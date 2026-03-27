@@ -1,0 +1,161 @@
+/* ========================================
+   LED Editor
+   ======================================== */
+
+.led-editor {
+  max-width: 640px;
+}
+
+.led-editor-main {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Preview */
+.led-preview-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 24px;
+  margin-bottom: 20px;
+}
+
+.led-preview-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.led-preview-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  height: 80px;
+  background: #111;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+}
+
+.led-preview-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--led-color, #333);
+  box-shadow: 0 0 12px var(--led-color, #333), 0 0 24px var(--led-color, #333);
+}
+
+.led-preview-dot.solid {
+  /* 常時点灯 - 変化なし */
+}
+
+.led-preview-dot.breathe {
+  animation: led-breathe 3s ease-in-out infinite;
+}
+
+.led-preview-dot.pulse {
+  animation: led-pulse 1s ease-in-out infinite;
+}
+
+.led-preview-dot.off {
+  background: #222;
+  box-shadow: none;
+}
+
+@keyframes led-breathe {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+@keyframes led-pulse {
+  0%, 100% { opacity: 0.2; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+/* Config */
+.led-config-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.led-color-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.color-picker {
+  width: 40px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  cursor: pointer;
+  padding: 2px;
+}
+
+.color-picker::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+.color-picker::-webkit-color-swatch {
+  border: none;
+  border-radius: 3px;
+}
+
+.led-color-input .input {
+  width: 100px;
+}
+
+/* Pattern Options */
+.led-pattern-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.led-pattern-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.led-pattern-btn:hover {
+  background: rgba(124, 92, 191, 0.08);
+  border-color: var(--border-light);
+}
+
+.led-pattern-btn.active {
+  background: rgba(124, 92, 191, 0.15);
+  border-color: var(--accent);
+}
+
+.led-pattern-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.led-pattern-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Event placeholder */
+.led-event-placeholder {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.8;
+}

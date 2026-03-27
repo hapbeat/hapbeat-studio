@@ -1,0 +1,141 @@
+/* ========================================
+   Pack Builder
+   ======================================== */
+
+.pack-builder {
+  max-width: 800px;
+}
+
+.pack-builder-main {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Add Form */
+.event-add-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.event-add-form .config-field {
+  flex: 1 1 auto;
+  min-width: 120px;
+}
+
+.event-add-form .input {
+  width: 100%;
+}
+
+.event-add-form .btn {
+  flex-shrink: 0;
+  align-self: flex-end;
+}
+
+/* Event List */
+.event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.event-list-header,
+.event-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.event-list-header {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+}
+
+.event-row {
+  font-size: 13px;
+  border-radius: var(--radius);
+  transition: background var(--transition);
+}
+
+.event-row:hover {
+  background: rgba(124, 92, 191, 0.06);
+}
+
+.event-col-id {
+  flex: 2 1 0;
+  min-width: 100px;
+}
+
+.event-col-gain {
+  flex: 0 0 60px;
+  text-align: center;
+}
+
+.event-col-loop {
+  flex: 0 0 60px;
+  text-align: center;
+}
+
+.event-col-clip {
+  flex: 1.5 1 0;
+  color: var(--text-muted);
+  min-width: 80px;
+}
+
+.event-col-actions {
+  flex: 0 0 60px;
+  text-align: right;
+}
+
+.loop-toggle {
+  padding: 2px 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.loop-toggle.active {
+  background: rgba(76, 175, 80, 0.15);
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.event-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Export Section */
+.pack-export-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.pack-export-info {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.pack-export-stats {
+  font-size: 12px;
+  color: var(--text-muted);
+}

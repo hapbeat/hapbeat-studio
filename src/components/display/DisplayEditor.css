@@ -1,0 +1,481 @@
+/* ========================================
+   Display Editor — 縦1カラム構成
+   ======================================== */
+
+.display-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ========================================
+   Control Bar (sticky — シミュレータの下に固定)
+   ======================================== */
+
+.editor-control-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+
+.control-separator {
+  width: 1px;
+  height: 24px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.page-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.page-tab-wrapper { display: flex; align-items: center; }
+
+.page-tab {
+  padding: 5px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius) 0 0 var(--radius);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+.page-tab:hover { background: var(--bg-hover); color: var(--text-primary); }
+.page-tab.active { background: var(--bg-surface); color: var(--accent-light); border-color: var(--accent-dim); }
+
+.page-tab-delete {
+  padding: 5px 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+.page-tab-delete:hover { color: var(--error); background: rgba(244, 67, 54, 0.1); }
+
+.device-toggle { display: flex; }
+.device-toggle-btn { border-radius: 0; }
+.device-toggle-btn:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.device-toggle-btn:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+.device-toggle-btn.active,
+.editor-control-bar .btn.active {
+  background: var(--accent-dim); border-color: var(--accent); color: var(--accent-light);
+}
+
+.template-select { min-width: 100px; font-size: 12px; padding: 4px 8px; }
+
+/* ========================================
+   Fixed Top Area (シミュレータ + コントロールバーまとめて sticky)
+   ======================================== */
+
+.fixed-top-area {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--bg-primary);
+  padding-bottom: 6px;
+}
+
+.hardware-preview-sticky {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 20px;
+}
+
+/* ========================================
+   Device Abs Container
+   ======================================== */
+
+.device-abs-container {
+  position: relative;
+  width: 680px;
+  min-height: 230px;
+  transition: transform 0.3s ease;
+}
+
+.device-abs-oled {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.oled-screen {
+  background: #0a0a14;
+  border: 2px solid #444;
+  border-radius: 4px;
+  position: relative;
+  overflow: hidden;
+  cursor: crosshair;
+  /* 余白は CSS padding で均一に制御。GridLayout は margin=0, containerPadding=0 */
+  padding: 2px;
+  box-sizing: content-box;
+}
+
+/* ボタン */
+.device-abs-button {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  z-index: 2;
+  cursor: pointer;
+}
+.device-abs-button:hover .device-button-dot { filter: brightness(1.3); transform: scale(1.15); }
+.device-abs-button:active .device-button-dot { transform: scale(0.9); }
+
+.device-button-dot {
+  width: 18px; height: 18px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #daa520, #b8860b);
+  border: 1px solid #8b6914;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4), inset 0 1px 2px rgba(255,255,255,0.3);
+  flex-shrink: 0;
+  transition: transform 0.1s ease, filter 0.1s ease;
+}
+.device-button-label { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); white-space: nowrap; }
+
+/* LED */
+.device-abs-led {
+  position: absolute; transform: translate(-50%, -50%);
+  width: 14px; height: 14px; border-radius: 50%;
+  background: radial-gradient(circle at 40% 40%, #fff, #aaf);
+  box-shadow: 0 0 8px rgba(180,180,255,0.6), 0 0 16px rgba(180,180,255,0.3);
+  z-index: 2;
+}
+
+/* ========================================
+   Grid Elements (OLED 内) — 明るい背景、見やすく
+   ======================================== */
+
+.grid-layout { position: relative; }
+
+.grid-element {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  background: rgba(50, 65, 100, 0.9);
+  border: 1px solid rgba(100, 160, 255, 0.45);
+  border-radius: 3px;
+  cursor: move;
+  overflow: hidden;
+}
+.grid-element:hover { border-color: rgba(100, 200, 255, 0.9); }
+
+/* カード上部のヘッダーバー（要素名） */
+.grid-element-name {
+  display: block;
+  padding: 1px 5px;
+  background: rgba(70, 90, 140, 0.9);
+  font-size: 9px;
+  font-family: var(--font-mono);
+  color: rgba(220, 230, 255, 0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+/* メイン表示テキスト */
+.grid-element-preview {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  padding: 0 5px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  color: #d0e0ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1;
+}
+
+/* 削除ボタン */
+.grid-element-delete {
+  position: absolute; top: 0; right: 0;
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(244, 67, 54, 0.85);
+  border: none; border-radius: 0 3px 0 4px;
+  color: #fff; font-size: 13px; font-family: var(--font-mono);
+  cursor: pointer; opacity: 0; transition: opacity 0.1s;
+  z-index: 15; padding: 0; line-height: 1;
+}
+.grid-element:hover .grid-element-delete { opacity: 1; }
+.grid-element-delete:hover { background: rgba(244, 67, 54, 1); transform: scale(1.1); }
+
+/* react-grid-layout ドラッグ中の影 — 水色に統一 */
+.react-grid-item.react-draggable-dragging {
+  box-shadow: 0 0 12px rgba(100, 200, 255, 0.5) !important;
+  border-color: rgba(100, 200, 255, 0.8) !important;
+  z-index: 20 !important;
+}
+
+/* react-grid-layout プレースホルダー（ドラッグ移動中の影）— 水色に */
+.react-grid-item.react-grid-placeholder {
+  background: rgba(100, 200, 255, 0.2) !important;
+  border: 2px dashed rgba(100, 200, 255, 0.6) !important;
+  border-radius: 3px;
+  opacity: 1 !important;
+}
+
+.react-grid-item > .react-resizable-handle { display: none; }
+
+/* ========================================
+   Drag Preview Shadow (パレットからドラッグ時)
+   ======================================== */
+
+.drag-preview-shadow {
+  position: absolute;
+  background: rgba(100, 200, 255, 0.2);
+  border: 2px solid rgba(100, 200, 255, 0.7);
+  border-radius: 3px;
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* ========================================
+   Drag Fallback Shadow (配置不可時 — 赤い点線)
+   ======================================== */
+
+.drag-fallback-shadow {
+  position: absolute;
+  background: rgba(244, 80, 80, 0.15);
+  border: 2px dashed rgba(244, 80, 80, 0.7);
+  border-radius: 3px;
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* ========================================
+   Placeholder (クリック時 — 水色統一)
+   ======================================== */
+
+.placeholder-cell {
+  position: absolute;
+  border: 2px dashed rgba(100, 200, 255, 0.7);
+  background: rgba(100, 200, 255, 0.1);
+  border-radius: 3px;
+  pointer-events: none;
+  z-index: 4;
+  animation: placeholder-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes placeholder-pulse {
+  0%, 100% { border-color: rgba(100, 200, 255, 0.7); }
+  50% { border-color: rgba(100, 200, 255, 0.4); }
+}
+
+/* ========================================
+   Popup Palette (OLED クリック時)
+   ======================================== */
+
+.popup-overlay { position: fixed; inset: 0; z-index: 20; }
+
+.popup-palette {
+  position: absolute; z-index: 21;
+  display: flex; flex-wrap: wrap; gap: 3px;
+  padding: 6px;
+  background: var(--bg-surface);
+  border: 1px solid rgba(100, 200, 255, 0.3);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  max-width: 400px;
+}
+
+.popup-palette-item {
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: 11px; font-family: var(--font-ui);
+  cursor: pointer; white-space: nowrap;
+  transition: background 0.1s, border-color 0.1s;
+}
+.popup-palette-item:hover:not(:disabled) { background: var(--accent-dim); border-color: var(--accent); }
+.popup-palette-item.used { opacity: 0.35; cursor: default; }
+.popup-palette-item.no-space {
+  opacity: 0.5; color: var(--error); border-color: rgba(244, 67, 54, 0.3); cursor: not-allowed;
+}
+
+/* ツールチップを即座に表示 */
+.popup-palette-item[title] {
+  position: relative;
+}
+.popup-palette-item[title]:hover::after {
+  content: attr(title);
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 8px;
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  font-size: 10px;
+  border-radius: 3px;
+  white-space: nowrap;
+  z-index: 30;
+  pointer-events: none;
+}
+.popup-palette-icon { font-family: var(--font-mono); font-size: 11px; }
+
+/* ========================================
+   Bottom Panels (パレット + ボタン設定)
+   ======================================== */
+
+/* ========================================
+   Toast Warning
+   ======================================== */
+
+.drop-toast {
+  position: fixed;
+  transform: translate(-50%, -120%);
+  padding: 6px 14px;
+  background: rgba(244, 67, 54, 0.9);
+  color: #fff;
+  font-size: 12px;
+  font-family: var(--font-ui);
+  border-radius: var(--radius);
+  pointer-events: none;
+  z-index: 100;
+  white-space: nowrap;
+  animation: toast-fade 2s ease-out forwards;
+}
+
+@keyframes toast-fade {
+  0% { opacity: 1; transform: translate(-50%, -120%); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -150%); }
+}
+
+/* ========================================
+   Bottom Panels
+   ======================================== */
+
+.bottom-panels {
+  display: flex; gap: 12px; align-items: flex-start;
+}
+.bottom-panels > .element-palette { flex: 1; min-width: 0; }
+.bottom-panels > .per-button-config-panel { flex-shrink: 0; }
+
+/* ========================================
+   Per-Button Config Panel
+   ======================================== */
+
+.per-button-config-panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+}
+
+.per-button-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px; margin-top: 8px;
+}
+
+.per-button-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+}
+
+.per-button-label {
+  font-size: 12px; font-weight: 600;
+  color: var(--accent-light); margin-bottom: 6px;
+  font-family: var(--font-mono);
+}
+
+.per-button-fields { display: flex; flex-direction: column; gap: 4px; }
+
+.config-field-inline {
+  display: flex; align-items: center; gap: 6px;
+  position: relative;
+}
+.config-field-inline .label-sm {
+  font-size: 10px; color: var(--text-muted); min-width: 28px; flex-shrink: 0;
+}
+
+/* カスタムアクション選択ボタン */
+.action-select-btn {
+  flex: 1;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 3px 6px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: 11px; font-family: var(--font-ui);
+  cursor: pointer;
+  min-width: 0;
+}
+.action-select-btn:hover { border-color: var(--accent-dim); }
+.action-select-arrow { font-size: 8px; color: var(--text-muted); margin-left: 4px; }
+
+/* 2列ドロップダウン */
+.action-dropdown-overlay { position: fixed; inset: 0; z-index: 25; }
+.action-dropdown {
+  position: absolute;
+  top: 100%; left: 0; right: 0;
+  z-index: 26;
+  min-width: 260px;
+  padding: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--accent-dim);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+
+.action-dropdown-group { margin-bottom: 4px; }
+.action-dropdown-group-label {
+  font-size: 9px; color: var(--text-muted); font-family: var(--font-mono);
+  padding: 2px 4px; margin-bottom: 2px;
+}
+
+.action-dropdown-items {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+}
+
+.action-dropdown-item {
+  padding: 4px 8px;
+  background: var(--bg-secondary);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: 11px; font-family: var(--font-ui);
+  cursor: pointer; text-align: left;
+  white-space: nowrap;
+}
+.action-dropdown-item:hover { background: var(--accent-dim); border-color: var(--accent); }
+.action-dropdown-item.selected { border-color: var(--accent); color: var(--accent-light); }
+.action-dropdown.above { top: auto; bottom: 100%; }
+.action-dropdown.align-right { left: auto; right: 0; }
+
+/* 「なし」を目立つ色に */
+.action-dropdown-item[data-none="true"] { color: var(--text-muted); font-style: italic; }

@@ -1,0 +1,207 @@
+/* ========================================
+   Device Layout Designer
+   ======================================== */
+
+.layout-designer {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ========================================
+   Toolbar
+   ======================================== */
+
+.layout-designer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.layout-designer-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.layout-designer-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.layout-designer-controls .btn.active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent-light);
+}
+
+.snap-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.snap-label input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+/* ========================================
+   Canvas
+   ======================================== */
+
+.layout-designer-canvas {
+  position: relative;
+  background: #1a1a2e;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+
+.layout-designer-grid-svg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* ========================================
+   OLED Reference (fixed, not draggable)
+   ======================================== */
+
+.layout-oled-ref {
+  position: absolute;
+  background: #000;
+  border: 2px solid #444;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.layout-oled-label {
+  font-size: 12px;
+  color: #555;
+  font-family: var(--font-mono);
+}
+
+/* ========================================
+   Draggable Items
+   ======================================== */
+
+.layout-item {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  cursor: grab;
+  z-index: 5;
+  transition: filter 0.1s ease;
+}
+
+.layout-item:hover {
+  filter: brightness(1.3);
+}
+
+.layout-item.dragging {
+  cursor: grabbing;
+  z-index: 10;
+  filter: brightness(1.5) drop-shadow(0 0 8px rgba(167, 139, 250, 0.5));
+}
+
+/* ボタン */
+.layout-item-dot.button {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #daa520, #b8860b);
+  border: 2px solid #8b6914;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.3);
+}
+
+/* LED */
+.layout-item-dot.led {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 40%, #fff, #88f);
+  box-shadow: 0 0 10px rgba(140, 140, 255, 0.7), 0 0 20px rgba(140, 140, 255, 0.3);
+  border: 1px solid rgba(200, 200, 255, 0.4);
+}
+
+.layout-item-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.layout-item-coords {
+  font-size: 9px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.layout-item:hover .layout-item-coords,
+.layout-item.dragging .layout-item-coords {
+  opacity: 1;
+}
+
+/* ========================================
+   Coordinate Table
+   ======================================== */
+
+.layout-designer-table {
+  max-width: 500px;
+}
+
+.layout-designer-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.layout-designer-table th {
+  text-align: left;
+  padding: 4px 8px;
+  color: var(--text-muted);
+  font-weight: 500;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.layout-designer-table td {
+  padding: 3px 8px;
+  color: var(--text-secondary);
+}
+
+.layout-designer-table .mono {
+  font-family: var(--font-mono);
+}
+
+.layout-designer-table .oled-row td {
+  color: var(--text-muted);
+}
+
+.layout-designer-table .active-row td {
+  color: var(--accent-light);
+  background: rgba(167, 139, 250, 0.08);
+}
