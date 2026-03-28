@@ -49,3 +49,9 @@ Hapbeat Studio — Web ベースの統合デザインツール。
 - hapbeat-contracts: display-layout.schema.json, pack-manifest.schema.json, event-id 仕様
 - hapbeat-desktop: WebSocket リレー（localhost:7703）でデバイス書き込み
 
+## 指示書
+
+- `instructions/` — 他セッションからの未実行の指示書
+- `instructions/completed/` — 完了済みの指示書
+- セッション開始時に `instructions/` を確認し、該当する指示書があれば適用する
+
