@@ -31,6 +31,7 @@ export interface DeviceHardwareSpec {
   description: string
   buttons: ButtonPosition[]
   led: LedPosition
+  volumeIcon: LedPosition
   oled: OledPosition
   /** SVG の viewBox 用アスペクト比 (width / height) */
   aspectRatio: number
@@ -65,7 +66,8 @@ export const DUO_WL_SPEC: DeviceHardwareSpec = {
     { id: 'btn_4', label: '4(右上)', x: 98, y:25 },
     { id: 'btn_5', label: '5(右下)', x: 98, y:90 },
   ],
-  led: { x: 50, y: 90 },
+  led: { x: 55, y: 90 },
+  volumeIcon: { x: 30, y: 90 },
   oled: { x: 9, y: 40, width: 82, height: 20 },
   aspectRatio: 1.25,
   // 五角形: 上辺水平、左右辺垂直、底部が V 字
@@ -89,8 +91,9 @@ export const BAND_WL_SPEC: DeviceHardwareSpec = {
     { id: 'btn_c', label: '中', x: 50, y: 10 },
     { id: 'btn_r', label: '右', x: 88, y: 10 },
   ],
-  led: { x: 96, y: 50 },
-  oled: { x: 9, y: 40, width: 82, height: 20 },
+  led: { x: 100, y: 65 },
+  volumeIcon: { x: 100, y: 85 },
+  oled: { x: 9, y: 50, width: 82, height: 20 },
   aspectRatio: 1.1,
   // 長方形（角丸）
   outlinePath: 'M 8,5 L 92,5 Q 97,5 97,10 L 97,90 Q 97,95 92,95 L 8,95 Q 3,95 3,90 L 3,10 Q 3,5 8,5 Z',

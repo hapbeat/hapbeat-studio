@@ -1,4 +1,5 @@
-import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
+import { useState, useCallback, useMemo, useRef, useEffect, type ChangeEvent } from 'react'
+import { createPortal } from 'react-dom'
 import GridLayout from 'react-grid-layout'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
@@ -10,14 +11,26 @@ import type {
   SingleButtonAction,
   PerButtonActions,
   DisplayOrientation,
+  LedConfig,
+  VolumeConfig,
 } from '@/types/display'
-import { ELEMENT_FIXED_SIZES } from '@/types/display'
+import { ELEMENT_FIXED_SIZES, DEFAULT_LED_RULES, DEFAULT_VOLUME_CONFIG } from '@/types/display'
 import type { DeviceModel, DeviceHardwareSpec } from '@/types/device'
 import { DEVICE_SPECS } from '@/types/device'
 import { ElementPalette, elementMetas, getElementMeta } from '@/components/common/ElementPalette'
 import { getElementPreviewText, DEFAULT_SIM_STATE } from '@/utils/displayPreview'
 import type { SimState } from '@/utils/displayPreview'
 import { allTemplates, standardTemplate } from '@/utils/templates'
+import {
+  exportDisplayLayout,
+  importDisplayLayout,
+  saveDisplayToIDB,
+  toFirmwareFormat,
+  type DisplaySavedState,
+} from '@/utils/displayLayoutIO'
+import { useManagerConnection } from '@/hooks/useManagerConnection'
+import { LedConfigModal } from './LedConfigModal'
+import { VolumeConfigModal } from './VolumeConfigModal'
 import './DisplayEditor.css'
 
 /** パレットからドラッグ中の要素タイプ */
@@ -29,8 +42,8 @@ export function setCurrentDragType(type: DisplayElementType | null) {
 // OLED: 128x32 = 4:1
 const GRID_COLS = 16
 const GRID_ROWS = 2
-const CELL_WIDTH = 32
-const CELL_HEIGHT = 64
+const CELL_WIDTH = 28
+const CELL_HEIGHT = 56
 const GAP = 2
 // GridLayout: containerPadding=0, margin=GAP. CSS padding で外枠余白
 const GRID_WIDTH = GRID_COLS * CELL_WIDTH + GAP * (GRID_COLS - 1)   // 512 + 30 = 542
@@ -81,7 +94,10 @@ function buildActionGroups(pages: DisplayPage[]): ActionGroup[] {
     {
       label: 'その他',
       items: [
-        { value: 'toggle_volume_adc', label: 'VOL ADC切替' },
+        { value: 'mode_toggle', label: 'モード切替' },
+        { value: 'volume_up', label: 'Volume +' },
+        { value: 'volume_down', label: 'Volume -' },
+        { value: 'display_toggle', label: '画面 ON/OFF' },
         { value: 'none', label: '\u2014 (なし)' },
       ],
     },
@@ -131,6 +147,8 @@ interface SavedState {
   orientation: DisplayOrientation
   perButtonActions: PerButtonActions
   simState: SimState
+  ledConfig: LedConfig
+  volumeConfig: VolumeConfig
 }
 
 function loadSaved(): SavedState | null {
@@ -162,8 +180,12 @@ export function DisplayEditor() {
   const [perButtonActions, setPerButtonActions] = useState<PerButtonActions>(
     saved?.perButtonActions ?? createDefaultPerButtonActions(DEVICE_SPECS['duo_wl'])
   )
-  const [popupPos, setPopupPos] = useState<{ col: number; row: number; x: number; y: number } | null>(null)
+  const [popupPos, setPopupPos] = useState<{ col: number; row: number; x: number; y: number; screenX: number; screenY: number } | null>(null)
   const [simState, setSimState] = useState<SimState>(saved?.simState ?? { ...DEFAULT_SIM_STATE })
+  const [ledConfig, setLedConfig] = useState<LedConfig>(saved?.ledConfig ?? { rules: [...DEFAULT_LED_RULES] })
+  const [volumeConfig, setVolumeConfig] = useState<VolumeConfig>(saved?.volumeConfig ?? { ...DEFAULT_VOLUME_CONFIG })
+  const [ledModalOpen, setLedModalOpen] = useState(false)
+  const [volumeModalOpen, setVolumeModalOpen] = useState(false)
   const [toast, setToast] = useState<{ msg: string; x: number; y: number } | null>(null)
   const [externalDragType, setExternalDragType] = useState<DisplayElementType | null>(null)
 
@@ -173,10 +195,12 @@ export function DisplayEditor() {
     return () => { _dragTypeCallback = null }
   }, [])
 
-  // 自動保存: 状態変更のたびに localStorage + sessionStorage に保存
+  // 自動保存: 状態変更のたびに localStorage + sessionStorage + IndexedDB に保存
   useEffect(() => {
-    saveTo({ layout, deviceModel, orientation, perButtonActions, simState })
-  }, [layout, deviceModel, orientation, perButtonActions, simState])
+    const state: DisplaySavedState = { layout, deviceModel, orientation, perButtonActions, simState, ledConfig, volumeConfig }
+    saveTo(state)
+    saveDisplayToIDB(state)
+  }, [layout, deviceModel, orientation, perButtonActions, simState, ledConfig, volumeConfig])
 
   const oledRef = useRef<HTMLDivElement>(null)
   const deviceSpec = DEVICE_SPECS[deviceModel]
@@ -285,7 +309,9 @@ export function DisplayEditor() {
       const col = Math.floor((e.clientX - rect.left - OLED_PAD) / (CELL_WIDTH + GAP))
       const row = Math.floor((e.clientY - rect.top - OLED_PAD) / (CELL_HEIGHT + GAP))
       if (col < 0 || col >= GRID_COLS || row < 0 || row >= GRID_ROWS) return
-      setPopupPos({ col, row, x: col * (CELL_WIDTH + GAP) + OLED_PAD, y: row * (CELL_HEIGHT + GAP) + OLED_PAD })
+      const localX = col * (CELL_WIDTH + GAP) + OLED_PAD
+      const localY = row * (CELL_HEIGHT + GAP) + OLED_PAD
+      setPopupPos({ col, row, x: localX, y: localY, screenX: rect.left + localX, screenY: rect.top + localY + CELL_HEIGHT + 4 })
     },
     []
   )
@@ -382,6 +408,52 @@ export function DisplayEditor() {
     setPopupPos(null)
   }, [])
 
+  // --- Manager 接続 ---
+  const { isConnected: managerConnected, send: managerSend } = useManagerConnection()
+
+  // --- エクスポート / インポート / デバイス書き込み ---
+
+  const buildSavedState = useCallback((): DisplaySavedState => ({
+    layout, deviceModel, orientation, perButtonActions, simState, ledConfig, volumeConfig,
+  }), [layout, deviceModel, orientation, perButtonActions, simState, ledConfig, volumeConfig])
+
+  const handleDeploy = useCallback(() => {
+    if (!managerConnected) {
+      alert('Manager (hapbeat-desktop) に接続されていません。\nManager を起動してください。')
+      return
+    }
+    const uiConfig = toFirmwareFormat(buildSavedState())
+    managerSend({
+      type: 'write_ui_config',
+      payload: { config: uiConfig },
+    })
+  }, [managerConnected, managerSend, buildSavedState])
+
+  const handleExport = useCallback(() => {
+    exportDisplayLayout(buildSavedState())
+  }, [buildSavedState])
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleImport = useCallback(async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const imported = await importDisplayLayout(file)
+      if (imported.layout) setLayout(imported.layout)
+      if (imported.deviceModel) setDeviceModel(imported.deviceModel)
+      if (imported.orientation) setOrientation(imported.orientation)
+      if (imported.perButtonActions) setPerButtonActions(imported.perButtonActions)
+      if (imported.ledConfig) setLedConfig(imported.ledConfig)
+      if (imported.volumeConfig) setVolumeConfig(imported.volumeConfig)
+      setActivePageIndex(0)
+      setPopupPos(null)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'インポートに失敗しました')
+    }
+    e.target.value = ''
+  }, [])
+
   const handlePerButtonActionChange = useCallback(
     (buttonId: string, field: keyof SingleButtonAction, value: ButtonActionType) => {
       setPerButtonActions((prev) => ({
@@ -412,7 +484,7 @@ export function DisplayEditor() {
         case 'player_dec': setSimState((s) => ({ ...s, player: Math.max(0, s.player - 1) })); break
         case 'position_inc': setSimState((s) => ({ ...s, position: s.position + 1 })); break
         case 'position_dec': setSimState((s) => ({ ...s, position: Math.max(0, s.position - 1) })); break
-        case 'toggle_volume_adc': setSimState((s) => ({ ...s, volumeAdcEnabled: !s.volumeAdcEnabled })); break
+        case 'mode_toggle': setSimState((s) => ({ ...s, volumeAdcEnabled: !s.volumeAdcEnabled })); break
       }
     },
     [perButtonActions, layout.pages.length]
@@ -473,6 +545,11 @@ export function DisplayEditor() {
           onSimButtonClick={handleSimButtonClick}
           onSimButtonDown={handleSimButtonDown}
           onSimButtonUp={handleSimButtonUp}
+          pages={layout.pages}
+          perButtonActions={perButtonActions}
+          onActionChange={handlePerButtonActionChange}
+          onLedClick={() => setLedModalOpen(true)}
+          onVolumeClick={() => setVolumeModalOpen(true)}
         />
         <ControlBar
           pages={layout.pages}
@@ -485,6 +562,17 @@ export function DisplayEditor() {
           onDeviceModelChange={handleDeviceModelChange}
           onApplyTemplate={handleApplyTemplate}
           onToggleOrientation={() => setOrientation(isFlipped ? 'normal' : 'flipped')}
+          onExport={handleExport}
+          onImport={() => fileInputRef.current?.click()}
+          onDeploy={handleDeploy}
+          managerConnected={managerConnected}
+        />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json"
+          style={{ display: 'none' }}
+          onChange={handleImport}
         />
       </div>
 
@@ -495,16 +583,26 @@ export function DisplayEditor() {
         </div>
       )}
 
-      {/* 3. パレット + ボタン設定 */}
-      <div className="bottom-panels">
-        <ElementPalette selectedType={null} onSelectType={() => {}} usedTypes={usedTypes} />
-        <ButtonConfigPanel
-          deviceSpec={deviceSpec}
-          pages={layout.pages}
-          perButtonActions={perButtonActions}
-          onActionChange={handlePerButtonActionChange}
+      {/* 3. パレット */}
+      <ElementPalette selectedType={null} onSelectType={() => {}} usedTypes={usedTypes} />
+
+      {/* LED 設定モーダル */}
+      {ledModalOpen && (
+        <LedConfigModal
+          ledConfig={ledConfig}
+          onLedChange={setLedConfig}
+          onClose={() => setLedModalOpen(false)}
         />
-      </div>
+      )}
+
+      {/* Volume 設定モーダル */}
+      {volumeModalOpen && (
+        <VolumeConfigModal
+          volumeConfig={volumeConfig}
+          onVolumeChange={setVolumeConfig}
+          onClose={() => setVolumeModalOpen(false)}
+        />
+      )}
     </div>
   )
 }
@@ -520,7 +618,7 @@ interface OledSimulatorProps {
   gridLayoutItems: GridLayout.Layout[]
   activePage: DisplayPage | undefined
   simState: SimState
-  popupPos: { col: number; row: number; x: number; y: number } | null
+  popupPos: { col: number; row: number; x: number; y: number; screenX: number; screenY: number } | null
   usedTypes: Set<DisplayElementType>
   onLayoutChange: (layout: GridLayout.Layout[]) => void
   onOledClick: (e: React.MouseEvent<HTMLDivElement>) => void
@@ -536,6 +634,12 @@ interface OledSimulatorProps {
   onSimButtonClick: (buttonId: string) => void
   onSimButtonDown: (buttonId: string) => void
   onSimButtonUp: () => void
+  // ボタン設定（インライン）
+  pages: DisplayPage[]
+  perButtonActions: PerButtonActions
+  onActionChange: (buttonId: string, field: keyof SingleButtonAction, value: ButtonActionType) => void
+  onLedClick: () => void
+  onVolumeClick: () => void
 }
 
 function OledSimulator({
@@ -544,6 +648,7 @@ function OledSimulator({
   onLayoutChange, onOledClick,
   onOledDragOver, onOledDragLeave, onOledDrop, onDropElement, droppingItem, dragFallback,
   onDeleteElement, onPopupSelect, onPopupClose, onSimButtonClick, onSimButtonDown, onSimButtonUp,
+  pages, perButtonActions, onActionChange, onLedClick, onVolumeClick,
 }: OledSimulatorProps) {
   return (
     <div className="hardware-preview-sticky">
@@ -596,11 +701,29 @@ function OledSimulator({
                 >
                   {activePage.elements.map((el) => {
                     const meta = getElementMeta(el.type)
+                    const previewText = getElementPreviewText(el.type, simState)
+                    const charCount = previewText.length
+                    const elSize = ELEMENT_FIXED_SIZES[el.type]
+                    const elWidthPx = elSize[0] * CELL_WIDTH + GAP * (elSize[0] - 1)
+                    // 文字サイズをカード幅に合わせる: カード幅 / 文字数
+                    // 幅基準: 等幅フォントで文字がカード幅にフィットするサイズ
+                    // 高さ基準: ヘッダー(~14px)を除いた残りに収まるサイズ
+                    const widthBased = (elWidthPx - 2) / charCount * 1.7
+                    const heightBased = CELL_HEIGHT * 0.6
+                    const fontSize = Math.min(widthBased, heightBased)
                     return (
-                    <div key={el.id} className="grid-element" onClick={(e) => e.stopPropagation()}>
+                    <div
+                      key={el.id}
+                      className="grid-element"
+                      onClick={(e) => e.stopPropagation()}
+                      title={meta?.label ?? el.type}
+                    >
                       <span className="grid-element-name">{meta?.label ?? el.type}</span>
-                      <span className="grid-element-preview">
-                        {getElementPreviewText(el.type, simState)}
+                      <span
+                        className="grid-element-preview"
+                        style={{ fontSize: `${fontSize}px` }}
+                      >
+                        {previewText}
                       </span>
                       <button
                         className="grid-element-delete"
@@ -642,8 +765,8 @@ function OledSimulator({
             {/* ポップアップパレット */}
             {popupPos && (
               <PopupPalette
-                displayX={popupPos.x}
-                displayY={popupPos.y + CELL_HEIGHT + 4}
+                screenX={popupPos.screenX}
+                screenY={popupPos.screenY}
                 gridCol={popupPos.col}
                 gridRow={popupPos.row}
                 page={activePage}
@@ -655,28 +778,80 @@ function OledSimulator({
           </div>
         </div>
 
-        {/* ボタン */}
-        {deviceSpec.buttons.map((btn) => (
-          <div
-            key={btn.id}
-            className="device-abs-button"
-            style={{ left: `${btn.x}%`, top: `${btn.y}%` }}
-            title={btn.label}
-            onClick={() => onSimButtonClick(btn.id)}
-            onMouseDown={() => onSimButtonDown(btn.id)}
-            onMouseUp={onSimButtonUp}
-            onMouseLeave={onSimButtonUp}
-          >
-            <div className="device-button-dot" />
-            <span className="device-button-label"
-              style={{ transform: isFlipped ? 'rotate(180deg)' : undefined }}
-            >{btn.label}</span>
-          </div>
-        ))}
+        {/* ボタン + インライン設定 */}
+        {deviceSpec.buttons.map((btn) => {
+          const isLeft = deviceSpec.model === 'duo_wl' && ['btn_1', 'btn_2', 'btn_3'].includes(btn.id)
+          const action = perButtonActions[btn.id] ?? DEFAULT_BUTTON_ACTION
+          const actionGroups = buildActionGroups(pages)
+          const holdGroups = buildHoldActionGroups(pages)
+          const allItems = [...actionGroups, ...holdGroups].flatMap((g) => g.items)
 
-        <div className="device-abs-led"
-          style={{ left: `${deviceSpec.led.x}%`, top: `${deviceSpec.led.y}%` }}
-        />
+          return (
+            <div
+              key={btn.id}
+              className={`device-abs-button-row ${isLeft ? 'left-side' : 'right-side'}`}
+              style={{
+                left: isLeft ? undefined : `${btn.x}%`,
+                right: isLeft ? `${100 - btn.x}%` : undefined,
+                top: `${btn.y}%`,
+                transform: isFlipped ? 'rotate(180deg)' : undefined,
+              }}
+            >
+              {/* 左側ボタン: 設定 → ドット */}
+              {isLeft && (
+                <InlineButtonConfig
+                  action={action}
+                  allItems={allItems}
+                  actionGroups={actionGroups}
+                  holdGroups={holdGroups}
+                  btnId={btn.id}
+                  onActionChange={onActionChange}
+                />
+              )}
+              <div
+                className="device-button-dot-wrap"
+                title={btn.label}
+                onClick={() => onSimButtonClick(btn.id)}
+                onMouseDown={() => onSimButtonDown(btn.id)}
+                onMouseUp={onSimButtonUp}
+                onMouseLeave={onSimButtonUp}
+              >
+                <div className="device-button-dot" />
+                <span className="device-button-label">{btn.label}</span>
+              </div>
+              {/* 右側ボタン: ドット → 設定 */}
+              {!isLeft && (
+                <InlineButtonConfig
+                  action={action}
+                  allItems={allItems}
+                  actionGroups={actionGroups}
+                  holdGroups={holdGroups}
+                  btnId={btn.id}
+                  onActionChange={onActionChange}
+                />
+              )}
+            </div>
+          )
+        })}
+
+        <div className="device-config-item" style={{
+          left: `${deviceSpec.led.x}%`, top: `${deviceSpec.led.y}%`,
+          transform: `translate(-50%, -50%)${isFlipped ? ' rotate(180deg)' : ''}`,
+        }} onClick={onLedClick}>
+          <div className="device-abs-led" />
+          <span className="device-config-label">LED 設定</span>
+        </div>
+        <div className="device-config-item" style={{
+          left: `${deviceSpec.volumeIcon.x}%`, top: `${deviceSpec.volumeIcon.y}%`,
+          transform: `translate(-50%, -50%)${isFlipped ? ' rotate(180deg)' : ''}`,
+        }} onClick={onVolumeClick}>
+          <svg className="device-config-vol-icon" viewBox="0 0 16 14" width="14" height="12">
+            <polygon points="0,5 0,9 4,9 8,13 8,1 4,5" fill="currentColor" />
+            <path d="M10,4 Q13,7 10,10" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M12,2 Q16,7 12,12" fill="none" stroke="currentColor" strokeWidth="1.2" />
+          </svg>
+          <span className="device-config-label">Volume 設定</span>
+        </div>
       </div>
     </div>
   )
@@ -687,7 +862,7 @@ function OledSimulator({
 // ========================================
 
 interface PopupPaletteProps {
-  displayX: number; displayY: number
+  screenX: number; screenY: number
   gridCol: number; gridRow: number
   page: DisplayPage | undefined
   usedTypes: Set<DisplayElementType>
@@ -695,11 +870,13 @@ interface PopupPaletteProps {
   onClose: () => void
 }
 
-function PopupPalette({ displayX, displayY, gridCol, gridRow, page, usedTypes, onSelect, onClose }: PopupPaletteProps) {
-  return (
+function PopupPalette({ screenX, screenY, gridCol, gridRow, page, usedTypes, onSelect, onClose }: PopupPaletteProps) {
+  const popupW = 400
+  const clampedX = screenX + popupW > window.innerWidth ? window.innerWidth - popupW - 8 : screenX
+  return createPortal(
     <>
-      <div className="popup-overlay" onClick={onClose} />
-      <div className="popup-palette" style={{ left: displayX, top: displayY }}>
+      <div className="portal-overlay" onClick={onClose} />
+      <div className="portal-dropdown popup-palette-content" style={{ left: clampedX, top: screenY }}>
         {elementMetas.map((meta) => {
           const used = usedTypes.has(meta.type)
           const noSpace = page ? !canPlace(page, meta.type, [gridCol, gridRow]) : true
@@ -718,7 +895,8 @@ function PopupPalette({ displayX, displayY, gridCol, gridRow, page, usedTypes, o
           )
         })}
       </div>
-    </>
+    </>,
+    document.body
   )
 }
 
@@ -737,12 +915,17 @@ interface ControlBarProps {
   onDeviceModelChange: (model: DeviceModel) => void
   onApplyTemplate: (idx: number) => void
   onToggleOrientation: () => void
+  onExport: () => void
+  onImport: () => void
+  onDeploy: () => void
+  managerConnected: boolean
 }
 
 function ControlBar({
   pages, activePageIndex, deviceModel, isFlipped,
   onPageChange, onAddPage, onDeletePage,
   onDeviceModelChange, onApplyTemplate, onToggleOrientation,
+  onExport, onImport, onDeploy, managerConnected,
 }: ControlBarProps) {
   return (
     <div className="editor-control-bar">
@@ -781,111 +964,109 @@ function ControlBar({
       <button className={`btn btn-sm ${isFlipped ? 'active' : ''}`} onClick={onToggleOrientation}>
         {isFlipped ? '\u21bb 180\u00b0' : '\u21bb \u901a\u5e38'}
       </button>
+      <div className="control-separator" />
+      <button className="btn btn-sm" onClick={onExport} title="display-layout.json をダウンロード">
+        保存
+      </button>
+      <button className="btn btn-sm" onClick={onImport} title="display-layout.json を読み込み">
+        読込
+      </button>
+      <div className="control-separator" />
+      <button
+        className="btn btn-sm btn-deploy"
+        onClick={onDeploy}
+        disabled={!managerConnected}
+        title={managerConnected ? 'Manager 経由でデバイスに書き込み' : 'Manager (hapbeat-desktop) を起動してください'}
+      >
+        デバイスに書込
+      </button>
     </div>
   )
 }
 
 // ========================================
-// ButtonConfigPanel
+// InlineButtonConfig — ボタン横のコンパクト設定 (press + hold)
 // ========================================
 
-interface ButtonConfigPanelProps {
-  deviceSpec: DeviceHardwareSpec
-  pages: DisplayPage[]
-  perButtonActions: PerButtonActions
+interface InlineButtonConfigProps {
+  action: SingleButtonAction
+  allItems: ActionItem[]
+  actionGroups: ActionGroup[]
+  holdGroups: ActionGroup[]
+  btnId: string
   onActionChange: (buttonId: string, field: keyof SingleButtonAction, value: ButtonActionType) => void
 }
 
-function ButtonConfigPanel({ deviceSpec, pages, perButtonActions, onActionChange }: ButtonConfigPanelProps) {
-  const [openDropdown, setOpenDropdown] = useState<{
-    btnId: string; field: keyof SingleButtonAction; above: boolean; alignRight: boolean
-  } | null>(null)
-  const actionGroups = useMemo(() => buildActionGroups(pages), [pages])
-  const holdGroups = useMemo(() => buildHoldActionGroups(pages), [pages])
-  const allItems = useMemo(() => [...actionGroups, ...holdGroups].flatMap((g) => g.items), [actionGroups, holdGroups])
+function InlineButtonConfig({ action, allItems, actionGroups, holdGroups, btnId, onActionChange }: InlineButtonConfigProps) {
+  const [openField, setOpenField] = useState<keyof SingleButtonAction | null>(null)
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
+  const btnRefs = useRef<Record<string, HTMLButtonElement | null>>({})
 
-  const handleSelect = (value: string) => {
-    if (openDropdown) {
-      onActionChange(openDropdown.btnId, openDropdown.field, value as ButtonActionType)
-    }
-    setOpenDropdown(null)
+  const handleSelect = (field: keyof SingleButtonAction, value: string) => {
+    onActionChange(btnId, field, value as ButtonActionType)
+    setOpenField(null)
   }
 
-  const openAt = (btnId: string, field: keyof SingleButtonAction, e: React.MouseEvent) => {
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    const spaceBelow = window.innerHeight - rect.bottom
-    const spaceRight = window.innerWidth - rect.right
-    setOpenDropdown({ btnId, field, above: spaceBelow < 300, alignRight: spaceRight < 280 })
-  }
-
-  // DuoWL: 左列(1,2,3) + 右列(5,4) の順で並べる
-  const orderedButtons = useMemo(() => {
-    if (deviceSpec.model === 'duo_wl') {
-      const ids = ['btn_1', 'btn_4', 'btn_2', 'btn_5', 'btn_3']
-      return ids.map((id) => deviceSpec.buttons.find((b) => b.id === id)).filter(Boolean) as typeof deviceSpec.buttons
+  const openMenu = (field: keyof SingleButtonAction) => {
+    const el = btnRefs.current[field]
+    if (el) {
+      const rect = el.getBoundingClientRect()
+      const menuW = 240
+      // 右端からはみ出す場合は左にずらす
+      const x = rect.left + menuW > window.innerWidth ? window.innerWidth - menuW - 8 : rect.left
+      setMenuPos({ x, y: rect.bottom + 2 })
     }
-    return deviceSpec.buttons
-  }, [deviceSpec])
+    setOpenField(field)
+  }
 
   return (
-    <div className="panel per-button-config-panel">
-      <div className="panel-title">ボタン設定（{deviceSpec.name}）</div>
-      <div className="per-button-grid">
-        {orderedButtons.map((btn) => {
-          const action = perButtonActions[btn.id] ?? DEFAULT_BUTTON_ACTION
-          return (
-            <div key={btn.id} className="per-button-card">
-              <div className="per-button-label">{btn.label}</div>
-              <div className="per-button-fields">
-                {(['short_press', 'long_press', 'hold'] as const).map((field) => {
-                  const groups = field === 'hold' ? holdGroups : actionGroups
-                  const currentValue = (action[field] as string) ?? 'none'
-                  const currentLabel = allItems.find((i) => i.value === currentValue)?.label ?? '\u2014'
-                  const isOpen = openDropdown?.btnId === btn.id && openDropdown?.field === field
-                  return (
-                    <div key={field} className="config-field-inline">
-                      <label className="label-sm">
-                        {field === 'short_press' ? '短' : field === 'long_press' ? '長' : '押続'}
-                      </label>
-                      <button
-                        className="action-select-btn"
-                        onClick={(e) => isOpen ? setOpenDropdown(null) : openAt(btn.id, field, e)}
-                      >
-                        {currentLabel}
-                        <span className="action-select-arrow">{isOpen ? '\u25b2' : '\u25bc'}</span>
-                      </button>
-                      {isOpen && (
-                        <>
-                          <div className="action-dropdown-overlay" onClick={() => setOpenDropdown(null)} />
-                          <div className={`action-dropdown ${openDropdown?.above ? 'above' : ''} ${openDropdown?.alignRight ? 'align-right' : ''}`}>
-                            {groups.map((group) => (
-                              <div key={group.label} className="action-dropdown-group">
-                                <div className="action-dropdown-group-label">{group.label}</div>
-                                <div className="action-dropdown-items">
-                                  {group.items.map((opt) => (
-                                    <button
-                                      key={opt.value + opt.label}
-                                      className={`action-dropdown-item ${opt.value === currentValue ? 'selected' : ''}`}
-                                      data-none={opt.value === 'none' ? 'true' : undefined}
-                                      onClick={() => handleSelect(opt.value)}
-                                    >
-                                      {opt.label}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </>
-                      )}
+    <div className="inline-btn-config">
+      {(['short_press', 'hold'] as const).map((field) => {
+        const groups = field === 'hold' ? holdGroups : actionGroups
+        const currentValue = (action[field] as string) ?? 'none'
+        const currentLabel = allItems.find((i) => i.value === currentValue)?.label ?? '\u2014'
+        const isOpen = openField === field
+        return (
+          <div key={field} className="inline-config-row">
+            <span className="inline-config-label">{field === 'short_press' ? '押' : '続'}</span>
+            <button
+              ref={(el) => { btnRefs.current[field] = el }}
+              className="inline-config-btn"
+              onClick={(e) => {
+                e.stopPropagation()
+                isOpen ? setOpenField(null) : openMenu(field)
+              }}
+            >
+              {currentLabel}
+            </button>
+            {isOpen && createPortal(
+              <>
+                <div className="portal-overlay" onClick={() => setOpenField(null)} />
+                <div className="portal-dropdown" style={{ left: menuPos.x, top: menuPos.y }}>
+                  {groups.map((group) => (
+                    <div key={group.label} className="action-dropdown-group">
+                      <div className="action-dropdown-group-label">{group.label}</div>
+                      <div className="action-dropdown-items">
+                        {group.items.map((opt) => (
+                          <button
+                            key={opt.value + opt.label}
+                            className={`action-dropdown-item ${opt.value === currentValue ? 'selected' : ''}`}
+                            data-none={opt.value === 'none' ? 'true' : undefined}
+                            onClick={() => handleSelect(field, opt.value)}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  )
-                })}
-              </div>
-            </div>
-          )
-        })}
-      </div>
+                  ))}
+                </div>
+              </>,
+              document.body
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
