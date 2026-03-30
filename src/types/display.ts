@@ -172,7 +172,7 @@ export const DEFAULT_VOLUME_CONFIG: VolumeConfig = {
  */
 export const ELEMENT_FIXED_SIZES: Record<DisplayElementType, [number, number]> = {
   volume: [3, 1],            // "v 5"       3文字
-  battery: [8, 1],           // "BAT:100%"  8文字 (メーター含む)
+  battery: [4, 1],           // " 85%"      4文字 (数値%表示)
   wifi_status: [5, 1],       // "W:---"     5文字 (standard), compact 同
   wifi_ssid: [8, 1],         // "MySSID__"  最大8文字
   connection_status: [4, 1], // "[--]"      4文字 (compact), standard "[OK]App_" 8文字

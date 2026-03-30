@@ -1,8 +1,5 @@
 import { useState, useCallback, useMemo, useRef, useEffect, type ChangeEvent } from 'react'
 import { createPortal } from 'react-dom'
-import GridLayout from 'react-grid-layout'
-import 'react-grid-layout/css/styles.css'
-import 'react-resizable/css/styles.css'
 import type {
   DisplayElementType,
   DisplayLayout,
@@ -39,16 +36,59 @@ export function setCurrentDragType(type: DisplayElementType | null) {
   _dragTypeCallback?.(type)
 }
 
-// OLED: 128x32 = 4:1
+// OLED: 128x32 = 16文字×2行（8x16px/文字）
 const GRID_COLS = 16
 const GRID_ROWS = 2
-const CELL_WIDTH = 28
-const CELL_HEIGHT = 56
-const GAP = 2
-// GridLayout: containerPadding=0, margin=GAP. CSS padding で外枠余白
-const GRID_WIDTH = GRID_COLS * CELL_WIDTH + GAP * (GRID_COLS - 1)   // 512 + 30 = 542
-const GRID_HEIGHT = GRID_ROWS * CELL_HEIGHT + GAP * (GRID_ROWS - 1) // 128 + 2 = 130
-const OLED_PAD = 2 // CSS padding on .oled-screen — GAP と同じ
+const CELL_W = 32   // 1文字セルの表示幅
+const CELL_H = 56   // 1文字セルの表示高さ
+const GRID_WIDTH = GRID_COLS * CELL_W   // 512
+const GRID_HEIGHT = GRID_ROWS * CELL_H  // 112
+const BORDER_W = 2  // CSS border width on .oled-screen
+
+/** グリッド行内のアイテム（空セルまたは要素カード） */
+type GridItem =
+  | { kind: 'empty'; col: number }
+  | { kind: 'element'; col: number; span: number; el: import('@/types/display').DisplayElement; text: string }
+
+/** 各行を「空セル / 要素カード」のリストに変換 */
+function buildGridRows(page: DisplayPage | undefined, simState: SimState): GridItem[][] {
+  const rows: GridItem[][] = Array.from({ length: GRID_ROWS }, () => [])
+  if (!page) {
+    for (let r = 0; r < GRID_ROWS; r++)
+      for (let c = 0; c < GRID_COLS; c++) rows[r].push({ kind: 'empty', col: c })
+    return rows
+  }
+
+  // 占有マップ: どのセルがどの要素に属するか
+  const occupied: (string | null)[][] = Array.from({ length: GRID_ROWS }, () =>
+    Array.from({ length: GRID_COLS }, () => null)
+  )
+  for (const el of page.elements) {
+    const size = ELEMENT_FIXED_SIZES[el.type]
+    for (let dx = 0; dx < size[0]; dx++) {
+      const col = el.pos[0] + dx
+      if (col < GRID_COLS && el.pos[1] < GRID_ROWS) occupied[el.pos[1]][col] = el.id
+    }
+  }
+
+  for (let r = 0; r < GRID_ROWS; r++) {
+    let c = 0
+    while (c < GRID_COLS) {
+      const elId = occupied[r][c]
+      if (elId) {
+        const el = page.elements.find((e) => e.id === elId)!
+        const size = ELEMENT_FIXED_SIZES[el.type]
+        const text = getElementPreviewText(el.type, simState)
+        rows[r].push({ kind: 'element', col: c, span: size[0], el, text })
+        c += size[0]
+      } else {
+        rows[r].push({ kind: 'empty', col: c })
+        c++
+      }
+    }
+  }
+  return rows
+}
 
 const DEFAULT_BUTTON_ACTION: SingleButtonAction = {
   short_press: 'none', long_press: 'none', hold: 'none',
@@ -213,17 +253,7 @@ export function DisplayEditor() {
     return set
   }, [activePage])
 
-  const gridLayoutItems = useMemo(() => {
-    if (!activePage) return []
-    return activePage.elements.map((el) => {
-      const size = ELEMENT_FIXED_SIZES[el.type]
-      return {
-        i: el.id, x: el.pos[0], y: el.pos[1],
-        w: size[0], h: size[1],
-        minW: size[0], maxW: size[0], minH: size[1], maxH: size[1],
-      }
-    })
-  }, [activePage])
+  const gridRows = useMemo(() => buildGridRows(activePage, simState), [activePage, simState])
 
   // --- ハンドラ ---
 
@@ -232,17 +262,23 @@ export function DisplayEditor() {
     setPerButtonActions(createDefaultPerButtonActions(DEVICE_SPECS[model]))
   }, [])
 
-  const handleLayoutChange = useCallback(
-    (newGridLayout: GridLayout.Layout[]) => {
+  const handleMoveElement = useCallback(
+    (elementId: string, newPos: [number, number]) => {
       setLayout((prev) => {
         const newPages = [...prev.pages]
         const page = newPages[activePageIndex]
         if (!page) return prev
-        const updatedElements = page.elements.map((el) => {
-          const item = newGridLayout.find((l) => l.i === el.id)
-          if (!item) return el
-          return { ...el, pos: [item.x, item.y] as [number, number] }
-        })
+        const el = page.elements.find((e) => e.id === elementId)
+        if (!el) return prev
+        const size = ELEMENT_FIXED_SIZES[el.type]
+        const clamped: [number, number] = [
+          Math.max(0, Math.min(newPos[0], GRID_COLS - size[0])),
+          Math.max(0, Math.min(newPos[1], GRID_ROWS - size[1])),
+        ]
+        if (!canPlace(page, el.type, clamped, elementId)) return prev
+        const updatedElements = page.elements.map((e) =>
+          e.id === elementId ? { ...e, pos: clamped } : e
+        )
         newPages[activePageIndex] = { ...page, elements: updatedElements }
         return { ...prev, pages: newPages }
       })
@@ -306,12 +342,12 @@ export function DisplayEditor() {
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (!oledRef.current) return
       const rect = oledRef.current.getBoundingClientRect()
-      const col = Math.floor((e.clientX - rect.left - OLED_PAD) / (CELL_WIDTH + GAP))
-      const row = Math.floor((e.clientY - rect.top - OLED_PAD) / (CELL_HEIGHT + GAP))
+      const col = Math.floor((e.clientX - rect.left - BORDER_W) / CELL_W)
+      const row = Math.floor((e.clientY - rect.top - BORDER_W) / CELL_H)
       if (col < 0 || col >= GRID_COLS || row < 0 || row >= GRID_ROWS) return
-      const localX = col * (CELL_WIDTH + GAP) + OLED_PAD
-      const localY = row * (CELL_HEIGHT + GAP) + OLED_PAD
-      setPopupPos({ col, row, x: localX, y: localY, screenX: rect.left + localX, screenY: rect.top + localY + CELL_HEIGHT + 4 })
+      const localX = col * CELL_W + BORDER_W
+      const localY = row * CELL_H + BORDER_W
+      setPopupPos({ col, row, x: localX, y: localY, screenX: rect.left + localX, screenY: rect.top + localY + CELL_H + 4 })
     },
     []
   )
@@ -326,52 +362,124 @@ export function DisplayEditor() {
 
   // ドラッグ中の位置と配置可否を追跡
   const [dragPos, setDragPos] = useState<{ col: number; row: number } | null>(null)
+  // 内部移動ドラッグ中の要素情報
+  const [internalDrag, setInternalDrag] = useState<{ id: string; type: DisplayElementType; offsetCol: number } | null>(null)
+  // 内部移動時の最後の有効位置
+  const [lastValidPos, setLastValidPos] = useState<{ col: number; row: number } | null>(null)
+
+  /** ドラッグ中の要素タイプ（パレット or 内部移動） */
+  const dragType = externalDragType ?? internalDrag?.type ?? null
+  const dragOffsetCol = internalDrag?.offsetCol ?? 0
+
+  /** マウス位置をクランプした配置候補 */
+  const clampedDragPos = useMemo(() => {
+    if (!dragType || !dragPos) return null
+    const size = ELEMENT_FIXED_SIZES[dragType]
+    return {
+      col: Math.max(0, Math.min(dragPos.col - dragOffsetCol, GRID_COLS - size[0])),
+      row: Math.max(0, Math.min(dragPos.row, GRID_ROWS - size[1])),
+    }
+  }, [dragType, dragPos, dragOffsetCol])
 
   const dragCanPlace = useMemo(() => {
-    if (!externalDragType || !dragPos || !activePage) return false
-    const size = ELEMENT_FIXED_SIZES[externalDragType]
-    const pos: [number, number] = [
-      Math.max(0, Math.min(dragPos.col, GRID_COLS - size[0])),
-      Math.max(0, Math.min(dragPos.row, GRID_ROWS - size[1])),
-    ]
-    return canPlace(activePage, externalDragType, pos)
-  }, [externalDragType, dragPos, activePage])
+    if (!clampedDragPos || !activePage) return false
+    return canPlace(activePage, dragType!, [clampedDragPos.col, clampedDragPos.row], internalDrag?.id)
+  }, [clampedDragPos, activePage, dragType, internalDrag])
 
-  // GridLayout の isDroppable は配置可能な時のみ有効
-  const droppingItem = useMemo(() => {
-    if (!externalDragType || !dragCanPlace) return undefined
-    const size = ELEMENT_FIXED_SIZES[externalDragType]
-    return { i: '__dropping__', w: size[0], h: size[1] }
-  }, [externalDragType, dragCanPlace])
+  // 内部ドラッグ時: 配置可能な位置を記録
+  useEffect(() => {
+    if (internalDrag && clampedDragPos && dragCanPlace) {
+      setLastValidPos(clampedDragPos)
+    }
+  }, [internalDrag, clampedDragPos, dragCanPlace])
 
-  // ドラッグ位置追跡（配置不可時の赤枠表示用）
+  /** ドラッグ中のプレビュー影 */
+  const dragPreview = useMemo(() => {
+    if (!dragType) return null
+    const size = ELEMENT_FIXED_SIZES[dragType]
+    if (internalDrag) {
+      // 内部移動: 配置可能ならその位置、不可なら最後の有効位置にとどまる
+      const pos = dragCanPlace ? clampedDragPos : lastValidPos
+      if (!pos) return null
+      return { col: pos.col, row: pos.row, w: size[0], h: size[1], canPlace: true }
+    }
+    // パレットからのドラッグ
+    if (!clampedDragPos) return null
+    return { col: clampedDragPos.col, row: clampedDragPos.row, w: size[0], h: size[1], canPlace: dragCanPlace }
+  }, [dragType, internalDrag, clampedDragPos, dragCanPlace, lastValidPos])
+
+  // ドラッグ位置追跡
   const handleOledDragOver = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
       e.preventDefault()
       if (!oledRef.current) return
       const rect = oledRef.current.getBoundingClientRect()
-      const col = Math.floor((e.clientX - rect.left - OLED_PAD) / (CELL_WIDTH + GAP))
-      const row = Math.floor((e.clientY - rect.top - OLED_PAD) / (CELL_HEIGHT + GAP))
-      setDragPos(col >= 0 && col < GRID_COLS && row >= 0 && row < GRID_ROWS ? { col, row } : null)
+      const rawCol = Math.floor((e.clientX - rect.left - BORDER_W) / CELL_W)
+      const rawRow = Math.floor((e.clientY - rect.top - BORDER_W) / CELL_H)
+      // 常にクランプ — OLED 外でも端にとどまる
+      const col = Math.max(0, Math.min(rawCol, GRID_COLS - 1))
+      const row = Math.max(0, Math.min(rawRow, GRID_ROWS - 1))
+      setDragPos((prev) => (prev?.col === col && prev?.row === row) ? prev : { col, row })
     },
     []
+  )
+
+  // 内部ドラッグ中は OLED 外に出ても状態を保持（影がとどまる）
+  // パレットからのドラッグで完全に離脱した場合のみクリア
+  const handleOledDragLeave = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      // 子要素間の移動は無視
+      const related = e.relatedTarget as Node | null
+      if (related && oledRef.current?.contains(related)) return
+      // 内部移動中は何もクリアしない — dragPos も lastValidPos も保持
+      if (internalDrag) return
+      // パレットからのドラッグのみクリア
+      setDragPos(null)
+    },
+    [internalDrag]
   )
 
   const handleOledDrop = useCallback(
     (e: React.DragEvent<HTMLDivElement>) => {
       e.preventDefault()
       setDragPos(null)
-      const type = e.dataTransfer.getData('text/plain') as DisplayElementType
-      if (!type || !ELEMENT_FIXED_SIZES[type]) return
+      setInternalDrag(null)
+      setLastValidPos(null)
       if (!oledRef.current) return
       const rect = oledRef.current.getBoundingClientRect()
-      const col = Math.floor((e.clientX - rect.left - OLED_PAD) / (CELL_WIDTH + GAP))
-      const row = Math.floor((e.clientY - rect.top - OLED_PAD) / (CELL_HEIGHT + GAP))
+      const col = Math.floor((e.clientX - rect.left - BORDER_W) / CELL_W)
+      const row = Math.floor((e.clientY - rect.top - BORDER_W) / CELL_H)
       if (col < 0 || col >= GRID_COLS || row < 0 || row >= GRID_ROWS) return
+
+      // 内部要素移動 — 配置可能ならその位置、不可なら最後の有効位置
+      const moveData = e.dataTransfer.getData('application/hapbeat-move')
+      if (moveData) {
+        try {
+          const { id, offsetCol: oc } = JSON.parse(moveData)
+          const el = activePage?.elements.find((x) => x.id === id)
+          if (el) {
+            const size = ELEMENT_FIXED_SIZES[el.type]
+            const clamped: [number, number] = [
+              Math.max(0, Math.min(col - oc, GRID_COLS - size[0])),
+              Math.max(0, Math.min(row, GRID_ROWS - size[1])),
+            ]
+            if (canPlace(activePage!, el.type, clamped, id)) {
+              handleMoveElement(id, clamped)
+            } else if (lastValidPos) {
+              handleMoveElement(id, [lastValidPos.col, lastValidPos.row])
+            }
+          }
+        } catch { /* ignore */ }
+        return
+      }
+
+      // パレットからのドロップ
+      const type = e.dataTransfer.getData('text/plain') as DisplayElementType
+      if (!type || !ELEMENT_FIXED_SIZES[type]) return
       addElement(type, [col, row], e.clientX, e.clientY)
       setPopupPos(null)
     },
-    [addElement]
+    [addElement, handleMoveElement, activePage, lastValidPos]
   )
 
   /** ページ名を「画面1」「画面2」...に正規化 */
@@ -522,23 +630,20 @@ export function DisplayEditor() {
           deviceSpec={deviceSpec}
           isFlipped={isFlipped}
           oledRef={oledRef}
-          gridLayoutItems={gridLayoutItems}
+          gridRows={gridRows}
           activePage={activePage}
-          simState={simState}
           popupPos={popupPos}
           usedTypes={usedTypes}
-          onLayoutChange={handleLayoutChange}
           onOledClick={handleOledClick}
           onOledDragOver={handleOledDragOver}
-          onOledDragLeave={() => setDragPos(null)}
+          onOledDragLeave={handleOledDragLeave}
           onOledDrop={handleOledDrop}
-          onDropElement={(type, pos, mx, my) => addElement(type, pos, mx, my)}
-          droppingItem={droppingItem}
-          dragFallback={externalDragType && dragPos && !dragCanPlace ? {
-            col: dragPos.col, row: dragPos.row,
-            w: ELEMENT_FIXED_SIZES[externalDragType][0],
-            h: ELEMENT_FIXED_SIZES[externalDragType][1],
-          } : null}
+          dragPreview={dragPreview}
+          onInternalDragStart={(id, type, offsetCol) => {
+            setInternalDrag({ id, type, offsetCol })
+            const el = activePage?.elements.find((e) => e.id === id)
+            if (el) setLastValidPos({ col: el.pos[0], row: el.pos[1] })
+          }}
           onDeleteElement={handleDeleteElement}
           onPopupSelect={handlePopupSelect}
           onPopupClose={() => setPopupPos(null)}
@@ -615,26 +720,22 @@ interface OledSimulatorProps {
   deviceSpec: DeviceHardwareSpec
   isFlipped: boolean
   oledRef: React.RefObject<HTMLDivElement>
-  gridLayoutItems: GridLayout.Layout[]
+  gridRows: GridItem[][]
   activePage: DisplayPage | undefined
-  simState: SimState
   popupPos: { col: number; row: number; x: number; y: number; screenX: number; screenY: number } | null
   usedTypes: Set<DisplayElementType>
-  onLayoutChange: (layout: GridLayout.Layout[]) => void
   onOledClick: (e: React.MouseEvent<HTMLDivElement>) => void
   onOledDragOver: (e: React.DragEvent<HTMLDivElement>) => void
-  onOledDragLeave: () => void
+  onOledDragLeave: (e: React.DragEvent<HTMLDivElement>) => void
   onOledDrop: (e: React.DragEvent<HTMLDivElement>) => void
-  onDropElement: (type: DisplayElementType, pos: [number, number], mouseX: number, mouseY: number) => void
-  droppingItem: { i: string; w: number; h: number } | undefined
-  dragFallback: { col: number; row: number; w: number; h: number } | null
+  dragPreview: { col: number; row: number; w: number; h: number; canPlace: boolean } | null
+  onInternalDragStart: (id: string, type: DisplayElementType, offsetCol: number) => void
   onDeleteElement: (id: string) => void
   onPopupSelect: (type: DisplayElementType) => void
   onPopupClose: () => void
   onSimButtonClick: (buttonId: string) => void
   onSimButtonDown: (buttonId: string) => void
   onSimButtonUp: () => void
-  // ボタン設定（インライン）
   pages: DisplayPage[]
   perButtonActions: PerButtonActions
   onActionChange: (buttonId: string, field: keyof SingleButtonAction, value: ButtonActionType) => void
@@ -643,10 +744,10 @@ interface OledSimulatorProps {
 }
 
 function OledSimulator({
-  deviceSpec, isFlipped, oledRef, gridLayoutItems, activePage, simState,
+  deviceSpec, isFlipped, oledRef, gridRows, activePage,
   popupPos, usedTypes,
-  onLayoutChange, onOledClick,
-  onOledDragOver, onOledDragLeave, onOledDrop, onDropElement, droppingItem, dragFallback,
+  onOledClick,
+  onOledDragOver, onOledDragLeave, onOledDrop, dragPreview, onInternalDragStart,
   onDeleteElement, onPopupSelect, onPopupClose, onSimButtonClick, onSimButtonDown, onSimButtonUp,
   pages, perButtonActions, onActionChange, onLedClick, onVolumeClick,
 }: OledSimulatorProps) {
@@ -673,79 +774,59 @@ function OledSimulator({
               onDragLeave={onOledDragLeave}
               onDrop={onOledDrop}
             >
-              {activePage && (
-                <GridLayout
-                  className="grid-layout"
-                  layout={gridLayoutItems}
-                  cols={GRID_COLS}
-                  rowHeight={CELL_HEIGHT}
-                  width={GRID_WIDTH}
-                  maxRows={GRID_ROWS}
-                  compactType={null}
-                  preventCollision={true}
-                  isResizable={false}
-                  isDraggable={true}
-                  isDroppable={!!droppingItem}
-                  droppingItem={droppingItem}
-                  onLayoutChange={onLayoutChange}
-                  onDrop={(_layout, item, e) => {
-                    const type = (e as DragEvent).dataTransfer?.getData('text/plain') as DisplayElementType
-                    if (type && ELEMENT_FIXED_SIZES[type]) {
-                      // GridLayout の onDrop で配置位置を取得
-                      const mouseE = e as unknown as MouseEvent
-                      onDropElement(type, [item.x, item.y], mouseE.clientX, mouseE.clientY)
+              <div className="char-grid">
+                {gridRows.map((row, rowIdx) =>
+                  row.map((item) => {
+                    if (item.kind === 'empty') {
+                      return (
+                        <div key={`${rowIdx}-${item.col}`} className="char-cell empty" />
+                      )
                     }
-                  }}
-                  margin={[GAP, GAP]}
-                  containerPadding={[0, 0]}
-                >
-                  {activePage.elements.map((el) => {
-                    const meta = getElementMeta(el.type)
-                    const previewText = getElementPreviewText(el.type, simState)
-                    const charCount = previewText.length
-                    const elSize = ELEMENT_FIXED_SIZES[el.type]
-                    const elWidthPx = elSize[0] * CELL_WIDTH + GAP * (elSize[0] - 1)
-                    // 文字サイズをカード幅に合わせる: カード幅 / 文字数
-                    // 幅基準: 等幅フォントで文字がカード幅にフィットするサイズ
-                    // 高さ基準: ヘッダー(~14px)を除いた残りに収まるサイズ
-                    const widthBased = (elWidthPx - 2) / charCount * 1.7
-                    const heightBased = CELL_HEIGHT * 0.6
-                    const fontSize = Math.min(widthBased, heightBased)
+                    const meta = getElementMeta(item.el.type)
                     return (
-                    <div
-                      key={el.id}
-                      className="grid-element"
-                      onClick={(e) => e.stopPropagation()}
-                      title={meta?.label ?? el.type}
-                    >
-                      <span className="grid-element-name">{meta?.label ?? el.type}</span>
-                      <span
-                        className="grid-element-preview"
-                        style={{ fontSize: `${fontSize}px` }}
+                      <div
+                        key={item.el.id}
+                        className="grid-element"
+                        style={{ gridColumn: `span ${item.span}` }}
+                        draggable
+                        onDragStart={(e) => {
+                          // カード内のクリック位置 → 列オフセット
+                          const cardRect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                          const offsetCol = Math.floor((e.clientX - cardRect.left) / CELL_W)
+                          e.dataTransfer.setData('application/hapbeat-move', JSON.stringify({ id: item.el.id, offsetCol }))
+                          e.dataTransfer.effectAllowed = 'move'
+                          onInternalDragStart(item.el.id, item.el.type, offsetCol)
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        title={meta?.label ?? item.el.type}
                       >
-                        {previewText}
-                      </span>
-                      <button
-                        className="grid-element-delete"
-                        onMouseDown={(e) => { e.stopPropagation(); e.preventDefault() }}
-                        onClick={(e) => { e.stopPropagation(); onDeleteElement(el.id) }}
-                        title="削除"
-                      >×</button>
-                    </div>
+                        <span className="grid-element-name">{meta?.label ?? item.el.type}</span>
+                        <div className="grid-element-chars">
+                          {item.text.split('').map((ch, ci) => (
+                            <span key={ci} className="char-text">{ch}</span>
+                          ))}
+                        </div>
+                        <button
+                          className="grid-element-delete"
+                          onMouseDown={(e) => { e.stopPropagation(); e.preventDefault() }}
+                          onClick={(e) => { e.stopPropagation(); onDeleteElement(item.el.id) }}
+                          title="削除"
+                        >×</button>
+                      </div>
                     )
-                  })}
-                </GridLayout>
-              )}
+                  })
+                )}
+              </div>
 
-              {/* 配置不可時の赤い影（コライダーなし fallback） */}
-              {dragFallback && (
+              {/* ドラッグ中のプレビュー影 */}
+              {dragPreview && (
                 <div
-                  className="drag-fallback-shadow"
+                  className={`drag-preview-shadow ${dragPreview.canPlace ? '' : 'invalid'}`}
                   style={{
-                    left: dragFallback.col * (CELL_WIDTH + GAP) + OLED_PAD,
-                    top: dragFallback.row * (CELL_HEIGHT + GAP) + OLED_PAD,
-                    width: dragFallback.w * CELL_WIDTH + GAP * (dragFallback.w - 1),
-                    height: dragFallback.h * CELL_HEIGHT,
+                    left: dragPreview.col * CELL_W,
+                    top: dragPreview.row * CELL_H,
+                    width: dragPreview.w * CELL_W,
+                    height: dragPreview.h * CELL_H,
                   }}
                 />
               )}
@@ -756,7 +837,7 @@ function OledSimulator({
                   className="placeholder-cell"
                   style={{
                     left: popupPos.x, top: popupPos.y,
-                    width: CELL_WIDTH, height: CELL_HEIGHT,
+                    width: CELL_W, height: CELL_H,
                   }}
                 />
               )}

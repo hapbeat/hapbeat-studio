@@ -124,8 +124,7 @@
   position: relative;
   overflow: hidden;
   cursor: crosshair;
-  /* 余白は CSS padding で均一に制御。GridLayout は margin=0, containerPadding=0 */
-  padding: 2px;
+  padding: 0;
   box-sizing: content-box;
 }
 
@@ -197,23 +196,43 @@
 }
 
 /* ========================================
-   Grid Elements (OLED 内) — 明るい背景、見やすく
+   Char Grid (OLED 内 — 16×2 文字グリッド + カード)
    ======================================== */
 
-.grid-layout { position: relative; }
+.char-grid {
+  display: grid;
+  grid-template-columns: repeat(16, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  width: 100%;
+  height: 100%;
+}
 
+/* 空セル */
+.char-cell.empty {
+  cursor: crosshair;
+}
+.char-cell.empty:hover {
+  background: rgba(100, 200, 255, 0.08);
+}
+
+/* 要素カード — 複数セルを span */
 .grid-element {
   position: relative;
   display: flex;
   flex-direction: column;
   padding: 0;
-  background: rgba(50, 65, 100, 0.9);
+  background: rgba(40, 50, 80, 0.9);
   border: 1px solid rgba(100, 160, 255, 0.45);
   border-radius: 3px;
   cursor: move;
   overflow: hidden;
+  user-select: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
-.grid-element:hover { border-color: rgba(100, 200, 255, 0.9); }
+.grid-element:hover {
+  border-color: rgba(100, 200, 255, 0.9);
+  box-shadow: 0 0 8px rgba(100, 200, 255, 0.3);
+}
 
 /* カード上部のヘッダーバー（要素名） */
 .grid-element-name {
@@ -229,76 +248,57 @@
   line-height: 1.3;
 }
 
-/* メイン表示テキスト — 等幅フォントでカード幅にフィット */
-.grid-element-preview {
+/* 文字表示エリア — 1文字ずつ均等配置 */
+.grid-element-chars {
   flex: 1;
   display: flex;
   align-items: center;
   padding: 0 1px;
-  font-size: 14px;
   font-family: var(--font-mono);
-  color: #d0e0ff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+.grid-element-chars .char-text {
+  flex: 1;
+  text-align: center;
+  font-size: 20px;
+  font-weight: 600;
   line-height: 1;
+  color: #d0e0ff;
 }
 
 /* 削除ボタン */
 .grid-element-delete {
   position: absolute; top: 0; right: 0;
-  width: 22px; height: 22px;
+  width: 18px; height: 18px;
   display: flex; align-items: center; justify-content: center;
   background: rgba(244, 67, 54, 0.85);
   border: none; border-radius: 0 3px 0 4px;
-  color: #fff; font-size: 13px; font-family: var(--font-mono);
+  color: #fff; font-size: 11px; font-family: var(--font-mono);
   cursor: pointer; opacity: 0; transition: opacity 0.1s;
   z-index: 15; padding: 0; line-height: 1;
 }
 .grid-element:hover .grid-element-delete { opacity: 1; }
 .grid-element-delete:hover { background: rgba(244, 67, 54, 1); transform: scale(1.1); }
 
-/* react-grid-layout ドラッグ中の影 — 水色に統一 */
-.react-grid-item.react-draggable-dragging {
-  box-shadow: 0 0 12px rgba(100, 200, 255, 0.5) !important;
-  border-color: rgba(100, 200, 255, 0.8) !important;
-  z-index: 20 !important;
-}
-
-/* react-grid-layout プレースホルダー（ドラッグ移動中の影）— 水色に */
-.react-grid-item.react-grid-placeholder {
-  background: rgba(100, 200, 255, 0.2) !important;
-  border: 2px dashed rgba(100, 200, 255, 0.6) !important;
-  border-radius: 3px;
-  opacity: 1 !important;
-}
-
-.react-grid-item > .react-resizable-handle { display: none; }
-
 /* ========================================
-   Drag Preview Shadow (パレットからドラッグ時)
+   Drag Preview Shadow (ドラッグ中 — 配置先プレビュー)
    ======================================== */
 
 .drag-preview-shadow {
   position: absolute;
   background: rgba(100, 200, 255, 0.2);
-  border: 2px solid rgba(100, 200, 255, 0.7);
+  border: 2px dashed rgba(100, 200, 255, 0.7);
   border-radius: 3px;
   pointer-events: none;
   z-index: 4;
+  box-shadow: 0 0 12px rgba(100, 200, 255, 0.4);
 }
 
-/* ========================================
-   Drag Fallback Shadow (配置不可時 — 赤い点線)
-   ======================================== */
-
-.drag-fallback-shadow {
-  position: absolute;
+/* 配置不可時 — 赤 */
+.drag-preview-shadow.invalid {
   background: rgba(244, 80, 80, 0.15);
-  border: 2px dashed rgba(244, 80, 80, 0.7);
-  border-radius: 3px;
-  pointer-events: none;
-  z-index: 4;
+  border-color: rgba(244, 80, 80, 0.7);
+  box-shadow: 0 0 8px rgba(244, 80, 80, 0.3);
 }
 
 /* ========================================

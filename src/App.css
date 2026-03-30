@@ -109,16 +109,49 @@ body {
 }
 
 /* ========================================
+   Header Toggle
+   ======================================== */
+
+.header-toggle {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-primary);
+  border-radius: var(--radius);
+  padding: 2px;
+}
+
+.toggle-btn {
+  padding: 6px 16px;
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  transition: color var(--transition), background var(--transition);
+}
+
+.toggle-btn:hover {
+  color: var(--text-primary);
+}
+
+.toggle-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ========================================
    Tab Bar
    ======================================== */
 
 .tab-bar {
   display: flex;
-  gap: 2px;
-  padding: 0 24px;
+  gap: 0;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  overflow-x: auto;
 }
 
 .tab {
@@ -127,16 +160,16 @@ body {
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 13px;
   font-family: var(--font-ui);
   cursor: pointer;
   transition: color var(--transition), border-color var(--transition), background var(--transition);
-  position: relative;
+  white-space: nowrap;
 }
 
 .tab:hover {
   color: var(--text-primary);
-  background: rgba(124, 92, 191, 0.08);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .tab.active {
@@ -152,6 +185,7 @@ body {
   flex: 1;
   overflow: auto;
   padding: 24px;
+  min-height: 0;
 }
 
 /* ========================================
@@ -291,15 +325,13 @@ body {
     padding: 10px 16px;
   }
 
-  .tab-bar {
-    padding: 0 16px;
-    overflow-x: auto;
+  .header-toggle {
+    gap: 1px;
   }
 
-  .tab {
-    padding: 8px 14px;
-    font-size: 13px;
-    white-space: nowrap;
+  .toggle-btn {
+    padding: 5px 12px;
+    font-size: 12px;
   }
 
   .tab-content {

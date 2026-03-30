@@ -24,8 +24,8 @@ export const DEFAULT_SIM_STATE: SimState = {
 export function getElementPreviewText(type: DisplayElementType, simState?: SimState): string {
   const s = simState ?? DEFAULT_SIM_STATE
   switch (type) {
-    case 'volume':            return `v${String(s.volume).padStart(2, ' ')}`     // 3文字
-    case 'battery':           return 'BAT:100%'                                  // 8文字
+    case 'volume':            return `v${String(s.volume).padStart(2, '0')}`     // 3文字
+    case 'battery':           return ' 85%'                                       // 4文字
     case 'wifi_status':       return 'W:---'                                     // 5文字 (padding)
     case 'wifi_ssid':         return 'MySSID  '                                  // 8文字
     case 'connection_status': return '[--]'                                      // 4文字
@@ -45,7 +45,7 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
 export function getElementDescription(type: DisplayElementType): string {
   switch (type) {
     case 'volume':            return 'v00\u2013v23'
-    case 'battery':           return 'BAT:XXX%'
+    case 'battery':           return 'XX%'
     case 'wifi_status':       return 'W:dBm'
     case 'wifi_ssid':         return 'SSID/AP'
     case 'connection_status': return '[OK]app'
