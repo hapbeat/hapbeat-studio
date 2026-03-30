@@ -212,7 +212,9 @@
   cursor: crosshair;
 }
 .char-cell.empty:hover {
-  background: rgba(100, 200, 255, 0.08);
+  background: rgba(100, 200, 255, 0.1);
+  border: 2px dashed rgba(100, 200, 255, 0.7);
+  border-radius: 3px;
 }
 
 /* 要素カード — 複数セルを span */

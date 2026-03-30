@@ -52,14 +52,11 @@ export function ElementPalette({ selectedType, onSelectType, usedTypes }: Elemen
                 onSelectType(isSelected ? null : meta.type)
               }}
               disabled={isUsed}
-              draggable={!isUsed}
-              onDragStart={(e) => {
-                if (isUsed) { e.preventDefault(); return }
-                e.dataTransfer.setData('text/plain', meta.type)
-                e.dataTransfer.effectAllowed = 'copy'
+              onMouseDown={(e) => {
+                if (isUsed || e.button !== 0) return
+                e.preventDefault()
                 setCurrentDragType(meta.type)
               }}
-              onDragEnd={() => setCurrentDragType(null)}
             >
               <span className="palette-icon">{meta.icon}</span>
               <div className="palette-info">

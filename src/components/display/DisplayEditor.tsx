@@ -322,6 +322,43 @@ export function DisplayEditor() {
     [activePageIndex, layout.pages, showToast]
   )
 
+  // パレットからの mouse ドラッグ
+  useEffect(() => {
+    if (!externalDragType) return
+    document.body.classList.add('is-dragging')
+    const onMove = (e: MouseEvent) => {
+      if (!oledRef.current) return
+      const rect = oledRef.current.getBoundingClientRect()
+      const rawCol = Math.floor((e.clientX - rect.left - BORDER_W) / CELL_W)
+      const rawRow = Math.floor((e.clientY - rect.top - BORDER_W) / CELL_H)
+      if (rawCol >= 0 && rawCol < GRID_COLS && rawRow >= 0 && rawRow < GRID_ROWS) {
+        setDragPos((prev) => (prev?.col === rawCol && prev?.row === rawRow) ? prev : { col: rawCol, row: rawRow })
+      } else {
+        setDragPos((prev) => prev === null ? prev : null)
+      }
+    }
+    const onUp = (e: MouseEvent) => {
+      document.body.classList.remove('is-dragging')
+      if (oledRef.current) {
+        const rect = oledRef.current.getBoundingClientRect()
+        const col = Math.floor((e.clientX - rect.left - BORDER_W) / CELL_W)
+        const row = Math.floor((e.clientY - rect.top - BORDER_W) / CELL_H)
+        if (col >= 0 && col < GRID_COLS && row >= 0 && row < GRID_ROWS) {
+          addElement(externalDragType, [col, row], e.clientX, e.clientY)
+        }
+      }
+      setDragPos(null)
+      setExternalDragType(null)
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    return () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.classList.remove('is-dragging')
+    }
+  }, [externalDragType, addElement])
+
   const handleDeleteElement = useCallback(
     (elementId: string) => {
       setLayout((prev) => {
@@ -345,9 +382,9 @@ export function DisplayEditor() {
       const col = Math.floor((e.clientX - rect.left - BORDER_W) / CELL_W)
       const row = Math.floor((e.clientY - rect.top - BORDER_W) / CELL_H)
       if (col < 0 || col >= GRID_COLS || row < 0 || row >= GRID_ROWS) return
-      const localX = col * CELL_W + BORDER_W
-      const localY = row * CELL_H + BORDER_W
-      setPopupPos({ col, row, x: localX, y: localY, screenX: rect.left + localX, screenY: rect.top + localY + CELL_H + 4 })
+      const localX = col * CELL_W
+      const localY = row * CELL_H
+      setPopupPos({ col, row, x: localX, y: localY, screenX: rect.left + BORDER_W + localX, screenY: rect.top + BORDER_W + localY + CELL_H + 4 })
     },
     []
   )
@@ -408,79 +445,39 @@ export function DisplayEditor() {
     return { col: clampedDragPos.col, row: clampedDragPos.row, w: size[0], h: size[1], canPlace: dragCanPlace }
   }, [dragType, internalDrag, clampedDragPos, dragCanPlace, lastValidPos])
 
-  // ドラッグ位置追跡
-  const handleOledDragOver = useCallback(
-    (e: React.DragEvent<HTMLDivElement>) => {
-      e.preventDefault()
+  // 内部移動: mouse イベントで追跡（HTML5 drag を使わないのでカーソルが安定）
+  const lastValidPosRef = useRef(lastValidPos)
+  lastValidPosRef.current = lastValidPos
+  useEffect(() => {
+    if (!internalDrag) return
+    document.body.classList.add('is-dragging')
+    const onMove = (e: MouseEvent) => {
       if (!oledRef.current) return
       const rect = oledRef.current.getBoundingClientRect()
       const rawCol = Math.floor((e.clientX - rect.left - BORDER_W) / CELL_W)
       const rawRow = Math.floor((e.clientY - rect.top - BORDER_W) / CELL_H)
-      // 常にクランプ — OLED 外でも端にとどまる
       const col = Math.max(0, Math.min(rawCol, GRID_COLS - 1))
       const row = Math.max(0, Math.min(rawRow, GRID_ROWS - 1))
       setDragPos((prev) => (prev?.col === col && prev?.row === row) ? prev : { col, row })
-    },
-    []
-  )
-
-  // 内部ドラッグ中は OLED 外に出ても状態を保持（影がとどまる）
-  // パレットからのドラッグで完全に離脱した場合のみクリア
-  const handleOledDragLeave = useCallback(
-    (e: React.DragEvent<HTMLDivElement>) => {
-      // 子要素間の移動は無視
-      const related = e.relatedTarget as Node | null
-      if (related && oledRef.current?.contains(related)) return
-      // 内部移動中は何もクリアしない — dragPos も lastValidPos も保持
-      if (internalDrag) return
-      // パレットからのドラッグのみクリア
-      setDragPos(null)
-    },
-    [internalDrag]
-  )
-
-  const handleOledDrop = useCallback(
-    (e: React.DragEvent<HTMLDivElement>) => {
-      e.preventDefault()
+    }
+    const onUp = () => {
+      document.body.classList.remove('is-dragging')
+      const pos = lastValidPosRef.current
+      if (pos) handleMoveElement(internalDrag.id, [pos.col, pos.row])
       setDragPos(null)
       setInternalDrag(null)
       setLastValidPos(null)
-      if (!oledRef.current) return
-      const rect = oledRef.current.getBoundingClientRect()
-      const col = Math.floor((e.clientX - rect.left - BORDER_W) / CELL_W)
-      const row = Math.floor((e.clientY - rect.top - BORDER_W) / CELL_H)
-      if (col < 0 || col >= GRID_COLS || row < 0 || row >= GRID_ROWS) return
+    }
+    document.addEventListener('mousemove', onMove)
+    document.addEventListener('mouseup', onUp)
+    return () => {
+      document.removeEventListener('mousemove', onMove)
+      document.removeEventListener('mouseup', onUp)
+      document.body.classList.remove('is-dragging')
+    }
+  }, [internalDrag, handleMoveElement])
 
-      // 内部要素移動 — 配置可能ならその位置、不可なら最後の有効位置
-      const moveData = e.dataTransfer.getData('application/hapbeat-move')
-      if (moveData) {
-        try {
-          const { id, offsetCol: oc } = JSON.parse(moveData)
-          const el = activePage?.elements.find((x) => x.id === id)
-          if (el) {
-            const size = ELEMENT_FIXED_SIZES[el.type]
-            const clamped: [number, number] = [
-              Math.max(0, Math.min(col - oc, GRID_COLS - size[0])),
-              Math.max(0, Math.min(row, GRID_ROWS - size[1])),
-            ]
-            if (canPlace(activePage!, el.type, clamped, id)) {
-              handleMoveElement(id, clamped)
-            } else if (lastValidPos) {
-              handleMoveElement(id, [lastValidPos.col, lastValidPos.row])
-            }
-          }
-        } catch { /* ignore */ }
-        return
-      }
-
-      // パレットからのドロップ
-      const type = e.dataTransfer.getData('text/plain') as DisplayElementType
-      if (!type || !ELEMENT_FIXED_SIZES[type]) return
-      addElement(type, [col, row], e.clientX, e.clientY)
-      setPopupPos(null)
-    },
-    [addElement, handleMoveElement, activePage, lastValidPos]
-  )
+  // HTML5 drag ハンドラは不要（全て mouse ベースに移行済み）
 
   /** ページ名を「画面1」「画面2」...に正規化 */
   const renamePages = (pages: DisplayPage[]): DisplayPage[] =>
@@ -635,9 +632,6 @@ export function DisplayEditor() {
           popupPos={popupPos}
           usedTypes={usedTypes}
           onOledClick={handleOledClick}
-          onOledDragOver={handleOledDragOver}
-          onOledDragLeave={handleOledDragLeave}
-          onOledDrop={handleOledDrop}
           dragPreview={dragPreview}
           onInternalDragStart={(id, type, offsetCol) => {
             setInternalDrag({ id, type, offsetCol })
@@ -725,9 +719,6 @@ interface OledSimulatorProps {
   popupPos: { col: number; row: number; x: number; y: number; screenX: number; screenY: number } | null
   usedTypes: Set<DisplayElementType>
   onOledClick: (e: React.MouseEvent<HTMLDivElement>) => void
-  onOledDragOver: (e: React.DragEvent<HTMLDivElement>) => void
-  onOledDragLeave: (e: React.DragEvent<HTMLDivElement>) => void
-  onOledDrop: (e: React.DragEvent<HTMLDivElement>) => void
   dragPreview: { col: number; row: number; w: number; h: number; canPlace: boolean } | null
   onInternalDragStart: (id: string, type: DisplayElementType, offsetCol: number) => void
   onDeleteElement: (id: string) => void
@@ -747,7 +738,7 @@ function OledSimulator({
   deviceSpec, isFlipped, oledRef, gridRows, activePage,
   popupPos, usedTypes,
   onOledClick,
-  onOledDragOver, onOledDragLeave, onOledDrop, dragPreview, onInternalDragStart,
+  dragPreview, onInternalDragStart,
   onDeleteElement, onPopupSelect, onPopupClose, onSimButtonClick, onSimButtonDown, onSimButtonUp,
   pages, perButtonActions, onActionChange, onLedClick, onVolumeClick,
 }: OledSimulatorProps) {
@@ -770,9 +761,6 @@ function OledSimulator({
               className="oled-screen"
               style={{ width: GRID_WIDTH, height: GRID_HEIGHT }}
               onClick={onOledClick}
-              onDragOver={onOledDragOver}
-              onDragLeave={onOledDragLeave}
-              onDrop={onOledDrop}
             >
               <div className="char-grid">
                 {gridRows.map((row, rowIdx) =>
@@ -788,13 +776,11 @@ function OledSimulator({
                         key={item.el.id}
                         className="grid-element"
                         style={{ gridColumn: `span ${item.span}` }}
-                        draggable
-                        onDragStart={(e) => {
-                          // カード内のクリック位置 → 列オフセット
+                        onMouseDown={(e) => {
+                          if (e.button !== 0) return
+                          e.preventDefault()
                           const cardRect = (e.currentTarget as HTMLElement).getBoundingClientRect()
                           const offsetCol = Math.floor((e.clientX - cardRect.left) / CELL_W)
-                          e.dataTransfer.setData('application/hapbeat-move', JSON.stringify({ id: item.el.id, offsetCol }))
-                          e.dataTransfer.effectAllowed = 'move'
                           onInternalDragStart(item.el.id, item.el.type, offsetCol)
                         }}
                         onClick={(e) => e.stopPropagation()}

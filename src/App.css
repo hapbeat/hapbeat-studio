@@ -7,6 +7,15 @@ html {
   overflow-y: scroll;
 }
 
+/* ドラッグ中はカーソルを move に固定 + 空セルホバー抑制 */
+body.is-dragging, body.is-dragging * {
+  cursor: move !important;
+}
+body.is-dragging .char-cell.empty:hover {
+  background: transparent !important;
+  border-color: transparent !important;
+}
+
 :root {
   --bg-primary: #1a1a2e;
   --bg-secondary: #16213e;
