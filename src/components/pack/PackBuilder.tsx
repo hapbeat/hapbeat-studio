@@ -38,8 +38,8 @@ export function PackBuilder() {
       alert('エクスポートするイベントがありません。')
       return
     }
-    // Pack ビルドは将来的に JSZip で実装
-    alert('Pack エクスポート機能は準備中です。')
+    // Kit ビルドは将来的に JSZip で実装
+    alert('Kit エクスポート機能は準備中です。')
   }, [events])
 
   return (
@@ -127,17 +127,17 @@ export function PackBuilder() {
 
         {/* エクスポート */}
         <div className="panel">
-          <div className="panel-title">Pack エクスポート</div>
+          <div className="panel-title">Kit エクスポート</div>
           <div className="pack-export-section">
             <div className="pack-export-info">
-              定義されたイベントと設定を Hapbeat Pack ファイル (.hapbeat-pack)
+              定義されたイベントと設定を Hapbeat Kit ファイル (.hapbeat-kit)
               としてエクスポートします。
             </div>
             <div className="pack-export-stats mono">
               イベント数: {events.length}
             </div>
             <button className="btn btn-primary" onClick={handleExport}>
-              Pack をエクスポート
+              Kit をエクスポート
             </button>
           </div>
         </div>
