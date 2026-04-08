@@ -4,12 +4,13 @@ export interface DisplayElement {
   id: string
   type: DisplayElementType
   pos: [number, number]  // [col, row]
-  variant?: 'standard' | 'compact'
+  variant?: 'standard' | 'compact' | 'bar'
   font_scale?: 1 | 2
 }
 
 export type DisplayElementType =
   | 'volume'
+  | 'volume_mode'
   | 'battery'
   | 'wifi_status'
   | 'wifi_ssid'
@@ -75,6 +76,7 @@ export interface DisplayTemplate {
 
 export interface DisplayElementMeta {
   type: DisplayElementType
+  variant?: 'standard' | 'compact' | 'bar'
   label: string
   description: string
   icon: string
@@ -101,12 +103,16 @@ export interface LedRule {
   condition: LedCondition
   enabled: boolean
   color: [number, number, number]
+  /** Per-rule brightness override (0-255). undefined = use globalBrightness */
+  brightness?: number
   blink_sec: number
   fade: boolean
   priority: number
 }
 
 export interface LedConfig {
+  /** Global brightness applied to all rules (0-255). Per-rule brightness overrides this. */
+  globalBrightness: number
   rules: LedRule[]
 }
 
@@ -171,13 +177,14 @@ export const DEFAULT_VOLUME_CONFIG: VolumeConfig = {
  * 各要素の幅はプレビュー文字列の文字数と完全一致させること
  */
 export const ELEMENT_FIXED_SIZES: Record<DisplayElementType, [number, number]> = {
-  volume: [3, 1],            // "v 5"       3文字
-  battery: [4, 1],           // " 85%"      4文字 (数値%表示)
+  volume: [6, 1],            // "vol:05"    6文字
+  volume_mode: [3, 1],       // "Fix"/"Var" 3文字
+  battery: [4, 1],           // " 85%"      4文字 (数値%表示, standard)
   wifi_status: [5, 1],       // "W:---"     5文字 (standard), compact 同
   wifi_ssid: [8, 1],         // "MySSID__"  最大8文字
   connection_status: [4, 1], // "[--]"      4文字 (compact), standard "[OK]App_" 8文字
   ip_address: [15, 1],       // "192.168.1.100" 最大15文字, compact ".1.100" 6文字
-  firmware_version: [6, 1],  // "v1.2.3"    6文字
+  firmware_version: [3, 1],  // "FW3"       3文字
   device_name: [6, 1],       // "DuoWL2"    6文字, compact 3文字
   gain: [4, 1],              // "G:12"      4文字
   player_number: [4, 1],     // "P:01"      4文字
@@ -185,4 +192,10 @@ export const ELEMENT_FIXED_SIZES: Record<DisplayElementType, [number, number]> =
   page_indicator: [3, 1],    // "1/2"       3文字
   group_id: [4, 1],          // "Gr:1"      4文字
   address: [10, 1],          // "p1/pos_nck" 10文字, compact 7文字
+}
+
+/** Get element size considering variant. Battery "bar" variant is wider. */
+export function getElementSize(type: DisplayElementType, variant?: string): [number, number] {
+  if (type === 'battery' && variant === 'bar') return [8, 1] // "BAT[||||]" 8文字
+  return ELEMENT_FIXED_SIZES[type]
 }

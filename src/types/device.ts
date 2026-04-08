@@ -50,10 +50,10 @@ export interface DeviceHardwareSpec {
  *      \          /
  *         3(底)               ← 底部中央 1 点
  *
- * ボタン配置:
- *   Btn1            Btn5      ← 1,5 は同じ Y
- *   Btn2   [OLED]             ← 2 の Y = OLED の Y
- *   Btn3   [LED]    Btn4      ← 3,4 は同じ Y, LED の X = OLED の X
+ * ボタン配置 (物理位置 → GPIO):
+ *   Btn1(左上,SW2,GPIO33)   Btn4(右上,SW1,GPIO47)
+ *   Btn2(左中,SW4,GPIO48)   [OLED]
+ *   Btn3(左下,SW3,GPIO34)   [LED]   Btn5(右下,SW0,GPIO26)
  */
 export const DUO_WL_SPEC: DeviceHardwareSpec = {
   model: 'duo_wl',
@@ -63,8 +63,8 @@ export const DUO_WL_SPEC: DeviceHardwareSpec = {
     { id: 'btn_1', label: '1(左上)', x: 2, y: 25 },
     { id: 'btn_2', label: '2(左中)', x: 2, y: 60 },
     { id: 'btn_3', label: '3(左下)', x: 2, y: 90 },
-    { id: 'btn_4', label: '4(右上)', x: 98, y:25 },
-    { id: 'btn_5', label: '5(右下)', x: 98, y:90 },
+    { id: 'btn_4', label: '4(右上)', x: 98, y: 25 },
+    { id: 'btn_5', label: '5(右下)', x: 98, y: 90 },
   ],
   led: { x: 55, y: 90 },
   volumeIcon: { x: 30, y: 90 },

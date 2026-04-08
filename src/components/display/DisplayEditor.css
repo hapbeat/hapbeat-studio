@@ -452,14 +452,35 @@
   font-family: var(--font-ui);
   cursor: pointer;
   white-space: nowrap;
-  max-width: 100px;
+  width: 72px;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex-shrink: 0;
 }
 .inline-config-btn:hover { border-color: var(--accent-dim); color: var(--text-primary); }
 
-
-
+/* Instant CSS tooltip (no delay like title attr) */
+.tooltip-wrap {
+  position: relative;
+  display: inline-block;
+}
+.tooltip-wrap .tooltip-text {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  background: #222;
+  color: #eee;
+  font-size: 11px;
+  border-radius: 4px;
+  white-space: nowrap;
+  z-index: 100;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.tooltip-wrap:hover .tooltip-text { display: block; }
 
 
 .action-dropdown-group { margin-bottom: 4px; }

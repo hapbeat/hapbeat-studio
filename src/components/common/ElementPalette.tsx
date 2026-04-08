@@ -1,12 +1,14 @@
 import type { DisplayElementMeta, DisplayElementType } from '@/types/display'
-import { ELEMENT_FIXED_SIZES } from '@/types/display'
+import { getElementSize } from '@/types/display'
 import { getElementDescription } from '@/utils/displayPreview'
-import { setCurrentDragType } from '@/components/display/DisplayEditor'
+import { setCurrentDragType, setCurrentDragVariant } from '@/components/display/DisplayEditor'
 import './ElementPalette.css'
 
 export const elementMetas: DisplayElementMeta[] = [
-  { type: 'volume',            label: 'ボリューム',        description: 'ADC切替連動',    icon: '\u266a' },
-  { type: 'battery',           label: 'バッテリー',        description: '残量メーター',   icon: '\u26a1' },
+  { type: 'volume',            label: 'Volume',             description: 'vol:00',         icon: '\u266a' },
+  { type: 'volume_mode',       label: 'Vol Mode',           description: 'Fix/Var',        icon: 'M' },
+  { type: 'battery',           label: 'Battery %',         description: '残量パーセント', icon: '\u26a1' },
+  { type: 'battery', variant: 'bar', label: 'Battery Bar', description: '残量バーメーター', icon: '\u2588' },
   { type: 'wifi_status',       label: 'Wi-Fi 強度',       description: 'RSSI表示',       icon: '\u25ce' },
   { type: 'wifi_ssid',         label: 'Wi-Fi 接続先',     description: 'SSID/AP名',      icon: '\u25cb' },
   { type: 'connection_status', label: '接続状態',          description: 'Wi-Fi+アプリ',   icon: '\u25c9' },
@@ -17,9 +19,13 @@ export const elementMetas: DisplayElementMeta[] = [
   { type: 'address',           label: 'アドレス',          description: 'player/pos',     icon: 'A' },
   { type: 'player_number',     label: 'プレイヤー',        description: 'Player番号',     icon: 'P' },
   { type: 'position',          label: 'ポジション',        description: '装着位置',       icon: '\u2b26' },
-  { type: 'page_indicator',    label: 'ページ',            description: '1/2 表示',       icon: '#' },
+  { type: 'page_indicator',    label: 'Page',               description: 'Page indicator', icon: '#' },
   { type: 'group_id',          label: 'グループ',          description: 'グループID',     icon: 'Gr' },
 ]
+
+function metaKey(meta: DisplayElementMeta): string {
+  return meta.variant ? `${meta.type}:${meta.variant}` : meta.type
+}
 
 export function getElementMeta(type: DisplayElementType): DisplayElementMeta | undefined {
   return elementMetas.find((m) => m.type === type)
@@ -40,12 +46,13 @@ export function ElementPalette({ selectedType, onSelectType, usedTypes }: Elemen
       </div>
       <div className="palette-grid">
         {elementMetas.map((meta) => {
-          const size = ELEMENT_FIXED_SIZES[meta.type]
-          const isSelected = selectedType === meta.type
-          const isUsed = usedTypes.has(meta.type)
+          const size = getElementSize(meta.type, meta.variant)
+          const key = metaKey(meta)
+          const isSelected = selectedType === meta.type && !meta.variant
+          const isUsed = usedTypes.has(meta.type) && !meta.variant
           return (
             <button
-              key={meta.type}
+              key={key}
               className={`palette-item ${isSelected ? 'selected' : ''} ${isUsed ? 'used' : ''}`}
               onClick={() => {
                 if (isUsed) return
@@ -56,13 +63,14 @@ export function ElementPalette({ selectedType, onSelectType, usedTypes }: Elemen
                 if (isUsed || e.button !== 0) return
                 e.preventDefault()
                 setCurrentDragType(meta.type)
+                setCurrentDragVariant(meta.variant)
               }}
             >
               <span className="palette-icon">{meta.icon}</span>
               <div className="palette-info">
                 <span className="palette-label">{meta.label}</span>
                 <span className="palette-desc">
-                  {getElementDescription(meta.type)} ({size[0]}x{size[1]})
+                  {meta.description} ({size[0]}x{size[1]})
                 </span>
               </div>
               {isUsed && <span className="palette-used-badge">使用中</span>}

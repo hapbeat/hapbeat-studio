@@ -18,6 +18,7 @@ import type {
 } from '@/types/display'
 import {
   ELEMENT_FIXED_SIZES,
+  getElementSize,
   DEFAULT_LED_RULES,
   DEFAULT_VOLUME_CONFIG,
 } from '@/types/display'
@@ -62,12 +63,14 @@ interface FirmwareLedRule {
   condition: string
   enabled: boolean
   color: [number, number, number]
+  brightness?: number
   blink_sec: number
   fade: boolean
   priority: number
 }
 
 interface FirmwareLedSection {
+  global_brightness: number
   rules: FirmwareLedRule[]
 }
 
@@ -105,13 +108,19 @@ export function toFirmwareFormat(state: DisplaySavedState): FirmwareUiConfig {
     id: `page_${idx}`,
     name: page.name,
     elements: page.elements.map((el) => {
-      const size = ELEMENT_FIXED_SIZES[el.type]
+      const size = getElementSize(el.type, el.variant)
       const out: FirmwareElement = {
         type: el.type,
         position: el.pos,
         size: [size[0], size[1]] as [number, number],
       }
-      if (el.variant && el.variant !== 'standard') out.variant = el.variant
+      // battery: standard(no variant) = percent, "bar" = bar meter
+      // Other elements: only emit variant if not standard
+      if (el.type === 'battery') {
+        out.variant = el.variant === 'bar' ? 'bar' : 'percent'
+      } else if (el.variant && el.variant !== 'standard') {
+        out.variant = el.variant
+      }
       if (el.font_scale && el.font_scale !== 1) out.font_scale = el.font_scale
       return out
     }),
@@ -143,15 +152,20 @@ export function toFirmwareFormat(state: DisplaySavedState): FirmwareUiConfig {
       show_page_indicator: hasPageIndicator,
     },
     led: {
-      rules: (ledConfig?.rules ?? DEFAULT_LED_RULES).map((r) => ({
-        id: r.id,
-        condition: r.condition,
-        enabled: r.enabled,
-        color: r.color,
-        blink_sec: r.blink_sec,
-        fade: r.fade,
-        priority: r.priority,
-      })),
+      global_brightness: ledConfig?.globalBrightness ?? 255,
+      rules: (ledConfig?.rules ?? DEFAULT_LED_RULES).map((r) => {
+        const rule: FirmwareLedRule = {
+          id: r.id,
+          condition: r.condition,
+          enabled: r.enabled,
+          color: r.color,
+          blink_sec: r.blink_sec,
+          fade: r.fade,
+          priority: r.priority,
+        }
+        if (r.brightness !== undefined) rule.brightness = r.brightness
+        return rule
+      }),
     },
     volume: {
       steps: volumeConfig?.steps ?? DEFAULT_VOLUME_CONFIG.steps,
@@ -174,6 +188,7 @@ export function fromFirmwareFormat(fw: FirmwareUiConfig): Partial<DisplaySavedSt
         pos: el.position as [number, number],
       }
       if (el.variant === 'compact') base.variant = 'compact'
+      if (el.variant === 'bar') base.variant = 'bar'
       if (el.font_scale && el.font_scale !== 1) base.font_scale = el.font_scale as 1 | 2
       return base
     }),
@@ -203,7 +218,9 @@ export function fromFirmwareFormat(fw: FirmwareUiConfig): Partial<DisplaySavedSt
     buttons: { short_press: 'next_page', long_press: 'none' },
   }
 
-  const ledConfig: LedConfig = fw.led ? { rules: fw.led.rules as LedRule[] } : { rules: [...DEFAULT_LED_RULES] }
+  const ledConfig: LedConfig = fw.led
+    ? { globalBrightness: fw.led.global_brightness ?? 255, rules: fw.led.rules as LedRule[] }
+    : { globalBrightness: 255, rules: [...DEFAULT_LED_RULES] }
 
   const volumeConfig: VolumeConfig = fw.volume ? {
     steps: fw.volume.steps,
@@ -261,7 +278,7 @@ export async function importUiConfig(file: File): Promise<Partial<DisplaySavedSt
           // 旧 display-layout.json 形式 → display セクションに変換して読み込み
           const compat: FirmwareUiConfig = {
             display: parsed,
-            led: parsed.led ?? { rules: DEFAULT_LED_RULES },
+            led: parsed.led ?? { global_brightness: 255, rules: DEFAULT_LED_RULES },
             volume: parsed.volume ?? DEFAULT_VOLUME_CONFIG,
           }
           resolve(fromFirmwareFormat(compat))

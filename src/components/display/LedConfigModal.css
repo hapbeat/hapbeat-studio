@@ -53,6 +53,81 @@
   flex: 1;
 }
 
+/* ---- Global Brightness ---- */
+
+.led-global-brightness {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #444);
+  border-radius: 6px;
+  background: var(--bg, #111);
+}
+
+.led-global-brightness-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.led-global-brightness-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.led-global-brightness-value {
+  font-size: 13px;
+  font-family: monospace;
+  color: var(--text-muted, #888);
+}
+
+.led-global-brightness > .led-setting-hint {
+  display: block;
+  margin-top: 4px;
+}
+
+/* ---- Brightness Slider ---- */
+
+.led-brightness-slider {
+  width: 100%;
+  cursor: pointer;
+  accent-color: #66aaff;
+}
+
+.led-brightness-slider.small {
+  width: 80px;
+  flex-shrink: 0;
+}
+
+.led-brightness-slider:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.led-brightness-num {
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--text-muted, #888);
+  width: 24px;
+  text-align: right;
+}
+
+.led-setting-brightness {
+  flex-wrap: wrap;
+}
+
+.led-brightness-override-toggle {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.led-brightness-override-toggle input[type="checkbox"] {
+  margin: 0;
+}
+
 /* ---- LED Rules ---- */
 
 .led-rules {

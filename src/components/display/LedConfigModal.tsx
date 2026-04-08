@@ -19,12 +19,29 @@ function hexToRgb(hex: string): [number, number, number] {
   return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)]
 }
 
+const BRIGHTNESS_STEPS = 10
+function rawToStep(raw: number): number {
+  return Math.round((raw / 255) * BRIGHTNESS_STEPS)
+}
+function stepToRaw(step: number): number {
+  return Math.round((step / BRIGHTNESS_STEPS) * 255)
+}
+
 export function LedConfigModal({ ledConfig, onLedChange, onClose }: LedConfigModalProps) {
+  const globalBrightness = ledConfig.globalBrightness ?? 255
+
   const updateRule = (id: string, patch: Partial<LedRule>) => {
     onLedChange({
+      ...ledConfig,
       rules: ledConfig.rules.map((r) => r.id === id ? { ...r, ...patch } : r),
     })
   }
+
+  const setGlobalBrightness = (raw: number) => {
+    onLedChange({ ...ledConfig, globalBrightness: raw })
+  }
+
+  const globalStep = rawToStep(globalBrightness)
 
   return createPortal(
     <>
@@ -36,9 +53,30 @@ export function LedConfigModal({ ledConfig, onLedChange, onClose }: LedConfigMod
         </div>
 
         <div className="modal-body">
+          {/* Global Brightness */}
+          <div className="led-global-brightness">
+            <div className="led-global-brightness-header">
+              <span className="led-global-brightness-label">全体の明るさ</span>
+              <span className="led-global-brightness-value">{globalStep} / {BRIGHTNESS_STEPS}</span>
+            </div>
+            <input
+              type="range"
+              min={0} max={BRIGHTNESS_STEPS} step={1}
+              value={globalStep}
+              onChange={(e) => setGlobalBrightness(stepToRaw(parseInt(e.target.value, 10)))}
+              className="led-brightness-slider"
+            />
+            <span className="led-setting-hint">
+              各項目で個別に設定されていない場合、この値が適用されます
+            </span>
+          </div>
+
           <div className="led-rules">
             {ledConfig.rules.map((rule) => {
               const meta = LED_CONDITION_METAS.find((m) => m.condition === rule.condition)
+              const hasOverride = rule.brightness !== undefined
+              const effectiveRaw = hasOverride ? rule.brightness! : globalBrightness
+              const effectiveStep = rawToStep(effectiveRaw)
               return (
                 <div key={rule.id} className={`led-rule ${rule.enabled ? '' : 'disabled'}`}>
                   <div className="led-rule-header">
@@ -62,6 +100,32 @@ export function LedConfigModal({ ledConfig, onLedChange, onClose }: LedConfigMod
                           onChange={(e) => updateRule(rule.id, { color: hexToRgb(e.target.value) })}
                         />
                       </label>
+                      <div className="led-setting led-setting-brightness">
+                        <span>明るさ</span>
+                        <label className="led-brightness-override-toggle" title="個別設定を有効にする">
+                          <input
+                            type="checkbox"
+                            checked={hasOverride}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                updateRule(rule.id, { brightness: globalBrightness })
+                              } else {
+                                updateRule(rule.id, { brightness: undefined })
+                              }
+                            }}
+                          />
+                          <span className="led-setting-hint">個別</span>
+                        </label>
+                        <input
+                          type="range"
+                          min={0} max={BRIGHTNESS_STEPS} step={1}
+                          value={effectiveStep}
+                          disabled={!hasOverride}
+                          onChange={(e) => updateRule(rule.id, { brightness: stepToRaw(parseInt(e.target.value, 10)) })}
+                          className="led-brightness-slider small"
+                        />
+                        <span className="led-brightness-num">{effectiveStep}</span>
+                      </div>
                       <label className="led-setting">
                         <span>点滅 (秒)</span>
                         <input

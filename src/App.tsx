@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { WaveformEditor } from '@/components/waveform/WaveformEditor'
 import { DisplayEditor } from '@/components/display/DisplayEditor'
 import { KitManager } from '@/components/kit/KitManager'
@@ -8,7 +8,14 @@ import './App.css'
 type Tab = 'waveform' | 'kit' | 'display'
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<Tab>('waveform')
+  const [activeTab, setActiveTab] = useState<Tab>(() => {
+    const saved = localStorage.getItem('hapbeat-studio-tab')
+    return (saved === 'waveform' || saved === 'kit' || saved === 'display') ? saved : 'waveform'
+  })
+
+  useEffect(() => {
+    localStorage.setItem('hapbeat-studio-tab', activeTab)
+  }, [activeTab])
   const { isConnected } = useManagerConnection()
 
   return (

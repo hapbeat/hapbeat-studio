@@ -1,6 +1,9 @@
 import { useEffect, useCallback, useState, useRef } from 'react'
 import { useLibraryStore } from '@/stores/libraryStore'
+import { useManagerConnection } from '@/hooks/useManagerConnection'
+import { useToast } from '@/components/common/Toast'
 import { formatDuration, formatFileSize } from '@/utils/wavIO'
+import { exportKitAsPack, downloadBlob, validateEventIds } from '@/utils/kitExporter'
 import type { LibraryClip, KitEvent } from '@/types/library'
 import './KitManager.css'
 
@@ -371,9 +374,12 @@ function KitEditor() {
   const updateKitEvent = useLibraryStore((s) => s.updateKitEvent)
   const updateKit = useLibraryStore((s) => s.updateKit)
 
+  const { isConnected: managerConnected, devices } = useManagerConnection()
+
   const [isCreating, setIsCreating] = useState(false)
   const [newKitName, setNewKitName] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [isExporting, setIsExporting] = useState(false)
 
   const activeKit = kits.find((k) => k.id === activeKitId)
 
@@ -544,28 +550,123 @@ function KitEditor() {
             )}
           </div>
 
-          <div className="kit-export-section">
-            <button
-              className="library-btn primary"
-              disabled={activeKit.events.length === 0}
-              title="Coming soon"
-            >
-              Export Kit
-            </button>
-            <button
-              className="library-btn primary"
-              disabled={activeKit.events.length === 0}
-              title="Coming soon — Manager 接続が必要"
-            >
-              Write to Device
-            </button>
-          </div>
+          <KitExportSection
+            kit={activeKit}
+            clips={clips}
+            isExporting={isExporting}
+            setIsExporting={setIsExporting}
+            managerConnected={managerConnected}
+            deviceCount={devices.length}
+          />
         </div>
       ) : (
         <div className="kit-empty">
           {kits.length === 0
             ? 'Kit を作成して、イベントとクリップの対応を定義してください。'
             : 'Kit を選択してください。'}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---- Kit Export / Deploy Section ----
+
+function KitExportSection({
+  kit,
+  clips,
+  isExporting,
+  setIsExporting,
+  managerConnected,
+  deviceCount,
+}: {
+  kit: import('@/types/library').KitDefinition
+  clips: LibraryClip[]
+  isExporting: boolean
+  setIsExporting: (v: boolean) => void
+  managerConnected: boolean
+  deviceCount: number
+}) {
+  const { toast } = useToast()
+  const [lastExportInfo, setLastExportInfo] = useState<string | null>(null)
+
+  const handleExport = useCallback(async () => {
+    // Event ID バリデーション
+    const validations = validateEventIds(kit)
+    const invalid = validations.filter((v) => !v.valid)
+    if (invalid.length > 0) {
+      const ids = invalid.map((v) => `  - "${v.eventId}"`).join('\n')
+      const proceed = confirm(
+        `以下の Event ID が contracts の形式に準拠していません:\n${ids}\n\nこのままエクスポートしますか？`
+      )
+      if (!proceed) return
+    }
+
+    setIsExporting(true)
+    setLastExportInfo(null)
+    try {
+      const result = await exportKitAsPack(kit, clips)
+
+      if (result.warnings.length > 0) {
+        console.warn('Kit Export warnings:', result.warnings)
+      }
+
+      downloadBlob(result.blob, result.filename)
+      const msg = `"${result.filename}" をダウンロードしました`
+      setLastExportInfo(
+        msg +
+        (result.warnings.length > 0
+          ? ` (${result.warnings.length}件の警告あり — コンソールを確認)`
+          : '')
+      )
+      toast(msg, 'success')
+    } catch (err) {
+      toast(`エクスポートに失敗しました: ${err instanceof Error ? err.message : err}`, 'error')
+    } finally {
+      setIsExporting(false)
+    }
+  }, [kit, clips, setIsExporting, toast])
+
+  const handleExportAndTransfer = useCallback(async () => {
+    await handleExport()
+  }, [handleExport])
+
+  return (
+    <div className="kit-export-section">
+      <button
+        className="library-btn primary"
+        disabled={kit.events.length === 0 || isExporting}
+        onClick={handleExport}
+        title="Pack 形式の ZIP をダウンロード"
+      >
+        {isExporting ? 'Exporting...' : 'Export Kit'}
+      </button>
+      <button
+        className="library-btn primary"
+        disabled={kit.events.length === 0 || isExporting}
+        onClick={handleExportAndTransfer}
+        title={
+          managerConnected
+            ? 'Kit をエクスポートし、Manager から転送してください'
+            : 'Kit をエクスポートします（Manager 未接続）'
+        }
+      >
+        Export & Transfer
+      </button>
+
+      {lastExportInfo && (
+        <div className="kit-export-info">{lastExportInfo}</div>
+      )}
+
+      {managerConnected && deviceCount > 0 && (
+        <div className="kit-export-info">
+          Manager に {deviceCount} 台のデバイスが接続中です。
+          エクスポートした Kit は Manager の Content ページから転送できます。
+        </div>
+      )}
+      {!managerConnected && (
+        <div className="kit-export-info muted">
+          Manager 未接続 — Kit はファイルとしてエクスポートできます。
         </div>
       )}
     </div>

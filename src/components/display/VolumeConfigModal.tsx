@@ -29,7 +29,7 @@ export function VolumeConfigModal({ volumeConfig, onVolumeChange, onClose }: Vol
                   onVolumeChange({ ...volumeConfig, steps, default_level: Math.min(volumeConfig.default_level, steps - 1) })
                 }}
               />
-              <span className="volume-modal-hint">1〜64 (デフォルト: 10)</span>
+              <span className="volume-modal-hint">1〜64</span>
             </label>
             <label className="volume-modal-row">
               <span className="volume-modal-label">方向</span>
@@ -42,7 +42,7 @@ export function VolumeConfigModal({ volumeConfig, onVolumeChange, onClose }: Vol
               </select>
             </label>
             <label className="volume-modal-row">
-              <span className="volume-modal-label">初期レベル</span>
+              <span className="volume-modal-label">固定値</span>
               <input
                 type="range" min={0} max={volumeConfig.steps - 1}
                 value={volumeConfig.default_level}
@@ -50,6 +50,12 @@ export function VolumeConfigModal({ volumeConfig, onVolumeChange, onClose }: Vol
               />
               <span className="volume-modal-hint">{volumeConfig.default_level} / {volumeConfig.steps - 1}</span>
             </label>
+            <div className="volume-modal-row">
+              <span className="volume-modal-label" />
+              <span className="volume-modal-hint">
+                Fix モード時にこの値に固定されます
+              </span>
+            </div>
           </div>
         </div>
       </div>

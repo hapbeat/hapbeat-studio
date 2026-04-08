@@ -11,7 +11,7 @@ import type {
   LedConfig,
   VolumeConfig,
 } from '@/types/display'
-import { ELEMENT_FIXED_SIZES, DEFAULT_LED_RULES, DEFAULT_VOLUME_CONFIG } from '@/types/display'
+import { ELEMENT_FIXED_SIZES, getElementSize, DEFAULT_LED_RULES, DEFAULT_VOLUME_CONFIG } from '@/types/display'
 import type { DeviceModel, DeviceHardwareSpec } from '@/types/device'
 import { DEVICE_SPECS } from '@/types/device'
 import { ElementPalette, elementMetas, getElementMeta } from '@/components/common/ElementPalette'
@@ -26,14 +26,22 @@ import {
   type DisplaySavedState,
 } from '@/utils/displayLayoutIO'
 import { useManagerConnection } from '@/hooks/useManagerConnection'
+import { useToast } from '@/components/common/Toast'
 import { LedConfigModal } from './LedConfigModal'
 import { VolumeConfigModal } from './VolumeConfigModal'
 import './DisplayEditor.css'
 
-/** パレットからドラッグ中の要素タイプ */
+/** パレットからドラッグ中の要素タイプ + variant */
 let _dragTypeCallback: ((type: DisplayElementType | null) => void) | null = null
+let _dragVariant: string | undefined
 export function setCurrentDragType(type: DisplayElementType | null) {
   _dragTypeCallback?.(type)
+}
+export function setCurrentDragVariant(variant: string | undefined) {
+  _dragVariant = variant
+}
+export function getCurrentDragVariant(): string | undefined {
+  return _dragVariant
 }
 
 // OLED: 128x32 = 16文字×2行（8x16px/文字）
@@ -64,7 +72,7 @@ function buildGridRows(page: DisplayPage | undefined, simState: SimState): GridI
     Array.from({ length: GRID_COLS }, () => null)
   )
   for (const el of page.elements) {
-    const size = ELEMENT_FIXED_SIZES[el.type]
+    const size = getElementSize(el.type, el.variant)
     for (let dx = 0; dx < size[0]; dx++) {
       const col = el.pos[0] + dx
       if (col < GRID_COLS && el.pos[1] < GRID_ROWS) occupied[el.pos[1]][col] = el.id
@@ -77,8 +85,8 @@ function buildGridRows(page: DisplayPage | undefined, simState: SimState): GridI
       const elId = occupied[r][c]
       if (elId) {
         const el = page.elements.find((e) => e.id === elId)!
-        const size = ELEMENT_FIXED_SIZES[el.type]
-        const text = getElementPreviewText(el.type, simState)
+        const size = getElementSize(el.type, el.variant)
+        const text = getElementPreviewText(el.type, simState, el.variant)
         rows[r].push({ kind: 'element', col: c, span: size[0], el, text })
         c += size[0]
       } else {
@@ -113,15 +121,15 @@ interface ActionGroup { label: string; items: ActionItem[] }
 /** 短押し・長押し用アクション */
 function buildActionGroups(pages: DisplayPage[]): ActionGroup[] {
   const pageItems: ActionItem[] = [
-    { value: 'next_page', label: '次ページ' },
-    { value: 'prev_page', label: '前ページ' },
+    { value: 'prev_page', label: 'Prev Page' },
+    { value: 'next_page', label: 'Next Page' },
   ]
   pages.forEach((p, i) => {
     pageItems.push({ value: `goto_page:${i}`, label: `\u2192 ${p.name}` })
   })
 
   return [
-    { label: 'ページ', items: pageItems },
+    { label: 'Page', items: pageItems },
     {
       label: 'Player / Position',
       items: [
@@ -132,13 +140,13 @@ function buildActionGroups(pages: DisplayPage[]): ActionGroup[] {
       ],
     },
     {
-      label: 'その他',
+      label: 'Other',
       items: [
-        { value: 'mode_toggle', label: 'モード切替' },
+        { value: 'mode_toggle', label: 'Mode Toggle' },
         { value: 'volume_up', label: 'Volume +' },
         { value: 'volume_down', label: 'Volume -' },
-        { value: 'display_toggle', label: '画面 ON/OFF' },
-        { value: 'none', label: '\u2014 (なし)' },
+        { value: 'display_toggle', label: 'Display ON/OFF' },
+        { value: 'none', label: '\u2014 (None)' },
       ],
     },
   ]
@@ -150,8 +158,8 @@ function buildHoldActionGroups(pages: DisplayPage[]): ActionGroup[] {
   pages.forEach((p, i) => {
     items.push({ value: `hold_page:${i}`, label: p.name })
   })
-  items.push({ value: 'none', label: '\u2014 (なし)' })
-  return [{ label: '押している間表示', items }]
+  items.push({ value: 'none', label: '\u2014 (None)' })
+  return [{ label: 'Hold to show', items }]
 }
 
 
@@ -167,7 +175,7 @@ function canPlace(
   if (pos[0] + size[0] > GRID_COLS || pos[1] + size[1] > GRID_ROWS) return false
   return !page.elements.some((el) => {
     if (el.id === excludeId) return false
-    const s = ELEMENT_FIXED_SIZES[el.type]
+    const s = getElementSize(el.type, el.variant)
     return (
       pos[0] < el.pos[0] + s[0] && pos[0] + size[0] > el.pos[0] &&
       pos[1] < el.pos[1] + s[1] && pos[1] + size[1] > el.pos[1]
@@ -222,11 +230,11 @@ export function DisplayEditor() {
   )
   const [popupPos, setPopupPos] = useState<{ col: number; row: number; x: number; y: number; screenX: number; screenY: number } | null>(null)
   const [simState, setSimState] = useState<SimState>(saved?.simState ?? { ...DEFAULT_SIM_STATE })
-  const [ledConfig, setLedConfig] = useState<LedConfig>(saved?.ledConfig ?? { rules: [...DEFAULT_LED_RULES] })
+  const [ledConfig, setLedConfig] = useState<LedConfig>(saved?.ledConfig ?? { globalBrightness: 255, rules: [...DEFAULT_LED_RULES] })
   const [volumeConfig, setVolumeConfig] = useState<VolumeConfig>(saved?.volumeConfig ?? { ...DEFAULT_VOLUME_CONFIG })
   const [ledModalOpen, setLedModalOpen] = useState(false)
   const [volumeModalOpen, setVolumeModalOpen] = useState(false)
-  const [toast, setToast] = useState<{ msg: string; x: number; y: number } | null>(null)
+  const [dropHint, setDropHint] = useState<{ msg: string; x: number; y: number } | null>(null)
   const [externalDragType, setExternalDragType] = useState<DisplayElementType | null>(null)
 
   // パレットからのドラッグ通知を受け取る
@@ -259,7 +267,13 @@ export function DisplayEditor() {
 
   const handleDeviceModelChange = useCallback((model: DeviceModel) => {
     setDeviceModel(model)
-    setPerButtonActions(createDefaultPerButtonActions(DEVICE_SPECS[model]))
+    // 既存のボタン設定はすべて保持。新モデルのボタンで未設定のもののみデフォルトで補完
+    setPerButtonActions((prev) => {
+      const defaults = createDefaultPerButtonActions(DEVICE_SPECS[model])
+      return { ...prev, ...Object.fromEntries(
+        Object.entries(defaults).filter(([id]) => !prev[id])
+      ) }
+    })
   }, [])
 
   const handleMoveElement = useCallback(
@@ -270,7 +284,7 @@ export function DisplayEditor() {
         if (!page) return prev
         const el = page.elements.find((e) => e.id === elementId)
         if (!el) return prev
-        const size = ELEMENT_FIXED_SIZES[el.type]
+        const size = getElementSize(el.type, el.variant)
         const clamped: [number, number] = [
           Math.max(0, Math.min(newPos[0], GRID_COLS - size[0])),
           Math.max(0, Math.min(newPos[1], GRID_ROWS - size[1])),
@@ -287,19 +301,20 @@ export function DisplayEditor() {
   )
 
   const showToast = useCallback((msg: string, x: number, y: number) => {
-    setToast({ msg, x, y })
-    setTimeout(() => setToast(null), 2000)
+    setDropHint({ msg, x, y })
+    setTimeout(() => setDropHint(null), 2000)
   }, [])
 
   const addElement = useCallback(
-    (type: DisplayElementType, pos: [number, number], mouseX?: number, mouseY?: number): boolean => {
+    (type: DisplayElementType, pos: [number, number], mouseX?: number, mouseY?: number, variant?: string): boolean => {
       const page = layout.pages[activePageIndex]
       if (!page) return false
-      if (page.elements.some((el) => el.type === type)) {
+      // 同一 type + variant の重複チェック
+      if (page.elements.some((el) => el.type === type && (el.variant ?? 'standard') === (variant ?? 'standard'))) {
         if (mouseX != null && mouseY != null) showToast('この要素は既に配置済みです', mouseX, mouseY)
         return false
       }
-      const size = ELEMENT_FIXED_SIZES[type]
+      const size = getElementSize(type, variant)
       const clampedPos: [number, number] = [
         Math.max(0, Math.min(pos[0], GRID_COLS - size[0])),
         Math.max(0, Math.min(pos[1], GRID_ROWS - size[1])),
@@ -308,12 +323,14 @@ export function DisplayEditor() {
         if (mouseX != null && mouseY != null) showToast('スペースが不足しています', mouseX, mouseY)
         return false
       }
+      const newEl: import('@/types/display').DisplayElement = { id: generateId(), type, pos: clampedPos }
+      if (variant && variant !== 'standard') newEl.variant = variant as 'compact' | 'bar'
       setLayout((prev) => {
         const newPages = [...prev.pages]
         const p = newPages[activePageIndex]
         if (!p) return prev
         newPages[activePageIndex] = {
-          ...p, elements: [...p.elements, { id: generateId(), type, pos: clampedPos }],
+          ...p, elements: [...p.elements, newEl],
         }
         return { ...prev, pages: newPages }
       })
@@ -344,7 +361,7 @@ export function DisplayEditor() {
         const col = Math.floor((e.clientX - rect.left - BORDER_W) / CELL_W)
         const row = Math.floor((e.clientY - rect.top - BORDER_W) / CELL_H)
         if (col >= 0 && col < GRID_COLS && row >= 0 && row < GRID_ROWS) {
-          addElement(externalDragType, [col, row], e.clientX, e.clientY)
+          addElement(externalDragType, [col, row], e.clientX, e.clientY, getCurrentDragVariant())
         }
       }
       setDragPos(null)
@@ -479,9 +496,8 @@ export function DisplayEditor() {
 
   // HTML5 drag ハンドラは不要（全て mouse ベースに移行済み）
 
-  /** ページ名を「画面1」「画面2」...に正規化 */
   const renamePages = (pages: DisplayPage[]): DisplayPage[] =>
-    pages.map((p, i) => ({ ...p, name: `画面${i + 1}` }))
+    pages.map((p, i) => ({ ...p, name: `Page ${i + 1}` }))
 
   const handleAddPage = useCallback(() => {
     setLayout((prev) => {
@@ -514,7 +530,33 @@ export function DisplayEditor() {
   }, [])
 
   // --- Manager 接続 ---
-  const { isConnected: managerConnected, send: managerSend } = useManagerConnection()
+  const { isConnected: managerConnected, lastMessage, send: managerSend } = useManagerConnection()
+  const { toast, setAnchor: setToastAnchor } = useToast()
+  const [isDeploying, setIsDeploying] = useState(false)
+  const deployBtnRef = useCallback((el: HTMLButtonElement | null) => {
+    setToastAnchor(el)
+  }, [setToastAnchor])
+
+  // write_result / deploy_result レスポンスの監視
+  useEffect(() => {
+    if (!lastMessage) return
+    if (lastMessage.type === 'write_result' || lastMessage.type === 'deploy_result') {
+      setIsDeploying(false)
+      const success = lastMessage.payload.success as boolean
+      const deviceConfirmed = lastMessage.payload.device_confirmed as boolean | undefined
+      if (success) {
+        if (deviceConfirmed) {
+          toast('デバイスに書き込みました', 'success')
+        } else {
+          // Manager が受理したがデバイス応答未確認
+          toast('Manager に送信しました', 'info')
+        }
+      } else {
+        const errorMsg = (lastMessage.payload.error as string) || '不明なエラー'
+        toast(`書き込みに失敗しました: ${errorMsg}`, 'error')
+      }
+    }
+  }, [lastMessage, toast])
 
   // --- エクスポート / インポート / デバイス書き込み ---
 
@@ -524,9 +566,10 @@ export function DisplayEditor() {
 
   const handleDeploy = useCallback(() => {
     if (!managerConnected) {
-      alert('Manager (hapbeat-desktop) に接続されていません。\nManager を起動してください。')
+      toast('Manager (hapbeat-desktop) を起動してください', 'error')
       return
     }
+    setIsDeploying(true)
     const uiConfig = toFirmwareFormat(buildSavedState())
     managerSend({
       type: 'write_ui_config',
@@ -536,7 +579,8 @@ export function DisplayEditor() {
 
   const handleExport = useCallback(() => {
     exportDisplayLayout(buildSavedState())
-  }, [buildSavedState])
+    toast('ui-config.json をダウンロードしました', 'success')
+  }, [buildSavedState, toast])
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -553,8 +597,9 @@ export function DisplayEditor() {
       if (imported.volumeConfig) setVolumeConfig(imported.volumeConfig)
       setActivePageIndex(0)
       setPopupPos(null)
+      toast('レイアウトを読み込みました', 'success')
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'インポートに失敗しました')
+      toast(err instanceof Error ? err.message : 'インポートに失敗しました', 'error')
     }
     e.target.value = ''
   }, [])
@@ -577,14 +622,16 @@ export function DisplayEditor() {
       const action = perButtonActions[buttonId]?.short_press as string
       if (!action || action === 'none') return
       const n = layout.pages.length
-      if (action === 'next_page' && n > 1) { setActivePageIndex((p) => (p + 1) % n); return }
-      if (action === 'prev_page' && n > 1) { setActivePageIndex((p) => (p + n - 1) % n); return }
+      if (action === 'next_page' && n > 1) { setActivePageIndex((p) => Math.min(p + 1, n - 1)); return }
+      if (action === 'prev_page' && n > 1) { setActivePageIndex((p) => Math.max(p - 1, 0)); return }
       if (action.startsWith('goto_page:')) {
         const idx = parseInt(action.split(':')[1], 10)
         if (!isNaN(idx) && idx >= 0 && idx < n) setActivePageIndex(idx)
         return
       }
       switch (action) {
+        case 'volume_up': setSimState((s) => ({ ...s, volume: Math.min(s.volume + 1, volumeConfig.steps - 1) })); break
+        case 'volume_down': setSimState((s) => ({ ...s, volume: Math.max(s.volume - 1, 0) })); break
         case 'player_inc': setSimState((s) => ({ ...s, player: s.player + 1 })); break
         case 'player_dec': setSimState((s) => ({ ...s, player: Math.max(0, s.player - 1) })); break
         case 'position_inc': setSimState((s) => ({ ...s, position: s.position + 1 })); break
@@ -592,7 +639,7 @@ export function DisplayEditor() {
         case 'mode_toggle': setSimState((s) => ({ ...s, volumeAdcEnabled: !s.volumeAdcEnabled })); break
       }
     },
-    [perButtonActions, layout.pages.length]
+    [perButtonActions, layout.pages.length, volumeConfig.steps]
   )
 
   // 押し続けシミュレーション — mousedown で画面遷移、mouseup で戻す
@@ -665,6 +712,8 @@ export function DisplayEditor() {
           onImport={() => fileInputRef.current?.click()}
           onDeploy={handleDeploy}
           managerConnected={managerConnected}
+          isDeploying={isDeploying}
+          deployBtnRef={deployBtnRef}
         />
         <input
           ref={fileInputRef}
@@ -676,9 +725,9 @@ export function DisplayEditor() {
       </div>
 
       {/* トースト警告 */}
-      {toast && (
-        <div className="drop-toast" style={{ left: toast.x, top: toast.y }}>
-          {toast.msg}
+      {dropHint && (
+        <div className="drop-toast" style={{ left: dropHint.x, top: dropHint.y }}>
+          {dropHint.msg}
         </div>
       )}
 
@@ -986,13 +1035,15 @@ interface ControlBarProps {
   onImport: () => void
   onDeploy: () => void
   managerConnected: boolean
+  isDeploying: boolean
+  deployBtnRef?: (el: HTMLButtonElement | null) => void
 }
 
 function ControlBar({
   pages, activePageIndex, deviceModel, isFlipped,
   onPageChange, onAddPage, onDeletePage,
   onDeviceModelChange, onApplyTemplate, onToggleOrientation,
-  onExport, onImport, onDeploy, managerConnected,
+  onExport, onImport, onDeploy, managerConnected, isDeploying, deployBtnRef,
 }: ControlBarProps) {
   return (
     <div className="editor-control-bar">
@@ -1008,7 +1059,7 @@ function ControlBar({
             )}
           </div>
         ))}
-        <button className="btn btn-sm" onClick={onAddPage}>+ ページ</button>
+        <button className="btn btn-sm" onClick={onAddPage}>+ Page</button>
       </div>
       <div className="control-separator" />
       <div className="device-toggle">
@@ -1039,14 +1090,19 @@ function ControlBar({
         読込
       </button>
       <div className="control-separator" />
-      <button
-        className="btn btn-sm btn-deploy"
-        onClick={onDeploy}
-        disabled={!managerConnected}
-        title={managerConnected ? 'Manager 経由でデバイスに書き込み' : 'Manager (hapbeat-desktop) を起動してください'}
-      >
-        デバイスに書込
-      </button>
+      <span className="tooltip-wrap">
+        <button
+          ref={deployBtnRef}
+          className="btn btn-sm btn-deploy"
+          onClick={onDeploy}
+          disabled={!managerConnected || isDeploying}
+        >
+          {isDeploying ? '書込中...' : 'デバイスに書込'}
+        </button>
+        {!managerConnected && (
+          <span className="tooltip-text">Manager (hapbeat-desktop) を起動してください</span>
+        )}
+      </span>
     </div>
   )
 }
@@ -1095,7 +1151,7 @@ function InlineButtonConfig({ action, allItems, actionGroups, holdGroups, btnId,
         const isOpen = openField === field
         return (
           <div key={field} className="inline-config-row">
-            <span className="inline-config-label">{field === 'short_press' ? '押' : '続'}</span>
+            <span className="inline-config-label">{field === 'short_press' ? 'Press' : 'Hold'}</span>
             <button
               ref={(el) => { btnRefs.current[field] = el }}
               className="inline-config-btn"

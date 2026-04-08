@@ -17,8 +17,7 @@ export interface DeviceInfo {
 export interface StudioToManagerMessage {
   type:
     | 'list_devices'
-    | 'write_display_layout'
-    | 'write_led_config'
+    | 'write_ui_config'
     | 'deploy_pack'
     | 'preview_event'
     | 'ping'

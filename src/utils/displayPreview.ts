@@ -18,19 +18,22 @@ export const DEFAULT_SIM_STATE: SimState = {
 /**
  * ファームウェア準拠のプレビューテキスト
  *
- * 重要: 文字数 = ELEMENT_FIXED_SIZES の幅と一致させること
+ * 重要: 文字数 = getElementSize() の幅と一致させること
  * 1文字 = 1グリッドセル = 8px
  */
-export function getElementPreviewText(type: DisplayElementType, simState?: SimState): string {
+export function getElementPreviewText(type: DisplayElementType, simState?: SimState, variant?: string): string {
   const s = simState ?? DEFAULT_SIM_STATE
   switch (type) {
-    case 'volume':            return `v${String(s.volume).padStart(2, '0')}`     // 3文字
-    case 'battery':           return ' 85%'                                       // 4文字
+    case 'volume':            return `vol:${String(s.volume).padStart(2, '0')}`   // 6文字
+    case 'volume_mode':       return s.volumeAdcEnabled ? 'Var' : 'Fix'          // 3文字
+    case 'battery':
+      if (variant === 'bar') return 'BAT\u2588\u2588\u2588\u2588\u2581'          // 8文字 (bar meter)
+      return ' 85%'                                                               // 4文字 (percent)
     case 'wifi_status':       return 'W:---'                                     // 5文字 (padding)
     case 'wifi_ssid':         return 'MySSID  '                                  // 8文字
     case 'connection_status': return '[--]'                                      // 4文字
     case 'ip_address':        return '192.168.100.123'                           // 15文字
-    case 'firmware_version':  return 'v1.2.3'                                    // 6文字
+    case 'firmware_version':  return 'FW3'                                        // 3文字
     case 'device_name':       return 'DuoWL2'                                   // 6文字
     case 'gain':              return 'G:12'                                      // 4文字
     case 'player_number':     return `P:${String(s.player).padStart(2, '0')}`    // 4文字
@@ -44,7 +47,8 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
 /** パレット表示用の説明文 */
 export function getElementDescription(type: DisplayElementType): string {
   switch (type) {
-    case 'volume':            return 'v00\u2013v23'
+    case 'volume':            return 'vol:00'
+    case 'volume_mode':       return 'Fix/Var'
     case 'battery':           return 'XX%'
     case 'wifi_status':       return 'W:dBm'
     case 'wifi_ssid':         return 'SSID/AP'
