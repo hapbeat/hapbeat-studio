@@ -22,7 +22,7 @@ import {
   DEFAULT_LED_RULES,
   DEFAULT_VOLUME_CONFIG,
 } from '@/types/display'
-import type { DeviceModel } from '@/types/device'
+import { DEVICE_SPECS, type DeviceModel } from '@/types/device'
 import type { SimState } from '@/utils/displayPreview'
 
 // ---- Firmware-side JSON types (contracts 仕様準拠) -------------------------
@@ -46,6 +46,7 @@ interface FirmwareButtonActions {
     short_press?: string
     long_press?: string
     hold?: string
+    hold_mode?: string
   }
 }
 
@@ -126,14 +127,28 @@ export function toFirmwareFormat(state: DisplaySavedState): FirmwareUiConfig {
     }),
   }))
 
+  // Studio 内部名 → ファームウェアアクション名
+  const toFirmwareAction = (a: string): string => {
+    if (a === 'vib_mode') return 'mode_toggle'
+    if (a === 'toggle_page') return 'toggle_page' // ファーム側で追加が必要
+    return a
+  }
+
+  // 選択中デバイスモデルのボタンIDのみ出力（他モデルのIDが混入するとファーム側で上書き事故）
+  const validBtnIds = new Set(DEVICE_SPECS[deviceModel].buttons.map((b) => b.id))
   const button_actions: FirmwareButtonActions = {}
   if (perButtonActions) {
     for (const [btnId, action] of Object.entries(perButtonActions)) {
-      button_actions[btnId] = {
-        short_press: action.short_press ?? 'none',
-        long_press: action.long_press ?? 'none',
-        hold: action.hold ?? 'none',
+      if (!validBtnIds.has(btnId)) continue
+      const entry: FirmwareButtonActions[string] = {
+        short_press: toFirmwareAction(action.short_press ?? 'none'),
+        long_press: toFirmwareAction(action.long_press ?? 'none'),
+        hold: toFirmwareAction(action.hold ?? 'none'),
       }
+      if (action.hold_mode && action.hold_mode !== 'momentary') {
+        entry.hold_mode = action.hold_mode
+      }
+      button_actions[btnId] = entry
     }
   }
 
@@ -196,7 +211,7 @@ export function fromFirmwareFormat(fw: FirmwareUiConfig): Partial<DisplaySavedSt
 
   // アクション名の正規化（旧名 → 新名）
   const normalizeAction = (a: string): import('@/types/display').ButtonActionType => {
-    if (a === 'toggle_volume_adc') return 'mode_toggle'
+    if (a === 'toggle_volume_adc' || a === 'mode_toggle') return 'vib_mode'
     if (a === 'previous_page') return 'prev_page'
     return (a ?? 'none') as import('@/types/display').ButtonActionType
   }
@@ -208,6 +223,7 @@ export function fromFirmwareFormat(fw: FirmwareUiConfig): Partial<DisplaySavedSt
         short_press: normalizeAction(action.short_press ?? 'none'),
         long_press: normalizeAction(action.long_press ?? 'none'),
         hold: normalizeAction(action.hold ?? 'none'),
+        hold_mode: (action as Record<string, unknown>).hold_mode === 'latch' ? 'latch' : 'momentary',
       }
     }
   }

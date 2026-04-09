@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, createContext, useContext, useRef } f
 import { createPortal } from 'react-dom'
 import './Toast.css'
 
-type ToastType = 'success' | 'error' | 'info'
+type ToastType = 'success' | 'error' | 'info' | 'warning'
 
 interface ToastItem {
   id: number
@@ -58,15 +58,17 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   )
 }
 
+/** トースト幅の推定値（実測前のクランプ用） */
+const TOAST_EST_W = 280
+
 function ToastNotification({ item, onRemove }: { item: ToastItem; onRemove: (id: number) => void }) {
   const [exiting, setExiting] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const duration = item.type === 'error' ? 5000 : 3000
-    const timer = setTimeout(() => setExiting(true), duration)
+    const timer = setTimeout(() => setExiting(true), 2000)
     return () => clearTimeout(timer)
-  }, [item.type])
+  }, [])
 
   useEffect(() => {
     if (!exiting) return
@@ -74,19 +76,25 @@ function ToastNotification({ item, onRemove }: { item: ToastItem; onRemove: (id:
     return () => clearTimeout(timer)
   }, [exiting, item.id, onRemove])
 
-  // Position near anchor or top-center
-  const style: React.CSSProperties = {}
+  const margin = 8
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 1024
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 768
+
+  // クランプ: left を margin 〜 vw - margin - 推定幅 に収める
+  const clampLeft = (idealCenter: number) => {
+    const left = idealCenter - TOAST_EST_W / 2
+    return Math.max(margin, Math.min(left, vw - margin - TOAST_EST_W))
+  }
+
+  const style: React.CSSProperties = { position: 'fixed', zIndex: 9999 }
   if (item.anchorRect) {
     const r = item.anchorRect
-    style.position = 'fixed'
-    style.top = r.bottom + 8
-    style.left = r.left + r.width / 2
-    style.transform = 'translateX(-50%)'
+    const idealTop = r.bottom + margin
+    style.top = idealTop + 50 > vh ? Math.max(margin, r.top - margin - 50) : idealTop
+    style.left = clampLeft(r.left + r.width / 2)
   } else {
-    style.position = 'fixed'
-    style.top = 60
-    style.left = '50%'
-    style.transform = 'translateX(-50%)'
+    style.top = Math.min(60, vh - margin - 50)
+    style.left = clampLeft(vw / 2)
   }
 
   return (
@@ -97,7 +105,7 @@ function ToastNotification({ item, onRemove }: { item: ToastItem; onRemove: (id:
       onClick={() => setExiting(true)}
     >
       <span className="toast-icon">
-        {item.type === 'success' ? '\u2713' : item.type === 'error' ? '!' : 'i'}
+        {item.type === 'success' ? '\u2713' : item.type === 'error' ? '!' : item.type === 'warning' ? '\u26A0' : 'i'}
       </span>
       <span className="toast-message">{item.message}</span>
     </div>

@@ -19,12 +19,35 @@ function hexToRgb(hex: string): [number, number, number] {
   return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)]
 }
 
+// 非線形 brightness マッピング: 低い方の分解能を高くする
+// step 0 = OFF(0), step 1 = 最小(20), step N = MAX(255)
+// 中間はガンマカーブで生成
 const BRIGHTNESS_STEPS = 10
+const BRIGHTNESS_MIN = 20 // 最小可視輝度
+
+function buildBrightnessTable(steps: number): number[] {
+  const table = [0] // step 0 = OFF
+  for (let i = 1; i <= steps; i++) {
+    const raw = BRIGHTNESS_MIN + (255 - BRIGHTNESS_MIN) * (i - 1) / (steps - 1)
+    table.push(Math.round(raw))
+  }
+  table[steps] = 255
+  return table
+}
+
+const BRIGHTNESS_TABLE = buildBrightnessTable(BRIGHTNESS_STEPS)
+
 function rawToStep(raw: number): number {
-  return Math.round((raw / 255) * BRIGHTNESS_STEPS)
+  let best = 0
+  let bestDist = Math.abs(raw - BRIGHTNESS_TABLE[0])
+  for (let i = 1; i < BRIGHTNESS_TABLE.length; i++) {
+    const d = Math.abs(raw - BRIGHTNESS_TABLE[i])
+    if (d < bestDist) { best = i; bestDist = d }
+  }
+  return best
 }
 function stepToRaw(step: number): number {
-  return Math.round((step / BRIGHTNESS_STEPS) * 255)
+  return BRIGHTNESS_TABLE[Math.max(0, Math.min(step, BRIGHTNESS_STEPS))]
 }
 
 export function LedConfigModal({ ledConfig, onLedChange, onClose }: LedConfigModalProps) {

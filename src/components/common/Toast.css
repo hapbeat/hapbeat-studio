@@ -33,6 +33,11 @@
   border: 1px solid #3a6aaa;
 }
 
+.toast-warning {
+  background: #7a6a1a;
+  border: 1px solid #aa9a2a;
+}
+
 .toast-icon {
   display: flex;
   align-items: center;
@@ -51,11 +56,11 @@
 }
 
 @keyframes toast-in {
-  from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
-  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes toast-out {
-  from { opacity: 1; transform: translateX(-50%) translateY(0); }
-  to { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-8px); }
 }

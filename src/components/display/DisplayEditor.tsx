@@ -99,7 +99,7 @@ function buildGridRows(page: DisplayPage | undefined, simState: SimState): GridI
 }
 
 const DEFAULT_BUTTON_ACTION: SingleButtonAction = {
-  short_press: 'none', long_press: 'none', hold: 'none',
+  short_press: 'none', long_press: 'none', hold: 'none', hold_mode: 'momentary',
 }
 
 function generateId(): string {
@@ -127,6 +127,7 @@ function buildActionGroups(pages: DisplayPage[]): ActionGroup[] {
   pages.forEach((p, i) => {
     pageItems.push({ value: `goto_page:${i}`, label: `\u2192 ${p.name}` })
   })
+  pageItems.push({ value: 'toggle_page', label: 'Toggle Page' })
 
   return [
     { label: 'Page', items: pageItems },
@@ -142,24 +143,37 @@ function buildActionGroups(pages: DisplayPage[]): ActionGroup[] {
     {
       label: 'Other',
       items: [
-        { value: 'mode_toggle', label: 'Mode Toggle' },
-        { value: 'volume_up', label: 'Volume +' },
-        { value: 'volume_down', label: 'Volume -' },
         { value: 'display_toggle', label: 'Display ON/OFF' },
+        { value: 'led_toggle', label: 'LED ON/OFF' },
+        { value: 'vib_mode', label: 'VibMode Var/Fix' },
         { value: 'none', label: '\u2014 (None)' },
       ],
     },
   ]
 }
 
-/** 押し続け用アクション（ページ一覧のみ） */
-function buildHoldActionGroups(pages: DisplayPage[]): ActionGroup[] {
-  const items: ActionItem[] = []
-  pages.forEach((p, i) => {
-    items.push({ value: `hold_page:${i}`, label: p.name })
-  })
-  items.push({ value: 'none', label: '\u2014 (None)' })
-  return [{ label: 'Hold to show', items }]
+/** 押し続け用アクション。Tmp: toggle系 + ページ遷移のみ。Exec: Press と同じ全アクション */
+function buildHoldActionGroups(pages: DisplayPage[], holdMode: import('@/types/display').HoldMode): ActionGroup[] {
+  if (holdMode === 'momentary') {
+    // Tmp: 離したら戻せるアクションのみ（ファーム側で hold_page: として処理）
+    const pageItems: ActionItem[] = pages.map((p, i) => ({
+      value: `hold_page:${i}`, label: `\u2192 ${p.name} (tmp)`,
+    }))
+    return [
+      ...(pageItems.length > 0 ? [{ label: 'Page', items: pageItems }] : []),
+      {
+        label: 'Toggle',
+        items: [
+          { value: 'display_toggle', label: 'Display ON/OFF' },
+          { value: 'led_toggle', label: 'LED ON/OFF' },
+          { value: 'vib_mode', label: 'VibMode Var/Fix' },
+          { value: 'none', label: '\u2014 (None)' },
+        ],
+      },
+    ]
+  }
+  // Exec: Press と同じ
+  return buildActionGroups(pages)
 }
 
 
@@ -544,16 +558,17 @@ export function DisplayEditor() {
       setIsDeploying(false)
       const success = lastMessage.payload.success as boolean
       const deviceConfirmed = lastMessage.payload.device_confirmed as boolean | undefined
-      if (success) {
+      const reason = (lastMessage.payload.error ?? lastMessage.payload.message ?? '') as string
+      if (!success && reason.includes('no_device')) {
+        toast('デバイスが選択されていません', 'warning')
+      } else if (success) {
         if (deviceConfirmed) {
           toast('デバイスに書き込みました', 'success')
         } else {
-          // Manager が受理したがデバイス応答未確認
           toast('Manager に送信しました', 'info')
         }
       } else {
-        const errorMsg = (lastMessage.payload.error as string) || '不明なエラー'
-        toast(`書き込みに失敗しました: ${errorMsg}`, 'error')
+        toast(`書き込みに失敗しました: ${reason || '不明なエラー'}`, 'error')
       }
     }
   }, [lastMessage, toast])
@@ -619,9 +634,12 @@ export function DisplayEditor() {
 
   const handleSimButtonClick = useCallback(
     (buttonId: string) => {
+      // Tmp hold が発火中なら click（short_press）を抑制
+      if (holdActiveRef.current) return
       const action = perButtonActions[buttonId]?.short_press as string
       if (!action || action === 'none') return
       const n = layout.pages.length
+      if (action === 'toggle_page' && n > 1) { setActivePageIndex((p) => (p + 1) % n); return }
       if (action === 'next_page' && n > 1) { setActivePageIndex((p) => Math.min(p + 1, n - 1)); return }
       if (action === 'prev_page' && n > 1) { setActivePageIndex((p) => Math.max(p - 1, 0)); return }
       if (action.startsWith('goto_page:')) {
@@ -630,37 +648,73 @@ export function DisplayEditor() {
         return
       }
       switch (action) {
-        case 'volume_up': setSimState((s) => ({ ...s, volume: Math.min(s.volume + 1, volumeConfig.steps - 1) })); break
-        case 'volume_down': setSimState((s) => ({ ...s, volume: Math.max(s.volume - 1, 0) })); break
         case 'player_inc': setSimState((s) => ({ ...s, player: s.player + 1 })); break
         case 'player_dec': setSimState((s) => ({ ...s, player: Math.max(0, s.player - 1) })); break
         case 'position_inc': setSimState((s) => ({ ...s, position: s.position + 1 })); break
         case 'position_dec': setSimState((s) => ({ ...s, position: Math.max(0, s.position - 1) })); break
-        case 'mode_toggle': setSimState((s) => ({ ...s, volumeAdcEnabled: !s.volumeAdcEnabled })); break
+        case 'vib_mode': setSimState((s) => ({ ...s, volumeAdcEnabled: !s.volumeAdcEnabled })); break
       }
     },
-    [perButtonActions, layout.pages.length, volumeConfig.steps]
+    [perButtonActions, layout.pages.length]
   )
 
-  // 押し続けシミュレーション — mousedown で画面遷移、mouseup で戻す
+  // 押し続けシミュレーション
+  // holdActiveRef: Tmp hold が発火中かどうか（click 抑制に使用）
+  const holdActiveRef = useRef(false)
+
   const handleSimButtonDown = useCallback(
     (buttonId: string) => {
-      const holdAction = perButtonActions[buttonId]?.hold as string | undefined
-      if (!holdAction || holdAction === 'none' || !holdAction.startsWith('hold_page:')) return
-      const idx = parseInt(holdAction.split(':')[1], 10)
+      const btnAction = perButtonActions[buttonId]
+      const holdAction = btnAction?.hold as string | undefined
+      if (!holdAction || holdAction === 'none') return
+      const holdMode = btnAction?.hold_mode ?? 'momentary'
       const n = layout.pages.length
-      if (isNaN(idx) || idx < 0 || idx >= n) return
-      if (idx === activePageIndex) return // 今のページなら何もしない
-      holdReturnPageRef.current = activePageIndex
-      setActivePageIndex(idx)
+
+      if (holdMode === 'momentary') {
+        // Tmp: 押している間だけ
+        holdActiveRef.current = true
+        if (holdAction.startsWith('hold_page:') || holdAction.startsWith('goto_page:')) {
+          const idx = parseInt(holdAction.split(':')[1], 10)
+          if (isNaN(idx) || idx < 0 || idx >= n || idx === activePageIndex) return
+          holdReturnPageRef.current = activePageIndex
+          setActivePageIndex(idx)
+        } else if (holdAction === 'vib_mode') {
+          setSimState((s) => ({ ...s, volumeAdcEnabled: !s.volumeAdcEnabled }))
+        }
+        // display_toggle / led_toggle: ファーム側で処理、UI シミュレーションは省略
+        return
+      }
+
+      // Exec: Press と同じ（離しても戻らない）
+      if (holdAction === 'toggle_page' && n > 1) { setActivePageIndex((p) => (p + 1) % n); return }
+      if (holdAction === 'next_page' && n > 1) { setActivePageIndex((p) => Math.min(p + 1, n - 1)); return }
+      if (holdAction === 'prev_page' && n > 1) { setActivePageIndex((p) => Math.max(p - 1, 0)); return }
+      if (holdAction.startsWith('goto_page:')) {
+        const idx = parseInt(holdAction.split(':')[1], 10)
+        if (!isNaN(idx) && idx >= 0 && idx < n) setActivePageIndex(idx)
+        return
+      }
+      switch (holdAction) {
+        case 'player_inc': setSimState((s) => ({ ...s, player: s.player + 1 })); break
+        case 'player_dec': setSimState((s) => ({ ...s, player: Math.max(0, s.player - 1) })); break
+        case 'position_inc': setSimState((s) => ({ ...s, position: s.position + 1 })); break
+        case 'position_dec': setSimState((s) => ({ ...s, position: Math.max(0, s.position - 1) })); break
+        case 'vib_mode': setSimState((s) => ({ ...s, volumeAdcEnabled: !s.volumeAdcEnabled })); break
+      }
     },
     [perButtonActions, layout.pages.length, activePageIndex]
   )
 
   const handleSimButtonUp = useCallback(() => {
+    // Tmp: ページを戻す
     if (holdReturnPageRef.current !== null) {
       setActivePageIndex(holdReturnPageRef.current)
       holdReturnPageRef.current = null
+    }
+    // Tmp: hold が発火していた場合、click を抑制するためリセットを遅延
+    if (holdActiveRef.current) {
+      // holdActiveRef は click 抑制後にリセット（setTimeout で click より後に）
+      setTimeout(() => { holdActiveRef.current = false }, 0)
     }
   }, [])
 
@@ -791,20 +845,49 @@ function OledSimulator({
   onDeleteElement, onPopupSelect, onPopupClose, onSimButtonClick, onSimButtonDown, onSimButtonUp,
   pages, perButtonActions, onActionChange, onLedClick, onVolumeClick,
 }: OledSimulatorProps) {
+  // ボタンをグリッドエリアに振り分け
+  const leftBtns = deviceSpec.model === 'duo_wl'
+    ? deviceSpec.buttons.filter((b) => ['btn_1', 'btn_2', 'btn_3'].includes(b.id))
+    : deviceSpec.buttons
+  const rightBtns = deviceSpec.model === 'duo_wl'
+    ? deviceSpec.buttons.filter((b) => ['btn_4', 'btn_5'].includes(b.id))
+    : []
+
+  const actionGroups = buildActionGroups(pages)
+
+  const renderButton = (btn: typeof deviceSpec.buttons[0]) => {
+    const act = perButtonActions[btn.id] ?? DEFAULT_BUTTON_ACTION
+    const btnHoldMode = act.hold_mode ?? 'momentary'
+    const holdGroups = buildHoldActionGroups(pages, btnHoldMode)
+    const allItems = [...actionGroups, ...holdGroups].flatMap((g) => g.items)
+    return (
+      <div key={btn.id} className="device-button-row">
+        <div
+          className="device-button-dot-wrap"
+          title={btn.label}
+          onClick={() => onSimButtonClick(btn.id)}
+          onMouseDown={() => onSimButtonDown(btn.id)}
+          onMouseUp={onSimButtonUp}
+          onMouseLeave={onSimButtonUp}
+        >
+          <div className="device-button-dot" />
+          <span className="device-button-label">{btn.label}</span>
+        </div>
+        <InlineButtonConfig
+          action={act} allItems={allItems}
+          actionGroups={actionGroups} holdGroups={holdGroups}
+          btnId={btn.id} onActionChange={onActionChange}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="hardware-preview-sticky">
-      <div
-        className="device-abs-container"
-        style={{ transform: isFlipped ? 'rotate(180deg)' : undefined }}
-      >
-        <div
-          className="device-abs-oled"
-          style={{
-            left: `${deviceSpec.oled.x}%`, top: `${deviceSpec.oled.y}%`,
-            width: `${deviceSpec.oled.width}%`, height: `${deviceSpec.oled.height}%`,
-          }}
-        >
-          <div style={{ transform: isFlipped ? 'rotate(180deg)' : undefined, position: 'relative' }}>
+      <div className="device-grid-container">
+        {/* OLED — grid-area: oled */}
+        <div className="device-grid-oled" style={{ transform: isFlipped ? 'rotate(180deg)' : undefined }}>
+          <div style={{ position: 'relative' }}>
             <div
               ref={oledRef}
               className="oled-screen"
@@ -815,9 +898,7 @@ function OledSimulator({
                 {gridRows.map((row, rowIdx) =>
                   row.map((item) => {
                     if (item.kind === 'empty') {
-                      return (
-                        <div key={`${rowIdx}-${item.col}`} className="char-cell empty" />
-                      )
+                      return <div key={`${rowIdx}-${item.col}`} className="char-cell empty" />
                     }
                     const meta = getElementMeta(item.el.type)
                     return (
@@ -853,120 +934,61 @@ function OledSimulator({
                 )}
               </div>
 
-              {/* ドラッグ中のプレビュー影 */}
               {dragPreview && (
                 <div
                   className={`drag-preview-shadow ${dragPreview.canPlace ? '' : 'invalid'}`}
                   style={{
-                    left: dragPreview.col * CELL_W,
-                    top: dragPreview.row * CELL_H,
-                    width: dragPreview.w * CELL_W,
-                    height: dragPreview.h * CELL_H,
+                    left: dragPreview.col * CELL_W, top: dragPreview.row * CELL_H,
+                    width: dragPreview.w * CELL_W, height: dragPreview.h * CELL_H,
                   }}
                 />
               )}
-
-              {/* クリック時の位置マーカー */}
               {popupPos && (
                 <div
                   className="placeholder-cell"
-                  style={{
-                    left: popupPos.x, top: popupPos.y,
-                    width: CELL_W, height: CELL_H,
-                  }}
+                  style={{ left: popupPos.x, top: popupPos.y, width: CELL_W, height: CELL_H }}
                 />
               )}
             </div>
-
-            {/* ポップアップパレット */}
             {popupPos && (
               <PopupPalette
-                screenX={popupPos.screenX}
-                screenY={popupPos.screenY}
-                gridCol={popupPos.col}
-                gridRow={popupPos.row}
-                page={activePage}
-                usedTypes={usedTypes}
-                onSelect={onPopupSelect}
-                onClose={onPopupClose}
+                screenX={popupPos.screenX} screenY={popupPos.screenY}
+                gridCol={popupPos.col} gridRow={popupPos.row}
+                page={activePage} usedTypes={usedTypes}
+                onSelect={onPopupSelect} onClose={onPopupClose}
               />
             )}
           </div>
         </div>
 
-        {/* ボタン + インライン設定 */}
-        {deviceSpec.buttons.map((btn) => {
-          const isLeft = deviceSpec.model === 'duo_wl' && ['btn_1', 'btn_2', 'btn_3'].includes(btn.id)
-          const action = perButtonActions[btn.id] ?? DEFAULT_BUTTON_ACTION
-          const actionGroups = buildActionGroups(pages)
-          const holdGroups = buildHoldActionGroups(pages)
-          const allItems = [...actionGroups, ...holdGroups].flatMap((g) => g.items)
+        {/* 左ボタン列 — grid-area: btn1, btn2, btn3 */}
+        {leftBtns.map((btn, i) => (
+          <div key={btn.id} className={`device-grid-btn btn-l${i + 1}`}>
+            {renderButton(btn)}
+          </div>
+        ))}
 
-          return (
-            <div
-              key={btn.id}
-              className={`device-abs-button-row ${isLeft ? 'left-side' : 'right-side'}`}
-              style={{
-                left: isLeft ? undefined : `${btn.x}%`,
-                right: isLeft ? `${100 - btn.x}%` : undefined,
-                top: `${btn.y}%`,
-                transform: isFlipped ? 'rotate(180deg)' : undefined,
-              }}
-            >
-              {/* 左側ボタン: 設定 → ドット */}
-              {isLeft && (
-                <InlineButtonConfig
-                  action={action}
-                  allItems={allItems}
-                  actionGroups={actionGroups}
-                  holdGroups={holdGroups}
-                  btnId={btn.id}
-                  onActionChange={onActionChange}
-                />
-              )}
-              <div
-                className="device-button-dot-wrap"
-                title={btn.label}
-                onClick={() => onSimButtonClick(btn.id)}
-                onMouseDown={() => onSimButtonDown(btn.id)}
-                onMouseUp={onSimButtonUp}
-                onMouseLeave={onSimButtonUp}
-              >
-                <div className="device-button-dot" />
-                <span className="device-button-label">{btn.label}</span>
-              </div>
-              {/* 右側ボタン: ドット → 設定 */}
-              {!isLeft && (
-                <InlineButtonConfig
-                  action={action}
-                  allItems={allItems}
-                  actionGroups={actionGroups}
-                  holdGroups={holdGroups}
-                  btnId={btn.id}
-                  onActionChange={onActionChange}
-                />
-              )}
-            </div>
-          )
-        })}
+        {/* 右ボタン列 — grid-area: btn4, btn5 */}
+        {rightBtns.map((btn, i) => (
+          <div key={btn.id} className={`device-grid-btn btn-r${i + 1}`}>
+            {renderButton(btn)}
+          </div>
+        ))}
 
-        <div className="device-config-item" style={{
-          left: `${deviceSpec.led.x}%`, top: `${deviceSpec.led.y}%`,
-          transform: `translate(-50%, -50%)${isFlipped ? ' rotate(180deg)' : ''}`,
-        }} onClick={onLedClick}>
-          <div className="device-abs-led" />
-          <span className="device-config-label">LED 設定</span>
-        </div>
-        <div className="device-config-item" style={{
-          left: `${deviceSpec.volumeIcon.x}%`, top: `${deviceSpec.volumeIcon.y}%`,
-          transform: `translate(-50%, -50%)${isFlipped ? ' rotate(180deg)' : ''}`,
-        }} onClick={onVolumeClick}>
+        {/* Volume 設定 — grid-area: vol */}
+        <div className="device-grid-vol" onClick={onVolumeClick}>
           <svg className="device-config-vol-icon" viewBox="0 0 16 14" width="14" height="12">
             <polygon points="0,5 0,9 4,9 8,13 8,1 4,5" fill="currentColor" />
             <path d="M10,4 Q13,7 10,10" fill="none" stroke="currentColor" strokeWidth="1.5" />
             <path d="M12,2 Q16,7 12,12" fill="none" stroke="currentColor" strokeWidth="1.2" />
           </svg>
           <span className="device-config-label">Volume 設定</span>
+        </div>
+
+        {/* LED 設定 — grid-area: led */}
+        <div className="device-grid-led" onClick={onLedClick}>
+          <div className="device-abs-led" />
+          <span className="device-config-label">LED 設定</span>
         </div>
       </div>
     </div>
@@ -1125,6 +1147,12 @@ function InlineButtonConfig({ action, allItems, actionGroups, holdGroups, btnId,
   const [menuPos, setMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
   const btnRefs = useRef<Record<string, HTMLButtonElement | null>>({})
 
+  // Hold メニューには hold_page 系も含まれるため、allItems を拡張
+  const holdAllItems = useMemo(() => {
+    const extra = holdGroups.flatMap((g) => g.items)
+    return [...extra, ...allItems]
+  }, [holdGroups, allItems])
+
   const handleSelect = (field: keyof SingleButtonAction, value: string) => {
     onActionChange(btnId, field, value as ButtonActionType)
     setOpenField(null)
@@ -1135,19 +1163,21 @@ function InlineButtonConfig({ action, allItems, actionGroups, holdGroups, btnId,
     if (el) {
       const rect = el.getBoundingClientRect()
       const menuW = 240
-      // 右端からはみ出す場合は左にずらす
       const x = rect.left + menuW > window.innerWidth ? window.innerWidth - menuW - 8 : rect.left
       setMenuPos({ x, y: rect.bottom + 2 })
     }
     setOpenField(field)
   }
 
+  const holdMode = action.hold_mode ?? 'momentary'
+
   return (
     <div className="inline-btn-config">
       {(['short_press', 'hold'] as const).map((field) => {
         const groups = field === 'hold' ? holdGroups : actionGroups
+        const items = field === 'hold' ? holdAllItems : allItems
         const currentValue = (action[field] as string) ?? 'none'
-        const currentLabel = allItems.find((i) => i.value === currentValue)?.label ?? '\u2014'
+        const currentLabel = items.find((i) => i.value === currentValue)?.label ?? '\u2014'
         const isOpen = openField === field
         return (
           <div key={field} className="inline-config-row">
@@ -1166,6 +1196,29 @@ function InlineButtonConfig({ action, allItems, actionGroups, holdGroups, btnId,
               <>
                 <div className="portal-overlay" onClick={() => setOpenField(null)} />
                 <div className="portal-dropdown" style={{ left: menuPos.x, top: menuPos.y }}>
+                  {/* Hold メニュー内に hold_mode トグル（常時表示） */}
+                  {field === 'hold' && (
+                    <div className="hold-mode-bar">
+                      <div className="tooltip-wrap">
+                        <button
+                          className={`hold-mode-btn ${holdMode === 'momentary' ? 'active' : ''}`}
+                          onClick={(e) => { e.stopPropagation(); onActionChange(btnId, 'hold_mode', 'momentary' as ButtonActionType) }}
+                        >
+                          Tmp
+                        </button>
+                        <span className="tooltip-text">押している間だけ実行。離すと元に戻る</span>
+                      </div>
+                      <div className="tooltip-wrap">
+                        <button
+                          className={`hold-mode-btn ${holdMode === 'latch' ? 'active' : ''}`}
+                          onClick={(e) => { e.stopPropagation(); onActionChange(btnId, 'hold_mode', 'latch' as ButtonActionType) }}
+                        >
+                          Exec
+                        </button>
+                        <span className="tooltip-text">Press と同じ挙動。離しても戻らない</span>
+                      </div>
+                    </div>
+                  )}
                   {groups.map((group) => (
                     <div key={group.label} className="action-dropdown-group">
                       <div className="action-dropdown-group-label">{group.label}</div>

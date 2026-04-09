@@ -34,19 +34,23 @@ export type ButtonActionType =
   | 'none'
   | 'next_page'
   | 'prev_page'
-  | 'volume_up'
-  | 'volume_down'
-  | 'mode_toggle'
+  | 'toggle_page'
+  | 'vib_mode'
   | 'display_toggle'
+  | 'led_toggle'
   | 'player_inc'
   | 'player_dec'
   | 'position_inc'
   | 'position_dec'
 
+/** Hold 動作モード: momentary=離したら戻す, latch=1回押しと同じ */
+export type HoldMode = 'momentary' | 'latch'
+
 export interface SingleButtonAction {
   short_press: ButtonActionType
   long_press: ButtonActionType
   hold?: ButtonActionType
+  hold_mode?: HoldMode
 }
 
 export type PerButtonActions = Record<string, SingleButtonAction>
@@ -55,6 +59,7 @@ export interface ButtonAction {
   short_press: ButtonActionType
   long_press: ButtonActionType
   hold?: ButtonActionType
+  hold_mode?: HoldMode
 }
 
 export type DisplayOrientation = 'normal' | 'flipped'
