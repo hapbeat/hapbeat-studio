@@ -47,7 +47,7 @@ Hapbeat Studio — Web ベースの統合デザインツール。
 ## 依存
 
 - hapbeat-contracts: display-layout.schema.json, pack-manifest.schema.json, event-id 仕様
-- hapbeat-desktop: WebSocket リレー（localhost:7703）でデバイス書き込み
+- hapbeat-manager: WebSocket リレー（localhost:7703）でデバイス書き込み
 
 ## 指示書
 

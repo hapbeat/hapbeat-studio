@@ -581,7 +581,7 @@ export function DisplayEditor() {
 
   const handleDeploy = useCallback(() => {
     if (!managerConnected) {
-      toast('Manager (hapbeat-desktop) を起動してください', 'error')
+      toast('Hapbeat Manager を起動してください', 'error')
       return
     }
     setIsDeploying(true)
@@ -1122,7 +1122,7 @@ function ControlBar({
           {isDeploying ? '書込中...' : 'デバイスに書込'}
         </button>
         {!managerConnected && (
-          <span className="tooltip-text">Manager (hapbeat-desktop) を起動してください</span>
+          <span className="tooltip-text">Hapbeat Manager を起動してください</span>
         )}
       </span>
     </div>

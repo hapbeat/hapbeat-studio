@@ -76,7 +76,7 @@ npm run preview
 
 ## Hapbeat Manager との連携
 
-Hapbeat Studio は [Hapbeat Manager](../hapbeat-desktop/) (Desktop アプリ) と WebSocket で連携します。
+Hapbeat Studio は [Hapbeat Manager](../hapbeat-manager/) と WebSocket で連携します。
 
 ### 接続方法
 
