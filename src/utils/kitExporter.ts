@@ -111,8 +111,9 @@ export async function exportKitAsPack(
       description: '',
       tags: [],
       parameters: {
-        gain: ev.gain,
+        intensity: ev.intensity,
         loop: ev.loop,
+        ...(ev.deviceWiper !== null ? { device_wiper: ev.deviceWiper } : {}),
       },
     }
 

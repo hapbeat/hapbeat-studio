@@ -1,0 +1,231 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-04-09T17:33:12.338Z",
+  "clips": [
+    {
+      "id": "builtin/clip.booster",
+      "name": "Booster",
+      "category": "uncategorized",
+      "tags": [
+        "uncategorized"
+      ],
+      "event_id": "clip.booster",
+      "description": "",
+      "filename": "booster.wav",
+      "duration_ms": 1001,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 32556
+    },
+    {
+      "id": "builtin/clip.charge",
+      "name": "Charge",
+      "category": "uncategorized",
+      "tags": [
+        "uncategorized"
+      ],
+      "event_id": "clip.charge",
+      "description": "",
+      "filename": "charge.wav",
+      "duration_ms": 3588,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 115346
+    },
+    {
+      "id": "builtin/clip.damage",
+      "name": "Damage",
+      "category": "uncategorized",
+      "tags": [
+        "uncategorized"
+      ],
+      "event_id": "clip.damage",
+      "description": "",
+      "filename": "damage.wav",
+      "duration_ms": 153,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 5422
+    },
+    {
+      "id": "builtin/clip.footstep_1",
+      "name": "Footstep 1",
+      "category": "uncategorized",
+      "tags": [
+        "uncategorized"
+      ],
+      "event_id": "clip.footstep_1",
+      "description": "",
+      "filename": "footstep_1.wav",
+      "duration_ms": 155,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 5492
+    },
+    {
+      "id": "builtin/clip.footstep_2",
+      "name": "Footstep 2",
+      "category": "uncategorized",
+      "tags": [
+        "uncategorized"
+      ],
+      "event_id": "clip.footstep_2",
+      "description": "",
+      "filename": "footstep_2.wav",
+      "duration_ms": 20,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 1182
+    },
+    {
+      "id": "builtin/clip.gunshot_1",
+      "name": "Gunshot 1",
+      "category": "uncategorized",
+      "tags": [
+        "uncategorized"
+      ],
+      "event_id": "clip.gunshot_1",
+      "description": "",
+      "filename": "gunshot_1.wav",
+      "duration_ms": 94,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 3536
+    },
+    {
+      "id": "builtin/clip.gunshot_2",
+      "name": "Gunshot 2",
+      "category": "uncategorized",
+      "tags": [
+        "uncategorized"
+      ],
+      "event_id": "clip.gunshot_2",
+      "description": "",
+      "filename": "gunshot_2.wav",
+      "duration_ms": 90,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 3412
+    },
+    {
+      "id": "builtin/clip.gunshot_3",
+      "name": "Gunshot 3",
+      "category": "uncategorized",
+      "tags": [
+        "uncategorized"
+      ],
+      "event_id": "clip.gunshot_3",
+      "description": "",
+      "filename": "gunshot_3.wav",
+      "duration_ms": 100,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 3716
+    },
+    {
+      "id": "builtin/clip.gunshot_4",
+      "name": "Gunshot 4",
+      "category": "uncategorized",
+      "tags": [
+        "uncategorized"
+      ],
+      "event_id": "clip.gunshot_4",
+      "description": "",
+      "filename": "gunshot_4.wav",
+      "duration_ms": 109,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 4018
+    },
+    {
+      "id": "builtin/clip.gunshot_5",
+      "name": "Gunshot 5",
+      "category": "uncategorized",
+      "tags": [
+        "uncategorized"
+      ],
+      "event_id": "clip.gunshot_5",
+      "description": "",
+      "filename": "gunshot_5.wav",
+      "duration_ms": 95,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 3564
+    },
+    {
+      "id": "builtin/clip.gunshot_6",
+      "name": "Gunshot 6",
+      "category": "uncategorized",
+      "tags": [
+        "uncategorized"
+      ],
+      "event_id": "clip.gunshot_6",
+      "description": "",
+      "filename": "gunshot_6.wav",
+      "duration_ms": 81,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 3130
+    },
+    {
+      "id": "builtin/clip.landing",
+      "name": "Landing",
+      "category": "uncategorized",
+      "tags": [
+        "uncategorized"
+      ],
+      "event_id": "clip.landing",
+      "description": "",
+      "filename": "landing.wav",
+      "duration_ms": 74,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 2888
+    },
+    {
+      "id": "builtin/clip.launcherexp",
+      "name": "LauncherExp",
+      "category": "uncategorized",
+      "tags": [
+        "uncategorized"
+      ],
+      "event_id": "clip.launcherexp",
+      "description": "",
+      "filename": "launcherExp.wav",
+      "duration_ms": 746,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 24442
+    },
+    {
+      "id": "builtin/clip.launchershot",
+      "name": "LauncherShot",
+      "category": "uncategorized",
+      "tags": [
+        "uncategorized"
+      ],
+      "event_id": "clip.launchershot",
+      "description": "",
+      "filename": "launcherShot.wav",
+      "duration_ms": 200,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 6946
+    },
+    {
+      "id": "builtin/clip.shotgun",
+      "name": "Shotgun",
+      "category": "uncategorized",
+      "tags": [
+        "uncategorized"
+      ],
+      "event_id": "clip.shotgun",
+      "description": "",
+      "filename": "shotgun.wav",
+      "duration_ms": 620,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 20384
+    }
+  ]
+}
