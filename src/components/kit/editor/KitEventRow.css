@@ -1,0 +1,107 @@
+/* ============================================================
+   Kit Event Row Wrap — ClipCard + kit-only side rail.
+
+   The whole row is one bordered container. The inner ClipCard is
+   transparent/borderless so the wrap frame is continuous. A single
+   `border-left` on the side rail acts as a vertical divider,
+   reading as "one card split by a rule".
+   ============================================================ */
+
+.kit-event-wrap {
+  display: flex;
+  align-items: stretch;
+  margin: 4px 0;
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-top-width: 2px;
+  min-width: 0;
+  transition: background 0.12s, border-color 0.12s;
+}
+.kit-event-wrap:hover {
+  background: var(--bg-surface);
+  border-color: rgba(124,92,191,0.3);
+}
+.kit-event-wrap.drag-over-indicator { border-top-color: var(--accent); }
+
+/* Inner clip card = borderless / transparent */
+.kit-event-wrap > .clip-card {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+.kit-event-wrap > .clip-card:hover { background: transparent; }
+
+/* Side rail — narrow column with delete on top, loop at bottom. */
+.kit-event-side {
+  flex: 0 0 auto;
+  width: 32px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 4px;
+  border-left: 1px solid var(--border);
+}
+.kit-event-wrap:hover > .kit-event-side {
+  border-left-color: rgba(124,92,191,0.3);
+}
+
+/* Shared button style for the side rail. */
+/* Shared style for ALL buttons inside the side rail (both direct children
+   and nested ones like the loop button inside its label group). */
+.kit-event-side button {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.kit-event-side-delete:hover {
+  background: rgba(244,67,54,0.25);
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.kit-event-side-loop-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.kit-event-side-loop-label {
+  font-size: 7px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  line-height: 1;
+}
+.kit-event-side-loop {
+  font-size: 13px;
+}
+/* Active state — filled accent background. */
+.kit-event-side-loop.on {
+  background: var(--accent);
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+.kit-event-side-loop:not(.on):hover {
+  color: var(--accent-light);
+  border-color: rgba(124,92,191,0.5);
+  background: rgba(124,92,191,0.15);
+}

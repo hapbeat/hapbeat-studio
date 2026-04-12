@@ -2,11 +2,37 @@
    Kit Manager
    ============================================================ */
 
-.kit-manager-wrapper { display: flex; flex-direction: column; height: 100%; }
-.kit-manager { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+.kit-manager-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  /* Library min 260 + kit min 280 + gap ≈ 560. Below this the
+     horizontal scrollbar on <body> kicks in. */
+  min-width: 560px;
+}
+/* No horizontal padding — Library left edge and Kit right edge align
+   with the WorkDirBar's outer border edges above. The gap between the
+   two panes matches the WorkDirBar's margin-bottom (4px). */
+.kit-manager { display: flex; flex: 1; min-height: 0; overflow: hidden; gap: 4px; padding: 0; }
+.kit-manager-stacked { flex-direction: column; gap: 0; padding: 0; }
 .kit-loading { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-secondary); }
-.kit-manager-left { min-width: 0; overflow: hidden; }
-.kit-manager-right { min-width: 240px; overflow: hidden; }
+
+/* Side mode: proportional split — library takes ~48%, kit ~52% (slightly
+   wider to accommodate the sub-rail). No resize handle; the panes scale
+   with the browser/panel width automatically. */
+.kit-manager-left {
+  flex: 48 0 0;
+  min-width: 260px;
+  overflow: hidden;
+}
+.kit-manager-right {
+  flex: 52 0 0;
+  min-width: 280px;
+  overflow: hidden;
+}
+/* Stacked mode: full-width panes, resize between them vertically. */
+.kit-manager-top { min-height: 160px; overflow: hidden; }
+.kit-manager-bottom { min-height: 200px; overflow: hidden; }
 
 /* ---- Browser Warning ---- */
 .browser-warning {
@@ -17,7 +43,9 @@
 }
 
 /* ---- Work Dir Bar ---- */
-.workdir-bar { display: flex; align-items: center; gap: 8px; padding: 4px 10px; margin-bottom: 4px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); font-size: 11px; }
+/* margin-bottom matches kit-manager gap (both 4px) so vertical and
+   horizontal spacing between the three bordered boxes is identical. */
+.workdir-bar { display: flex; align-items: center; gap: 8px; padding: 4px 10px; margin-bottom: 3px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 2px; font-size: 11px; }
 .workdir-icon { font-size: 13px; }
 .workdir-path { font-family: var(--font-mono); color: var(--text-primary); font-weight: 500; }
 .workdir-hint { color: var(--text-secondary); }
@@ -30,13 +58,24 @@
 .workdir-btn.primary:hover { background: var(--accent-dim); }
 .workdir-btn.disconnect { margin-left: 0; color: var(--text-secondary); }
 .workdir-btn.disconnect:hover { background: rgba(244,67,54,0.2); color: var(--error); }
+.workdir-vol { font-family: var(--font-mono); font-size: 10px; color: var(--accent-light); white-space: nowrap; }
 
 /* ---- View Mode ---- */
 .view-mode-group { display: flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .view-mode-btn { padding: 2px 8px; font-size: 10px; background: var(--bg-surface); color: var(--text-secondary); border: none; border-right: 1px solid var(--border); cursor: pointer; }
-.view-mode-btn:last-child { border-right: none; }
+.view-mode-group .view-mode-btn:last-child { border-right: none; }
 .view-mode-btn:hover { color: var(--text-primary); }
 .view-mode-btn.active { background: var(--accent); color: var(--text-primary); }
+/* Standalone info toggle (not inside the view-mode-group). */
+.view-mode-btn.info-toggle {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 22px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-style: italic;
+  font-weight: 700;
+}
 
 /* ---- Work Dir Prompt ---- */
 .workdir-prompt { flex-direction: column; min-height: 100px; }
@@ -68,23 +107,8 @@
   background: var(--border); transform: translateY(-50%);
 }
 
-/* ============================================================
-   Split View
-   ============================================================ */
-
-.clip-library-split { display: flex; height: 100%; }
-.clip-library-split.h { flex-direction: row; }
-.clip-library-split.v { flex-direction: column; }
-.split-pane { overflow: hidden; display: flex; }
-.split-pane > .clip-panel { flex: 1; min-width: 0; min-height: 0; }
-
-/* ---- Collapsed bar ---- */
-.collapsed-bar {
-  padding: 4px 10px; font-size: 10px; background: var(--bg-surface);
-  color: var(--text-secondary); border: 1px solid var(--border); border-radius: var(--radius);
-  cursor: pointer; text-align: center; flex-shrink: 0;
-}
-.collapsed-bar:hover { background: var(--accent); color: var(--text-primary); }
+/* Split-view classes removed — the UI now has exactly one ClipsPanel and
+   one KitEditor, either side-by-side or stacked. See .kit-manager-* above. */
 
 /* ============================================================
    Clip Panel
@@ -92,7 +116,7 @@
 
 .clip-panel {
   display: flex; flex-direction: column; height: 100%;
-  background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 2px;
   overflow: hidden;
 }
 .clip-panel.drag-over { border-color: var(--accent); box-shadow: 0 0 10px rgba(124,92,191,0.3); }
@@ -139,13 +163,7 @@
 .tag-chip.removable button { background: none; border: none; color: var(--accent-light); cursor: pointer; font-size: 9px; padding: 0; }
 .tag-input { width: 50px; padding: 1px 3px; font-size: 9px; background: transparent; color: var(--text-primary); border: 1px solid var(--border); border-radius: 3px; }
 
-.library-list {
-  flex: 1; overflow-y: auto; padding: 2px;
-  /* Container context for clip-row responsive layout. Must be on the parent,
-     not the row itself — an element cannot query its own container. */
-  container-type: inline-size;
-  container-name: clip-list;
-}
+.library-list { flex: 1; overflow-y: auto; padding: 2px; }
 .library-empty { display: flex; align-items: center; justify-content: center; height: 100%; min-height: 50px; color: var(--text-secondary); font-size: 11px; text-align: center; padding: 10px; }
 
 /* ---- Buttons ---- */
@@ -158,150 +176,83 @@
 .library-btn.danger:hover { background: rgba(244,67,54,0.2); }
 .library-btn.small { padding: 2px 7px; font-size: 9px; }
 
-/* ============================================================
-   Tree View
-   ============================================================ */
+/* NOTE: .clip-row, .clip-body, .clip-event-id, .clip-play-btn,
+   .clip-drag-handle, .clip-actions are gone — replaced by the unified
+   ClipCard primitive (shared/ClipCard.css). Only the edit-mode form
+   styles remain below because the editor is still rendered inline
+   inside the library list. */
 
+/* ============================================================
+   Tree view (clips grouped by folder path)
+   ============================================================ */
 .tree-group { border-bottom: 1px solid rgba(255,255,255,0.03); }
 .tree-group-header {
-  display: flex; align-items: center; gap: 4px; padding: 3px 8px; width: 100%;
-  background: rgba(255,255,255,0.02); border: none; color: var(--text-secondary);
-  font-size: 10px; font-weight: 600; cursor: pointer; text-transform: uppercase; letter-spacing: 0.3px;
-}
-.tree-group-header:hover { background: rgba(255,255,255,0.05); }
-.tree-arrow { font-size: 10px; width: 10px; }
-.tree-label { flex: 1; }
-.tree-group-children { padding-left: 8px; }
-
-/* ============================================================
-   Clip Row — 2-mode responsive grid card
-   Always a single row. Slider is either inline (wide) or a compact
-   "Amp NN%" popover button (narrow). No wrap/2-row mode.
-   Query container is .library-list (container-name: clip-list).
-   ============================================================ */
-.clip-row {
-  display: grid;
-  /* body and slider both flex; slider shares 1fr with body 2fr */
-  grid-template-columns: auto auto minmax(80px, 2fr) minmax(90px, 1fr) auto;
-  grid-template-areas: "handle play body slider actions";
+  display: flex;
   align-items: center;
-  column-gap: 6px;
-  row-gap: 0;
-  padding: 6px 8px;
-  margin: 3px 0;
-  border-radius: var(--radius);
-  background: var(--bg-primary);
-  border: 1px solid var(--border);
-  position: relative;
-  min-width: 0;
-}
-.clip-row:hover {
-  background: var(--bg-surface);
-  border-color: rgba(124,92,191,0.3);
-}
-
-/* Narrow: slider column collapses to a compact "Amp NN%" popover button */
-@container clip-list (max-width: 360px) {
-  .clip-row {
-    grid-template-columns: auto auto minmax(60px, 1fr) auto auto;
-    column-gap: 4px;
-  }
-  .clip-row > .intensity-slider { display: none; }
-  .clip-row > .intensity-popover { display: inline-flex; }
-}
-
-/* ---- Drag handle ---- */
-.clip-drag-handle {
-  grid-area: handle;
-  width: 18px; min-height: 28px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 12px;
+  gap: 4px;
+  padding: 4px 8px;
+  width: 100%;
+  background: rgba(255,255,255,0.02);
+  border: none;
   color: var(--text-secondary);
-  opacity: 0.4;
-  cursor: grab;
-  user-select: none;
-  border-radius: 3px;
-  transition: background 0.12s, opacity 0.12s;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  transition: background 0.12s, color 0.12s;
 }
-.clip-drag-handle:hover {
-  opacity: 1;
-  background: rgba(124,92,191,0.2);
-  color: var(--accent-light);
-}
-.clip-drag-handle:active { cursor: grabbing; }
-
-.clip-play-btn {
-  grid-area: play;
-  width: 24px; height: 24px; min-width: 24px;
-  display: flex; align-items: center; justify-content: center; font-size: 9px;
-  background: var(--bg-surface); color: var(--text-primary);
-  border: 1px solid var(--border); border-radius: 50%; cursor: pointer;
-}
-.clip-play-btn:hover { background: var(--accent); }
-.clip-play-btn.playing { background: var(--accent); border-color: var(--accent); }
-
-/* ---- Body (name/meta + event/tags) ---- */
-.clip-body {
-  grid-area: body;
-  min-width: 0;
-  display: grid;
-  grid-template-rows: auto auto;
-  row-gap: 1px;
-}
-.clip-row-top, .clip-row-bottom {
-  display: flex; align-items: baseline; gap: 6px;
-  min-width: 0;
-  overflow: hidden;
-}
-.clip-row-top { flex-wrap: nowrap; }
-.clip-row-bottom { flex-wrap: wrap; row-gap: 2px; }
-
-.clip-name {
-  font-size: 11px; font-weight: 500; color: var(--text-primary);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  min-width: 0; flex: 1 1 auto;
-}
-.clip-meta {
-  font-size: 9px; color: var(--text-secondary); font-family: var(--font-mono);
-  white-space: nowrap; flex-shrink: 0;
+.tree-group-header:hover {
+  background: rgba(255,255,255,0.05);
+  color: var(--text-primary);
 }
 
-/* Slider + actions placement */
-.clip-row > .intensity-slider { grid-area: slider; }
-.clip-row > .clip-actions { grid-area: actions; }
-.clip-row > .intensity-popover { grid-area: slider; display: none; justify-self: end; }
-
-/* ---- Wiper corner badge ---- */
-.clip-wiper-corner {
-  position: absolute;
-  top: 1px; right: 4px;
-  font-size: 8px;
+/* Closed state — muted arrow */
+.tree-arrow {
+  font-size: 10px;
+  width: 10px;
+  flex-shrink: 0;
+  transition: color 0.12s;
+}
+.tree-label { flex: 1; text-align: left; }
+.tree-count {
+  font-size: 9px;
   font-family: var(--font-mono);
   color: var(--text-secondary);
-  opacity: 0.5;
-  pointer-events: none;
-  letter-spacing: 0.3px;
+  opacity: 0.7;
+  padding-right: 4px;
 }
-.clip-row:hover .clip-wiper-corner,
-.kit-event-row:hover .clip-wiper-corner { opacity: 0.85; }
 
-.clip-event-id {
-  display: inline-block; font-size: 10px; font-family: var(--font-mono); font-weight: 500;
-  color: var(--accent-light); padding: 0 5px;
-  background: rgba(124,92,191,0.1); border: 1px solid rgba(124,92,191,0.25); border-radius: 3px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;
+/* Open state — each folder gets a distinct hue via CSS custom property
+   --tree-hue set inline by the component. Header is more saturated,
+   children share a lighter tint so cards visually "belong" to the folder. */
+.tree-group.is-open > .tree-group-header {
+  background: hsla(var(--tree-hue, 260), 50%, 55%, 0.2);
+  color: hsla(var(--tree-hue, 260), 70%, 80%, 1);
 }
-.clip-event-id.empty { color: var(--text-secondary); opacity: 0.5; border-style: dashed; }
+.tree-group.is-open > .tree-group-header .tree-arrow {
+  color: hsla(var(--tree-hue, 260), 70%, 80%, 1);
+}
+/* Cards inside an open folder: vivid border in the folder's hue so the
+   grouping is obvious at a glance. Background stays default (dark). */
+.tree-group.is-open > .tree-group-children > .clip-card {
+  border-color: hsla(var(--tree-hue, 260), 70%, 55%, 0.7);
+}
+.tree-group.is-open > .tree-group-children > .clip-card:hover {
+  border-color: hsla(var(--tree-hue, 260), 80%, 65%, 0.9);
+}
 
-.clip-tags-inline { font-size: 9px; color: var(--text-secondary); opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
 
-.clip-actions { display: flex; gap: 2px; align-items: center; }
-.clip-action-btn { padding: 2px 7px; font-size: 9px; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; }
-.clip-action-btn:hover { background: var(--accent); }
-.clip-action-btn.danger:hover { background: rgba(244,67,54,0.3); color: var(--error); }
-
-/* ---- Edit mode ---- */
-.clip-row-editing { display: flex; flex-direction: column; align-items: stretch; background: rgba(255,255,255,0.04); padding: 8px; gap: 5px; cursor: default; }
+/* ---- Edit mode (inline form for both library clips and kit events) ---- */
+.clip-edit-form {
+  display: flex; flex-direction: column; align-items: stretch;
+  background: rgba(255,255,255,0.04);
+  padding: 10px; margin: 4px 0;
+  gap: 5px;
+  cursor: default;
+  border-radius: var(--radius);
+  border: 1px solid var(--accent);
+}
 .clip-edit-fields { display: flex; flex-direction: column; gap: 5px; }
 .clip-edit-field { display: flex; flex-direction: column; gap: 2px; }
 .clip-edit-field > span { font-size: 9px; color: var(--text-secondary); }
@@ -322,7 +273,7 @@
    Kit Editor
    ============================================================ */
 
-.kit-editor { display: flex; flex-direction: column; height: 100%; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+.kit-editor { display: flex; flex-direction: column; height: 100%; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 2px; overflow: hidden; }
 
 /* ---- Create bar ---- */
 .kit-create-bar { display: flex; gap: 4px; padding: 5px 6px; border-bottom: 1px solid var(--border); }
@@ -366,148 +317,13 @@
 /* ---- Kit Events ---- */
 .kit-events-header { display: flex; justify-content: space-between; padding: 3px 8px; font-size: 10px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.4px; border-bottom: 1px solid var(--border); }
 .kit-size-label { font-weight: 400; font-family: var(--font-mono); text-transform: none; letter-spacing: 0; }
-.kit-events-list {
-  flex: 1; overflow-y: auto; padding: 2px;
-  /* Container context for kit-event-row responsive layout. See .library-list above. */
-  container-type: inline-size;
-  container-name: kit-events;
-}
+.kit-events-list { flex: 1; overflow-y: auto; padding: 2px; }
 .kit-events-list.drop-active { background: rgba(124,92,191,0.06); outline: 2px dashed rgba(124,92,191,0.4); outline-offset: -3px; }
 .kit-events-empty { padding: 10px; font-size: 11px; color: var(--text-secondary); text-align: center; }
 .kit-drop-zone { min-height: 50px; display: flex; align-items: center; justify-content: center; }
 
-.kit-event-row {
-  display: grid;
-  /* Query container is .kit-events-list (container-name: kit-events). */
-  grid-template-columns: auto auto minmax(80px, 2fr) minmax(90px, 1fr) auto auto;
-  grid-template-areas: "handle play info slider loop actions";
-  align-items: center;
-  column-gap: 6px;
-  row-gap: 0;
-  padding: 5px 8px;
-  margin: 3px 0;
-  border-radius: var(--radius);
-  background: var(--bg-primary);
-  border: 1px solid var(--border);
-  border-top-width: 2px;
-  position: relative;
-  min-width: 0;
-}
-.kit-event-row:hover { background: var(--bg-surface); border-color: rgba(124,92,191,0.3); }
-.kit-event-row.drag-over-indicator { border-top-color: var(--accent); }
-
-/* Narrow: slider collapses into popover, Loop label hides to save space */
-@container kit-events (max-width: 400px) {
-  .kit-event-row {
-    grid-template-columns: auto auto minmax(60px, 1fr) auto auto auto;
-    column-gap: 4px;
-  }
-  .kit-event-row > .intensity-slider { display: none; }
-  .kit-event-row > .intensity-popover { display: inline-flex; }
-  .kit-event-row > .kit-event-loop > span { display: none; }
-}
-
-.kit-event-row > .clip-drag-handle { grid-area: handle; }
-.kit-event-row > .clip-play-btn { grid-area: play; }
-.kit-event-row > .kit-event-info { grid-area: info; min-width: 0; overflow: hidden; }
-.kit-event-row > .intensity-slider { grid-area: slider; }
-.kit-event-row > .intensity-popover { grid-area: slider; display: none; justify-self: end; }
-.kit-event-row > .kit-event-loop { grid-area: loop; }
-.kit-event-row > .clip-action-btn { grid-area: actions; }
-
-.kit-event-id { display: block; font-size: 11px; font-family: var(--font-mono); color: var(--accent-light); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.kit-event-clip { font-size: 9px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.kit-event-params { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.kit-event-loop { display: flex; align-items: center; gap: 2px; cursor: pointer; font-size: 10px; color: var(--text-secondary); }
-.kit-event-loop input[type="checkbox"] { accent-color: var(--accent); }
-.kit-event-wiper { font-size: 9px; font-family: var(--font-mono); color: var(--text-secondary); padding: 1px 5px; background: rgba(255,255,255,0.05); border-radius: 3px; }
-
-/* ============================================================
-   Intensity Slider (reusable)
-   Flex layout so the slider fills whatever grid cell it lands in.
-   ============================================================ */
-.intensity-slider {
-  display: flex; align-items: center; gap: 4px;
-  padding: 3px 6px;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  cursor: default;
-  user-select: none;
-  transition: background 0.12s, border-color 0.12s;
-  min-width: 0;
-}
-.intensity-slider:hover { background: rgba(255,255,255,0.07); }
-.intensity-slider.focused {
-  background: rgba(124,92,191,0.25);
-  border-color: rgba(124,92,191,0.5);
-}
-.intensity-label { font-size: 10px; color: var(--text-secondary); font-weight: 500; flex-shrink: 0; }
-.intensity-slider.focused .intensity-label { color: var(--accent-light); }
-.intensity-slider input[type="range"] {
-  flex: 1 1 auto;
-  min-width: 50px;
-  height: 14px;
-  accent-color: var(--accent);
-  cursor: pointer;
-  margin: 0;
-}
-.intensity-slider input[type="range"]:focus { outline: none; }
-.intensity-val {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-primary);
-  min-width: 32px;
-  text-align: right;
-  flex-shrink: 0;
-}
-
-/* ---- Intensity Popover (very narrow mode) ---- */
-.intensity-popover {
-  position: relative;
-  /* shown via container query override */
-}
-.intensity-popover-trigger {
-  display: inline-flex; align-items: center; gap: 3px;
-  padding: 3px 8px;
-  font-size: 10px;
-  font-family: var(--font-mono);
-  background: rgba(255,255,255,0.04);
-  color: var(--text-primary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.intensity-popover-label {
-  font-size: 9px;
-  color: var(--text-secondary);
-  font-family: var(--font-ui);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-.intensity-popover-trigger:hover {
-  background: rgba(124,92,191,0.25);
-  border-color: rgba(124,92,191,0.5);
-}
-.intensity-popover-panel {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 10;
-  display: flex; align-items: center; gap: 6px;
-  padding: 6px 10px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--accent);
-  border-radius: var(--radius);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-  white-space: nowrap;
-}
-.intensity-popover-panel input[type="range"] {
-  width: 140px;
-  accent-color: var(--accent);
-}
+/* NOTE: .kit-event-row and all its slot/amp/loop/delete styles now live in
+   editor/KitEventRow.css (co-located with the component). */
 
 .kit-empty { display: flex; align-items: center; justify-content: center; flex: 1; color: var(--text-secondary); font-size: 11px; text-align: center; padding: 16px; }
 .kit-empty.drop-active { background: rgba(124,92,191,0.06); }
@@ -527,10 +343,7 @@
 .capacity-labels { display: flex; justify-content: space-between; margin-top: 2px; font-size: 9px; font-family: var(--font-mono); color: var(--text-secondary); }
 .capacity-warning { color: var(--error); font-weight: 500; }
 .capacity-note { font-size: 8px; color: var(--text-secondary); opacity: 0.6; }
+.capacity-vol { color: var(--accent-light); font-weight: 500; }
 
-/* ---- Responsive ---- */
-@media (max-width: 768px) {
-  .kit-manager { flex-direction: column; }
-  .kit-manager-right { min-width: unset; }
-  .clip-library-split.h { flex-direction: column; }
-}
+/* No @media collapses anymore — min-width: 720px on .kit-manager-wrapper
+   enforces horizontal scroll instead, so each pane stays at its designed size. */

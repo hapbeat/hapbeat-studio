@@ -88,7 +88,11 @@ export interface KitDefinition {
 }
 
 export interface KitEvent {
-  /** Event ID (hapbeat-contracts format) */
+  /** Stable per-kit id, generated on add. Used as the React key and as the
+   *  handle for update/remove — NOT the same as eventId, which can repeat
+   *  across events within a kit (e.g. same clip added with different amps). */
+  id: string
+  /** Event ID (hapbeat-contracts format). May repeat within a kit. */
   eventId: string
   /** Reference to LibraryClip.id */
   clipId: string
@@ -109,7 +113,15 @@ export interface KitEvent {
 }
 
 /** Library view layout mode */
-export type LibraryViewMode = 'tabs' | 'split-h' | 'split-v' | 'unified'
+/**
+ * Kit Manager layout:
+ * - 'side'    : clips on the left, kit editor on the right (default)
+ * - 'stacked' : clips on the top, kit editor full width at the bottom
+ *
+ * Built-in and user clips are no longer split into separate panels — they
+ * live in the same unified list and the user can freely edit any of them.
+ */
+export type LibraryViewMode = 'side' | 'stacked'
 
 /** Filter/sort options for library view */
 export interface LibraryFilter {

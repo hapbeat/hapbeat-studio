@@ -22,6 +22,7 @@ import {
   writeClipFile,
   deleteClipFile,
   readClipFile,
+  archiveClipFile,
   writeMetadataJson,
   readMetadataJson,
 } from '@/utils/localDirectory'
@@ -80,6 +81,16 @@ interface LibraryState {
   kits: KitDefinition[]
   activeKitId: string | null
 
+  /** Clip id currently open in the inline editor (Clips panel). Set from
+   *  either the Clips panel itself or from a Kit event row's Edit action so
+   *  the user lands in the same editor regardless of entry point. */
+  editingClipId: string | null
+
+  /** Whether clip cards show the details row (duration / sample rate /
+   *  channels / file size / tags). Global toggle so library and kit stay
+   *  visually in sync. */
+  showClipDetails: boolean
+
   // Filter
   filter: LibraryFilter
   builtinCategoryFilter: string | null
@@ -89,6 +100,13 @@ interface LibraryState {
   loadBuiltinIndex: () => Promise<void>
   fetchBuiltinClipAudio: (builtinId: string) => Promise<Blob | undefined>
   importBuiltinToLocal: (builtinId: string) => Promise<string | undefined>
+  /**
+   * Imports every built-in clip into the current clip collection.
+   * Called automatically when the user picks a fresh work directory so
+   * they start with the shipped library available as ordinary clips
+   * they can edit, tag, rename or delete.
+   */
+  importAllBuiltinClips: () => Promise<number>
   addClipFromBuffer: (
     buffer: AudioBuffer,
     name: string,
@@ -97,6 +115,10 @@ interface LibraryState {
   ) => Promise<string>
   addClipFromFile: (file: File) => Promise<string>
   removeClip: (id: string) => Promise<void>
+  /** Move a clip into clips/archive/. Preferred over removeClip — the file
+   *  is preserved on disk so the user can recover it by moving it back.
+   *  Returns true on success. */
+  archiveClip: (id: string) => Promise<boolean>
   updateClip: (id: string, updates: Partial<LibraryClip>) => Promise<void>
   getClipAudio: (id: string) => Promise<Blob | undefined>
 
@@ -113,9 +135,20 @@ interface LibraryState {
   createKit: (name: string) => Promise<string>
   removeKit: (id: string) => Promise<void>
   setActiveKit: (id: string | null) => void
-  addEventToKit: (kitId: string, event: KitEvent) => Promise<void>
-  removeEventFromKit: (kitId: string, eventId: string) => Promise<void>
-  updateKitEvent: (kitId: string, eventId: string, updates: Partial<KitEvent>) => Promise<void>
+  setEditingClipId: (id: string | null) => void
+  setShowClipDetails: (show: boolean) => void
+  /**
+   * Adds an event to a kit. The caller passes an event *without* the stable
+   * per-kit id; the store generates it. Returns the generated id on success
+   * so the UI can scroll to / highlight the new row if desired.
+   *
+   * Duplicate eventIds are now allowed (e.g. the same clip added with two
+   * different amps as two distinct events).
+   */
+  addEventToKit: (kitId: string, event: Omit<KitEvent, 'id'>) => Promise<string | null>
+  /** Remove an event by its per-kit id (not eventId — duplicates are allowed). */
+  removeEventFromKit: (kitId: string, kitEventId: string) => Promise<void>
+  updateKitEvent: (kitId: string, kitEventId: string, updates: Partial<KitEvent>) => Promise<void>
   updateKit: (id: string, updates: Partial<KitDefinition>) => Promise<void>
 
   // Tab / filter actions
@@ -149,6 +182,17 @@ async function saveClipsMetaToDir(handle: FileSystemDirectoryHandle, clips: Libr
   await writeMetadataJson(handle, CLIPS_META_FILE, clips)
 }
 
+/** Upgrade legacy KitDefinitions whose events lack a stable `id` field. */
+function migrateKit(kit: KitDefinition): KitDefinition {
+  let changed = false
+  const events = kit.events.map((e) => {
+    if (e.id) return e
+    changed = true
+    return { ...e, id: generateId() }
+  })
+  return changed ? { ...kit, events } : kit
+}
+
 /** Save kits metadata to the local work directory */
 async function saveKitsMetaToDir(handle: FileSystemDirectoryHandle, kits: KitDefinition[]) {
   await writeMetadataJson(handle, KITS_META_FILE, kits)
@@ -161,12 +205,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   builtinLoading: false,
   builtinAudioCache: new Map(),
   activeTab: 'builtin' as LibraryTab,
-  viewMode: 'split-v' as LibraryViewMode,
+  viewMode: 'side' as LibraryViewMode,
   workDirHandle: null,
   workDirName: null,
   workDirSupported: isFileSystemAccessSupported(),
   kits: [],
   activeKitId: null,
+  editingClipId: null,
+  showClipDetails: true,
   filter: { ...DEFAULT_FILTER },
   builtinCategoryFilter: null,
 
@@ -182,11 +228,19 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       } else {
         // Fallback to IndexedDB
         const [clips, kits] = await Promise.all([listClips(), listKits()])
-        set({ clips, kits })
+        set({ clips, kits: kits.map(migrateKit) })
+      }
+      // Load the built-in index so subsequent auto-import can consult it.
+      await get().loadBuiltinIndex()
+      // Fill any missing built-ins (first run after upgrade, or user removed
+      // template/ but wants the default library back).
+      const { builtinIndex, clips } = get()
+      if (builtinIndex && builtinIndex.length > 0) {
+        const have = new Set(clips.map((c) => c.builtinId).filter((x): x is string => !!x))
+        const missing = builtinIndex.some((b) => !have.has(b.id))
+        if (missing) await get().importAllBuiltinClips()
       }
       set({ isLoading: false })
-      // Also load built-in index
-      get().loadBuiltinIndex()
     } catch (err) {
       console.error('ライブラリの読み込みに失敗:', err)
       set({ isLoading: false })
@@ -272,6 +326,53 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     return clip.id
   },
 
+  importAllBuiltinClips: async () => {
+    // Make sure we have the index (lazy-load if not yet fetched).
+    if (get().builtinIndex === null) await get().loadBuiltinIndex()
+    const { builtinIndex, fetchBuiltinClipAudio, workDirHandle } = get()
+    if (!builtinIndex || builtinIndex.length === 0) return 0
+
+    const now = new Date().toISOString()
+    const toAdd: LibraryClip[] = []
+    const existingBuiltinIds = new Set(
+      get().clips.map((c) => c.builtinId).filter((x): x is string => !!x)
+    )
+
+    for (const meta of builtinIndex) {
+      if (existingBuiltinIds.has(meta.id)) continue
+      const blob = await fetchBuiltinClipAudio(meta.id)
+      if (!blob) continue
+      // Built-ins land in clips/template/<filename>. The user can freely
+      // move them out, edit them or delete them — nothing else depends on
+      // the subfolder location, it's purely for organisation.
+      const relPath = `template/${meta.filename}`
+      const clip: LibraryClip = {
+        id: generateId(),
+        name: meta.name,
+        tags: [...meta.tags],
+        group: meta.category || 'template',
+        eventId: meta.event_id,
+        duration: meta.duration_ms / 1000,
+        channels: meta.channels,
+        sampleRate: meta.sample_rate,
+        fileSize: meta.filesize_bytes,
+        sourceFilename: relPath,
+        createdAt: now,
+        updatedAt: now,
+        builtinId: meta.id,
+      }
+      await saveClip(clip, blob)
+      if (workDirHandle) await writeClipFile(workDirHandle, relPath, blob)
+      toAdd.push(clip)
+    }
+
+    if (toAdd.length === 0) return 0
+    const newClips = [...toAdd, ...get().clips]
+    set({ clips: newClips })
+    if (workDirHandle) await saveClipsMetaToDir(workDirHandle, newClips)
+    return toAdd.length
+  },
+
   // ---- Work directory actions ----
 
   pickWorkDir: async () => {
@@ -279,8 +380,19 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const handle = await pickWorkDirectory()
     if (!handle) return false
     set({ workDirHandle: handle, workDirName: handle.name })
-    // Sync existing clips to the new directory
-    await get().syncClipsToDir()
+
+    // If the new directory already has clips, just adopt them.
+    // Otherwise auto-seed it with the full built-in library so the user
+    // can edit those clips freely from the start.
+    const existingFiles = await listClipFiles(handle)
+    if (existingFiles.length > 0) {
+      await get().syncClipsFromDir()
+    } else {
+      await get().syncClipsToDir()
+      if (get().clips.length === 0) {
+        await get().importAllBuiltinClips()
+      }
+    }
     return true
   },
 
@@ -373,11 +485,12 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     await saveClipsMetaToDir(workDirHandle, clips)
 
     if (savedKits) {
-      for (const kit of savedKits) await saveKit(kit)
-      set({ kits: savedKits })
+      const migrated = savedKits.map(migrateKit)
+      for (const kit of migrated) await saveKit(kit)
+      set({ kits: migrated })
     } else {
       const kits = await listKits()
-      set({ kits })
+      set({ kits: kits.map(migrateKit) })
     }
   },
 
@@ -521,6 +634,32 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     }
   },
 
+  archiveClip: async (id) => {
+    const { clips, workDirHandle } = get()
+    const clip = clips.find((c) => c.id === id)
+    if (!clip) return false
+
+    // Move the file into clips/archive/. If there's no work dir, just
+    // drop the entry from the list (IndexedDB path) — there's no on-disk
+    // file to move in that case.
+    if (workDirHandle && clip.sourceFilename) {
+      try {
+        await archiveClipFile(workDirHandle, clip.sourceFilename)
+      } catch (err) {
+        console.error('Failed to archive clip file:', err)
+      }
+    }
+
+    // Drop from the in-memory list and IndexedDB cache. The file lives on
+    // in clips/archive/ — the user can move it back to recover it, which
+    // our next dir refresh will pick up as a regular clip again.
+    await deleteClip(id)
+    const newClips = clips.filter((c) => c.id !== id)
+    set({ clips: newClips })
+    if (workDirHandle) await saveClipsMetaToDir(workDirHandle, newClips)
+    return true
+  },
+
   updateClip: async (id, updates) => {
     await updateClipMeta(id, updates)
     const newClips = get().clips.map((c) =>
@@ -582,26 +721,35 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ activeKitId: id })
   },
 
+  setEditingClipId: (id) => {
+    set({ editingClipId: id })
+  },
+
+  setShowClipDetails: (show) => {
+    set({ showClipDetails: show })
+  },
+
   addEventToKit: async (kitId, event) => {
     const { kits } = get()
     const kit = kits.find((k) => k.id === kitId)
-    if (!kit) return
-    if (kit.events.some((e) => e.eventId === event.eventId)) return
+    if (!kit) return null
 
-    const updated = { ...kit, events: [...kit.events, event], updatedAt: new Date().toISOString() }
+    const newEvent: KitEvent = { id: generateId(), ...event }
+    const updated = { ...kit, events: [...kit.events, newEvent], updatedAt: new Date().toISOString() }
     await saveKit(updated)
     const newKits = kits.map((k) => (k.id === kitId ? updated : k))
     set({ kits: newKits })
     const { workDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
+    return newEvent.id
   },
 
-  removeEventFromKit: async (kitId, eventId) => {
+  removeEventFromKit: async (kitId, kitEventId) => {
     const { kits } = get()
     const kit = kits.find((k) => k.id === kitId)
     if (!kit) return
 
-    const updated = { ...kit, events: kit.events.filter((e) => e.eventId !== eventId), updatedAt: new Date().toISOString() }
+    const updated = { ...kit, events: kit.events.filter((e) => e.id !== kitEventId), updatedAt: new Date().toISOString() }
     await saveKit(updated)
     const newKits = kits.map((k) => (k.id === kitId ? updated : k))
     set({ kits: newKits })
@@ -609,14 +757,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
   },
 
-  updateKitEvent: async (kitId, eventId, updates) => {
+  updateKitEvent: async (kitId, kitEventId, updates) => {
     const { kits } = get()
     const kit = kits.find((k) => k.id === kitId)
     if (!kit) return
 
     const updated = {
       ...kit,
-      events: kit.events.map((e) => e.eventId === eventId ? { ...e, ...updates } : e),
+      events: kit.events.map((e) => e.id === kitEventId ? { ...e, ...updates } : e),
       updatedAt: new Date().toISOString(),
     }
     await saveKit(updated)

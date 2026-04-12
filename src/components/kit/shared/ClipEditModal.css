@@ -1,0 +1,81 @@
+/* ============================================================
+   Clip Edit Modal — a dialog overlay so the card stays visible
+   behind. Click the backdrop or press Escape to dismiss.
+   ============================================================ */
+
+.clip-edit-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(1px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.clip-edit-modal {
+  width: 100%;
+  max-width: 440px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  max-height: 90vh;
+  overflow: hidden;
+}
+
+.clip-edit-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.clip-edit-modal-header h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-light);
+  margin: 0;
+}
+.clip-edit-modal-close {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0;
+  transition: background 0.12s, color 0.12s;
+}
+.clip-edit-modal-close:hover {
+  background: rgba(244, 67, 54, 0.2);
+  color: var(--error);
+}
+
+.clip-edit-modal .clip-edit-fields {
+  padding: 12px 14px;
+  gap: 10px;
+  overflow-y: auto;
+}
+
+.clip-edit-modal-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+}
+.clip-edit-modal-footer-spacer {
+  flex: 1 1 auto;
+}

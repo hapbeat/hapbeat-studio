@@ -91,27 +91,66 @@ async function ensureSubdir(
 
 // ---- Clip file operations ----
 
+const AUDIO_EXT = /\.(wav|mp3|ogg|flac|aac|m4a)$/i
+
+/** Directory names under clips/ that are hidden from the UI. */
+const HIDDEN_CLIP_DIRS = new Set(['archive'])
+
+/**
+ * Recursively lists all audio files under clips/, skipping hidden folders
+ * like clips/archive/. Subfolders are walked and returned with their
+ * relative path so "template/booster.wav" is a distinct entry from
+ * "booster.wav".
+ */
 export async function listClipFiles(
   root: FileSystemDirectoryHandle,
 ): Promise<{ name: string; file: File }[]> {
   const clipsDir = await ensureSubdir(root, 'clips')
   const results: { name: string; file: File }[] = []
-  for await (const entry of clipsDir.values()) {
-    if (entry.kind === 'file' && /\.(wav|mp3|ogg|flac|aac|m4a)$/i.test(entry.name)) {
-      const file = await entry.getFile()
-      results.push({ name: entry.name, file })
+
+  const walk = async (dir: FileSystemDirectoryHandle, prefix: string) => {
+    for await (const entry of dir.values()) {
+      if (entry.kind === 'file' && AUDIO_EXT.test(entry.name)) {
+        const file = await entry.getFile()
+        results.push({ name: prefix ? `${prefix}/${entry.name}` : entry.name, file })
+      } else if (entry.kind === 'directory') {
+        // Skip hidden top-level dirs (e.g. archive/) but recurse into others.
+        if (prefix === '' && HIDDEN_CLIP_DIRS.has(entry.name)) continue
+        const sub = await dir.getDirectoryHandle(entry.name)
+        await walk(sub, prefix ? `${prefix}/${entry.name}` : entry.name)
+      }
     }
   }
+  await walk(clipsDir, '')
   return results
+}
+
+/**
+ * Resolves a slash-separated relative path inside clips/ to a FileSystem
+ * directory handle + final filename, creating intermediate directories when
+ * `create` is true.
+ */
+async function resolveClipPath(
+  root: FileSystemDirectoryHandle,
+  relPath: string,
+  create: boolean,
+): Promise<{ dir: FileSystemDirectoryHandle; filename: string }> {
+  const clipsDir = await ensureSubdir(root, 'clips')
+  const parts = relPath.split('/').filter(Boolean)
+  let dir = clipsDir
+  for (let i = 0; i < parts.length - 1; i++) {
+    dir = await dir.getDirectoryHandle(parts[i], { create })
+  }
+  return { dir, filename: parts[parts.length - 1] }
 }
 
 export async function readClipFile(
   root: FileSystemDirectoryHandle,
-  filename: string,
+  relPath: string,
 ): Promise<File | null> {
   try {
-    const clipsDir = await ensureSubdir(root, 'clips')
-    const fileHandle = await clipsDir.getFileHandle(filename)
+    const { dir, filename } = await resolveClipPath(root, relPath, false)
+    const fileHandle = await dir.getFileHandle(filename)
     return fileHandle.getFile()
   } catch {
     return null
@@ -120,11 +159,11 @@ export async function readClipFile(
 
 export async function writeClipFile(
   root: FileSystemDirectoryHandle,
-  filename: string,
+  relPath: string,
   blob: Blob,
 ): Promise<void> {
-  const clipsDir = await ensureSubdir(root, 'clips')
-  const fileHandle = await clipsDir.getFileHandle(filename, { create: true })
+  const { dir, filename } = await resolveClipPath(root, relPath, true)
+  const fileHandle = await dir.getFileHandle(filename, { create: true })
   const writable = await fileHandle.createWritable()
   await writable.write(blob)
   await writable.close()
@@ -132,10 +171,57 @@ export async function writeClipFile(
 
 export async function deleteClipFile(
   root: FileSystemDirectoryHandle,
-  filename: string,
+  relPath: string,
 ): Promise<void> {
-  const clipsDir = await ensureSubdir(root, 'clips')
-  await clipsDir.removeEntry(filename)
+  try {
+    const { dir, filename } = await resolveClipPath(root, relPath, false)
+    await dir.removeEntry(filename)
+  } catch { /* ignore */ }
+}
+
+/**
+ * Moves a clip file into clips/archive/<filename> preserving its basename.
+ * If a file of the same basename already exists in archive/, appends a
+ * numeric suffix. Returns the new relative path on success, or null if the
+ * source file was not found.
+ *
+ * The archive is the studio-level "recycle bin" — hidden from the UI but
+ * still on disk so the user can recover a clip by moving it back.
+ */
+export async function archiveClipFile(
+  root: FileSystemDirectoryHandle,
+  relPath: string,
+): Promise<string | null> {
+  const file = await readClipFile(root, relPath)
+  if (!file) return null
+  const blob = new Blob([await file.arrayBuffer()], { type: 'audio/wav' })
+
+  const basename = relPath.split('/').pop() ?? relPath
+  const archiveDir = await (await ensureSubdir(root, 'clips')).getDirectoryHandle('archive', { create: true })
+
+  // Pick a non-colliding destination name.
+  let destName = basename
+  const existing = new Set<string>()
+  for await (const entry of archiveDir.values()) {
+    if (entry.kind === 'file') existing.add(entry.name)
+  }
+  if (existing.has(destName)) {
+    const dot = basename.lastIndexOf('.')
+    const stem = dot > 0 ? basename.slice(0, dot) : basename
+    const ext = dot > 0 ? basename.slice(dot) : ''
+    for (let i = 2; i < 10000; i++) {
+      const candidate = `${stem}_${i}${ext}`
+      if (!existing.has(candidate)) { destName = candidate; break }
+    }
+  }
+
+  const fh = await archiveDir.getFileHandle(destName, { create: true })
+  const writable = await fh.createWritable()
+  await writable.write(blob)
+  await writable.close()
+
+  await deleteClipFile(root, relPath)
+  return `archive/${destName}`
 }
 
 // ---- Kit folder operations ----

@@ -7,6 +7,12 @@ html {
   overflow-y: scroll;
 }
 
+/* 狭すぎるビューポートで KitManager (min-width: 720px) を潰さないよう
+   body で横スクロールを許可する */
+body {
+  overflow-x: auto;
+}
+
 /* ドラッグ中はカーソルを move に固定 + 空セルホバー抑制 */
 body.is-dragging, body.is-dragging * {
   cursor: move !important;
@@ -44,6 +50,19 @@ body.is-dragging .char-cell.empty:hover {
   padding: 0;
   box-sizing: border-box;
 }
+
+/* ---- Scrollbar — dark theme matching Studio palette ---- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-light) transparent;
+}
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--border-light);
+  border-radius: 3px;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--accent-dim); }
 
 html, body, #root {
   height: 100%;

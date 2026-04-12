@@ -59,16 +59,21 @@ export function CapacityGauge({ kitSize, managerConnected, devices, send }: Capa
         />
       </div>
       <div className="capacity-labels">
-        <span>
+        <span title="Device storage in use">
           Used: {formatFileSize(usedBytes)} / {formatFileSize(totalBytes)}
         </span>
         {kitSize > 0 && (
-          <span className={wouldExceed ? 'capacity-warning' : ''}>
+          <span className={wouldExceed ? 'capacity-warning' : ''} title="Size of the current kit">
             Kit: {formatFileSize(kitSize)}
             {wouldExceed && ' (exceeds free space!)'}
           </span>
         )}
-        <span>Free: {formatFileSize(freeBytes)}</span>
+        <span title="Remaining device storage">Free: {formatFileSize(freeBytes)}</span>
+        {devices.length > 0 && devices[0].volumeWiper != null && (
+          <span className="capacity-vol" title="Connected Hapbeat device volume (MCP4018 wiper 0–127)">
+            Vol {devices[0].volumeWiper}
+          </span>
+        )}
       </div>
       {!space && (
         <div className="capacity-note">

@@ -1,0 +1,130 @@
+/* ============================================================
+   Intensity Control — shared between Kit events and clip rows
+   Self-responsive: ResizeObserver inside the component decides
+   whether to render the inline slider or the compact popover
+   button, based on its own wrapper width.
+   ============================================================ */
+
+/* Outer wrapper — flex-grows in its parent and sets a stable width
+   basis so the inner slider/button doesn't feed back into the size. */
+.intensity-control {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+.intensity-control > .intensity-inline,
+.intensity-control > .intensity-popover-wrap {
+  width: 100%;
+  min-width: 0;
+}
+
+/* ---- Inline slider ---- */
+.intensity-inline {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 5px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: default;
+  user-select: none;
+  transition: background 0.12s, border-color 0.12s;
+  min-width: 0;
+}
+.intensity-inline:hover { background: rgba(255,255,255,0.07); }
+.intensity-inline.focused {
+  background: rgba(124,92,191,0.25);
+  border-color: rgba(124,92,191,0.5);
+}
+.intensity-inline-label {
+  font-size: 9px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+  padding-right: 2px;
+}
+.intensity-inline.focused .intensity-inline-label { color: var(--accent-light); }
+.intensity-inline input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 30px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  margin: 0;
+}
+.intensity-inline input[type="range"]:focus { outline: none; }
+.intensity-inline-val {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-primary);
+  min-width: 30px;
+  text-align: right;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Popover trigger button ---- */
+.intensity-popover-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+.intensity-popover-wrap > .intensity-popover-trigger { width: 100%; justify-content: center; }
+.intensity-popover-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s;
+}
+.intensity-popover-trigger:hover {
+  background: rgba(124,92,191,0.25);
+  border-color: rgba(124,92,191,0.5);
+}
+.intensity-popover-label {
+  font-size: 9px;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.intensity-popover-trigger:hover .intensity-popover-label { color: var(--accent-light); }
+.intensity-popover-val {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Popover panel ---- */
+.intensity-popover-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  white-space: nowrap;
+}
+.intensity-popover-panel input[type="range"] {
+  width: 140px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}

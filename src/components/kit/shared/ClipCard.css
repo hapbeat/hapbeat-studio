@@ -1,0 +1,207 @@
+/* ============================================================
+   ClipCard — flex-column card.
+
+   Row 1 (header):   [☰] [▶] ClipName  event-id badge   [wiper top-right]
+   Row 2 (controls): [====== Amp slider 100%] [+Kit] [Edit]
+   Row 3 (details, optional): duration · channels · kHz · size   tag tag tag
+
+   The header keeps handle + play + name on one line so the card only
+   uses two visible rows by default (three with details shown).
+   ============================================================ */
+.clip-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  margin: 4px 0;
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-top-width: 2px;
+  position: relative;
+  min-width: 0;
+  transition: background 0.12s, border-color 0.12s;
+}
+.clip-card:hover {
+  background: var(--bg-surface);
+  border-color: rgba(124,92,191,0.3);
+}
+.clip-card.drag-over-indicator { border-top-color: var(--accent); }
+
+/* ---- Row 1: header (handle / play / name / event-id) ---- */
+.clip-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.clip-card-handle {
+  width: 16px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--text-secondary);
+  opacity: 0.4;
+  cursor: grab;
+  user-select: none;
+  border-radius: 3px;
+  transition: background 0.12s, opacity 0.12s;
+}
+.clip-card-handle:hover {
+  opacity: 1;
+  background: rgba(124,92,191,0.2);
+  color: var(--accent-light);
+}
+.clip-card-handle:active { cursor: grabbing; }
+
+.clip-card-play {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.clip-card-play:hover { background: var(--accent); }
+.clip-card-play.playing { background: var(--accent); border-color: var(--accent); }
+
+.clip-card-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1 1 auto;
+  font-family: var(--font-ui);
+}
+.clip-card-name:hover:not(:disabled) { color: var(--accent-light); text-decoration: underline; }
+.clip-card-name:disabled { cursor: default; }
+
+.clip-card-event-id {
+  display: inline-block;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--accent-light);
+  padding: 0 5px;
+  background: rgba(124,92,191,0.1);
+  border: 1px solid rgba(124,92,191,0.25);
+  border-radius: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 0 1 auto;
+  max-width: 55%;
+}
+.clip-card-event-id.empty {
+  color: var(--text-secondary);
+  opacity: 0.5;
+  border-style: dashed;
+}
+
+/* ---- Row 2: controls (amp slider + actions) ---- */
+.clip-card-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.clip-card-actions {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  flex-shrink: 0;
+}
+.clip-card-action-btn {
+  padding: 3px 8px;
+  font-size: 10px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.clip-card-action-btn:hover { background: var(--accent); border-color: var(--accent); }
+.clip-card-action-btn.primary {
+  background: rgba(124,92,191,0.2);
+  border-color: rgba(124,92,191,0.4);
+  color: var(--accent-light);
+}
+.clip-card-action-btn.primary:hover { background: var(--accent); color: var(--text-primary); }
+.clip-card-action-btn.danger { color: var(--text-secondary); }
+.clip-card-action-btn.danger:hover { background: rgba(244,67,54,0.3); color: var(--error); border-color: var(--error); }
+.clip-card-action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.clip-card-action-btn:disabled:hover { background: var(--bg-surface); border-color: var(--border); color: var(--text-primary); }
+
+/* ---- Row 3 (optional): details (duration / sample rate / file size / tags) ---- */
+.clip-card-details {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 9px;
+  color: var(--text-secondary);
+  padding-top: 2px;
+  border-top: 1px dashed rgba(255,255,255,0.05);
+  margin-top: 2px;
+  /* Fixed single-line height so cards don't shift when tags appear/disappear */
+  height: 18px;
+  flex-shrink: 0;
+}
+.clip-card-details-meta {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 0 1 auto;
+  opacity: 0.85;
+}
+.clip-card-details-tags {
+  display: flex;
+  gap: 3px;
+  flex-wrap: nowrap;
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+}
+.clip-card-tag {
+  padding: 1px 6px;
+  font-size: 9px;
+  background: rgba(255,255,255,0.05);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  white-space: nowrap;
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* When details row is hidden but Vol needs to show, render a
+   minimal row with just the badge right-aligned. */
+.clip-card-details-vol-only {
+  border-top: none;
+  margin-top: 0;
+  padding-top: 0;
+  justify-content: flex-end;
+}

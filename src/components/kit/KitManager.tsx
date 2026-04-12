@@ -2,15 +2,17 @@ import { useEffect, useCallback, useState, useRef, type MouseEvent as ReactMouse
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useManagerConnection } from '@/hooks/useManagerConnection'
 import { useToast } from '@/components/common/Toast'
-import { formatDuration, formatFileSize } from '@/utils/wavIO'
+import { formatFileSize } from '@/utils/wavIO'
 import { exportKitAsPack, downloadBlob, validateEventIds } from '@/utils/kitExporter'
-import type { LibraryClip, BuiltinClipMeta, LibraryViewMode } from '@/types/library'
+import type { LibraryClip, LibraryViewMode } from '@/types/library'
 import type { DeviceInfo } from '@/types/manager'
 import { CapacityGauge } from './CapacityGauge'
+import { KitEventRow } from './editor/KitEventRow'
+import { ClipCard } from './shared/ClipCard'
+import { ClipEditModal } from './shared/ClipEditModal'
 import './KitManager.css'
 
 const DND_TYPE_CLIP = 'application/x-hapbeat-clip'
-const DND_TYPE_BUILTIN = 'application/x-hapbeat-builtin'
 const DND_TYPE_KIT_EVENT = 'application/x-hapbeat-kit-event'
 
 function randomKitName(): string {
@@ -18,8 +20,6 @@ function randomKitName(): string {
   const noun = ['Kit', 'Pack', 'Set', 'Mix', 'Drop', 'Vibe', 'Hit', 'Boom', 'Wave', 'Beat']
   return `${adj[Math.floor(Math.random() * adj.length)]}-${noun[Math.floor(Math.random() * noun.length)]}`
 }
-
-type ClipListMode = 'flat' | 'tree'
 
 // ============================================================
 // Resize handle hook
@@ -62,48 +62,14 @@ export function KitManager() {
   const viewMode = useLibraryStore((s) => s.viewMode)
   const workDirSupported = useLibraryStore((s) => s.workDirSupported)
 
-  // Resize between library and kit editor (horizontal)
-  const mainResize = useResizeHandle('horizontal', 60)
-  // Resize between builtin and user panels
-  const splitDir = viewMode === 'split-h' ? 'horizontal' : 'vertical'
-  const splitResize = useResizeHandle(splitDir, 50)
-
-  // Panel collapse
-  const [collapsedPanels, setCollapsedPanels] = useState<Set<string>>(new Set())
-  const togglePanel = useCallback((id: string) => {
-    setCollapsedPanels((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
-  }, [])
+  // Stacked mode keeps a vertical resize handle so the user can trade library
+  // vs kit height. Side mode uses fixed widths — the draggable range was too
+  // small to be useful, and fixing removes a whole class of layout bugs.
+  const stackedResize = useResizeHandle('vertical', 50)
 
   useEffect(() => { loadLibrary() }, [loadLibrary])
 
   if (isLoading) return <div className="kit-manager-wrapper"><div className="kit-loading">Loading...</div></div>
-
-  const isSplit = viewMode === 'split-h' || viewMode === 'split-v'
-  const splitClass = viewMode === 'split-h' ? 'h' : 'v'
-
-  const libraryContent = isSplit ? (
-    <div className={`clip-library-split ${splitClass}`} ref={splitResize.containerRef}>
-      {!collapsedPanels.has('builtin') && (
-        <div className="split-pane" style={splitDir === 'vertical' ? { height: `${splitResize.pct}%` } : { width: `${splitResize.pct}%` }}>
-          <BuiltinClipPanel onCollapse={() => togglePanel('builtin')} />
-        </div>
-      )}
-      {!collapsedPanels.has('builtin') && !collapsedPanels.has('user') && (
-        <div className={`resize-handle ${splitClass}`} onMouseDown={splitResize.onMouseDown} />
-      )}
-      {!collapsedPanels.has('user') && (
-        <div className="split-pane" style={{ flex: 1 }}>
-          <UserClipPanel onCollapse={() => togglePanel('user')} />
-        </div>
-      )}
-      {collapsedPanels.has('builtin') && <CollapsedBar label="Built-in" onExpand={() => togglePanel('builtin')} />}
-      {collapsedPanels.has('user') && <CollapsedBar label="My Clips" onExpand={() => togglePanel('user')} />}
-    </div>
-  ) : viewMode === 'unified' ? (
-    <UnifiedClipPanel />
-  ) : (
-    <TabbedClipPanel />
-  )
 
   return (
     <div className="kit-manager-wrapper">
@@ -113,17 +79,20 @@ export function KitManager() {
         </div>
       )}
       <WorkDirBar />
-      <div className="kit-manager" ref={mainResize.containerRef}>
-        <div className="kit-manager-left" style={{ width: `${mainResize.pct}%` }}>{libraryContent}</div>
-        <div className="resize-handle h" onMouseDown={mainResize.onMouseDown} />
-        <div className="kit-manager-right" style={{ flex: 1 }}><KitEditor /></div>
-      </div>
+      {viewMode === 'stacked' ? (
+        <div className="kit-manager kit-manager-stacked" ref={stackedResize.containerRef}>
+          <div className="kit-manager-top" style={{ height: `${stackedResize.pct}%` }}><ClipsPanel /></div>
+          <div className="resize-handle v" onMouseDown={stackedResize.onMouseDown} />
+          <div className="kit-manager-bottom" style={{ flex: 1 }}><KitEditor /></div>
+        </div>
+      ) : (
+        <div className="kit-manager">
+          <div className="kit-manager-left"><ClipsPanel /></div>
+          <div className="kit-manager-right"><KitEditor /></div>
+        </div>
+      )}
     </div>
   )
-}
-
-function CollapsedBar({ label, onExpand }: { label: string; onExpand: () => void }) {
-  return <button className="collapsed-bar" onClick={onExpand} title={`Show ${label}`}>{label}</button>
 }
 
 // ============================================================
@@ -137,13 +106,15 @@ function WorkDirBar() {
   const disconnectWorkDir = useLibraryStore((s) => s.disconnectWorkDir)
   const viewMode = useLibraryStore((s) => s.viewMode)
   const setViewMode = useLibraryStore((s) => s.setViewMode)
+  const showClipDetails = useLibraryStore((s) => s.showClipDetails)
+  const setShowClipDetails = useLibraryStore((s) => s.setShowClipDetails)
+  const { devices } = useManagerConnection()
+  const volumeWiper = devices[0]?.volumeWiper ?? null
   const { toast } = useToast()
 
   const views: { value: LibraryViewMode; label: string; title: string }[] = [
-    { value: 'split-v', label: '\u2501', title: 'Horizontal split (top/bottom)' },
-    { value: 'split-h', label: '\u2503', title: 'Vertical split (left/right)' },
-    { value: 'tabs', label: 'Tab', title: 'Tab view' },
-    { value: 'unified', label: 'All', title: 'Unified list' },
+    { value: 'side', label: '\u2503', title: 'Clips left, kit editor right' },
+    { value: 'stacked', label: '\u2501', title: 'Clips top, kit editor full width bottom' },
   ]
 
   return (
@@ -154,6 +125,11 @@ function WorkDirBar() {
             onClick={() => setViewMode(m.value)} title={m.title}>{m.label}</button>
         ))}
       </div>
+      <button
+        className={`view-mode-btn info-toggle ${showClipDetails ? 'active' : ''}`}
+        onClick={() => setShowClipDetails(!showClipDetails)}
+        title={showClipDetails ? 'Hide clip details (duration, sample rate, tags…)' : 'Show clip details'}
+      >i</button>
       <span className="workdir-divider" />
       {workDirSupported && (
         <>
@@ -164,6 +140,12 @@ function WorkDirBar() {
               <span className="workdir-status connected">Connected</span>
               <button className="workdir-btn" onClick={async () => { if (await pickWorkDir()) toast('Folder changed', 'success') }}>Change</button>
               <button className="workdir-btn disconnect" onClick={async () => { await disconnectWorkDir(); toast('Disconnected', 'success') }}>Disconnect</button>
+              {volumeWiper !== null && (
+                <>
+                  <span className="workdir-divider" />
+                  <span className="workdir-vol" title="Connected Hapbeat device volume (MCP4018 wiper 0–127)">Vol {volumeWiper}</span>
+                </>
+              )}
             </>
           ) : (
             <>
@@ -242,176 +224,101 @@ function useAudioPreview() {
 }
 
 // ============================================================
-// Intensity Slider — reusable component
+// Tree grouping — builds a nested folder tree from clip.sourceFilename
+// ("template/booster.wav" → template / booster.wav). Clips with no
+// path prefix land in the root bucket.
 // ============================================================
 
-interface IntensitySliderProps {
-  value: number
-  onChange: (v: number) => void
-  label?: string
+interface ClipTreeNode {
+  name: string
+  path: string
+  children: Map<string, ClipTreeNode>
+  clips: LibraryClip[]
 }
 
-function IntensitySlider({ value, onChange, label = 'Amp' }: IntensitySliderProps) {
-  const [focused, setFocused] = useState(false)
-  return (
-    <label
-      className={`intensity-slider ${focused ? 'focused' : ''}`}
-      draggable={false}
-      onMouseDown={(e) => e.stopPropagation()}
-      onDragStart={(e) => { e.preventDefault(); e.stopPropagation() }}
-      title="クリックでフォーカス、矢印キーで微調整"
-    >
-      <span className="intensity-label">{label}</span>
-      <input
-        type="range"
-        min={0} max={1} step={0.05}
-        value={value}
-        draggable={false}
-        onChange={(e) => onChange(Number(e.target.value))}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        onMouseDown={(e) => e.stopPropagation()}
-      />
-      <span className="intensity-val">{Math.round(value * 100)}%</span>
-    </label>
-  )
-}
-
-/** Compact popover trigger for very narrow cards — shown only when slider is hidden */
-function IntensityPopover({ value, onChange }: IntensitySliderProps) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const onClickOutside = (e: globalThis.MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+function buildClipTree(clips: LibraryClip[]): ClipTreeNode {
+  const root: ClipTreeNode = { name: '', path: '', children: new Map(), clips: [] }
+  for (const clip of clips) {
+    const src = clip.sourceFilename || ''
+    const parts = src.split('/').filter(Boolean)
+    if (parts.length <= 1) {
+      root.clips.push(clip)
+      continue
     }
-    document.addEventListener('mousedown', onClickOutside)
-    return () => document.removeEventListener('mousedown', onClickOutside)
-  }, [open])
-
-  return (
-    <div className="intensity-popover" ref={ref}
-      draggable={false}
-      onMouseDown={(e) => e.stopPropagation()}>
-      <button className="intensity-popover-trigger"
-        onClick={() => setOpen(!open)}
-        title="Amp">
-        <span className="intensity-popover-label">Amp</span> {Math.round(value * 100)}%
-      </button>
-      {open && (
-        <div className="intensity-popover-panel">
-          <span className="intensity-label">Amp</span>
-          <input type="range" min={0} max={1} step={0.05} value={value}
-            draggable={false}
-            onChange={(e) => onChange(Number(e.target.value))}
-            onMouseDown={(e) => e.stopPropagation()} />
-          <span className="intensity-val">{Math.round(value * 100)}%</span>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ============================================================
-// Group clips by category for tree view
-// ============================================================
-
-function groupByCategory<T>(items: T[], getCategory: (item: T) => string): Map<string, T[]> {
-  const map = new Map<string, T[]>()
-  for (const item of items) {
-    const cat = getCategory(item) || 'uncategorized'
-    if (!map.has(cat)) map.set(cat, [])
-    map.get(cat)!.push(item)
+    // All but the last segment are folder names.
+    let node = root
+    for (let i = 0; i < parts.length - 1; i++) {
+      const name = parts[i]
+      let child = node.children.get(name)
+      if (!child) {
+        child = { name, path: node.path ? `${node.path}/${name}` : name, children: new Map(), clips: [] }
+        node.children.set(name, child)
+      }
+      node = child
+    }
+    node.clips.push(clip)
   }
-  return new Map([...map.entries()].sort(([a], [b]) => a.localeCompare(b)))
+  return root
 }
 
-function builtinCategory(c: BuiltinClipMeta): string { return c.category || c.event_id.split('.')[0] }
-function userCategory(c: LibraryClip): string { return c.group || c.eventId.split('.')[0] }
+/** Stable hue palette — high-contrast, easily distinguishable colours.
+ *  Order: red, green, blue, orange, cyan, pink, yellow, teal, magenta, lime */
+const TREE_HUES = [0, 130, 220, 30, 185, 330, 50, 165, 290, 90]
 
-// ============================================================
-// Built-in Panel
-// ============================================================
-
-function BuiltinClipPanel({ onCollapse }: { onCollapse?: () => void }) {
-  const builtinIndex = useLibraryStore((s) => s.builtinIndex)
-  const filteredBuiltinClips = useLibraryStore((s) => s.filteredBuiltinClips)
-  const builtinCategories = useLibraryStore((s) => s.builtinCategories)
-  const builtinCategoryFilter = useLibraryStore((s) => s.builtinCategoryFilter)
-  const setBuiltinCategoryFilter = useLibraryStore((s) => s.setBuiltinCategoryFilter)
-  const filter = useLibraryStore((s) => s.filter)
-  const setFilter = useLibraryStore((s) => s.setFilter)
-  const [listMode, setListMode] = useState<ClipListMode>('flat')
-  const displayed = filteredBuiltinClips()
-  const categories = builtinCategories()
-  const { playingId, toggle } = useAudioPreview()
-
+function TreeFolder({ node, defaultOpen, index, children }: { node: ClipTreeNode; defaultOpen: boolean; index: number; children: React.ReactNode }) {
+  const [open, setOpen] = useState(defaultOpen)
+  const clipCount = countClipsInTree(node)
+  const hue = TREE_HUES[index % TREE_HUES.length]
   return (
-    <div className="clip-panel">
-      <div className="panel-header">
-        <h3>Built-in</h3>
-        <span className="library-count">{builtinIndex?.length ?? 0}</span>
-        <div className="panel-header-actions">
-          <button className={`panel-mode-btn ${listMode === 'flat' ? 'active' : ''}`} onClick={() => setListMode('flat')} title="Flat list">=</button>
-          <button className={`panel-mode-btn ${listMode === 'tree' ? 'active' : ''}`} onClick={() => setListMode('tree')} title="Tree view">&#x25B8;</button>
-          {onCollapse && <button className="panel-collapse-btn" onClick={onCollapse} title="Collapse">_</button>}
-        </div>
-      </div>
-      <div className="library-toolbar">
-        <input type="text" className="library-search" placeholder="Search..." value={filter.searchQuery}
-          onChange={(e) => setFilter({ searchQuery: e.target.value })} />
-      </div>
-      {listMode === 'flat' && categories.length > 0 && (
-        <div className="library-filters"><div className="library-tags">
-          <button className={`tag-chip ${builtinCategoryFilter === null ? 'active' : ''}`}
-            onClick={() => setBuiltinCategoryFilter(null)}>All</button>
-          {categories.map((c) => (
-            <button key={c} className={`tag-chip ${builtinCategoryFilter === c ? 'active' : ''}`}
-              onClick={() => setBuiltinCategoryFilter(builtinCategoryFilter === c ? null : c)}>{c}</button>
-          ))}
-        </div></div>
-      )}
-      <div className="library-list">
-        {displayed.length === 0
-          ? <div className="library-empty">{builtinIndex === null ? 'Loading...' : 'No clips.'}</div>
-          : listMode === 'tree' ? (
-            [...groupByCategory(displayed, builtinCategory)].map(([cat, clips]) => (
-              <TreeGroup key={cat} label={cat}>
-                {clips.map((c) => <BuiltinClipRow key={c.id} clip={c} playingId={playingId} onToggle={toggle} />)}
-              </TreeGroup>
-            ))
-          ) : displayed.map((c) => <BuiltinClipRow key={c.id} clip={c} playingId={playingId} onToggle={toggle} />)
-        }
-      </div>
+    <div className={`tree-group ${open ? 'is-open' : ''}`} style={{ '--tree-hue': hue } as React.CSSProperties}>
+      <button className="tree-group-header" onClick={() => setOpen(!open)}>
+        <span className="tree-arrow">{open ? '\u25BE' : '\u25B8'}</span>
+        <span className="tree-label">{node.name}</span>
+        <span className="tree-count">{clipCount}</span>
+      </button>
+      {open && <div className="tree-group-children">{children}</div>}
     </div>
   )
 }
 
+function countClipsInTree(node: ClipTreeNode): number {
+  let n = node.clips.length
+  for (const c of node.children.values()) n += countClipsInTree(c)
+  return n
+}
+
 // ============================================================
-// User Panel
+// Clips Panel — unified list (built-ins are auto-imported into the
+// user's work folder so there is no separate built-in/user split)
 // ============================================================
 
-function UserClipPanel({ onCollapse }: { onCollapse?: () => void }) {
+type ClipListMode = 'flat' | 'tree'
+
+function ClipsPanel() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const clips = useLibraryStore((s) => s.clips)
   const filteredClips = useLibraryStore((s) => s.filteredClips)
   const filter = useLibraryStore((s) => s.filter)
   const setFilter = useLibraryStore((s) => s.setFilter)
   const addClipFromFile = useLibraryStore((s) => s.addClipFromFile)
-  const removeClip = useLibraryStore((s) => s.removeClip)
+  const archiveClip = useLibraryStore((s) => s.archiveClip)
   const updateClip = useLibraryStore((s) => s.updateClip)
   const workDirHandle = useLibraryStore((s) => s.workDirHandle)
   const workDirSupported = useLibraryStore((s) => s.workDirSupported)
   const pickWorkDir = useLibraryStore((s) => s.pickWorkDir)
   const refreshClipsFromDir = useLibraryStore((s) => s.refreshClipsFromDir)
   const getClipAudio = useLibraryStore((s) => s.getClipAudio)
-  const [editingId, setEditingId] = useState<string | null>(null)
+  const addEventToKit = useLibraryStore((s) => s.addEventToKit)
+  const activeKitId = useLibraryStore((s) => s.activeKitId)
+  const editingClipId = useLibraryStore((s) => s.editingClipId)
+  const setEditingClipId = useLibraryStore((s) => s.setEditingClipId)
+  const showClipDetails = useLibraryStore((s) => s.showClipDetails)
+  const { toast } = useToast()
   const [dragOver, setDragOver] = useState(false)
-  const [listMode, setListMode] = useState<ClipListMode>('flat')
+  const [listMode, setListMode] = useState<ClipListMode>('tree')
   const { playingId, toggle } = useAudioPreview()
   const displayed = filteredClips()
+  const editingClip = editingClipId ? clips.find((c) => c.id === editingClipId) ?? null : null
 
   useEffect(() => {
     if (!workDirHandle) return
@@ -424,18 +331,57 @@ function UserClipPanel({ onCollapse }: { onCollapse?: () => void }) {
     for (const f of Array.from(files)) { try { await addClipFromFile(f) } catch (e) { console.error(e) } }
   }, [addClipFromFile])
 
+  const addClipToActiveKit = useCallback(async (clip: LibraryClip) => {
+    if (!activeKitId) { toast('Select or create a Kit first', 'error'); return }
+    if (!clip.eventId) { toast('Set Event ID first', 'error'); return }
+    const newId = await addEventToKit(activeKitId, {
+      eventId: clip.eventId, clipId: clip.id, loop: false, intensity: 0.5, deviceWiper: null,
+    })
+    if (newId) toast(`Added "${clip.name}" to kit`, 'success')
+    else toast('Kit not found', 'error')
+  }, [activeKitId, addEventToKit, toast])
+
+  const renderClipRow = (c: LibraryClip) => (
+    <ClipRow
+      key={c.id}
+      clip={c}
+      onStartEdit={() => setEditingClipId(c.id)}
+      playingId={playingId}
+      onToggle={(id, intensity) => toggle(id, () => getClipAudio(id), intensity)}
+      onAddToKit={() => addClipToActiveKit(c)}
+      kitAvailable={!!activeKitId}
+      showDetails={showClipDetails}
+    />
+  )
+
+  const renderTreeNode = (node: ClipTreeNode, isRoot: boolean): React.ReactNode => {
+    const childFolders = [...node.children.values()].sort((a, b) => a.name.localeCompare(b.name))
+    const sortedClips = [...node.clips].sort((a, b) => a.name.localeCompare(b.name))
+    const body = (
+      <>
+        {childFolders.map((child, i) => (
+          <TreeFolder key={child.path} node={child} defaultOpen={true} index={i}>
+            {renderTreeNode(child, false)}
+          </TreeFolder>
+        ))}
+        {sortedClips.map((c) => renderClipRow(c))}
+      </>
+    )
+    return isRoot ? body : body
+  }
+
   if (!workDirHandle) {
     return (
       <div className="clip-panel">
-        <div className="panel-header"><h3>My Clips</h3>
-          {onCollapse && <div className="panel-header-actions"><button className="panel-collapse-btn" onClick={onCollapse}>_</button></div>}
-        </div>
+        <div className="panel-header"><h3>Clips</h3></div>
         <div className="library-list">
           <div className="library-empty workdir-prompt">
             <div className="workdir-prompt-content">
               <div className="workdir-prompt-icon">&#x1F4C2;</div>
               <div className="workdir-prompt-text">
-                {workDirSupported ? 'Select a work folder to manage clips.' : 'Use Chrome or Edge.'}
+                {workDirSupported
+                  ? 'Pick a work folder to start. We\'ll copy the built-in clips into it so you can edit anything freely.'
+                  : 'Use Chrome or Edge.'}
               </div>
               {workDirSupported && <button className="library-btn primary" onClick={pickWorkDir}>Choose Folder</button>}
             </div>
@@ -445,37 +391,25 @@ function UserClipPanel({ onCollapse }: { onCollapse?: () => void }) {
     )
   }
 
-  const renderClips = () => {
-    if (displayed.length === 0) return <div className="library-empty">{clips.length === 0 ? 'Drop files or Import.' : 'No match.'}</div>
-    const rows = displayed.map((c) => (
-      <UserClipRow key={c.id} clip={c} isEditing={editingId === c.id}
-        onStartEdit={() => setEditingId(c.id)} onEndEdit={() => setEditingId(null)}
-        onUpdate={updateClip} onDelete={removeClip}
-        playingId={playingId} onToggle={(id, intensity) => toggle(id, () => getClipAudio(id), intensity)} />
-    ))
-    if (listMode === 'tree') {
-      return [...groupByCategory(displayed, userCategory)].map(([cat, items]) => (
-        <TreeGroup key={cat} label={cat}>{items.map((c) => (
-          <UserClipRow key={c.id} clip={c} isEditing={editingId === c.id}
-            onStartEdit={() => setEditingId(c.id)} onEndEdit={() => setEditingId(null)}
-            onUpdate={updateClip} onDelete={removeClip}
-            playingId={playingId} onToggle={(id, intensity) => toggle(id, () => getClipAudio(id), intensity)} />
-        ))}</TreeGroup>
-      ))
-    }
-    return rows
-  }
-
   return (
     <div className={`clip-panel ${dragOver ? 'drag-over' : ''}`}
       onDrop={(e) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files.length > 0) handleImport(e.dataTransfer.files) }}
       onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
       onDragLeave={() => setDragOver(false)}>
-      <div className="panel-header"><h3>My Clips</h3><span className="library-count">{clips.length}</span>
+      <div className="panel-header">
+        <h3>Clips</h3>
+        <span className="library-count">{clips.length}</span>
         <div className="panel-header-actions">
-          <button className={`panel-mode-btn ${listMode === 'flat' ? 'active' : ''}`} onClick={() => setListMode('flat')} title="Flat">=</button>
-          <button className={`panel-mode-btn ${listMode === 'tree' ? 'active' : ''}`} onClick={() => setListMode('tree')} title="Tree">&#x25B8;</button>
-          {onCollapse && <button className="panel-collapse-btn" onClick={onCollapse} title="Collapse">_</button>}
+          <button
+            className={`panel-mode-btn ${listMode === 'flat' ? 'active' : ''}`}
+            onClick={() => setListMode('flat')}
+            title="Flat list (all clips, no folders)"
+          >=</button>
+          <button
+            className={`panel-mode-btn ${listMode === 'tree' ? 'active' : ''}`}
+            onClick={() => setListMode('tree')}
+            title="Tree view (grouped by folder)"
+          >&#x25B8;</button>
         </div>
       </div>
       <div className="library-toolbar">
@@ -486,209 +420,75 @@ function UserClipPanel({ onCollapse }: { onCollapse?: () => void }) {
         <button className="library-btn" onClick={() => fileInputRef.current?.click()}>+ Import</button>
         <button className="library-btn" onClick={refreshClipsFromDir}>Refresh</button>
       </div>
-      <div className="library-list">{renderClips()}</div>
-    </div>
-  )
-}
-
-// ============================================================
-// Tree Group
-// ============================================================
-
-function TreeGroup({ label, children }: { label: string; children: React.ReactNode }) {
-  const [open, setOpen] = useState(true)
-  return (
-    <div className="tree-group">
-      <button className="tree-group-header" onClick={() => setOpen(!open)}>
-        <span className="tree-arrow">{open ? '\u25BE' : '\u25B8'}</span>
-        <span className="tree-label">{label}</span>
-      </button>
-      {open && <div className="tree-group-children">{children}</div>}
-    </div>
-  )
-}
-
-// ============================================================
-// Tabbed / Unified
-// ============================================================
-
-function TabbedClipPanel() {
-  const activeTab = useLibraryStore((s) => s.activeTab)
-  const setActiveTab = useLibraryStore((s) => s.setActiveTab)
-  return (
-    <div className="clip-panel clip-panel-full">
-      <div className="library-tabs">
-        <button className={`library-tab ${activeTab === 'builtin' ? 'active' : ''}`} onClick={() => setActiveTab('builtin')}>Built-in</button>
-        <button className={`library-tab ${activeTab === 'user' ? 'active' : ''}`} onClick={() => setActiveTab('user')}>My Clips</button>
-      </div>
-      {activeTab === 'builtin' ? <BuiltinClipPanel /> : <UserClipPanel />}
-    </div>
-  )
-}
-
-function UnifiedClipPanel() {
-  const builtinIndex = useLibraryStore((s) => s.builtinIndex)
-  const filteredBuiltinClips = useLibraryStore((s) => s.filteredBuiltinClips)
-  const filteredClips = useLibraryStore((s) => s.filteredClips)
-  const filter = useLibraryStore((s) => s.filter)
-  const setFilter = useLibraryStore((s) => s.setFilter)
-  const updateClip = useLibraryStore((s) => s.updateClip)
-  const removeClip = useLibraryStore((s) => s.removeClip)
-  const getClipAudio = useLibraryStore((s) => s.getClipAudio)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const { playingId, toggle } = useAudioPreview()
-  const bc = filteredBuiltinClips(), uc = filteredClips()
-
-  return (
-    <div className="clip-panel clip-panel-full">
-      <div className="panel-header"><h3>All Clips</h3><span className="library-count">{(builtinIndex?.length ?? 0) + uc.length}</span></div>
-      <div className="library-toolbar">
-        <input type="text" className="library-search" placeholder="Search..." value={filter.searchQuery}
-          onChange={(e) => setFilter({ searchQuery: e.target.value })} />
-      </div>
       <div className="library-list">
-        {bc.length > 0 && <><div className="list-section-header">Built-in</div>
-          {bc.map((c) => <BuiltinClipRow key={c.id} clip={c} playingId={playingId} onToggle={toggle} />)}</>}
-        {uc.length > 0 && <><div className="list-section-header">My Clips</div>
-          {uc.map((c) => <UserClipRow key={c.id} clip={c} isEditing={editingId === c.id}
-            onStartEdit={() => setEditingId(c.id)} onEndEdit={() => setEditingId(null)}
-            onUpdate={updateClip} onDelete={removeClip}
-            playingId={playingId} onToggle={(id, intensity) => toggle(id, () => getClipAudio(id), intensity)} />)}</>}
-        {bc.length === 0 && uc.length === 0 && <div className="library-empty">No clips.</div>}
+        {displayed.length === 0
+          ? <div className="library-empty">{clips.length === 0 ? 'Drop files or + Import.' : 'No match.'}</div>
+          : listMode === 'flat'
+            ? displayed.map((c) => renderClipRow(c))
+            : renderTreeNode(buildClipTree(displayed), true)
+        }
       </div>
+
+      {editingClip && (
+        <ClipEditModal
+          clip={editingClip}
+          onClose={() => setEditingClipId(null)}
+          onUpdate={updateClip}
+          onArchive={async (id) => { await archiveClip(id) }}
+        />
+      )}
     </div>
   )
 }
 
 // ============================================================
-// Clip Rows
+// Clip Row — uses unified ClipCard primitive
 // ============================================================
 
-function BuiltinClipRow({ clip, playingId, onToggle }: {
-  clip: BuiltinClipMeta; playingId: string | null
-  onToggle: (id: string, getBlob: () => Promise<Blob | undefined>, intensity: number) => void
-}) {
-  const fetchAudio = useLibraryStore((s) => s.fetchBuiltinClipAudio)
-  const importToLocal = useLibraryStore((s) => s.importBuiltinToLocal)
-  const { toast } = useToast()
-  const { devices } = useManagerConnection()
-  const wiper = devices[0]?.volumeWiper ?? null
-  const [intensity, setIntensity] = useState(0.5)
-
-  return (
-    <div className="clip-row">
-      <div className="clip-drag-handle" draggable
-        onDragStart={(e) => { e.dataTransfer.setData(DND_TYPE_BUILTIN, clip.id); e.dataTransfer.effectAllowed = 'copy' }}
-        title="ドラッグして Kit に追加">&#x2630;</div>
-      <button className={`clip-play-btn ${playingId === clip.id ? 'playing' : ''}`}
-        onClick={() => onToggle(clip.id, () => fetchAudio(clip.id), intensity)}>
-        {playingId === clip.id ? '\u25A0' : '\u25B6'}</button>
-      <div className="clip-body">
-        <div className="clip-row-top">
-          <span className="clip-name">{clip.name}</span>
-          <span className="clip-meta">{Math.round(clip.duration_ms)}ms {clip.channels === 1 ? 'M' : 'St'} {clip.sample_rate / 1000}k {formatFileSize(clip.filesize_bytes)}</span>
-        </div>
-        <div className="clip-row-bottom">
-          <span className="clip-event-id" title="Event ID">{clip.event_id}</span>
-          {clip.tags.length > 0 && <span className="clip-tags-inline">{clip.tags.join(', ')}</span>}
-        </div>
-      </div>
-      <IntensitySlider value={intensity} onChange={setIntensity} />
-      <IntensityPopover value={intensity} onChange={setIntensity} />
-      <div className="clip-actions">
-        <button className="clip-action-btn"
-          onClick={async () => { const id = await importToLocal(clip.id); if (id) toast(`Copied "${clip.name}"`, 'success') }}>Copy</button>
-      </div>
-      {wiper !== null && <span className="clip-wiper-corner" title="Device volume wiper (0–127)">wiper {wiper}/127</span>}
-    </div>
-  )
+interface ClipRowProps {
+  clip: LibraryClip
+  onStartEdit: () => void
+  playingId: string | null
+  onToggle: (id: string, intensity: number) => void
+  onAddToKit: () => void
+  kitAvailable: boolean
+  showDetails: boolean
 }
 
-function UserClipRow({ clip, isEditing, onStartEdit, onEndEdit, onUpdate, onDelete, playingId, onToggle }: {
-  clip: LibraryClip; isEditing: boolean
-  onStartEdit: () => void; onEndEdit: () => void
-  onUpdate: (id: string, u: Partial<LibraryClip>) => Promise<void>
-  onDelete: (id: string) => Promise<void>
-  playingId: string | null; onToggle: (id: string, intensity: number) => void
-}) {
-  const [tagInput, setTagInput] = useState('')
+function ClipRow({
+  clip,
+  onStartEdit,
+  playingId,
+  onToggle,
+  onAddToKit,
+  kitAvailable,
+  showDetails,
+}: ClipRowProps) {
   const [intensity, setIntensity] = useState(0.5)
-  const { devices } = useManagerConnection()
-  const wiper = devices[0]?.volumeWiper ?? null
 
-  // Split eventId into category.name
-  const dotIdx = clip.eventId.indexOf('.')
-  const eidCategory = dotIdx > 0 ? clip.eventId.substring(0, dotIdx) : ''
-  const eidName = dotIdx > 0 ? clip.eventId.substring(dotIdx + 1) : clip.eventId
-
-  const updateEventId = useCallback((cat: string, name: string) => {
-    const c = cat.toLowerCase().replace(/[^a-z0-9_-]/g, '')
-    const n = name.toLowerCase().replace(/[^a-z0-9_.-]/g, '')
-    onUpdate(clip.id, { eventId: c && n ? `${c}.${n}` : '' })
-  }, [clip.id, onUpdate])
-
-  if (isEditing) {
-    return (
-      <div className="clip-row clip-row-editing">
-        <div className="clip-edit-fields">
-          <label className="clip-edit-field"><span>Name</span>
-            <input type="text" value={clip.name} onChange={(e) => onUpdate(clip.id, { name: e.target.value })} /></label>
-          <div className="clip-edit-field"><span>Event ID <span className="field-hint">(category.name — both required)</span></span>
-            <div className="event-id-inputs">
-              <input type="text" value={eidCategory} placeholder="category" className="eid-category"
-                onChange={(e) => updateEventId(e.target.value, eidName)} />
-              <span className="eid-dot">.</span>
-              <input type="text" value={eidName} placeholder="name" className="eid-name"
-                onChange={(e) => updateEventId(eidCategory, e.target.value)} />
-            </div>
-            {(!eidCategory || !eidName) && clip.eventId !== '' && <span className="field-error">Both category and name are required</span>}
-          </div>
-          <label className="clip-edit-field"><span>Group</span>
-            <input type="text" value={clip.group} placeholder="impacts"
-              onChange={(e) => onUpdate(clip.id, { group: e.target.value })} /></label>
-          <div className="clip-edit-field"><span>Tags</span>
-            <div className="clip-edit-tags">
-              {clip.tags.map((t) => <span key={t} className="tag-chip removable">{t}
-                <button onClick={() => onUpdate(clip.id, { tags: clip.tags.filter((x) => x !== t) })}>x</button></span>)}
-              <input type="text" value={tagInput} placeholder="+ tag" className="tag-input"
-                onChange={(e) => setTagInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { const t = tagInput.trim(); if (t && !clip.tags.includes(t)) { onUpdate(clip.id, { tags: [...clip.tags, t] }); setTagInput('') } } }} />
-            </div>
-          </div>
-        </div>
-        <div className="clip-edit-actions">
-          <button className="library-btn" onClick={onEndEdit}>Done</button>
-          <button className="library-btn danger" onClick={() => { onDelete(clip.id); onEndEdit() }}>Delete</button>
-        </div>
-      </div>
-    )
-  }
-
+  const metaSummary = `${Math.round(clip.duration * 1000)}ms | ${clip.channels === 1 ? 'Mono' : 'Stereo'} | ${clip.sampleRate / 1000}kHz | ${formatFileSize(clip.fileSize)}`
   return (
-    <div className="clip-row" onDoubleClick={onStartEdit}>
-      <div className="clip-drag-handle" draggable
-        onDragStart={(e) => { e.dataTransfer.setData(DND_TYPE_CLIP, clip.id); e.dataTransfer.effectAllowed = 'copy' }}
-        title="ドラッグして Kit に追加">&#x2630;</div>
-      <button className={`clip-play-btn ${playingId === clip.id ? 'playing' : ''}`}
-        onClick={() => onToggle(clip.id, intensity)}>
-        {playingId === clip.id ? '\u25A0' : '\u25B6'}</button>
-      <div className="clip-body">
-        <div className="clip-row-top">
-          <span className="clip-name">{clip.name}</span>
-          <span className="clip-meta">{formatDuration(clip.duration)} {clip.channels === 1 ? 'M' : 'St'} {clip.sampleRate / 1000}k {formatFileSize(clip.fileSize)}</span>
-        </div>
-        <div className="clip-row-bottom">
-          <span className={`clip-event-id ${!clip.eventId ? 'empty' : ''}`} title="Event ID">{clip.eventId || '(no ID)'}</span>
-          {clip.tags.length > 0 && <span className="clip-tags-inline">{clip.tags.join(', ')}</span>}
-        </div>
-      </div>
-      <IntensitySlider value={intensity} onChange={setIntensity} />
-      <IntensityPopover value={intensity} onChange={setIntensity} />
-      <div className="clip-actions">
-        <button className="clip-action-btn" onClick={onStartEdit}>Edit</button>
-      </div>
-      {wiper !== null && <span className="clip-wiper-corner" title="Device volume wiper (0–127)">wiper {wiper}/127</span>}
-    </div>
+    <ClipCard
+      name={clip.name}
+      eventId={clip.eventId}
+      eventIdEmpty={!clip.eventId}
+      details={metaSummary}
+      tags={clip.tags}
+      showDetails={showDetails}
+      intensity={intensity}
+      onIntensityChange={setIntensity}
+      playing={playingId === clip.id}
+      onTogglePlay={() => onToggle(clip.id, intensity)}
+      onNameClick={onStartEdit}
+      wiper={null}
+      title={`${metaSummary}${clip.tags.length > 0 ? ` | tags: ${clip.tags.join(', ')}` : ''}`}
+      drag={{ type: DND_TYPE_CLIP, payload: clip.id, dragTitle: 'ドラッグして Kit に追加' }}
+      actions={[
+        { label: '+ Kit', variant: 'primary', onClick: onAddToKit, disabled: !kitAvailable || !clip.eventId,
+          title: kitAvailable ? 'Add to active kit' : 'Select a kit first' },
+        { label: 'Edit', onClick: onStartEdit, title: 'Edit name, event ID, tags…' },
+      ]}
+    />
   )
 }
 
@@ -707,8 +507,8 @@ function KitEditor() {
   const updateKitEvent = useLibraryStore((s) => s.updateKitEvent)
   const updateKit = useLibraryStore((s) => s.updateKit)
   const addEventToKit = useLibraryStore((s) => s.addEventToKit)
-  const importBuiltinToLocal = useLibraryStore((s) => s.importBuiltinToLocal)
-  const builtinIndex = useLibraryStore((s) => s.builtinIndex)
+  const setEditingClipId = useLibraryStore((s) => s.setEditingClipId)
+  const showClipDetails = useLibraryStore((s) => s.showClipDetails)
   const { isConnected: managerConnected, devices, send } = useManagerConnection()
   const { toast } = useToast()
   const getClipAudio = useLibraryStore((s) => s.getClipAudio)
@@ -728,30 +528,32 @@ function KitEditor() {
     placeholderName.current = randomKitName()
   }, [createKit])
 
-  const getClipName = useCallback((clipId: string) => clips.find((c) => c.id === clipId)?.name ?? '?', [clips])
-
   const handleKitDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault(); setDropActive(false); setDragOverIdx(null)
     if (!activeKitId) { toast('Select or create a Kit first', 'error'); return }
-    const bid = e.dataTransfer.getData(DND_TYPE_BUILTIN)
-    if (bid) {
-      const meta = builtinIndex?.find((c) => c.id === bid); if (!meta) return
-      const lid = await importBuiltinToLocal(bid); if (!lid) { toast('Import failed', 'error'); return }
-      await addEventToKit(activeKitId, { eventId: meta.event_id, clipId: lid, loop: false, intensity: 0.5, deviceWiper: null })
-      toast(`Added "${meta.name}"`, 'success'); return
-    }
+
     const cid = e.dataTransfer.getData(DND_TYPE_CLIP)
     if (cid) {
       const c = clips.find((x) => x.id === cid); if (!c) return
       if (!c.eventId) { toast('Set Event ID first', 'error'); return }
-      await addEventToKit(activeKitId, { eventId: c.eventId, clipId: c.id, loop: false, intensity: 0.5, deviceWiper: null })
-      toast(`Added "${c.name}"`, 'success'); return
+      const newId = await addEventToKit(activeKitId, { eventId: c.eventId, clipId: c.id, loop: false, intensity: 0.5, deviceWiper: null })
+      if (newId) toast(`Added "${c.name}"`, 'success')
+      else toast('Kit not found', 'error')
+      return
     }
     const evd = e.dataTransfer.getData(DND_TYPE_KIT_EVENT)
     if (evd && activeKit && dragOverIdx !== null) {
-      try { const { eventId } = JSON.parse(evd); const evts = [...activeKit.events]; const from = evts.findIndex((e) => e.eventId === eventId); if (from < 0) return; const [moved] = evts.splice(from, 1); evts.splice(dragOverIdx > from ? dragOverIdx - 1 : dragOverIdx, 0, moved); await updateKit(activeKitId, { events: evts }) } catch { /* */ }
+      try {
+        const { kitEventId } = JSON.parse(evd)
+        const evts = [...activeKit.events]
+        const from = evts.findIndex((e) => e.id === kitEventId)
+        if (from < 0) return
+        const [moved] = evts.splice(from, 1)
+        evts.splice(dragOverIdx > from ? dragOverIdx - 1 : dragOverIdx, 0, moved)
+        await updateKit(activeKitId, { events: evts })
+      } catch { /* */ }
     }
-  }, [activeKitId, activeKit, builtinIndex, clips, dragOverIdx, importBuiltinToLocal, addEventToKit, updateKit, toast])
+  }, [activeKitId, activeKit, clips, dragOverIdx, addEventToKit, updateKit, toast])
 
   const kitSize = activeKit ? activeKit.events.reduce((s, ev) => s + (clips.find((c) => c.id === ev.clipId)?.fileSize ?? 0), 0) + 1024 : 0
 
@@ -816,36 +618,24 @@ function KitEditor() {
                     {activeKit.events.length === 0
                       ? <div className="kit-events-empty kit-drop-zone">Drag clips here.</div>
                       : activeKit.events.map((ev, i) => (
-                        <div key={ev.eventId} className={`kit-event-row ${dragOverIdx === i ? 'drag-over-indicator' : ''}`}
-                          onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragOverIdx(i) }}>
-                          <div className="clip-drag-handle" draggable
-                            onDragStart={(e) => { e.dataTransfer.setData(DND_TYPE_KIT_EVENT, JSON.stringify({ eventId: ev.eventId })); e.dataTransfer.effectAllowed = 'move' }}
-                            title="ドラッグして並び替え">&#x2630;</div>
-                          <button className={`clip-play-btn ${playingId === ev.eventId ? 'playing' : ''}`}
-                            onClick={() => {
-                              togglePreview(ev.eventId, () => getClipAudio(ev.clipId), ev.intensity)
-                              // Capture current device wiper into this event (auto-update)
-                              const w = getDeviceWiper()
-                              if (w !== null && w !== ev.deviceWiper) updateKitEvent(activeKit.id, ev.eventId, { deviceWiper: w })
-                            }}
-                            title={`Play at ${Math.round(ev.intensity * 100)}%`}>
-                            {playingId === ev.eventId ? '\u25A0' : '\u25B6'}
-                          </button>
-                          <div className="kit-event-info">
-                            <span className="kit-event-id">{ev.eventId}</span>
-                            <span className="kit-event-clip">{getClipName(ev.clipId)}</span>
-                          </div>
-                          <IntensitySlider value={ev.intensity}
-                            onChange={(v) => updateKitEvent(activeKit.id, ev.eventId, { intensity: v })} />
-                          <IntensityPopover value={ev.intensity}
-                            onChange={(v) => updateKitEvent(activeKit.id, ev.eventId, { intensity: v })} />
-                          <label className="kit-event-loop">
-                            <input type="checkbox" checked={ev.loop} onChange={(e) => updateKitEvent(activeKit.id, ev.eventId, { loop: e.target.checked })} />
-                            <span>Loop</span>
-                          </label>
-                          <button className="clip-action-btn danger" onClick={() => removeEventFromKit(activeKit.id, ev.eventId)}>x</button>
-                          {ev.deviceWiper !== null && <span className="clip-wiper-corner" title="Device volume wiper captured when this event was last previewed (0–127)">wiper {ev.deviceWiper}/127</span>}
-                        </div>
+                        <KitEventRow
+                          key={ev.id}
+                          event={ev}
+                          clip={clips.find((c) => c.id === ev.clipId) ?? null}
+                          playing={playingId === ev.id}
+                          showDetails={showClipDetails}
+                          onTogglePlay={() => {
+                            togglePreview(ev.id, () => getClipAudio(ev.clipId), ev.intensity)
+                            const w = getDeviceWiper()
+                            if (w !== null && w !== ev.deviceWiper) updateKitEvent(activeKit.id, ev.id, { deviceWiper: w })
+                          }}
+                          onIntensityChange={(v) => updateKitEvent(activeKit.id, ev.id, { intensity: v })}
+                          onLoopChange={(loop) => updateKitEvent(activeKit.id, ev.id, { loop })}
+                          onEditClip={() => setEditingClipId(ev.clipId)}
+                          onDelete={() => removeEventFromKit(activeKit.id, ev.id)}
+                          onDragOverRow={() => setDragOverIdx(i)}
+                          dragOverIndicator={dragOverIdx === i}
+                        />
                       ))}
                   </div>
 
