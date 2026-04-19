@@ -1,8 +1,11 @@
 /**
  * DSP utility functions for the waveform editor.
  * All functions take an AudioBuffer and return a new AudioBuffer (immutable).
+ *
+ * NOTE: Tone.js は AudioContext を eager 初期化し、user gesture 前にロードすると
+ * "AudioContext was not allowed to start" 警告を出す。Tone を使う関数 (pitchShift,
+ * timeStretch) は dynamic import で遅延ロードする。
  */
-import * as Tone from 'tone'
 import type {
   EffectParams,
   EnvelopePoint,
@@ -68,6 +71,7 @@ export async function pitchShift(
 ): Promise<AudioBuffer> {
   if (semitones === 0) return buffer
 
+  const Tone = await import('tone')
   const duration = buffer.duration
   const rendered = await Tone.Offline(
     ({ transport }) => {
@@ -97,6 +101,7 @@ export async function timeStretch(
 ): Promise<AudioBuffer> {
   if (rate === 1.0) return buffer
 
+  const Tone = await import('tone')
   const outputDuration = buffer.duration / rate
 
   const rendered = await Tone.Offline(

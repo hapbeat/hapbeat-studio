@@ -1,18 +1,33 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 
 const MANAGER_WS_URL = 'ws://localhost:7703'
 const RECONNECT_INTERVAL_BASE = 2000
 const RECONNECT_INTERVAL_MAX = 30000
 
-interface UseManagerConnectionReturn {
+interface ManagerConnectionValue {
   isConnected: boolean
   devices: DeviceInfo[]
   lastMessage: ManagerMessage | null
   send: (message: ManagerMessage) => void
 }
 
-export function useManagerConnection(): UseManagerConnectionReturn {
+const ManagerConnectionContext = createContext<ManagerConnectionValue | null>(null)
+
+/**
+ * Provider that owns the single WebSocket to Manager.
+ * Wrap the app once (in main.tsx). All useManagerConnection() consumers
+ * share the same connection and state.
+ */
+export function ManagerConnectionProvider({ children }: { children: ReactNode }) {
   const [isConnected, setIsConnected] = useState(false)
   const [devices, setDevices] = useState<DeviceInfo[]>([])
   const [lastMessage, setLastMessage] = useState<ManagerMessage | null>(null)
@@ -51,7 +66,6 @@ export function useManagerConnection(): UseManagerConnectionReturn {
     wsRef.current = ws
 
     // 各 handler は「今もアクティブな ws か」を確認してから動く
-    // (orphan ws がイベントを発火しても無視される)
     ws.onopen = () => {
       if (wsRef.current !== ws) return
       console.log('[Manager] 接続成功')
@@ -84,7 +98,6 @@ export function useManagerConnection(): UseManagerConnectionReturn {
     ws.onerror = (err) => {
       if (wsRef.current !== ws) return
       console.error('[Manager] WebSocket エラー:', err)
-      // onclose が自動的に呼ばれるため、ここでは再接続しない
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -113,15 +126,35 @@ export function useManagerConnection(): UseManagerConnectionReturn {
 
   useEffect(() => {
     connect()
-
     return () => {
       clearReconnectTimer()
-      if (wsRef.current) {
-        wsRef.current.close()
+      const ws = wsRef.current
+      if (ws) {
+        ws.onopen = null
+        ws.onmessage = null
+        ws.onclose = null
+        ws.onerror = null
+        try { ws.close() } catch { /* ignore */ }
         wsRef.current = null
       }
     }
   }, [connect, clearReconnectTimer])
 
-  return { isConnected, devices, lastMessage, send }
+  return (
+    <ManagerConnectionContext.Provider value={{ isConnected, devices, lastMessage, send }}>
+      {children}
+    </ManagerConnectionContext.Provider>
+  )
+}
+
+/**
+ * Consume the shared Manager connection.
+ * Must be inside <ManagerConnectionProvider>.
+ */
+export function useManagerConnection(): ManagerConnectionValue {
+  const ctx = useContext(ManagerConnectionContext)
+  if (!ctx) {
+    throw new Error('useManagerConnection must be used inside <ManagerConnectionProvider>')
+  }
+  return ctx
 }
