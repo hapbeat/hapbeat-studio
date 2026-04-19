@@ -9,7 +9,7 @@
 
 import type { ManagerMessage } from '@/types/manager'
 
-/** Chunk size in samples (matching Manager's 512-sample chunks) */
+/** Chunk size in frames (matching Manager's 512-sample chunks). For stereo, 1 frame = 2 samples. */
 const CHUNK_SAMPLES = 512
 
 export interface StreamOptions {
@@ -39,11 +39,12 @@ export async function streamClipToDevice(
   const ctx = new OfflineAudioContext(1, 1, 44100)
   const decoded = await ctx.decodeAudioData(arrayBuffer)
 
-  // Resample to target rate, mono
-  const resampled = await resampleToMono(decoded, targetRate)
-  const pcm16 = audioBufferToPcm16Mono(resampled)
+  // Resample to target rate, preserving original channel count
+  const resampled = await resample(decoded, targetRate)
+  const channels = resampled.numberOfChannels
+  const pcm16 = audioBufferToPcm16Interleaved(resampled)
 
-  // Apply intensity to PCM data
+  // Apply intensity to PCM data (interleaved samples)
   if (intensity !== 1.0) {
     for (let i = 0; i < pcm16.length; i++) {
       let val = Math.round(pcm16[i] * intensity)
@@ -53,7 +54,7 @@ export async function streamClipToDevice(
     }
   }
 
-  const totalSamples = pcm16.length
+  const totalFrames = Math.floor(pcm16.length / channels)
 
   // Send STREAM_BEGIN
   send({
@@ -61,9 +62,9 @@ export async function streamClipToDevice(
     payload: {
       target: targetDevice,
       sample_rate: targetRate,
-      channels: 1,
+      channels: channels,
       format: 'pcm16',
-      total_samples: totalSamples,
+      total_samples: totalFrames,
     },
   })
 
@@ -71,21 +72,21 @@ export async function streamClipToDevice(
   const chunkDurationMs = (CHUNK_SAMPLES / targetRate) * 1000
   const startTime = performance.now()
 
-  // Send data in chunks (PCM16 = 2 bytes per sample)
-  for (let sampleOffset = 0; sampleOffset < totalSamples; sampleOffset += CHUNK_SAMPLES) {
+  // Send data in chunks (PCM16 = 2 bytes per sample, interleaved when stereo)
+  for (let frameOffset = 0; frameOffset < totalFrames; frameOffset += CHUNK_SAMPLES) {
     if (signal?.aborted) {
       send({ type: 'stream_end', payload: { target: targetDevice } })
       throw new DOMException('Streaming aborted', 'AbortError')
     }
 
-    const end = Math.min(sampleOffset + CHUNK_SAMPLES, totalSamples)
-    const chunk = pcm16.slice(sampleOffset, end)
+    const endFrame = Math.min(frameOffset + CHUNK_SAMPLES, totalFrames)
+    const chunk = pcm16.slice(frameOffset * channels, endFrame * channels)
 
     // Convert Int16Array to bytes
     const bytes = new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength)
     const base64 = uint8ArrayToBase64(bytes)
 
-    const byteOffset = sampleOffset * 2 // 2 bytes per sample
+    const byteOffset = frameOffset * channels * 2 // 2 bytes/sample × channels
     send({
       type: 'stream_data',
       payload: {
@@ -96,7 +97,7 @@ export async function streamClipToDevice(
     })
 
     // Pace to real-time: wait until the wall-clock time matches the audio position
-    const chunkIndex = sampleOffset / CHUNK_SAMPLES
+    const chunkIndex = frameOffset / CHUNK_SAMPLES
     const expectedTime = startTime + (chunkIndex + 1) * chunkDurationMs
     const now = performance.now()
     if (expectedTime > now) {
@@ -110,21 +111,30 @@ export async function streamClipToDevice(
 
 // ---- Helpers ----
 
-function audioBufferToPcm16Mono(buffer: AudioBuffer): Int16Array {
-  const data = buffer.getChannelData(0)
-  const pcm = new Int16Array(data.length)
-  for (let i = 0; i < data.length; i++) {
-    let val = Math.round(data[i] * 32767)
-    if (val > 32767) val = 32767
-    if (val < -32768) val = -32768
-    pcm[i] = val
+function audioBufferToPcm16Interleaved(buffer: AudioBuffer): Int16Array {
+  const channels = buffer.numberOfChannels
+  const frames = buffer.length
+  const pcm = new Int16Array(frames * channels)
+
+  // getChannelData(ch) returns Float32Array for channel ch (planar).
+  // Interleave: frame0_L, frame0_R, frame1_L, frame1_R, ...
+  const channelData: Float32Array[] = []
+  for (let c = 0; c < channels; c++) channelData.push(buffer.getChannelData(c))
+
+  for (let f = 0; f < frames; f++) {
+    for (let c = 0; c < channels; c++) {
+      let val = Math.round(channelData[c][f] * 32767)
+      if (val > 32767) val = 32767
+      if (val < -32768) val = -32768
+      pcm[f * channels + c] = val
+    }
   }
   return pcm
 }
 
-async function resampleToMono(buffer: AudioBuffer, targetRate: number): Promise<AudioBuffer> {
+async function resample(buffer: AudioBuffer, targetRate: number): Promise<AudioBuffer> {
   const length = Math.ceil(buffer.length * targetRate / buffer.sampleRate)
-  const offCtx = new OfflineAudioContext(1, length, targetRate)
+  const offCtx = new OfflineAudioContext(buffer.numberOfChannels, length, targetRate)
   const src = offCtx.createBufferSource()
   src.buffer = buffer
   src.connect(offCtx.destination)
