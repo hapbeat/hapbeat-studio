@@ -1,6 +1,5 @@
 import type { DisplayElementMeta, DisplayElementType } from '@/types/display'
 import { getElementSize } from '@/types/display'
-import { getElementDescription } from '@/utils/displayPreview'
 import { setCurrentDragType, setCurrentDragVariant } from '@/components/display/DisplayEditor'
 import './ElementPalette.css'
 

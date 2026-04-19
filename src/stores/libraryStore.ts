@@ -250,7 +250,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   loadBuiltinIndex: async () => {
     set({ builtinLoading: true })
     try {
-      const res = await fetch('/library/index.json')
+      const res = await fetch(`${import.meta.env.BASE_URL}library/index.json`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data: BuiltinLibraryIndex = await res.json()
       set({ builtinIndex: data.clips, builtinLoading: false })
@@ -270,7 +270,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (!meta) return undefined
 
     try {
-      const res = await fetch(`/library/clips/${meta.filename}`)
+      const res = await fetch(`${import.meta.env.BASE_URL}library/clips/${meta.filename}`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const blob = await res.blob()
       // Cache it

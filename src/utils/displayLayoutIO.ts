@@ -17,7 +17,6 @@ import type {
   VolumeConfig,
 } from '@/types/display'
 import {
-  ELEMENT_FIXED_SIZES,
   getElementSize,
   DEFAULT_LED_RULES,
   DEFAULT_VOLUME_CONFIG,
