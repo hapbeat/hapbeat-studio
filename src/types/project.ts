@@ -13,7 +13,8 @@ export interface HapbeatProject {
 export interface EventDefinition {
   eventId: string
   clipFile?: string // filename of wav
-  gain: number
+  intensity: number
+  device_wiper?: number
   loop: boolean
   ledColor?: string
 }
