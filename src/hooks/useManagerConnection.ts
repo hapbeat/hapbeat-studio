@@ -28,53 +28,63 @@ export function useManagerConnection(): UseManagerConnectionReturn {
   }, [])
 
   const connect = useCallback(() => {
-    // 既存の接続があれば閉じる
-    if (wsRef.current) {
-      wsRef.current.close()
-      wsRef.current = null
+    // 既存の接続があれば、ハンドラを detach してから閉じる
+    // (古い ws の遅延発火 onclose が新しい wsRef を null 化するのを防ぐ)
+    const old = wsRef.current
+    if (old) {
+      old.onopen = null
+      old.onmessage = null
+      old.onclose = null
+      old.onerror = null
+      try { old.close() } catch { /* ignore */ }
     }
+    wsRef.current = null
 
+    let ws: WebSocket
     try {
-      const ws = new WebSocket(MANAGER_WS_URL)
-      wsRef.current = ws
-
-      ws.onopen = () => {
-        console.log('[Manager] 接続成功')
-        setIsConnected(true)
-        reconnectAttemptRef.current = 0
-
-        // デバイス一覧を要求
-        ws.send(JSON.stringify({ type: 'list_devices', payload: {} }))
-      }
-
-      ws.onmessage = (event) => {
-        try {
-          const message: ManagerMessage = JSON.parse(event.data)
-          setLastMessage(message)
-
-          // デバイス一覧の更新
-          if (message.type === 'device_list' && Array.isArray(message.payload.devices)) {
-            setDevices(message.payload.devices as DeviceInfo[])
-          }
-        } catch (err) {
-          console.error('[Manager] メッセージのパースに失敗:', err)
-        }
-      }
-
-      ws.onclose = () => {
-        console.log('[Manager] 接続が切断されました')
-        setIsConnected(false)
-        wsRef.current = null
-        scheduleReconnect()
-      }
-
-      ws.onerror = (err) => {
-        console.error('[Manager] WebSocket エラー:', err)
-        // onclose が自動的に呼ばれるため、ここでは再接続しない
-      }
+      ws = new WebSocket(MANAGER_WS_URL)
     } catch (err) {
       console.error('[Manager] 接続の作成に失敗:', err)
       scheduleReconnect()
+      return
+    }
+    wsRef.current = ws
+
+    // 各 handler は「今もアクティブな ws か」を確認してから動く
+    // (orphan ws がイベントを発火しても無視される)
+    ws.onopen = () => {
+      if (wsRef.current !== ws) return
+      console.log('[Manager] 接続成功')
+      setIsConnected(true)
+      reconnectAttemptRef.current = 0
+      ws.send(JSON.stringify({ type: 'list_devices', payload: {} }))
+    }
+
+    ws.onmessage = (event) => {
+      if (wsRef.current !== ws) return
+      try {
+        const message: ManagerMessage = JSON.parse(event.data)
+        setLastMessage(message)
+        if (message.type === 'device_list' && Array.isArray(message.payload.devices)) {
+          setDevices(message.payload.devices as DeviceInfo[])
+        }
+      } catch (err) {
+        console.error('[Manager] メッセージのパースに失敗:', err)
+      }
+    }
+
+    ws.onclose = () => {
+      if (wsRef.current !== ws) return
+      console.log('[Manager] 接続が切断されました')
+      setIsConnected(false)
+      wsRef.current = null
+      scheduleReconnect()
+    }
+
+    ws.onerror = (err) => {
+      if (wsRef.current !== ws) return
+      console.error('[Manager] WebSocket エラー:', err)
+      // onclose が自動的に呼ばれるため、ここでは再接続しない
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
