@@ -33,5 +33,5 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           protocol: ftps
           port: 21
-          server-dir: /devtools.hapbeat.com/public_html/studio/
+          server-dir: /studio/
           local-dir: ./dist/
