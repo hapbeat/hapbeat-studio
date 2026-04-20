@@ -119,7 +119,7 @@ interface ActionItem { value: string; label: string }
 interface ActionGroup { label: string; items: ActionItem[] }
 
 /** 短押し・長押し用アクション */
-function buildActionGroups(pages: DisplayPage[]): ActionGroup[] {
+function buildActionGroups(pages: DisplayPage[], deviceModel: DeviceModel): ActionGroup[] {
   const pageItems: ActionItem[] = [
     { value: 'prev_page', label: 'Prev Page' },
     { value: 'next_page', label: 'Next Page' },
@@ -129,7 +129,7 @@ function buildActionGroups(pages: DisplayPage[]): ActionGroup[] {
   })
   pageItems.push({ value: 'toggle_page', label: 'Toggle Page' })
 
-  return [
+  const groups: ActionGroup[] = [
     { label: 'Page', items: pageItems },
     {
       label: 'Player / Position',
@@ -140,20 +140,34 @@ function buildActionGroups(pages: DisplayPage[]): ActionGroup[] {
         { value: 'position_dec', label: 'Pos -1' },
       ],
     },
-    {
-      label: 'Other',
-      items: [
-        { value: 'display_toggle', label: 'Display ON/OFF' },
-        { value: 'led_toggle', label: 'LED ON/OFF' },
-        { value: 'vib_mode', label: 'VibMode Var/Fix' },
-        { value: 'none', label: '\u2014 (None)' },
-      ],
-    },
   ]
+
+  // Volume は BandWL のみ（DuoWL はノブで調整）
+  if (deviceModel === 'band_wl') {
+    groups.push({
+      label: 'Volume (Var mode)',
+      items: [
+        { value: 'volume_up', label: 'Volume +' },
+        { value: 'volume_down', label: 'Volume -' },
+      ],
+    })
+  }
+
+  groups.push({
+    label: 'Other',
+    items: [
+      { value: 'display_toggle', label: 'Display ON/OFF' },
+      { value: 'led_toggle', label: 'LED ON/OFF' },
+      { value: 'vib_mode', label: 'VibMode Var/Fix' },
+      { value: 'none', label: '\u2014 (None)' },
+    ],
+  })
+
+  return groups
 }
 
 /** 押し続け用アクション。Tmp: toggle系 + ページ遷移のみ。Exec: Press と同じ全アクション */
-function buildHoldActionGroups(pages: DisplayPage[], holdMode: import('@/types/display').HoldMode): ActionGroup[] {
+function buildHoldActionGroups(pages: DisplayPage[], holdMode: import('@/types/display').HoldMode, deviceModel: DeviceModel): ActionGroup[] {
   if (holdMode === 'momentary') {
     // Tmp: 離したら戻せるアクションのみ（ファーム側で hold_page: として処理）
     const pageItems: ActionItem[] = pages.map((p, i) => ({
@@ -173,7 +187,7 @@ function buildHoldActionGroups(pages: DisplayPage[], holdMode: import('@/types/d
     ]
   }
   // Exec: Press と同じ
-  return buildActionGroups(pages)
+  return buildActionGroups(pages, deviceModel)
 }
 
 
@@ -853,12 +867,12 @@ function OledSimulator({
     ? deviceSpec.buttons.filter((b) => ['btn_4', 'btn_5'].includes(b.id))
     : []
 
-  const actionGroups = buildActionGroups(pages)
+  const actionGroups = buildActionGroups(pages, deviceSpec.model)
 
   const renderButton = (btn: typeof deviceSpec.buttons[0]) => {
     const act = perButtonActions[btn.id] ?? DEFAULT_BUTTON_ACTION
     const btnHoldMode = act.hold_mode ?? 'momentary'
-    const holdGroups = buildHoldActionGroups(pages, btnHoldMode)
+    const holdGroups = buildHoldActionGroups(pages, btnHoldMode, deviceSpec.model)
     const allItems = [...actionGroups, ...holdGroups].flatMap((g) => g.items)
     return (
       <div key={btn.id} className="device-button-row">
@@ -884,9 +898,9 @@ function OledSimulator({
 
   return (
     <div className="hardware-preview-sticky">
-      <div className="device-grid-container">
+      <div className={`device-grid-container ${deviceSpec.model === 'band_wl' ? 'is-band-wl' : ''} ${isFlipped ? 'is-flipped' : ''}`}>
         {/* OLED — grid-area: oled */}
-        <div className="device-grid-oled" style={{ transform: isFlipped ? 'rotate(180deg)' : undefined }}>
+        <div className="device-grid-oled">
           <div style={{ position: 'relative' }}>
             <div
               ref={oledRef}

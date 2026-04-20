@@ -42,6 +42,8 @@ export type ButtonActionType =
   | 'player_dec'
   | 'position_inc'
   | 'position_dec'
+  | 'volume_up'
+  | 'volume_down'
 
 /** Hold 動作モード: momentary=離したら戻す, latch=1回押しと同じ */
 export type HoldMode = 'momentary' | 'latch'

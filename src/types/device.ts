@@ -78,9 +78,15 @@ export const DUO_WL_SPEC: DeviceHardwareSpec = {
 /**
  * BandWL — 長方形筐体（ストラップ付き）、ボタン3個、OLED下部左、LED下部右
  *
- * ボタン配置（正面から見た向き）:
- *   [L] [C] [R]           ← 上段3個横並び
- *   [OLED]     [LED]      ← 下段
+ * 物理配置（正面から見た向き）— ID と位置を一致させる:
+ *   [btn_l] [btn_c] [btn_r]   ← 左から右へ
+ *   [OLED]           [LED]
+ *
+ * firmware 側 (button_handler.cpp / element-registry.json) で
+ *   btn_l → 物理 左 (= SW1/GPIO13, idx 1)
+ *   btn_c → 物理 中 (= SW2/GPIO12, idx 2)
+ *   btn_r → 物理 右 (= SW0/GPIO14, idx 0)
+ * の対応になるよう同期が必要。
  */
 export const BAND_WL_SPEC: DeviceHardwareSpec = {
   model: 'band_wl',

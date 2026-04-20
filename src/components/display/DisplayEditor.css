@@ -101,16 +101,19 @@
 
 /* ========================================
    Device Grid Container
-   Wide (≥951px): 3行×5列
+   DuoWL Wide (≥951px): 3行×5列
      "btn1 oled oled oled btn4"
      "btn2 oled oled oled .   "
      "btn3 vol  led  .    btn5"
-   Narrow (≤950px): 5行×3列
+   DuoWL Narrow (≤950px): 5行×3列
      "oled oled oled"
      "oled oled oled"
      "btn1 vol  btn4"
      "btn2 led  .   "
      "btn3 .    btn5"
+   BandWL (常時): 2行×4列 — 狭くなっても維持
+     "led  oled oled oled"
+     "vol  btn1 btn2 btn3"
    ======================================== */
 
 .device-grid-container {
@@ -127,6 +130,10 @@
 }
 
 .device-grid-oled { grid-area: oled; position: relative; }
+
+/* 180°回転: コンテナ全体を回転させ、各セルを逆回転して中身を上向きに保つ */
+.device-grid-container.is-flipped { transform: rotate(180deg); }
+.device-grid-container.is-flipped > * { transform: rotate(180deg); }
 .device-grid-btn.btn-l1 { grid-area: btn1; }
 .device-grid-btn.btn-l2 { grid-area: btn2; }
 .device-grid-btn.btn-l3 { grid-area: btn3; }
@@ -142,8 +149,28 @@
   cursor: pointer;
 }
 
+/* BandWL: 左列に led / vol 縦積み、右側に OLED / ボタン3個横並び — レスポンシブ無し */
+.device-grid-container.is-band-wl {
+  grid-template-columns: auto 1fr 1fr 1fr;
+  grid-template-rows: auto auto;
+  grid-template-areas:
+    "led  oled oled oled"
+    "vol  btn1 btn2 btn3";
+  gap: 8px 12px;
+  align-items: center;
+  justify-items: center;
+}
+.device-grid-container.is-band-wl .device-grid-led,
+.device-grid-container.is-band-wl .device-grid-vol { justify-self: start; }
+/* ボタン行を縦積み（dot/label を上、Press/Hold を下）にして横並び 3 個に収める */
+.device-grid-container.is-band-wl .device-button-row {
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
 @media (max-width: 950px) {
-  .device-grid-container {
+  .device-grid-container:not(.is-band-wl) {
     grid-template-columns: 1fr auto 1fr;
     grid-template-rows: auto auto auto auto auto;
     grid-template-areas:
@@ -154,13 +181,13 @@
       "btn3 .    btn5";
     gap: 4px 8px;
   }
-  .device-grid-vol,
-  .device-grid-led { justify-self: center; }
-  .device-grid-btn.btn-l1,
-  .device-grid-btn.btn-l2,
-  .device-grid-btn.btn-l3 { justify-self: start; }
-  .device-grid-btn.btn-r1,
-  .device-grid-btn.btn-r2 { justify-self: end; }
+  .device-grid-container:not(.is-band-wl) .device-grid-vol,
+  .device-grid-container:not(.is-band-wl) .device-grid-led { justify-self: center; }
+  .device-grid-container:not(.is-band-wl) .device-grid-btn.btn-l1,
+  .device-grid-container:not(.is-band-wl) .device-grid-btn.btn-l2,
+  .device-grid-container:not(.is-band-wl) .device-grid-btn.btn-l3 { justify-self: start; }
+  .device-grid-container:not(.is-band-wl) .device-grid-btn.btn-r1,
+  .device-grid-container:not(.is-band-wl) .device-grid-btn.btn-r2 { justify-self: end; }
 }
 
 .oled-screen {
