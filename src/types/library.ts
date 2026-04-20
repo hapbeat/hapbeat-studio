@@ -28,6 +28,24 @@ export interface LibraryClip {
   updatedAt: string
   /** Set when this clip was imported from built-in library */
   builtinId?: string
+  /** Library 側のプレビュー amp (0-1)。Kit 追加時のデフォルト値にもなる。 */
+  libraryIntensity?: number
+  /** Event ID の自動生成フラグ。未設定時は両方 true 扱い (name/folder に自動追従)。 */
+  eventIdAuto?: {
+    /** category 部分を sourceFilename のフォルダ名から自動生成する */
+    category: boolean
+    /** name 部分を clip.name から自動生成する */
+    name: boolean
+  }
+}
+
+/** Library amp preset - clipId → intensity のマップ */
+export interface ClipAmpPreset {
+  name: string
+  /** 保存した日時 (ISO 8601) */
+  createdAt: string
+  /** clipId → intensity (0.0–1.0) */
+  values: Record<string, number>
 }
 
 /**

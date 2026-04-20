@@ -180,6 +180,63 @@ export async function deleteClipFile(
 }
 
 /**
+ * clips/ 配下のファイル名のみを変更する（ディレクトリは維持）。
+ * 新ファイル名はベース名のみ。拡張子は元ファイルから保持する。
+ *
+ * 衝突時: `name_2.wav` → `name_3.wav` …と連番を付与する。
+ * 実装は File System Access API の `move(name)` を使い、
+ * 非対応環境では copy → delete にフォールバックする。
+ *
+ * @returns 新しい相対パス（変更なし or 失敗時は null）
+ */
+export async function renameClipFile(
+  root: FileSystemDirectoryHandle,
+  relPath: string,
+  newBaseName: string,
+): Promise<string | null> {
+  const { dir, filename } = await resolveClipPath(root, relPath, false)
+  // 拡張子を保持
+  const extMatch = filename.match(AUDIO_EXT)
+  const ext = extMatch ? extMatch[0] : ''
+  const oldStem = ext ? filename.slice(0, -ext.length) : filename
+  const sanitized = newBaseName.trim().replace(/[\\/:*?"<>|]/g, '_')
+  if (!sanitized || sanitized === oldStem) return null
+
+  // 同一ディレクトリ内の既存ファイル名を収集して衝突回避
+  const existing = new Set<string>()
+  for await (const entry of dir.values()) {
+    if (entry.kind === 'file') existing.add(entry.name)
+  }
+  let dest = `${sanitized}${ext}`
+  if (existing.has(dest) && dest !== filename) {
+    for (let i = 2; i < 10000; i++) {
+      const cand = `${sanitized}_${i}${ext}`
+      if (!existing.has(cand)) { dest = cand; break }
+    }
+  }
+
+  const oldHandle = await dir.getFileHandle(filename)
+  // 優先: FileSystemFileHandle.move(name) (Chromium ≥ 108)
+  const moveFn = (oldHandle as unknown as { move?: (name: string) => Promise<void> }).move
+  if (typeof moveFn === 'function') {
+    await moveFn.call(oldHandle, dest)
+  } else {
+    // Fallback: copy → delete
+    const file = await oldHandle.getFile()
+    const blob = new Blob([await file.arrayBuffer()], { type: file.type || 'audio/wav' })
+    const newHandle = await dir.getFileHandle(dest, { create: true })
+    const w = await newHandle.createWritable()
+    await w.write(blob)
+    await w.close()
+    await dir.removeEntry(filename)
+  }
+
+  const parts = relPath.split('/').filter(Boolean)
+  parts[parts.length - 1] = dest
+  return parts.join('/')
+}
+
+/**
  * Moves a clip file into clips/archive/<filename> preserving its basename.
  * If a file of the same basename already exists in archive/, appends a
  * numeric suffix. Returns the new relative path on success, or null if the

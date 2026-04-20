@@ -1,7 +1,11 @@
 /**
- * Audio streamer — sends audio data to Hapbeat device via Manager WebSocket.
+ * Audio streamer — sends audio data to Hapbeat device(s) via Manager WebSocket.
  *
- * Flow: Studio → WebSocket (JSON+base64) → Manager → UDP (binary) → Device
+ * Flow: Studio → WebSocket (JSON+base64) → Manager → UDP (binary) → Device(s)
+ *
+ * Studio does NOT specify target. Manager resolves destinations from its own
+ * "selected device" state. This means the user's device selection in Manager
+ * drives playback routing; Studio just supplies audio + metadata.
  *
  * Manager uses command codes 0x30/0x31/0x32 for STREAM_BEGIN/DATA/END.
  * Default: PCM16 format (format=0), 512-sample chunks, paced at real-time.
@@ -9,8 +13,12 @@
 
 import type { ManagerMessage } from '@/types/manager'
 
-/** Chunk size in frames (matching Manager's 512-sample chunks). For stereo, 1 frame = 2 samples. */
-const CHUNK_SAMPLES = 512
+/** UDP payload は firmware の RX バッファ (MTU 1500B) を超えないよう制限する。
+ *  frame_size (channels × 2B) で割って 1 チャンクあたりの frames を決める:
+ *    mono  (2B/frame) → 512 frames
+ *    stereo (4B/frame) → 256 frames
+ *  Manager 側 (main_window.py の file streamer) と同じポリシー。 */
+const MAX_PAYLOAD_BYTES = 1024
 
 export interface StreamOptions {
   /** Target sample rate (default: 16000) */
@@ -22,11 +30,10 @@ export interface StreamOptions {
 }
 
 /**
- * Stream audio to a Hapbeat device via Manager WebSocket.
+ * Stream audio via Manager WebSocket. Manager decides the routing destination.
  */
-export async function streamClipToDevice(
+export async function streamClip(
   audioBlob: Blob,
-  targetDevice: string,
   send: (msg: ManagerMessage) => void,
   options?: StreamOptions,
 ): Promise<void> {
@@ -55,12 +62,13 @@ export async function streamClipToDevice(
   }
 
   const totalFrames = Math.floor(pcm16.length / channels)
+  const frameSize = channels * 2 // PCM16
+  const chunkFrames = Math.max(1, Math.floor(MAX_PAYLOAD_BYTES / frameSize))
 
-  // Send STREAM_BEGIN
+  // Send STREAM_BEGIN (no target — Manager routes to its selected devices)
   send({
     type: 'stream_begin',
     payload: {
-      target: targetDevice,
       sample_rate: targetRate,
       channels: channels,
       format: 'pcm16',
@@ -69,17 +77,17 @@ export async function streamClipToDevice(
   })
 
   // Calculate real-time pacing delay per chunk
-  const chunkDurationMs = (CHUNK_SAMPLES / targetRate) * 1000
+  const chunkDurationMs = (chunkFrames / targetRate) * 1000
   const startTime = performance.now()
 
   // Send data in chunks (PCM16 = 2 bytes per sample, interleaved when stereo)
-  for (let frameOffset = 0; frameOffset < totalFrames; frameOffset += CHUNK_SAMPLES) {
+  for (let frameOffset = 0; frameOffset < totalFrames; frameOffset += chunkFrames) {
     if (signal?.aborted) {
-      send({ type: 'stream_end', payload: { target: targetDevice } })
+      send({ type: 'stream_end', payload: {} })
       throw new DOMException('Streaming aborted', 'AbortError')
     }
 
-    const endFrame = Math.min(frameOffset + CHUNK_SAMPLES, totalFrames)
+    const endFrame = Math.min(frameOffset + chunkFrames, totalFrames)
     const chunk = pcm16.slice(frameOffset * channels, endFrame * channels)
 
     // Convert Int16Array to bytes
@@ -90,14 +98,13 @@ export async function streamClipToDevice(
     send({
       type: 'stream_data',
       payload: {
-        target: targetDevice,
         offset: byteOffset,
         data: base64,
       },
     })
 
     // Pace to real-time: wait until the wall-clock time matches the audio position
-    const chunkIndex = frameOffset / CHUNK_SAMPLES
+    const chunkIndex = frameOffset / chunkFrames
     const expectedTime = startTime + (chunkIndex + 1) * chunkDurationMs
     const now = performance.now()
     if (expectedTime > now) {
@@ -106,7 +113,7 @@ export async function streamClipToDevice(
   }
 
   // Send STREAM_END
-  send({ type: 'stream_end', payload: { target: targetDevice } })
+  send({ type: 'stream_end', payload: {} })
 }
 
 // ---- Helpers ----

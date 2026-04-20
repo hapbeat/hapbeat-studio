@@ -36,9 +36,13 @@ export interface ClipCardProps {
   playing: boolean
   onTogglePlay: () => void
 
-  /** Optional: clicking the clip name triggers this (edit/details) */
-  onNameClick?: () => void
+  /** Optional: double-click card to trigger (edit/details) */
   onDoubleClick?: () => void
+
+  /** 選択状態 — カード全体をハイライトする */
+  selected?: boolean
+  /** カードクリック時の選択ハンドラ（内部の input/button クリックでは発火しない） */
+  onSelect?: () => void
 
   /** Device wiper badge in the top-right. null = hidden. */
   wiper: number | null
@@ -56,6 +60,9 @@ export interface ClipCardProps {
   onDragOver?: (e: DragEvent) => void
   /** Extra CSS className (e.g. drag-over-indicator, active state) */
   extraClass?: string
+
+  /** data-card-id 属性 — 親から querySelector で参照するため */
+  dataCardId?: string
 
   /** Action buttons shown next to the slider. Order is preserved. */
   actions?: ClipCardAction[]
@@ -80,13 +87,15 @@ export function ClipCard({
   onIntensityChange,
   playing,
   onTogglePlay,
-  onNameClick,
   onDoubleClick,
+  selected,
+  onSelect,
   wiper,
   wiperTitle,
   drag,
   onDragOver,
   extraClass,
+  dataCardId,
   actions,
   title,
 }: ClipCardProps) {
@@ -99,8 +108,10 @@ export function ClipCard({
 
   return (
     <div
-      className={`clip-card ${extraClass ?? ''}`}
+      className={`clip-card ${extraClass ?? ''} ${selected ? 'is-selected' : ''}`}
+      data-card-id={dataCardId}
       title={title}
+      onClick={onSelect}
       onDoubleClick={onDoubleClick}
       onDragOver={onDragOver}
     >
@@ -114,16 +125,10 @@ export function ClipCard({
         >☰</div>
         <button
           className={`clip-card-play ${playing ? 'playing' : ''}`}
-          onMouseDown={(e) => { e.preventDefault(); onTogglePlay() }}
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onTogglePlay() }}
           title={playing ? 'Stop' : 'Play'}
         >{playing ? '■' : '▶'}</button>
-        <button
-          className="clip-card-name"
-          type="button"
-          onClick={onNameClick}
-          title={onNameClick ? 'Click to edit' : name}
-          disabled={!onNameClick}
-        >{name}</button>
+        <span className="clip-card-name" title={name}>{name}</span>
         <span
           className={`clip-card-event-id ${eventIdEmpty ? 'empty' : ''}`}
           title={`Event ID: ${eventId || '(not set)'}`}
@@ -141,7 +146,7 @@ export function ClipCard({
               <button
                 key={i}
                 className={`clip-card-action-btn ${a.variant ?? ''}`}
-                onClick={a.onClick}
+                onClick={(e) => { e.stopPropagation(); a.onClick() }}
                 title={a.title}
                 disabled={a.disabled}
               >{a.label}</button>

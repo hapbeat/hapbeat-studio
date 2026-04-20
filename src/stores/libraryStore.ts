@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { LibraryClip, KitDefinition, KitEvent, LibraryFilter, BuiltinClipMeta, BuiltinLibraryIndex, LibraryViewMode } from '@/types/library'
+import type { LibraryClip, KitDefinition, KitEvent, LibraryFilter, BuiltinClipMeta, BuiltinLibraryIndex, LibraryViewMode, ClipAmpPreset } from '@/types/library'
 import {
   saveClip,
   listClips,
@@ -23,6 +23,7 @@ import {
   deleteClipFile,
   readClipFile,
   archiveClipFile,
+  renameClipFile,
   writeMetadataJson,
   readMetadataJson,
 } from '@/utils/localDirectory'
@@ -31,9 +32,15 @@ function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
-/** Derive display name from filename: "impact/gunshot_1.wav" → "Gunshot 1", "gunshot_1.wav" → "Gunshot 1" */
+/** Derive display name from filename: "impact/gunshot_1.wav" → "gunshot_1". 拡張子のみ除去、ハイフン/アンダースコアは保持 */
 function filenameToDisplayName(filename: string): string {
-  // Use just the file part (not directory) for display name
+  const parts = filename.replace(/\\/g, '/').split('/')
+  return parts[parts.length - 1].replace(/\.(wav|mp3|ogg|flac|aac|m4a)$/i, '')
+}
+
+/** 旧実装（2026-04-20 以前）が生成していた display name。
+ *  既存 metadata の自動生成名がこれと一致していたら新実装に書き換える。 */
+function legacyFilenameToDisplayName(filename: string): string {
   const parts = filename.replace(/\\/g, '/').split('/')
   const base = parts[parts.length - 1].replace(/\.(wav|mp3|ogg|flac|aac|m4a)$/i, '')
   return base
@@ -55,6 +62,41 @@ function filenameToEventId(filename: string): string {
   // Contracts require at least one dot (category.name)
   if (!dotted.includes('.')) return `clip.${dotted}`
   return dotted
+}
+
+/** Event ID の1パートとして安全な文字列に変換。
+ *  contracts の正規表現: `^[a-z][a-z0-9_-]{0,63}$` */
+function sanitizeEventIdPart(s: string): string {
+  let out = s.toLowerCase().replace(/[^a-z0-9_-]/g, '_').replace(/_{2,}/g, '_')
+  out = out.replace(/^[_-]+/, '').replace(/[_-]+$/, '')
+  // 先頭は英小文字必須
+  if (!/^[a-z]/.test(out)) out = `c${out ? '_' + out : ''}`
+  return out.slice(0, 64)
+}
+
+/** clip.sourceFilename のフォルダ部分から category を導出。
+ *  ルート直下 (folder なし) の場合はデフォルト "clip" を返す。 */
+function deriveCategoryFromPath(sourceFilename: string): string {
+  const parts = (sourceFilename || '').replace(/\\/g, '/').split('/').filter(Boolean)
+  if (parts.length < 2) return 'clip'
+  return sanitizeEventIdPart(parts[parts.length - 2])
+}
+
+/** clip.name からの event_id の name 部分。 */
+function deriveNameFromClipName(name: string): string {
+  return sanitizeEventIdPart(name || '')
+}
+
+/** eventIdAuto フラグに従って eventId を再計算する。
+ *  auto が両方 false なら既存 eventId をそのまま返す。 */
+export function recomputeEventId(clip: Pick<LibraryClip, 'eventId' | 'name' | 'sourceFilename' | 'eventIdAuto'>): string {
+  const auto = clip.eventIdAuto ?? { category: true, name: true }
+  const dotIdx = (clip.eventId || '').indexOf('.')
+  const curCat = dotIdx > 0 ? clip.eventId.substring(0, dotIdx) : ''
+  const curName = dotIdx > 0 ? clip.eventId.substring(dotIdx + 1) : (clip.eventId || '')
+  const cat = auto.category ? deriveCategoryFromPath(clip.sourceFilename) : curCat
+  const name = auto.name ? deriveNameFromClipName(clip.name) : curName
+  return cat && name ? `${cat}.${name}` : ''
 }
 
 /** Source tab for the library view */
@@ -120,6 +162,18 @@ interface LibraryState {
    *  Returns true on success. */
   archiveClip: (id: string) => Promise<boolean>
   updateClip: (id: string, updates: Partial<LibraryClip>) => Promise<void>
+  /** name の現在値に合わせて clips/ 配下の実ファイル名を同期する（Edit modal の確定時などに呼ぶ） */
+  commitClipRename: (id: string) => Promise<void>
+  /** Library の amp (libraryIntensity) を更新。workDir に永続化される。 */
+  setLibraryIntensity: (id: string, value: number) => Promise<void>
+
+  // Amp preset actions
+  ampPresets: ClipAmpPreset[]
+  loadAmpPresets: () => Promise<void>
+  saveAmpPreset: (name: string) => Promise<void>
+  applyAmpPreset: (name: string) => Promise<void>
+  deleteAmpPreset: (name: string) => Promise<void>
+
   getClipAudio: (id: string) => Promise<Blob | undefined>
 
   // Work directory actions
@@ -176,6 +230,7 @@ const DEFAULT_FILTER: LibraryFilter = {
 
 const CLIPS_META_FILE = 'clips-meta.json'
 const KITS_META_FILE = 'kits-meta.json'
+const AMP_PRESETS_FILE = 'amp-presets.json'
 
 /** Save clips metadata to the local work directory */
 async function saveClipsMetaToDir(handle: FileSystemDirectoryHandle, clips: LibraryClip[]) {
@@ -215,6 +270,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   showClipDetails: true,
   filter: { ...DEFAULT_FILTER },
   builtinCategoryFilter: null,
+  ampPresets: [],
 
   loadLibrary: async () => {
     set({ isLoading: true })
@@ -393,6 +449,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         await get().importAllBuiltinClips()
       }
     }
+    await get().loadAmpPresets()
     return true
   },
 
@@ -403,12 +460,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const granted = await verifyPermission(handle, true)
     if (!granted) return false
     set({ workDirHandle: handle, workDirName: handle.name })
+    await get().loadAmpPresets()
     return true
   },
 
   disconnectWorkDir: async () => {
     await clearDirectoryHandle()
-    set({ workDirHandle: null, workDirName: null })
+    set({ workDirHandle: null, workDirName: null, ampPresets: [] })
   },
 
   syncClipsToDir: async () => {
@@ -448,6 +506,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     for (const { name: filename, file } of fileList) {
       const existing = metaMap.get(filename)
       if (existing) {
+        // 旧実装の自動生成名だったら新実装で上書き（ユーザが編集した名前は保持）
+        if (existing.name === legacyFilenameToDisplayName(existing.sourceFilename)) {
+          existing.name = filenameToDisplayName(existing.sourceFilename)
+        }
         clips.push(existing)
         // Sync to IndexedDB
         const blob = new Blob([await file.arrayBuffer()], { type: 'audio/wav' })
@@ -661,9 +723,22 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 
   updateClip: async (id, updates) => {
-    await updateClipMeta(id, updates)
+    // eventIdAuto が有効なら eventId を再計算して上書きする
+    const prev = get().clips.find((c) => c.id === id)
+    let finalUpdates = updates
+    if (prev) {
+      const merged = { ...prev, ...updates }
+      const auto = merged.eventIdAuto ?? { category: true, name: true }
+      // ユーザが手動で eventId を直接編集している場合はそれを尊重（auto を off にすべき）
+      const userEditedEventId = 'eventId' in updates
+      if (!userEditedEventId && (auto.category || auto.name)) {
+        const derived = recomputeEventId(merged)
+        if (derived !== merged.eventId) finalUpdates = { ...updates, eventId: derived }
+      }
+    }
+    await updateClipMeta(id, finalUpdates)
     const newClips = get().clips.map((c) =>
-      c.id === id ? { ...c, ...updates, updatedAt: new Date().toISOString() } : c
+      c.id === id ? { ...c, ...finalUpdates, updatedAt: new Date().toISOString() } : c
     )
     set({ clips: newClips })
     // Update metadata in work directory
@@ -671,6 +746,93 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (workDirHandle) {
       await saveClipsMetaToDir(workDirHandle, newClips)
     }
+  },
+
+  commitClipRename: async (id) => {
+    const { workDirHandle, clips } = get()
+    if (!workDirHandle) return
+    const clip = clips.find((c) => c.id === id)
+    if (!clip || !clip.sourceFilename) return
+    const ext = clip.sourceFilename.match(/\.(wav|mp3|ogg|flac|aac|m4a)$/i)?.[0] ?? ''
+    const oldBase = clip.sourceFilename.split('/').pop()?.replace(/\.(wav|mp3|ogg|flac|aac|m4a)$/i, '') ?? ''
+    const desired = clip.name.trim().replace(/[\\/:*?"<>|]/g, '_')
+    if (!desired || desired === oldBase) return
+    try {
+      const newPath = await renameClipFile(workDirHandle, clip.sourceFilename, desired)
+      if (!newPath) return
+      // 新 filename を反映。name は拡張子を除いた実ベース名に再同期する。
+      const newBase = newPath.split('/').pop()?.replace(/\.(wav|mp3|ogg|flac|aac|m4a)$/i, '') ?? clip.name
+      const rebuiltBase = { sourceFilename: newPath, name: newBase }
+      // eventIdAuto に応じて eventId も再計算
+      const auto = clip.eventIdAuto ?? { category: true, name: true }
+      const newEventId = auto.category || auto.name
+        ? recomputeEventId({ ...clip, ...rebuiltBase })
+        : clip.eventId
+      const patch = { ...rebuiltBase, eventId: newEventId }
+      await updateClipMeta(id, patch)
+      const updated = get().clips.map((c) =>
+        c.id === id ? { ...c, ...patch, updatedAt: new Date().toISOString() } : c
+      )
+      set({ clips: updated })
+      await saveClipsMetaToDir(workDirHandle, updated)
+      void ext // kept for readability — extension preserved by renameClipFile
+    } catch (err) {
+      console.error('renameClipFile failed:', err)
+    }
+  },
+
+  setLibraryIntensity: async (id, value) => {
+    const clamped = Math.max(0, Math.min(1, value))
+    await get().updateClip(id, { libraryIntensity: Math.round(clamped * 100) / 100 })
+  },
+
+  loadAmpPresets: async () => {
+    const { workDirHandle } = get()
+    if (!workDirHandle) { set({ ampPresets: [] }); return }
+    const list = await readMetadataJson<ClipAmpPreset[]>(workDirHandle, AMP_PRESETS_FILE)
+    set({ ampPresets: list ?? [] })
+  },
+
+  saveAmpPreset: async (name) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    const { workDirHandle, clips, ampPresets } = get()
+    if (!workDirHandle) return
+    const values: Record<string, number> = {}
+    for (const c of clips) values[c.id] = c.libraryIntensity ?? 0.5
+    const entry: ClipAmpPreset = {
+      name: trimmed,
+      createdAt: new Date().toISOString(),
+      values,
+    }
+    const others = ampPresets.filter((p) => p.name !== trimmed)
+    const next = [...others, entry].sort((a, b) => a.name.localeCompare(b.name))
+    set({ ampPresets: next })
+    await writeMetadataJson(workDirHandle, AMP_PRESETS_FILE, next)
+  },
+
+  applyAmpPreset: async (name) => {
+    const { ampPresets, clips, workDirHandle } = get()
+    const preset = ampPresets.find((p) => p.name === name)
+    if (!preset) return
+    const updated = clips.map((c) => {
+      const v = preset.values[c.id]
+      if (typeof v !== 'number') return c
+      return { ...c, libraryIntensity: Math.round(Math.max(0, Math.min(1, v)) * 100) / 100, updatedAt: new Date().toISOString() }
+    })
+    set({ clips: updated })
+    // Persist each changed clip
+    for (const c of updated) {
+      if (preset.values[c.id] !== undefined) await updateClipMeta(c.id, { libraryIntensity: c.libraryIntensity })
+    }
+    if (workDirHandle) await saveClipsMetaToDir(workDirHandle, updated)
+  },
+
+  deleteAmpPreset: async (name) => {
+    const { workDirHandle, ampPresets } = get()
+    const next = ampPresets.filter((p) => p.name !== name)
+    set({ ampPresets: next })
+    if (workDirHandle) await writeMetadataJson(workDirHandle, AMP_PRESETS_FILE, next)
   },
 
   getClipAudio: async (id) => {

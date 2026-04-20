@@ -10,6 +10,8 @@ export interface KitEventRowProps {
   clip: LibraryClip | null
   playing: boolean
   showDetails: boolean
+  selected: boolean
+  onSelect: () => void
   onTogglePlay: () => void
   onIntensityChange: (v: number) => void
   onLoopChange: (loop: boolean) => void
@@ -32,6 +34,8 @@ export function KitEventRow({
   clip,
   playing,
   showDetails,
+  selected,
+  onSelect,
   onTogglePlay,
   onIntensityChange,
   onLoopChange,
@@ -61,7 +65,9 @@ export function KitEventRow({
         onIntensityChange={onIntensityChange}
         playing={playing}
         onTogglePlay={onTogglePlay}
-        onNameClick={onEditClip}
+        selected={selected}
+        onSelect={onSelect}
+        dataCardId={event.id}
         wiper={null}
         drag={{ type: DND_TYPE_KIT_EVENT, payload: JSON.stringify({ kitEventId: event.id }), effect: 'move', dragTitle: 'ドラッグして並び替え' }}
         actions={[

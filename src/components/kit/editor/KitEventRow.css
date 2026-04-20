@@ -84,7 +84,7 @@
   gap: 4px;
 }
 .kit-event-side-loop-label {
-  font-size: 7px;
+  font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.4px;
   color: var(--text-secondary);
@@ -92,7 +92,7 @@
   line-height: 1;
 }
 .kit-event-side-loop {
-  font-size: 13px;
+  font-size: 15px;
 }
 /* Active state — filled accent background. */
 .kit-event-side-loop.on {

@@ -12,9 +12,10 @@ export interface WiperBadgeProps {
  * Renders nothing when value is null. Designed to sit at the right end
  * of the details row rather than being absolute-positioned.
  */
-export function WiperBadge({ value, title = 'Device volume (0–127)' }: WiperBadgeProps) {
+export function WiperBadge({ value, title = 'Device volume (wiper 0–127, 128段階)' }: WiperBadgeProps) {
   if (value === null) return null
+  const pct = Math.round((value / 127) * 100)
   return (
-    <span className="wiper-badge" title={title}>Vol {value}</span>
+    <span className="wiper-badge" title={title}>Vol {value}/128 ({pct}%)</span>
   )
 }

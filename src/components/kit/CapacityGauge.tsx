@@ -17,7 +17,8 @@ export function CapacityGauge({ kitSize, managerConnected, devices, send }: Capa
 
   const querySpace = useCallback(() => {
     if (!managerConnected || devices.length === 0) return
-    send({ type: 'query_space', payload: { target: devices[0].ipAddress } })
+    // No target — Manager answers for its selected device(s)
+    send({ type: 'query_space', payload: {} })
     setQueried(true)
   }, [managerConnected, devices, send])
 
@@ -70,8 +71,8 @@ export function CapacityGauge({ kitSize, managerConnected, devices, send }: Capa
         )}
         <span title="Remaining device storage">Free: {formatFileSize(freeBytes)}</span>
         {devices.length > 0 && devices[0].volumeWiper != null && (
-          <span className="capacity-vol" title="Connected Hapbeat device volume (MCP4018 wiper 0–127)">
-            Vol {devices[0].volumeWiper}
+          <span className="capacity-vol" title="Connected Hapbeat device volume (MCP4018 wiper 0–127, 128段階)">
+            Vol {devices[0].volumeWiper}/128 ({Math.round((devices[0].volumeWiper / 127) * 100)}%)
           </span>
         )}
       </div>
