@@ -1,5 +1,5 @@
 import { type DragEvent } from 'react'
-import type { KitEvent, LibraryClip } from '@/types/library'
+import type { KitEvent, KitEventMode, LibraryClip } from '@/types/library'
 import { ClipCard } from '../shared/ClipCard'
 import './KitEventRow.css'
 
@@ -15,11 +15,18 @@ export interface KitEventRowProps {
   onTogglePlay: () => void
   onIntensityChange: (v: number) => void
   onLoopChange: (loop: boolean) => void
+  onModeChange: (mode: KitEventMode) => void
   onEditClip: () => void
   onDelete: () => void
   onDragOverRow: (e: DragEvent) => void
   dragOverIndicator: boolean
 }
+
+const MODE_OPTIONS: { value: KitEventMode; label: string; title: string }[] = [
+  { value: 'command', label: 'CMD', title: 'Command — device plays WAV from flash' },
+  { value: 'stream_clip', label: 'STR', title: 'Stream Clip — SDK streams WAV over UDP' },
+  { value: 'stream_source', label: 'SRC', title: 'Stream Source — SDK captures live audio and streams it' },
+]
 
 /**
  * Kit event = the same ClipCard used in the library, plus a kit-only
@@ -39,15 +46,20 @@ export function KitEventRow({
   onTogglePlay,
   onIntensityChange,
   onLoopChange,
+  onModeChange,
   onEditClip,
   onDelete,
   onDragOverRow,
   dragOverIndicator,
 }: KitEventRowProps) {
-  const name = clip?.name ?? '(missing clip)'
+  const mode = event.mode ?? 'command'
+  // stream_source events have no clip; show a placeholder name instead
+  const name = mode === 'stream_source'
+    ? (clip?.name ?? event.eventId)
+    : (clip?.name ?? '(missing clip)')
   const details = clip
     ? `${Math.round(clip.duration * 1000)}ms | ${clip.channels === 1 ? 'Mono' : 'Stereo'} | ${clip.sampleRate / 1000}kHz | ${formatBytes(clip.fileSize)}`
-    : undefined
+    : (mode === 'stream_source' ? 'live audio source' : undefined)
   const tags = clip?.tags
 
   return (
@@ -81,6 +93,17 @@ export function KitEventRow({
           title="Remove from kit"
           aria-label="Remove from kit"
         >×</button>
+        <div className="kit-event-side-mode-group">
+          {MODE_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              className={`kit-event-side-mode ${mode === opt.value ? 'active' : ''}`}
+              onClick={() => onModeChange(opt.value)}
+              title={opt.title}
+              aria-pressed={mode === opt.value}
+            >{opt.label}</button>
+          ))}
+        </div>
         <div className="kit-event-side-loop-group">
           <span className="kit-event-side-loop-label">Loop</span>
           <button

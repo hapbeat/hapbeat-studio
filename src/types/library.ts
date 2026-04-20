@@ -105,6 +105,15 @@ export interface KitDefinition {
   updatedAt: string
 }
 
+/**
+ * Playback mode for a Kit event (hapbeat-contracts DEC-023).
+ *
+ * - command: Device plays the WAV clip from flash (legacy mode, default)
+ * - stream_clip: SDK streams the WAV over UDP; device only receives the PCM stream
+ * - stream_source: SDK captures a live AudioSource and streams it; no clip needed
+ */
+export type KitEventMode = 'command' | 'stream_clip' | 'stream_source'
+
 export interface KitEvent {
   /** Stable per-kit id, generated on add. Used as the React key and as the
    *  handle for update/remove — NOT the same as eventId, which can repeat
@@ -114,6 +123,11 @@ export interface KitEvent {
   eventId: string
   /** Reference to LibraryClip.id */
   clipId: string
+  /**
+   * Playback mode. Defaults to "command" if absent (backward-compatible
+   * with kits that predate the mode field).
+   */
+  mode?: KitEventMode
   /** Loop playback */
   loop: boolean
   /**

@@ -5,12 +5,19 @@
  * ZIP 内構造:
  *   <pack_id>/
  *     manifest.json
- *     clips/
+ *     clips/              ← command mode events の WAV (device flash 用)
  *       <clip-file>.wav
+ *     stream-clips/       ← stream_clip mode events の WAV (SDK import 用, device には焼かない)
+ *       <clip-file>.wav
+ *
+ * mode フィールド (DEC-023):
+ *   - command      : device に焼かれる WAV clip。manifest に mode 省略 or "command" で記録。
+ *   - stream_clip  : SDK が UDP ストリームで流す WAV。stream-clips/ に配置。device binary 除外。
+ *   - stream_source: live audio capture。clip 不要。device binary 除外。
  */
 
 import JSZip from 'jszip'
-import type { KitDefinition, LibraryClip } from '@/types/library'
+import type { KitDefinition, KitEventMode, LibraryClip } from '@/types/library'
 import { loadClipAudio } from '@/utils/libraryStorage'
 import { encodeWavBlob } from '@/utils/wavIO'
 
@@ -73,13 +80,22 @@ export interface ExportResult {
   warnings: string[]
 }
 
+/** Resolve the effective mode of a KitEvent, defaulting to "command". */
+function resolveMode(mode: KitEventMode | undefined): KitEventMode {
+  return mode ?? 'command'
+}
+
 /**
  * Kit を Pack 形式の ZIP にエクスポートする。
+ *
+ * mode=command  → clips/ に WAV 配置、manifest に clip フィールドあり
+ * mode=stream_clip → stream-clips/ に WAV 配置、manifest に mode + clip フィールド
+ *                    ただし device binary の clips/ には含めない
+ * mode=stream_source → WAV 不要、manifest に mode フィールドのみ
  *
  * @param kit - Kit 定義
  * @param clips - ライブラリ内の全クリップ（kit.events.clipId で参照）
  * @returns ZIP の Blob とファイル名
- * @throws クリップの音声データ取得に失敗した場合
  */
 export async function exportKitAsPack(
   kit: KitDefinition,
@@ -90,12 +106,30 @@ export async function exportKitAsPack(
   const zip = new JSZip()
   const root = zip.folder(packId)!
 
-  // Event ID → clip ファイルパスのマッピング
+  // manifest に書き込む events / clips テーブル
   const events: Record<string, unknown> = {}
   const clipsMeta: Record<string, unknown> = {}
-  const usedFileNames = new Set<string>()
+
+  // ファイル名の重複回避（command / stream_clip それぞれ独立した namespace）
+  const usedCommandNames = new Set<string>()
+  const usedStreamNames = new Set<string>()
 
   for (const ev of kit.events) {
+    const mode = resolveMode(ev.mode)
+
+    // --- stream_source: WAV 不要 ---
+    if (mode === 'stream_source') {
+      events[ev.eventId] = {
+        mode: 'stream_source',
+        description: '',
+        parameters: {
+          intensity: round2(ev.intensity),
+        },
+      }
+      continue
+    }
+
+    // --- command / stream_clip: WAV が必要 ---
     const clip = clips.find((c) => c.id === ev.clipId)
     if (!clip) {
       warnings.push(`クリップが見つかりません: eventId="${ev.eventId}", clipId="${ev.clipId}"`)
@@ -109,7 +143,8 @@ export async function exportKitAsPack(
       continue
     }
 
-    // 16 kHz PCM16 に normalize してから pack に入れる（device 側に resampler がないため）
+    // command は 16 kHz PCM16 に normalize（device 側に resampler なし）
+    // stream_clip も同じ normalize を適用しておく（SDK が decode しやすいように）
     let packBlob: Blob
     let packSampleRate: number
     let packChannels: number
@@ -133,36 +168,62 @@ export async function exportKitAsPack(
       packDuration = clip.duration
     }
 
-    // ファイル名の重複回避
-    let fname = clipFileName(clip)
-    if (usedFileNames.has(fname)) {
-      const base = fname.replace(/\.wav$/, '')
-      let n = 2
-      while (usedFileNames.has(`${base}_${n}.wav`)) n++
-      fname = `${base}_${n}.wav`
-    }
-    usedFileNames.add(fname)
+    if (mode === 'command') {
+      // ファイル名の重複回避 (command namespace)
+      let fname = clipFileName(clip)
+      if (usedCommandNames.has(fname)) {
+        const base = fname.replace(/\.wav$/, '')
+        let n = 2
+        while (usedCommandNames.has(`${base}_${n}.wav`)) n++
+        fname = `${base}_${n}.wav`
+      }
+      usedCommandNames.add(fname)
 
-    // ZIP 内では clips/ 配下に配置するが、manifest 内の clip 参照は
-    // clips/ からの相対パス（= ファイル名のみ）で記録する (contracts 準拠)
-    root.file(`clips/${fname}`, packBlob)
+      // ZIP に配置（clips/ = device binary 対象）
+      root.file(`clips/${fname}`, packBlob)
 
-    events[ev.eventId] = {
-      clip: fname,
-      description: '',
-      tags: [],
-      parameters: {
-        intensity: round2(ev.intensity),
-        loop: ev.loop,
-        ...(ev.deviceWiper !== null ? { device_wiper: ev.deviceWiper } : {}),
-      },
-    }
+      // manifest: mode=command は mode フィールドを省略（後方互換、firmware の default=command と一致）
+      events[ev.eventId] = {
+        clip: fname,
+        description: '',
+        parameters: {
+          intensity: round2(ev.intensity),
+          loop: ev.loop,
+          ...(ev.deviceWiper !== null ? { device_wiper: ev.deviceWiper } : {}),
+        },
+      }
 
-    clipsMeta[fname] = {
-      duration_ms: round2(packDuration * 1000),
-      sample_rate: packSampleRate,
-      channels: packChannels,
-      format: 'pcm_s16le',
+      clipsMeta[fname] = {
+        duration_ms: round2(packDuration * 1000),
+        sample_rate: packSampleRate,
+        channels: packChannels,
+        format: 'pcm_s16le',
+      }
+    } else {
+      // stream_clip: SDK import 用に stream-clips/ に配置
+      let fname = clipFileName(clip)
+      if (usedStreamNames.has(fname)) {
+        const base = fname.replace(/\.wav$/, '')
+        let n = 2
+        while (usedStreamNames.has(`${base}_${n}.wav`)) n++
+        fname = `${base}_${n}.wav`
+      }
+      usedStreamNames.add(fname)
+
+      // ZIP に配置（stream-clips/ = device binary 対象外）
+      root.file(`stream-clips/${fname}`, packBlob)
+
+      // manifest: mode=stream_clip + clip パスは stream-clips/ 相対
+      events[ev.eventId] = {
+        mode: 'stream_clip',
+        clip: `stream-clips/${fname}`,
+        description: '',
+        parameters: {
+          intensity: round2(ev.intensity),
+        },
+      }
+      // stream-clips の metadata は clips テーブルではなく将来的に stream-clips テーブルで管理。
+      // 現時点は manifest.clips には含めない（device binary には不要なため）。
     }
   }
 

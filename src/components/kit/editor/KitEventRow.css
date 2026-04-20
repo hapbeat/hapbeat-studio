@@ -36,10 +36,10 @@
 }
 .kit-event-wrap > .clip-card:hover { background: transparent; }
 
-/* Side rail — narrow column with delete on top, loop at bottom. */
+/* Side rail — narrow column with delete on top, mode group middle, loop at bottom. */
 .kit-event-side {
   flex: 0 0 auto;
-  width: 32px;
+  width: 36px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -104,4 +104,32 @@
   color: var(--accent-light);
   border-color: rgba(124,92,191,0.5);
   background: rgba(124,92,191,0.15);
+}
+
+/* Mode selector group */
+.kit-event-side-mode-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.kit-event-side-mode {
+  font-size: 8px !important;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  width: 28px !important;
+  height: 18px !important;
+  border-radius: 3px !important;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+.kit-event-side-mode.active {
+  opacity: 1;
+  background: rgba(124,92,191,0.2) !important;
+  color: var(--accent-light) !important;
+  border-color: rgba(124,92,191,0.5) !important;
+}
+.kit-event-side-mode:hover:not(.active) {
+  opacity: 0.9;
+  background: rgba(255,255,255,0.06) !important;
 }

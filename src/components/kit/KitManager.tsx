@@ -1036,6 +1036,7 @@ function KitEditor() {
                           }}
                           onIntensityChange={(v) => updateKitEvent(activeKit.id, ev.id, { intensity: v })}
                           onLoopChange={(loop) => updateKitEvent(activeKit.id, ev.id, { loop })}
+                          onModeChange={(mode) => updateKitEvent(activeKit.id, ev.id, { mode })}
                           onEditClip={() => setEditingClipId(ev.clipId)}
                           onDelete={() => removeEventFromKit(activeKit.id, ev.id)}
                           onDragOverRow={() => setDragOverIdx(i)}
