@@ -23,7 +23,10 @@ export function isFileSystemAccessSupported(): boolean {
 
 const HANDLE_DB = 'hapbeat-studio-fs'
 const HANDLE_STORE = 'handles'
-const HANDLE_KEY = 'workdir'
+
+/** IDB key for each persisted handle. `workdir` = clip library root,
+ *  `kitdir` = optional separate kit output root (e.g. Unity Assets). */
+export type DirectoryHandleKey = 'workdir' | 'kitdir'
 
 async function getHandleDb() {
   return openDB(HANDLE_DB, 1, {
@@ -35,19 +38,19 @@ async function getHandleDb() {
   })
 }
 
-export async function saveDirectoryHandle(handle: FileSystemDirectoryHandle): Promise<void> {
+export async function saveDirectoryHandle(handle: FileSystemDirectoryHandle, key: DirectoryHandleKey = 'workdir'): Promise<void> {
   const db = await getHandleDb()
-  await db.put(HANDLE_STORE, handle, HANDLE_KEY)
+  await db.put(HANDLE_STORE, handle, key)
 }
 
-export async function loadDirectoryHandle(): Promise<FileSystemDirectoryHandle | null> {
+export async function loadDirectoryHandle(key: DirectoryHandleKey = 'workdir'): Promise<FileSystemDirectoryHandle | null> {
   const db = await getHandleDb()
-  return (await db.get(HANDLE_STORE, HANDLE_KEY)) ?? null
+  return (await db.get(HANDLE_STORE, key)) ?? null
 }
 
-export async function clearDirectoryHandle(): Promise<void> {
+export async function clearDirectoryHandle(key: DirectoryHandleKey = 'workdir'): Promise<void> {
   const db = await getHandleDb()
-  await db.delete(HANDLE_STORE, HANDLE_KEY)
+  await db.delete(HANDLE_STORE, key)
 }
 
 // ---- Permission ----
@@ -64,14 +67,17 @@ export async function verifyPermission(
 
 // ---- Directory picker ----
 
-export async function pickWorkDirectory(): Promise<FileSystemDirectoryHandle | null> {
+export async function pickWorkDirectory(key: DirectoryHandleKey = 'workdir'): Promise<FileSystemDirectoryHandle | null> {
+  // pickerId は key ごとに分けておくとブラウザが「最後に選んだフォルダ」を
+  // それぞれ独立して記憶してくれる (library と kit-out で別フォルダに誘導できる)。
+  const pickerId = key === 'kitdir' ? 'hapbeat-kitdir' : 'hapbeat-workdir'
   try {
     const handle = await window.showDirectoryPicker({
-      id: 'hapbeat-workdir',
+      id: pickerId,
       mode: 'readwrite',
       startIn: 'documents',
     })
-    await saveDirectoryHandle(handle)
+    await saveDirectoryHandle(handle, key)
     return handle
   } catch (err) {
     // User cancelled
@@ -288,8 +294,11 @@ export async function writeKitFolder(
   kitName: string,
   files: { path: string; blob: Blob }[],
 ): Promise<void> {
-  const kitsDir = await ensureSubdir(root, 'kits')
-  const kitDir = await kitsDir.getDirectoryHandle(kitName, { create: true })
+  // 各 kit は必ず root 直下に kit 名のフォルダとして書き出す
+  // (ライブラリ / kit-out どちらを root に指定してもこの階層構造)。
+  // 以前は library workDir と共用する想定で `kits/` 階層を挟んでいたが、
+  // フォルダを分離できるようになったため削除した。
+  const kitDir = await root.getDirectoryHandle(kitName, { create: true })
 
   for (const { path, blob } of files) {
     // Handle nested paths like "clips/gunshot.wav"
@@ -316,6 +325,57 @@ export async function listKitFolders(
     }
   }
   return names.sort()
+}
+
+/** Scan result for a single discovered kit folder. */
+export interface DiscoveredKit {
+  folderName: string
+  manifestJson: unknown
+  /** relPath (e.g. "clips/foo.wav" or "stream-clips/bar.wav") → File */
+  clipFiles: Map<string, File>
+}
+
+/**
+ * Scan `root` for immediate subfolders that look like an exported Hapbeat Kit
+ * (= contain a `manifest.json`). For each one, parse the manifest and load
+ * every wav under `clips/` and `stream-clips/` so the caller can register
+ * them into the Studio library.
+ *
+ * 存在しない / 壊れた manifest は黙ってスキップする。
+ */
+export async function scanKitOutputFolder(
+  root: FileSystemDirectoryHandle,
+): Promise<DiscoveredKit[]> {
+  const out: DiscoveredKit[] = []
+  for await (const entry of root.values()) {
+    if (entry.kind !== 'directory') continue
+    const kitFolder = entry as FileSystemDirectoryHandle
+    let manifestJson: unknown
+    try {
+      const mf = await kitFolder.getFileHandle('manifest.json')
+      const text = await (await mf.getFile()).text()
+      manifestJson = JSON.parse(text)
+    } catch {
+      // manifest.json が無い / parse 失敗 → この folder は Hapbeat kit ではない
+      continue
+    }
+    const clipFiles = new Map<string, File>()
+    for (const subName of ['clips', 'stream-clips'] as const) {
+      try {
+        const subDir = await kitFolder.getDirectoryHandle(subName)
+        for await (const child of subDir.values()) {
+          if (child.kind !== 'file') continue
+          if (!child.name.toLowerCase().endsWith('.wav')) continue
+          const fh = child as FileSystemFileHandle
+          clipFiles.set(`${subName}/${child.name}`, await fh.getFile())
+        }
+      } catch {
+        // このサブフォルダが無ければ単にスキップ (mode によっては片方しか存在しない)
+      }
+    }
+    out.push({ folderName: kitFolder.name, manifestJson, clipFiles })
+  }
+  return out
 }
 
 // ---- Metadata JSON ----

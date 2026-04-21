@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { LibraryClip, KitDefinition, KitEvent, LibraryFilter, BuiltinClipMeta, BuiltinLibraryIndex, LibraryViewMode, ClipAmpPreset } from '@/types/library'
+import type { LibraryClip, KitDefinition, KitEvent, KitEventMode, LibraryFilter, BuiltinClipMeta, BuiltinLibraryIndex, LibraryViewMode, ClipAmpPreset } from '@/types/library'
 import {
   saveClip,
   listClips,
@@ -26,6 +26,8 @@ import {
   renameClipFile,
   writeMetadataJson,
   readMetadataJson,
+  scanKitOutputFolder,
+  type DiscoveredKit,
 } from '@/utils/localDirectory'
 
 function generateId(): string {
@@ -118,6 +120,10 @@ interface LibraryState {
   workDirHandle: FileSystemDirectoryHandle | null
   workDirName: string | null
   workDirSupported: boolean
+  /** Optional: separate output folder for exported Kits (e.g. Unity's
+   *  Assets/HapbeatKits). When null, kits are saved under workDir/kits/. */
+  kitDirHandle: FileSystemDirectoryHandle | null
+  kitDirName: string | null
 
   // Kit management
   kits: KitDefinition[]
@@ -180,6 +186,14 @@ interface LibraryState {
   pickWorkDir: () => Promise<boolean>
   restoreWorkDir: () => Promise<boolean>
   disconnectWorkDir: () => Promise<void>
+  // Kit output directory (separate folder for kit exports)
+  pickKitDir: () => Promise<boolean>
+  restoreKitDir: () => Promise<boolean>
+  disconnectKitDir: () => Promise<void>
+  /** Scan kitDirHandle for kit subfolders (manifest.json + clips/ + stream-clips/)
+   *  and merge them into the in-memory kits[] + clips[]. Called automatically
+   *  when the kit output folder is chosen or restored on startup. */
+  importKitsFromOutputDir: () => Promise<number>
   syncClipsToDir: () => Promise<void>
   syncClipsFromDir: () => Promise<void>
   /** Re-scan work dir clips/ folder and update clips list (adds new, removes deleted) */
@@ -264,6 +278,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   workDirHandle: null,
   workDirName: null,
   workDirSupported: isFileSystemAccessSupported(),
+  kitDirHandle: null,
+  kitDirName: null,
   kits: [],
   activeKitId: null,
   editingClipId: null,
@@ -277,6 +293,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     try {
       // Try to restore work directory first
       const restored = await get().restoreWorkDir()
+      // Kit output dir is optional and independent — restore silently
+      await get().restoreKitDir().catch(() => { /* ignore permission loss */ })
 
       if (restored) {
         // Load from local directory
@@ -467,6 +485,146 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   disconnectWorkDir: async () => {
     await clearDirectoryHandle()
     set({ workDirHandle: null, workDirName: null, ampPresets: [] })
+  },
+
+  pickKitDir: async () => {
+    if (!isFileSystemAccessSupported()) return false
+    const handle = await pickWorkDirectory('kitdir')
+    if (!handle) return false
+    set({ kitDirHandle: handle, kitDirName: handle.name })
+    // ユーザーが選んだフォルダが既存の Hapbeat kit を含んでいれば自動取り込み
+    await get().importKitsFromOutputDir().catch((err) => console.error('Auto-import after pickKitDir failed:', err))
+    return true
+  },
+
+  restoreKitDir: async () => {
+    if (!isFileSystemAccessSupported()) return false
+    const handle = await loadDirectoryHandle('kitdir')
+    if (!handle) return false
+    const granted = await verifyPermission(handle, true)
+    if (!granted) return false
+    set({ kitDirHandle: handle, kitDirName: handle.name })
+    // 起動時の復元でも同様に自動取り込み (ローカル ≥ IDB)
+    await get().importKitsFromOutputDir().catch((err) => console.error('Auto-import after restoreKitDir failed:', err))
+    return true
+  },
+
+  disconnectKitDir: async () => {
+    await clearDirectoryHandle('kitdir')
+    set({ kitDirHandle: null, kitDirName: null })
+  },
+
+  importKitsFromOutputDir: async () => {
+    const { kitDirHandle, workDirHandle } = get()
+    if (!kitDirHandle) return 0
+
+    const discovered = await scanKitOutputFolder(kitDirHandle)
+    if (discovered.length === 0) return 0
+
+    const ctx = new AudioContext()
+    const now = new Date().toISOString()
+    const updatedClips = [...get().clips]
+    const updatedKits = [...get().kits]
+
+    /** basename match (先頭のフォルダ部分を無視) でライブラリ clip を探す。
+     *  無ければ file を decode してライブラリに登録する。 */
+    const ensureClip = async (filename: string, file: File): Promise<string | null> => {
+      const base = (filename.split('/').pop() || filename)
+      const existing = updatedClips.find((c) => {
+        const b = (c.sourceFilename || '').split('/').pop() || c.sourceFilename
+        return b === base
+      })
+      if (existing) return existing.id
+      try {
+        const arrayBuffer = await file.arrayBuffer()
+        const buffer = await ctx.decodeAudioData(arrayBuffer.slice(0))
+        const id = generateId()
+        const clip: LibraryClip = {
+          id,
+          name: filenameToDisplayName(base),
+          tags: [],
+          group: '',
+          eventId: '',
+          duration: buffer.duration,
+          channels: buffer.numberOfChannels,
+          sampleRate: buffer.sampleRate,
+          fileSize: file.size,
+          sourceFilename: base,
+          createdAt: now,
+          updatedAt: now,
+        }
+        updatedClips.push(clip)
+        const blob = new Blob([arrayBuffer], { type: 'audio/wav' })
+        await saveClip(clip, blob)
+        if (workDirHandle) await writeClipFile(workDirHandle, base, blob)
+        return id
+      } catch (err) {
+        console.error(`Failed to decode kit clip "${filename}":`, err)
+        return null
+      }
+    }
+
+    let importedCount = 0
+    for (const { manifestJson, clipFiles } of discovered as DiscoveredKit[]) {
+      if (!manifestJson || typeof manifestJson !== 'object') continue
+      const m = manifestJson as {
+        pack_id?: string; name?: string; version?: string; description?: string
+        created_at?: string; events?: Record<string, unknown>
+      }
+      const packId = String(m.pack_id ?? m.name ?? '').trim()
+      if (!packId) continue
+
+      const events: KitEvent[] = []
+      for (const [eventId, rawEv] of Object.entries(m.events ?? {})) {
+        if (!rawEv || typeof rawEv !== 'object') continue
+        const ev = rawEv as {
+          mode?: string; clip?: string; parameters?: Record<string, unknown>
+        }
+        const mode = (ev.mode ?? 'command') as KitEventMode
+        let clipId = ''
+        if (ev.clip) {
+          // clipPath は "stream-clips/foo.wav" または "foo.wav" (command の場合 clips/ 相対)
+          const relKey = ev.clip.includes('/') ? ev.clip : `clips/${ev.clip}`
+          const file = clipFiles.get(relKey) ?? clipFiles.get(ev.clip)
+          if (file) {
+            const id = await ensureClip(ev.clip, file)
+            if (id) clipId = id
+          }
+        }
+        const params = (ev.parameters ?? {}) as { intensity?: number; loop?: boolean; device_wiper?: number }
+        events.push({
+          id: generateId(),
+          eventId,
+          clipId,
+          mode,
+          loop: params.loop ?? false,
+          intensity: typeof params.intensity === 'number' ? params.intensity : 0.5,
+          deviceWiper: typeof params.device_wiper === 'number' ? params.device_wiper : null,
+        })
+      }
+
+      const existingIdx = updatedKits.findIndex((k) => k.name === (m.name ?? packId) || k.name === packId)
+      const kit: KitDefinition = {
+        id: existingIdx >= 0 ? updatedKits[existingIdx].id : generateId(),
+        name: String(m.name ?? packId),
+        version: String(m.version ?? '1.0.0'),
+        description: String(m.description ?? ''),
+        events,
+        createdAt: existingIdx >= 0 ? updatedKits[existingIdx].createdAt : (m.created_at ?? now),
+        updatedAt: now,
+      }
+      if (existingIdx >= 0) updatedKits[existingIdx] = kit
+      else updatedKits.push(kit)
+      await saveKit(kit)
+      importedCount++
+    }
+
+    set({ clips: updatedClips, kits: updatedKits })
+    if (workDirHandle) {
+      await saveClipsMetaToDir(workDirHandle, updatedClips)
+      await saveKitsMetaToDir(workDirHandle, updatedKits)
+    }
+    return importedCount
   },
 
   syncClipsToDir: async () => {

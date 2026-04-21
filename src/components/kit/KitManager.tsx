@@ -8,6 +8,7 @@ import type { LibraryClip, LibraryViewMode } from '@/types/library'
 import type { DeviceInfo } from '@/types/manager'
 import { CapacityGauge } from './CapacityGauge'
 import { KitEventRow } from './editor/KitEventRow'
+import { ClipModeInfoModal } from './editor/ClipModeInfoModal'
 import { ClipCard } from './shared/ClipCard'
 import { ClipEditModal } from './shared/ClipEditModal'
 import './KitManager.css'
@@ -68,6 +69,27 @@ export function KitManager() {
   const stackedResize = useResizeHandle('vertical', 50)
 
   useEffect(() => { loadLibrary() }, [loadLibrary])
+
+  // キーボード操作中はマウスカーソル / hover 状態を抑制する。
+  // キーボードでカードを選択移動している最中に、別のカードの hover が
+  // 効いていると「どちらが選択中か」が視覚的にわかりにくくなるため。
+  // keydown を検知した時点で body に .using-keyboard を付け、
+  // 次の mousemove で外す。CSS 側で hover と cursor を殺している。
+  useEffect(() => {
+    const NAV_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' ', 'Spacebar', 'Enter', 'Delete', 'Backspace', 'Tab'])
+    const onKey = (e: KeyboardEvent) => {
+      if (!NAV_KEYS.has(e.key)) return
+      document.body.classList.add('using-keyboard')
+    }
+    const onMouse = () => { document.body.classList.remove('using-keyboard') }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('mousemove', onMouse)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousemove', onMouse)
+      document.body.classList.remove('using-keyboard')
+    }
+  }, [])
 
   if (isLoading) return <div className="kit-manager-wrapper"><div className="kit-loading">Loading...</div></div>
 
@@ -236,7 +258,11 @@ function AmpPresetBar() {
 // Shortcut Help — ヘルプボタン + ポップオーバー
 // ============================================================
 
-function ShortcutHelp({ scope }: { scope: 'library' | 'kit' }) {
+/**
+ * 操作説明 — マウス/キーボードの全操作を 1 つのポップオーバーにまとめた
+ * トップバー配置用ヘルプ。Library と Kit の両方のパネルの操作を同時に示す。
+ */
+function ShortcutHelp() {
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLSpanElement>(null)
 
@@ -254,24 +280,28 @@ function ShortcutHelp({ scope }: { scope: 'library' | 'kit' }) {
   return (
     <span className="shortcut-help-wrap" ref={wrapRef}>
       <button
-        className="shortcut-help-btn"
+        className="shortcut-help-btn labeled"
         onClick={() => setOpen((o) => !o)}
-        title="キーボード/マウス操作の説明"
-        aria-label="Show shortcut help"
-      >?</button>
+        title="マウス/キーボード操作の一覧を開く"
+        aria-label="操作説明"
+      ><span className="shortcut-help-btn-icon">?</span>操作説明</button>
       {open && (
         <div className="shortcut-help-panel" role="dialog">
-          <div className="shortcut-help-title">マウス操作</div>
+          <div className="shortcut-help-title">マウス操作 (Library)</div>
           <ul className="shortcut-help-list">
             <li><span className="shortcut-help-key">クリック</span>カードを選択</li>
             <li><span className="shortcut-help-key">▶</span>再生 / 停止</li>
-            <li><span className="shortcut-help-key">☰ ドラッグ</span>
-              {scope === 'library' ? 'Kit にドロップして追加' : 'Kit 内で並び替え'}</li>
+            <li><span className="shortcut-help-key">☰ ドラッグ</span>Kit にドロップして追加</li>
             <li><span className="shortcut-help-key">Amp スライダー</span>強度 (0–100%)</li>
             <li><span className="shortcut-help-key">Edit ボタン</span>名前 / Event ID / タグ編集</li>
-            {scope === 'library' && <li><span className="shortcut-help-key">+ Kit ボタン</span>選択中の Kit に追加</li>}
-            {scope === 'kit' && <li><span className="shortcut-help-key">FIRE / CLIP / LIVE</span>再生モード切替 (? で詳細)</li>}
-            {scope === 'kit' && <li><span className="shortcut-help-key">×</span>Kit から削除</li>}
+            <li><span className="shortcut-help-key">+ Kit ボタン</span>選択中の Kit に追加</li>
+          </ul>
+
+          <div className="shortcut-help-title">マウス操作 (Kit)</div>
+          <ul className="shortcut-help-list">
+            <li><span className="shortcut-help-key">☰ ドラッグ</span>Kit 内で並び替え</li>
+            <li><span className="shortcut-help-key">FIRE / CLIP / LIVE</span>再生モード切替 (ヘッダーの「モード説明」参照)</li>
+            <li><span className="shortcut-help-key">×</span>Kit から削除</li>
           </ul>
 
           <div className="shortcut-help-title">キーボード（選択中）</div>
@@ -279,7 +309,8 @@ function ShortcutHelp({ scope }: { scope: 'library' | 'kit' }) {
             <li><span className="shortcut-help-key">↑ / ↓</span>選択を上下に移動</li>
             <li><span className="shortcut-help-key">← / →</span>Amp を ±5%</li>
             <li><span className="shortcut-help-key">Space</span>再生 / 停止</li>
-            {scope === 'library' && <li><span className="shortcut-help-key">Enter</span>アクティブ Kit に追加</li>}
+            <li><span className="shortcut-help-key">Enter</span>アクティブ Kit に追加 (Library 側)</li>
+            <li><span className="shortcut-help-key">Delete / Backspace</span>Kit から削除 (Kit 側)</li>
           </ul>
 
           <div className="shortcut-help-note">
@@ -296,18 +327,56 @@ function ShortcutHelp({ scope }: { scope: 'library' | 'kit' }) {
 // Work Dir Bar
 // ============================================================
 
+/**
+ * Reusable folder chip — icon + path + action buttons in one compact pill.
+ * Used in both the Clips panel header (library folder) and the Kit panel
+ * header (kit-out folder). Keeps each folder UI next to the panel it scopes.
+ */
+interface FolderChipProps {
+  icon: string
+  name: string | null
+  onPick: () => Promise<boolean>
+  onClear: () => Promise<void>
+  label: string          // e.g. "Library" / "Kit"
+  setTitle?: string
+  emptyTitle?: string
+  setLabel?: string      // "+ Library" / "+ Kit"
+  changeTitle?: string
+  clearTitle?: string
+  clearLabel?: string    // "×" or custom
+}
+function FolderChip({
+  icon, name, onPick, onClear, label,
+  setTitle, emptyTitle,
+  setLabel, changeTitle, clearTitle, clearLabel = '×',
+}: FolderChipProps) {
+  const { toast } = useToast()
+  return (
+    <span className="workdir-chip" title={name ? (setTitle ?? `${label}: ${name}`) : (emptyTitle ?? `Choose ${label} folder`)}>
+      <span className="workdir-icon">{icon}</span>
+      {name ? (
+        <>
+          <span className="workdir-path" title={name}>{name}</span>
+          <button className="workdir-icon-btn" onClick={async () => { if (await onPick()) toast(`${label} folder changed`, 'success') }}
+            title={changeTitle ?? `Change ${label} folder`}>⇄</button>
+          <button className="workdir-icon-btn danger" onClick={async () => { await onClear(); toast(`${label} folder cleared`, 'success') }}
+            title={clearTitle ?? `Clear ${label} folder`}>{clearLabel}</button>
+        </>
+      ) : (
+        <button className="workdir-icon-btn primary" onClick={async () => { if (await onPick()) toast(`${label} folder set`, 'success') }}
+          title={emptyTitle ?? `Choose ${label} folder`}>{setLabel ?? `+ ${label}`}</button>
+      )}
+    </span>
+  )
+}
+
 function WorkDirBar() {
-  const workDirSupported = useLibraryStore((s) => s.workDirSupported)
-  const workDirName = useLibraryStore((s) => s.workDirName)
-  const pickWorkDir = useLibraryStore((s) => s.pickWorkDir)
-  const disconnectWorkDir = useLibraryStore((s) => s.disconnectWorkDir)
   const viewMode = useLibraryStore((s) => s.viewMode)
   const setViewMode = useLibraryStore((s) => s.setViewMode)
   const showClipDetails = useLibraryStore((s) => s.showClipDetails)
   const setShowClipDetails = useLibraryStore((s) => s.setShowClipDetails)
   const { devices } = useManagerConnection()
   const volumeWiper = devices[0]?.volumeWiper ?? null
-  const { toast } = useToast()
 
   const views: { value: LibraryViewMode; label: string; title: string }[] = [
     { value: 'side', label: '\u2503', title: 'Clips left, kit editor right' },
@@ -327,29 +396,11 @@ function WorkDirBar() {
         onClick={() => setShowClipDetails(!showClipDetails)}
         title={showClipDetails ? 'Hide clip details (duration, sample rate, tags…)' : 'Show clip details'}
       >i</button>
-      <span className="workdir-divider" />
-      {workDirSupported && (
+      <ShortcutHelp />
+      {volumeWiper !== null && (
         <>
-          <span className="workdir-icon">&#x1F4C2;</span>
-          {workDirName ? (
-            <>
-              <span className="workdir-path">{workDirName}/</span>
-              <span className="workdir-status connected">Connected</span>
-              <button className="workdir-btn" onClick={async () => { if (await pickWorkDir()) toast('Folder changed', 'success') }}>Change</button>
-              <button className="workdir-btn disconnect" onClick={async () => { await disconnectWorkDir(); toast('Disconnected', 'success') }}>Disconnect</button>
-              {volumeWiper !== null && (
-                <>
-                  <span className="workdir-divider" />
-                  <span className="workdir-vol" title="Connected Hapbeat device volume (MCP4018 wiper 0–127, 128段階)">Vol {volumeWiper}/128 ({Math.round((volumeWiper / 127) * 100)}%)</span>
-                </>
-              )}
-            </>
-          ) : (
-            <>
-              <span className="workdir-hint">No work folder</span>
-              <button className="workdir-btn primary" onClick={async () => { if (await pickWorkDir()) toast('Folder set', 'success') }}>Choose Folder</button>
-            </>
-          )}
+          <span className="workdir-divider" />
+          <span className="workdir-vol" title="Connected Hapbeat device volume (MCP4018 wiper 0–127, 128段階)">Vol {volumeWiper}/128 ({Math.round((volumeWiper / 127) * 100)}%)</span>
         </>
       )}
     </div>
@@ -416,7 +467,7 @@ function useAudioPreview() {
     return (d as DeviceInfo).volumeWiper ?? null
   }, [hasDevice, devices])
 
-  return { playingId, toggle, hasDevice, getDeviceWiper }
+  return { playingId, toggle, stop, hasDevice, getDeviceWiper }
 }
 
 // ============================================================
@@ -472,13 +523,21 @@ function hueForPath(path: string): number {
   return TREE_HUES[Math.abs(h) % TREE_HUES.length]
 }
 
-function TreeFolder({ node, defaultOpen, children }: { node: ClipTreeNode; defaultOpen: boolean; children: React.ReactNode }) {
-  const [open, setOpen] = useState(defaultOpen)
+interface TreeFolderProps {
+  node: ClipTreeNode
+  /** 親から受け取る open 判定。キーボード選択時に親が強制的に開くため、
+   *  ローカル state ではなく parent 管理の Set<string> を参照する。 */
+  isOpen: (path: string) => boolean
+  toggle: (path: string) => void
+  children: React.ReactNode
+}
+function TreeFolder({ node, isOpen, toggle, children }: TreeFolderProps) {
+  const open = isOpen(node.path)
   const clipCount = countClipsInTree(node)
   const hue = hueForPath(node.path)
   return (
     <div className={`tree-group ${open ? 'is-open' : ''}`} style={{ '--tree-hue': hue } as React.CSSProperties}>
-      <button className="tree-group-header" onClick={() => setOpen(!open)}>
+      <button className="tree-group-header" onClick={() => toggle(node.path)}>
         <span className="tree-arrow">{open ? '\u25BE' : '\u25B8'}</span>
         <span className="tree-label">{node.name}</span>
         <span className="tree-count">{clipCount}</span>
@@ -524,8 +583,10 @@ function ClipsPanel() {
   const updateClip = useLibraryStore((s) => s.updateClip)
   const commitClipRename = useLibraryStore((s) => s.commitClipRename)
   const workDirHandle = useLibraryStore((s) => s.workDirHandle)
+  const workDirName = useLibraryStore((s) => s.workDirName)
   const workDirSupported = useLibraryStore((s) => s.workDirSupported)
   const pickWorkDir = useLibraryStore((s) => s.pickWorkDir)
+  const disconnectWorkDir = useLibraryStore((s) => s.disconnectWorkDir)
   const refreshClipsFromDir = useLibraryStore((s) => s.refreshClipsFromDir)
   const getClipAudio = useLibraryStore((s) => s.getClipAudio)
   const addEventToKit = useLibraryStore((s) => s.addEventToKit)
@@ -537,7 +598,11 @@ function ClipsPanel() {
   const [dragOver, setDragOver] = useState(false)
   const [listMode, setListMode] = useState<ClipListMode>('tree')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const { playingId, toggle } = useAudioPreview()
+  // Tree view で開いているフォルダ集合 (path で管理)。キーボード選択が
+  // 別フォルダに移ったときに自動で祖先フォルダを開いて、選択カードが
+  // 画面からも見えるようにするため、parent 管理にする。
+  const [openFolders, setOpenFolders] = useState<Set<string>>(new Set())
+  const { playingId, toggle, stop: stopPreview } = useAudioPreview()
   const displayed = filteredClips()
   const editingClip = editingClipId ? clips.find((c) => c.id === editingClipId) ?? null : null
   const setLibraryIntensity = useLibraryStore((s) => s.setLibraryIntensity)
@@ -557,14 +622,41 @@ function ClipsPanel() {
     return () => window.removeEventListener('focus', onFocus)
   }, [workDirHandle, refreshClipsFromDir])
 
-  // 選択が変わったら画面内にスクロール（tree で折りたたみ内にある場合はそのフォルダも開く）
+  // 選択が変わったら: 祖先フォルダを全部開く → 画面内にスクロール。
+  // 閉じたフォルダに選択が移ると DOM に要素が無く、選択のハイライトが
+  // 画面から消えてしまうため、キーボード移動に追従して自動展開する。
   useEffect(() => {
     if (!selectedId) return
-    const panel = panelRef.current
-    if (!panel) return
-    const el = panel.querySelector<HTMLElement>(`[data-card-id="${selectedId}"]`)
-    if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-  }, [selectedId])
+    const clip = clips.find((c) => c.id === selectedId)
+    if (clip) {
+      const src = clip.sourceFilename || ''
+      const parts = src.split('/').filter(Boolean)
+      if (parts.length > 1) {
+        // 末尾はファイル名なので除き、すべての祖先 path を open 集合に追加
+        const ancestors: string[] = []
+        let cur = ''
+        for (let i = 0; i < parts.length - 1; i++) {
+          cur = cur ? `${cur}/${parts[i]}` : parts[i]
+          ancestors.push(cur)
+        }
+        setOpenFolders((prev) => {
+          const missing = ancestors.filter((p) => !prev.has(p))
+          if (missing.length === 0) return prev
+          const next = new Set(prev)
+          for (const p of missing) next.add(p)
+          return next
+        })
+      }
+    }
+    // open 反映を待つため次フレームでスクロール
+    const raf = requestAnimationFrame(() => {
+      const panel = panelRef.current
+      if (!panel) return
+      const el = panel.querySelector<HTMLElement>(`[data-card-id="${selectedId}"]`)
+      if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [selectedId, clips])
 
   // 表示順と一致するナビゲーション順。tree mode では renderTreeNode の順で flat 化する。
   const orderedClips = useMemo(() => {
@@ -604,7 +696,10 @@ function ClipsPanel() {
       const moveTo = (idx: number) => {
         const clamped = Math.max(0, Math.min(orderedClips.length - 1, idx))
         const next = orderedClips[clamped]
-        if (next) setSelectedId(next.id)
+        if (!next || next.id === selectedId) return
+        // 選択を動かすときは再生中のプレビューを停止 (= 停止ボタンと同じ挙動)
+        stopPreview()
+        setSelectedId(next.id)
       }
 
       switch (e.key) {
@@ -641,7 +736,7 @@ function ClipsPanel() {
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [orderedClips, selectedId, editingClipId, toggle, getClipAudio, getIntensity, setIntensity, clips, addClipToActiveKit])
+  }, [orderedClips, selectedId, editingClipId, toggle, stopPreview, getClipAudio, getIntensity, setIntensity, clips, addClipToActiveKit])
 
   const handleImport = useCallback(async (files: FileList) => {
     for (const f of Array.from(files)) { try { await addClipFromFile(f) } catch (e) { console.error(e) } }
@@ -670,7 +765,13 @@ function ClipsPanel() {
     const body = (
       <>
         {childFolders.map((child) => (
-          <TreeFolder key={child.path} node={child} defaultOpen={false}>
+          <TreeFolder key={child.path} node={child}
+            isOpen={(p) => openFolders.has(p)}
+            toggle={(p) => setOpenFolders((prev) => {
+              const next = new Set(prev)
+              if (next.has(p)) next.delete(p); else next.add(p)
+              return next
+            })}>
             {renderTreeNode(child, false)}
           </TreeFolder>
         ))}
@@ -683,7 +784,20 @@ function ClipsPanel() {
   if (!workDirHandle) {
     return (
       <div className="clip-panel">
-        <div className="panel-header"><h3>Clips</h3></div>
+        <div className="panel-header">
+          <h3>Clips</h3>
+          {workDirSupported && (
+            <FolderChip
+              icon="&#x1F4C2;"
+              name={null}
+              onPick={pickWorkDir}
+              onClear={disconnectWorkDir}
+              label="Library"
+              emptyTitle="クリップ本体 (wav) を置くフォルダ。ここから Studio が clips / kits-meta を読み書きする。"
+              setLabel="+ Library"
+            />
+          )}
+        </div>
         <div className="library-list">
           <div className="library-empty workdir-prompt">
             <div className="workdir-prompt-content">
@@ -710,6 +824,17 @@ function ClipsPanel() {
       <div className="panel-header">
         <h3>Clips</h3>
         <span className="library-count">{clips.length}</span>
+        {workDirSupported && (
+          <FolderChip
+            icon="&#x1F4C2;"
+            name={workDirName}
+            onPick={pickWorkDir}
+            onClear={disconnectWorkDir}
+            label="Library"
+            emptyTitle="クリップ本体 (wav) を置くフォルダ。ここから Studio が clips / kits-meta を読み書きする。"
+            setLabel="+ Library"
+          />
+        )}
         <div className="panel-header-actions">
           <button
             className={`panel-mode-btn ${listMode === 'flat' ? 'active' : ''}`}
@@ -721,7 +846,6 @@ function ClipsPanel() {
             onClick={() => setListMode('tree')}
             title="Tree view (grouped by folder)"
           >&#x25B8;</button>
-          <ShortcutHelp scope="library" />
         </div>
       </div>
       <div className="library-toolbar">
@@ -831,24 +955,42 @@ function KitEditor() {
   const addEventToKit = useLibraryStore((s) => s.addEventToKit)
   const setEditingClipId = useLibraryStore((s) => s.setEditingClipId)
   const showClipDetails = useLibraryStore((s) => s.showClipDetails)
+  const workDirSupported = useLibraryStore((s) => s.workDirSupported)
+  const kitDirName = useLibraryStore((s) => s.kitDirName)
+  const pickKitDir = useLibraryStore((s) => s.pickKitDir)
+  const disconnectKitDir = useLibraryStore((s) => s.disconnectKitDir)
   const { isConnected: managerConnected, devices, send } = useManagerConnection()
   const { toast } = useToast()
   const getClipAudio = useLibraryStore((s) => s.getClipAudio)
-  const { playingId, toggle: togglePreview, getDeviceWiper } = useAudioPreview()
+  const { playingId, toggle: togglePreview, stop: stopPreview, getDeviceWiper } = useAudioPreview()
 
   const [isExporting, setIsExporting] = useState(false)
   const [dropActive, setDropActive] = useState(false)
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
+  const [modeInfoOpen, setModeInfoOpen] = useState(false)
   const placeholderName = useRef(randomKitName())
   const kitPanelRef = useRef<HTMLDivElement>(null)
 
   const activeKit = kits.find((k) => k.id === activeKitId)
 
-  // Kit を切り替えたら選択をクリア
+  // 表示も keyboard navigation も同じ「名前昇順」配列を使う。
+  // 以前は keyboard が activeKit.events (追加順) を見ていたため、視覚上の
+  // 順番とズレていた。useMemo で両方が同じ参照を共有する形にする。
+  const sortedEvents = useMemo(() => {
+    if (!activeKit) return []
+    return [...activeKit.events].sort((a, b) => {
+      const an = (clips.find((c) => c.id === a.clipId)?.name ?? '').toLowerCase()
+      const bn = (clips.find((c) => c.id === b.clipId)?.name ?? '').toLowerCase()
+      return an.localeCompare(bn)
+    })
+  }, [activeKit, clips])
+
+  // Kit を切り替えたら選択をクリアし、再生中のプレビューも止める。
   useEffect(() => {
     setSelectedEventId(null)
-  }, [activeKitId])
+    stopPreview()
+  }, [activeKitId, stopPreview])
 
   // 選択変更時に画面内にスクロール（Kit Editor 内で完結）
   useEffect(() => {
@@ -872,14 +1014,18 @@ function KitEditor() {
       if (isTextField) return
       if (isRange && e.key.startsWith('Arrow')) return
       if (!panel.contains(active) && !panel.matches(':hover')) return
-      const events = activeKit.events
+      // 視覚順 (name 昇順) に揃える。追加順で辿ると表示とバラバラに動く。
+      const events = sortedEvents
       if (events.length === 0) return
 
       const curIdx = selectedEventId ? events.findIndex((ev) => ev.id === selectedEventId) : -1
       const moveTo = (idx: number) => {
         const clamped = Math.max(0, Math.min(events.length - 1, idx))
         const next = events[clamped]
-        if (next) setSelectedEventId(next.id)
+        if (!next || next.id === selectedEventId) return
+        // 選択を動かすときは再生中のプレビューを停止 (= 停止ボタンと同じ挙動)
+        stopPreview()
+        setSelectedEventId(next.id)
       }
       const currentEvent = selectedEventId ? events.find((ev) => ev.id === selectedEventId) : null
 
@@ -917,11 +1063,29 @@ function KitEditor() {
             }
           }
           break
+        case 'Delete':
+        case 'Backspace':
+          // Delete / Backspace — remove the selected event (= × button).
+          // 削除後は同位置 (末尾ならその前) のイベントに選択を移す。
+          if (currentEvent) {
+            e.preventDefault()
+            const removedIdx = curIdx
+            removeEventFromKit(activeKit.id, currentEvent.id)
+            const remaining = events.length - 1
+            if (remaining <= 0) {
+              setSelectedEventId(null)
+            } else {
+              const nextIdx = Math.min(removedIdx, remaining - 1)
+              const nextEv = activeKit.events.filter((ev) => ev.id !== currentEvent.id)[nextIdx]
+              setSelectedEventId(nextEv?.id ?? null)
+            }
+          }
+          break
       }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [activeKit, selectedEventId, updateKitEvent, togglePreview, getClipAudio, getDeviceWiper])
+  }, [activeKit, sortedEvents, selectedEventId, updateKitEvent, togglePreview, stopPreview, getClipAudio, getDeviceWiper, removeEventFromKit])
 
   const handleCreate = useCallback(async (name?: string) => {
     const n = (name ?? placeholderName.current).trim()
@@ -957,12 +1121,34 @@ function KitEditor() {
     }
   }, [activeKitId, activeKit, clips, dragOverIdx, addEventToKit, updateKit, toast])
 
-  const kitSize = activeKit ? activeKit.events.reduce((s, ev) => s + (clips.find((c) => c.id === ev.clipId)?.fileSize ?? 0), 0) + 1024 : 0
+  // Kit のデバイス flash 使用量は FIRE (command) モードのイベントだけ数える。
+  // CLIP / LIVE はデバイスに WAV を載せず SDK 側ストリームで送るため flash を消費しない。
+  const kitSize = activeKit
+    ? activeKit.events.reduce((s, ev) => {
+        const m = ev.mode ?? 'command'
+        if (m !== 'command') return s
+        return s + (clips.find((c) => c.id === ev.clipId)?.fileSize ?? 0)
+      }, 0) + 1024
+    : 0
 
   return (
     <div className="kit-editor" ref={kitPanelRef} tabIndex={-1}>
-      {/* Create bar with placeholder */}
-      <div className="kit-create-bar">
+      {/* One-row header: title + count + folder chip + create bar.
+          Clips 側と違い Kit は検索/import 行が不要なので 1 行にまとめる。 */}
+      <div className="panel-header kit-panel-header">
+        <h3>Kits</h3>
+        <span className="library-count">{kits.length}</span>
+        {workDirSupported && (
+          <FolderChip
+            icon="&#x1F4E6;"
+            name={kitDirName}
+            onPick={pickKitDir}
+            onClear={disconnectKitDir}
+            label="Kit"
+            emptyTitle="Kit の書き出し先フォルダ。未指定なら Library フォルダ直下に <packId>/ を作る。Unity Assets 等を選ぶと直接そこに書き出せる。"
+            setLabel="+ Kit"
+          />
+        )}
         <input type="text" className="kit-create-input" placeholder={placeholderName.current}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -1013,14 +1199,45 @@ function KitEditor() {
 
                   <div className="kit-events-header">
                     <span>Events ({activeKit.events.length})</span>
-                    <span className="kit-size-label">{formatFileSize(kitSize)}</span>
-                    <ShortcutHelp scope="kit" />
+                    <span className="kit-size-label" title="FIRE (command) モードのクリップだけがデバイス flash に載る容量">{formatFileSize(kitSize)}</span>
+                    <button
+                      className="kit-events-mode-help-btn"
+                      onClick={() => setModeInfoOpen(true)}
+                      title="FIRE / CLIP / LIVE 3 種類のモードとデバイス側の挙動を説明"
+                    ><span className="kit-events-mode-help-icon">?</span>モード説明</button>
+                    <select
+                      className="kit-events-mode-bulk"
+                      value=""
+                      disabled={activeKit.events.length === 0}
+                      onChange={(e) => {
+                        const m = e.target.value as import('@/types/library').KitEventMode
+                        if (!m) return
+                        // モードが変わると再生挙動 (device 内蔵 / stream) が変わるので
+                        // 鳴りっぱなしを防ぐために現在のプレビューを止める。
+                        stopPreview()
+                        // 全件を 1 回の updateKit で置き換える。
+                        // events 配列ごと差し替えるので UI は 1 フレームで一斉に切り替わる
+                        // (updateKitEvent を逐次 await すると 1 件ずつ変わるのが見えてしまう)。
+                        const nextEvents = activeKit.events.map((ev) =>
+                          (ev.mode ?? 'command') === m ? ev : { ...ev, mode: m }
+                        )
+                        void updateKit(activeKit.id, { events: nextEvents })
+                      }}
+                      title="Kit 内の全イベントを選択したモードに一括変更"
+                    >
+                      <option value="" disabled>一括変更…</option>
+                      <option value="command">&gt; FIRE — 全て</option>
+                      <option value="stream_clip">♪ CLIP — 全て</option>
+                      <option value="stream_source">~ LIVE — 全て</option>
+                    </select>
                   </div>
 
                   <div className="kit-events-list">
-                    {activeKit.events.length === 0
+                    {sortedEvents.length === 0
                       ? <div className="kit-events-empty kit-drop-zone">Drag clips here.</div>
-                      : activeKit.events.map((ev, i) => (
+                      // sortedEvents は keyboard navigation と同じ参照を使い、
+                      // 視覚順と keyboard 順を必ず一致させる。
+                      : sortedEvents.map((ev, i) => (
                         <KitEventRow
                           key={ev.id}
                           event={ev}
@@ -1038,8 +1255,10 @@ function KitEditor() {
                           onModeChange={(mode) => updateKitEvent(activeKit.id, ev.id, { mode })}
                           onEditClip={() => setEditingClipId(ev.clipId)}
                           onDelete={() => removeEventFromKit(activeKit.id, ev.id)}
-                          onDragOverRow={() => setDragOverIdx(i)}
-                          dragOverIndicator={dragOverIdx === i}
+                          // 常に名前順表示のため drag-reorder は意味を持たない (= 無効)。
+                          // clip を新規 drop する場合は末尾追加にフォールバックする。
+                          onDragOverRow={() => { /* noop: 名前順表示のため挿入位置を固定できない */ void i }}
+                          dragOverIndicator={false}
                         />
                       ))}
                   </div>
@@ -1052,6 +1271,7 @@ function KitEditor() {
           )
         })}
       </div>
+      {modeInfoOpen && <ClipModeInfoModal onClose={() => setModeInfoOpen(false)} />}
     </div>
   )
 }
@@ -1069,11 +1289,15 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
 }) {
   const { toast } = useToast()
   const workDirHandle = useLibraryStore((s) => s.workDirHandle)
+  const kitDirHandle = useLibraryStore((s) => s.kitDirHandle)
+  // kit-out dir が設定されていればそちらを、無ければ library workDir を root にする。
+  // どちらの場合も root 直下に `<packId>/` フォルダを作る (kits/ 階層は挟まない)。
+  const outRoot = kitDirHandle ?? workDirHandle
 
-  /** Kit を ZIP 化して workDir/kits/<packId>/ に展開書き出し。
-   *  workDir が必須 (未選択時は呼ばれない前提)。返り値は生成した ZIP Blob + packId。 */
+  /** Kit を ZIP 化して <outRoot>/<packId>/ に展開書き出し。
+   *  outRoot が必須 (未選択時は呼ばれない前提)。返り値は生成した ZIP Blob + packId。 */
   const buildAndSave = useCallback(async () => {
-    if (!workDirHandle) throw new Error('Work directory not selected')
+    if (!outRoot) throw new Error('Output folder not selected')
     const validations = validateEventIds(kit)
     const invalid = validations.filter((v) => !v.valid)
     if (invalid.length > 0) {
@@ -1093,22 +1317,44 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
       }
     }
     const packId = kit.name.toLowerCase().replace(/[^a-z0-9-]/g, '-') || 'unnamed-kit'
-    await writeKitFolder(workDirHandle, packId, files)
+    // Version が変わっていたら、上書き前に旧 manifest.json を history/ に退避する。
+    // 音声データは容量の都合で残さないが、manifest は小さいので履歴として残しておく。
+    // 同じ version で上書きするとき (=実質的な編集) はコピーしない。
+    try {
+      const thisKitDir = await outRoot.getDirectoryHandle(packId, { create: false })
+      const oldHandle = await thisKitDir.getFileHandle('manifest.json', { create: false })
+      const oldText = await (await oldHandle.getFile()).text()
+      const oldVersion = String((JSON.parse(oldText) as { version?: unknown }).version ?? '')
+      if (oldVersion && oldVersion !== (kit.version || '1.0.0')) {
+        const histDir = await thisKitDir.getDirectoryHandle('history', { create: true })
+        const safeVer = oldVersion.replace(/[^a-zA-Z0-9_.-]/g, '_')
+        const archHandle = await histDir.getFileHandle(`manifest-${safeVer}.json`, { create: true })
+        const w = await archHandle.createWritable()
+        await w.write(oldText)
+        await w.close()
+      }
+    } catch {
+      // 既存 manifest が無い、または読めない → 初回保存としてスキップ
+    }
+    await writeKitFolder(outRoot, packId, files)
     return { blob: result.blob, packId }
-  }, [kit, clips, workDirHandle])
+  }, [kit, clips, outRoot])
 
   const handleSave = useCallback(async () => {
-    if (!workDirHandle) { toast('Select a work folder first', 'error'); return }
+    if (!outRoot) { toast('Select an output folder first', 'error'); return }
     setIsExporting(true)
     try {
       const out = await buildAndSave()
-      if (out) toast(`Saved to kits/${out.packId}/`, 'success')
+      if (out) {
+        const rootName = kitDirHandle?.name ?? workDirHandle?.name ?? ''
+        toast(`Saved to ${rootName}/${out.packId}/`, 'success')
+      }
     } catch (err) { toast(`Save failed: ${err instanceof Error ? err.message : err}`, 'error') }
     finally { setIsExporting(false) }
-  }, [buildAndSave, workDirHandle, setIsExporting, toast])
+  }, [buildAndSave, outRoot, kitDirHandle, workDirHandle, setIsExporting, toast])
 
   const handleDeploy = useCallback(async () => {
-    if (!workDirHandle) { toast('Select a work folder first', 'error'); return }
+    if (!outRoot) { toast('Select an output folder first', 'error'); return }
     if (!managerConnected || devices.length === 0) { toast('No devices', 'error'); return }
     setIsExporting(true)
     try {
@@ -1120,16 +1366,21 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
       toast(`Saved + sent "${out.packId}" to ${devices.length} device(s)`, 'success')
     } catch (err) { toast(`Deploy failed: ${err instanceof Error ? err.message : err}`, 'error') }
     finally { setIsExporting(false) }
-  }, [buildAndSave, managerConnected, devices, send, workDirHandle, setIsExporting, toast])
+  }, [buildAndSave, managerConnected, devices, send, outRoot, setIsExporting, toast])
+
+  const saveLabel = 'Save Kit'
+  const saveTitle = outRoot
+    ? `"${outRoot.name}/${kit.name.toLowerCase().replace(/[^a-z0-9-]/g, '-') || 'unnamed-kit'}/" に書き出す`
+    : 'Kit の保存先フォルダ (Library または Kit Folder) を先に指定してください'
 
   return (
     <div className="kit-export-section">
-      <button className="library-btn primary" disabled={kit.events.length === 0 || isExporting || !workDirHandle} onClick={handleSave}
-        title="Kit を workDir/kits/<packId>/ に書き出す">
-        {isExporting ? '...' : 'Save'}</button>
-      <button className="library-btn primary" disabled={kit.events.length === 0 || isExporting || !managerConnected || devices.length === 0 || !workDirHandle}
+      <button className="library-btn primary" disabled={kit.events.length === 0 || isExporting || !outRoot} onClick={handleSave}
+        title={saveTitle}>
+        {isExporting ? '...' : saveLabel}</button>
+      <button className="library-btn primary" disabled={kit.events.length === 0 || isExporting || !managerConnected || devices.length === 0 || !outRoot}
         onClick={handleDeploy}
-        title="Save したうえで Manager 経由でデバイスに転送する">Deploy</button>
+        title="Save したうえで Manager 経由でデバイスに転送する">Deploy to Device</button>
       {managerConnected && devices.length > 0 && <div className="kit-export-info">{devices.length} device(s)</div>}
       {!managerConnected && <div className="kit-export-info muted">Manager offline</div>}
     </div>

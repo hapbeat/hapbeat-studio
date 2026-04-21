@@ -8,6 +8,7 @@
    ============================================================ */
 
 .kit-event-wrap {
+  position: relative;
   display: flex;
   align-items: stretch;
   margin: 4px 0;
@@ -24,6 +25,17 @@
 }
 .kit-event-wrap.drag-over-indicator { border-top-color: var(--accent); }
 
+/* 選択中: 内側 clip-card の is-selected スタイルが .kit-event-wrap > .clip-card
+   の transparent/border:none 上書きで消えてしまうため、wrap 側にも選択表示を出す。
+   :has() が未対応のブラウザでも is-selected が React 経由で付くので
+   追加で .is-selected クラスでもフォールバックする。 */
+.kit-event-wrap.is-selected,
+.kit-event-wrap:has(> .clip-card.is-selected) {
+  background: var(--bg-surface);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
 /* Inner clip card = borderless / transparent */
 .kit-event-wrap > .clip-card {
   flex: 1 1 auto;
@@ -36,16 +48,18 @@
 }
 .kit-event-wrap > .clip-card:hover { background: transparent; }
 
-/* Side rail — column with delete on top, mode selector middle, help (?) at bottom. */
+/* Side rail — column holding the mode selector only. Delete (×) floats in
+   the top-right corner of the whole wrap so the rail stays short.
+   Modes are bottom-aligned so the first (FIRE) row clears the corner ×. */
 .kit-event-side {
   flex: 0 0 auto;
   width: 68px;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
-  padding: 6px 6px;
-  gap: 6px;
+  padding: 4px 6px;
+  gap: 4px;
   border-left: 1px solid var(--border);
 }
 .kit-event-wrap:hover > .kit-event-side {
@@ -67,17 +81,33 @@
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
 
-/* Delete (×) — square, same size as help */
-.kit-event-side-delete {
-  width: 22px;
-  height: 22px;
-  font-size: 14px;
-  align-self: flex-end;
+/* Delete (×) — floats in the top-right corner so it doesn't occupy a row
+   in the side rail. Subtle by default, brightens on hover. */
+.kit-event-delete-corner {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0;
+  opacity: 0.55;
+  z-index: 2;
+  transition: background 0.12s, color 0.12s, opacity 0.12s;
 }
-.kit-event-side-delete:hover {
+.kit-event-delete-corner:hover {
   background: rgba(244,67,54,0.25);
   color: var(--error);
-  border-color: var(--error);
+  opacity: 1;
 }
 
 /* Mode selector group */
@@ -130,16 +160,3 @@
   background: rgba(255,255,255,0.06) !important;
 }
 
-/* Help (?) — opens the mode-info modal */
-.kit-event-side-mode-help {
-  width: 22px;
-  height: 22px;
-  font-size: 12px;
-  font-weight: 600;
-  align-self: flex-end;
-}
-.kit-event-side-mode-help:hover {
-  color: var(--accent-light);
-  border-color: rgba(124,92,191,0.5);
-  background: rgba(124,92,191,0.15);
-}

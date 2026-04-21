@@ -1,0 +1,135 @@
+.clip-mode-info-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.clip-mode-info-modal {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: min(620px, 92vw);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.clip-mode-info-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.clip-mode-info-header h3 {
+  margin: 0;
+  font-size: 15px;
+  color: var(--text-primary);
+}
+.clip-mode-info-close {
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.clip-mode-info-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.clip-mode-info-body {
+  padding: 14px 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.clip-mode-info-intro {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.clip-mode-info-row {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 10px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.clip-mode-info-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-primary);
+}
+.clip-mode-info-badge .sym {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 14px;
+  color: var(--accent-light);
+}
+.clip-mode-info-badge.fire {
+  border-color: rgba(124, 92, 191, 0.45);
+  color: var(--accent-light);
+}
+.clip-mode-info-badge.clip {
+  border-color: rgba(124, 92, 191, 0.45);
+  color: var(--accent-light);
+}
+.clip-mode-info-badge.live {
+  border-color: rgba(124, 92, 191, 0.45);
+  color: var(--accent-light);
+}
+
+.clip-mode-info-text {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.clip-mode-info-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.clip-mode-info-text p {
+  margin: 0 0 6px 0;
+  color: var(--text-secondary);
+}
+.clip-mode-info-pros {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.clip-mode-info-pros li {
+  margin: 2px 0;
+}
+
+.clip-mode-info-footer {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+}

@@ -1,7 +1,6 @@
-import { useState, type DragEvent } from 'react'
+import { type DragEvent } from 'react'
 import type { KitEvent, KitEventMode, LibraryClip } from '@/types/library'
 import { ClipCard } from '../shared/ClipCard'
-import { ClipModeInfoModal } from './ClipModeInfoModal'
 import './KitEventRow.css'
 
 const DND_TYPE_KIT_EVENT = 'application/x-hapbeat-kit-event'
@@ -58,7 +57,6 @@ export function KitEventRow({
   onDragOverRow,
   dragOverIndicator,
 }: KitEventRowProps) {
-  const [modeInfoOpen, setModeInfoOpen] = useState(false)
   const mode = event.mode ?? 'command'
 
   // clip name / details — same for all modes.
@@ -74,7 +72,7 @@ export function KitEventRow({
 
   return (
     <div
-      className={`kit-event-wrap ${dragOverIndicator ? 'drag-over-indicator' : ''}`}
+      className={`kit-event-wrap ${dragOverIndicator ? 'drag-over-indicator' : ''} ${selected ? 'is-selected' : ''}`}
       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); onDragOverRow(e) }}
     >
       <ClipCard
@@ -95,12 +93,6 @@ export function KitEventRow({
         actions={cardActions}
       />
       <aside className="kit-event-side">
-        <button
-          className="kit-event-side-delete"
-          onClick={onDelete}
-          title="Remove from kit"
-          aria-label="Remove from kit"
-        >×</button>
         <div className="kit-event-side-mode-group">
           {MODE_OPTIONS.map((opt) => (
             <button
@@ -115,14 +107,13 @@ export function KitEventRow({
             </button>
           ))}
         </div>
-        <button
-          className="kit-event-side-mode-help"
-          onClick={() => setModeInfoOpen(true)}
-          title="3 つの再生モードの違いを見る"
-          aria-label="Show playback mode help"
-        >?</button>
       </aside>
-      {modeInfoOpen && <ClipModeInfoModal onClose={() => setModeInfoOpen(false)} />}
+      <button
+        className="kit-event-delete-corner"
+        onClick={onDelete}
+        title="Remove from kit"
+        aria-label="Remove from kit"
+      >×</button>
     </div>
   )
 }
