@@ -117,8 +117,11 @@ export async function exportKitAsPack(
   for (const ev of kit.events) {
     const mode = resolveMode(ev.mode)
 
-    // --- stream_source: WAV 不要 ---
-    if (mode === 'stream_source') {
+    // --- stream_source で clip なし: WAV 省略、manifest に mode のみ記録 ---
+    // clip が設定されていれば stream_clip と同様に stream-clips/ に配置する。
+    // Unity SDK は clip フィールドを参照して AudioSource のデフォルトクリップに使用する。
+    const hasClip = !!ev.clipId && clips.some((c) => c.id === ev.clipId)
+    if (mode === 'stream_source' && !hasClip) {
       events[ev.eventId] = {
         mode: 'stream_source',
         description: '',
@@ -129,7 +132,7 @@ export async function exportKitAsPack(
       continue
     }
 
-    // --- command / stream_clip: WAV が必要 ---
+    // --- command / stream_clip / stream_source(clip あり): WAV が必要 ---
     const clip = clips.find((c) => c.id === ev.clipId)
     if (!clip) {
       warnings.push(`クリップが見つかりません: eventId="${ev.eventId}", clipId="${ev.clipId}"`)
@@ -200,7 +203,9 @@ export async function exportKitAsPack(
         format: 'pcm_s16le',
       }
     } else {
-      // stream_clip: SDK import 用に stream-clips/ に配置
+      // stream_clip / stream_source(clip あり): SDK import 用に stream-clips/ に配置。
+      // stream_source の clip は Unity SDK が AudioSource のデフォルトクリップとして使用する。
+      // device binary の clips/ には含めない点は stream_clip と同じ。
       let fname = clipFileName(clip)
       if (usedStreamNames.has(fname)) {
         const base = fname.replace(/\.wav$/, '')
@@ -213,9 +218,9 @@ export async function exportKitAsPack(
       // ZIP に配置（stream-clips/ = device binary 対象外）
       root.file(`stream-clips/${fname}`, packBlob)
 
-      // manifest: mode=stream_clip + clip パスは stream-clips/ 相対
+      // manifest: mode フィールドは実際の mode 値を使用、clip パスは stream-clips/ 相対
       events[ev.eventId] = {
-        mode: 'stream_clip',
+        mode,  // 'stream_clip' or 'stream_source'
         clip: `stream-clips/${fname}`,
         description: '',
         parameters: {

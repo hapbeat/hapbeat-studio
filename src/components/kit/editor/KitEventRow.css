@@ -36,15 +36,16 @@
 }
 .kit-event-wrap > .clip-card:hover { background: transparent; }
 
-/* Side rail — narrow column with delete on top, mode group middle, loop at bottom. */
+/* Side rail — column with delete on top, mode selector middle, help (?) at bottom. */
 .kit-event-side {
   flex: 0 0 auto;
-  width: 36px;
+  width: 68px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   align-items: center;
-  padding: 6px 4px;
+  padding: 6px 6px;
+  gap: 6px;
   border-left: 1px solid var(--border);
 }
 .kit-event-wrap:hover > .kit-event-side {
@@ -52,11 +53,7 @@
 }
 
 /* Shared button style for the side rail. */
-/* Shared style for ALL buttons inside the side rail (both direct children
-   and nested ones like the loop button inside its label group). */
 .kit-event-side button {
-  width: 24px;
-  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -65,63 +62,58 @@
   border: 1px solid var(--border);
   border-radius: var(--radius);
   cursor: pointer;
-  font-size: 14px;
   line-height: 1;
   padding: 0;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
 
+/* Delete (×) — square, same size as help */
+.kit-event-side-delete {
+  width: 22px;
+  height: 22px;
+  font-size: 14px;
+  align-self: flex-end;
+}
 .kit-event-side-delete:hover {
   background: rgba(244,67,54,0.25);
   color: var(--error);
   border-color: var(--error);
 }
 
-.kit-event-side-loop-group {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-.kit-event-side-loop-label {
-  font-size: 9px;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  color: var(--text-secondary);
-  opacity: 0.7;
-  line-height: 1;
-}
-.kit-event-side-loop {
-  font-size: 15px;
-}
-/* Active state — filled accent background. */
-.kit-event-side-loop.on {
-  background: var(--accent);
-  color: var(--text-primary);
-  border-color: var(--accent);
-}
-.kit-event-side-loop:not(.on):hover {
-  color: var(--accent-light);
-  border-color: rgba(124,92,191,0.5);
-  background: rgba(124,92,191,0.15);
-}
-
 /* Mode selector group */
 .kit-event-side-mode-group {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 2px;
+  align-items: stretch;
+  gap: 3px;
+  width: 100%;
 }
 .kit-event-side-mode {
-  font-size: 8px !important;
+  width: 100%;
+  height: 20px;
+  font-size: 10px !important;
   font-weight: 600;
-  letter-spacing: 0.3px;
-  width: 28px !important;
-  height: 18px !important;
+  letter-spacing: 0.4px;
   border-radius: 3px !important;
   text-transform: uppercase;
   opacity: 0.6;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px !important;
+}
+.kit-event-side-mode-sym {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  width: 10px;
+  text-align: center;
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+.kit-event-side-mode-label {
+  flex: 1 1 auto;
+  text-align: left;
 }
 .kit-event-side-mode.active {
   opacity: 1;
@@ -129,7 +121,25 @@
   color: var(--accent-light) !important;
   border-color: rgba(124,92,191,0.5) !important;
 }
+.kit-event-side-mode.active .kit-event-side-mode-sym {
+  color: var(--accent-light);
+  opacity: 1;
+}
 .kit-event-side-mode:hover:not(.active) {
   opacity: 0.9;
   background: rgba(255,255,255,0.06) !important;
+}
+
+/* Help (?) — opens the mode-info modal */
+.kit-event-side-mode-help {
+  width: 22px;
+  height: 22px;
+  font-size: 12px;
+  font-weight: 600;
+  align-self: flex-end;
+}
+.kit-event-side-mode-help:hover {
+  color: var(--accent-light);
+  border-color: rgba(124,92,191,0.5);
+  background: rgba(124,92,191,0.15);
 }

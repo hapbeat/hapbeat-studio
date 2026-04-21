@@ -1,6 +1,7 @@
-import { type DragEvent } from 'react'
+import { useState, type DragEvent } from 'react'
 import type { KitEvent, KitEventMode, LibraryClip } from '@/types/library'
 import { ClipCard } from '../shared/ClipCard'
+import { ClipModeInfoModal } from './ClipModeInfoModal'
 import './KitEventRow.css'
 
 const DND_TYPE_KIT_EVENT = 'application/x-hapbeat-kit-event'
@@ -14,7 +15,6 @@ export interface KitEventRowProps {
   onSelect: () => void
   onTogglePlay: () => void
   onIntensityChange: (v: number) => void
-  onLoopChange: (loop: boolean) => void
   onModeChange: (mode: KitEventMode) => void
   onEditClip: () => void
   onDelete: () => void
@@ -22,15 +22,22 @@ export interface KitEventRowProps {
   dragOverIndicator: boolean
 }
 
-const MODE_OPTIONS: { value: KitEventMode; label: string; title: string }[] = [
-  { value: 'command', label: 'CMD', title: 'Command — device plays WAV from flash' },
-  { value: 'stream_clip', label: 'STR', title: 'Stream Clip — SDK streams WAV over UDP' },
-  { value: 'stream_source', label: 'SRC', title: 'Stream Source — SDK captures live audio and streams it' },
+interface ModeOption {
+  value: KitEventMode
+  symbol: string
+  label: string
+  title: string
+}
+
+const MODE_OPTIONS: ModeOption[] = [
+  { value: 'command', symbol: '>', label: 'FIRE', title: 'Fire — デバイス内蔵 WAV を再生 (Event ID + 強度を UDP で送信)' },
+  { value: 'stream_clip', symbol: '♪', label: 'CLIP', title: 'Stream Clip — SDK が Kit の WAV を UDP でストリーム' },
+  { value: 'stream_source', symbol: '~', label: 'LIVE', title: 'Stream Source — SDK がライブ AudioSource をキャプチャしてストリーム' },
 ]
 
 /**
  * Kit event = the same ClipCard used in the library, plus a kit-only
- * side panel on the right holding Loop + × (remove-from-kit).
+ * side panel on the right holding mode selector + help (?) + × (remove-from-kit).
  *
  * The card itself is visually identical to library rows. Anything that
  * only makes sense in a kit context lives in the side panel so the two
@@ -45,32 +52,25 @@ export function KitEventRow({
   onSelect,
   onTogglePlay,
   onIntensityChange,
-  onLoopChange,
   onModeChange,
   onEditClip,
   onDelete,
   onDragOverRow,
   dragOverIndicator,
 }: KitEventRowProps) {
+  const [modeInfoOpen, setModeInfoOpen] = useState(false)
   const mode = event.mode ?? 'command'
-  const isSrc = mode === 'stream_source'
 
-  // stream_source: no clip is needed — show a descriptive label instead of the clip name
-  const name = isSrc
-    ? '— live source —'
-    : (clip?.name ?? '(missing clip)')
+  // clip name / details — same for all modes.
+  // stream_source も stream-clips/ に WAV を持つ (Unity SDK が AudioSource の
+  // デフォルトクリップとして参照する)。clip 未設定時のみフォールバック表示。
+  const name = clip?.name ?? '(missing clip)'
+  const details = clip
+    ? `${Math.round(clip.duration * 1000)}ms | ${clip.channels === 1 ? 'Mono' : 'Stereo'} | ${clip.sampleRate / 1000}kHz | ${formatBytes(clip.fileSize)}`
+    : undefined
+  const tags = clip?.tags
 
-  const details = isSrc
-    ? 'SDK captures AudioSource at runtime; no audio file needed'
-    : clip
-      ? `${Math.round(clip.duration * 1000)}ms | ${clip.channels === 1 ? 'Mono' : 'Stereo'} | ${clip.sampleRate / 1000}kHz | ${formatBytes(clip.fileSize)}`
-      : undefined
-  const tags = isSrc ? undefined : clip?.tags
-
-  // stream_source: no clip to preview or edit; suppress those actions
-  const cardActions = isSrc
-    ? []
-    : [{ label: 'Edit', onClick: onEditClip, title: 'Edit the underlying clip' }]
+  const cardActions = [{ label: 'Edit', onClick: onEditClip, title: 'Edit the underlying clip' }]
 
   return (
     <div
@@ -87,7 +87,6 @@ export function KitEventRow({
         onIntensityChange={onIntensityChange}
         playing={playing}
         onTogglePlay={onTogglePlay}
-        playDisabled={isSrc}
         selected={selected}
         onSelect={onSelect}
         dataCardId={event.id}
@@ -110,19 +109,20 @@ export function KitEventRow({
               onClick={() => onModeChange(opt.value)}
               title={opt.title}
               aria-pressed={mode === opt.value}
-            >{opt.label}</button>
+            >
+              <span className="kit-event-side-mode-sym">{opt.symbol}</span>
+              <span className="kit-event-side-mode-label">{opt.label}</span>
+            </button>
           ))}
         </div>
-        <div className="kit-event-side-loop-group">
-          <span className="kit-event-side-loop-label">Loop</span>
-          <button
-            className={`kit-event-side-loop ${event.loop ? 'on' : ''}`}
-            onClick={() => onLoopChange(!event.loop)}
-            title={event.loop ? 'Looping — click to disable' : 'Not looping — click to enable'}
-            aria-pressed={event.loop}
-          >↻</button>
-        </div>
+        <button
+          className="kit-event-side-mode-help"
+          onClick={() => setModeInfoOpen(true)}
+          title="3 つの再生モードの違いを見る"
+          aria-label="Show playback mode help"
+        >?</button>
       </aside>
+      {modeInfoOpen && <ClipModeInfoModal onClose={() => setModeInfoOpen(false)} />}
     </div>
   )
 }

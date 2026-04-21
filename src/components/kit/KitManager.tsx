@@ -270,7 +270,7 @@ function ShortcutHelp({ scope }: { scope: 'library' | 'kit' }) {
             <li><span className="shortcut-help-key">Amp スライダー</span>強度 (0–100%)</li>
             <li><span className="shortcut-help-key">Edit ボタン</span>名前 / Event ID / タグ編集</li>
             {scope === 'library' && <li><span className="shortcut-help-key">+ Kit ボタン</span>選択中の Kit に追加</li>}
-            {scope === 'kit' && <li><span className="shortcut-help-key">Loop (↻)</span>ループ ON/OFF</li>}
+            {scope === 'kit' && <li><span className="shortcut-help-key">FIRE / CLIP / LIVE</span>再生モード切替 (? で詳細)</li>}
             {scope === 'kit' && <li><span className="shortcut-help-key">×</span>Kit から削除</li>}
           </ul>
 
@@ -908,7 +908,7 @@ function KitEditor() {
           break
         case ' ':
         case 'Spacebar':
-          if (currentEvent && (currentEvent.mode ?? 'command') !== 'stream_source') {
+          if (currentEvent) {
             e.preventDefault()
             togglePreview(currentEvent.id, () => getClipAudio(currentEvent.clipId), currentEvent.intensity)
             const w = getDeviceWiper()
@@ -1030,15 +1030,13 @@ function KitEditor() {
                           selected={selectedEventId === ev.id}
                           onSelect={() => setSelectedEventId(ev.id)}
                           onTogglePlay={() => {
-                            if ((ev.mode ?? 'command') === 'stream_source') return
                             togglePreview(ev.id, () => getClipAudio(ev.clipId), ev.intensity)
                             const w = getDeviceWiper()
                             if (w !== null && w !== ev.deviceWiper) updateKitEvent(activeKit.id, ev.id, { deviceWiper: w })
                           }}
                           onIntensityChange={(v) => updateKitEvent(activeKit.id, ev.id, { intensity: v })}
-                          onLoopChange={(loop) => updateKitEvent(activeKit.id, ev.id, { loop })}
                           onModeChange={(mode) => updateKitEvent(activeKit.id, ev.id, { mode })}
-                          onEditClip={() => { if ((ev.mode ?? 'command') !== 'stream_source') setEditingClipId(ev.clipId) }}
+                          onEditClip={() => setEditingClipId(ev.clipId)}
                           onDelete={() => removeEventFromKit(activeKit.id, ev.id)}
                           onDragOverRow={() => setDragOverIdx(i)}
                           dragOverIndicator={dragOverIdx === i}
