@@ -78,6 +78,11 @@
 }
 .clip-card-play:hover { background: var(--accent); }
 .clip-card-play.playing { background: var(--accent); border-color: var(--accent); }
+.clip-card-play.disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.clip-card-play.disabled:hover { background: var(--bg-surface); }
 
 .clip-card-name {
   font-size: 14px;

@@ -35,6 +35,8 @@ export interface ClipCardProps {
   /** Play/stop toggle */
   playing: boolean
   onTogglePlay: () => void
+  /** Disable the play button (e.g. stream_source events have no previewable clip) */
+  playDisabled?: boolean
 
   /** Optional: double-click card to trigger (edit/details) */
   onDoubleClick?: () => void
@@ -87,6 +89,7 @@ export function ClipCard({
   onIntensityChange,
   playing,
   onTogglePlay,
+  playDisabled,
   onDoubleClick,
   selected,
   onSelect,
@@ -124,9 +127,10 @@ export function ClipCard({
           title={drag?.dragTitle ?? 'ドラッグで移動'}
         >☰</div>
         <button
-          className={`clip-card-play ${playing ? 'playing' : ''}`}
-          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onTogglePlay() }}
-          title={playing ? 'Stop' : 'Play'}
+          className={`clip-card-play ${playing ? 'playing' : ''} ${playDisabled ? 'disabled' : ''}`}
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); if (!playDisabled) onTogglePlay() }}
+          title={playDisabled ? 'No audio to preview' : (playing ? 'Stop' : 'Play')}
+          aria-disabled={playDisabled}
         >{playing ? '■' : '▶'}</button>
         <span className="clip-card-name" title={name}>{name}</span>
         <span

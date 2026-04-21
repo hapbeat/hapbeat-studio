@@ -53,14 +53,24 @@ export function KitEventRow({
   dragOverIndicator,
 }: KitEventRowProps) {
   const mode = event.mode ?? 'command'
-  // stream_source events have no clip; show a placeholder name instead
-  const name = mode === 'stream_source'
-    ? (clip?.name ?? event.eventId)
+  const isSrc = mode === 'stream_source'
+
+  // stream_source: no clip is needed — show a descriptive label instead of the clip name
+  const name = isSrc
+    ? '— live source —'
     : (clip?.name ?? '(missing clip)')
-  const details = clip
-    ? `${Math.round(clip.duration * 1000)}ms | ${clip.channels === 1 ? 'Mono' : 'Stereo'} | ${clip.sampleRate / 1000}kHz | ${formatBytes(clip.fileSize)}`
-    : (mode === 'stream_source' ? 'live audio source' : undefined)
-  const tags = clip?.tags
+
+  const details = isSrc
+    ? 'SDK captures AudioSource at runtime; no audio file needed'
+    : clip
+      ? `${Math.round(clip.duration * 1000)}ms | ${clip.channels === 1 ? 'Mono' : 'Stereo'} | ${clip.sampleRate / 1000}kHz | ${formatBytes(clip.fileSize)}`
+      : undefined
+  const tags = isSrc ? undefined : clip?.tags
+
+  // stream_source: no clip to preview or edit; suppress those actions
+  const cardActions = isSrc
+    ? []
+    : [{ label: 'Edit', onClick: onEditClip, title: 'Edit the underlying clip' }]
 
   return (
     <div
@@ -77,14 +87,13 @@ export function KitEventRow({
         onIntensityChange={onIntensityChange}
         playing={playing}
         onTogglePlay={onTogglePlay}
+        playDisabled={isSrc}
         selected={selected}
         onSelect={onSelect}
         dataCardId={event.id}
         wiper={null}
         drag={{ type: DND_TYPE_KIT_EVENT, payload: JSON.stringify({ kitEventId: event.id }), effect: 'move', dragTitle: 'ドラッグして並び替え' }}
-        actions={[
-          { label: 'Edit', onClick: onEditClip, title: 'Edit the underlying clip' },
-        ]}
+        actions={cardActions}
       />
       <aside className="kit-event-side">
         <button

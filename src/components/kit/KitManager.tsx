@@ -908,7 +908,7 @@ function KitEditor() {
           break
         case ' ':
         case 'Spacebar':
-          if (currentEvent) {
+          if (currentEvent && (currentEvent.mode ?? 'command') !== 'stream_source') {
             e.preventDefault()
             togglePreview(currentEvent.id, () => getClipAudio(currentEvent.clipId), currentEvent.intensity)
             const w = getDeviceWiper()
@@ -1030,6 +1030,7 @@ function KitEditor() {
                           selected={selectedEventId === ev.id}
                           onSelect={() => setSelectedEventId(ev.id)}
                           onTogglePlay={() => {
+                            if ((ev.mode ?? 'command') === 'stream_source') return
                             togglePreview(ev.id, () => getClipAudio(ev.clipId), ev.intensity)
                             const w = getDeviceWiper()
                             if (w !== null && w !== ev.deviceWiper) updateKitEvent(activeKit.id, ev.id, { deviceWiper: w })
@@ -1037,7 +1038,7 @@ function KitEditor() {
                           onIntensityChange={(v) => updateKitEvent(activeKit.id, ev.id, { intensity: v })}
                           onLoopChange={(loop) => updateKitEvent(activeKit.id, ev.id, { loop })}
                           onModeChange={(mode) => updateKitEvent(activeKit.id, ev.id, { mode })}
-                          onEditClip={() => setEditingClipId(ev.clipId)}
+                          onEditClip={() => { if ((ev.mode ?? 'command') !== 'stream_source') setEditingClipId(ev.clipId) }}
                           onDelete={() => removeEventFromKit(activeKit.id, ev.id)}
                           onDragOverRow={() => setDragOverIdx(i)}
                           dragOverIndicator={dragOverIdx === i}
