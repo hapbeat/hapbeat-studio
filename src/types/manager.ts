@@ -24,8 +24,8 @@ export interface StudioToManagerMessage {
   type:
     | 'list_devices'
     | 'write_ui_config'
-    | 'deploy_pack'
-    | 'deploy_pack_data'
+    | 'deploy_kit'
+    | 'deploy_kit_data'
     | 'preview_event'
     | 'stream_begin'
     | 'stream_data'

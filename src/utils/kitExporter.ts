@@ -3,7 +3,7 @@
  *
  * hapbeat-contracts の pack-format.md に準拠した ZIP を生成する。
  * ZIP 内構造:
- *   <pack_id>/
+ *   <kit_id>/
  *     manifest.json
  *     clips/              ← command mode events の WAV (device flash 用)
  *       <clip-file>.wav
@@ -36,7 +36,7 @@ function round2(v: number): number {
   return Math.round(v * 100) / 100
 }
 
-/** Kit 名 → pack_id (kebab-case, [a-z][a-z0-9-]*) */
+/** Kit 名 → kit_id (kebab-case, [a-z][a-z0-9-]*) */
 export function toPackId(name: string): string {
   return name
     .toLowerCase()
@@ -234,7 +234,7 @@ export async function exportKitAsPack(
 
   const manifest = {
     schema_version: '1.0.0',
-    pack_id: packId,
+    kit_id: packId,
     version: kit.version || '1.0.0',
     name: kit.name,
     description: kit.description,

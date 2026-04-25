@@ -568,10 +568,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     for (const { manifestJson, clipFiles } of discovered as DiscoveredKit[]) {
       if (!manifestJson || typeof manifestJson !== 'object') continue
       const m = manifestJson as {
-        pack_id?: string; name?: string; version?: string; description?: string
+        kit_id?: string; name?: string; version?: string; description?: string
         created_at?: string; events?: Record<string, unknown>
       }
-      const packId = String(m.pack_id ?? m.name ?? '').trim()
+      const packId = String(m.kit_id ?? m.name ?? '').trim()
       if (!packId) continue
 
       const events: KitEvent[] = []

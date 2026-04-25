@@ -1362,7 +1362,7 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
       if (!out) return
       const ab = await out.blob.arrayBuffer(); const bytes = new Uint8Array(ab)
       let bin = ''; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
-      send({ type: 'deploy_pack_data', payload: { pack_id: out.packId, zip_base64: btoa(bin), targets: devices.map((d) => d.ipAddress) }})
+      send({ type: 'deploy_kit_data', payload: { kit_id: out.packId, zip_base64: btoa(bin), targets: devices.map((d) => d.ipAddress) }})
       toast(`Saved + sent "${out.packId}" to ${devices.length} device(s)`, 'success')
     } catch (err) { toast(`Deploy failed: ${err instanceof Error ? err.message : err}`, 'error') }
     finally { setIsExporting(false) }
