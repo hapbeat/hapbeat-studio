@@ -25,7 +25,7 @@ import {
   toFirmwareFormat,
   type DisplaySavedState,
 } from '@/utils/displayLayoutIO'
-import { useManagerConnection } from '@/hooks/useManagerConnection'
+import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useToast } from '@/components/common/Toast'
 import { LedConfigModal } from './LedConfigModal'
 import { VolumeConfigModal } from './VolumeConfigModal'
@@ -152,6 +152,13 @@ function buildActionGroups(pages: DisplayPage[], deviceModel: DeviceModel): Acti
       ],
     })
   }
+
+  groups.push({
+    label: 'System',
+    items: [
+      { value: 'wifi_select', label: 'Wi-Fi \u9078\u629e\u30e2\u30fc\u30c9' },
+    ],
+  })
 
   groups.push({
     label: 'Other',
@@ -557,8 +564,8 @@ export function DisplayEditor() {
     setPopupPos(null)
   }, [])
 
-  // --- Manager 接続 ---
-  const { isConnected: managerConnected, lastMessage, send: managerSend } = useManagerConnection()
+  // --- Helper 接続 ---
+  const { isConnected: managerConnected, lastMessage, send: managerSend } = useHelperConnection()
   const { toast, setAnchor: setToastAnchor } = useToast()
   const [isDeploying, setIsDeploying] = useState(false)
   const deployBtnRef = useCallback((el: HTMLButtonElement | null) => {
@@ -667,6 +674,7 @@ export function DisplayEditor() {
         case 'position_inc': setSimState((s) => ({ ...s, position: s.position + 1 })); break
         case 'position_dec': setSimState((s) => ({ ...s, position: Math.max(0, s.position - 1) })); break
         case 'vib_mode': setSimState((s) => ({ ...s, volumeAdcEnabled: !s.volumeAdcEnabled })); break
+        case 'wifi_select': break // Wi-Fi 選択モード遷移はファーム側で OLED が固定描画する。Studio のプレビューでは表現しない
       }
     },
     [perButtonActions, layout.pages.length]
@@ -714,6 +722,7 @@ export function DisplayEditor() {
         case 'position_inc': setSimState((s) => ({ ...s, position: s.position + 1 })); break
         case 'position_dec': setSimState((s) => ({ ...s, position: Math.max(0, s.position - 1) })); break
         case 'vib_mode': setSimState((s) => ({ ...s, volumeAdcEnabled: !s.volumeAdcEnabled })); break
+        case 'wifi_select': break // Wi-Fi 選択モード遷移はファーム側で OLED が固定描画する。Studio のプレビューでは表現しない
       }
     },
     [perButtonActions, layout.pages.length, activePageIndex]

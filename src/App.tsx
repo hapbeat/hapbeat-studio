@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { WaveformEditor } from '@/components/waveform/WaveformEditor'
 import { DisplayEditor } from '@/components/display/DisplayEditor'
 import { KitManager } from '@/components/kit/KitManager'
-import { useManagerConnection } from '@/hooks/useManagerConnection'
+import { useHelperConnection } from '@/hooks/useHelperConnection'
 import './App.css'
 
 type Tab = 'waveform' | 'kit' | 'display'
@@ -16,7 +16,7 @@ export function App() {
   useEffect(() => {
     localStorage.setItem('hapbeat-studio-tab', activeTab)
   }, [activeTab])
-  const { isConnected } = useManagerConnection()
+  const { isConnected } = useHelperConnection()
 
   return (
     <div className="app">
@@ -44,7 +44,9 @@ export function App() {
         </div>
         <div className="connection-status">
           <span className={`status-dot ${isConnected ? 'connected' : 'disconnected'}`} />
-          {isConnected ? 'Manager 接続中' : 'Manager 未接続'}
+          {isConnected
+            ? 'Helper 接続中'
+            : 'Helper 未接続 — `hapbeat-helper start --foreground` で起動してください'}
         </div>
       </header>
       <main className="tab-content">

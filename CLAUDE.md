@@ -26,7 +26,7 @@ Hapbeat Studio — Web ベースの統合デザインツール。
 - **静的ホスティング**: Xserver / GitHub Pages / Netlify 等で配信
 - **ローカルデータ保持**: ユーザーのプロジェクトはブラウザの IndexedDB に保存
 - **ファイル入出力**: JSON エクスポート/インポートでプロジェクト共有
-- **Manager 連携**: WebSocket（localhost:7703）経由で Hapbeat Manager と通信し、デバイスへの書き込みを実行
+- **Helper 連携**: WebSocket（localhost:7703）経由で `hapbeat-helper` daemon と通信し、デバイスへの書き込みを実行（旧: hapbeat-manager。DEC-026 で deprecate）
 
 ## ディレクトリ構造
 
@@ -47,7 +47,7 @@ Hapbeat Studio — Web ベースの統合デザインツール。
 ## 依存
 
 - hapbeat-contracts: display-layout.schema.json, pack-manifest.schema.json, event-id 仕様
-- hapbeat-manager: WebSocket リレー（localhost:7703）でデバイス書き込み
+- hapbeat-helper: WebSocket リレー（localhost:7703）。`pipx install hapbeat-helper` で常駐。詳細は `../hapbeat-helper/README.md`
 
 ## 指示書
 

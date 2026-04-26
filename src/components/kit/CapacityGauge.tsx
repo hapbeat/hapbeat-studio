@@ -29,7 +29,7 @@ export function CapacityGauge({ kitSize, managerConnected, devices, send }: Capa
     }
   }, [managerConnected, devices.length, queried, querySpace])
 
-  // Listen for space_result via custom event (set up in useManagerConnection)
+  // Listen for space_result via custom event (set up in useHelperConnection)
   useEffect(() => {
     const handler = (e: CustomEvent<SpaceResult>) => {
       setSpace(e.detail)

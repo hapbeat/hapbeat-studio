@@ -2,14 +2,14 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { App } from './App'
 import { ToastProvider } from '@/components/common/Toast'
-import { ManagerConnectionProvider } from '@/hooks/useManagerConnection'
+import { HelperConnectionProvider } from '@/hooks/useHelperConnection'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ManagerConnectionProvider>
+    <HelperConnectionProvider>
       <ToastProvider>
         <App />
       </ToastProvider>
-    </ManagerConnectionProvider>
+    </HelperConnectionProvider>
   </React.StrictMode>,
 )

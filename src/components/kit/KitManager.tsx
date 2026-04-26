@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useMemo, useState, useRef, type MouseEvent as ReactMouseEvent } from 'react'
 import { useLibraryStore } from '@/stores/libraryStore'
-import { useManagerConnection } from '@/hooks/useManagerConnection'
+import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useToast } from '@/components/common/Toast'
 import { formatFileSize } from '@/utils/wavIO'
 import { exportKitAsPack, validateEventIds } from '@/utils/kitExporter'
@@ -375,7 +375,7 @@ function WorkDirBar() {
   const setViewMode = useLibraryStore((s) => s.setViewMode)
   const showClipDetails = useLibraryStore((s) => s.showClipDetails)
   const setShowClipDetails = useLibraryStore((s) => s.setShowClipDetails)
-  const { devices } = useManagerConnection()
+  const { devices } = useHelperConnection()
   const volumeWiper = devices[0]?.volumeWiper ?? null
 
   const views: { value: LibraryViewMode; label: string; title: string }[] = [
@@ -415,7 +415,7 @@ function useAudioPreview() {
   const [playingId, setPlayingId] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
-  const { isConnected, devices, send } = useManagerConnection()
+  const { isConnected, devices, send } = useHelperConnection()
 
   const hasDevice = isConnected && devices.length > 0
 
@@ -959,7 +959,7 @@ function KitEditor() {
   const kitDirName = useLibraryStore((s) => s.kitDirName)
   const pickKitDir = useLibraryStore((s) => s.pickKitDir)
   const disconnectKitDir = useLibraryStore((s) => s.disconnectKitDir)
-  const { isConnected: managerConnected, devices, send } = useManagerConnection()
+  const { isConnected: managerConnected, devices, send } = useHelperConnection()
   const { toast } = useToast()
   const getClipAudio = useLibraryStore((s) => s.getClipAudio)
   const { playingId, toggle: togglePreview, stop: stopPreview, getDeviceWiper } = useAudioPreview()

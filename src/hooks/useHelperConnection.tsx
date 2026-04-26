@@ -9,25 +9,25 @@ import {
 } from 'react'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 
-const MANAGER_WS_URL = 'ws://localhost:7703'
+const HELPER_WS_URL = 'ws://localhost:7703'
 const RECONNECT_INTERVAL_BASE = 2000
 const RECONNECT_INTERVAL_MAX = 30000
 
-interface ManagerConnectionValue {
+interface HelperConnectionValue {
   isConnected: boolean
   devices: DeviceInfo[]
   lastMessage: ManagerMessage | null
   send: (message: ManagerMessage) => void
 }
 
-const ManagerConnectionContext = createContext<ManagerConnectionValue | null>(null)
+const HelperConnectionContext = createContext<HelperConnectionValue | null>(null)
 
 /**
- * Provider that owns the single WebSocket to Manager.
- * Wrap the app once (in main.tsx). All useManagerConnection() consumers
+ * Provider that owns the single WebSocket to hapbeat-helper.
+ * Wrap the app once (in main.tsx). All useHelperConnection() consumers
  * share the same connection and state.
  */
-export function ManagerConnectionProvider({ children }: { children: ReactNode }) {
+export function HelperConnectionProvider({ children }: { children: ReactNode }) {
   const [isConnected, setIsConnected] = useState(false)
   const [devices, setDevices] = useState<DeviceInfo[]>([])
   const [lastMessage, setLastMessage] = useState<ManagerMessage | null>(null)
@@ -57,9 +57,9 @@ export function ManagerConnectionProvider({ children }: { children: ReactNode })
 
     let ws: WebSocket
     try {
-      ws = new WebSocket(MANAGER_WS_URL)
+      ws = new WebSocket(HELPER_WS_URL)
     } catch (err) {
-      console.error('[Manager] 接続の作成に失敗:', err)
+      console.error('[Helper] 接続の作成に失敗:', err)
       scheduleReconnect()
       return
     }
@@ -68,7 +68,7 @@ export function ManagerConnectionProvider({ children }: { children: ReactNode })
     // 各 handler は「今もアクティブな ws か」を確認してから動く
     ws.onopen = () => {
       if (wsRef.current !== ws) return
-      console.log('[Manager] 接続成功')
+      console.log('[Helper] 接続成功')
       setIsConnected(true)
       reconnectAttemptRef.current = 0
       ws.send(JSON.stringify({ type: 'list_devices', payload: {} }))
@@ -83,13 +83,13 @@ export function ManagerConnectionProvider({ children }: { children: ReactNode })
           setDevices(message.payload.devices as DeviceInfo[])
         }
       } catch (err) {
-        console.error('[Manager] メッセージのパースに失敗:', err)
+        console.error('[Helper] メッセージのパースに失敗:', err)
       }
     }
 
     ws.onclose = () => {
       if (wsRef.current !== ws) return
-      console.log('[Manager] 接続が切断されました')
+      console.log('[Helper] 接続が切断されました')
       setIsConnected(false)
       wsRef.current = null
       scheduleReconnect()
@@ -97,7 +97,7 @@ export function ManagerConnectionProvider({ children }: { children: ReactNode })
 
     ws.onerror = (err) => {
       if (wsRef.current !== ws) return
-      console.error('[Manager] WebSocket エラー:', err)
+      console.error('[Helper] WebSocket エラー:', err)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -109,7 +109,7 @@ export function ManagerConnectionProvider({ children }: { children: ReactNode })
       RECONNECT_INTERVAL_BASE * Math.pow(1.5, attempt),
       RECONNECT_INTERVAL_MAX
     )
-    console.log(`[Manager] ${Math.round(delay / 1000)}秒後に再接続を試行...`)
+    console.log(`[Helper] ${Math.round(delay / 1000)}秒後に再接続を試行...`)
     reconnectTimerRef.current = setTimeout(() => {
       reconnectAttemptRef.current += 1
       connect()
@@ -120,7 +120,7 @@ export function ManagerConnectionProvider({ children }: { children: ReactNode })
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(message))
     } else {
-      console.warn('[Manager] 未接続のため送信できません:', message.type)
+      console.warn('[Helper] 未接続のため送信できません:', message.type)
     }
   }, [])
 
@@ -141,20 +141,20 @@ export function ManagerConnectionProvider({ children }: { children: ReactNode })
   }, [connect, clearReconnectTimer])
 
   return (
-    <ManagerConnectionContext.Provider value={{ isConnected, devices, lastMessage, send }}>
+    <HelperConnectionContext.Provider value={{ isConnected, devices, lastMessage, send }}>
       {children}
-    </ManagerConnectionContext.Provider>
+    </HelperConnectionContext.Provider>
   )
 }
 
 /**
- * Consume the shared Manager connection.
- * Must be inside <ManagerConnectionProvider>.
+ * Consume the shared Helper connection.
+ * Must be inside <HelperConnectionProvider>.
  */
-export function useManagerConnection(): ManagerConnectionValue {
-  const ctx = useContext(ManagerConnectionContext)
+export function useHelperConnection(): HelperConnectionValue {
+  const ctx = useContext(HelperConnectionContext)
   if (!ctx) {
-    throw new Error('useManagerConnection must be used inside <ManagerConnectionProvider>')
+    throw new Error('useHelperConnection must be used inside <HelperConnectionProvider>')
   }
   return ctx
 }
