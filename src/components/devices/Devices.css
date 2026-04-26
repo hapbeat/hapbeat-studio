@@ -282,3 +282,137 @@
   margin-top: 4px;
   flex-wrap: wrap;
 }
+
+/* ---- Wi-Fi profile rows ---- */
+.wifi-profile-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-primary);
+  margin-bottom: 4px;
+}
+
+.wifi-profile-marker {
+  font-size: 14px;
+  color: var(--text-muted);
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.wifi-profile-marker.active { color: var(--success); }
+
+.wifi-profile-ssid {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.wifi-profile-badge {
+  font-size: 10px;
+  color: var(--success);
+  padding: 2px 6px;
+  border: 1px solid var(--success);
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.wifi-profile-btn {
+  font-size: 11px;
+  padding: 4px 10px;
+  flex-shrink: 0;
+}
+
+.wifi-add-form {
+  margin-top: 10px;
+  padding: 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* ---- Installed Kits ---- */
+.installed-kits-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.installed-kit {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+}
+.installed-kit-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.installed-kit-toggle {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+  width: 14px;
+}
+.installed-kit-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 13px;
+  flex: 1;
+  min-width: 0;
+}
+.installed-kit-version,
+.installed-kit-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.installed-kit-events {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0 0 0 22px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.installed-kit-events li { margin: 0; }
+.installed-kit-event-btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 2px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.installed-kit-event-btn:hover {
+  background: var(--bg-hover);
+  color: var(--accent-light);
+  border-color: var(--accent);
+}
+
+/* ---- Debug dump ---- */
+.debug-dump-pre {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-x: auto;
+  margin: 0;
+  white-space: pre;
+}

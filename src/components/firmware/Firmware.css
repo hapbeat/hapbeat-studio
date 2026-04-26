@@ -1,0 +1,83 @@
+.firmware-page {
+  padding: 20px 24px;
+  max-width: 760px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.firmware-banner {
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+}
+.firmware-banner.warn { border-color: var(--warning); color: var(--warning); }
+
+.firmware-section {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+}
+
+.firmware-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+.firmware-section-sub {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.firmware-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.firmware-filename {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.firmware-size {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.firmware-progress {
+  height: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  margin: 8px 0 6px;
+}
+.firmware-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 200ms ease;
+}

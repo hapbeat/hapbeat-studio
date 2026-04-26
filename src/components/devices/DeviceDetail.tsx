@@ -1,26 +1,34 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
-import { useDeviceStore } from '@/stores/deviceStore'
+import { useDeviceStore, type WifiProfile } from '@/stores/deviceStore'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import { IdentityForm } from './IdentityForm'
-import { WifiForm } from './WifiForm'
-import { GroupForm } from './GroupForm'
+import { WifiProfilesForm } from './WifiProfilesForm'
 import { UiConfigForm } from './UiConfigForm'
+import { DebugDumpSection } from './DebugDumpSection'
+import { InstalledKitsSection } from './InstalledKitsSection'
 
 /**
  * Right-hand pane: forms for the device picked in the sidebar.
  *
  * Subscribes to the Helper connection's `lastMessage` stream so that
- * `get_info_result` / `wifi_status_result` push updates flow into the
- * device-store cache and forms re-render with fresh values.
+ * Helper -> Studio push results (`get_info_result`, `wifi_profiles_result`,
+ * `debug_dump_result`, etc.) flow into the device-store cache and forms
+ * re-render with fresh values.
  */
 export function DeviceDetail() {
   const { devices, lastMessage, send } = useHelperConnection()
   const selectedIp = useDeviceStore((s) => s.selectedIp)
   const setInfo = useDeviceStore((s) => s.setInfo)
   const setWifiStatus = useDeviceStore((s) => s.setWifiStatus)
+  const setWifiProfiles = useDeviceStore((s) => s.setWifiProfiles)
+  const setDebugDump = useDeviceStore((s) => s.setDebugDump)
+  const setKitList = useDeviceStore((s) => s.setKitList)
   const infoCache = useDeviceStore((s) => s.infoCache)
   const wifiStatusCache = useDeviceStore((s) => s.wifiStatusCache)
+  const wifiProfilesCache = useDeviceStore((s) => s.wifiProfilesCache)
+  const debugDumpCache = useDeviceStore((s) => s.debugDumpCache)
+  const kitListCache = useDeviceStore((s) => s.kitListCache)
 
   const device: DeviceInfo | undefined = useMemo(
     () => devices.find((d) => d.ipAddress === selectedIp),
@@ -28,6 +36,17 @@ export function DeviceDetail() {
   )
 
   const [globalStatus, setGlobalStatus] = useState<{ kind: 'ok' | 'err' | 'warn' | 'muted'; msg: string } | null>(null)
+
+  // Auto-fetch wifi profiles + info the first time a device becomes the
+  // selection. Mirrors Manager's behavior of pulling list_wifi_profiles
+  // on selection_changed when the IP differs from the last fetch.
+  useEffect(() => {
+    if (!selectedIp || !device?.online) return
+    if (wifiProfilesCache[selectedIp]) return
+    send({ type: 'list_wifi_profiles', payload: { ip: selectedIp } })
+    send({ type: 'get_info', payload: { ip: selectedIp } })
+    send({ type: 'get_wifi_status', payload: { ip: selectedIp } })
+  }, [selectedIp, device?.online, wifiProfilesCache, send])
 
   // Drain helper push messages relevant to this view.
   useEffect(() => {
@@ -51,12 +70,33 @@ export function DeviceDetail() {
         rssi: p.rssi as number | undefined,
         channel: p.channel as number | undefined,
       })
+    } else if (t === 'wifi_profiles_result' && typeof p.device === 'string') {
+      const profiles = (p.profiles as WifiProfile[] | undefined) ?? []
+      const cnt = (p.count as number | undefined) ?? profiles.length
+      const max = (p.max as number | undefined) ?? 5
+      setWifiProfiles(p.device, profiles, cnt, max)
+    } else if (t === 'debug_dump_result' && typeof p.device === 'string') {
+      setDebugDump(p.device, p as Record<string, unknown>)
+    } else if (t === 'kit_list_result' && typeof p.device === 'string') {
+      const kits = (p.kits as Array<{
+        kit_id: string
+        version?: string
+        events?: string[]
+      }> | undefined) ?? []
+      setKitList(p.device, kits)
     } else if (t === 'write_result') {
       const ok = p.success === true
       const msg = (p.message as string) || (p.error as string) || (ok ? 'ok' : 'failed')
       setGlobalStatus({ kind: ok ? 'ok' : 'err', msg })
     }
-  }, [lastMessage, setInfo, setWifiStatus])
+  }, [
+    lastMessage,
+    setInfo,
+    setWifiStatus,
+    setWifiProfiles,
+    setDebugDump,
+    setKitList,
+  ])
 
   // Auto-clear the floating status line after a few seconds.
   useEffect(() => {
@@ -86,10 +126,25 @@ export function DeviceDetail() {
   const refreshInfo = () => {
     send({ type: 'get_info', payload: { ip: selectedIp } })
     send({ type: 'get_wifi_status', payload: { ip: selectedIp } })
+    send({ type: 'list_wifi_profiles', payload: { ip: selectedIp } })
+  }
+
+  const refreshWifiProfiles = () => {
+    send({ type: 'list_wifi_profiles', payload: { ip: selectedIp } })
   }
 
   const cachedInfo = infoCache[selectedIp]
   const wifiStatus = wifiStatusCache[selectedIp]
+  const wifiProfiles = wifiProfilesCache[selectedIp]
+  const debugDump = debugDumpCache[selectedIp]
+  const kitList = kitListCache[selectedIp]
+
+  const playEvent = (eventId: string) => {
+    sendTo({
+      type: 'preview_event',
+      payload: { event_id: eventId, target: device.address || '' },
+    })
+  }
 
   return (
     <section className="devices-detail">
@@ -107,7 +162,7 @@ export function DeviceDetail() {
             className="form-button-secondary"
             onClick={refreshInfo}
             disabled={!device.online}
-            title="デバイスから get_info / get_wifi_status を取得"
+            title="デバイスから get_info / get_wifi_status / list_wifi_profiles を取得"
           >
             ⟳ デバイスから読み込み
           </button>
@@ -133,20 +188,31 @@ export function DeviceDetail() {
         sendTo={sendTo}
       />
 
-      <GroupForm
+      <WifiProfilesForm
         device={device}
-        cachedInfo={cachedInfo}
-        sendTo={sendTo}
-      />
-
-      <WifiForm
-        device={device}
+        profiles={wifiProfiles?.profiles ?? []}
+        count={wifiProfiles?.count ?? 0}
+        max={wifiProfiles?.max ?? 5}
         wifiStatus={wifiStatus}
         sendTo={sendTo}
+        onRefresh={refreshWifiProfiles}
       />
 
       <UiConfigForm
         device={device}
+        sendTo={sendTo}
+      />
+
+      <InstalledKitsSection
+        device={device}
+        kits={kitList}
+        sendTo={sendTo}
+        onPlayEvent={playEvent}
+      />
+
+      <DebugDumpSection
+        device={device}
+        dump={debugDump}
         sendTo={sendTo}
       />
     </section>

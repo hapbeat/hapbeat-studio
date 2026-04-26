@@ -1,0 +1,97 @@
+.log-drawer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  max-height: 280px;
+  transition: max-height 200ms ease;
+}
+.log-drawer.collapsed {
+  max-height: 28px;
+}
+
+.log-drawer-header {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.log-drawer-toggle {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  font-size: 11px;
+}
+.log-drawer-toggle:hover { color: var(--text-primary); }
+
+.log-drawer-count {
+  color: var(--text-muted);
+}
+
+.log-drawer-clear {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.log-drawer-clear:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.log-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--bg-primary);
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.log-drawer-empty {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 16px;
+}
+
+.log-line {
+  display: grid;
+  grid-template-columns: 70px 160px 1fr;
+  gap: 8px;
+  align-items: baseline;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-time {
+  color: var(--text-muted);
+}
+.log-source {
+  color: var(--accent-light);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.log-msg {
+  color: var(--text-primary);
+}
+
+/* Page padding so content doesn't sit under the drawer when expanded. */
+body { padding-bottom: 28px; }
