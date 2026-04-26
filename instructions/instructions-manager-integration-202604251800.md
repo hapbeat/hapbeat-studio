@@ -111,11 +111,11 @@ Helper との WS protocol は現 Manager の ws_server.py と互換。Studio 側
 - AudioContext + 16kHz resampler
 - WS stream_begin / stream_data / stream_end
 
-### Phase 6: Manager deprecation (1 セッション)
+### Phase 6: Manager archive (1 セッション)
 
-- `hapbeat-manager` の README に「deprecated, use Studio + Helper」追記
-- `_RECOVERY_ENABLED` 等のレガシーコード整理
-- archive 候補としてマーク
+- 機能移植が完了したら hapbeat-manager を即座に archive へ移動
+- ユーザーは未だ存在しないため、deprecation 告知や移行ガイドは不要
+- 既存ユーザー向けの README 警告等は書かない（リリース前なので不要）
 
 ## 完了条件
 
