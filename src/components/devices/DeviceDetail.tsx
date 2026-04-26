@@ -155,9 +155,14 @@ export function DeviceDetail() {
   const kitList = kitListCache[selectedIp]
 
   const playEvent = (eventId: string) => {
-    sendTo({
+    // Broadcast (no target filter) — kits are addressed by event_id, not
+    // device address. Specifying target=device.address would only fire
+    // on this device but the device is also the only one that has the
+    // kit installed in normal use, so leaving target empty is simpler
+    // and matches the manager's content_page behavior.
+    send({
       type: 'preview_event',
-      payload: { event_id: eventId, target: device.address || '' },
+      payload: { event_id: eventId, target: '' },
     })
   }
 

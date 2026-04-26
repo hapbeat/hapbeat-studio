@@ -57,6 +57,12 @@ export function LogDrawer() {
     } else if (t === 'log_subscription' && typeof p.device === 'string') {
       if (p.stopped) push('helper', `log_stream stopped (${p.device})`)
       else if (p.ok) push('helper', `log_stream subscribed (${p.device})`)
+    } else if (t === 'ping_result' && typeof p.device === 'string') {
+      if (typeof p.rtt_ms === 'number') {
+        push(`ping ${p.device}`, `PONG ${(p.rtt_ms as number).toFixed(2)} ms`)
+      } else {
+        push(`ping ${p.device}`, `PING failed: ${p.error ?? 'no response'}`)
+      }
     }
   }, [lastMessage, push])
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
+import { StreamingTestSection } from './StreamingTestSection'
 
 const HISTORY_KEY = 'hapbeat-studio-test-event-history'
 const GAIN_KEY = 'hapbeat-studio-test-gain'
@@ -93,6 +94,12 @@ export function TestSubTab({ device, sendTo }: Props) {
   const ping = () => {
     sendTo({ type: 'ping_device', payload: {} })
     setPingResult('pinging…')
+    // Local watchdog: helper waits up to 2 s for the PONG, plus tiny
+    // round-trip overhead. If nothing arrives in 3 s, it's a helper-or-
+    // network problem the user should know about.
+    setTimeout(() => {
+      setPingResult((cur) => (cur === 'pinging…' ? 'no response (timeout)' : cur))
+    }, 3000)
   }
 
   const playAll = () => {
@@ -211,6 +218,8 @@ export function TestSubTab({ device, sendTo }: Props) {
           </button>
         </div>
       </div>
+
+      <StreamingTestSection device={device} />
 
       <div className="form-status muted" style={{ padding: '0 4px' }}>
         Event ID 履歴 ({history.length}/{MAX_HISTORY}):
