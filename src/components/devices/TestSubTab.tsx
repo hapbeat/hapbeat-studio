@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
-import { useDeviceStore } from '@/stores/deviceStore'
-import './Test.css'
+import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 
 const HISTORY_KEY = 'hapbeat-studio-test-event-history'
 const GAIN_KEY = 'hapbeat-studio-test-gain'
@@ -19,18 +18,18 @@ function loadHistory(): string[] {
   }
 }
 
+interface Props {
+  device: DeviceInfo
+  sendTo: (msg: ManagerMessage) => void
+}
+
 /**
- * Replicates the Manager `TestPage` controls — event id history,
- * gain slider, PLAY/STOP/PING for the selected device, and
- * PLAY ALL / STOP ALL broadcast with optional target filter.
- *
- * Streaming-test (folder browse + audio file player) is intentionally
- * not ported: the existing Audio Bridge in Manager handles the same
- * use case and is being relocated to a future Live Audio tab.
+ * Per-device 再生テスト pane — Event ID + Gain + PLAY/STOP/PING
+ * for the selected device, plus a broadcast PLAY ALL / STOP ALL with
+ * an optional target filter.
  */
-export function TestPanel() {
-  const { isConnected, devices, lastMessage, send } = useHelperConnection()
-  const selectedIp = useDeviceStore((s) => s.selectedIp)
+export function TestSubTab({ device, sendTo }: Props) {
+  const { lastMessage, send } = useHelperConnection()
 
   const [history, setHistory] = useState<string[]>(loadHistory)
   const [eventId, setEventId] = useState<string>(history[0] ?? '')
@@ -43,23 +42,16 @@ export function TestPanel() {
   )
   const [pingResult, setPingResult] = useState<string>('')
 
-  useEffect(() => {
-    localStorage.setItem(GAIN_KEY, String(gain))
-  }, [gain])
+  useEffect(() => { localStorage.setItem(GAIN_KEY, String(gain)) }, [gain])
+  useEffect(() => { localStorage.setItem(TARGET_KEY, target) }, [target])
 
   useEffect(() => {
-    localStorage.setItem(TARGET_KEY, target)
-  }, [target])
-
-  // Listen for ping_result push.
-  useEffect(() => {
-    if (!lastMessage) return
-    if (lastMessage.type !== 'ping_result') return
+    if (!lastMessage || lastMessage.type !== 'ping_result') return
     const p = lastMessage.payload as Record<string, unknown>
     if (p.error) {
       setPingResult(`PING failed: ${p.error}`)
     } else if (typeof p.rtt_ms === 'number') {
-      setPingResult(`PONG ${p.rtt_ms.toFixed(2)} ms (${String(p.device)})`)
+      setPingResult(`PONG ${p.rtt_ms.toFixed(2)} ms`)
     }
     const t = setTimeout(() => setPingResult(''), 4000)
     return () => clearTimeout(t)
@@ -69,11 +61,7 @@ export function TestPanel() {
     if (!id) return
     const next = [id, ...history.filter((h) => h !== id)].slice(0, MAX_HISTORY)
     setHistory(next)
-    try {
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(next))
-    } catch {
-      /* ignore */
-    }
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)) } catch { /* ignore */ }
   }
 
   const gainFloat = gain / 100
@@ -81,14 +69,11 @@ export function TestPanel() {
   const playSelected = () => {
     if (!eventId.trim()) return
     recordEvent(eventId.trim())
-    send({
+    sendTo({
       type: 'preview_event',
       payload: {
         event_id: eventId.trim(),
-        // PLAY is broadcast; the address/group filter is up to the device.
-        // For "selected only" we still pass the device's address as target so
-        // other devices ignore it.
-        target: selectedDeviceAddress(devices, selectedIp) ?? '',
+        target: device.address || '',
         gain: gainFloat,
       },
     })
@@ -96,27 +81,24 @@ export function TestPanel() {
 
   const stopSelected = () => {
     if (!eventId.trim()) return
-    send({
+    sendTo({
       type: 'stop_event',
       payload: {
         event_id: eventId.trim(),
-        target: selectedDeviceAddress(devices, selectedIp) ?? '',
+        target: device.address || '',
       },
     })
   }
 
   const ping = () => {
-    if (!selectedIp) {
-      setPingResult('PING: デバイス未選択')
-      return
-    }
-    send({ type: 'ping_device', payload: { ip: selectedIp } })
+    sendTo({ type: 'ping_device', payload: {} })
     setPingResult('pinging…')
   }
 
   const playAll = () => {
     if (!eventId.trim()) return
     recordEvent(eventId.trim())
+    // Broadcast — bypass selected device, use the global send.
     send({
       type: 'preview_event',
       payload: {
@@ -134,20 +116,11 @@ export function TestPanel() {
     })
   }
 
-  const selDev = devices.find((d) => d.ipAddress === selectedIp)
-
   return (
-    <div className="test-page">
-      {!isConnected && (
-        <div className="test-banner warn">
-          Helper 未接続 — 起動するまで PLAY/STOP は届きません
-        </div>
-      )}
-
-      {/* === Event ID === */}
-      <div className="test-section">
-        <div className="test-section-title">イベント設定</div>
-        <div className="test-row">
+    <>
+      <div className="form-section">
+        <div className="form-section-title">イベント設定</div>
+        <div className="form-row">
           <label>Event ID</label>
           <input
             list="hapbeat-event-history"
@@ -157,54 +130,55 @@ export function TestPanel() {
             placeholder="impact.damage"
           />
           <datalist id="hapbeat-event-history">
-            {history.map((h) => (
-              <option key={h} value={h} />
-            ))}
+            {history.map((h) => <option key={h} value={h} />)}
           </datalist>
+          <span />
         </div>
-        <div className="test-row">
+        <div className="form-row">
           <label>Gain</label>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            value={gain}
-            onChange={(e) => setGain(Number(e.target.value))}
-            style={{ flex: 1 }}
-          />
-          <span className="test-gain-readout">{gain}%</span>
+          <div className="form-row-multi" style={{ width: '100%' }}>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={gain}
+              onChange={(e) => setGain(Number(e.target.value))}
+              style={{ flex: 1 }}
+            />
+            <span className="form-input mono short" style={{ textAlign: 'right' }}>
+              {gain}%
+            </span>
+          </div>
+          <span />
         </div>
       </div>
 
-      {/* === Selected device === */}
-      <div className="test-section">
-        <div className="test-section-title">
+      <div className="form-section">
+        <div className="form-section-title">
           選択デバイスに送信
-          {selDev && (
-            <span className="test-section-sub">
-              {' '}— {selDev.name} ({selDev.address || selDev.ipAddress})
-            </span>
-          )}
+          <span className="form-section-sub-inline">
+            {' — '}{device.name} ({device.address || device.ipAddress})
+          </span>
         </div>
-        <div className="test-action-row">
+        <div className="form-action-row">
           <button
             className="form-button"
             onClick={playSelected}
-            disabled={!isConnected || !eventId.trim() || !selDev}
+            disabled={!device.online || !eventId.trim()}
           >
             ▶ PLAY
           </button>
           <button
             className="form-button-secondary"
             onClick={stopSelected}
-            disabled={!isConnected || !eventId.trim() || !selDev}
+            disabled={!device.online || !eventId.trim()}
           >
             ■ STOP
           </button>
           <button
             className="form-button-secondary"
             onClick={ping}
-            disabled={!isConnected || !selDev}
+            disabled={!device.online}
           >
             PING
           </button>
@@ -212,10 +186,9 @@ export function TestPanel() {
         </div>
       </div>
 
-      {/* === Broadcast === */}
-      <div className="test-section">
-        <div className="test-section-title">ブロードキャスト送信</div>
-        <div className="test-row">
+      <div className="form-section">
+        <div className="form-section-title">ブロードキャスト送信</div>
+        <div className="form-row">
           <label>Target</label>
           <input
             className="form-input mono"
@@ -223,35 +196,32 @@ export function TestPanel() {
             onChange={(e) => setTarget(e.target.value)}
             placeholder="例: player_1, */chest, 空 = 全台"
           />
+          <span />
         </div>
-        <div className="test-action-row">
+        <div className="form-action-row">
           <button
             className="form-button"
             onClick={playAll}
-            disabled={!isConnected || !eventId.trim()}
+            disabled={!eventId.trim()}
           >
             ▶ PLAY ALL
           </button>
-          <button
-            className="form-button-secondary"
-            onClick={stopAll}
-            disabled={!isConnected}
-          >
+          <button className="form-button-secondary" onClick={stopAll}>
             ■ STOP ALL
           </button>
         </div>
       </div>
 
-      <div className="test-foot">
+      <div className="form-status muted" style={{ padding: '0 4px' }}>
         Event ID 履歴 ({history.length}/{MAX_HISTORY}):
         {history.length === 0 ? (
           <em> （履歴なし）</em>
         ) : (
-          <ul className="test-history">
+          <ul className="event-history-list">
             {history.map((h) => (
               <li key={h}>
                 <button
-                  className="test-history-btn"
+                  className="event-history-btn"
                   onClick={() => setEventId(h)}
                 >
                   {h}
@@ -261,15 +231,6 @@ export function TestPanel() {
           </ul>
         )}
       </div>
-    </div>
+    </>
   )
-}
-
-function selectedDeviceAddress(
-  devices: { ipAddress: string; address: string }[],
-  ip: string | null,
-): string | null {
-  if (!ip) return null
-  const d = devices.find((dd) => dd.ipAddress === ip)
-  return d?.address || null
 }

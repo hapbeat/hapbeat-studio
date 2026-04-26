@@ -75,6 +75,12 @@
 .device-row.selected {
   background: var(--bg-surface);
   border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
+  padding-left: 13px;
+}
+
+.device-row.selected .device-row-name {
+  color: var(--accent-light);
 }
 
 .device-row-top {
@@ -112,6 +118,17 @@
 
 .device-row-status.offline {
   color: var(--text-muted);
+}
+
+.device-row-selected-tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  background: var(--accent);
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
 }
 
 .device-row-meta {
@@ -158,6 +175,104 @@
   font-size: 12px;
   color: var(--text-muted);
   font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.device-detail-pill {
+  display: inline-block;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-family: var(--font-ui);
+}
+
+.selected-pill {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* ---- Sub-tabs (per-device pages) ---- */
+.device-subtabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  margin: 14px 0 16px;
+}
+
+.device-subtab-btn {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  padding: 8px 16px;
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition);
+}
+.device-subtab-btn:hover { color: var(--text-primary); }
+.device-subtab-btn.active {
+  color: var(--accent-light);
+  border-bottom-color: var(--accent);
+}
+
+.device-subtab-body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Inline subtitle next to a section heading */
+.form-section-sub-inline {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+/* Event ID history pill list (was in test/Test.css; relocated since the
+   test pane now lives inside the Devices subtab body) */
+.event-history-list {
+  list-style: none;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 4px 0 0;
+  padding: 0;
+}
+.event-history-btn {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+.event-history-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Firmware OTA progress (was in firmware/Firmware.css; relocated) */
+.firmware-progress {
+  height: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+  margin: 8px 0 6px;
+}
+.firmware-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 200ms ease;
 }
 
 /* ---- Form section card ---- */

@@ -7,14 +7,24 @@ import { WifiProfilesForm } from './WifiProfilesForm'
 import { UiConfigForm } from './UiConfigForm'
 import { DebugDumpSection } from './DebugDumpSection'
 import { InstalledKitsSection } from './InstalledKitsSection'
+import { TestSubTab } from './TestSubTab'
+import { FirmwareSubTab } from './FirmwareSubTab'
+
+type SubTab = 'config' | 'kit' | 'test' | 'firmware'
+
+const SUB_TABS: { id: SubTab; label: string }[] = [
+  { id: 'config', label: '設定' },
+  { id: 'kit', label: 'Kit' },
+  { id: 'test', label: '再生テスト' },
+  { id: 'firmware', label: 'ファームウェア' },
+]
+
+const SUBTAB_KEY = 'hapbeat-studio-devices-subtab'
 
 /**
- * Right-hand pane: forms for the device picked in the sidebar.
- *
- * Subscribes to the Helper connection's `lastMessage` stream so that
- * Helper -> Studio push results (`get_info_result`, `wifi_profiles_result`,
- * `debug_dump_result`, etc.) flow into the device-store cache and forms
- * re-render with fresh values.
+ * Right-hand pane: per-device tabs that mirror the Manager's
+ * DetailPanel (`設定 / Kit / 再生テスト / ファームウェア`). Live Audio
+ * is intentionally out of scope and lives elsewhere.
  */
 export function DeviceDetail() {
   const { devices, lastMessage, send } = useHelperConnection()
@@ -35,11 +45,17 @@ export function DeviceDetail() {
     [devices, selectedIp],
   )
 
+  const [subTab, setSubTab] = useState<SubTab>(() => {
+    const saved = localStorage.getItem(SUBTAB_KEY)
+    return SUB_TABS.some((t) => t.id === saved) ? (saved as SubTab) : 'config'
+  })
+  useEffect(() => {
+    localStorage.setItem(SUBTAB_KEY, subTab)
+  }, [subTab])
+
   const [globalStatus, setGlobalStatus] = useState<{ kind: 'ok' | 'err' | 'warn' | 'muted'; msg: string } | null>(null)
 
-  // Auto-fetch wifi profiles + info the first time a device becomes the
-  // selection. Mirrors Manager's behavior of pulling list_wifi_profiles
-  // on selection_changed when the IP differs from the last fetch.
+  // Auto-fetch info / wifi when first selecting a device.
   useEffect(() => {
     if (!selectedIp || !device?.online) return
     if (wifiProfilesCache[selectedIp]) return
@@ -48,7 +64,7 @@ export function DeviceDetail() {
     send({ type: 'get_wifi_status', payload: { ip: selectedIp } })
   }, [selectedIp, device?.online, wifiProfilesCache, send])
 
-  // Drain helper push messages relevant to this view.
+  // Drain helper push messages.
   useEffect(() => {
     if (!lastMessage) return
     const t = lastMessage.type
@@ -98,7 +114,6 @@ export function DeviceDetail() {
     setKitList,
   ])
 
-  // Auto-clear the floating status line after a few seconds.
   useEffect(() => {
     if (!globalStatus) return
     const t = setTimeout(() => setGlobalStatus(null), 4000)
@@ -153,8 +168,10 @@ export function DeviceDetail() {
           {device.name || '(unnamed)'}
         </div>
         <div className="devices-detail-sub">
+          <span className="device-detail-pill selected-pill">SELECTED</span>
           {device.ipAddress}
           {device.firmwareVersion && <> · fw {device.firmwareVersion}</>}
+          {device.address && <> · {device.address}</>}
           {!device.online && <> · offline</>}
         </div>
         <div className="form-action-row" style={{ marginTop: 10 }}>
@@ -182,39 +199,59 @@ export function DeviceDetail() {
         </div>
       </div>
 
-      <IdentityForm
-        device={device}
-        cachedInfo={cachedInfo}
-        sendTo={sendTo}
-      />
+      <div className="device-subtabs">
+        {SUB_TABS.map((t) => (
+          <button
+            key={t.id}
+            className={`device-subtab-btn${subTab === t.id ? ' active' : ''}`}
+            onClick={() => setSubTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
 
-      <WifiProfilesForm
-        device={device}
-        profiles={wifiProfiles?.profiles ?? []}
-        count={wifiProfiles?.count ?? 0}
-        max={wifiProfiles?.max ?? 5}
-        wifiStatus={wifiStatus}
-        sendTo={sendTo}
-        onRefresh={refreshWifiProfiles}
-      />
+      <div className="device-subtab-body">
+        {subTab === 'config' && (
+          <>
+            <IdentityForm
+              device={device}
+              cachedInfo={cachedInfo}
+              sendTo={sendTo}
+            />
+            <WifiProfilesForm
+              device={device}
+              profiles={wifiProfiles?.profiles ?? []}
+              count={wifiProfiles?.count ?? 0}
+              max={wifiProfiles?.max ?? 5}
+              wifiStatus={wifiStatus}
+              sendTo={sendTo}
+              onRefresh={refreshWifiProfiles}
+            />
+            <UiConfigForm device={device} sendTo={sendTo} />
+            <DebugDumpSection
+              device={device}
+              dump={debugDump}
+              sendTo={sendTo}
+            />
+          </>
+        )}
 
-      <UiConfigForm
-        device={device}
-        sendTo={sendTo}
-      />
+        {subTab === 'kit' && (
+          <InstalledKitsSection
+            device={device}
+            kits={kitList}
+            sendTo={sendTo}
+            onPlayEvent={playEvent}
+          />
+        )}
 
-      <InstalledKitsSection
-        device={device}
-        kits={kitList}
-        sendTo={sendTo}
-        onPlayEvent={playEvent}
-      />
+        {subTab === 'test' && <TestSubTab device={device} sendTo={sendTo} />}
 
-      <DebugDumpSection
-        device={device}
-        dump={debugDump}
-        sendTo={sendTo}
-      />
+        {subTab === 'firmware' && (
+          <FirmwareSubTab device={device} sendTo={sendTo} />
+        )}
+      </div>
     </section>
   )
 }

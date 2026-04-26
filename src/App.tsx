@@ -3,23 +3,19 @@ import { WaveformEditor } from '@/components/waveform/WaveformEditor'
 import { DisplayEditor } from '@/components/display/DisplayEditor'
 import { KitManager } from '@/components/kit/KitManager'
 import { Devices } from '@/components/devices/Devices'
-import { TestPanel } from '@/components/test/TestPanel'
-import { FirmwarePanel } from '@/components/firmware/FirmwarePanel'
 import { LogDrawer } from '@/components/log/LogDrawer'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import './App.css'
 
-type Tab = 'waveform' | 'kit' | 'display' | 'devices' | 'test' | 'firmware'
+type Tab = 'waveform' | 'kit' | 'display' | 'devices'
 
-const TABS: Tab[] = ['waveform', 'kit', 'display', 'devices', 'test', 'firmware']
+const TABS: Tab[] = ['waveform', 'kit', 'display', 'devices']
 
 const TAB_LABELS: Record<Tab, string> = {
   waveform: 'Wave Editor',
   kit: 'Kit',
   display: 'Display',
   devices: 'Devices',
-  test: 'Test',
-  firmware: 'Firmware',
 }
 
 export function App() {
@@ -60,8 +56,6 @@ export function App() {
         {activeTab === 'kit' && <KitManager />}
         {activeTab === 'display' && <DisplayEditor />}
         {activeTab === 'devices' && <Devices />}
-        {activeTab === 'test' && <TestPanel />}
-        {activeTab === 'firmware' && <FirmwarePanel />}
       </main>
       <LogDrawer />
     </div>

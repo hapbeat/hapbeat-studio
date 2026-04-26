@@ -47,27 +47,32 @@ export function DeviceList() {
             デバイスを Wi-Fi に接続してください
           </div>
         ) : (
-          devices.map((dev) => (
-            <div
-              key={dev.ipAddress || dev.name}
-              className={`device-row${selectedIp === dev.ipAddress ? ' selected' : ''}`}
-              onClick={() => selectDevice(dev.ipAddress)}
-            >
-              <div className="device-row-top">
-                <span className="device-row-name">{dev.name || '(unnamed)'}</span>
-                <span
-                  className={`device-row-status ${dev.online ? 'online' : 'offline'}`}
-                >
-                  {dev.online ? '●' : '○'}
-                </span>
+          devices.map((dev) => {
+            const isSel = selectedIp === dev.ipAddress
+            return (
+              <div
+                key={dev.ipAddress || dev.name}
+                className={`device-row${isSel ? ' selected' : ''}`}
+                onClick={() => selectDevice(dev.ipAddress)}
+                aria-selected={isSel}
+              >
+                <div className="device-row-top">
+                  <span className="device-row-name">{dev.name || '(unnamed)'}</span>
+                  {isSel && <span className="device-row-selected-tag">SELECTED</span>}
+                  <span
+                    className={`device-row-status ${dev.online ? 'online' : 'offline'}`}
+                  >
+                    {dev.online ? '●' : '○'}
+                  </span>
+                </div>
+                <div className="device-row-meta">
+                  <span className="device-row-meta-ip">{dev.ipAddress || '—'}</span>
+                  {dev.address && <span>{dev.address}</span>}
+                  {dev.firmwareVersion && <span>fw {dev.firmwareVersion}</span>}
+                </div>
               </div>
-              <div className="device-row-meta">
-                <span className="device-row-meta-ip">{dev.ipAddress || '—'}</span>
-                {dev.address && <span>{dev.address}</span>}
-                {dev.firmwareVersion && <span>fw {dev.firmwareVersion}</span>}
-              </div>
-            </div>
-          ))
+            )
+          })
         )}
       </div>
     </aside>
