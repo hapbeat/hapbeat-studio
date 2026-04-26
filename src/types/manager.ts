@@ -1,4 +1,8 @@
-// WebSocket messages between Studio and Manager
+// WebSocket messages between Studio and hapbeat-helper.
+// (Helper supersedes the legacy hapbeat-manager from DEC-026 onward,
+// but the wire protocol is the same — type names are kept Manager*-
+// prefixed only because they are widely referenced; rename is a future
+// cleanup task.)
 
 export interface ManagerMessage {
   type: string
@@ -8,9 +12,13 @@ export interface ManagerMessage {
 export interface DeviceInfo {
   name: string
   ipAddress: string
-  group: number
+  /** path-based device address e.g. "player_1/chest" (may be empty) */
+  address: string
   firmwareVersion: string
-  batteryLevel: number
+  /** liveness flag pushed by Helper */
+  online: boolean
+  /** filled when the user installs hapbeat over USB serial directly (Phase 3) */
+  serialConnected: boolean
   /** MCP4018 wiper value 0-127 (null if not yet queried) */
   volumeWiper: number | null
   /** Volume level 0-N (null if not yet queried) */
@@ -19,7 +27,7 @@ export interface DeviceInfo {
   volumeSteps: number | null
 }
 
-// Studio -> Manager messages
+// Studio -> Helper messages
 export interface StudioToManagerMessage {
   type:
     | 'list_devices'
@@ -27,16 +35,25 @@ export interface StudioToManagerMessage {
     | 'deploy_kit'
     | 'deploy_kit_data'
     | 'preview_event'
+    | 'stop_event'
     | 'stream_begin'
     | 'stream_data'
     | 'stream_end'
     | 'query_space'
     | 'query_volume'
+    | 'set_name'
+    | 'set_address'
+    | 'set_group'
+    | 'set_wifi'
+    | 'clear_wifi'
+    | 'reboot'
+    | 'get_info'
+    | 'get_wifi_status'
     | 'ping'
   payload: Record<string, unknown>
 }
 
-// Manager -> Studio messages
+// Helper -> Studio messages
 export interface ManagerToStudioMessage {
   type:
     | 'device_list'
@@ -45,6 +62,9 @@ export interface ManagerToStudioMessage {
     | 'stream_ack'
     | 'space_result'
     | 'volume_result'
+    | 'volume_changed'
+    | 'get_info_result'
+    | 'wifi_status_result'
     | 'error'
     | 'pong'
   payload: Record<string, unknown>
@@ -62,4 +82,36 @@ export interface VolumeResult {
   volume_level: number
   volume_wiper: number
   volume_steps: number
+}
+
+export interface WriteResult {
+  success: boolean
+  message?: string
+  error?: string
+  device_confirmed?: boolean
+  results?: Array<{
+    ip: string
+    success: boolean
+    response: Record<string, unknown>
+  }>
+}
+
+export interface GetInfoResult {
+  device: string
+  name?: string
+  mac?: string
+  fw?: string
+  group?: number
+  wifi_connected?: boolean
+  error?: string
+}
+
+export interface WifiStatusResult {
+  device: string
+  connected?: boolean
+  ssid?: string
+  ip?: string
+  rssi?: number
+  channel?: number
+  error?: string
 }

@@ -2,15 +2,18 @@ import { useState, useEffect } from 'react'
 import { WaveformEditor } from '@/components/waveform/WaveformEditor'
 import { DisplayEditor } from '@/components/display/DisplayEditor'
 import { KitManager } from '@/components/kit/KitManager'
+import { Devices } from '@/components/devices/Devices'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import './App.css'
 
-type Tab = 'waveform' | 'kit' | 'display'
+type Tab = 'waveform' | 'kit' | 'display' | 'devices'
+
+const TABS: Tab[] = ['waveform', 'kit', 'display', 'devices']
 
 export function App() {
   const [activeTab, setActiveTab] = useState<Tab>(() => {
     const saved = localStorage.getItem('hapbeat-studio-tab')
-    return (saved === 'waveform' || saved === 'kit' || saved === 'display') ? saved : 'waveform'
+    return (TABS as string[]).includes(saved ?? '') ? (saved as Tab) : 'waveform'
   })
 
   useEffect(() => {
@@ -41,6 +44,12 @@ export function App() {
           >
             Display
           </button>
+          <button
+            className={`toggle-btn ${activeTab === 'devices' ? 'active' : ''}`}
+            onClick={() => setActiveTab('devices')}
+          >
+            Devices
+          </button>
         </div>
         <div className="connection-status">
           <span className={`status-dot ${isConnected ? 'connected' : 'disconnected'}`} />
@@ -53,6 +62,7 @@ export function App() {
         {activeTab === 'waveform' && <WaveformEditor />}
         {activeTab === 'kit' && <KitManager />}
         {activeTab === 'display' && <DisplayEditor />}
+        {activeTab === 'devices' && <Devices />}
       </main>
     </div>
   )
