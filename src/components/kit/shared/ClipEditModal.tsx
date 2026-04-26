@@ -14,15 +14,14 @@ export interface ClipEditModalProps {
 /**
  * Modal editor for a single clip.
  *
- * - Rendered as a dialog overlay so the underlying card stays visible.
- * - There is intentionally no "Delete" button here. Deletion would lose
- *   the file; instead the user clicks "Archive" which moves the file to
- *   clips/archive/ where it can be recovered by dragging back later.
+ * Event ID is no longer edited here — it is derived from `<kitName>.<clipName>`
+ * inside the kit at add-time, so the only kit-relevant field a clip exposes
+ * is its display name (= the event-id name part). Group / tags / note are
+ * library-side metadata for organisation and filtering.
  */
 export function ClipEditModal({ clip, onClose, onUpdate, onArchive, onCommitRename }: ClipEditModalProps) {
   const [tagInput, setTagInput] = useState('')
 
-  // Name 入力終了時 (blur / 閉じる) にローカルファイル名を同期
   const commitRename = useCallback(() => {
     if (onCommitRename) void onCommitRename(clip.id)
   }, [clip.id, onCommitRename])
@@ -31,25 +30,6 @@ export function ClipEditModal({ clip, onClose, onUpdate, onArchive, onCommitRena
     commitRename()
     onClose()
   }, [commitRename, onClose])
-
-  // Split eventId into category.name
-  const dotIdx = clip.eventId.indexOf('.')
-  const eidCategory = dotIdx > 0 ? clip.eventId.substring(0, dotIdx) : ''
-  const eidName = dotIdx > 0 ? clip.eventId.substring(dotIdx + 1) : clip.eventId
-
-  const autoCategory = clip.eventIdAuto?.category ?? true
-  const autoName = clip.eventIdAuto?.name ?? true
-
-  const setAutoFlag = useCallback((part: 'category' | 'name', next: boolean) => {
-    const cur = clip.eventIdAuto ?? { category: true, name: true }
-    onUpdate(clip.id, { eventIdAuto: { ...cur, [part]: next } })
-  }, [clip.id, clip.eventIdAuto, onUpdate])
-
-  const updateEventId = useCallback((cat: string, name: string) => {
-    const c = cat.toLowerCase().replace(/[^a-z0-9_-]/g, '')
-    const n = name.toLowerCase().replace(/[^a-z0-9_.-]/g, '')
-    onUpdate(clip.id, { eventId: c && n ? `${c}.${n}` : '' })
-  }, [clip.id, onUpdate])
 
   // Close on Escape, allow click-out to dismiss.
   useEffect(() => {
@@ -68,7 +48,7 @@ export function ClipEditModal({ clip, onClose, onUpdate, onArchive, onCommitRena
 
         <div className="clip-edit-fields">
           <label className="clip-edit-field">
-            <span>Name</span>
+            <span>Name <span className="field-hint">(used as the event-id name part inside a kit)</span></span>
             <input
               type="text"
               value={clip.name}
@@ -78,43 +58,15 @@ export function ClipEditModal({ clip, onClose, onUpdate, onArchive, onCommitRena
             />
           </label>
 
-          <div className="clip-edit-field">
-            <span>Event ID <span className="field-hint">(category.name — both required)</span></span>
-            <div className="event-id-inputs">
-              <input
-                type="text"
-                value={eidCategory}
-                placeholder="category"
-                className={`eid-category ${autoCategory ? 'auto-disabled' : ''}`}
-                disabled={autoCategory}
-                onChange={(e) => updateEventId(e.target.value, eidName)}
-              />
-              <span className="eid-dot">.</span>
-              <input
-                type="text"
-                value={eidName}
-                placeholder="name"
-                className={`eid-name ${autoName ? 'auto-disabled' : ''}`}
-                disabled={autoName}
-                onChange={(e) => updateEventId(eidCategory, e.target.value)}
-              />
-            </div>
-            <div className="event-id-auto-flags">
-              <label className="auto-flag-label" title="チェック時、category をフォルダ名から自動生成（入力欄は編集不可）">
-                <input type="checkbox" checked={autoCategory}
-                  onChange={(e) => setAutoFlag('category', e.target.checked)} />
-                フォルダ名 → category
-              </label>
-              <label className="auto-flag-label" title="チェック時、name をファイル名 (= clip.name) から自動生成（入力欄は編集不可）">
-                <input type="checkbox" checked={autoName}
-                  onChange={(e) => setAutoFlag('name', e.target.checked)} />
-                ファイル名 → name
-              </label>
-            </div>
-            {(!eidCategory || !eidName) && clip.eventId !== '' && (
-              <span className="field-error">Both category and name are required</span>
-            )}
-          </div>
+          <label className="clip-edit-field">
+            <span>Note <span className="field-hint">(optional — shown on hover)</span></span>
+            <textarea
+              rows={3}
+              value={clip.note ?? ''}
+              placeholder="任意のメモ。例: 用途、サイドノート、注意事項…"
+              onChange={(e) => onUpdate(clip.id, { note: e.target.value })}
+            />
+          </label>
 
           <label className="clip-edit-field">
             <span>Group</span>
@@ -157,7 +109,7 @@ export function ClipEditModal({ clip, onClose, onUpdate, onArchive, onCommitRena
         <div className="clip-edit-modal-footer">
           <button
             className="library-btn danger"
-            title="Move this clip to clips/archive/. Your file stays on disk so you can recover it later by moving it back into clips/."
+            title="Move this clip to clips/archive/. Your file stays on disk so you can recover it later by moving it back."
             onClick={async () => {
               if (!confirm(`Archive "${clip.name}"?\n\nThe file will be moved to clips/archive/ and hidden from Studio.\nYou can recover it by moving the file back into clips/.`)) return
               await onArchive(clip.id)

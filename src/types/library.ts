@@ -4,14 +4,12 @@
  */
 export interface LibraryClip {
   id: string
-  /** Display name */
+  /** Display name (used as the bare event-id name part inside a kit) */
   name: string
   /** User-assigned tags for filtering */
   tags: string[]
   /** Group/folder name for organization */
   group: string
-  /** Assigned Event ID (hapbeat-contracts format, e.g. "impact.hit") */
-  eventId: string
   /** Duration in seconds */
   duration: number
   /** Number of channels */
@@ -30,13 +28,12 @@ export interface LibraryClip {
   builtinId?: string
   /** Library 側のプレビュー amp (0-1)。Kit 追加時のデフォルト値にもなる。 */
   libraryIntensity?: number
-  /** Event ID の自動生成フラグ。未設定時は両方 true 扱い (name/folder に自動追従)。 */
-  eventIdAuto?: {
-    /** category 部分を sourceFilename のフォルダ名から自動生成する */
-    category: boolean
-    /** name 部分を clip.name から自動生成する */
-    name: boolean
-  }
+  /**
+   * Optional free-form annotation by the user. Surfaced as a tooltip on
+   * the clip name in cards and as a multi-line note field in
+   * ClipEditModal. Persisted in clipsMeta.json.
+   */
+  note?: string
 }
 
 /** Library amp preset - clipId → intensity のマップ */

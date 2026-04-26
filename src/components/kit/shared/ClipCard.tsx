@@ -15,9 +15,11 @@ export interface ClipCardAction {
 export interface ClipCardProps {
   /** Primary: clip display name (clickable → onNameClick) */
   name: string
-  /** Secondary: event ID badge */
-  eventId: string
-  /** "No event ID set" styling when eventId is empty */
+  /** Secondary: event ID badge.
+   *  Pass null to omit the badge entirely (library context — clips no
+   *  longer carry an eventId; kits compose it on add). */
+  eventId: string | null
+  /** "No event ID set" styling when eventId is empty (only meaningful when eventId is a string) */
   eventIdEmpty?: boolean
 
   /** Optional details row (duration · channels · kHz · file size) rendered
@@ -133,10 +135,12 @@ export function ClipCard({
           aria-disabled={playDisabled}
         >{playing ? '■' : '▶'}</button>
         <span className="clip-card-name" title={name}>{name}</span>
-        <span
-          className={`clip-card-event-id ${eventIdEmpty ? 'empty' : ''}`}
-          title={`Event ID: ${eventId || '(not set)'}`}
-        >{eventId || '(no ID)'}</span>
+        {eventId !== null && (
+          <span
+            className={`clip-card-event-id ${eventIdEmpty ? 'empty' : ''}`}
+            title={`Event ID: ${eventId || '(not set)'}`}
+          >{eventId || '(no ID)'}</span>
+        )}
       </div>
 
       {/* Row 2 — controls: amp slider + action buttons */}

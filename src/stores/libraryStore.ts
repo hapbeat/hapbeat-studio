@@ -51,54 +51,46 @@ function legacyFilenameToDisplayName(filename: string): string {
 }
 
 /**
- * Derive event_id from filename with namespace support.
- * Contracts require at least category.name (one dot minimum).
- *
- *   "impact/gunshot_1.wav" → "impact.gunshot_1"
- *   "gunshot_1.wav"        → "clip.gunshot_1"  (default category)
- *   "a/b/c.wav"            → "a.b.c"
+ * Sanitize a single Event ID part to match the contracts regex
+ * `^[a-z][a-z0-9_-]{0,63}$`. Used for both kit name (category) and
+ * clip name (event-id name part).
  */
-function filenameToEventId(filename: string): string {
-  const withoutExt = filename.replace(/\.(wav|mp3|ogg|flac|aac|m4a)$/i, '')
-  const dotted = withoutExt.replace(/\\/g, '/').replace(/\//g, '.').toLowerCase()
-  // Contracts require at least one dot (category.name)
-  if (!dotted.includes('.')) return `clip.${dotted}`
-  return dotted
-}
-
-/** Event ID の1パートとして安全な文字列に変換。
- *  contracts の正規表現: `^[a-z][a-z0-9_-]{0,63}$` */
-function sanitizeEventIdPart(s: string): string {
-  let out = s.toLowerCase().replace(/[^a-z0-9_-]/g, '_').replace(/_{2,}/g, '_')
+export function sanitizeEventIdPart(s: string): string {
+  let out = (s || '').toLowerCase().replace(/[^a-z0-9_-]/g, '_').replace(/_{2,}/g, '_')
   out = out.replace(/^[_-]+/, '').replace(/[_-]+$/, '')
   // 先頭は英小文字必須
   if (!/^[a-z]/.test(out)) out = `c${out ? '_' + out : ''}`
   return out.slice(0, 64)
 }
 
-/** clip.sourceFilename のフォルダ部分から category を導出。
- *  ルート直下 (folder なし) の場合はデフォルト "clip" を返す。 */
-function deriveCategoryFromPath(sourceFilename: string): string {
-  const parts = (sourceFilename || '').replace(/\\/g, '/').split('/').filter(Boolean)
-  if (parts.length < 2) return 'clip'
-  return sanitizeEventIdPart(parts[parts.length - 2])
+/**
+ * Compose `eventId = "<kitName>.<clipName>"` (both sanitized).
+ *
+ * The kit's name is the **only** source of the category. Clip
+ * sourceFilename is no longer consulted — `clip.name` is the user-
+ * editable identifier and feeds the name part.
+ *
+ * Returns "" if either part is empty (caller treats that as "needs
+ * filling in" and blocks Save).
+ */
+export function composeKitEventId(kitName: string, clipName: string): string {
+  const cat = sanitizeEventIdPart(kitName)
+  const name = sanitizeEventIdPart(clipName)
+  if (!cat || !name) return ''
+  return `${cat}.${name}`
 }
 
-/** clip.name からの event_id の name 部分。 */
-function deriveNameFromClipName(name: string): string {
-  return sanitizeEventIdPart(name || '')
-}
-
-/** eventIdAuto フラグに従って eventId を再計算する。
- *  auto が両方 false なら既存 eventId をそのまま返す。 */
-export function recomputeEventId(clip: Pick<LibraryClip, 'eventId' | 'name' | 'sourceFilename' | 'eventIdAuto'>): string {
-  const auto = clip.eventIdAuto ?? { category: true, name: true }
-  const dotIdx = (clip.eventId || '').indexOf('.')
-  const curCat = dotIdx > 0 ? clip.eventId.substring(0, dotIdx) : ''
-  const curName = dotIdx > 0 ? clip.eventId.substring(dotIdx + 1) : (clip.eventId || '')
-  const cat = auto.category ? deriveCategoryFromPath(clip.sourceFilename) : curCat
-  const name = auto.name ? deriveNameFromClipName(clip.name) : curName
-  return cat && name ? `${cat}.${name}` : ''
+/**
+ * Validate a kit name against contracts (`^[a-z0-9_-]+$`, ≤ 64 chars).
+ * Returns null on success, otherwise an error message.
+ */
+export function validateKitName(name: string): string | null {
+  if (!name) return 'Kit name is required'
+  if (name.length > 64) return 'Kit name must be 64 chars or fewer'
+  if (!/^[a-z0-9_-]+$/.test(name)) {
+    return 'Kit name must use only [a-z0-9_-] (lowercase, no spaces or dots)'
+  }
+  return null
 }
 
 /** Source tab for the library view */
@@ -378,7 +370,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       name: meta.name,
       tags: [...meta.tags],
       group: meta.category,
-      eventId: meta.event_id,
       duration: meta.duration_ms / 1000,
       channels: meta.channels,
       sampleRate: meta.sample_rate,
@@ -425,7 +416,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         name: meta.name,
         tags: [...meta.tags],
         group: meta.category || 'template',
-        eventId: meta.event_id,
         duration: meta.duration_ms / 1000,
         channels: meta.channels,
         sampleRate: meta.sample_rate,
@@ -544,7 +534,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           name: filenameToDisplayName(base),
           tags: [],
           group: '',
-          eventId: '',
           duration: buffer.duration,
           channels: buffer.numberOfChannels,
           sampleRate: buffer.sampleRate,
@@ -583,8 +572,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         const mode = (ev.mode ?? 'command') as KitEventMode
         let clipId = ''
         if (ev.clip) {
-          // clipPath は "stream-clips/foo.wav" または "foo.wav" (command の場合 clips/ 相対)
-          const relKey = ev.clip.includes('/') ? ev.clip : `clips/${ev.clip}`
+          // clipPath は "stream-clips/foo.wav" または "foo.wav" (command の場合 install-clips/ 相対, DEC-027)
+          const relKey = ev.clip.includes('/') ? ev.clip : `install-clips/${ev.clip}`
           const file = clipFiles.get(relKey) ?? clipFiles.get(ev.clip)
           if (file) {
             const id = await ensureClip(ev.clip, file)
@@ -683,7 +672,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
             name: filenameToDisplayName(filename),
             tags: [],
             group: '',
-            eventId: filenameToEventId(filename),
             duration: buffer.duration,
             channels: buffer.numberOfChannels,
             sampleRate: buffer.sampleRate,
@@ -754,7 +742,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
               name: filenameToDisplayName(filename),
               tags: [],
               group: '',
-              eventId: filenameToEventId(filename),
               duration: buffer.duration,
               channels: buffer.numberOfChannels,
               sampleRate: buffer.sampleRate,
@@ -788,7 +775,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       name,
       tags: [],
       group: '',
-      eventId: '',
       duration: buffer.duration,
       channels: buffer.numberOfChannels,
       sampleRate,
@@ -820,7 +806,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       name: filenameToDisplayName(file.name),
       tags: [],
       group: '',
-      eventId: filenameToEventId(file.name),
       duration: buffer.duration,
       channels: buffer.numberOfChannels,
       sampleRate: buffer.sampleRate,
@@ -881,28 +866,43 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 
   updateClip: async (id, updates) => {
-    // eventIdAuto が有効なら eventId を再計算して上書きする
+    await updateClipMeta(id, updates)
     const prev = get().clips.find((c) => c.id === id)
-    let finalUpdates = updates
-    if (prev) {
-      const merged = { ...prev, ...updates }
-      const auto = merged.eventIdAuto ?? { category: true, name: true }
-      // ユーザが手動で eventId を直接編集している場合はそれを尊重（auto を off にすべき）
-      const userEditedEventId = 'eventId' in updates
-      if (!userEditedEventId && (auto.category || auto.name)) {
-        const derived = recomputeEventId(merged)
-        if (derived !== merged.eventId) finalUpdates = { ...updates, eventId: derived }
-      }
-    }
-    await updateClipMeta(id, finalUpdates)
     const newClips = get().clips.map((c) =>
-      c.id === id ? { ...c, ...finalUpdates, updatedAt: new Date().toISOString() } : c
+      c.id === id ? { ...c, ...updates, updatedAt: new Date().toISOString() } : c
     )
     set({ clips: newClips })
+
+    // If the clip's display name changed, every kit-event referencing
+    // this clip needs its eventId recomposed (`<kitName>.<clipName>`).
+    const nameChanged =
+      updates.name !== undefined && prev !== undefined && updates.name !== prev.name
+    if (nameChanged) {
+      const newName = updates.name as string
+      const { kits } = get()
+      const refreshedKits = kits.map((k) => {
+        const touched = k.events.some((e) => e.clipId === id)
+        if (!touched) return k
+        return {
+          ...k,
+          events: k.events.map((e) =>
+            e.clipId === id ? { ...e, eventId: composeKitEventId(k.name, newName) } : e
+          ),
+          updatedAt: new Date().toISOString(),
+        }
+      })
+      set({ kits: refreshedKits })
+      // Persist every touched kit
+      for (const k of refreshedKits) {
+        if (k.events.some((e) => e.clipId === id)) await saveKit(k)
+      }
+    }
+
     // Update metadata in work directory
     const { workDirHandle } = get()
     if (workDirHandle) {
       await saveClipsMetaToDir(workDirHandle, newClips)
+      if (nameChanged) await saveKitsMetaToDir(workDirHandle, get().kits)
     }
   },
 
@@ -911,7 +911,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (!workDirHandle) return
     const clip = clips.find((c) => c.id === id)
     if (!clip || !clip.sourceFilename) return
-    const ext = clip.sourceFilename.match(/\.(wav|mp3|ogg|flac|aac|m4a)$/i)?.[0] ?? ''
     const oldBase = clip.sourceFilename.split('/').pop()?.replace(/\.(wav|mp3|ogg|flac|aac|m4a)$/i, '') ?? ''
     const desired = clip.name.trim().replace(/[\\/:*?"<>|]/g, '_')
     if (!desired || desired === oldBase) return
@@ -920,20 +919,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       if (!newPath) return
       // 新 filename を反映。name は拡張子を除いた実ベース名に再同期する。
       const newBase = newPath.split('/').pop()?.replace(/\.(wav|mp3|ogg|flac|aac|m4a)$/i, '') ?? clip.name
-      const rebuiltBase = { sourceFilename: newPath, name: newBase }
-      // eventIdAuto に応じて eventId も再計算
-      const auto = clip.eventIdAuto ?? { category: true, name: true }
-      const newEventId = auto.category || auto.name
-        ? recomputeEventId({ ...clip, ...rebuiltBase })
-        : clip.eventId
-      const patch = { ...rebuiltBase, eventId: newEventId }
+      const patch = { sourceFilename: newPath, name: newBase }
       await updateClipMeta(id, patch)
       const updated = get().clips.map((c) =>
         c.id === id ? { ...c, ...patch, updatedAt: new Date().toISOString() } : c
       )
       set({ clips: updated })
       await saveClipsMetaToDir(workDirHandle, updated)
-      void ext // kept for readability — extension preserved by renameClipFile
     } catch (err) {
       console.error('renameClipFile failed:', err)
     }
@@ -1050,11 +1042,20 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 
   addEventToKit: async (kitId, event) => {
-    const { kits } = get()
+    const { kits, clips } = get()
     const kit = kits.find((k) => k.id === kitId)
     if (!kit) return null
 
-    const newEvent: KitEvent = { id: generateId(), ...event }
+    // Always derive eventId from `<kitName>.<clipName>` — callers are
+    // expected NOT to set event.eventId themselves anymore. Even if they
+    // do, kit-name overrides so all events in a kit share the same
+    // category and stay in sync.
+    const clip = clips.find((c) => c.id === event.clipId)
+    const composedId = clip
+      ? composeKitEventId(kit.name, clip.name)
+      : event.eventId  // last resort (no matching clip — keep what caller passed)
+
+    const newEvent: KitEvent = { id: generateId(), ...event, eventId: composedId }
     const updated = { ...kit, events: [...kit.events, newEvent], updatedAt: new Date().toISOString() }
     await saveKit(updated)
     const newKits = kits.map((k) => (k.id === kitId ? updated : k))
@@ -1095,11 +1096,25 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 
   updateKit: async (id, updates) => {
-    const { kits } = get()
+    const { kits, clips } = get()
     const kit = kits.find((k) => k.id === id)
     if (!kit) return
 
-    const updated = { ...kit, ...updates, updatedAt: new Date().toISOString() }
+    // If the kit name changed, every event's eventId must be recomposed
+    // because the category part is `<kitName>` by definition. Caller
+    // need not pass `events` — the store handles it.
+    const renamed = updates.name !== undefined && updates.name !== kit.name
+    let updated = { ...kit, ...updates, updatedAt: new Date().toISOString() }
+    if (renamed) {
+      const newName = updates.name as string
+      updated.events = updated.events.map((e) => {
+        const clip = clips.find((c) => c.id === e.clipId)
+        const newEventId = clip
+          ? composeKitEventId(newName, clip.name)
+          : e.eventId
+        return { ...e, eventId: newEventId }
+      })
+    }
     await saveKit(updated)
     const newKits = kits.map((k) => (k.id === id ? updated : k))
     set({ kits: newKits })
@@ -1168,7 +1183,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       result = result.filter(
         (c) =>
           c.name.toLowerCase().includes(q) ||
-          c.eventId.toLowerCase().includes(q) ||
+          (c.note ?? '').toLowerCase().includes(q) ||
           c.tags.some((t) => t.toLowerCase().includes(q))
       )
     }

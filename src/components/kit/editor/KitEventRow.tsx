@@ -78,6 +78,7 @@ export function KitEventRow({
       <ClipCard
         name={name}
         eventId={event.eventId}
+        eventIdEmpty={!event.eventId && mode !== 'stream_source'}
         details={details}
         tags={tags}
         showDetails={showDetails}

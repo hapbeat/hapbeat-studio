@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useMemo, useState, useRef, type MouseEvent as ReactMouseEvent } from 'react'
-import { useLibraryStore } from '@/stores/libraryStore'
+import { useLibraryStore, validateKitName } from '@/stores/libraryStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useToast } from '@/components/common/Toast'
 import { formatFileSize } from '@/utils/wavIO'
@@ -668,9 +668,9 @@ function ClipsPanel() {
 
   const addClipToActiveKit = useCallback(async (clip: LibraryClip) => {
     if (!activeKitId) { toast('Select or create a Kit first', 'error'); return }
-    if (!clip.eventId) { toast('Set Event ID first', 'error'); return }
+    // eventId is auto-derived inside the store (kit name × clip name).
     const newId = await addEventToKit(activeKitId, {
-      eventId: clip.eventId, clipId: clip.id, loop: false, intensity: getIntensity(clip.id), deviceWiper: null,
+      eventId: '', clipId: clip.id, loop: false, intensity: getIntensity(clip.id), deviceWiper: null,
     })
     if (newId) toast(`Added "${clip.name}" to kit`, 'success')
     else toast('Kit not found', 'error')
@@ -914,8 +914,9 @@ function ClipRow({
   return (
     <ClipCard
       name={clip.name}
-      eventId={clip.eventId}
-      eventIdEmpty={!clip.eventId}
+      // Library no longer carries an eventId — kit composes it on add.
+      eventId={null}
+      eventIdEmpty={false}
       details={metaSummary}
       tags={clip.tags}
       showDetails={showDetails}
@@ -927,12 +928,16 @@ function ClipRow({
       onSelect={onSelect}
       dataCardId={clip.id}
       wiper={null}
-      title={`${metaSummary}${clip.tags.length > 0 ? ` | tags: ${clip.tags.join(', ')}` : ''}`}
+      title={
+        clip.note
+          ? `${clip.note}\n\n${metaSummary}${clip.tags.length > 0 ? ` | tags: ${clip.tags.join(', ')}` : ''}`
+          : `${metaSummary}${clip.tags.length > 0 ? ` | tags: ${clip.tags.join(', ')}` : ''}`
+      }
       drag={{ type: DND_TYPE_CLIP, payload: clip.id, dragTitle: 'ドラッグして Kit に追加' }}
       actions={[
-        { label: '+ Kit', variant: 'primary', onClick: onAddToKit, disabled: !kitAvailable || !clip.eventId,
+        { label: '+ Kit', variant: 'primary', onClick: onAddToKit, disabled: !kitAvailable,
           title: kitAvailable ? 'Add to active kit' : 'Select a kit first' },
-        { label: 'Edit', onClick: onStartEdit, title: 'Edit name, event ID, tags…' },
+        { label: 'Edit', onClick: onStartEdit, title: 'Edit name, note, tags…' },
       ]}
     />
   )
@@ -1101,8 +1106,7 @@ function KitEditor() {
     const cid = e.dataTransfer.getData(DND_TYPE_CLIP)
     if (cid) {
       const c = clips.find((x) => x.id === cid); if (!c) return
-      if (!c.eventId) { toast('Set Event ID first', 'error'); return }
-      const newId = await addEventToKit(activeKitId, { eventId: c.eventId, clipId: c.id, loop: false, intensity: 0.5, deviceWiper: null })
+      const newId = await addEventToKit(activeKitId, { eventId: '', clipId: c.id, loop: false, intensity: 0.5, deviceWiper: null })
       if (newId) toast(`Added "${c.name}"`, 'success')
       else toast('Kit not found', 'error')
       return
@@ -1189,8 +1193,21 @@ function KitEditor() {
               {isThisKit && (
                 <div className={`kit-details-inline ${dropActive ? 'drop-active' : ''}`}>
                   <div className="kit-meta-fields">
-                    <label className="kit-meta-field"><span>Name</span>
-                      <input type="text" value={activeKit.name} onChange={(e) => updateKit(activeKit.id, { name: e.target.value })} /></label>
+                    <label className="kit-meta-field">
+                      <span>Name</span>
+                      <input
+                        type="text"
+                        value={activeKit.name}
+                        onChange={(e) => updateKit(activeKit.id, { name: e.target.value })}
+                        title={validateKitName(activeKit.name) ?? 'Lowercase, [a-z 0-9 _ -] only — used as the event-id category'}
+                        style={validateKitName(activeKit.name) ? { borderColor: 'var(--error)' } : undefined}
+                      />
+                      {validateKitName(activeKit.name) && (
+                        <span className="kit-meta-error" style={{ color: 'var(--error)', fontSize: 11, marginTop: 2 }}>
+                          {validateKitName(activeKit.name)}
+                        </span>
+                      )}
+                    </label>
                     <label className="kit-meta-field"><span>Version</span>
                       <input type="text" value={activeKit.version} onChange={(e) => updateKit(activeKit.id, { version: e.target.value })} /></label>
                   </div>
@@ -1298,11 +1315,38 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
    *  outRoot が必須 (未選択時は呼ばれない前提)。返り値は生成した ZIP Blob + packId。 */
   const buildAndSave = useCallback(async () => {
     if (!outRoot) throw new Error('Output folder not selected')
+
+    // Hard validation — these are blockers, not warnings:
+    // 1. Kit name must match the contracts regex (a-z 0-9 _ -)
+    // 2. Every FIRE / CLIP event must have a non-empty eventId
+    //    (LIVE events stream live audio, no event_id needed)
+    const kitErr = validateKitName(kit.name)
+    if (kitErr) {
+      alert(`Kit name invalid: ${kitErr}`)
+      return null
+    }
+
+    const needsEventId = kit.events.filter(
+      (e) => (e.mode ?? 'command') !== 'stream_source',
+    )
+    const missing = needsEventId.filter((e) => !e.eventId)
+    if (missing.length > 0) {
+      alert(
+        `${missing.length} event(s) have no Event ID.\n` +
+        `These usually have a clip with an empty Name — open the clip and set one.`
+      )
+      return null
+    }
+
     const validations = validateEventIds(kit)
     const invalid = validations.filter((v) => !v.valid)
     if (invalid.length > 0) {
-      const ids = invalid.map((v) => `  "${v.eventId}" — must be category.name`).join('\n')
-      if (!confirm(`Invalid Event IDs:\n${ids}\n\nContinue anyway?`)) return null
+      const ids = invalid.map((v) => `  "${v.eventId}"`).join('\n')
+      alert(
+        `${invalid.length} event(s) have an Event ID that breaks the contracts format ` +
+        `(category.name, only [a-z 0-9 _ -]):\n${ids}`
+      )
+      return null
     }
     const result = await exportKitAsPack(kit, clips)
     const { writeKitFolder } = await import('@/utils/localDirectory')

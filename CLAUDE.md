@@ -42,7 +42,22 @@ Hapbeat Studio — Web ベースの統合デザインツール。
 - ユーザー認証を入れない
 - hapbeat-contracts の仕様に反するデータ形式を独自に定義しない
 - Pack フォーマットを独自に拡張しない（contracts に従う）
-- Manager（Desktop アプリ）の機能を Studio 側に実装しない（書き込み・転送は Manager 経由）
+- Manager（Desktop アプリ）の機能を Studio 側に実装しない（書き込み・転送は Helper 経由）
+
+## 「Manager 機能を Studio に移植」する際のルール
+
+「Manager 機能を移植」と依頼されたら、**Manager の現行実装 (git HEAD) に存在する機能を全て洗い出してから着手する**。
+
+- ❌ 悪い例: Manager の `widgets/config_page.py` を読んで「設定タブはこういうものだ」と Studio 側を一から書き直す → 結果として Wi-Fi profiles 一覧やデバッグダンプなど、Manager 側で実装済みの機能が抜け落ちる
+- ✅ 良い例:
+  1. `widgets/__init__.py` と `main_window.py` から **タブ構成と全 page クラス** を確認
+  2. 各 page の **public method / Signal を全列挙** (`apply_*`, `update_*`, `flash_*`, `show_*` 等)
+  3. 各メソッドが「Studio から WS で同等の操作ができるか」をチェックリスト化
+  4. 漏れがあれば実装、欠けるなら理由を明記してユーザーに確認
+
+「Manager にあって Studio に無い機能」が出たら、それは原則 **欠陥** として報告する。Live Audio のように明示的に外す合意があるものだけ例外。
+
+参照は **git HEAD の実コード** が正。`docs/`, `knowledge/`, `instructions/applied/` などは過去の判断ログで、現在の実装と乖離している可能性がある。
 
 ## 依存
 
