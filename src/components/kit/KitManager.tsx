@@ -1301,6 +1301,120 @@ function KitEditor() {
                       <input type="text" value={activeKit.version} onChange={(e) => updateKit(activeKit.id, { version: e.target.value })} /></label>
                   </div>
 
+                  <details className="kit-target-device">
+                    <summary>
+                      Target Device
+                      <span className="field-hint">
+                        Kit 作者が調整したハードウェア / 設定を manifest に記録（任意）
+                      </span>
+                    </summary>
+                    <div className="kit-meta-fields">
+                      <label className="kit-meta-field">
+                        <span>Board <span className="field-hint">例: duo_wl_v3</span></span>
+                        <input
+                          type="text"
+                          value={activeKit.targetDevice?.board ?? ''}
+                          onChange={(e) => {
+                            const cleaned = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '')
+                            updateKit(activeKit.id, {
+                              targetDevice: {
+                                ...activeKit.targetDevice,
+                                board: cleaned || undefined,
+                              },
+                            })
+                          }}
+                          placeholder="duo_wl_v3"
+                        />
+                      </label>
+                      <label className="kit-meta-field">
+                        <span>FW min</span>
+                        <input
+                          type="text"
+                          value={activeKit.targetDevice?.firmware_version_min ?? ''}
+                          onChange={(e) => updateKit(activeKit.id, {
+                            targetDevice: {
+                              ...activeKit.targetDevice,
+                              firmware_version_min: e.target.value || undefined,
+                            },
+                          })}
+                          placeholder="0.1.0"
+                        />
+                      </label>
+                    </div>
+                    <div className="kit-meta-fields">
+                      <label className="kit-meta-field">
+                        <span>Volume level</span>
+                        <input
+                          type="number"
+                          min={0}
+                          value={activeKit.targetDevice?.volume_level ?? ''}
+                          onChange={(e) => {
+                            const v = e.target.value
+                            updateKit(activeKit.id, {
+                              targetDevice: {
+                                ...activeKit.targetDevice,
+                                volume_level: v === '' ? undefined : Number(v),
+                              },
+                            })
+                          }}
+                        />
+                      </label>
+                      <label className="kit-meta-field">
+                        <span>Wiper (0-127)</span>
+                        <input
+                          type="number"
+                          min={0} max={127}
+                          value={activeKit.targetDevice?.volume_wiper ?? ''}
+                          onChange={(e) => {
+                            const v = e.target.value
+                            updateKit(activeKit.id, {
+                              targetDevice: {
+                                ...activeKit.targetDevice,
+                                volume_wiper: v === '' ? undefined : Number(v),
+                              },
+                            })
+                          }}
+                        />
+                      </label>
+                      <label className="kit-meta-field">
+                        <span>Volume steps</span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={activeKit.targetDevice?.volume_steps ?? ''}
+                          onChange={(e) => {
+                            const v = e.target.value
+                            updateKit(activeKit.id, {
+                              targetDevice: {
+                                ...activeKit.targetDevice,
+                                volume_steps: v === '' ? undefined : Number(v),
+                              },
+                            })
+                          }}
+                        />
+                      </label>
+                    </div>
+                    <button
+                      type="button"
+                      className="library-btn"
+                      style={{ marginTop: 6 }}
+                      disabled={!devices[0]?.online}
+                      title="現在選択中のデバイスから wiper / volume を取得して反映"
+                      onClick={() => {
+                        const dev = devices[0]
+                        if (!dev) return
+                        updateKit(activeKit.id, {
+                          targetDevice: {
+                            ...activeKit.targetDevice,
+                            volume_level: dev.volumeLevel ?? activeKit.targetDevice?.volume_level,
+                            volume_wiper: dev.volumeWiper ?? activeKit.targetDevice?.volume_wiper,
+                            volume_steps: dev.volumeSteps ?? activeKit.targetDevice?.volume_steps,
+                          },
+                        })
+                      }}
+                    >⟳ デバイスから取り込む</button>
+                  </details>
+
                   <CapacityGauge kitSize={kitSize} managerConnected={managerConnected} devices={devices} send={send} />
 
                   <div className="kit-events-header">
@@ -1527,6 +1641,15 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
     } catch {
       // 既存 manifest が無い、または読めない → 初回保存としてスキップ
     }
+    // Race-condition guard: silent (auto-save) writes must not
+    // resurrect a kit that the user just removed via ×.  Caller
+    // checks `kits.some(k => k.id === kit.id)` before invoking us,
+    // but the async exportKitAsPack window is wide enough that the
+    // deletion can still race in.  Re-check just before the write.
+    if (silent) {
+      const stillExists = useLibraryStore.getState().kits.some((k) => k.id === kit.id)
+      if (!stillExists) return null
+    }
     await writeKitFolder(outRoot, packId, files)
     return { blob: result.blob, packId }
   }, [kit, clips, outRoot])
@@ -1549,16 +1672,39 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
   // (otherwise we'd repeatedly alert the user mid-typing). We rebuild
   // the full ZIP so Deploy has a fresh blob without re-running
   // exportKitAsPack on the click.
+  //
+  // Race condition guard (2026-04-28): when the user clicks ×, we
+  // archive the kit folder and remove it from the kits store. But the
+  // debounce timer that's already in flight still fires and writes the
+  // folder back. The hard guard is an explicit re-check inside the
+  // timer body — `useLibraryStore.getState().kits.some(k => k.id === kit.id)`
+  // — done AFTER the clearTimeout cleanup window has passed. If the
+  // kit was removed, the auto-save bails out before touching disk.
   useEffect(() => {
     if (!outRoot) return
     if (kit.events.length === 0) return
     if (validateKitName(kit.name)) return
     setAutoSaveStatus('pending')
     const handle = window.setTimeout(async () => {
+      // Bail out if the kit was deleted in the meantime — see comment
+      // above for why this is necessary even though the cleanup also
+      // calls clearTimeout.
+      const stillExists = useLibraryStore.getState().kits.some((k) => k.id === kit.id)
+      if (!stillExists || !isMountedRef.current) {
+        setAutoSaveStatus('idle')
+        return
+      }
       try {
         setAutoSaveStatus('saving')
         const out = await buildAndSave({ silent: true })
         if (!isMountedRef.current) return
+        // One more check after the async build — the user may have
+        // pressed × while we were generating the ZIP.
+        const stillExistsAfter = useLibraryStore.getState().kits.some((k) => k.id === kit.id)
+        if (!stillExistsAfter) {
+          setAutoSaveStatus('idle')
+          return
+        }
         if (out) {
           lastBuildRef.current = out
           setAutoSaveStatus('saved')

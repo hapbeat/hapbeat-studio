@@ -560,6 +560,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       const m = manifestJson as {
         kit_id?: string; name?: string; version?: string; description?: string
         created_at?: string; events?: Record<string, unknown>
+        target_device?: {
+          firmware_version_min?: string
+          firmware_version_max?: string
+          board?: string
+          volume_level?: number
+          volume_wiper?: number
+          volume_steps?: number
+        }
       }
       const packId = String(m.kit_id ?? m.name ?? '').trim()
       if (!packId) continue
@@ -594,6 +602,16 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       }
 
       const existingIdx = updatedKits.findIndex((k) => k.name === (m.name ?? packId) || k.name === packId)
+      // Author tuning context — read every supported field, drop the
+      // ones that are absent so we don't leave stale numeric defaults.
+      const td = m.target_device ?? {}
+      const targetDevice: KitDefinition['targetDevice'] = {}
+      if (td.firmware_version_min) targetDevice.firmware_version_min = td.firmware_version_min
+      if (td.firmware_version_max) targetDevice.firmware_version_max = td.firmware_version_max
+      if (td.board) targetDevice.board = td.board
+      if (typeof td.volume_level === 'number') targetDevice.volume_level = td.volume_level
+      if (typeof td.volume_wiper === 'number') targetDevice.volume_wiper = td.volume_wiper
+      if (typeof td.volume_steps === 'number') targetDevice.volume_steps = td.volume_steps
       const kit: KitDefinition = {
         id: existingIdx >= 0 ? updatedKits[existingIdx].id : generateId(),
         name: String(m.name ?? packId),
@@ -602,6 +620,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         events,
         createdAt: existingIdx >= 0 ? updatedKits[existingIdx].createdAt : (m.created_at ?? now),
         updatedAt: now,
+        targetDevice: Object.keys(targetDevice).length > 0 ? targetDevice : undefined,
       }
       if (existingIdx >= 0) updatedKits[existingIdx] = kit
       else updatedKits.push(kit)

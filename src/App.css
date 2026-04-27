@@ -69,6 +69,16 @@ html, body, #root {
   width: 100%;
 }
 
+/* Global typography scale — every font-size in the codebase is in
+   `px`, so a `font-size` change on <html> wouldn't cascade. We use
+   `zoom: 1.1` on the body instead, which scales all dimensions
+   uniformly (text, paddings, hit-targets) without rewriting hundreds
+   of rules. Supported by Chrome / Edge / Safari and (since 126)
+   Firefox. (User feedback 2026-04-28: "テキスト全体的にもう一回り大きく".) */
+body {
+  zoom: 1.1;
+}
+
 body {
   font-family: var(--font-ui);
   background: var(--bg-primary);

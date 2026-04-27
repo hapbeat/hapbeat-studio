@@ -86,6 +86,29 @@ export interface BuiltinLibraryIndex {
 /**
  * Kit definition: a collection of event-clip mappings ready for device deployment.
  */
+/**
+ * Kit author tuning context — written into manifest.target_device.
+ * Every field is optional; the kit can deploy without this metadata
+ * but losing it means players can't reproduce the author's setup.
+ */
+export interface KitTargetDevice {
+  /** firmware semver lower bound (default "0.1.0" if absent) */
+  firmware_version_min?: string
+  /** firmware semver upper bound (optional) */
+  firmware_version_max?: string
+  /** Board identifier the author tuned on (e.g. "duo_wl_v3") */
+  board?: string
+  /** Author's device volume level when tuning */
+  volume_level?: number
+  /** Author's MCP4018 wiper value (0-127) */
+  volume_wiper?: number
+  /** Author device's volume step count */
+  volume_steps?: number
+}
+
+/**
+ * Kit definition: a collection of event-clip mappings ready for device deployment.
+ */
 export interface KitDefinition {
   id: string
   /** Kit display name */
@@ -100,6 +123,11 @@ export interface KitDefinition {
   createdAt: string
   /** Last modified timestamp */
   updatedAt: string
+  /**
+   * Author-tuning context — copied into manifest.target_device on
+   * export. Optional; older kits won't have it.
+   */
+  targetDevice?: KitTargetDevice
 }
 
 /**

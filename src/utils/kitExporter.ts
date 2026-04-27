@@ -1,17 +1,17 @@
 /**
  * Kit → Pack 形式 ZIP エクスポーター
  *
- * hapbeat-contracts の pack-format.md に準拠した ZIP を生成する。
- * ZIP 内構造:
+ * hapbeat-contracts の kit-format.md に準拠した ZIP を生成する。
+ * ZIP 内構造 (DEC-027: clips/ → install-clips/, manifest.clips → manifest.install_clips):
  *   <kit_id>/
  *     manifest.json
- *     clips/              ← command mode events の WAV (device flash 用)
+ *     install-clips/      ← command mode events の WAV (device flash 用)
  *       <clip-file>.wav
  *     stream-clips/       ← stream_clip mode events の WAV (SDK import 用, device には焼かない)
  *       <clip-file>.wav
  *
  * mode フィールド (DEC-023):
- *   - command      : device に焼かれる WAV clip。manifest に mode 省略 or "command" で記録。
+ *   - command      : device に焼かれる WAV clip。install-clips/ に配置。manifest に mode 省略 or "command" で記録。
  *   - stream_clip  : SDK が UDP ストリームで流す WAV。stream-clips/ に配置。device binary 除外。
  *   - stream_source: live audio capture。clip 不要。device binary 除外。
  */
@@ -65,8 +65,8 @@ export function validateEventIds(
 
 /** クリップファイル名を安全な形にする。
  *  sourceFilename が "HandDemo/foo.wav" のようにサブフォルダを含む場合でも
- *  ベース名のみ取り出し、Pack 内では常に clips/ 直下に配置する。
- *  （ファームは clips/ 直下にのみ音声ファイルを期待する） */
+ *  ベース名のみ取り出し、Pack 内では常に install-clips/ 直下に配置する。
+ *  （ファームは install-clips/ 直下にのみ音声ファイルを期待する） */
 function clipFileName(clip: LibraryClip): string {
   const srcBase = (clip.sourceFilename || '').split('/').pop() || ''
   const base = srcBase || `${clip.name}.wav`
@@ -88,9 +88,9 @@ function resolveMode(mode: KitEventMode | undefined): KitEventMode {
 /**
  * Kit を Pack 形式の ZIP にエクスポートする。
  *
- * mode=command  → clips/ に WAV 配置、manifest に clip フィールドあり
- * mode=stream_clip → stream-clips/ に WAV 配置、manifest に mode + clip フィールド
- *                    ただし device binary の clips/ には含めない
+ * mode=command  → install-clips/ に WAV 配置、manifest に clip フィールドあり (bare filename)
+ * mode=stream_clip → stream-clips/ に WAV 配置、manifest に mode + clip フィールド (stream-clips/<filename>)
+ *                    ただし device binary の install-clips/ には含めない
  * mode=stream_source → WAV 不要、manifest に mode フィールドのみ
  *
  * @param kit - Kit 定義
@@ -182,8 +182,8 @@ export async function exportKitAsPack(
       }
       usedCommandNames.add(fname)
 
-      // ZIP に配置（clips/ = device binary 対象）
-      root.file(`clips/${fname}`, packBlob)
+      // ZIP に配置（install-clips/ = device binary 対象, DEC-027）
+      root.file(`install-clips/${fname}`, packBlob)
 
       // manifest: mode=command は mode フィールドを省略（後方互換、firmware の default=command と一致）
       events[ev.eventId] = {
@@ -205,7 +205,7 @@ export async function exportKitAsPack(
     } else {
       // stream_clip / stream_source(clip あり): SDK import 用に stream-clips/ に配置。
       // stream_source の clip は Unity SDK が AudioSource のデフォルトクリップとして使用する。
-      // device binary の clips/ には含めない点は stream_clip と同じ。
+      // device binary の install-clips/ には含めない点は stream_clip と同じ。
       let fname = clipFileName(clip)
       if (usedStreamNames.has(fname)) {
         const base = fname.replace(/\.wav$/, '')
@@ -227,10 +227,23 @@ export async function exportKitAsPack(
           intensity: round2(ev.intensity),
         },
       }
-      // stream-clips の metadata は clips テーブルではなく将来的に stream-clips テーブルで管理。
-      // 現時点は manifest.clips には含めない（device binary には不要なため）。
+      // stream-clips の metadata は install_clips テーブルではなく将来的に stream-clips テーブルで管理。
+      // 現時点は manifest.install_clips には含めない（device binary には不要なため）。
     }
   }
+
+  // Author tuning context. We always emit firmware_version_min (the
+  // schema requires it) but only keep extra hardware fields when the
+  // user supplied them — keeps manifest.json clean for new kits.
+  const td = kit.targetDevice ?? {}
+  const targetDevice: Record<string, unknown> = {
+    firmware_version_min: td.firmware_version_min || '0.1.0',
+  }
+  if (td.firmware_version_max) targetDevice.firmware_version_max = td.firmware_version_max
+  if (td.board) targetDevice.board = td.board
+  if (typeof td.volume_level === 'number') targetDevice.volume_level = td.volume_level
+  if (typeof td.volume_wiper === 'number') targetDevice.volume_wiper = td.volume_wiper
+  if (typeof td.volume_steps === 'number') targetDevice.volume_steps = td.volume_steps
 
   const manifest = {
     schema_version: '1.0.0',
@@ -240,11 +253,9 @@ export async function exportKitAsPack(
     description: kit.description,
     author: '',
     created_at: new Date().toISOString(),
-    target_device: {
-      firmware_version_min: '0.1.0',
-    },
+    target_device: targetDevice,
     events,
-    clips: clipsMeta,
+    install_clips: clipsMeta,
   }
 
   root.file('manifest.json', JSON.stringify(manifest, null, 2))
