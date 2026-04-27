@@ -303,6 +303,18 @@
 .library-toolbar { display: flex; gap: 4px; padding: 4px 6px; border-bottom: 1px solid var(--border); }
 .library-search { flex: 1; min-width: 50px; padding: 3px 7px; font-size: 13px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border); border-radius: var(--radius); font-family: var(--font-ui); }
 .library-search:focus { outline: none; border-color: var(--accent); }
+.library-sort {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  font-size: 12px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-ui);
+  cursor: pointer;
+}
+.library-sort:focus { outline: none; border-color: var(--accent); }
 
 /* ---- Filters ---- */
 .library-filters { display: flex; align-items: center; gap: 3px; padding: 3px 6px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
@@ -599,10 +611,57 @@ body.using-keyboard .clip-card:hover {
 .kit-empty.drop-active { background: rgba(124,92,191,0.06); }
 
 /* ---- Kit Export ---- */
-.kit-export-section { display: flex; gap: 6px; padding: 5px 8px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.kit-export-section-wrap { border-top: 1px solid var(--border); }
+.kit-export-section { display: flex; gap: 6px; padding: 5px 8px; flex-wrap: wrap; }
 .kit-export-section .library-btn { flex: 1; }
 .kit-export-info { width: 100%; font-size: 12px; color: var(--text-secondary); }
 .kit-export-info.muted { opacity: 0.6; }
+
+/* ---- Deploy progress (per-device rows) ---- */
+.kit-deploy-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 8px 8px;
+}
+.kit-deploy-progress-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.kit-deploy-progress-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+.kit-deploy-progress-pct {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.kit-deploy-progress-bar {
+  height: 6px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.kit-deploy-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 200ms ease, background 200ms ease;
+}
+.kit-deploy-progress-fill.ok { background: var(--success); }
+.kit-deploy-progress-fill.err { background: var(--error); }
+.kit-deploy-progress-msg {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* ---- Capacity Gauge ---- */
 .capacity-gauge { padding: 4px 8px; border-bottom: 1px solid var(--border); }

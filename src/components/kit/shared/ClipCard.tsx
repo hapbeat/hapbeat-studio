@@ -163,21 +163,21 @@ export function ClipCard({
 
   return (
     <div
+      // The whole card is the drag source now (no more ☰ handle): it
+      // matches OS-explorer affordances and frees up a chunk of empty
+      // space on the left of the header where the user's note tooltip
+      // can surface naturally on hover.
       className={`clip-card ${extraClass ?? ''} ${selected ? 'is-selected' : ''}`}
       data-card-id={dataCardId}
       title={title}
+      draggable={!!handleDragStart}
+      onDragStart={handleDragStart}
       onClick={onSelect}
       onDoubleClick={onDoubleClick}
       onDragOver={onDragOver}
     >
-      {/* Row 1 — header: handle / play / name / event-id */}
+      {/* Row 1 — header: play / name / event-id */}
       <div className="clip-card-header">
-        <div
-          className="clip-card-handle"
-          draggable={!!handleDragStart}
-          onDragStart={handleDragStart}
-          title={drag?.dragTitle ?? 'ドラッグで移動'}
-        >☰</div>
         <button
           className={`clip-card-play ${playing ? 'playing' : ''} ${playDisabled ? 'disabled' : ''}`}
           onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); if (!playDisabled) onTogglePlay() }}

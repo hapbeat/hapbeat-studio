@@ -20,8 +20,13 @@
   border-top-width: 2px;
   position: relative;
   min-width: 0;
+  /* OS-explorer-style affordance: the whole row is the drag source.
+     Default cursor stays normal; while the user is mid-drag the
+     browser flips to grabbing automatically. */
+  cursor: default;
   transition: background 0.12s, border-color 0.12s;
 }
+.clip-card[draggable="true"]:active { cursor: grabbing; }
 .clip-card:hover {
   background: var(--bg-surface);
   border-color: rgba(124,92,191,0.3);
@@ -40,26 +45,9 @@
   gap: 8px;
   min-width: 0;
 }
-.clip-card-handle {
-  width: 16px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  color: var(--text-secondary);
-  opacity: 0.4;
-  cursor: grab;
-  user-select: none;
-  border-radius: 3px;
-  transition: background 0.12s, opacity 0.12s;
-}
-.clip-card-handle:hover {
-  opacity: 1;
-  background: rgba(124,92,191,0.2);
-  color: var(--accent-light);
-}
-.clip-card-handle:active { cursor: grabbing; }
+/* `.clip-card-handle` was removed in favour of "the whole card is the
+   drag source" — kept the rule out of the stylesheet entirely so any
+   left-over markup gets default styling. */
 
 .clip-card-play {
   width: 26px;
@@ -96,9 +84,11 @@
   font-family: var(--font-ui);
 }
 /* Cards in a context that allows rename (library) get a subtle hover
-   underline so users discover the click-to-rename affordance. */
+   underline so users discover the click-to-rename affordance. We use
+   `cursor: pointer` (not `text`) because the click is what enters
+   rename mode — the input only appears after the click. */
 .clip-card-name.clip-card-name-editable {
-  cursor: text;
+  cursor: pointer;
   border-bottom: 1px dashed transparent;
 }
 .clip-card-name.clip-card-name-editable:hover {

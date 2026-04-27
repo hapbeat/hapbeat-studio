@@ -857,6 +857,22 @@ function ClipsPanel() {
       <div className="library-toolbar">
         <input type="text" className="library-search" placeholder="Search..." value={filter.searchQuery}
           onChange={(e) => setFilter({ searchQuery: e.target.value })} />
+        <select
+          className="library-sort"
+          value={`${filter.sortBy}:${filter.sortOrder}`}
+          onChange={(e) => {
+            const [sortBy, sortOrder] = e.target.value.split(':') as ['name' | 'date' | 'duration', 'asc' | 'desc']
+            setFilter({ sortBy, sortOrder })
+          }}
+          title="並び順"
+        >
+          <option value="name:asc">名前 ↑</option>
+          <option value="name:desc">名前 ↓</option>
+          <option value="date:desc">更新日時 (新しい順)</option>
+          <option value="date:asc">更新日時 (古い順)</option>
+          <option value="duration:asc">長さ (短い順)</option>
+          <option value="duration:desc">長さ (長い順)</option>
+        </select>
         <input ref={fileInputRef} type="file" accept=".wav,.mp3,.ogg,.flac,.aac,.m4a,audio/*" multiple
           onChange={(e) => e.target.files && handleImport(e.target.files)} style={{ display: 'none' }} />
         <button className="library-btn" onClick={() => fileInputRef.current?.click()}>+ Import</button>
@@ -996,17 +1012,49 @@ function KitEditor() {
 
   const activeKit = kits.find((k) => k.id === activeKitId)
 
-  // 表示も keyboard navigation も同じ「名前昇順」配列を使う。
-  // 以前は keyboard が activeKit.events (追加順) を見ていたため、視覚上の
-  // 順番とズレていた。useMemo で両方が同じ参照を共有する形にする。
+  // Sort UI for kit events. Persisted in localStorage so the user's
+  // last choice carries between sessions (one global preference, not
+  // per-kit — feels closer to OS file explorers).
+  const KIT_SORT_KEY = 'hapbeat-studio-kit-sort'
+  type KitSortBy = 'name' | 'date' | 'duration' | 'order'
+  type KitSortOrder = 'asc' | 'desc'
+  const [kitSort, setKitSort] = useState<{ by: KitSortBy; order: KitSortOrder }>(() => {
+    try {
+      const raw = localStorage.getItem(KIT_SORT_KEY)
+      if (raw) {
+        const v = JSON.parse(raw)
+        if (v?.by && v?.order) return v
+      }
+    } catch { /* ignore */ }
+    return { by: 'name', order: 'asc' }
+  })
+  useEffect(() => {
+    try { localStorage.setItem(KIT_SORT_KEY, JSON.stringify(kitSort)) } catch { /* ignore */ }
+  }, [kitSort])
+
   const sortedEvents = useMemo(() => {
     if (!activeKit) return []
-    return [...activeKit.events].sort((a, b) => {
-      const an = (clips.find((c) => c.id === a.clipId)?.name ?? '').toLowerCase()
-      const bn = (clips.find((c) => c.id === b.clipId)?.name ?? '').toLowerCase()
-      return an.localeCompare(bn)
+    const arr = [...activeKit.events]
+    if (kitSort.by === 'order') {
+      // Insertion order — reflect the array as stored. `desc` reverses
+      // it so newest-added shows up first.
+      return kitSort.order === 'asc' ? arr : arr.reverse()
+    }
+    arr.sort((a, b) => {
+      const ca = clips.find((c) => c.id === a.clipId)
+      const cb = clips.find((c) => c.id === b.clipId)
+      let cmp = 0
+      if (kitSort.by === 'name') {
+        cmp = (ca?.name ?? '').toLowerCase().localeCompare((cb?.name ?? '').toLowerCase())
+      } else if (kitSort.by === 'date') {
+        cmp = (ca?.updatedAt ?? '').localeCompare(cb?.updatedAt ?? '')
+      } else if (kitSort.by === 'duration') {
+        cmp = (ca?.duration ?? 0) - (cb?.duration ?? 0)
+      }
+      return kitSort.order === 'asc' ? cmp : -cmp
     })
-  }, [activeKit, clips])
+    return arr
+  }, [activeKit, clips, kitSort])
 
   // Kit を切り替えたら選択をクリアし、再生中のプレビューも止める。
   useEffect(() => {
@@ -1252,10 +1300,28 @@ function KitEditor() {
                   <div className="kit-events-header">
                     <span>Events ({activeKit.events.length})</span>
                     <span className="kit-size-label" title="FIRE (command) モードのクリップだけがデバイス flash に載る容量">{formatFileSize(kitSize)}</span>
+                    <select
+                      className="library-sort"
+                      value={`${kitSort.by}:${kitSort.order}`}
+                      onChange={(e) => {
+                        const [by, order] = e.target.value.split(':') as [KitSortBy, KitSortOrder]
+                        setKitSort({ by, order })
+                      }}
+                      title="並び順"
+                    >
+                      <option value="name:asc">名前 ↑</option>
+                      <option value="name:desc">名前 ↓</option>
+                      <option value="date:desc">更新日時 (新しい順)</option>
+                      <option value="date:asc">更新日時 (古い順)</option>
+                      <option value="duration:asc">長さ (短い順)</option>
+                      <option value="duration:desc">長さ (長い順)</option>
+                      <option value="order:asc">追加順</option>
+                      <option value="order:desc">追加順 (逆)</option>
+                    </select>
                     <button
                       className="kit-events-mode-help-btn"
                       onClick={() => setModeInfoOpen(true)}
-                      title="FIRE / CLIP / LIVE 3 種類のモードとデバイス側の挙動を説明"
+                      title="FIRE / CLIP の各モードとデバイス側の挙動を説明"
                     ><span className="kit-events-mode-help-icon">?</span>モード説明</button>
                     <select
                       className="kit-events-mode-bulk"
@@ -1339,7 +1405,39 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
   send: (msg: import('@/types/manager').ManagerMessage) => void
 }) {
   const { toast } = useToast()
+  const { lastMessage } = useHelperConnection()
   const workDirHandle = useLibraryStore((s) => s.workDirHandle)
+
+  // Per-IP deploy progress sourced from Helper's `deploy_progress` push.
+  // Cleared on a new deploy (`deploy started`) and on completion.
+  const [progressByIp, setProgressByIp] = useState<Record<string, { pct: number; msg: string; done?: boolean; ok?: boolean }>>({})
+
+  useEffect(() => {
+    if (!lastMessage) return
+    const t = lastMessage.type
+    const p = lastMessage.payload as Record<string, unknown>
+    if (t === 'deploy_progress' && typeof p.ip === 'string') {
+      setProgressByIp((cur) => ({
+        ...cur,
+        [p.ip as string]: {
+          pct: Math.max(0, Math.min(100, Number(p.percent ?? 0))),
+          msg: String(p.message ?? ''),
+        },
+      }))
+    } else if (t === 'deploy_result' && typeof p.ip === 'string') {
+      // Per-device finish (helper sends one of these per target after
+      // its run). We only mark done for the one that finished.
+      setProgressByIp((cur) => ({
+        ...cur,
+        [p.ip as string]: {
+          pct: p.success === true ? 100 : (cur[p.ip as string]?.pct ?? 0),
+          msg: String(p.message ?? (p.success === true ? 'complete' : 'failed')),
+          done: true,
+          ok: p.success === true,
+        },
+      }))
+    }
+  }, [lastMessage])
   const kitDirHandle = useLibraryStore((s) => s.kitDirHandle)
   // kit-out dir が設定されていればそちらを、無ければ library workDir を root にする。
   // どちらの場合も root 直下に `<packId>/` フォルダを作る (kits/ 階層は挟まない)。
@@ -1435,6 +1533,12 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
     if (!outRoot) { toast('Select an output folder first', 'error'); return }
     if (!managerConnected || devices.length === 0) { toast('No devices', 'error'); return }
     setIsExporting(true)
+    // Reset progress for every target up front so the bars render
+    // immediately at 0% instead of popping in once Helper starts
+    // pushing progress messages.
+    setProgressByIp(
+      Object.fromEntries(devices.map((d) => [d.ipAddress, { pct: 0, msg: 'queued…' }])),
+    )
     try {
       const out = await buildAndSave()
       if (!out) return
@@ -1452,15 +1556,42 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
     : 'Kit の保存先フォルダ (Library または Kit Folder) を先に指定してください'
 
   return (
-    <div className="kit-export-section">
-      <button className="library-btn primary" disabled={kit.events.length === 0 || isExporting || !outRoot} onClick={handleSave}
-        title={saveTitle}>
-        {isExporting ? '...' : saveLabel}</button>
-      <button className="library-btn primary" disabled={kit.events.length === 0 || isExporting || !managerConnected || devices.length === 0 || !outRoot}
-        onClick={handleDeploy}
-        title="Save したうえで Manager 経由でデバイスに転送する">Deploy to Device</button>
-      {managerConnected && devices.length > 0 && <div className="kit-export-info">{devices.length} device(s)</div>}
-      {!managerConnected && <div className="kit-export-info muted">Manager offline</div>}
+    <div className="kit-export-section-wrap">
+      <div className="kit-export-section">
+        <button className="library-btn primary" disabled={kit.events.length === 0 || isExporting || !outRoot} onClick={handleSave}
+          title={saveTitle}>
+          {isExporting ? '...' : saveLabel}</button>
+        <button className="library-btn primary" disabled={kit.events.length === 0 || isExporting || !managerConnected || devices.length === 0 || !outRoot}
+          onClick={handleDeploy}
+          title="Save したうえで Helper 経由でデバイスに転送する">Deploy to Device</button>
+        {managerConnected && devices.length > 0 && <div className="kit-export-info">{devices.length} device(s)</div>}
+        {!managerConnected && <div className="kit-export-info muted">Helper offline</div>}
+      </div>
+
+      {/* Per-device deploy progress. Lives directly under the Deploy
+          button so the user's eye stays on the same column while a kit
+          uploads. We render rows for every IP that has progress state,
+          even after the deploy finishes — the user can see the final
+          message until the next deploy starts. */}
+      {Object.keys(progressByIp).length > 0 && (
+        <div className="kit-deploy-progress">
+          {Object.entries(progressByIp).map(([ip, st]) => (
+            <div key={ip} className="kit-deploy-progress-row">
+              <div className="kit-deploy-progress-head">
+                <span className="kit-deploy-progress-ip">{ip}</span>
+                <span className="kit-deploy-progress-pct">{st.pct}%</span>
+              </div>
+              <div className="kit-deploy-progress-bar">
+                <div
+                  className={`kit-deploy-progress-fill ${st.done ? (st.ok ? 'ok' : 'err') : ''}`}
+                  style={{ width: `${st.pct}%` }}
+                />
+              </div>
+              <div className="kit-deploy-progress-msg">{st.msg}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
