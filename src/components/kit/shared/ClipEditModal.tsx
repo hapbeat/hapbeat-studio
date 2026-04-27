@@ -48,12 +48,18 @@ export function ClipEditModal({ clip, onClose, onUpdate, onArchive, onCommitRena
 
         <div className="clip-edit-fields">
           <label className="clip-edit-field">
-            <span>Name <span className="field-hint">(used as the event-id name part inside a kit)</span></span>
+            <span>Name <span className="field-hint">(英小文字 / 数字 / -, _ のみ — kit 内の event-id の name 部に使う)</span></span>
             <input
               type="text"
               value={clip.name}
               autoFocus
-              onChange={(e) => onUpdate(clip.id, { name: e.target.value })}
+              maxLength={64}
+              pattern="[a-z0-9_-]+"
+              title="英小文字 / 数字 / -, _ のみ"
+              onChange={(e) => {
+                const cleaned = e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '')
+                if (cleaned !== clip.name) onUpdate(clip.id, { name: cleaned })
+              }}
               onBlur={commitRename}
             />
           </label>

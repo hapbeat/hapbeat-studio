@@ -95,6 +95,28 @@
   flex: 1 1 auto;
   font-family: var(--font-ui);
 }
+/* Cards in a context that allows rename (library) get a subtle hover
+   underline so users discover the click-to-rename affordance. */
+.clip-card-name.clip-card-name-editable {
+  cursor: text;
+  border-bottom: 1px dashed transparent;
+}
+.clip-card-name.clip-card-name-editable:hover {
+  border-bottom-color: var(--border-light);
+}
+.clip-card-name-input {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 1px 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+  font-family: var(--font-ui);
+  outline: none;
+}
 
 .clip-card-event-id {
   display: inline-block;

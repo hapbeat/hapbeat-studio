@@ -301,7 +301,7 @@ export async function writeKitFolder(
   const kitDir = await root.getDirectoryHandle(kitName, { create: true })
 
   for (const { path, blob } of files) {
-    // Handle nested paths like "clips/gunshot.wav"
+    // Handle nested paths like "install-clips/gunshot.wav"
     const parts = path.split('/')
     let dir = kitDir
     for (let i = 0; i < parts.length - 1; i++) {
@@ -311,6 +311,52 @@ export async function writeKitFolder(
     const writable = await fileHandle.createWritable()
     await writable.write(blob)
     await writable.close()
+  }
+}
+
+/**
+ * Recursively remove a kit folder under *root*. Used when the user
+ * deletes a kit from the UI — without this the folder lingers on disk
+ * and `importKitsFromOutputDir` resurrects the kit on the next refresh.
+ *
+ * Best-effort: missing folder = success, no-op. All errors are
+ * swallowed and returned as `false` so callers stay simple.
+ */
+export async function deleteKitFolder(
+  root: FileSystemDirectoryHandle,
+  kitName: string,
+): Promise<boolean> {
+  try {
+    // `recursive: true` (Chromium-only) lets us drop the whole subtree
+    // in one call. The fallback walks and deletes per-entry.
+    const removeOpts = { recursive: true } as { recursive?: boolean }
+    try {
+      await (root as FileSystemDirectoryHandle).removeEntry(kitName, removeOpts)
+      return true
+    } catch {
+      // Manual recursion fallback
+      const dir = await root.getDirectoryHandle(kitName)
+      await emptyDirectory(dir)
+      await root.removeEntry(kitName)
+      return true
+    }
+  } catch {
+    return false
+  }
+}
+
+async function emptyDirectory(dir: FileSystemDirectoryHandle): Promise<void> {
+  const names: string[] = []
+  for await (const entry of dir.values()) names.push(entry.name)
+  for (const name of names) {
+    try {
+      const sub = await dir.getDirectoryHandle(name)
+      await emptyDirectory(sub)
+      await dir.removeEntry(name)
+    } catch {
+      // not a directory — try as file
+      try { await dir.removeEntry(name) } catch { /* ignore */ }
+    }
   }
 }
 
@@ -360,7 +406,7 @@ export async function scanKitOutputFolder(
       continue
     }
     const clipFiles = new Map<string, File>()
-    for (const subName of ['clips', 'stream-clips'] as const) {
+    for (const subName of ['install-clips', 'stream-clips'] as const) {
       try {
         const subDir = await kitFolder.getDirectoryHandle(subName)
         for await (const child of subDir.values()) {

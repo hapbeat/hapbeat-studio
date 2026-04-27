@@ -17,8 +17,10 @@ const DND_TYPE_CLIP = 'application/x-hapbeat-clip'
 const DND_TYPE_KIT_EVENT = 'application/x-hapbeat-kit-event'
 
 function randomKitName(): string {
-  const adj = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Echo', 'Zeta', 'Nova', 'Pulse', 'Volt', 'Rush']
-  const noun = ['Kit', 'Pack', 'Set', 'Mix', 'Drop', 'Vibe', 'Hit', 'Boom', 'Wave', 'Beat']
+  // Lowercase + hyphen-only by default so the suggestion already obeys
+  // the contracts regex (`^[a-z0-9_-]+$`).
+  const adj = ['alpha', 'beta', 'gamma', 'delta', 'echo', 'zeta', 'nova', 'pulse', 'volt', 'rush']
+  const noun = ['kit', 'pack', 'set', 'mix', 'drop', 'vibe', 'hit', 'boom', 'wave', 'beat']
   return `${adj[Math.floor(Math.random() * adj.length)]}-${noun[Math.floor(Math.random() * noun.length)]}`
 }
 
@@ -747,6 +749,10 @@ function ClipsPanel() {
       key={c.id}
       clip={c}
       onStartEdit={() => setEditingClipId(c.id)}
+      onRenameCommit={async (next) => {
+        await updateClip(c.id, { name: next })
+        await commitClipRename(c.id)
+      }}
       playingId={playingId}
       onToggle={(id, intensity) => toggle(id, () => getClipAudio(id), intensity)}
       onAddToKit={() => addClipToActiveKit(c)}
@@ -886,6 +892,7 @@ function ClipsPanel() {
 interface ClipRowProps {
   clip: LibraryClip
   onStartEdit: () => void
+  onRenameCommit: (next: string) => void | Promise<void>
   playingId: string | null
   onToggle: (id: string, intensity: number) => void
   onAddToKit: () => void
@@ -900,6 +907,7 @@ interface ClipRowProps {
 function ClipRow({
   clip,
   onStartEdit,
+  onRenameCommit,
   playingId,
   onToggle,
   onAddToKit,
@@ -934,10 +942,11 @@ function ClipRow({
           : `${metaSummary}${clip.tags.length > 0 ? ` | tags: ${clip.tags.join(', ')}` : ''}`
       }
       drag={{ type: DND_TYPE_CLIP, payload: clip.id, dragTitle: 'ドラッグして Kit に追加' }}
+      onRenameCommit={(next) => { void onRenameCommit(next) }}
       actions={[
         { label: '+ Kit', variant: 'primary', onClick: onAddToKit, disabled: !kitAvailable,
           title: kitAvailable ? 'Add to active kit' : 'Select a kit first' },
-        { label: 'Edit', onClick: onStartEdit, title: 'Edit name, note, tags…' },
+        { label: 'Edit', onClick: onStartEdit, title: 'Edit note, tags…' },
       ]}
     />
   )
@@ -958,7 +967,6 @@ function KitEditor() {
   const updateKitEvent = useLibraryStore((s) => s.updateKitEvent)
   const updateKit = useLibraryStore((s) => s.updateKit)
   const addEventToKit = useLibraryStore((s) => s.addEventToKit)
-  const setEditingClipId = useLibraryStore((s) => s.setEditingClipId)
   const showClipDetails = useLibraryStore((s) => s.showClipDetails)
   const workDirSupported = useLibraryStore((s) => s.workDirSupported)
   const kitDirName = useLibraryStore((s) => s.kitDirName)
@@ -1093,11 +1101,17 @@ function KitEditor() {
   }, [activeKit, sortedEvents, selectedEventId, updateKitEvent, togglePreview, stopPreview, getClipAudio, getDeviceWiper, removeEventFromKit])
 
   const handleCreate = useCallback(async (name?: string) => {
-    const n = (name ?? placeholderName.current).trim()
-    if (!n) return
-    await createKit(n)
+    // Match the same constraint applied in the rename input — strip
+    // disallowed characters silently before persisting.
+    const raw = (name ?? placeholderName.current).trim()
+    const cleaned = raw.toLowerCase().replace(/[^a-z0-9_-]/g, '')
+    if (!cleaned) {
+      toast('Kit 名は英小文字 / 数字 / -, _ のみ使用できます', 'error')
+      return
+    }
+    await createKit(cleaned)
     placeholderName.current = randomKitName()
-  }, [createKit])
+  }, [createKit, toast])
 
   const handleKitDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault(); setDropActive(false); setDragOverIdx(null)
@@ -1194,12 +1208,22 @@ function KitEditor() {
                 <div className={`kit-details-inline ${dropActive ? 'drop-active' : ''}`}>
                   <div className="kit-meta-fields">
                     <label className="kit-meta-field">
-                      <span>Name</span>
+                      <span>Name <span className="field-hint">(英小文字 / 数字 / -, _ のみ — Event ID の category 部に使用)</span></span>
                       <input
                         type="text"
                         value={activeKit.name}
-                        onChange={(e) => updateKit(activeKit.id, { name: e.target.value })}
-                        title={validateKitName(activeKit.name) ?? 'Lowercase, [a-z 0-9 _ -] only — used as the event-id category'}
+                        // Strip-on-input: silently drop disallowed chars and
+                        // lowercase as the user types, so they cannot create
+                        // an invalid kit name in the first place. Pasting "My Kit"
+                        // becomes "mykit" — surprising in isolation but spelled
+                        // out by the field hint above.
+                        onChange={(e) => {
+                          const cleaned = e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '')
+                          if (cleaned !== activeKit.name) updateKit(activeKit.id, { name: cleaned })
+                        }}
+                        maxLength={64}
+                        pattern="[a-z0-9_-]+"
+                        title={validateKitName(activeKit.name) ?? '英小文字 / 数字 / -, _ のみ'}
                         style={validateKitName(activeKit.name) ? { borderColor: 'var(--error)' } : undefined}
                       />
                       {validateKitName(activeKit.name) && (
@@ -1270,7 +1294,6 @@ function KitEditor() {
                           }}
                           onIntensityChange={(v) => updateKitEvent(activeKit.id, ev.id, { intensity: v })}
                           onModeChange={(mode) => updateKitEvent(activeKit.id, ev.id, { mode })}
-                          onEditClip={() => setEditingClipId(ev.clipId)}
                           onDelete={() => removeEventFromKit(activeKit.id, ev.id)}
                           // 常に名前順表示のため drag-reorder は意味を持たない (= 無効)。
                           // clip を新規 drop する場合は末尾追加にフォールバックする。

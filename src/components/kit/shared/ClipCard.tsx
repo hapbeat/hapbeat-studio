@@ -1,4 +1,4 @@
-import { type DragEvent } from 'react'
+import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { IntensityControl } from './IntensityControl'
 import { WiperBadge } from './WiperBadge'
 import './ClipCard.css'
@@ -73,6 +73,13 @@ export interface ClipCardProps {
 
   /** Tooltip to put on the root element — typically the collapsed meta info */
   title?: string
+
+  /**
+   * Optional rename handler. When set, clicking the name turns it into
+   * a text input. Enter / blur commits, Escape reverts. Library cards
+   * pass this; kit-side cards do not (kits should not mutate clips).
+   */
+  onRenameCommit?: (next: string) => void
 }
 
 /**
@@ -103,7 +110,35 @@ export function ClipCard({
   dataCardId,
   actions,
   title,
+  onRenameCommit,
 }: ClipCardProps) {
+  const [renaming, setRenaming] = useState(false)
+  const [draftName, setDraftName] = useState(name)
+  const inputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (renaming) {
+      setDraftName(name)
+      // focus + select on next tick
+      requestAnimationFrame(() => {
+        const el = inputRef.current
+        if (!el) return
+        el.focus()
+        el.select()
+      })
+    }
+  }, [renaming, name])
+
+  const commitRename = () => {
+    setRenaming(false)
+    const next = draftName.trim()
+    if (next && next !== name && onRenameCommit) onRenameCommit(next)
+  }
+
+  const onRenameKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') { e.preventDefault(); commitRename() }
+    else if (e.key === 'Escape') { e.preventDefault(); setRenaming(false); setDraftName(name) }
+  }
   const handleDragStart = drag
     ? (e: DragEvent) => {
       e.dataTransfer.setData(drag.type, drag.payload)
@@ -134,7 +169,41 @@ export function ClipCard({
           title={playDisabled ? 'No audio to preview' : (playing ? 'Stop' : 'Play')}
           aria-disabled={playDisabled}
         >{playing ? '■' : '▶'}</button>
-        <span className="clip-card-name" title={name}>{name}</span>
+        {/* `title` already contains the note (caller injects it) so we let
+            the parent tooltip win — the name span gets no title of its own
+            and hovering the name reveals the note. */}
+        {renaming && onRenameCommit ? (
+          <input
+            ref={inputRef}
+            className="clip-card-name clip-card-name-input"
+            value={draftName}
+            // Same sanitize as Kit name: clip.name feeds the event-id
+            // `name` part inside a kit, so the same character set
+            // constraint must apply — silently lowercase + drop bad
+            // chars rather than letting users type something that the
+            // kit will reject at Save time.
+            onChange={(e) =>
+              setDraftName(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))
+            }
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onBlur={commitRename}
+            onKeyDown={onRenameKey}
+            title="英小文字 / 数字 / -, _ のみ"
+          />
+        ) : (
+          <span
+            className={`clip-card-name${onRenameCommit ? ' clip-card-name-editable' : ''}`}
+            onClick={(e) => {
+              if (!onRenameCommit) return
+              e.stopPropagation()
+              setRenaming(true)
+            }}
+            title={onRenameCommit ? 'クリックで名前を変更' : undefined}
+          >
+            {name}
+          </span>
+        )}
         {eventId !== null && (
           <span
             className={`clip-card-event-id ${eventIdEmpty ? 'empty' : ''}`}

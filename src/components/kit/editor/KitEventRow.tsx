@@ -15,7 +15,6 @@ export interface KitEventRowProps {
   onTogglePlay: () => void
   onIntensityChange: (v: number) => void
   onModeChange: (mode: KitEventMode) => void
-  onEditClip: () => void
   onDelete: () => void
   onDragOverRow: (e: DragEvent) => void
   dragOverIndicator: boolean
@@ -28,10 +27,15 @@ interface ModeOption {
   title: string
 }
 
+// `stream_source` (LIVE) is retained in the type system + manifest schema
+// for future use, but the Unity SDK retired it on 2026-04-22 in favour
+// of StreamClip + ParameterBinding (commit 13663f0). The button is
+// hidden from the UI; the value stays a valid `KitEventMode` so any
+// older kits still load without errors.
 const MODE_OPTIONS: ModeOption[] = [
   { value: 'command', symbol: '>', label: 'FIRE', title: 'Fire — デバイス内蔵 WAV を再生 (Event ID + 強度を UDP で送信)' },
   { value: 'stream_clip', symbol: '♪', label: 'CLIP', title: 'Stream Clip — SDK が Kit の WAV を UDP でストリーム' },
-  { value: 'stream_source', symbol: '~', label: 'LIVE', title: 'Stream Source — SDK がライブ AudioSource をキャプチャしてストリーム' },
+  // { value: 'stream_source', symbol: '~', label: 'LIVE', title: 'Stream Source — Unity SDK 廃止 (2026-04-22)' },
 ]
 
 /**
@@ -52,7 +56,6 @@ export function KitEventRow({
   onTogglePlay,
   onIntensityChange,
   onModeChange,
-  onEditClip,
   onDelete,
   onDragOverRow,
   dragOverIndicator,
@@ -68,7 +71,12 @@ export function KitEventRow({
     : undefined
   const tags = clip?.tags
 
-  const cardActions = [{ label: 'Edit', onClick: onEditClip, title: 'Edit the underlying clip' }]
+  // Kit-side cards are intentionally non-editable: editing the clip
+  // here would mutate the same LibraryClip in the library too, which
+  // contradicts the new "kit references library, library is the
+  // source of truth" model. Click the clip in the Library panel to
+  // edit name / note / tags.
+  const cardActions: { label: string; onClick: () => void; title: string }[] = []
 
   return (
     <div
