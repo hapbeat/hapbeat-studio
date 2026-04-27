@@ -4,7 +4,7 @@ import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useToast } from '@/components/common/Toast'
 import { formatFileSize } from '@/utils/wavIO'
 import { exportKitAsPack, validateEventIds } from '@/utils/kitExporter'
-import type { LibraryClip, LibraryViewMode } from '@/types/library'
+import type { LibraryClip, LibraryViewMode, KitDefinition } from '@/types/library'
 import type { DeviceInfo } from '@/types/manager'
 import { CapacityGauge } from './CapacityGauge'
 import { KitEventRow } from './editor/KitEventRow'
@@ -377,8 +377,16 @@ function WorkDirBar() {
   const setViewMode = useLibraryStore((s) => s.setViewMode)
   const showClipDetails = useLibraryStore((s) => s.showClipDetails)
   const setShowClipDetails = useLibraryStore((s) => s.setShowClipDetails)
-  const { devices } = useHelperConnection()
-  const volumeWiper = devices[0]?.volumeWiper ?? null
+  const { isConnected: helperConnected, devices } = useHelperConnection()
+  const dev0 = devices[0]
+  const volumeWiper = dev0?.volumeWiper ?? null
+  // First-online-or-first-known device, displayed in the kit-page
+  // header so kit authors don't have to flip to Devices tab to see
+  // which Hapbeat is currently active.
+  const headerDevice = devices.find((d) => d.online) ?? dev0 ?? null
+  const otherCount = headerDevice
+    ? Math.max(0, devices.length - 1)
+    : 0
 
   const views: { value: LibraryViewMode; label: string; title: string }[] = [
     { value: 'side', label: '\u2503', title: 'Clips left, kit editor right' },
@@ -399,6 +407,42 @@ function WorkDirBar() {
         title={showClipDetails ? 'Hide clip details (duration, sample rate, tags…)' : 'Show clip details'}
       >i</button>
       <ShortcutHelp />
+      {/* Connected Hapbeat indicator. Tap-target for now; future
+          revisions will open a device picker modal here. */}
+      {headerDevice && (
+        <>
+          <span className="workdir-divider" />
+          <span
+            className="workdir-device"
+            title={
+              `${headerDevice.name || '(unnamed)'}\n` +
+              `IP: ${headerDevice.ipAddress || '-'}\n` +
+              `${headerDevice.online ? 'online' : 'offline'}` +
+              (otherCount > 0 ? `\n他 ${otherCount} 台が接続されています` : '')
+            }
+          >
+            <span
+              className={`workdir-device-dot ${headerDevice.online ? 'online' : 'offline'}`}
+              aria-hidden="true"
+            />
+            <span className="workdir-device-name">
+              {headerDevice.name || '(unnamed)'}
+            </span>
+            {otherCount > 0 && (
+              <span className="workdir-device-more">+{otherCount}</span>
+            )}
+          </span>
+        </>
+      )}
+      {!headerDevice && helperConnected && (
+        <>
+          <span className="workdir-divider" />
+          <span className="workdir-device muted" title="No Hapbeat discovered yet">
+            <span className="workdir-device-dot offline" aria-hidden="true" />
+            no device
+          </span>
+        </>
+      )}
       {volumeWiper !== null && (
         <>
           <span className="workdir-divider" />
@@ -1017,6 +1061,39 @@ function KitEditor() {
   }, [toast])
 
   const activeKit = kits.find((k) => k.id === activeKitId)
+
+  // Auto-sync active kit's targetDevice with the first connected
+  // device. Fires whenever the device's volume_* values change (incl.
+  // the initial PONG after a fresh connection). Manual override is
+  // still available via the "⟳ デバイスから取り込む" button — that
+  // button is just a convenience now.
+  //
+  // We intentionally only mirror values that the device reports as
+  // numbers; missing fields stay untouched so the user can hand-edit
+  // them without us clobbering on the next push.
+  const dev0 = devices[0]
+  const dev0Wiper = dev0?.volumeWiper ?? null
+  const dev0Level = dev0?.volumeLevel ?? null
+  const dev0Steps = dev0?.volumeSteps ?? null
+  useEffect(() => {
+    if (!activeKit) return
+    const cur = activeKit.targetDevice ?? {}
+    const next: NonNullable<KitDefinition['targetDevice']> = { ...cur }
+    let changed = false
+    if (typeof dev0Wiper === 'number' && dev0Wiper !== cur.volume_wiper) {
+      next.volume_wiper = dev0Wiper; changed = true
+    }
+    if (typeof dev0Level === 'number' && dev0Level !== cur.volume_level) {
+      next.volume_level = dev0Level; changed = true
+    }
+    if (typeof dev0Steps === 'number' && dev0Steps !== cur.volume_steps) {
+      next.volume_steps = dev0Steps; changed = true
+    }
+    if (changed) updateKit(activeKit.id, { targetDevice: next })
+  // intentionally skip activeKit reference — drive only off device
+  // numbers so editing the kit doesn't retrigger the sync
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dev0Wiper, dev0Level, dev0Steps, activeKitId])
 
   // Sort UI for kit events. Persisted in localStorage so the user's
   // last choice carries between sessions (one global preference, not
@@ -1682,8 +1759,11 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
   // kit was removed, the auto-save bails out before touching disk.
   useEffect(() => {
     if (!outRoot) return
-    if (kit.events.length === 0) return
     if (validateKitName(kit.name)) return
+    // Note: we no longer skip when events.length === 0. A brand-new
+    // kit should still materialise as `<packId>/manifest.json` on disk
+    // so the user immediately sees the folder appear in their Explorer
+    // alongside their other kits.
     setAutoSaveStatus('pending')
     const handle = window.setTimeout(async () => {
       // Bail out if the kit was deleted in the meantime — see comment
@@ -1696,6 +1776,9 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
       }
       try {
         setAutoSaveStatus('saving')
+        useLibraryStore.getState().setLocalFsStatus(
+          'saving', `kit "${kit.name}" 保存中…`,
+        )
         const out = await buildAndSave({ silent: true })
         if (!isMountedRef.current) return
         // One more check after the async build — the user may have
@@ -1709,13 +1792,20 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
           lastBuildRef.current = out
           setAutoSaveStatus('saved')
           setAutoSaveError('')
+          useLibraryStore.getState().setLocalFsStatus(
+            'saved', `kit "${kit.name}" を保存`,
+          )
         } else {
           setAutoSaveStatus('idle')
         }
       } catch (err) {
         if (!isMountedRef.current) return
         setAutoSaveStatus('error')
-        setAutoSaveError(err instanceof Error ? err.message : String(err))
+        const msg = err instanceof Error ? err.message : String(err)
+        setAutoSaveError(msg)
+        useLibraryStore.getState().setLocalFsStatus(
+          'error', `kit "${kit.name}" 保存失敗: ${msg}`,
+        )
       }
     }, 600)
     return () => window.clearTimeout(handle)
@@ -1749,14 +1839,12 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
     finally { setIsExporting(false) }
   }, [autoSaveStatus, buildAndSave, managerConnected, devices, send, outRoot, setIsExporting, toast])
 
-  // Auto-save status copy shown beside the Deploy button. The order
-  // here matters: blocker conditions are checked first so the user
-  // sees a precise reason for nothing happening (e.g. "kit 名が無効"
-  // beats the generic "auto-save 待機中").
+  // Auto-save status copy shown beside the Deploy button. Blocker
+  // conditions take precedence so the user always knows the precise
+  // reason saving isn't happening.
   const autoSaveLabel = (() => {
     if (!outRoot) return '⚠ Library / Kit Folder を選択してください'
     if (validateKitName(kit.name)) return '⚠ kit 名が無効'
-    if (kit.events.length === 0) return 'クリップを追加してください'
     switch (autoSaveStatus) {
       case 'pending': return '保存待機…'
       case 'saving': return '保存中…'

@@ -122,6 +122,21 @@ interface LibraryState {
   kits: KitDefinition[]
   activeKitId: string | null
 
+  /**
+   * Global "what's the local file system doing right now" indicator.
+   * Updated by every write path (clip rename / archive / kit save / kit
+   * archive / metadata flush). The footer reads this to surface a
+   * single Studio-wide status pill so the user knows their edits are
+   * really hitting disk.
+   */
+  localFsStatus: 'idle' | 'saving' | 'saved' | 'error'
+  localFsLastMsg: string
+  localFsLastTs: number
+  setLocalFsStatus: (
+    status: LibraryState['localFsStatus'],
+    msg?: string,
+  ) => void
+
   /** Clip id currently open in the inline editor (Clips panel). Set from
    *  either the Clips panel itself or from a Kit event row's Edit action so
    *  the user lands in the same editor regardless of entry point. */
@@ -280,6 +295,16 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   filter: { ...DEFAULT_FILTER },
   builtinCategoryFilter: null,
   ampPresets: [],
+  localFsStatus: 'idle',
+  localFsLastMsg: '',
+  localFsLastTs: 0,
+  setLocalFsStatus: (status, msg = '') => {
+    set({
+      localFsStatus: status,
+      localFsLastMsg: msg,
+      localFsLastTs: Date.now(),
+    })
+  },
 
   loadLibrary: async () => {
     set({ isLoading: true })
@@ -911,6 +936,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 
   updateClip: async (id, updates) => {
+    get().setLocalFsStatus('saving', 'clip metadata 更新中…')
     await updateClipMeta(id, updates)
     const prev = get().clips.find((c) => c.id === id)
     const newClips = get().clips.map((c) =>
@@ -949,6 +975,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       await saveClipsMetaToDir(workDirHandle, newClips)
       if (nameChanged) await saveKitsMetaToDir(workDirHandle, get().kits)
     }
+    get().setLocalFsStatus('saved', `clip "${updates.name ?? prev?.name ?? ''}" を保存`)
   },
 
   commitClipRename: async (id) => {
@@ -1065,6 +1092,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
   removeKit: async (id) => {
     const kit = get().kits.find((k) => k.id === id)
+    get().setLocalFsStatus('saving', `kit "${kit?.name ?? id}" を archive 移動中…`)
     await deleteKit(id)
     const newKits = get().kits.filter((k) => k.id !== id)
     set({
@@ -1085,6 +1113,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         await archiveKitFolder(outRoot, packId)
       }
     }
+    get().setLocalFsStatus('saved', `kit "${kit?.name ?? id}" を _archive/ に移動`)
   },
 
   setActiveKit: (id) => {

@@ -95,7 +95,46 @@
   border-color: rgba(244,67,54,0.45);
 }
 
-.workdir-vol { font-family: var(--font-mono); font-size: 13px; color: var(--accent-light); white-space: nowrap; margin-left: auto; }
+.workdir-vol { font-family: var(--font-mono); font-size: 13px; color: var(--accent-light); white-space: nowrap; }
+
+/* Connected Hapbeat indicator. Sits between the dir-chips and Vol
+   readout in the kit-page WorkDir bar. */
+.workdir-device {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 2px 8px;
+  font-size: 13px;
+  font-family: var(--font-ui);
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  white-space: nowrap;
+  cursor: default;
+}
+.workdir-device.muted { color: var(--text-muted); background: transparent; }
+.workdir-device-name {
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.workdir-device-more {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.workdir-device-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.workdir-device-dot.online { background: var(--success); box-shadow: 0 0 4px rgba(76,175,80,0.6); }
+.workdir-device-dot.offline { background: var(--text-muted); }
+/* Adjacent Vol pill should not steal margin-left:auto from the device chip. */
+.workdir-device + .workdir-divider + .workdir-vol { margin-left: 0; }
 
 /* ---- View Mode ---- */
 .view-mode-group { display: flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
