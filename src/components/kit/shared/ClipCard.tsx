@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { IntensityControl } from './IntensityControl'
 import { WiperBadge } from './WiperBadge'
+import { useToast } from '@/components/common/Toast'
 import './ClipCard.css'
 
 export interface ClipCardAction {
@@ -115,6 +116,20 @@ export function ClipCard({
   const [renaming, setRenaming] = useState(false)
   const [draftName, setDraftName] = useState(name)
   const inputRef = useRef<HTMLInputElement | null>(null)
+  const { toast } = useToast()
+  // Throttle the sanitize warning so a paste of "Hello World" doesn't
+  // fire one toast per character. We re-arm 1.2s after the last invalid
+  // input, which is long enough to feel like "one warning per attempt"
+  // without being so long that a follow-up genuine mistake is silenced.
+  const warnArmedRef = useRef(true)
+  const warnRef = useRef<number | null>(null)
+  const flagInvalid = () => {
+    if (!warnArmedRef.current) return
+    warnArmedRef.current = false
+    toast('英小文字 / 数字 / -, _ のみ使用できます', 'warning')
+    if (warnRef.current !== null) window.clearTimeout(warnRef.current)
+    warnRef.current = window.setTimeout(() => { warnArmedRef.current = true }, 1200)
+  }
 
   useEffect(() => {
     if (renaming) {
@@ -181,10 +196,15 @@ export function ClipCard({
             // `name` part inside a kit, so the same character set
             // constraint must apply — silently lowercase + drop bad
             // chars rather than letting users type something that the
-            // kit will reject at Save time.
-            onChange={(e) =>
-              setDraftName(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, ''))
-            }
+            // kit will reject at Save time. We surface a (throttled)
+            // toast so the user understands why the character didn't
+            // appear, instead of "なぜか入らない" head-scratching.
+            onChange={(e) => {
+              const raw = e.target.value
+              const cleaned = raw.toLowerCase().replace(/[^a-z0-9_-]/g, '')
+              if (cleaned !== raw) flagInvalid()
+              setDraftName(cleaned)
+            }}
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
             onBlur={commitRename}

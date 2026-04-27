@@ -27,7 +27,7 @@ import {
   writeMetadataJson,
   readMetadataJson,
   scanKitOutputFolder,
-  deleteKitFolder,
+  archiveKitFolder,
   type DiscoveredKit,
 } from '@/utils/localDirectory'
 
@@ -1030,15 +1030,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const { workDirHandle, kitDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
 
-    // Wipe the on-disk folder too — otherwise a refresh / restart
-    // re-imports the kit from manifest.json and the deletion looks
-    // like a no-op to the user. Folder name follows the same packId
-    // mangling used at Save time (kitExporter / KitExportSection).
+    // Move the on-disk folder into `_archive/` instead of deleting it
+    // outright — the user can recover by hand from their OS file
+    // explorer. `scanKitOutputFolder` skips `_archive/`, so the kit
+    // stops appearing in the UI on the next refresh.
     if (kit) {
       const packId = kit.name.toLowerCase().replace(/[^a-z0-9-]/g, '-') || 'unnamed-kit'
       const outRoot = kitDirHandle ?? workDirHandle
       if (outRoot) {
-        await deleteKitFolder(outRoot, packId)
+        await archiveKitFolder(outRoot, packId)
       }
     }
   },

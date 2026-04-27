@@ -314,10 +314,96 @@ export async function writeKitFolder(
   }
 }
 
+/** Top-level kit subdirectory used as the studio "recycle bin". When
+ * a user removes a kit from the UI we move the entire folder under
+ * `<root>/_archive/<kitName>/` instead of deleting it, so a true
+ * delete still requires the user to act in their OS file explorer.
+ *
+ * Leading underscore keeps it sorted ahead of normal kits and signals
+ * "managed by Studio, do not edit". `scanKitOutputFolder` skips it.
+ */
+export const ARCHIVE_KIT_DIR = '_archive'
+
 /**
- * Recursively remove a kit folder under *root*. Used when the user
- * deletes a kit from the UI — without this the folder lingers on disk
- * and `importKitsFromOutputDir` resurrects the kit on the next refresh.
+ * Move a kit folder under *root* into `_archive/`.
+ * On collision (an archived kit of the same name already exists)
+ * the moved folder is suffixed with `-2`, `-3`, … until unique.
+ *
+ * Implementation note: the File System Access API has no atomic move
+ * across directories yet, so we recursively copy then delete. For a
+ * typical kit (a few WAVs + manifest.json) this is fast enough; for
+ * very large kits expect some delay.
+ *
+ * Returns the path under archive on success (e.g. "_archive/my-kit-2"),
+ * or null if the source folder was missing or the move failed.
+ */
+export async function archiveKitFolder(
+  root: FileSystemDirectoryHandle,
+  kitName: string,
+): Promise<string | null> {
+  let srcDir: FileSystemDirectoryHandle
+  try {
+    srcDir = await root.getDirectoryHandle(kitName)
+  } catch {
+    return null
+  }
+
+  // Ensure _archive/ exists and pick a non-colliding destination name.
+  const archiveRoot = await root.getDirectoryHandle(
+    ARCHIVE_KIT_DIR, { create: true },
+  )
+  let destName = kitName
+  if (await directoryExists(archiveRoot, destName)) {
+    for (let i = 2; i < 10000; i++) {
+      const cand = `${kitName}-${i}`
+      if (!(await directoryExists(archiveRoot, cand))) {
+        destName = cand
+        break
+      }
+    }
+  }
+
+  try {
+    const destDir = await archiveRoot.getDirectoryHandle(
+      destName, { create: true },
+    )
+    await copyDirectoryRecursive(srcDir, destDir)
+    await root.removeEntry(kitName, { recursive: true } as { recursive?: boolean })
+  } catch {
+    return null
+  }
+  return `${ARCHIVE_KIT_DIR}/${destName}`
+}
+
+async function directoryExists(
+  parent: FileSystemDirectoryHandle, name: string,
+): Promise<boolean> {
+  try { await parent.getDirectoryHandle(name); return true } catch { return false }
+}
+
+async function copyDirectoryRecursive(
+  src: FileSystemDirectoryHandle,
+  dst: FileSystemDirectoryHandle,
+): Promise<void> {
+  for await (const entry of src.values()) {
+    if (entry.kind === 'file') {
+      const file = await (entry as FileSystemFileHandle).getFile()
+      const dstHandle = await dst.getFileHandle(entry.name, { create: true })
+      const writable = await dstHandle.createWritable()
+      await writable.write(file)
+      await writable.close()
+    } else {
+      const subSrc = await src.getDirectoryHandle(entry.name)
+      const subDst = await dst.getDirectoryHandle(entry.name, { create: true })
+      await copyDirectoryRecursive(subSrc, subDst)
+    }
+  }
+}
+
+/**
+ * Recursively remove a kit folder under *root*. Hard-delete — used by
+ * tests and emergency cleanup. UI flows should prefer
+ * `archiveKitFolder` so the user can recover by hand.
  *
  * Best-effort: missing folder = success, no-op. All errors are
  * swallowed and returned as `false` so callers stay simple.
@@ -395,6 +481,9 @@ export async function scanKitOutputFolder(
   const out: DiscoveredKit[] = []
   for await (const entry of root.values()) {
     if (entry.kind !== 'directory') continue
+    // _archive/ holds kits the user "deleted" from the UI. They stay on
+    // disk for manual recovery but must not show up in the Studio list.
+    if (entry.name === ARCHIVE_KIT_DIR) continue
     const kitFolder = entry as FileSystemDirectoryHandle
     let manifestJson: unknown
     try {

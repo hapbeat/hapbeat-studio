@@ -50,13 +50,14 @@
 
 /* Side rail — column holding the mode selector only. Delete (×) floats in
    the top-right corner of the whole wrap so the rail stays short.
-   Modes are bottom-aligned so the first (FIRE) row clears the corner ×. */
+   LIVE モード廃止後 (2026-04-22) は FIRE/CLIP の 2 つだけになったので
+   底寄せから中央寄せに変更。× は absolute corner にあるので影響なし。 */
 .kit-event-side {
   flex: 0 0 auto;
   width: 68px;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
+  justify-content: center;
   align-items: center;
   padding: 4px 6px;
   gap: 4px;

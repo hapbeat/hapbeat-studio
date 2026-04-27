@@ -984,6 +984,15 @@ function KitEditor() {
   const [modeInfoOpen, setModeInfoOpen] = useState(false)
   const placeholderName = useRef(randomKitName())
   const kitPanelRef = useRef<HTMLDivElement>(null)
+  // Throttled "invalid character" toast — same shape as the one inside
+  // ClipCard (1.2 s rearm). Used by the Kit Name rename input below.
+  const kitNameWarnArmedRef = useRef(true)
+  const flagKitNameInvalid = useCallback(() => {
+    if (!kitNameWarnArmedRef.current) return
+    kitNameWarnArmedRef.current = false
+    toast('英小文字 / 数字 / -, _ のみ使用できます', 'warning')
+    window.setTimeout(() => { kitNameWarnArmedRef.current = true }, 1200)
+  }, [toast])
 
   const activeKit = kits.find((k) => k.id === activeKitId)
 
@@ -1215,10 +1224,12 @@ function KitEditor() {
                         // Strip-on-input: silently drop disallowed chars and
                         // lowercase as the user types, so they cannot create
                         // an invalid kit name in the first place. Pasting "My Kit"
-                        // becomes "mykit" — surprising in isolation but spelled
-                        // out by the field hint above.
+                        // becomes "mykit" — and a (throttled) toast tells the
+                        // user *why* their character disappeared.
                         onChange={(e) => {
-                          const cleaned = e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '')
+                          const raw = e.target.value
+                          const cleaned = raw.toLowerCase().replace(/[^a-z0-9_-]/g, '')
+                          if (cleaned !== raw) flagKitNameInvalid()
                           if (cleaned !== activeKit.name) updateKit(activeKit.id, { name: cleaned })
                         }}
                         maxLength={64}
