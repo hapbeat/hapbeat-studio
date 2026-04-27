@@ -1749,10 +1749,14 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
     finally { setIsExporting(false) }
   }, [autoSaveStatus, buildAndSave, managerConnected, devices, send, outRoot, setIsExporting, toast])
 
-  // Auto-save status copy shown beside the Deploy button.
+  // Auto-save status copy shown beside the Deploy button. The order
+  // here matters: blocker conditions are checked first so the user
+  // sees a precise reason for nothing happening (e.g. "kit 名が無効"
+  // beats the generic "auto-save 待機中").
   const autoSaveLabel = (() => {
-    if (!outRoot) return ''
+    if (!outRoot) return '⚠ Library / Kit Folder を選択してください'
     if (validateKitName(kit.name)) return '⚠ kit 名が無効'
+    if (kit.events.length === 0) return 'クリップを追加してください'
     switch (autoSaveStatus) {
       case 'pending': return '保存待機…'
       case 'saving': return '保存中…'
@@ -1783,7 +1787,10 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
                 ? 'Library または Kit Folder を選択してください'
                 : !managerConnected ? 'Helper offline'
                 : devices.length === 0 ? 'デバイスが見つかりません'
-                : autoSaveLabel || `${devices.length} device(s) — auto-save 待機中`}
+                // autoSaveLabel covers the kit-side state ("クリップを追加",
+                // "保存中", etc). When idle and everything is OK it falls
+                // through to a passive "device count" hint.
+                : autoSaveLabel || `${devices.length} device(s) ready`}
             </span>
           ) : (
             Object.entries(progressByIp).map(([ip, st]) => (

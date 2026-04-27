@@ -506,10 +506,16 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 
   importKitsFromOutputDir: async () => {
+    // Kits live under either a dedicated kit folder (kitDirHandle —
+    // e.g. Unity's Assets/HapbeatKits) or, if that's unset, directly
+    // under the library workdir. Match the same outRoot that
+    // KitExportSection uses when writing kits, so what gets read back
+    // matches what was written.
     const { kitDirHandle, workDirHandle } = get()
-    if (!kitDirHandle) return 0
+    const outRoot = kitDirHandle ?? workDirHandle
+    if (!outRoot) return 0
 
-    const discovered = await scanKitOutputFolder(kitDirHandle)
+    const discovered = await scanKitOutputFolder(outRoot)
     if (discovered.length === 0) return 0
 
     const ctx = new AudioContext()
@@ -712,13 +718,32 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ clips })
     await saveClipsMetaToDir(workDirHandle, clips)
 
-    if (savedKits) {
-      const migrated = savedKits.map(migrateKit)
-      for (const kit of migrated) await saveKit(kit)
-      set({ kits: migrated })
-    } else {
-      const kits = await listKits()
-      set({ kits: kits.map(migrateKit) })
+    // Kits: the real master is each `<packId>/manifest.json` file on
+    // disk, NOT the cached kitsMeta.json. We do a live folder scan so
+    // that kits added/edited/removed via OS Explorer (or by another
+    // tool) are picked up on next load.
+    //
+    // `importKitsFromOutputDir` falls back to `workDirHandle` when no
+    // dedicated `kitDirHandle` is set, so it covers both layouts:
+    //   - workdir/<packId>/manifest.json   (default — kits inside library)
+    //   - kitDir/<packId>/manifest.json    (dedicated kit-out folder)
+    //
+    // If the scan finds nothing (brand-new workdir, kits never deployed),
+    // fall back to the kitsMeta.json snapshot or IDB cache so the user
+    // still sees what they had before.
+    const importedKitCount = await get().importKitsFromOutputDir().catch((err) => {
+      console.warn('Kit folder scan failed, falling back to metadata:', err)
+      return 0
+    })
+    if (importedKitCount === 0) {
+      if (savedKits) {
+        const migrated = savedKits.map(migrateKit)
+        for (const kit of migrated) await saveKit(kit)
+        set({ kits: migrated })
+      } else {
+        const kits = await listKits()
+        set({ kits: kits.map(migrateKit) })
+      }
     }
   },
 

@@ -98,7 +98,7 @@
   border: none;
   border-radius: 3px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1;
   padding: 0;
   opacity: 0.55;
@@ -136,7 +136,7 @@
 }
 .kit-event-side-mode-sym {
   font-family: ui-monospace, Menlo, Consolas, monospace;
-  font-size: 11px;
+  font-size: 12px;
   width: 10px;
   text-align: center;
   color: var(--text-secondary);

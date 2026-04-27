@@ -56,7 +56,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 13px;
   background: var(--bg-surface);
   color: var(--text-primary);
   border: 1px solid var(--border);
@@ -73,7 +73,7 @@
 .clip-card-play.disabled:hover { background: var(--bg-surface); }
 
 .clip-card-name {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--text-primary);
   white-space: nowrap;
@@ -103,7 +103,7 @@
   border-bottom-color: var(--border-light);
 }
 .clip-card-name-input {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--text-primary);
   background: var(--bg-primary);
@@ -124,7 +124,7 @@
 
 .clip-card-event-id {
   display: inline-block;
-  font-size: 12px;
+  font-size: 13px;
   font-family: var(--font-mono);
   font-weight: 500;
   color: var(--accent-light);
@@ -160,7 +160,7 @@
 }
 .clip-card-action-btn {
   padding: 3px 8px;
-  font-size: 12px;
+  font-size: 13px;
   background: var(--bg-surface);
   color: var(--text-primary);
   border: 1px solid var(--border);
@@ -188,7 +188,7 @@
   gap: 8px;
   min-width: 0;
   overflow: hidden;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-secondary);
   padding-top: 2px;
   border-top: 1px dashed rgba(255,255,255,0.05);
@@ -215,7 +215,7 @@
 }
 .clip-card-tag {
   padding: 1px 6px;
-  font-size: 11px;
+  font-size: 12px;
   background: rgba(255,255,255,0.05);
   color: var(--text-secondary);
   border: 1px solid var(--border);
