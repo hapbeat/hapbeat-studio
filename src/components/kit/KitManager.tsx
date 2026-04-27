@@ -1,9 +1,9 @@
 import { useEffect, useCallback, useMemo, useState, useRef, type MouseEvent as ReactMouseEvent } from 'react'
-import { useLibraryStore, validateKitName } from '@/stores/libraryStore'
+import { useLibraryStore, validateKitName, composeKitEventId } from '@/stores/libraryStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useToast } from '@/components/common/Toast'
 import { formatFileSize } from '@/utils/wavIO'
-import { exportKitAsPack, validateEventIds } from '@/utils/kitExporter'
+import { validateEventIds } from '@/utils/kitExporter'
 import type { LibraryClip, LibraryViewMode, KitDefinition } from '@/types/library'
 import type { DeviceInfo } from '@/types/manager'
 import { CapacityGauge } from './CapacityGauge'
@@ -1569,6 +1569,21 @@ function KitEditor() {
                           onIntensityChange={(v) => updateKitEvent(activeKit.id, ev.id, { intensity: v })}
                           onModeChange={(mode) => updateKitEvent(activeKit.id, ev.id, { mode })}
                           onDelete={() => removeEventFromKit(activeKit.id, ev.id)}
+                          onRenameCommit={async (next) => {
+                            // Kit-local rename: writes only to this
+                            // KitEvent's `localName`. The library clip
+                            // and any other kit referencing it stay
+                            // untouched. The on-disk install-clips/
+                            // file picks up the new name on the next
+                            // flush; stale-prune deletes the old one.
+                            const cleaned = next.trim()
+                            if (!cleaned) return
+                            const newEventId = composeKitEventId(activeKit.name, cleaned)
+                            await updateKitEvent(activeKit.id, ev.id, {
+                              localName: cleaned,
+                              eventId: newEventId,
+                            })
+                          }}
                           // 常に名前順表示のため drag-reorder は意味を持たない (= 無効)。
                           // clip を新規 drop する場合は末尾追加にフォールバックする。
                           onDragOverRow={() => { /* noop: 名前順表示のため挿入位置を固定できない */ void i }}
@@ -1577,7 +1592,7 @@ function KitEditor() {
                       ))}
                   </div>
 
-                  <KitExportSection kit={activeKit} clips={clips} isExporting={isExporting} setIsExporting={setIsExporting}
+                  <KitExportSection kit={activeKit} isExporting={isExporting} setIsExporting={setIsExporting}
                     managerConnected={managerConnected} devices={devices} send={send} />
                 </div>
               )}
@@ -1594,8 +1609,8 @@ function KitEditor() {
 // Kit Export
 // ============================================================
 
-function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConnected, devices, send }: {
-  kit: import('@/types/library').KitDefinition; clips: LibraryClip[]
+function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, devices, send }: {
+  kit: import('@/types/library').KitDefinition
   isExporting: boolean; setIsExporting: (v: boolean) => void
   managerConnected: boolean
   devices: import('@/types/manager').DeviceInfo[]
@@ -1640,216 +1655,85 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
   // どちらの場合も root 直下に `<packId>/` フォルダを作る (kits/ 階層は挟まない)。
   const outRoot = kitDirHandle ?? workDirHandle
 
-  /** Kit を ZIP 化して <outRoot>/<packId>/ に展開書き出し。
-   *  outRoot が必須 (未選択時は呼ばれない前提)。返り値は生成した ZIP Blob + packId。
-   *
-   *  silent=true は auto-save パスから呼ばれる。バリデーション NG のとき
-   *  alert を出さずに null を返すだけ — user-typing 中に毎秒 alert が
-   *  飛んでくるのを避けるため。 */
-  const buildAndSave = useCallback(async (opts?: { silent?: boolean }) => {
-    if (!outRoot) throw new Error('Output folder not selected')
-    const silent = opts?.silent ?? false
+  // Persistence is owned by libraryStore: every kit-mutating action
+  // (createKit / updateKit / addEventToKit / updateKitEvent /
+  //  removeEventFromKit) calls scheduleKitFlush on its own, so the
+  // <outRoot>/<packId>/ folder stays in lockstep with the store
+  // regardless of which kit is "active" or whether KitExportSection
+  // is even mounted. This component only owns Deploy + status display.
 
-    // Hard validation — these are blockers, not warnings:
-    // 1. Kit name must match the contracts regex (a-z 0-9 _ -)
-    // 2. Every FIRE / CLIP event must have a non-empty eventId
-    //    (LIVE events stream live audio, no event_id needed)
+  // Mirror libraryStore's localFsStatus into a local label so the
+  // pending → saving → saved transition shows next to Deploy.
+  const fsStatus = useLibraryStore((s) => s.localFsStatus)
+  const fsLastMsg = useLibraryStore((s) => s.localFsLastMsg)
+
+  const handleDeploy = useCallback(async () => {
+    if (!outRoot) { toast('Select an output folder first', 'error'); return }
+    if (!managerConnected || devices.length === 0) { toast('No devices', 'error'); return }
+
+    // User-facing validation. The store's flush silently skips invalid
+    // kits — Deploy must surface those errors loudly.
     const kitErr = validateKitName(kit.name)
-    if (kitErr) {
-      if (!silent) alert(`Kit name invalid: ${kitErr}`)
-      return null
-    }
+    if (kitErr) { toast(`Kit name invalid: ${kitErr}`, 'error'); return }
 
     const needsEventId = kit.events.filter(
       (e) => (e.mode ?? 'command') !== 'stream_source',
     )
     const missing = needsEventId.filter((e) => !e.eventId)
     if (missing.length > 0) {
-      if (!silent) {
-        alert(
-          `${missing.length} event(s) have no Event ID.\n` +
-          `These usually have a clip with an empty Name — open the clip and set one.`
-        )
-      }
-      return null
+      alert(
+        `${missing.length} event(s) have no Event ID.\n` +
+        `These usually have a clip with an empty Name — open the clip and set one.`
+      )
+      return
     }
 
     const validations = validateEventIds(kit)
     const invalid = validations.filter((v) => !v.valid)
     if (invalid.length > 0) {
       const ids = invalid.map((v) => `  "${v.eventId}"`).join('\n')
-      if (!silent) {
-        alert(
-          `${invalid.length} event(s) have an Event ID that breaks the contracts format ` +
-          `(category.name, only [a-z 0-9 _ -]):\n${ids}`
-        )
-      }
-      return null
+      alert(
+        `${invalid.length} event(s) have an Event ID that breaks the contracts format ` +
+        `(category.name, only [a-z 0-9 _ -]):\n${ids}`
+      )
+      return
     }
-    const result = await exportKitAsPack(kit, clips)
-    const { writeKitFolder } = await import('@/utils/localDirectory')
-    const zip = await import('jszip').then((m) => m.default)
-    const zipData = await zip.loadAsync(result.blob)
-    const files: { path: string; blob: Blob }[] = []
-    for (const [path, entry] of Object.entries(zipData.files)) {
-      if (!entry.dir) {
-        const blob = await entry.async('blob')
-        const relPath = path.includes('/') ? path.substring(path.indexOf('/') + 1) : path
-        if (relPath) files.push({ path: relPath, blob })
-      }
-    }
-    const packId = kit.name.toLowerCase().replace(/[^a-z0-9-]/g, '-') || 'unnamed-kit'
-    // Version が変わっていたら、上書き前に旧 manifest.json を history/ に退避する。
-    // 音声データは容量の都合で残さないが、manifest は小さいので履歴として残しておく。
-    // 同じ version で上書きするとき (=実質的な編集) はコピーしない。
-    try {
-      const thisKitDir = await outRoot.getDirectoryHandle(packId, { create: false })
-      const oldHandle = await thisKitDir.getFileHandle('manifest.json', { create: false })
-      const oldText = await (await oldHandle.getFile()).text()
-      const oldVersion = String((JSON.parse(oldText) as { version?: unknown }).version ?? '')
-      if (oldVersion && oldVersion !== (kit.version || '1.0.0')) {
-        const histDir = await thisKitDir.getDirectoryHandle('history', { create: true })
-        const safeVer = oldVersion.replace(/[^a-zA-Z0-9_.-]/g, '_')
-        const archHandle = await histDir.getFileHandle(`manifest-${safeVer}.json`, { create: true })
-        const w = await archHandle.createWritable()
-        await w.write(oldText)
-        await w.close()
-      }
-    } catch {
-      // 既存 manifest が無い、または読めない → 初回保存としてスキップ
-    }
-    // Race-condition guard: silent (auto-save) writes must not
-    // resurrect a kit that the user just removed via ×.  Caller
-    // checks `kits.some(k => k.id === kit.id)` before invoking us,
-    // but the async exportKitAsPack window is wide enough that the
-    // deletion can still race in.  Re-check just before the write.
-    if (silent) {
-      const stillExists = useLibraryStore.getState().kits.some((k) => k.id === kit.id)
-      if (!stillExists) return null
-    }
-    await writeKitFolder(outRoot, packId, files)
-    return { blob: result.blob, packId }
-  }, [kit, clips, outRoot])
 
-  // Auto-save status, surfaced as a tiny indicator in the deploy bar.
-  // 'idle': nothing to save (last write was ahead of state)
-  // 'pending': we have unsaved changes, debounce timer is running
-  // 'saving': writing to disk now
-  // 'saved': just finished a write
-  // 'error': last save failed
-  type AutoSaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error'
-  const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus>('idle')
-  const [autoSaveError, setAutoSaveError] = useState<string>('')
-  const lastBuildRef = useRef<{ blob: Blob; packId: string } | null>(null)
-  const isMountedRef = useRef(true)
-  useEffect(() => () => { isMountedRef.current = false }, [])
-
-  // Debounced auto-save — fires 600 ms after the last kit / clips
-  // change. Skips silently when the kit name fails validation
-  // (otherwise we'd repeatedly alert the user mid-typing). We rebuild
-  // the full ZIP so Deploy has a fresh blob without re-running
-  // exportKitAsPack on the click.
-  //
-  // Race condition guard (2026-04-28): when the user clicks ×, we
-  // archive the kit folder and remove it from the kits store. But the
-  // debounce timer that's already in flight still fires and writes the
-  // folder back. The hard guard is an explicit re-check inside the
-  // timer body — `useLibraryStore.getState().kits.some(k => k.id === kit.id)`
-  // — done AFTER the clearTimeout cleanup window has passed. If the
-  // kit was removed, the auto-save bails out before touching disk.
-  useEffect(() => {
-    if (!outRoot) return
-    if (validateKitName(kit.name)) return
-    // Note: we no longer skip when events.length === 0. A brand-new
-    // kit should still materialise as `<packId>/manifest.json` on disk
-    // so the user immediately sees the folder appear in their Explorer
-    // alongside their other kits.
-    setAutoSaveStatus('pending')
-    const handle = window.setTimeout(async () => {
-      // Bail out if the kit was deleted in the meantime — see comment
-      // above for why this is necessary even though the cleanup also
-      // calls clearTimeout.
-      const stillExists = useLibraryStore.getState().kits.some((k) => k.id === kit.id)
-      if (!stillExists || !isMountedRef.current) {
-        setAutoSaveStatus('idle')
-        return
-      }
-      try {
-        setAutoSaveStatus('saving')
-        useLibraryStore.getState().setLocalFsStatus(
-          'saving', `kit "${kit.name}" 保存中…`,
-        )
-        const out = await buildAndSave({ silent: true })
-        if (!isMountedRef.current) return
-        // One more check after the async build — the user may have
-        // pressed × while we were generating the ZIP.
-        const stillExistsAfter = useLibraryStore.getState().kits.some((k) => k.id === kit.id)
-        if (!stillExistsAfter) {
-          setAutoSaveStatus('idle')
-          return
-        }
-        if (out) {
-          lastBuildRef.current = out
-          setAutoSaveStatus('saved')
-          setAutoSaveError('')
-          useLibraryStore.getState().setLocalFsStatus(
-            'saved', `kit "${kit.name}" を保存`,
-          )
-        } else {
-          setAutoSaveStatus('idle')
-        }
-      } catch (err) {
-        if (!isMountedRef.current) return
-        setAutoSaveStatus('error')
-        const msg = err instanceof Error ? err.message : String(err)
-        setAutoSaveError(msg)
-        useLibraryStore.getState().setLocalFsStatus(
-          'error', `kit "${kit.name}" 保存失敗: ${msg}`,
-        )
-      }
-    }, 600)
-    return () => window.clearTimeout(handle)
-  // We deliberately depend on the kit object identity + clips so
-  // every store update retriggers the timer.
-  }, [kit, clips, outRoot, buildAndSave])
-
-  const handleDeploy = useCallback(async () => {
-    if (!outRoot) { toast('Select an output folder first', 'error'); return }
-    if (!managerConnected || devices.length === 0) { toast('No devices', 'error'); return }
     setIsExporting(true)
-    // Reset progress for every target up front so the bars render
-    // immediately at 0% instead of popping in once Helper starts
-    // pushing progress messages.
     setProgressByIp(
       Object.fromEntries(devices.map((d) => [d.ipAddress, { pct: 0, msg: 'queued…' }])),
     )
     try {
-      // Prefer the auto-saved blob if it's fresh (autoSaveStatus === 'saved'
-      // means the latest state has already been written to disk + a blob
-      // is sitting in lastBuildRef). Otherwise build now.
-      const out = autoSaveStatus === 'saved' && lastBuildRef.current
-        ? lastBuildRef.current
-        : await buildAndSave()
-      if (!out) return
+      // Prefer the cached ZIP from the most recent auto-save. If none
+      // exists (e.g. user just changed something and the debounce
+      // hasn't fired yet), force a synchronous flush to get a fresh
+      // blob aligned with the on-disk folder.
+      const store = useLibraryStore.getState()
+      const out = store.getLastBuiltKit(kit.id) ?? await store.flushKitFolderNow(kit.id)
+      if (!out) { toast('Build failed', 'error'); return }
       const ab = await out.blob.arrayBuffer(); const bytes = new Uint8Array(ab)
       let bin = ''; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
       send({ type: 'deploy_kit_data', payload: { kit_id: out.packId, zip_base64: btoa(bin), targets: devices.map((d) => d.ipAddress) }})
       toast(`Sent "${out.packId}" to ${devices.length} device(s)`, 'success')
     } catch (err) { toast(`Deploy failed: ${err instanceof Error ? err.message : err}`, 'error') }
     finally { setIsExporting(false) }
-  }, [autoSaveStatus, buildAndSave, managerConnected, devices, send, outRoot, setIsExporting, toast])
+  }, [kit, managerConnected, devices, send, outRoot, setIsExporting, toast])
 
-  // Auto-save status copy shown beside the Deploy button. Blocker
-  // conditions take precedence so the user always knows the precise
-  // reason saving isn't happening.
+  // Status copy shown beside the Deploy button. Blocker conditions
+  // take precedence so the user always knows the precise reason
+  // saving isn't happening.
   const autoSaveLabel = (() => {
     if (!outRoot) return '⚠ Library / Kit Folder を選択してください'
     if (validateKitName(kit.name)) return '⚠ kit 名が無効'
-    switch (autoSaveStatus) {
-      case 'pending': return '保存待機…'
+    // fsLastMsg references the last touched kit name — show the
+    // current kit's status only when the message refers to it, so
+    // editing kit B doesn't flash kit A's "saved" label.
+    const refersToThisKit = fsLastMsg.includes(`"${kit.name}"`)
+    if (!refersToThisKit) return ''
+    switch (fsStatus) {
       case 'saving': return '保存中…'
       case 'saved': return '✓ 自動保存済み'
-      case 'error': return `✗ 保存失敗: ${autoSaveError}`
+      case 'error': return `✗ ${fsLastMsg}`
       case 'idle':
       default: return ''
     }

@@ -63,15 +63,28 @@ export function validateEventIds(
   }))
 }
 
-/** クリップファイル名を安全な形にする。
- *  sourceFilename が "HandDemo/foo.wav" のようにサブフォルダを含む場合でも
- *  ベース名のみ取り出し、Pack 内では常に install-clips/ 直下に配置する。
- *  （ファームは install-clips/ 直下にのみ音声ファイルを期待する） */
-function clipFileName(clip: LibraryClip): string {
-  const srcBase = (clip.sourceFilename || '').split('/').pop() || ''
-  const base = srcBase || `${clip.name}.wav`
-  // 拡張子が .wav でなければ付ける（元ファイルが mp3 等でも保存時は WAV blob）
-  return base.endsWith('.wav') ? base : base.replace(/\.[^.]+$/, '.wav')
+/**
+ * Resolve the kit-internal filename for a KitEvent.
+ *
+ * If `event.localName` is set (kit-side rename), use it verbatim
+ * — this is the user's intended on-disk name inside install-clips/
+ * and stays decoupled from the library clip. Otherwise fall back to
+ * the clip's sourceFilename basename, then to clip.name.
+ *
+ * Always normalised to a `.wav` extension; firmware accepts only WAV.
+ */
+function eventFileName(event: { localName?: string }, clip: LibraryClip): string {
+  let base: string
+  if (event.localName && event.localName.trim()) {
+    base = event.localName.trim()
+  } else {
+    const srcBase = (clip.sourceFilename || '').split('/').pop() || ''
+    base = srcBase || `${clip.name}`
+  }
+  // Strip extension, then re-append .wav. Sanitise stray slashes /
+  // OS-illegal chars so the user-edited name can't escape the folder.
+  const stem = base.replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]/g, '_')
+  return `${stem || 'clip'}.wav`
 }
 
 export interface ExportResult {
@@ -173,7 +186,7 @@ export async function exportKitAsPack(
 
     if (mode === 'command') {
       // ファイル名の重複回避 (command namespace)
-      let fname = clipFileName(clip)
+      let fname = eventFileName(ev, clip)
       if (usedCommandNames.has(fname)) {
         const base = fname.replace(/\.wav$/, '')
         let n = 2
@@ -206,7 +219,7 @@ export async function exportKitAsPack(
       // stream_clip / stream_source(clip あり): SDK import 用に stream-clips/ に配置。
       // stream_source の clip は Unity SDK が AudioSource のデフォルトクリップとして使用する。
       // device binary の install-clips/ には含めない点は stream_clip と同じ。
-      let fname = clipFileName(clip)
+      let fname = eventFileName(ev, clip)
       if (usedStreamNames.has(fname)) {
         const base = fname.replace(/\.wav$/, '')
         let n = 2

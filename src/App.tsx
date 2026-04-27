@@ -4,7 +4,6 @@ import { DisplayEditor } from '@/components/display/DisplayEditor'
 import { KitManager } from '@/components/kit/KitManager'
 import { Devices } from '@/components/devices/Devices'
 import { LogDrawer } from '@/components/log/LogDrawer'
-import { LocalFsStatus } from '@/components/common/LocalFsStatus'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import './App.css'
 
@@ -58,7 +57,6 @@ export function App() {
         {activeTab === 'display' && <DisplayEditor />}
         {activeTab === 'devices' && <Devices />}
       </main>
-      <LocalFsStatus />
       <LogDrawer />
     </div>
   )

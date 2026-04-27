@@ -18,6 +18,12 @@ export interface KitEventRowProps {
   onDelete: () => void
   onDragOverRow: (e: DragEvent) => void
   dragOverIndicator: boolean
+  /**
+   * Rename the underlying clip from inside the kit. The library is
+   * still the master — the same clip in any other kit will pick up
+   * the new name and have its eventId recomposed automatically.
+   */
+  onRenameCommit?: (next: string) => void | Promise<void>
 }
 
 interface ModeOption {
@@ -59,23 +65,25 @@ export function KitEventRow({
   onDelete,
   onDragOverRow,
   dragOverIndicator,
+  onRenameCommit,
 }: KitEventRowProps) {
   const mode = event.mode ?? 'command'
 
   // clip name / details — same for all modes.
   // stream_source も stream-clips/ に WAV を持つ (Unity SDK が AudioSource の
   // デフォルトクリップとして参照する)。clip 未設定時のみフォールバック表示。
-  const name = clip?.name ?? '(missing clip)'
+  // event.localName (kit-local rename) があればそれを優先 — library や
+  // 他の kit に影響を与えない。
+  const name = event.localName ?? clip?.name ?? '(missing clip)'
   const details = clip
     ? `${Math.round(clip.duration * 1000)}ms | ${clip.channels === 1 ? 'Mono' : 'Stereo'} | ${clip.sampleRate / 1000}kHz | ${formatBytes(clip.fileSize)}`
     : undefined
   const tags = clip?.tags
 
-  // Kit-side cards are intentionally non-editable: editing the clip
-  // here would mutate the same LibraryClip in the library too, which
-  // contradicts the new "kit references library, library is the
-  // source of truth" model. Click the clip in the Library panel to
-  // edit name / note / tags.
+  // Renaming from a kit row mutates the underlying clip — same as
+  // the library card. Every kit referencing this clip rebuilds its
+  // eventId (`<kitName>.<clipName>`) and re-flushes its folder, so
+  // file names on disk track event names everywhere.
   const cardActions: { label: string; onClick: () => void; title: string }[] = []
 
   return (
@@ -100,6 +108,7 @@ export function KitEventRow({
         wiper={null}
         drag={{ type: DND_TYPE_KIT_EVENT, payload: JSON.stringify({ kitEventId: event.id }), effect: 'move', dragTitle: 'ドラッグして並び替え' }}
         actions={cardActions}
+        onRenameCommit={clip && onRenameCommit ? (next) => { void onRenameCommit(next) } : undefined}
       />
       <aside className="kit-event-side">
         <div className="kit-event-side-mode-group">

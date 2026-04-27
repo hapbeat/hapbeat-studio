@@ -167,6 +167,17 @@ export interface KitEvent {
    * null if not captured.
    */
   deviceWiper: number | null
+  /**
+   * Kit-local clip name. When set, overrides the library clip's name
+   * for this event's display, eventId composition, and on-disk
+   * `install-clips/<localName>.wav` filename. Kit-side renames write
+   * here so the library and any other kit referencing the same clip
+   * are not affected.
+   *
+   * Audio data still comes from the library clip referenced by clipId
+   * (kits don't currently own audio bytes).
+   */
+  localName?: string
 }
 
 /** Library view layout mode */

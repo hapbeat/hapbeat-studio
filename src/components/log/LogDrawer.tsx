@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useLogStore } from '@/stores/logStore'
+import { LocalFsStatus } from '@/components/common/LocalFsStatus'
 import './LogDrawer.css'
 
 /**
@@ -112,6 +113,7 @@ export function LogDrawer() {
           {entries.length} 行{subscribedIp ? ` · ${subscribedIp} 購読中` : ''}
         </span>
         <span style={{ flex: 1 }} />
+        <LocalFsStatus />
         <button className="log-drawer-clear" onClick={clear}>クリア</button>
       </div>
       {visible && (

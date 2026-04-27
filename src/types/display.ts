@@ -44,6 +44,7 @@ export type ButtonActionType =
   | 'position_dec'
   | 'volume_up'
   | 'volume_down'
+  | 'wifi_select'
 
 /** Hold 動作モード: momentary=離したら戻す, latch=1回押しと同じ */
 export type HoldMode = 'momentary' | 'latch'

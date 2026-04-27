@@ -28,8 +28,10 @@ import {
   readMetadataJson,
   scanKitOutputFolder,
   archiveKitFolder,
+  writeKitFolder,
   type DiscoveredKit,
 } from '@/utils/localDirectory'
+import { exportKitAsPack, toPackId } from '@/utils/kitExporter'
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -128,14 +130,40 @@ interface LibraryState {
    * archive / metadata flush). The footer reads this to surface a
    * single Studio-wide status pill so the user knows their edits are
    * really hitting disk.
+   *
+   * - saving: a write is in flight
+   * - saved: write landed
+   * - retrying: a write failed but auto-retry is in progress
+   *   (warning, not an error — the user need not act)
+   * - error: retry budget exhausted, the user must intervene
    */
-  localFsStatus: 'idle' | 'saving' | 'saved' | 'error'
+  localFsStatus: 'idle' | 'saving' | 'saved' | 'retrying' | 'error'
   localFsLastMsg: string
   localFsLastTs: number
   setLocalFsStatus: (
     status: LibraryState['localFsStatus'],
     msg?: string,
   ) => void
+
+  /**
+   * Build the kit ZIP and write `<outRoot>/<packId>/` to disk *now*.
+   * Validates silently — invalid kits / missing outRoot return null.
+   * Updates the per-kit ZIP cache used by Deploy.
+   */
+  flushKitFolderNow: (kitId: string) => Promise<{ blob: Blob; packId: string } | null>
+  /**
+   * Debounced wrapper around flushKitFolderNow. Replaces any pending
+   * timer for the same kit. Pass delayMs=0 to flush on the next
+   * microtask without awaiting (used by createKit to make the folder
+   * pop up in Explorer immediately).
+   */
+  scheduleKitFlush: (kitId: string, delayMs?: number) => void
+  /** Cancel any pending flush for kitId (called from removeKit so the
+   *  archived folder is not recreated by a stale debounce timer). */
+  cancelKitFlush: (kitId: string) => void
+  /** Latest ZIP build for a kit, populated by flushKitFolderNow. Deploy
+   *  reads from here to avoid rebuilding on click. */
+  getLastBuiltKit: (kitId: string) => { blob: Blob; packId: string } | undefined
 
   /** Clip id currently open in the inline editor (Clips panel). Set from
    *  either the Clips panel itself or from a Kit event row's Edit action so
@@ -275,6 +303,55 @@ async function saveKitsMetaToDir(handle: FileSystemDirectoryHandle, kits: KitDef
   await writeMetadataJson(handle, KITS_META_FILE, kits)
 }
 
+// ---- Kit folder persistence (module-level state) ------------------------
+//
+// Per-kit debounce timers, last-written packId (for rename → archive
+// old folder) and last-built ZIP cache (for Deploy). These live outside
+// zustand state because they're internal bookkeeping that should not
+// trigger React re-renders.
+
+const kitFlushTimers = new Map<string, number>()
+const lastWrittenPackId = new Map<string, string>()
+const lastBuiltKit = new Map<string, { blob: Blob; packId: string }>()
+
+/**
+ * Per-kit flush mutex. Prevents two `flushKitFolderNow` calls for the
+ * same kit from interleaving — the File System Access API throws
+ * `InvalidStateError` ("operation that depends on state cached in an
+ * interface object …") when `getFileHandle` / `getFile` reads against
+ * a directory that another concurrent call is in the middle of
+ * overwriting. We chain new requests onto the in-flight promise so
+ * each kit's writes are strictly serialized.
+ */
+const kitFlushChain = new Map<string, Promise<unknown>>()
+
+/**
+ * Per-kit auto-retry state. When `flushKitFolderNow` fails (typically
+ * a transient `InvalidStateError` from a racy directory read), we
+ * schedule another attempt after exponential backoff so the user
+ * never has to manually retry. A successful flush — or a fresh user
+ * action arriving via scheduleKitFlush — resets the attempt counter.
+ */
+const retryAttempts = new Map<string, number>()
+const retryTimers = new Map<string, number>()
+const RETRY_MAX_ATTEMPTS = 8
+function retryDelayMs(attempt: number): number {
+  // 500, 1000, 2000, 4000, 5000, 5000, …
+  return Math.min(500 * 2 ** (attempt - 1), 5000)
+}
+
+/**
+ * Per-kit pending operation description. Each mutation sets a
+ * human-readable string (e.g. `kit "X" の "old.wav" → "new.wav"`)
+ * which the status pill surfaces while the flush is queued and once
+ * it lands on disk. Coalesced mutations show the *latest* message.
+ */
+const lastOpMessage = new Map<string, string>()
+function setOp(kitId: string, msg: string) {
+  lastOpMessage.set(kitId, msg)
+  useLibraryStore.getState().setLocalFsStatus('saving', msg)
+}
+
 export const useLibraryStore = create<LibraryState>((set, get) => ({
   clips: [],
   isLoading: false,
@@ -305,6 +382,208 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       localFsLastTs: Date.now(),
     })
   },
+
+  // ---- Kit folder persistence -------------------------------------------
+
+  flushKitFolderNow: async (kitId) => {
+    // Serialize concurrent flushes for the same kit. The actual work
+    // runs in `doFlush`; if a flush is already in flight, we await it
+    // first then run our own (so the latest store state hits disk last).
+    const doFlush = async (): Promise<{ blob: Blob; packId: string } | null> => {
+    const state = get()
+    const kit = state.kits.find((k) => k.id === kitId)
+    if (!kit) return null
+    if (validateKitName(kit.name)) return null
+    const outRoot = state.kitDirHandle ?? state.workDirHandle
+    if (!outRoot) return null
+
+    // The mutation that scheduled this flush set 'saving' with a
+    // descriptive op message. If no op message is recorded (e.g. a
+    // direct flushKitFolderNow call from the Deploy code path), we
+    // intentionally don't broadcast a vague "kit X を保存" — that
+    // confuses the user. Only error / retry surface a fallback so
+    // problems are never silent.
+    const opMsg = lastOpMessage.get(kit.id)
+    try {
+      const result = await exportKitAsPack(kit, state.clips)
+
+      // Race-condition guard: kit may have been removed (× clicked)
+      // while exportKitAsPack was running. Bail before any disk write.
+      if (!useLibraryStore.getState().kits.some((k) => k.id === kit.id)) {
+        return null
+      }
+
+      const zip = (await import('jszip')).default
+      const zipData = await zip.loadAsync(result.blob)
+      const files: { path: string; blob: Blob }[] = []
+      for (const [path, entry] of Object.entries(zipData.files)) {
+        if (!entry.dir) {
+          const blob = await entry.async('blob')
+          // exportKitAsPack puts everything under `<packId>/` — strip
+          // that prefix so writeKitFolder rebuilds the same layout.
+          const relPath = path.includes('/') ? path.substring(path.indexOf('/') + 1) : path
+          if (relPath) files.push({ path: relPath, blob })
+        }
+      }
+      const packId = toPackId(kit.name)
+
+      // Rename: if this kit was previously written under a different
+      // packId, archive the stale folder so it stops appearing in OS
+      // Explorer. The new folder is written below.
+      const prevPackId = lastWrittenPackId.get(kit.id)
+      if (prevPackId && prevPackId !== packId) {
+        try { await archiveKitFolder(outRoot, prevPackId) } catch { /* ignore */ }
+      }
+
+      // Version-bump history: snapshot the existing manifest under
+      // history/manifest-<oldVersion>.json before overwriting. WAVs
+      // aren't kept (size cost) — just the small manifest.
+      try {
+        const thisKitDir = await outRoot.getDirectoryHandle(packId, { create: false })
+        const oldHandle = await thisKitDir.getFileHandle('manifest.json', { create: false })
+        const oldText = await (await oldHandle.getFile()).text()
+        const oldVersion = String((JSON.parse(oldText) as { version?: unknown }).version ?? '')
+        if (oldVersion && oldVersion !== (kit.version || '1.0.0')) {
+          const histDir = await thisKitDir.getDirectoryHandle('history', { create: true })
+          const safeVer = oldVersion.replace(/[^a-zA-Z0-9_.-]/g, '_')
+          const archHandle = await histDir.getFileHandle(`manifest-${safeVer}.json`, { create: true })
+          const w = await archHandle.createWritable()
+          await w.write(oldText)
+          await w.close()
+        }
+      } catch { /* no existing manifest — first save */ }
+
+      await writeKitFolder(outRoot, packId, files)
+
+      // Prune stale WAVs in install-clips/ and stream-clips/. The
+      // folder is the on-disk projection of the latest manifest, so
+      // anything not in the freshly written `files` set is leftover
+      // from a previous version (rename, removed event, mode swap).
+      const keep = new Set(files.map((f) => f.path))
+      try {
+        const kitDir = await outRoot.getDirectoryHandle(packId)
+        for (const subName of ['install-clips', 'stream-clips'] as const) {
+          let sub: FileSystemDirectoryHandle
+          try {
+            sub = await kitDir.getDirectoryHandle(subName)
+          } catch { continue /* sub-folder doesn't exist */ }
+          const stale: string[] = []
+          for await (const entry of sub.values()) {
+            if (entry.kind !== 'file') continue
+            if (!keep.has(`${subName}/${entry.name}`)) stale.push(entry.name)
+          }
+          for (const n of stale) {
+            try { await sub.removeEntry(n) } catch { /* ignore */ }
+          }
+        }
+      } catch { /* kit dir vanished — caller will see no folder */ }
+
+      lastWrittenPackId.set(kit.id, packId)
+      lastBuiltKit.set(kit.id, { blob: result.blob, packId })
+
+      // Success: reset retry bookkeeping for this kit.
+      retryAttempts.delete(kit.id)
+      const pendingRetry = retryTimers.get(kit.id)
+      if (pendingRetry !== undefined) {
+        window.clearTimeout(pendingRetry)
+        retryTimers.delete(kit.id)
+      }
+      lastOpMessage.delete(kit.id)
+
+      // Only surface a "saved" pill when there's an actual operation
+      // to report. Silent flushes (Deploy build) shouldn't broadcast.
+      if (opMsg) state.setLocalFsStatus('saved', opMsg)
+      return { blob: result.blob, packId }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('flushKitFolderNow failed:', err)
+
+      // Auto-retry with exponential backoff. Most failures are
+      // transient FS-API races (`InvalidStateError`) that resolve on
+      // the next attempt. A fresh user action via scheduleKitFlush
+      // resets the counter independently — see scheduleKitFlush.
+      const attempt = (retryAttempts.get(kit.id) ?? 0) + 1
+      retryAttempts.set(kit.id, attempt)
+      // Build a label even when the caller didn't seed an op message
+      // — failures must never be silent.
+      const label = opMsg ?? `kit "${kit.name}" の自動保存`
+      if (attempt <= RETRY_MAX_ATTEMPTS) {
+        // Soft state: warning, not error. The retry mechanism will
+        // recover on its own — the user doesn't have to do anything.
+        state.setLocalFsStatus(
+          'retrying',
+          `${label}（リトライ中... ${attempt}/${RETRY_MAX_ATTEMPTS}）`,
+        )
+        const existingTimer = retryTimers.get(kit.id)
+        if (existingTimer !== undefined) window.clearTimeout(existingTimer)
+        const delay = retryDelayMs(attempt)
+        const t = window.setTimeout(() => {
+          retryTimers.delete(kit.id)
+          void get().flushKitFolderNow(kit.id)
+        }, delay)
+        retryTimers.set(kit.id, t)
+      } else {
+        // Retry budget exhausted — this is a real failure that needs
+        // user intervention. Surface what was being attempted plus
+        // a hint at the most common recovery (re-pick the folder).
+        state.setLocalFsStatus(
+          'error',
+          `「${label}」が失敗しました (${msg}) — Library / Kit Folder を選び直して再試行してください`,
+        )
+      }
+      return null
+    }
+    } // end doFlush
+
+    const prev = kitFlushChain.get(kitId) ?? Promise.resolve()
+    const next = prev.catch(() => null).then(() => doFlush())
+    kitFlushChain.set(kitId, next)
+    try {
+      return await next
+    } finally {
+      // Clear only if still the latest in chain — otherwise leave it
+      // so the next pending flush waits on its predecessor.
+      if (kitFlushChain.get(kitId) === next) kitFlushChain.delete(kitId)
+    }
+  },
+
+  scheduleKitFlush: (kitId, delayMs = 400) => {
+    // Note: we deliberately do NOT touch retry timers / counters
+    // here. If a retry was pending, letting it fire on its original
+    // schedule lets disk catch up *sooner* than the new debounce
+    // window. The chain mutex inside flushKitFolderNow always reads
+    // the latest store state, so the retry writes whatever the user
+    // just typed (no stale data).
+    const existing = kitFlushTimers.get(kitId)
+    if (existing) window.clearTimeout(existing)
+    if (delayMs <= 0) {
+      // Run on next microtask without awaiting — caller doesn't block.
+      kitFlushTimers.delete(kitId)
+      void get().flushKitFolderNow(kitId)
+      return
+    }
+    const handle = window.setTimeout(() => {
+      kitFlushTimers.delete(kitId)
+      void get().flushKitFolderNow(kitId)
+    }, delayMs)
+    kitFlushTimers.set(kitId, handle)
+  },
+
+  cancelKitFlush: (kitId) => {
+    const existing = kitFlushTimers.get(kitId)
+    if (existing) {
+      window.clearTimeout(existing)
+      kitFlushTimers.delete(kitId)
+    }
+    const pendingRetry = retryTimers.get(kitId)
+    if (pendingRetry !== undefined) {
+      window.clearTimeout(pendingRetry)
+      retryTimers.delete(kitId)
+    }
+    retryAttempts.delete(kitId)
+  },
+
+  getLastBuiltKit: (kitId) => lastBuiltKit.get(kitId),
 
   loadLibrary: async () => {
     set({ isLoading: true })
@@ -621,6 +900,17 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           }
         }
         const params = (ev.parameters ?? {}) as { intensity?: number; loop?: boolean; device_wiper?: number }
+        // Recover the kit-local name from the on-disk filename. The
+        // file under install-clips/ / stream-clips/ is the source of
+        // truth — if its stem differs from the library clip's name,
+        // a kit-side rename is implied and we restore localName so
+        // the next flush keeps writing under the renamed filename.
+        let localName: string | undefined = undefined
+        if (clipId && ev.clip) {
+          const stem = (ev.clip.split('/').pop() || ev.clip).replace(/\.wav$/i, '')
+          const libClip = updatedClips.find((c) => c.id === clipId)
+          if (libClip && stem && stem !== libClip.name) localName = stem
+        }
         events.push({
           id: generateId(),
           eventId,
@@ -629,6 +919,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           loop: params.loop ?? false,
           intensity: typeof params.intensity === 'number' ? params.intensity : 0.5,
           deviceWiper: typeof params.device_wiper === 'number' ? params.device_wiper : null,
+          ...(localName !== undefined ? { localName } : {}),
         })
       }
 
@@ -656,6 +947,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       if (existingIdx >= 0) updatedKits[existingIdx] = kit
       else updatedKits.push(kit)
       await saveKit(kit)
+      // Track the packId we just imported so a subsequent kit rename
+      // archives this folder rather than orphaning it on disk.
+      lastWrittenPackId.set(kit.id, packId)
       importedCount++
     }
 
@@ -951,13 +1245,19 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (nameChanged) {
       const newName = updates.name as string
       const { kits } = get()
+      // Kit-local renames (event.localName !== undefined) are
+      // independent of the library — leave them alone. Only events
+      // that still derive their name from the library clip get their
+      // eventId recomposed.
       const refreshedKits = kits.map((k) => {
-        const touched = k.events.some((e) => e.clipId === id)
+        const touched = k.events.some((e) => e.clipId === id && e.localName === undefined)
         if (!touched) return k
         return {
           ...k,
           events: k.events.map((e) =>
-            e.clipId === id ? { ...e, eventId: composeKitEventId(k.name, newName) } : e
+            e.clipId === id && e.localName === undefined
+              ? { ...e, eventId: composeKitEventId(k.name, newName) }
+              : e
           ),
           updatedAt: new Date().toISOString(),
         }
@@ -965,7 +1265,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       set({ kits: refreshedKits })
       // Persist every touched kit
       for (const k of refreshedKits) {
-        if (k.events.some((e) => e.clipId === id)) await saveKit(k)
+        if (k.events.some((e) => e.clipId === id && e.localName === undefined)) {
+          await saveKit(k)
+          // The clip rename changes the WAV filename inside install-clips/
+          // and the eventId in manifest.json — re-flush every affected
+          // kit so the on-disk folder stays consistent.
+          get().scheduleKitFlush(k.id)
+        }
       }
     }
 
@@ -1087,12 +1393,20 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ kits: newKits, activeKitId: kit.id })
     const { workDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
+    // Materialize the kit folder immediately so the user sees it pop
+    // up in their OS file explorer right after "+ Kit". 0-delay path
+    // skips the debounce and runs on the next microtask.
+    setOp(kit.id, `kit "${kit.name}" を新規作成`)
+    get().scheduleKitFlush(kit.id, 0)
     return kit.id
   },
 
   removeKit: async (id) => {
     const kit = get().kits.find((k) => k.id === id)
     get().setLocalFsStatus('saving', `kit "${kit?.name ?? id}" を archive 移動中…`)
+    // Cancel any pending autosave so it doesn't recreate the folder
+    // we're about to archive.
+    get().cancelKitFlush(id)
     await deleteKit(id)
     const newKits = get().kits.filter((k) => k.id !== id)
     set({
@@ -1107,11 +1421,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // explorer. `scanKitOutputFolder` skips `_archive/`, so the kit
     // stops appearing in the UI on the next refresh.
     if (kit) {
-      const packId = kit.name.toLowerCase().replace(/[^a-z0-9-]/g, '-') || 'unnamed-kit'
+      // Archive whatever packId we last wrote (covers the rename case
+      // where in-memory kit.name no longer matches the folder on disk).
+      const packId = lastWrittenPackId.get(kit.id) ?? toPackId(kit.name)
       const outRoot = kitDirHandle ?? workDirHandle
       if (outRoot) {
         await archiveKitFolder(outRoot, packId)
       }
+      lastWrittenPackId.delete(kit.id)
+      lastBuiltKit.delete(kit.id)
     }
     get().setLocalFsStatus('saved', `kit "${kit?.name ?? id}" を _archive/ に移動`)
   },
@@ -1149,13 +1467,18 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ kits: newKits })
     const { workDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
+    const clipName = clip?.name ?? '?'
+    setOp(kitId, `kit "${kit.name}" に "${clipName}" を追加`)
+    get().scheduleKitFlush(kitId)
     return newEvent.id
   },
 
   removeEventFromKit: async (kitId, kitEventId) => {
-    const { kits } = get()
+    const { kits, clips } = get()
     const kit = kits.find((k) => k.id === kitId)
     if (!kit) return
+    const ev = kit.events.find((e) => e.id === kitEventId)
+    const clipName = ev?.localName ?? clips.find((c) => c.id === ev?.clipId)?.name ?? '?'
 
     const updated = { ...kit, events: kit.events.filter((e) => e.id !== kitEventId), updatedAt: new Date().toISOString() }
     await saveKit(updated)
@@ -1163,12 +1486,16 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ kits: newKits })
     const { workDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
+    setOp(kitId, `kit "${kit.name}" から "${clipName}" を削除`)
+    get().scheduleKitFlush(kitId)
   },
 
   updateKitEvent: async (kitId, kitEventId, updates) => {
-    const { kits } = get()
+    const { kits, clips } = get()
     const kit = kits.find((k) => k.id === kitId)
     if (!kit) return
+    const prev = kit.events.find((e) => e.id === kitEventId)
+    const prevName = prev?.localName ?? clips.find((c) => c.id === prev?.clipId)?.name ?? '?'
 
     const updated = {
       ...kit,
@@ -1180,6 +1507,24 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ kits: newKits })
     const { workDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
+
+    // Build a context-specific op message based on what changed.
+    let opMsg: string
+    if (updates.localName !== undefined && updates.localName !== prev?.localName) {
+      opMsg = `kit "${kit.name}" の "${prevName}" → "${updates.localName}" rename`
+    } else if (updates.mode !== undefined && updates.mode !== prev?.mode) {
+      opMsg = `kit "${kit.name}" の "${prevName}" mode → ${updates.mode}`
+    } else if (updates.intensity !== undefined && updates.intensity !== prev?.intensity) {
+      opMsg = `kit "${kit.name}" の "${prevName}" intensity → ${updates.intensity.toFixed(2)}`
+    } else if (updates.deviceWiper !== undefined && updates.deviceWiper !== prev?.deviceWiper) {
+      opMsg = `kit "${kit.name}" の "${prevName}" wiper → ${updates.deviceWiper}`
+    } else if (updates.loop !== undefined && updates.loop !== prev?.loop) {
+      opMsg = `kit "${kit.name}" の "${prevName}" loop ${updates.loop ? 'on' : 'off'}`
+    } else {
+      opMsg = `kit "${kit.name}" の "${prevName}" を更新`
+    }
+    setOp(kitId, opMsg)
+    get().scheduleKitFlush(kitId)
   },
 
   updateKit: async (id, updates) => {
@@ -1195,9 +1540,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (renamed) {
       const newName = updates.name as string
       updated.events = updated.events.map((e) => {
-        const clip = clips.find((c) => c.id === e.clipId)
-        const newEventId = clip
-          ? composeKitEventId(newName, clip.name)
+        // localName overrides the library clip name for this event.
+        const namePart = e.localName ?? clips.find((c) => c.id === e.clipId)?.name
+        const newEventId = namePart
+          ? composeKitEventId(newName, namePart)
           : e.eventId
         return { ...e, eventId: newEventId }
       })
@@ -1207,6 +1553,11 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ kits: newKits })
     const { workDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
+    const opMsg = renamed
+      ? `kit "${kit.name}" → "${updates.name}" rename`
+      : `kit "${kit.name}" を更新`
+    setOp(id, opMsg)
+    get().scheduleKitFlush(id)
   },
 
   // Tab / filter

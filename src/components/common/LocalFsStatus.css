@@ -1,23 +1,20 @@
-/* Footer status pill — sits above the LogDrawer. */
+/* Status pill — sits inline in the LogDrawer header, right of the
+   spacer and left of the Clear button so it doesn't crowd the title. */
 .localfs-status {
-  position: fixed;
-  left: 12px;
-  bottom: 38px;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 10px;
+  gap: 6px;
+  padding: 2px 8px;
   background: var(--bg-secondary);
   color: var(--text-primary);
   border: 1px solid var(--border);
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 11px;
   font-family: var(--font-ui);
   white-space: nowrap;
-  max-width: calc(100% - 200px);
+  max-width: 360px;
   overflow: hidden;
   text-overflow: ellipsis;
-  z-index: 50;
   pointer-events: auto;
   transition: opacity 600ms ease;
 }
@@ -38,6 +35,13 @@
 .localfs-status.saved .localfs-status-dot {
   background: var(--success);
 }
+.localfs-status.retrying .localfs-status-dot {
+  /* Warning yellow — temporary failure, auto-recovering. We pulse
+     the dot so the user sees that work is still ongoing. */
+  background: #fbbf24;
+  box-shadow: 0 0 6px rgba(251, 191, 36, 0.7);
+  animation: localfs-pulse 1.2s ease-in-out infinite;
+}
 .localfs-status.error .localfs-status-dot {
   background: var(--error);
   box-shadow: 0 0 4px rgba(244, 67, 54, 0.7);
@@ -49,7 +53,22 @@
 }
 .localfs-status.saving .localfs-status-label { color: var(--accent-light); }
 .localfs-status.saved .localfs-status-label { color: var(--success); }
+.localfs-status.retrying .localfs-status-label { color: #fbbf24; }
 .localfs-status.error .localfs-status-label { color: var(--error); }
+
+/* Retrying pill: subtle yellow background tint so it reads as a
+   warning at a glance, distinct from the neutral saving / saved
+   states and the harder error red. */
+.localfs-status.retrying {
+  background: rgba(251, 191, 36, 0.10);
+  border-color: rgba(251, 191, 36, 0.55);
+}
+/* Error pill: keep red text, but tone the bg/border down so it
+   surfaces clearly without screaming at the user. */
+.localfs-status.error {
+  background: rgba(244, 67, 54, 0.10);
+  border-color: rgba(244, 67, 54, 0.55);
+}
 
 .localfs-status-msg {
   color: var(--text-muted);

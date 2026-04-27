@@ -35,6 +35,7 @@ export function LocalFsStatus() {
       <span className="localfs-status-label">
         {status === 'saving' && '保存中…'}
         {status === 'saved' && '✓ 保存済み'}
+        {status === 'retrying' && '⟳ リトライ中'}
         {status === 'error' && '✗ 保存失敗'}
       </span>
       {msg && <span className="localfs-status-msg">{msg}</span>}
