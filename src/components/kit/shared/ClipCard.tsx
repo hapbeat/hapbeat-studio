@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { IntensityControl } from './IntensityControl'
 import { WiperBadge } from './WiperBadge'
 import { useToast } from '@/components/common/Toast'
@@ -61,8 +61,10 @@ export interface ClipCardProps {
     dragTitle?: string
   }
 
-  /** Extra drop handler on the whole card (used by kit reorder). */
-  onDragOver?: (e: DragEvent) => void
+  /** Legacy drop handler — accepted but no longer wired to the DOM.
+   *  The card is a pure click-target now (drag was removed per user
+   *  request). Kept on the props type for backwards compatibility. */
+  onDragOver?: (e: import('react').DragEvent) => void
   /** Extra CSS className (e.g. drag-over-indicator, active state) */
   extraClass?: string
 
@@ -154,29 +156,26 @@ export function ClipCard({
     if (e.key === 'Enter') { e.preventDefault(); commitRename() }
     else if (e.key === 'Escape') { e.preventDefault(); setRenaming(false); setDraftName(name) }
   }
-  const handleDragStart = drag
-    ? (e: DragEvent) => {
-      e.dataTransfer.setData(drag.type, drag.payload)
-      e.dataTransfer.effectAllowed = drag.effect ?? 'copy'
-    }
-    : undefined
+  // Drag is intentionally absent: per user request the card is a
+  // pure click-target. "+ Kit" and the sort selector are the only
+  // ways to add / reorder. The `drag` and `onDragOver` props are
+  // accepted but ignored to avoid touching every call site.
+  void drag; void onDragOver
 
   return (
     <div
-      // The whole card is the drag source now (no more ☰ handle): it
-      // matches OS-explorer affordances and frees up a chunk of empty
-      // space on the left of the header where the user's note tooltip
-      // can surface naturally on hover.
       className={`clip-card ${extraClass ?? ''} ${selected ? 'is-selected' : ''}`}
       data-card-id={dataCardId}
       title={title}
-      draggable={!!handleDragStart}
-      onDragStart={handleDragStart}
       onClick={onSelect}
       onDoubleClick={onDoubleClick}
-      onDragOver={onDragOver}
     >
-      {/* Row 1 — header: play / name / event-id */}
+      {/* Row 1 — header: play / name / spacer / event-id
+          The spacer between name and event-id (or trailing edge in
+          library mode) is what shows the note tooltip on hover. The
+          name span is sized to its text so clicking literally "on the
+          name" is what triggers rename — not the empty area to its
+          right. */}
       <div className="clip-card-header">
         <button
           className={`clip-card-play ${playing ? 'playing' : ''} ${playDisabled ? 'disabled' : ''}`}
@@ -224,6 +223,11 @@ export function ClipCard({
             {name}
           </span>
         )}
+        {/* Flexible spacer — eats remaining width so the event-id badge
+            stays right-aligned. The spacer carries no `title` of its
+            own, so hovering it falls back to the parent card's title
+            (which contains the note + meta summary). */}
+        <span className="clip-card-spacer" aria-hidden="true" />
         {eventId !== null && (
           <span
             className={`clip-card-event-id ${eventIdEmpty ? 'empty' : ''}`}

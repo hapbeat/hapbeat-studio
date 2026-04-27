@@ -79,9 +79,17 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 0;
-  flex: 1 1 auto;
+  /* The name span is sized to its text — clicking literally on the
+     name is what triggers rename. Empty space to the right is taken
+     by `.clip-card-spacer` whose hover surfaces the note tooltip. */
+  flex: 0 1 auto;
+  max-width: 60%;
   font-family: var(--font-ui);
+}
+.clip-card-spacer {
+  flex: 1 1 auto;
+  min-width: 12px;
+  align-self: stretch;
 }
 /* Cards in a context that allows rename (library) get a subtle hover
    underline so users discover the click-to-rename affordance. We use

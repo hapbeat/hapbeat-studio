@@ -556,13 +556,17 @@ function countClipsInTree(node: ClipTreeNode): number {
 }
 
 /** Tree の表示順（renderTreeNode の順）で flat 化した clip リスト。
- *  フォルダを先に再帰処理し、各レベルで clip を後に足す。 */
+ *  フォルダを先に再帰処理し、各レベルで clip を後に足す。
+ *
+ *  buildClipTree が clips を入力順 (= filteredClips の sort 順) で
+ *  push するので、ここでは並び替えしない — フォルダだけ名前順で
+ *  畳む。これによりユーザーがソート select を切り替えると tree
+ *  内のクリップ並びも追従する。 */
 function flattenTreeInRenderOrder(node: ClipTreeNode): LibraryClip[] {
   const result: LibraryClip[] = []
   const folders = [...node.children.values()].sort((a, b) => a.name.localeCompare(b.name))
   for (const f of folders) result.push(...flattenTreeInRenderOrder(f))
-  const clips = [...node.clips].sort((a, b) => a.name.localeCompare(b.name))
-  result.push(...clips)
+  result.push(...node.clips)
   return result
 }
 
@@ -660,11 +664,11 @@ function ClipsPanel() {
     return () => cancelAnimationFrame(raf)
   }, [selectedId, clips])
 
-  // 表示順と一致するナビゲーション順。tree mode では renderTreeNode の順で flat 化する。
+  // 表示順と一致するナビゲーション順。
+  // - flat mode: displayed をそのまま (filteredClips の sort 順)
+  // - tree mode: renderTreeNode 順で flat 化 (フォルダ名順 + 中の clip は filter 順)
   const orderedClips = useMemo(() => {
-    if (listMode === 'flat') {
-      return [...displayed].sort((a, b) => a.name.localeCompare(b.name))
-    }
+    if (listMode === 'flat') return [...displayed]
     return flattenTreeInRenderOrder(buildClipTree(displayed))
   }, [displayed, listMode])
 
@@ -766,8 +770,10 @@ function ClipsPanel() {
   )
 
   const renderTreeNode = (node: ClipTreeNode, isRoot: boolean): React.ReactNode => {
+    // Folders alphabetical (familiar from OS Explorer); clips inside
+    // each folder honour the global sort because buildClipTree pushed
+    // them in the order from `filteredClips()` (= filter.sortBy).
     const childFolders = [...node.children.values()].sort((a, b) => a.name.localeCompare(b.name))
-    const sortedClips = [...node.clips].sort((a, b) => a.name.localeCompare(b.name))
     const body = (
       <>
         {childFolders.map((child) => (
@@ -781,7 +787,7 @@ function ClipsPanel() {
             {renderTreeNode(child, false)}
           </TreeFolder>
         ))}
-        {sortedClips.map((c) => renderClipRow(c))}
+        {node.clips.map((c) => renderClipRow(c))}
       </>
     )
     return isRoot ? body : body
@@ -1265,7 +1271,7 @@ function KitEditor() {
                 <div className={`kit-details-inline ${dropActive ? 'drop-active' : ''}`}>
                   <div className="kit-meta-fields">
                     <label className="kit-meta-field">
-                      <span>Name <span className="field-hint">(英小文字 / 数字 / -, _ のみ — Event ID の category 部に使用)</span></span>
+                      <span>Name <span className="field-hint">英小文字 / 数字 / -, _ のみ</span></span>
                       <input
                         type="text"
                         value={activeKit.name}
@@ -1444,9 +1450,14 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
   const outRoot = kitDirHandle ?? workDirHandle
 
   /** Kit を ZIP 化して <outRoot>/<packId>/ に展開書き出し。
-   *  outRoot が必須 (未選択時は呼ばれない前提)。返り値は生成した ZIP Blob + packId。 */
-  const buildAndSave = useCallback(async () => {
+   *  outRoot が必須 (未選択時は呼ばれない前提)。返り値は生成した ZIP Blob + packId。
+   *
+   *  silent=true は auto-save パスから呼ばれる。バリデーション NG のとき
+   *  alert を出さずに null を返すだけ — user-typing 中に毎秒 alert が
+   *  飛んでくるのを避けるため。 */
+  const buildAndSave = useCallback(async (opts?: { silent?: boolean }) => {
     if (!outRoot) throw new Error('Output folder not selected')
+    const silent = opts?.silent ?? false
 
     // Hard validation — these are blockers, not warnings:
     // 1. Kit name must match the contracts regex (a-z 0-9 _ -)
@@ -1454,7 +1465,7 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
     //    (LIVE events stream live audio, no event_id needed)
     const kitErr = validateKitName(kit.name)
     if (kitErr) {
-      alert(`Kit name invalid: ${kitErr}`)
+      if (!silent) alert(`Kit name invalid: ${kitErr}`)
       return null
     }
 
@@ -1463,10 +1474,12 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
     )
     const missing = needsEventId.filter((e) => !e.eventId)
     if (missing.length > 0) {
-      alert(
-        `${missing.length} event(s) have no Event ID.\n` +
-        `These usually have a clip with an empty Name — open the clip and set one.`
-      )
+      if (!silent) {
+        alert(
+          `${missing.length} event(s) have no Event ID.\n` +
+          `These usually have a clip with an empty Name — open the clip and set one.`
+        )
+      }
       return null
     }
 
@@ -1474,10 +1487,12 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
     const invalid = validations.filter((v) => !v.valid)
     if (invalid.length > 0) {
       const ids = invalid.map((v) => `  "${v.eventId}"`).join('\n')
-      alert(
-        `${invalid.length} event(s) have an Event ID that breaks the contracts format ` +
-        `(category.name, only [a-z 0-9 _ -]):\n${ids}`
-      )
+      if (!silent) {
+        alert(
+          `${invalid.length} event(s) have an Event ID that breaks the contracts format ` +
+          `(category.name, only [a-z 0-9 _ -]):\n${ids}`
+        )
+      }
       return null
     }
     const result = await exportKitAsPack(kit, clips)
@@ -1516,18 +1531,51 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
     return { blob: result.blob, packId }
   }, [kit, clips, outRoot])
 
-  const handleSave = useCallback(async () => {
-    if (!outRoot) { toast('Select an output folder first', 'error'); return }
-    setIsExporting(true)
-    try {
-      const out = await buildAndSave()
-      if (out) {
-        const rootName = kitDirHandle?.name ?? workDirHandle?.name ?? ''
-        toast(`Saved to ${rootName}/${out.packId}/`, 'success')
+  // Auto-save status, surfaced as a tiny indicator in the deploy bar.
+  // 'idle': nothing to save (last write was ahead of state)
+  // 'pending': we have unsaved changes, debounce timer is running
+  // 'saving': writing to disk now
+  // 'saved': just finished a write
+  // 'error': last save failed
+  type AutoSaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error'
+  const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus>('idle')
+  const [autoSaveError, setAutoSaveError] = useState<string>('')
+  const lastBuildRef = useRef<{ blob: Blob; packId: string } | null>(null)
+  const isMountedRef = useRef(true)
+  useEffect(() => () => { isMountedRef.current = false }, [])
+
+  // Debounced auto-save — fires 600 ms after the last kit / clips
+  // change. Skips silently when the kit name fails validation
+  // (otherwise we'd repeatedly alert the user mid-typing). We rebuild
+  // the full ZIP so Deploy has a fresh blob without re-running
+  // exportKitAsPack on the click.
+  useEffect(() => {
+    if (!outRoot) return
+    if (kit.events.length === 0) return
+    if (validateKitName(kit.name)) return
+    setAutoSaveStatus('pending')
+    const handle = window.setTimeout(async () => {
+      try {
+        setAutoSaveStatus('saving')
+        const out = await buildAndSave({ silent: true })
+        if (!isMountedRef.current) return
+        if (out) {
+          lastBuildRef.current = out
+          setAutoSaveStatus('saved')
+          setAutoSaveError('')
+        } else {
+          setAutoSaveStatus('idle')
+        }
+      } catch (err) {
+        if (!isMountedRef.current) return
+        setAutoSaveStatus('error')
+        setAutoSaveError(err instanceof Error ? err.message : String(err))
       }
-    } catch (err) { toast(`Save failed: ${err instanceof Error ? err.message : err}`, 'error') }
-    finally { setIsExporting(false) }
-  }, [buildAndSave, outRoot, kitDirHandle, workDirHandle, setIsExporting, toast])
+    }, 600)
+    return () => window.clearTimeout(handle)
+  // We deliberately depend on the kit object identity + clips so
+  // every store update retriggers the timer.
+  }, [kit, clips, outRoot, buildAndSave])
 
   const handleDeploy = useCallback(async () => {
     if (!outRoot) { toast('Select an output folder first', 'error'); return }
@@ -1540,40 +1588,82 @@ function KitExportSection({ kit, clips, isExporting, setIsExporting, managerConn
       Object.fromEntries(devices.map((d) => [d.ipAddress, { pct: 0, msg: 'queued…' }])),
     )
     try {
-      const out = await buildAndSave()
+      // Prefer the auto-saved blob if it's fresh (autoSaveStatus === 'saved'
+      // means the latest state has already been written to disk + a blob
+      // is sitting in lastBuildRef). Otherwise build now.
+      const out = autoSaveStatus === 'saved' && lastBuildRef.current
+        ? lastBuildRef.current
+        : await buildAndSave()
       if (!out) return
       const ab = await out.blob.arrayBuffer(); const bytes = new Uint8Array(ab)
       let bin = ''; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
       send({ type: 'deploy_kit_data', payload: { kit_id: out.packId, zip_base64: btoa(bin), targets: devices.map((d) => d.ipAddress) }})
-      toast(`Saved + sent "${out.packId}" to ${devices.length} device(s)`, 'success')
+      toast(`Sent "${out.packId}" to ${devices.length} device(s)`, 'success')
     } catch (err) { toast(`Deploy failed: ${err instanceof Error ? err.message : err}`, 'error') }
     finally { setIsExporting(false) }
-  }, [buildAndSave, managerConnected, devices, send, outRoot, setIsExporting, toast])
+  }, [autoSaveStatus, buildAndSave, managerConnected, devices, send, outRoot, setIsExporting, toast])
 
-  const saveLabel = 'Save Kit'
-  const saveTitle = outRoot
-    ? `"${outRoot.name}/${kit.name.toLowerCase().replace(/[^a-z0-9-]/g, '-') || 'unnamed-kit'}/" に書き出す`
-    : 'Kit の保存先フォルダ (Library または Kit Folder) を先に指定してください'
+  // Auto-save status copy shown beside the Deploy button.
+  const autoSaveLabel = (() => {
+    if (!outRoot) return ''
+    if (validateKitName(kit.name)) return '⚠ kit 名が無効'
+    switch (autoSaveStatus) {
+      case 'pending': return '保存待機…'
+      case 'saving': return '保存中…'
+      case 'saved': return '✓ 自動保存済み'
+      case 'error': return `✗ 保存失敗: ${autoSaveError}`
+      case 'idle':
+      default: return ''
+    }
+  })()
 
   return (
     <div className="kit-export-section-wrap">
       <div className="kit-export-section">
-        <button className="library-btn primary" disabled={kit.events.length === 0 || isExporting || !outRoot} onClick={handleSave}
-          title={saveTitle}>
-          {isExporting ? '...' : saveLabel}</button>
-        <button className="library-btn primary" disabled={kit.events.length === 0 || isExporting || !managerConnected || devices.length === 0 || !outRoot}
+        <button
+          className="library-btn primary"
+          disabled={kit.events.length === 0 || isExporting || !managerConnected || devices.length === 0 || !outRoot}
           onClick={handleDeploy}
-          title="Save したうえで Helper 経由でデバイスに転送する">Deploy to Device</button>
-        {managerConnected && devices.length > 0 && <div className="kit-export-info">{devices.length} device(s)</div>}
-        {!managerConnected && <div className="kit-export-info muted">Helper offline</div>}
+          title="自動保存済み Kit を Helper 経由でデバイスに転送する"
+        >Deploy</button>
+
+        {/* Per-device deploy progress sits to the *right* of the
+            Deploy button — the user's eye stays on the same row.
+            Multiple devices stack vertically inside this column. */}
+        <div className="kit-deploy-progress-inline">
+          {Object.keys(progressByIp).length === 0 ? (
+            <span className="kit-export-info muted">
+              {!outRoot
+                ? 'Library または Kit Folder を選択してください'
+                : !managerConnected ? 'Helper offline'
+                : devices.length === 0 ? 'デバイスが見つかりません'
+                : autoSaveLabel || `${devices.length} device(s) — auto-save 待機中`}
+            </span>
+          ) : (
+            Object.entries(progressByIp).map(([ip, st]) => (
+              <div key={ip} className="kit-deploy-progress-row">
+                <div className="kit-deploy-progress-head">
+                  <span className="kit-deploy-progress-ip">{ip}</span>
+                  <span className="kit-deploy-progress-pct">{st.pct}%</span>
+                </div>
+                <div className="kit-deploy-progress-bar">
+                  <div
+                    className={`kit-deploy-progress-fill ${st.done ? (st.ok ? 'ok' : 'err') : ''}`}
+                    style={{ width: `${st.pct}%` }}
+                  />
+                </div>
+                <div className="kit-deploy-progress-msg">{st.msg}</div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
 
-      {/* Per-device deploy progress. Lives directly under the Deploy
-          button so the user's eye stays on the same column while a kit
-          uploads. We render rows for every IP that has progress state,
-          even after the deploy finishes — the user can see the final
-          message until the next deploy starts. */}
-      {Object.keys(progressByIp).length > 0 && (
+      {/* (legacy) the per-device progress block now lives inline next
+          to the Deploy button. We keep this empty branch for the rare
+          case where the user wants the stacked-below-bar layout — the
+          inline block above is the default. */}
+      {false && Object.keys(progressByIp).length > 0 && (
         <div className="kit-deploy-progress">
           {Object.entries(progressByIp).map(([ip, st]) => (
             <div key={ip} className="kit-deploy-progress-row">

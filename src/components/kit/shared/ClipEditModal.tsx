@@ -48,7 +48,7 @@ export function ClipEditModal({ clip, onClose, onUpdate, onArchive, onCommitRena
 
         <div className="clip-edit-fields">
           <label className="clip-edit-field">
-            <span>Name <span className="field-hint">(英小文字 / 数字 / -, _ のみ — kit 内の event-id の name 部に使う)</span></span>
+            <span>Name <span className="field-hint">英小文字 / 数字 / -, _ のみ</span></span>
             <input
               type="text"
               value={clip.name}
