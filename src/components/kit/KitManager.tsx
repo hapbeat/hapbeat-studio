@@ -93,10 +93,21 @@ export function KitManager() {
     }
   }, [])
 
-  if (isLoading) return <div className="kit-manager-wrapper"><div className="kit-loading">Loading...</div></div>
-
+  // Don't block the whole pane on `isLoading`. The reload flow (browser
+  // refresh) has to re-restore the FileSystem handle + re-scan the
+  // disk; gating render behind that just made the user stare at a
+  // "Loading…" splash for ~half a second every refresh. Render the
+  // normal layout immediately, with a small inline badge while the
+  // background sync is in flight. The library list is empty until
+  // the sync finishes — that's an OK transient state since the
+  // WorkDirBar is already visible.
   return (
     <div className="kit-manager-wrapper">
+      {isLoading && (
+        <div className="kit-loading-badge">
+          <span className="kit-loading-spinner" /> ライブラリ読込中…
+        </div>
+      )}
       {!workDirSupported && (
         <div className="browser-warning">
           Your browser does not support local folder access. Use <strong>Chrome</strong> or <strong>Edge</strong>.

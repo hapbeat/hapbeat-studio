@@ -1,18 +1,63 @@
+/* Sit at the bottom of the .app flex column instead of floating with
+ * `position: fixed`. When the drawer expands, .tab-content shrinks
+ * (it is the flexible row), so previously-overlapped content becomes
+ * scrollable inside its own viewport rather than disappearing under
+ * the drawer. flex-shrink:0 keeps the drawer from being squeezed.
+ * The default height (280px) is overridden by an inline style when
+ * the user drags the resize handle — only the collapsed state and
+ * the (rare) initial render fall back to this value. */
 .log-drawer {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
   background: var(--bg-secondary);
   border-top: 1px solid var(--border);
-  z-index: 50;
   display: flex;
   flex-direction: column;
-  max-height: 280px;
-  transition: max-height 200ms ease;
+  height: 280px;
+  flex-shrink: 0;
+  /* No height transition — fights with the drag handle pointer
+   * tracking. Re-add only on the collapsed toggle if needed. */
+  position: relative;
 }
 .log-drawer.collapsed {
-  max-height: 28px;
+  height: 28px !important;
+  transition: height 180ms ease;
+}
+
+/* Drag handle for vertical resize. 6 px tall + 4 px hover area
+ * extending up and down via padding so the hit-target is generous
+ * even when the cursor wobbles. */
+.log-drawer-resize {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: ns-resize;
+  background: transparent;
+  z-index: 1;
+}
+.log-drawer-resize::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 40px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--border-light);
+  transition: background 120ms ease;
+}
+.log-drawer-resize:hover::after,
+body.log-drawer-resizing .log-drawer-resize::after {
+  background: var(--accent);
+}
+
+/* Lock cursor to ns-resize across the whole document while a drag
+ * is in flight so the cursor doesn't flicker over text / buttons. */
+body.log-drawer-resizing,
+body.log-drawer-resizing * {
+  cursor: ns-resize !important;
+  user-select: none;
 }
 
 .log-drawer-header {
@@ -93,5 +138,6 @@
   color: var(--text-primary);
 }
 
-/* Page padding so content doesn't sit under the drawer when expanded. */
-body { padding-bottom: 28px; }
+/* The drawer is now in-flow at the bottom of the .app flex column,
+ * so no body padding is needed — .tab-content reserves its own
+ * scroll area above the drawer. */

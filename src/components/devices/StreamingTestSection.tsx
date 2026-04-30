@@ -1,135 +1,685 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MutableRefObject,
+} from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import type { DeviceInfo } from '@/types/manager'
 import { streamClip } from '@/utils/audioStreamer'
+import {
+  isFileSystemAccessSupported,
+  loadDirectoryHandle,
+  pickWorkDirectory,
+  saveDirectoryHandle,
+  verifyPermission,
+} from '@/utils/localDirectory'
 
 interface Props {
   device: DeviceInfo
+  /** Live intensity ref (0..100 %). Polled per chunk by streamClip
+   *  so dragging the slider re-modulates an in-flight stream without
+   *  rebuilding it. */
+  intensityRef: MutableRefObject<number>
+  /** Intensity slider value (0..100 %), controlled by the parent. */
+  intensityPct: number
+  onIntensityChange: (next: number) => void
 }
 
-const INTENSITY_KEY = 'hapbeat-studio-stream-intensity'
+/** Subset of audio/video extensions the browser can decode via
+ *  Web Audio API. Mirrors hapbeat-manager test_page._AUDIO_EXTS. */
+const AUDIO_EXTS = new Set([
+  '.wav', '.mp3', '.aac', '.m4a', '.ogg', '.flac',
+  '.mp4', '.mkv', '.avi', '.mov', '.webm',
+])
+
+/** Min visual column width in px. Mirrors Manager's _MIN_COL_W. */
+const MIN_COL_W = 170
+/** Hysteresis band — must move past +/- this many px past a column
+ *  boundary before n flips. Prevents scroll-bar-toggle flicker. */
+const COL_HYSTERESIS = 30
+
+interface DirEntry {
+  /** Display name including emoji prefix (📁 / 🎵 / 📁 ..). */
+  label: string
+  /** Stable id used for selection / keyboard nav. */
+  id: string
+  kind: 'parent' | 'dir' | 'file'
+  /** Only set when kind === 'dir' or 'file'. */
+  handle?: FileSystemDirectoryHandle | FileSystemFileHandle
+}
 
 /**
- * In-tab streaming test — pick a local audio file (any format the
- * browser can decode), resample to 16 kHz PCM16, and stream it to the
- * selected device via Helper's stream_begin/data/end pipeline.
+ * In-tab streaming test — pick a local folder, browse with the keyboard,
+ * stream the selected clip to the active device via the Helper.
  *
- * Replaces the Manager TestPage's folder browser + WAV player. The
- * folder navigation UX is intentionally pared back to a single file
- * picker — for repeated testing, the OS file picker remembers the
- * last directory.
+ * Mirrors the Manager TestPage folder browser:
+ *   - 📁 .. row to climb back up the nav stack (capped at the picked root)
+ *   - subfolders first, then audio files (sorted natural-ish)
+ *   - dynamic column count from container width (170 px min, hysteresis)
+ *   - ↑↓←→ moves selection on the grid, Space = play/pause/switch,
+ *     Enter / dbl-click = activate (folder → enter, file → stream)
+ *   - persistent `streamdir` handle in IndexedDB so re-opens skip the picker
  */
-export function StreamingTestSection({ device }: Props) {
+export function StreamingTestSection({
+  device,
+  intensityRef,
+  intensityPct,
+  onIntensityChange,
+}: Props) {
   const { send } = useHelperConnection()
-  const inputRef = useRef<HTMLInputElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
-  const [filename, setFilename] = useState('')
-  const [blob, setBlob] = useState<Blob | null>(null)
+  // Folder navigation. `navStack` is the path from the picked root
+  // (index 0) to the currently-displayed directory (last element).
+  // Going up = pop. Going into a subdir = push. We cannot escape the
+  // picked root because FileSystemDirectoryHandle has no parent.
+  const [navStack, setNavStack] = useState<FileSystemDirectoryHandle[]>([])
+  const [entries, setEntries] = useState<DirEntry[]>([])
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [scanError, setScanError] = useState<string | null>(null)
+
+  // Streaming state
   const [streaming, setStreaming] = useState(false)
+  const [paused, setPaused] = useState(false)
+  const [nowPlaying, setNowPlaying] = useState<string | null>(null)
+  const [progress, setProgress] = useState({ current: 0, total: 0, sr: 16000 })
+  const [seekPreview, setSeekPreview] = useState<number | null>(null) // 0..1 while dragging
   const [status, setStatus] = useState<{ kind: 'ok' | 'err' | 'muted'; msg: string } | null>(null)
-  const [intensity, setIntensity] = useState<number>(() => {
-    const v = Number(localStorage.getItem(INTENSITY_KEY))
-    return Number.isFinite(v) && v > 0 && v <= 200 ? v : 100
-  })
 
-  useEffect(() => {
-    localStorage.setItem(INTENSITY_KEY, String(intensity))
-  }, [intensity])
+  // Refs for streamClip control surface (read each chunk).
+  const pausedRef = useRef(false)
+  const seekRequestRef = useRef<number | null>(null)
+  pausedRef.current = paused
 
-  // Stop any in-flight stream when the device changes / the section unmounts.
+  // Grid sizing
+  const gridRef = useRef<HTMLDivElement | null>(null)
+  const [nCols, setNCols] = useState(2)
+  const nColsRef = useRef(nCols)
+  nColsRef.current = nCols
+
+  // Stop any in-flight stream when device changes / unmount.
   useEffect(() => {
     return () => abortRef.current?.abort()
   }, [device.ipAddress])
 
-  const onFile = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setFilename(file.name)
-    setBlob(file)
-    setStatus({ kind: 'muted', msg: `${formatSize(file.size)} 読み込み済み` })
-  }
+  // ------------------------------------------------------------------
+  // Folder loading
+  // ------------------------------------------------------------------
 
-  const startStream = async () => {
-    if (!blob) return
-    if (streaming) return
-    setStatus({ kind: 'muted', msg: 'デコード + リサンプリング中…' })
-    setStreaming(true)
-    const ctrl = new AbortController()
-    abortRef.current = ctrl
-    try {
-      // Helper resolves "this device" because the WS message will include
-      // the selected device IP — but streamClip itself doesn't pass an
-      // ip. We rely on Helper's _resolve_targets falling back to the
-      // explicit `target` payload field. Inject it via a thin wrapper.
-      const sendForStream = (msg: Parameters<typeof send>[0]) => {
-        send({
-          type: msg.type,
-          payload: { ...msg.payload, ip: device.ipAddress },
-        })
+  const listEntries = useCallback(
+    async (
+      stack: FileSystemDirectoryHandle[],
+    ): Promise<{ entries: DirEntry[]; error: string | null }> => {
+      const cur = stack[stack.length - 1]
+      if (!cur) return { entries: [], error: null }
+      const dirs: DirEntry[] = []
+      const files: DirEntry[] = []
+      try {
+        for await (const handle of cur.values()) {
+          if (handle.kind === 'directory') {
+            dirs.push({
+              label: `📁 ${handle.name}`,
+              id: `dir:${handle.name}`,
+              kind: 'dir',
+              handle,
+            })
+          } else if (handle.kind === 'file') {
+            const ext = extractExt(handle.name)
+            if (AUDIO_EXTS.has(ext)) {
+              files.push({
+                label: `🎵 ${handle.name}`,
+                id: `file:${handle.name}`,
+                kind: 'file',
+                handle,
+              })
+            }
+          }
+        }
+      } catch (err) {
+        return { entries: [], error: `フォルダ読込失敗: ${String((err as Error).message ?? err)}` }
       }
-      setStatus({ kind: 'muted', msg: 'ストリーミング送信中…' })
-      await streamClip(blob, sendForStream, {
-        intensity: intensity / 100,
-        signal: ctrl.signal,
-      })
-      setStatus({ kind: 'ok', msg: '完了' })
-    } catch (err) {
-      if ((err as Error).name === 'AbortError') {
-        setStatus({ kind: 'muted', msg: '停止しました' })
-      } else {
-        setStatus({ kind: 'err', msg: `エラー: ${String(err)}` })
+      dirs.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }))
+      files.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }))
+      const out: DirEntry[] = []
+      // Parent row is always offered. When we're still inside the
+      // picked root it pops the navStack; when we're at the root it
+      // re-opens the directory picker scoped near the current dir so
+      // the user can pick a parent / sibling. FSAPI doesn't expose
+      // a parent handle to JS, so this is the closest analog to the
+      // Manager's "climb up to filesystem root" behavior.
+      if (stack.length >= 1) {
+        out.push({ label: '📁 .. (親フォルダ)', id: '__parent__', kind: 'parent' })
       }
-    } finally {
-      setStreaming(false)
-      abortRef.current = null
+      out.push(...dirs, ...files)
+      return { entries: out, error: null }
+    },
+    [],
+  )
+
+  const refreshEntries = useCallback(
+    async (stack: FileSystemDirectoryHandle[]) => {
+      const { entries: list, error } = await listEntries(stack)
+      setEntries(list)
+      setScanError(error)
+      // Default-select first non-parent entry on dir change.
+      const first = list.find((e) => e.kind !== 'parent')
+      setSelectedId(first ? first.id : null)
+    },
+    [listEntries],
+  )
+
+  // Restore persisted handle on mount.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      if (!isFileSystemAccessSupported()) return
+      const handle = await loadDirectoryHandle('streamdir')
+      if (cancelled || !handle) return
+      // Ask for permission silently — only re-prompt when the user
+      // clicks "参照…" if this fails. Read-only is enough.
+      const ok = await verifyPermission(handle, false).catch(() => false)
+      if (!ok || cancelled) return
+      const stack = [handle]
+      setNavStack(stack)
+      await refreshEntries(stack)
+    })()
+    return () => {
+      cancelled = true
     }
-  }
+  }, [refreshEntries])
 
-  const stopStream = () => {
+  // ------------------------------------------------------------------
+  // Grid sizing — ResizeObserver + hysteresis
+  // ------------------------------------------------------------------
+
+  useLayoutEffect(() => {
+    const el = gridRef.current
+    if (!el) return
+    const recompute = (w: number) => {
+      if (w < 10) return
+      const cur = nColsRef.current
+      const natural = Math.max(1, Math.floor(w / MIN_COL_W))
+      let next = cur
+      if (cur <= 0) {
+        next = natural
+      } else if (natural > cur && w >= (cur + 1) * MIN_COL_W + COL_HYSTERESIS) {
+        next = cur + 1
+      } else if (natural < cur && w < cur * MIN_COL_W - COL_HYSTERESIS && cur > 1) {
+        next = cur - 1
+      }
+      if (next !== cur) setNCols(next)
+    }
+    recompute(el.clientWidth)
+    const ro = new ResizeObserver((records) => {
+      for (const r of records) recompute(r.contentRect.width)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // ------------------------------------------------------------------
+  // Activation (Enter / dbl-click) — climb up, descend, or play
+  // ------------------------------------------------------------------
+
+  const enterDir = useCallback(
+    async (handle: FileSystemDirectoryHandle) => {
+      const stack = [...navStack, handle]
+      setNavStack(stack)
+      await refreshEntries(stack)
+    },
+    [navStack, refreshEntries],
+  )
+
+  /** Climb the nav stack. When already at the picked root we instead
+   *  prompt the directory picker, scoped at the current root, so the
+   *  user can pick a parent or sibling and effectively "escape" the
+   *  original sandbox. The browser only exposes parent dirs through
+   *  this dialog — there is no API to walk up programmatically. */
+  const goUp = useCallback(async () => {
+    if (navStack.length === 0) return
+    // Switching folders should also halt anything in-flight — otherwise
+    // the old stream keeps trickling chunks for a clip whose source
+    // folder isn't even visible anymore.
     abortRef.current?.abort()
-  }
+    if (navStack.length > 1) {
+      const stack = navStack.slice(0, -1)
+      setNavStack(stack)
+      await refreshEntries(stack)
+      return
+    }
+    if (!isFileSystemAccessSupported()) return
+    try {
+      // showDirectoryPicker accepts a handle as `startIn` — Chrome opens
+      // the dialog at that location, letting the user navigate to a
+      // parent directory and pick it.
+      const handle = await window.showDirectoryPicker({
+        id: 'hapbeat-streamdir',
+        mode: 'read',
+        startIn: navStack[0],
+      })
+      await saveDirectoryHandle(handle, 'streamdir')
+      const stack = [handle]
+      setNavStack(stack)
+      await refreshEntries(stack)
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
+      setStatus({ kind: 'err', msg: `フォルダ選択失敗: ${String(err)}` })
+    }
+  }, [navStack, refreshEntries])
+
+  const startStreamFromHandle = useCallback(
+    async (fileHandle: FileSystemFileHandle) => {
+      // Auto-replace any in-flight stream — abort then await briefly so
+      // STREAM_END from the old run lands before STREAM_BEGIN of the new.
+      abortRef.current?.abort()
+      await delay(20)
+
+      let blob: File
+      try {
+        blob = await fileHandle.getFile()
+      } catch (err) {
+        setStatus({ kind: 'err', msg: `ファイル読込失敗: ${String(err)}` })
+        return
+      }
+      setNowPlaying(blob.name)
+      setStatus({ kind: 'muted', msg: 'デコード + リサンプリング中…' })
+      setPaused(false)
+      pausedRef.current = false
+      seekRequestRef.current = null
+      setProgress({ current: 0, total: 0, sr: 16000 })
+      setStreaming(true)
+      const ctrl = new AbortController()
+      abortRef.current = ctrl
+
+      try {
+        const sendForStream: Parameters<typeof streamClip>[1] = (msg) => {
+          send({ type: msg.type, payload: { ...msg.payload, ip: device.ipAddress } })
+        }
+        setStatus({ kind: 'muted', msg: 'ストリーミング送信中…' })
+        await streamClip(blob, sendForStream, {
+          signal: ctrl.signal,
+          control: {
+            isPaused: () => pausedRef.current,
+            consumeSeek: () => {
+              const v = seekRequestRef.current
+              seekRequestRef.current = null
+              return v
+            },
+            getIntensity: () => intensityRef.current / 100,
+            onProgress: (current, total, sr) =>
+              setProgress({ current, total, sr }),
+          },
+        })
+        setStatus({ kind: 'ok', msg: '完了' })
+      } catch (err) {
+        if ((err as Error).name === 'AbortError') {
+          setStatus({ kind: 'muted', msg: '停止しました' })
+        } else {
+          setStatus({ kind: 'err', msg: `エラー: ${String(err)}` })
+        }
+      } finally {
+        if (abortRef.current === ctrl) {
+          setStreaming(false)
+          abortRef.current = null
+        }
+      }
+    },
+    [device.ipAddress, intensityRef, send],
+  )
+
+  const activateEntry = useCallback(
+    async (entry: DirEntry) => {
+      if (entry.kind === 'parent') {
+        await goUp()
+      } else if (entry.kind === 'dir' && entry.handle && entry.handle.kind === 'directory') {
+        await enterDir(entry.handle)
+      } else if (entry.kind === 'file' && entry.handle && entry.handle.kind === 'file') {
+        await startStreamFromHandle(entry.handle)
+      }
+    },
+    [goUp, enterDir, startStreamFromHandle],
+  )
+
+  // ------------------------------------------------------------------
+  // Toolbar handlers
+  // ------------------------------------------------------------------
+
+  const onBrowseDir = useCallback(async () => {
+    if (!isFileSystemAccessSupported()) {
+      setStatus({
+        kind: 'err',
+        msg: 'お使いのブラウザは File System Access API をサポートしていません (Chrome / Edge を推奨)',
+      })
+      return
+    }
+    // See goUp — picking a different root must also stop any in-flight
+    // stream so the player doesn't keep dripping chunks from a folder
+    // the user just left.
+    abortRef.current?.abort()
+    try {
+      const handle = await pickWorkDirectory('streamdir')
+      if (!handle) return
+      await saveDirectoryHandle(handle, 'streamdir')
+      const stack = [handle]
+      setNavStack(stack)
+      await refreshEntries(stack)
+    } catch (err) {
+      setStatus({ kind: 'err', msg: `フォルダ選択失敗: ${String(err)}` })
+    }
+  }, [refreshEntries])
+
+  const stopStream = useCallback(() => {
+    abortRef.current?.abort()
+  }, [])
+
+  /** Selection-aware Space (mirrors Manager._toggle_play_or_pause):
+   *   - not streaming → activate selected (play file / enter dir / go up)
+   *   - streaming + same file → pause/resume toggle
+   *   - streaming + different file selected → switch to that file */
+  const togglePlayPause = useCallback(() => {
+    const sel = entries.find((e) => e.id === selectedId) ?? null
+    if (!streaming) {
+      if (sel) void activateEntry(sel)
+      return
+    }
+    if (
+      sel
+      && sel.kind === 'file'
+      && sel.handle
+      && sel.handle.kind === 'file'
+      && sel.handle.name !== nowPlaying
+    ) {
+      void startStreamFromHandle(sel.handle)
+      return
+    }
+    setPaused((p) => !p)
+  }, [entries, selectedId, streaming, nowPlaying, activateEntry, startStreamFromHandle])
+
+  /** Toolbar Play button (mirrors Manager._on_stream_toggle):
+   *   - if streaming → stop
+   *   - else play selected file → last-played → first file in entries */
+  const onToolbarPlayStop = useCallback(() => {
+    if (streaming) {
+      stopStream()
+      return
+    }
+    const sel = entries.find((e) => e.id === selectedId) ?? null
+    let candidate: FileSystemFileHandle | null = null
+    if (sel && sel.kind === 'file' && sel.handle?.kind === 'file') {
+      candidate = sel.handle as FileSystemFileHandle
+    }
+    if (!candidate) {
+      const firstFile = entries.find(
+        (e) => e.kind === 'file' && e.handle?.kind === 'file',
+      )
+      if (firstFile) {
+        candidate = firstFile.handle as FileSystemFileHandle
+        setSelectedId(firstFile.id)
+      }
+    }
+    if (!candidate) {
+      setStatus({ kind: 'muted', msg: 'リストから音源ファイルを選んでください' })
+      return
+    }
+    void startStreamFromHandle(candidate)
+  }, [streaming, stopStream, entries, selectedId, startStreamFromHandle])
+
+  /** Slider drag / click → request seek on every value change.
+   *  `consumeSeek` is polled per chunk so rapid drags coalesce into
+   *  the latest position naturally. Committing on `onChange`
+   *  (instead of waiting for mouseup) means a single click on the
+   *  track also seeks immediately, which the previous mouseup-only
+   *  handler missed. */
+  const onSeekChange = useCallback((frac: number) => {
+    setSeekPreview(frac)
+    seekRequestRef.current = frac
+  }, [])
+
+  const onSeekCommit = useCallback(() => {
+    setSeekPreview(null)
+  }, [])
+
+  // ------------------------------------------------------------------
+  // Drag & drop
+  // ------------------------------------------------------------------
+
+  const onDrop = useCallback(
+    async (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault()
+      const items = e.dataTransfer.items
+      if (!items) return
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i]
+        if (typeof (item as DataTransferItem & {
+          getAsFileSystemHandle?: () => Promise<FileSystemHandle | null>
+        }).getAsFileSystemHandle !== 'function') continue
+        const handle = await (
+          item as DataTransferItem & {
+            getAsFileSystemHandle: () => Promise<FileSystemHandle | null>
+          }
+        ).getAsFileSystemHandle()
+        if (!handle) continue
+        if (handle.kind === 'directory') {
+          await saveDirectoryHandle(handle as FileSystemDirectoryHandle, 'streamdir')
+          const stack = [handle as FileSystemDirectoryHandle]
+          setNavStack(stack)
+          await refreshEntries(stack)
+          return
+        }
+        if (handle.kind === 'file') {
+          const ext = extractExt(handle.name)
+          if (AUDIO_EXTS.has(ext)) {
+            // Drop a single file → just play it. We don't try to remap
+            // the navigation root since FSAPI doesn't give parent dirs.
+            await startStreamFromHandle(handle as FileSystemFileHandle)
+            return
+          }
+        }
+      }
+    },
+    [refreshEntries, startStreamFromHandle],
+  )
+
+  const onDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }, [])
+
+  // ------------------------------------------------------------------
+  // Keyboard navigation on the grid
+  // ------------------------------------------------------------------
+
+  const onGridKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (entries.length === 0) return
+      const idx = entries.findIndex((en) => en.id === selectedId)
+      const cur = idx < 0 ? 0 : idx
+      const cols = Math.max(1, nCols)
+      let next = cur
+      if (e.key === 'ArrowRight') next = Math.min(entries.length - 1, cur + 1)
+      else if (e.key === 'ArrowLeft') next = Math.max(0, cur - 1)
+      else if (e.key === 'ArrowDown') next = Math.min(entries.length - 1, cur + cols)
+      else if (e.key === 'ArrowUp') next = Math.max(0, cur - cols)
+      else if (e.key === 'Enter') {
+        e.preventDefault()
+        const sel = entries[cur]
+        if (sel) void activateEntry(sel)
+        return
+      } else if (e.key === ' ' || e.code === 'Space') {
+        e.preventDefault()
+        togglePlayPause()
+        return
+      } else {
+        return
+      }
+      e.preventDefault()
+      const sel = entries[next]
+      if (sel) {
+        setSelectedId(sel.id)
+        // Scroll into view for long lists
+        const el = document.getElementById(rowDomId(sel.id))
+        el?.scrollIntoView({ block: 'nearest' })
+      }
+    },
+    [entries, selectedId, nCols, activateEntry, togglePlayPause],
+  )
+
+  // ------------------------------------------------------------------
+  // Render
+  // ------------------------------------------------------------------
+
+  const stack = navStack
+  const rootName = stack[0]?.name ?? ''
+  // Browser FSAPI deliberately does not hand JS the OS-level absolute
+  // path (privacy). The closest we can show is the chain of dir names
+  // from the picked root down to the current dir, so the breadcrumb
+  // doubles as the path display in the toolbar input.
+  const breadcrumb = useMemo(() => {
+    if (stack.length === 0) return ''
+    return stack.map((h) => h.name).join(' / ')
+  }, [stack])
+
+  const fraction =
+    progress.total > 0 ? progress.current / progress.total : 0
+  const sliderValue = Math.round((seekPreview ?? fraction) * 1000)
+  const supports = isFileSystemAccessSupported()
 
   return (
     <div className="form-section">
       <div className="form-section-title">
+        <span className="mode-prefix mode-prefix-clip">♪&nbsp;CLIP</span>
         ストリーミングテスト
         <span className="form-section-sub-inline">
-          {' '}— 任意の音源ファイルを 16 kHz PCM16 に変換して送信
+          {' '}— Space 再生/一時停止 / ↑↓←→ 選択移動 / Enter フォルダ侵入・再生
         </span>
       </div>
 
       <div className="form-row">
-        <label>ファイル</label>
+        <label>📁 フォルダ</label>
         <div className="form-row-multi" style={{ width: '100%' }}>
-          <input
-            ref={inputRef}
-            type="file"
-            accept="audio/*,video/*,.wav,.mp3,.m4a,.ogg,.flac"
-            onChange={onFile}
-            style={{ display: 'none' }}
-          />
-          <button
-            type="button"
-            className="form-button-secondary"
-            onClick={() => inputRef.current?.click()}
-            disabled={streaming}
-          >
-            参照…
-          </button>
           <span
             className="form-input mono"
             style={{
               flex: 1,
               padding: '6px 8px',
-              color: filename ? 'var(--text-primary)' : 'var(--text-muted)',
+              color: rootName ? 'var(--text-primary)' : 'var(--text-muted)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}
-            title={filename || ''}
+            title={
+              breadcrumb
+                ? `${breadcrumb}\n（ブラウザはセキュリティ上、OS のフルパスを公開しません。表示はピックしたフォルダから現在位置までの相対パスです）`
+                : ''
+            }
           >
-            {filename || '未選択'}
+            {breadcrumb || '音源フォルダを選択（参照... ボタン）'}
+          </span>
+          <button
+            type="button"
+            className="form-button-secondary"
+            onClick={onBrowseDir}
+            disabled={streaming}
+            title="音源フォルダを選択"
+          >
+            参照…
+          </button>
+        </div>
+        <span />
+      </div>
+
+      <div
+        ref={gridRef}
+        className="stream-grid"
+        tabIndex={0}
+        role="listbox"
+        aria-label="ストリーミング音源リスト"
+        onKeyDown={onGridKeyDown}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        style={{
+          gridTemplateColumns: `repeat(${nCols}, minmax(0, 1fr))`,
+        }}
+      >
+        {!supports && (
+          <div className="stream-grid-empty">
+            このブラウザでは File System Access API が使えません。Chrome / Edge を使ってください。
+          </div>
+        )}
+        {supports && entries.length === 0 && !scanError && (
+          <div className="stream-grid-empty">
+            {rootName
+              ? '（このフォルダに音源ファイルもサブフォルダもありません）'
+              : 'まずは「参照…」で音源フォルダを選んでください。フォルダごとドラッグ&ドロップしても OK。'}
+          </div>
+        )}
+        {scanError && <div className="stream-grid-empty">{scanError}</div>}
+        {entries.map((en) => (
+          <div
+            id={rowDomId(en.id)}
+            key={en.id}
+            role="option"
+            aria-selected={en.id === selectedId}
+            className={`stream-grid-item${en.id === selectedId ? ' selected' : ''}${
+              en.kind === 'file' && en.handle?.kind === 'file' && en.handle.name === nowPlaying
+                ? ' playing'
+                : ''
+            }`}
+            onClick={() => {
+              setSelectedId(en.id)
+              gridRef.current?.focus()
+            }}
+            onDoubleClick={() => void activateEntry(en)}
+            title={en.label}
+          >
+            {en.label}
+          </div>
+        ))}
+      </div>
+
+      <div className="form-row">
+        <label>再生中</label>
+        <span
+          className="form-input mono"
+          style={{
+            width: '100%',
+            padding: '6px 8px',
+            color: nowPlaying ? 'var(--text-primary)' : 'var(--text-muted)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {nowPlaying ?? '—'}
+        </span>
+        <span />
+      </div>
+
+      <div className="form-row">
+        <label>再生位置</label>
+        <div className="form-row-multi" style={{ width: '100%' }}>
+          <input
+            type="range"
+            min={0}
+            max={1000}
+            value={sliderValue}
+            disabled={!streaming || progress.total === 0}
+            onChange={(e) => onSeekChange(Number(e.target.value) / 1000)}
+            onPointerUp={onSeekCommit}
+            onMouseUp={onSeekCommit}
+            onTouchEnd={onSeekCommit}
+            onKeyUp={onSeekCommit}
+            style={{ flex: 1 }}
+          />
+          <span
+            className="form-input mono short"
+            style={{ textAlign: 'right', minWidth: 110 }}
+          >
+            {fmtTime(progress.current, progress.sr)} / {fmtTime(progress.total, progress.sr)}
           </span>
         </div>
         <span />
@@ -141,35 +691,41 @@ export function StreamingTestSection({ device }: Props) {
           <input
             type="range"
             min={0}
-            max={200}
-            value={intensity}
-            onChange={(e) => setIntensity(Number(e.target.value))}
+            max={100}
+            value={intensityPct}
+            onChange={(e) => onIntensityChange(Number(e.target.value))}
             style={{ flex: 1 }}
+            aria-label="ストリーミング Intensity (CLIP のみ)"
           />
           <span
             className="form-input mono short"
-            style={{ textAlign: 'right' }}
+            style={{ textAlign: 'right', minWidth: 60 }}
           >
-            {intensity}%
+            {intensityPct}%
           </span>
         </div>
         <span />
+      </div>
+      <div className="form-status muted" style={{ padding: '0 4px', marginTop: -4 }}>
+        ※ Intensity はストリーミング (CLIP) 専用。FIRE は Kit deploy 時の
+        manifest intensity が適用されるため、ここで変更しても反映されません。
       </div>
 
       <div className="form-action-row">
         <button
           className="form-button"
-          onClick={startStream}
-          disabled={!blob || !device.online || streaming}
+          onClick={onToolbarPlayStop}
+          disabled={!device.online || (entries.length === 0 && !streaming)}
         >
-          ▶ 再生 (stream)
+          {streaming ? '■ 停止' : '▶ 再生 (stream)'}
         </button>
         <button
           className="form-button-secondary"
-          onClick={stopStream}
+          onClick={() => setPaused((p) => !p)}
           disabled={!streaming}
+          aria-pressed={paused}
         >
-          ■ 停止
+          {paused ? '▶ 再開' : '⏸ 一時停止'}
         </button>
         {status && (
           <span className={`form-status ${status.kind}`} style={{ alignSelf: 'center' }}>
@@ -185,8 +741,30 @@ export function StreamingTestSection({ device }: Props) {
   )
 }
 
-function formatSize(n: number): string {
-  if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(2)} MB`
-  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${n} B`
+// ---- Helpers ----
+
+function extractExt(name: string): string {
+  const i = name.lastIndexOf('.')
+  return i < 0 ? '' : name.slice(i).toLowerCase()
+}
+
+function rowDomId(id: string): string {
+  // encodeURIComponent escapes non-ASCII / special chars without collapsing
+  // them to a single placeholder, so two distinct Unicode filenames
+  // ("あ.wav" / "い.wav") still get distinct DOM ids — important because
+  // arrow-key nav uses the id to scrollIntoView the right row. % is the
+  // only escape-output char CSS selectors choke on; map it to `_`.
+  return `stream-grid-row-${encodeURIComponent(id).replace(/%/g, '_')}`
+}
+
+function fmtTime(frames: number, sr: number): string {
+  if (!sr || sr <= 0 || !Number.isFinite(frames) || frames <= 0) return '0:00'
+  const secs = Math.floor(frames / sr)
+  const m = Math.floor(secs / 60)
+  const s = secs % 60
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms))
 }

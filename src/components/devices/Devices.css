@@ -6,7 +6,10 @@
   display: grid;
   grid-template-columns: 280px 1fr;
   gap: 0;
-  height: calc(100vh - 60px);
+  /* Fill .tab-content (which is itself a flex item shrinking when the
+   * LogDrawer expands). 100vh-minus-fixed-px hard-coding broke once
+   * the drawer became in-flow; rely on the parent flex slot instead. */
+  height: 100%;
   min-height: 0;
   background: var(--bg-primary);
 }
@@ -42,6 +45,11 @@
   color: var(--text-muted);
 }
 
+.devices-sidebar-checked {
+  color: var(--accent-light);
+  font-weight: 600;
+}
+
 .devices-sidebar-list {
   flex: 1 1 auto;
   overflow-y: auto;
@@ -72,63 +80,108 @@
   background: var(--bg-hover);
 }
 
-.device-row.selected {
+/* `.checked` = the user has ticked this card. This is the
+ * authoritative selection state and it also drives broadcast/batch ops.
+ * `.primary` = the most-recently-checked card; the right-pane detail
+ * view focuses on it. The two can overlap (every primary is checked)
+ * but only the primary gets the bright accent border. */
+.device-row.checked {
   background: var(--bg-surface);
+}
+.device-row.primary {
   border-color: var(--accent);
   box-shadow: inset 3px 0 0 var(--accent);
   padding-left: 13px;
 }
-
-.device-row.selected .device-row-name {
+.device-row.primary .device-row-name {
   color: var(--accent-light);
+}
+.device-row.offline .device-row-name {
+  color: var(--text-secondary);
 }
 
 .device-row-top {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+}
+
+/* Top-left checkbox (multi-select) */
+.device-row-checkbox {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.device-row-checkbox-input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  margin: 0;
 }
 
 .device-row-name {
+  flex: 1;
   font-weight: 600;
   color: var(--text-primary);
   font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
+/* Online status pill — green capsule with a link icon. Pure indicator, not actionable. */
 .device-row-status {
-  font-size: 9px;
-  font-weight: 600;
-  padding: 2px 6px;
-  border-radius: 999px;
-  background: var(--bg-primary);
-  color: var(--text-muted);
-  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
   letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
   text-transform: uppercase;
+  user-select: none;
 }
-
 .device-row-status.online {
-  background: rgba(76, 175, 80, 0.15);
+  background: rgba(76, 175, 80, 0.18);
+  color: var(--success);
+  border: 1px solid rgba(76, 175, 80, 0.5);
+}
+.device-row-status.online svg {
+  display: block;
   color: var(--success);
 }
 
-.device-row-status.offline {
-  color: var(--text-muted);
-}
-
-.device-row-selected-tag {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  background: var(--accent);
+/* Offline state: red ✕ button — clicks dismiss the card from the
+ * sidebar (auto-restored when the device comes back online). */
+.device-row-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: var(--error);
   color: #fff;
-  padding: 2px 6px;
+  border: 1px solid var(--error);
   border-radius: 999px;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
   flex-shrink: 0;
+  transition: filter var(--transition), transform var(--transition);
+}
+.device-row-dismiss:hover {
+  filter: brightness(1.1);
+  transform: scale(1.06);
+}
+.device-row-dismiss:active {
+  transform: scale(0.95);
 }
 
 .device-row-meta {
@@ -158,6 +211,59 @@
   height: 100%;
   color: var(--text-muted);
   font-size: 14px;
+}
+
+/* Empty-state onboarding pane: shown when no device is selected. The
+ * Serial config panel takes the spotlight so a brand-new device (not
+ * yet on Wi-Fi, so missing from the sidebar list) can be provisioned
+ * without the user hunting for "where do I start". */
+.devices-detail-onboarding {
+  padding-top: 28px;
+}
+.devices-onboarding-header {
+  margin: 0 0 18px;
+  padding: 14px 18px;
+  background: var(--bg-surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+}
+.devices-onboarding-title {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--accent-light);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.devices-onboarding-sub {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+.devices-onboarding-sub strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.devices-onboarding-divider {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 20px 4px 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.devices-onboarding-divider-sub {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .devices-detail-header {
@@ -398,6 +504,41 @@
   flex-wrap: wrap;
 }
 
+/* ---- Serial connect CTA (onboarding empty state + Config tab) ---- */
+.serial-connect-cta {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 18px 8px 8px;
+}
+.serial-connect-btn {
+  /* Override the default form-button compact look — this is the main
+   * call-to-action of the empty-state pane. */
+  font-size: 18px;
+  padding: 16px 24px;
+  border-radius: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  width: 100%;
+  box-shadow: 0 2px 8px rgba(124, 92, 191, 0.35);
+  transition: transform var(--transition), box-shadow var(--transition), background var(--transition);
+}
+.serial-connect-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(124, 92, 191, 0.55);
+}
+.serial-connect-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 4px rgba(124, 92, 191, 0.4);
+}
+.serial-connect-hint {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+  padding: 4px 4px 0;
+}
+
 /* ---- Wi-Fi profile rows ---- */
 .wifi-profile-row {
   display: flex;
@@ -492,29 +633,287 @@
   color: var(--text-muted);
   font-family: var(--font-mono);
 }
+.installed-kit-group {
+  margin: 8px 0 0;
+  padding: 0 0 0 22px;
+}
+.installed-kit-group + .installed-kit-group {
+  margin-top: 12px;
+}
+.installed-kit-group-title {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+.installed-kit-group-hint {
+  color: var(--text-muted);
+}
+
 .installed-kit-events {
   list-style: none;
-  margin: 6px 0 0;
-  padding: 0 0 0 22px;
+  margin: 0;
+  padding: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
 }
 .installed-kit-events li { margin: 0; }
 .installed-kit-event-btn {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
   font-family: var(--font-mono);
-  font-size: 12px;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-  padding: 2px 8px;
-  border-radius: 999px;
+  font-size: 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  color: var(--text-primary);
+  padding: 6px 12px;
+  border-radius: var(--radius);
   cursor: pointer;
+  min-width: 100px;
+  text-align: left;
 }
-.installed-kit-event-btn:hover {
+.installed-kit-event-name {
+  color: var(--text-primary);
+}
+.installed-kit-event-amp {
+  font-size: 11px;
+  color: var(--accent-light);
+  font-weight: 600;
+}
+.installed-kit-event-amp.missing {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.installed-kit-event-btn:disabled .installed-kit-event-amp,
+.installed-kit-event-btn.disabled .installed-kit-event-amp {
+  color: var(--text-muted);
+}
+.installed-kit-event-btn:hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--accent-light);
   border-color: var(--accent);
+}
+.installed-kit-event-btn:disabled,
+.installed-kit-event-btn.disabled {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--border);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+/* ---- Mode-name prefix on form-section titles (matches Kit editor) ---- */
+.mode-prefix {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  margin-right: 8px;
+  border-radius: 4px;
+  vertical-align: 1px;
+}
+
+.mode-prefix-fire {
+  background: rgba(255, 138, 76, 0.16);
+  color: #ff8a4c;
+  border: 1px solid rgba(255, 138, 76, 0.4);
+}
+
+.mode-prefix-clip {
+  background: rgba(76, 175, 230, 0.16);
+  color: #4cb6e6;
+  border: 1px solid rgba(76, 175, 230, 0.4);
+}
+
+/* Inline label for action-row groupings (選択デバイス / ブロードキャスト) */
+.form-action-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  align-self: center;
+  min-width: 110px;
+}
+
+/* ---- Firmware library: device-type toggle ---- */
+.firmware-lib-toggle {
+  display: flex;
+  gap: 6px;
+  margin: 6px 0 8px;
+  padding: 4px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.firmware-lib-toggle-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) - 1px);
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+
+.firmware-lib-toggle-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.firmware-lib-toggle-icon {
+  display: inline-flex;
+  align-items: center;
+  font-size: 18px;
+  line-height: 1;
+}
+.firmware-lib-toggle-icon svg {
+  display: block;
+}
+
+/* Per-device-type accent so the user can tell at a glance which is
+ * which without reading the label — necklace vs band are physically
+ * different products, so we color-code them. */
+.firmware-lib-toggle-btn.variant-necklace.selected {
+  background: rgba(124, 92, 191, 0.18);
+  color: var(--accent-light);
+  border-color: var(--accent);
+}
+
+.firmware-lib-toggle-btn.variant-band.selected {
+  background: rgba(76, 175, 230, 0.18);
+  color: #4cb6e6;
+  border-color: rgba(76, 175, 230, 0.65);
+}
+
+.firmware-lib-toggle-btn.variant-other.selected {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-color: var(--border-light);
+}
+
+.firmware-lib-detail {
+  padding: 10px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.firmware-lib-detail-name {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.firmware-lib-detail-meta {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.firmware-lib-detail-path {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Firmware target highlight ---- */
+.firmware-target-bright {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* Lift the muted-grey form-status text in the Devices pane closer to
+ * primary so secondary info (path lines, hint sentences, build mtime)
+ * stays legible on the dark theme without re-coloring every site
+ * use of `.form-status.muted`. Scoped to .devices-detail so other
+ * panes (Kit, Display) keep their existing palette. */
+.devices-detail .form-status.muted,
+.devices-detail-onboarding .form-status.muted {
+  color: var(--text-secondary);
+}
+
+/* ---- Streaming-test folder browser ---- */
+.stream-grid {
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  border-radius: var(--radius);
+  padding: 4px;
+  margin: 6px 0 4px;
+  max-height: 360px;
+  overflow-y: auto;
+  /* Required for keyboard handler — without this the grid can't take
+   * focus and arrow keys won't fire onKeyDown. */
+  outline: none;
+}
+
+.stream-grid:focus-within {
+  border-color: var(--accent);
+}
+
+.stream-grid-empty {
+  grid-column: 1 / -1;
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.stream-grid-item {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid transparent;
+}
+
+.stream-grid-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.stream-grid-item.selected {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.stream-grid-item.playing {
+  border-color: var(--accent-light);
+}
+
+.stream-grid-item.playing.selected {
+  /* selected wins for the background; outline still shows playing. */
+  outline: 1px dashed var(--accent-light);
+  outline-offset: -2px;
 }
 
 /* ---- Debug dump ---- */

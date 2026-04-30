@@ -90,8 +90,12 @@ body {
 .app {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: 100vh;
+  /* Fixed height (not min-height) so flex column children — the
+   * LogDrawer in particular — can shrink the .tab-content row
+   * predictably. With min-height the container would grow when an
+   * inner page (e.g. WaveformEditor's min-height: 500px) demands
+   * more space, pushing the drawer below the viewport. */
+  height: 100vh;
 }
 
 /* ========================================

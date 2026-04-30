@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore, type WifiProfile } from '@/stores/deviceStore'
+import { useLibraryStore } from '@/stores/libraryStore'
+import { useLogStore } from '@/stores/logStore'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import { IdentityForm } from './IdentityForm'
 import { WifiProfilesForm } from './WifiProfilesForm'
 import { UiConfigForm } from './UiConfigForm'
 import { DebugDumpSection } from './DebugDumpSection'
 import { InstalledKitsSection } from './InstalledKitsSection'
+import { SerialConfigSection } from './SerialConfigSection'
 import { TestSubTab } from './TestSubTab'
 import { FirmwareSubTab } from './FirmwareSubTab'
 
@@ -28,6 +31,7 @@ const SUBTAB_KEY = 'hapbeat-studio-devices-subtab'
  */
 export function DeviceDetail() {
   const { devices, lastMessage, send } = useHelperConnection()
+  const pushLog = useLogStore((s) => s.push)
   const selectedIp = useDeviceStore((s) => s.selectedIp)
   const setInfo = useDeviceStore((s) => s.setInfo)
   const setWifiStatus = useDeviceStore((s) => s.setWifiStatus)
@@ -94,19 +98,28 @@ export function DeviceDetail() {
     } else if (t === 'debug_dump_result' && typeof p.device === 'string') {
       setDebugDump(p.device, p as Record<string, unknown>)
     } else if (t === 'kit_list_result' && typeof p.device === 'string') {
+      // Firmware ≥ 2026-04-29 returns events as `{name, mode}` objects
+      // so we can split FIRE vs CLIP in the UI. Older builds (and any
+      // proxied response that strips the shape) still send `string[]`,
+      // so we accept either shape and normalize downstream.
       const kits = (p.kits as Array<{
         kit_id: string
         version?: string
-        events?: string[]
+        events?: Array<string | { name: string; mode?: string }>
       }> | undefined) ?? []
       setKitList(p.device, kits)
     } else if (t === 'write_result') {
       const ok = p.success === true
       const msg = (p.message as string) || (p.error as string) || (ok ? 'ok' : 'failed')
       setGlobalStatus({ kind: ok ? 'ok' : 'err', msg })
+      // Mirror every helper write_result to the log drawer so the user
+      // can audit the full request/response chain (set_wifi success,
+      // play_sent gain, etc.) without having to keep the toast visible.
+      pushLog('helper', `${ok ? '✓' : '✗'} ${msg}`)
     }
   }, [
     lastMessage,
+    pushLog,
     setInfo,
     setWifiStatus,
     setWifiProfiles,
@@ -120,12 +133,86 @@ export function DeviceDetail() {
     return () => clearTimeout(t)
   }, [globalStatus])
 
+  /**
+   * PLAY a Kit event. Look the manifest `intensity` for the eventId
+   * up in Studio's local Kit library and send it as the wire `gain`.
+   *
+   * Why: the device firmware (since 2026-04-29) no longer auto-applies
+   * manifest intensity at runtime — it just plays the wire gain
+   * verbatim. So a missing/default `gain=1.0` payload would cause
+   * authored intensities to be silently ignored when the user clicks
+   * a Kit event button. Falling back to 1.0 only when the eventId
+   * isn't found locally (e.g. the kit was installed by a different
+   * Studio install) preserves the legacy behavior for that edge case.
+   *
+   * Defined unconditionally (above the `!device` early return) so the
+   * hook order stays stable across renders — React will warn loudly
+   * if a useCallback is conditionally skipped, even when the early
+   * return is "obviously" the no-device branch.
+   */
+  const playEvent = useCallback((eventId: string) => {
+    if (!selectedIp) return
+    const kits = useLibraryStore.getState().kits
+    let intensity = 1.0
+    let kitId: string | null = null
+    let mode: string | null = null
+    for (const k of kits) {
+      const ev = k.events.find((e) => e.eventId === eventId)
+      if (ev && typeof ev.intensity === 'number') {
+        intensity = ev.intensity
+        kitId = k.id
+        mode = ev.mode ?? 'command'
+        break
+      }
+    }
+    const payload = { event_id: eventId, target: '', gain: intensity }
+    send({ type: 'preview_event', payload })
+    // Verbose log so the user can verify the manifest amp actually
+    // landed on the wire — the previous "play sent" line gave no
+    // information at all when intensity wasn't reflected.
+    const ampLabel = kitId
+      ? `gain=${intensity.toFixed(2)} (manifest amp ${(intensity * 100).toFixed(0)}%, kit=${kitId}${mode ? `, mode=${mode}` : ''})`
+      : `gain=${intensity.toFixed(2)} (manifest 未取得 — fallback to 1.0)`
+    pushLog(
+      'preview',
+      `→ ${selectedIp}: preview_event event_id=${eventId} ${ampLabel}`,
+    )
+  }, [selectedIp, send, pushLog])
+
   if (!device || !selectedIp) {
+    // No device selected — most likely the device hasn't joined Wi-Fi
+    // yet (so it doesn't appear in the LAN PING list). Show Serial
+    // connect at the top: a Hapbeat that already has firmware will
+    // respond to `get_info` and the panel can graduate the user
+    // straight into the config UI. Firmware flash sits below for the
+    // brand-new / bricked case where `get_info` never answers.
     return (
-      <section className="devices-detail">
-        <div className="devices-detail-empty">
-          サイドバーからデバイスを選択してください
+      <section className="devices-detail devices-detail-onboarding">
+        <div className="devices-onboarding-header">
+          <div className="devices-onboarding-title">はじめに</div>
+          <div className="devices-onboarding-sub">
+            Wi-Fi 未接続のデバイス (新品 / 工場出荷状態 / Wi-Fi クリア後) は
+            一覧に出ません。まず下の「Serial 接続」を試して、応答があれば
+            Wi-Fi / 名前 / グループの初回設定に進めます。応答が無い (新品 /
+            ブートローダー破損) 場合はその下の「ファームウェア書き込み」で
+            焼き直してから再度 Serial 接続してください。
+            既に Wi-Fi 接続済みのデバイスは <strong>サイドバー</strong>から選択できます。
+          </div>
         </div>
+        <div className="devices-onboarding-divider">
+          <span>1. Serial 接続で初回設定</span>
+          <span className="devices-onboarding-divider-sub">
+            (USB ケーブルで接続 → Wi-Fi / 名前 / グループを設定)
+          </span>
+        </div>
+        <SerialConfigSection />
+        <div className="devices-onboarding-divider">
+          <span>2. ファームウェア書き込み</span>
+          <span className="devices-onboarding-divider-sub">
+            (Serial 接続が応答しない場合 / チップが空 / ブートローダー破損時)
+          </span>
+        </div>
+        <FirmwareSubTab serialOnly />
       </section>
     )
   }
@@ -153,18 +240,6 @@ export function DeviceDetail() {
   const wifiProfiles = wifiProfilesCache[selectedIp]
   const debugDump = debugDumpCache[selectedIp]
   const kitList = kitListCache[selectedIp]
-
-  const playEvent = (eventId: string) => {
-    // Broadcast (no target filter) — kits are addressed by event_id, not
-    // device address. Specifying target=device.address would only fire
-    // on this device but the device is also the only one that has the
-    // kit installed in normal use, so leaving target empty is simpler
-    // and matches the manager's content_page behavior.
-    send({
-      type: 'preview_event',
-      payload: { event_id: eventId, target: '' },
-    })
-  }
 
   return (
     <section className="devices-detail">
@@ -219,6 +294,7 @@ export function DeviceDetail() {
       <div className="device-subtab-body">
         {subTab === 'config' && (
           <>
+            <SerialConfigSection />
             <IdentityForm
               device={device}
               cachedInfo={cachedInfo}

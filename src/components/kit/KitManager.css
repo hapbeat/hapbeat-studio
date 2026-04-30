@@ -17,6 +17,39 @@
 .kit-manager-stacked { flex-direction: column; gap: 0; padding: 0; }
 .kit-loading { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-secondary); }
 
+/* Inline loading badge — replaces the full-page block. Shows briefly
+ * while the background library load is in flight. Doesn't displace
+ * any layout because it's absolutely positioned over the WorkDirBar
+ * area. */
+.kit-loading-badge {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  pointer-events: none;
+}
+.kit-loading-spinner {
+  width: 10px;
+  height: 10px;
+  border: 2px solid var(--border-light);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: kit-loading-spin 800ms linear infinite;
+}
+@keyframes kit-loading-spin {
+  to { transform: rotate(360deg); }
+}
+.kit-manager-wrapper { position: relative; }
+
 /* Side mode: proportional split — library takes ~48%, kit ~52% (slightly
    wider to accommodate the sub-rail). No resize handle; the panes scale
    with the browser/panel width automatically. */

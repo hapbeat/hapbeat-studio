@@ -1,9 +1,14 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useLogStore } from '@/stores/logStore'
 import { LocalFsStatus } from '@/components/common/LocalFsStatus'
 import './LogDrawer.css'
+
+const HEIGHT_KEY = 'hapbeat-studio-log-drawer-height'
+const MIN_HEIGHT = 80
+const MAX_HEIGHT_FRACTION = 0.7 // never let the drawer eat more than 70% of viewport
+const HARD_MAX_HEIGHT = 5000 // sanity cap for absurd persisted values (corruption)
 
 /**
  * Bottom collapsible log panel mirroring the Manager's `LogDrawer`.
@@ -27,6 +32,85 @@ export function LogDrawer() {
 
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const stickToBottomRef = useRef(true)
+
+  // Drawer height — user-adjustable via a drag handle on the header.
+  // Persisted so the height is remembered across reloads.
+  const [height, setHeight] = useState<number>(() => {
+    const raw = localStorage.getItem(HEIGHT_KEY)
+    if (raw === null) return 280
+    const n = Number(raw)
+    // Sanity-cap absurd values so a corrupted localStorage entry
+    // (or a previous viewport with a tall window) doesn't render the
+    // drawer over the whole UI on first paint. The drag handler also
+    // re-clamps against the live viewport on every move.
+    if (!Number.isFinite(n) || n < MIN_HEIGHT || n > HARD_MAX_HEIGHT) return 280
+    return n
+  })
+  const dragRef = useRef<{
+    startY: number
+    startHeight: number
+    pointerId: number
+  } | null>(null)
+
+  const onDragStart = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      // Only allow drag when the drawer is open — collapsed strip is too
+      // thin to host a sensible resize gesture and would jump open
+      // unexpectedly.
+      if (!visible) return
+      e.preventDefault()
+      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+      dragRef.current = {
+        startY: e.clientY,
+        startHeight: height,
+        pointerId: e.pointerId,
+      }
+      document.body.classList.add('log-drawer-resizing')
+    },
+    [visible, height],
+  )
+
+  const onDragMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== e.pointerId) return
+    // Drag handle sits at the *top* of the drawer; dragging down should
+    // shrink the drawer, dragging up should grow it.
+    const dy = e.clientY - drag.startY
+    const proposed = drag.startHeight - dy
+    const cap = Math.max(MIN_HEIGHT, Math.floor(window.innerHeight * MAX_HEIGHT_FRACTION))
+    const next = Math.max(MIN_HEIGHT, Math.min(cap, proposed))
+    setHeight(next)
+  }, [])
+
+  const onDragEnd = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const drag = dragRef.current
+      if (!drag || drag.pointerId !== e.pointerId) return
+      ;(e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId)
+      dragRef.current = null
+      document.body.classList.remove('log-drawer-resizing')
+      // Save once at the end of the gesture — no point spamming
+      // localStorage on every pointermove. Quota / private-mode
+      // failures are non-fatal; just skip the persist.
+      try {
+        localStorage.setItem(HEIGHT_KEY, String(height))
+      } catch {
+        /* storage unavailable / quota exceeded — drag still works in-memory */
+      }
+    },
+    [height],
+  )
+
+  // Defensive cleanup: if the drawer is collapsed (or unmounted)
+  // mid-drag, the body class would otherwise stay stuck and lock the
+  // cursor / disable text selection forever. The pointercancel
+  // handler covers most cases; this useEffect catches the rest.
+  useEffect(() => {
+    return () => {
+      dragRef.current = null
+      document.body.classList.remove('log-drawer-resizing')
+    }
+  }, [])
 
   // Drain helper push messages into the log buffer.
   useEffect(() => {
@@ -100,7 +184,23 @@ export function LogDrawer() {
   }
 
   return (
-    <div className={`log-drawer${visible ? '' : ' collapsed'}`}>
+    <div
+      className={`log-drawer${visible ? '' : ' collapsed'}`}
+      style={visible ? { height } : undefined}
+    >
+      {visible && (
+        <div
+          className="log-drawer-resize"
+          onPointerDown={onDragStart}
+          onPointerMove={onDragMove}
+          onPointerUp={onDragEnd}
+          onPointerCancel={onDragEnd}
+          title="ドラッグでログ高さを調整"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="ログ高さリサイズ"
+        />
+      )}
       <div className="log-drawer-header">
         <button
           className="log-drawer-toggle"

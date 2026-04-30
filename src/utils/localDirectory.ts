@@ -25,14 +25,31 @@ const HANDLE_DB = 'hapbeat-studio-fs'
 const HANDLE_STORE = 'handles'
 
 /** IDB key for each persisted handle. `workdir` = clip library root,
- *  `kitdir` = optional separate kit output root (e.g. Unity Assets). */
-export type DirectoryHandleKey = 'workdir' | 'kitdir'
+ *  `kitdir` = optional separate kit output root (e.g. Unity Assets),
+ *  `streamdir` = streaming-test source folder (browseable WAV/MP3 root). */
+export type DirectoryHandleKey = 'workdir' | 'kitdir' | 'streamdir'
+
+/** IDB key for individual *file* handles (separate from directory handles
+ *  so a stale `firmwarefile` doesn't override a `workdir`). */
+export type FileHandleKey = 'firmwarefile'
+
+/** Single shared DB opener — both directory- and file-handle stores
+ *  live in the same IndexedDB. We previously had two `openDB` callers
+ *  with different version numbers (1 for directories, 2 for files),
+ *  which guarantees a `VersionError` once both fire in the same tab:
+ *  whichever opens second sees `requested < existing` and throws.
+ *  Keep this opener as the only entry point and bump `IDB_VERSION`
+ *  whenever the schema changes. */
+const IDB_VERSION = 2
 
 async function getHandleDb() {
-  return openDB(HANDLE_DB, 1, {
+  return openDB(HANDLE_DB, IDB_VERSION, {
     upgrade(db) {
       if (!db.objectStoreNames.contains(HANDLE_STORE)) {
         db.createObjectStore(HANDLE_STORE)
+      }
+      if (!db.objectStoreNames.contains(FILE_HANDLE_STORE)) {
+        db.createObjectStore(FILE_HANDLE_STORE)
       }
     },
   })
@@ -53,10 +70,71 @@ export async function clearDirectoryHandle(key: DirectoryHandleKey = 'workdir'):
   await db.delete(HANDLE_STORE, key)
 }
 
+// ---- File-handle persistence (separate logical key space) -----------
+
+const FILE_HANDLE_STORE = 'file-handles'
+
+export async function saveFileHandle(
+  handle: FileSystemFileHandle,
+  key: FileHandleKey,
+): Promise<void> {
+  const db = await getHandleDb()
+  await db.put(FILE_HANDLE_STORE, handle, key)
+}
+
+export async function loadFileHandle(
+  key: FileHandleKey,
+): Promise<FileSystemFileHandle | null> {
+  const db = await getHandleDb()
+  return (await db.get(FILE_HANDLE_STORE, key)) ?? null
+}
+
+export async function clearFileHandle(key: FileHandleKey): Promise<void> {
+  const db = await getHandleDb()
+  await db.delete(FILE_HANDLE_STORE, key)
+}
+
+/** Pick a single local file via the File System Access API and persist
+ *  the handle. Re-using the saved handle means we always read fresh
+ *  bytes from disk via `handle.getFile()` — the bug-prone re-pick of
+ *  `<input type=file>` (which silently no-ops on same-path) is gone. */
+export async function pickFile(
+  key: FileHandleKey,
+  options: {
+    types?: { description: string; accept: Record<string, string[]> }[]
+    excludeAcceptAllOption?: boolean
+  } = {},
+): Promise<FileSystemFileHandle | null> {
+  const w = window as unknown as {
+    showOpenFilePicker?: (opts?: {
+      id?: string
+      multiple?: boolean
+      excludeAcceptAllOption?: boolean
+      types?: { description: string; accept: Record<string, string[]> }[]
+      startIn?: 'desktop' | 'documents' | 'downloads' | FileSystemHandle
+    }) => Promise<FileSystemFileHandle[]>
+  }
+  if (typeof w.showOpenFilePicker !== 'function') return null
+  try {
+    const [handle] = await w.showOpenFilePicker({
+      id: `hapbeat-${key}`,
+      multiple: false,
+      excludeAcceptAllOption: options.excludeAcceptAllOption,
+      types: options.types,
+    })
+    if (!handle) return null
+    await saveFileHandle(handle, key)
+    return handle
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') return null
+    throw err
+  }
+}
+
 // ---- Permission ----
 
 export async function verifyPermission(
-  handle: FileSystemDirectoryHandle,
+  handle: FileSystemDirectoryHandle | FileSystemFileHandle,
   write = true,
 ): Promise<boolean> {
   const opts: FileSystemHandlePermissionDescriptor = { mode: write ? 'readwrite' : 'read' }
@@ -69,8 +147,13 @@ export async function verifyPermission(
 
 export async function pickWorkDirectory(key: DirectoryHandleKey = 'workdir'): Promise<FileSystemDirectoryHandle | null> {
   // pickerId は key ごとに分けておくとブラウザが「最後に選んだフォルダ」を
-  // それぞれ独立して記憶してくれる (library と kit-out で別フォルダに誘導できる)。
-  const pickerId = key === 'kitdir' ? 'hapbeat-kitdir' : 'hapbeat-workdir'
+  // それぞれ独立して記憶してくれる (library / kit-out / streaming で別フォルダに誘導できる)。
+  const pickerId =
+    key === 'kitdir'
+      ? 'hapbeat-kitdir'
+      : key === 'streamdir'
+        ? 'hapbeat-streamdir'
+        : 'hapbeat-workdir'
   try {
     const handle = await window.showDirectoryPicker({
       id: pickerId,
