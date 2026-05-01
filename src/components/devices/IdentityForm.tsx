@@ -77,9 +77,9 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
 
   const submitReboot = async () => {
     const ok = await ask({
-      title: 'リブート',
-      message: 'デバイスをリブートしますか？',
-      confirmLabel: 'リブートする',
+      title: '再起動',
+      message: 'デバイスを再起動しますか？',
+      confirmLabel: '再起動する',
     })
     if (!ok) return
     sendTo({ type: 'reboot', payload: {} })
@@ -191,9 +191,9 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
           className="form-button-secondary"
           onClick={submitReboot}
           disabled={!device.online}
-          title="set_* コマンドの一部はリブート後に有効になる"
+          title="set_* コマンドの一部は再起動後に有効になる"
         >
-          リブート
+          再起動
         </button>
       </div>
     </div>

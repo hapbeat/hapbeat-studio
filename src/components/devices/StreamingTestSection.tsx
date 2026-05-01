@@ -8,6 +8,7 @@ import {
   type MutableRefObject,
 } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
+import { useDeviceStore } from '@/stores/deviceStore'
 import type { DeviceInfo } from '@/types/manager'
 import { streamClip } from '@/utils/audioStreamer'
 import {
@@ -38,6 +39,25 @@ const AUDIO_EXTS = new Set([
 
 /** Min visual column width in px. Mirrors Manager's _MIN_COL_W. */
 const MIN_COL_W = 170
+
+/** localStorage keys for navigation persistence. The chosen root
+ *  directory itself is persisted via IndexedDB (key "streamdir"); these
+ *  carry the sub-path inside that root + the last-selected entry so a
+ *  device-detail subtab switch (which unmounts this component) doesn't
+ *  reset the user's exploration. */
+const NAV_PATH_KEY = 'hapbeat-studio-streamtest-path'
+const NAV_SEL_KEY = 'hapbeat-studio-streamtest-selected'
+
+function loadSavedPath(): string[] {
+  try {
+    const raw = localStorage.getItem(NAV_PATH_KEY)
+    if (!raw) return []
+    const arr = JSON.parse(raw)
+    return Array.isArray(arr) ? arr.filter((s) => typeof s === 'string') : []
+  } catch {
+    return []
+  }
+}
 /** Hysteresis band — must move past +/- this many px past a column
  *  boundary before n flips. Prevents scroll-bar-toggle flicker. */
 const COL_HYSTERESIS = 30
@@ -161,36 +181,79 @@ export function StreamingTestSection({
   )
 
   const refreshEntries = useCallback(
-    async (stack: FileSystemDirectoryHandle[]) => {
+    async (
+      stack: FileSystemDirectoryHandle[],
+      preferSelectedId?: string | null,
+    ) => {
       const { entries: list, error } = await listEntries(stack)
       setEntries(list)
       setScanError(error)
-      // Default-select first non-parent entry on dir change.
+      // Prefer the caller-provided selection (used by mount-time
+      // restore so a remembered file/folder stays highlighted across a
+      // tab switch). Fall back to the first non-parent entry.
+      if (preferSelectedId && list.some((e) => e.id === preferSelectedId)) {
+        setSelectedId(preferSelectedId)
+        return
+      }
       const first = list.find((e) => e.kind !== 'parent')
       setSelectedId(first ? first.id : null)
     },
     [listEntries],
   )
 
-  // Restore persisted handle on mount.
+  // Restore persisted handle on mount. The user's mid-folder
+  // exploration also survives a subtab unmount: replay the saved
+  // sub-path off the root + reapply the saved selection.
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       if (!isFileSystemAccessSupported()) return
       const handle = await loadDirectoryHandle('streamdir')
       if (cancelled || !handle) return
-      // Ask for permission silently — only re-prompt when the user
-      // clicks "参照…" if this fails. Read-only is enough.
       const ok = await verifyPermission(handle, false).catch(() => false)
       if (!ok || cancelled) return
-      const stack = [handle]
+      // Walk down the saved sub-path. If a hop is missing (folder was
+      // moved/deleted between sessions) we stop where the chain breaks
+      // and let the user navigate from there manually.
+      const stack: FileSystemDirectoryHandle[] = [handle]
+      const savedPath = loadSavedPath()
+      for (const segment of savedPath) {
+        const next = stack[stack.length - 1]
+        try {
+          const child = await next.getDirectoryHandle(segment)
+          stack.push(child)
+        } catch {
+          break
+        }
+      }
+      if (cancelled) return
+      const savedSel = localStorage.getItem(NAV_SEL_KEY)
       setNavStack(stack)
-      await refreshEntries(stack)
+      await refreshEntries(stack, savedSel)
     })()
     return () => {
       cancelled = true
     }
   }, [refreshEntries])
+
+  // Persist the sub-path as soon as it changes so a tab-switch
+  // unmount doesn't lose the user's place. Length 0 means "before
+  // root resolved" — leave the saved path alone in that case.
+  useEffect(() => {
+    if (navStack.length === 0) return
+    const subPath = navStack.slice(1).map((h) => h.name)
+    try {
+      localStorage.setItem(NAV_PATH_KEY, JSON.stringify(subPath))
+    } catch { /* quota — ignore */ }
+  }, [navStack])
+
+  useEffect(() => {
+    if (selectedId) {
+      try { localStorage.setItem(NAV_SEL_KEY, selectedId) } catch { /* ignore */ }
+    } else {
+      try { localStorage.removeItem(NAV_SEL_KEY) } catch { /* ignore */ }
+    }
+  }, [selectedId])
 
   // ------------------------------------------------------------------
   // Grid sizing — ResizeObserver + hysteresis
@@ -295,11 +358,27 @@ export function StreamingTestSection({
       const ctrl = new AbortController()
       abortRef.current = ctrl
 
+      // Read selection at stream-start (not on every chunk — capture
+      // the "what was selected when play was pressed" snapshot so
+      // toggling devices mid-stream doesn't re-route in flight).
+      // Empty selection falls back to the panel's host device so a
+      // single-device user without checkboxes ticked still gets a stream.
+      const { selectedIps } = useDeviceStore.getState()
+      const targets = selectedIps.length > 0 ? selectedIps : [device.ipAddress]
       try {
         const sendForStream: Parameters<typeof streamClip>[1] = (msg) => {
-          send({ type: msg.type, payload: { ...msg.payload, ip: device.ipAddress } })
+          // Helper's `_resolve_targets` prefers `payload.targets` over
+          // `payload.ip`. Sending the array makes stream_begin /
+          // stream_data / stream_end fan out to every selected device
+          // in one go (UDP per-IP send loop on helper side).
+          send({ type: msg.type, payload: { ...msg.payload, targets } })
         }
-        setStatus({ kind: 'muted', msg: 'ストリーミング送信中…' })
+        setStatus({
+          kind: 'muted',
+          msg: targets.length > 1
+            ? `ストリーミング送信中… (${targets.length} 台へ同時配信)`
+            : 'ストリーミング送信中…',
+        })
         await streamClip(blob, sendForStream, {
           signal: ctrl.signal,
           control: {
@@ -553,9 +632,12 @@ export function StreamingTestSection({
       <div className="form-section-title">
         <span className="mode-prefix mode-prefix-clip">♪&nbsp;CLIP</span>
         ストリーミングテスト
-        <span className="form-section-sub-inline">
-          {' '}— Space 再生/一時停止 / ↑↓←→ 選択移動 / Enter フォルダ侵入・再生
-        </span>
+      </div>
+      <div
+        className="form-section-sub-inline"
+        style={{ marginBottom: 6, paddingLeft: 4 }}
+      >
+        Space 再生/一時停止 / ↑↓←→ 選択移動 / Enter フォルダ侵入・再生
       </div>
 
       <div className="form-row">
@@ -716,6 +798,10 @@ export function StreamingTestSection({
           className="form-button"
           onClick={onToolbarPlayStop}
           disabled={!device.online || (entries.length === 0 && !streaming)}
+          // Fixed min-width so the label flip between "▶ 再生 (stream)"
+          // and "■ 停止" doesn't reflow the toolbar — the user reported
+          // that watching the button shrink mid-playback is distracting.
+          style={{ minWidth: 132, textAlign: 'center' }}
         >
           {streaming ? '■ 停止' : '▶ 再生 (stream)'}
         </button>

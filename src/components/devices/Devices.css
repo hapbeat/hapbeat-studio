@@ -370,11 +370,19 @@
   flex-direction: column;
 }
 
-/* Inline subtitle next to a section heading */
+/* Subtitle next to (or under) a section heading. Pinned to a fixed
+ * font-size so the look is identical whether the element is inline
+ * with the title (`<span>`) or standalone on its own line (`<div>`).
+ * Without this, a standalone `<div>` would inherit the section body's
+ * 14 px and look noticeably bigger than the inline variants. */
 .form-section-sub-inline {
   text-transform: none;
   letter-spacing: 0;
   font-weight: 400;
+  font-size: 12px;
+  /* Use the muted tier so the heading-vs-subtitle contrast is
+   * visually obvious — the heading anchors, the subtitle just sets
+   * context. Don't dim further: still must be legibly readable. */
   color: var(--text-muted);
 }
 
@@ -432,7 +440,9 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--text-secondary);
+  /* Section heads are the visual anchor — pin them to near-white so
+   * the eye finds them first regardless of theme tint. */
+  color: var(--text-primary);
   margin-bottom: 10px;
 }
 
@@ -457,6 +467,74 @@
   display: flex;
   gap: 6px;
   align-items: center;
+}
+
+/* ---- SSID combobox (custom dropdown for Wi-Fi profile add) ---- */
+.ssid-combobox-toggle {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.85;
+}
+.ssid-combobox-toggle:hover:not(:disabled) {
+  color: var(--text-primary);
+  opacity: 1;
+}
+.ssid-combobox-toggle:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+.ssid-combobox-menu {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  max-height: 220px;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+.ssid-combobox-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.ssid-combobox-item.history {
+  color: var(--text-secondary);
+}
+.ssid-combobox-item:hover,
+.ssid-combobox-item.selected {
+  background: var(--bg-hover);
+}
+.ssid-combobox-name {
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ssid-combobox-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
 
 .form-input,

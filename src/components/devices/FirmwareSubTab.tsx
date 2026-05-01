@@ -109,7 +109,6 @@ export function FirmwareSubTab({
   const serialRunning = useSerialMaster((s) => s.flashRunning)
   const serialProgress = useSerialMaster((s) => s.flashProgress)
   const serialResult = useSerialMaster((s) => s.flashLastResult)
-  const masterMode = useSerialMaster((s) => s.mode)
   const masterFlash = useSerialMaster((s) => s.flash)
   const masterEraseFlash = useSerialMaster((s) => s.eraseFlash)
   const masterRePick = useSerialMaster((s) => s.rePick)
@@ -120,13 +119,6 @@ export function FirmwareSubTab({
   const [localError, setLocalError] = useState<string | null>(null)
 
   // ---- Library: refresh on mount + on demand --------------------------
-
-  // Surfaced in the toolbar so the user can verify the last fetch
-  // actually happened — silent re-fetches were the quietest part of
-  // the previous "更新を押しても反映されない (mtime updated, size old)"
-  // report, where it turned out the request *did* succeed but the
-  // visual toggle reverted from "更新中…" too fast to notice.
-  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null)
 
   const refreshLibrary = useCallback(async () => {
     setLibLoading(true)
@@ -146,7 +138,6 @@ export function FirmwareSubTab({
         return a.env.localeCompare(b.env)
       })
       setLibEntries(entries)
-      setLastRefreshedAt(Date.now())
       // Verbose diagnostics — each refresh dumps every env's exact
       // bytes and mtime to the log drawer so the user can prove the
       // fetch actually returned new data even when the displayed
@@ -154,7 +145,7 @@ export function FirmwareSubTab({
       // to 0.01 MB, masking small deltas).
       pushLog('firmware', `library refreshed: ${entries.length} env(s) at ${new Date().toLocaleTimeString()}`)
       for (const e of entries) {
-        const tag = e.build_tag ? ` BUILD_TAG=${e.build_tag}` : ''
+        const tag = e.fwVersion ? ` fw=${e.fwVersion}` : ''
         pushLog('firmware', `  · ${e.env}:${tag} ${e.size.toLocaleString()} bytes mtime=${formatMtime(e.mtime)}`)
       }
       // Default-select the most-recently-built env on first load —
@@ -210,6 +201,15 @@ export function FirmwareSubTab({
     }
   }, [])
 
+  // FIRMWARE_VERSION of the binary the user just sent — captured at
+  // submit time so the post-OTA verify can compare it against the
+  // device's get_info `fw` field. Old firmware behavior:
+  // `Update.end(true)` returns ok but the bootloader never flips
+  // otadata, so the chip boots the previous slot. The user reported
+  // (2026-04-30) that this happens "sometimes", which is exactly the
+  // kind of silent failure a mismatch check catches.
+  const [expectedFwVersion, setExpectedFwVersion] = useState<string | null>(null)
+
   // ---- Wi-Fi OTA result drain ---------------------------------------
 
   useEffect(() => {
@@ -225,10 +225,47 @@ export function FirmwareSubTab({
       })
     } else if (t === 'ota_result' && typeof p.device === 'string') {
       setRunning(false)
-      setResult({ ok: p.success === true, message: String(p.message ?? '') })
+      const ok = p.success === true
+      setResult({ ok, message: String(p.message ?? '') })
       setTimeout(() => setProgress(null), 3000)
+      // Post-flight verify: device reboots ~1 s after Update.end
+      // returns. Wait long enough for it to come back on the LAN
+      // (~6 s for STA reconnect), then ask for `get_info` and compare
+      // BUILD_TAG. Mismatch implies otadata didn't flip — the
+      // "sometimes runs old version" symptom from the user report.
+      if (ok && expectedFwVersion && device && sendTo) {
+        const ip = device.ipAddress
+        pushLog('ota', `verify scheduled in 8 s (expected fw=${expectedFwVersion})`)
+        setTimeout(() => {
+          sendTo({ type: 'get_info', payload: { ip } })
+        }, 8000)
+      }
+    } else if (t === 'get_info_result' && expectedFwVersion) {
+      // Compare against `fw` (FIRMWARE_VERSION baked into the binary).
+      // After the BUILD_TAG / FIRMWARE_VERSION unification (2026-05-01)
+      // there is exactly one version concept — the semver in
+      // hapbeat_config.h — so this single comparison covers OLED
+      // display, get_info response, and OTA verify all at once.
+      const deviceFw = (p.fw as string | undefined) ?? ''
+      if (!deviceFw) {
+        pushLog('ota', 'verify skipped — device get_info did not include fw')
+      } else if (deviceFw !== expectedFwVersion) {
+        setResult({
+          ok: false,
+          message: (
+            `OTA は完了したが、再起動後のファームウェアバージョンが一致しません`
+            + ` (期待 ${expectedFwVersion}, 実際 ${deviceFw})。`
+            + ` otadata の切替に失敗している可能性があります — `
+            + `デバイスを電源 OFF/ON してから再度 OTA を試してください。`
+          ),
+        })
+        pushLog('ota', `verify FAILED — expected=${expectedFwVersion} got=${deviceFw}`)
+      } else {
+        pushLog('ota', `verify OK — fw=${deviceFw}`)
+      }
+      setExpectedFwVersion(null)
     }
-  }, [lastMessage])
+  }, [lastMessage, expectedFwVersion, device, sendTo, pushLog])
 
   // ---- Reading freshly from disk ------------------------------------
 
@@ -403,12 +440,23 @@ export function FirmwareSubTab({
       setResult({ ok: false, message: String((err as Error).message ?? err) })
       return
     }
+    setRunning(true)
     pushLog('ota', `flash → ${bin.label} (${formatBytes(bin.bytes.length)})`)
+    // Capture the firmware version so the post-OTA verify can compare
+    // it against the device's `fw` after reboot (see ota_result effect
+    // above). User-reported "old version remains" symptom (2026-04-30)
+    // = otadata didn't flip; this catches it explicitly instead of
+    // trusting `Update.end` ok status alone.
+    if (source === 'library') {
+      const e = libEntries.find((x) => x.env === libSelected)
+      setExpectedFwVersion(e?.fwVersion ?? null)
+    } else {
+      setExpectedFwVersion(null)
+    }
     setProgress({
       device: device.ipAddress, phase: 'begin', percent: 0,
       message: `OTA 開始要求… (${bin.label})`,
     })
-    setRunning(true)
     sendTo({
       type: 'ota_data',
       payload: { bin_base64: bytesToBase64(bin.bytes) },
@@ -456,21 +504,6 @@ export function FirmwareSubTab({
     ? Boolean(libSelected)
     : Boolean(localHandle && !localPermissionDenied)
 
-  const selectedSummary = source === 'library'
-    ? (() => {
-        const e = libEntries.find((x) => x.env === libSelected)
-        if (!e) return ''
-        const tag = e.build_tag ? `BUILD_TAG=${e.build_tag} · ` : ''
-        return `${e.env} · ${tag}${formatBytes(e.size)} · built ${formatMtime(e.mtime)}`
-      })()
-    : (localMeta
-      ? `${localMeta.name} · ${formatBytes(localMeta.size)} · modified ${formatMtime(localMeta.mtime)}`
-      : '')
-
-  const selectedPath = source === 'library'
-    ? (libEntries.find((x) => x.env === libSelected)?.path ?? '')
-    : '' // browser hides absolute path for security; full path only available for library entries
-
   return (
     <>
       {confirmDialog}
@@ -490,25 +523,15 @@ export function FirmwareSubTab({
             />
             ファームウェア ライブラリ
             <span className="form-section-sub-inline">
-              {' '}— device-firmware の最新ビルドを直接ロード
+              {' '}— Studio 同梱のビルド済みファームから選ぶ
             </span>
           </span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            {lastRefreshedAt && (
-              <span
-                className="form-status muted"
-                style={{ fontSize: 11, padding: 0 }}
-                title="最後にディスクから読み込んだ時刻"
-              >
-                last: {new Date(lastRefreshedAt).toLocaleTimeString()}
-              </span>
-            )}
             <button
               className="form-button-secondary"
               onClick={refreshLibrary}
               disabled={libLoading}
               style={{ fontSize: 11, padding: '2px 8px' }}
-              title="../hapbeat-device-firmware/.pio/build/<env>/firmware.bin を再読込"
             >
               {libLoading ? '更新中…' : '⟳ 更新'}
             </button>
@@ -516,19 +539,12 @@ export function FirmwareSubTab({
         </div>
 
         {libError && (
-          <div className="form-status err">
-            {libError}
-            <br />
-            開発時のみ利用可能です — Vite dev server (localhost:5173) 越しに{' '}
-            <code>../hapbeat-device-firmware/.pio/build/&lt;env&gt;/firmware.bin</code>
-            {' '}を読みます。
-          </div>
+          <div className="form-status err">{libError}</div>
         )}
 
         {!libError && libEntries.length === 0 && !libLoading && (
           <div className="form-status muted">
-            ビルド済みファームウェアが見つかりません。device-firmware repo で
-            {' '}<code>pio run -e necklace_v3_claude</code> 等を実行してください。
+            ファームウェアが見つかりません。
           </div>
         )}
 
@@ -574,30 +590,39 @@ export function FirmwareSubTab({
               if (!e) return null
               return (
                 <div className="firmware-lib-detail" role="tabpanel">
-                  <div className="firmware-lib-detail-name">
-                    {e.env}
-                    {e.build_tag && (
+                  <div
+                    className="firmware-lib-detail-meta"
+                    style={{
+                      // Allow the meta row to wrap when the version +
+                      // size + date sequence overflows the card. Long
+                      // semver strings (`1.234.567` etc) used to clip
+                      // when the row was kept single-line.
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    {e.fwVersion && (
                       <span
                         style={{
-                          marginLeft: 8,
                           fontSize: 11,
-                          padding: '2px 6px',
+                          padding: '2px 8px',
                           borderRadius: 3,
                           background: 'var(--accent)',
                           color: 'white',
                           fontFamily: 'var(--font-mono)',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
                         }}
-                        title="random_tag.py が振った BUILD_TAG。書込みごとに変わる。将来的に semver に置換予定。"
+                        title="ファームウェアバージョン (hapbeat_config.h FIRMWARE_VERSION)。OTA 完了後の起動バージョン照合に使用。"
                       >
-                        BUILD_TAG: {e.build_tag}
+                        v{e.fwVersion}
                       </span>
                     )}
-                  </div>
-                  <div className="firmware-lib-detail-meta">
-                    {formatBytes(e.size)} · built {formatMtime(e.mtime)}
-                  </div>
-                  <div className="firmware-lib-detail-path" title={e.path}>
-                    {e.path}
+                    <span style={{ whiteSpace: 'nowrap' }}>
+                      {formatBytes(e.size)} · {formatMtime(e.mtime)}
+                    </span>
                   </div>
                 </div>
               )
@@ -619,7 +644,7 @@ export function FirmwareSubTab({
           />
           ローカル .bin
           <span className="form-section-sub-inline">
-            {' '}— 任意のビルド済み .bin を直接指定
+            {' '}— 任意の .bin ファイルを直接指定して書き込む
           </span>
         </div>
         <div className="form-row">
@@ -655,22 +680,19 @@ export function FirmwareSubTab({
         </div>
         {localPermissionDenied && (
           <div className="form-status warn" style={{ padding: '0 4px' }}>
-            前回ピックしたファイルの読み取り権限がありません。「参照…」で再選択してください。
+            ファイル読み取り権限がありません。「参照…」で再選択してください。
           </div>
         )}
-        <div className="form-status muted" style={{ padding: '0 4px' }}>
-          ※ ブラウザはセキュリティ上 OS フルパスを公開しません。同じファイルを
-          指定し続ける場合、書き込みのたびにディスクから最新バイトを読み直します
-          （ビルド更新は自動反映）。
-        </div>
       </div>
 
       {/* --------- Wi-Fi OTA write -------------------------------------- */}
       {showOta && (
       <div className="form-section">
-        <div className="form-section-title">Wi-Fi OTA 書き込み</div>
-        <div className="form-status muted" style={{ marginBottom: 6 }}>
-          書き込み対象: <span className="mono firmware-target-bright">{selectedSummary || '(未選択)'}</span>
+        <div className="form-section-title">
+          Wi-Fi OTA 書き込み
+          <span className="form-section-sub-inline">
+            {' '}— LAN 経由で選択中ファームを上書き (デバイスは自動再起動)
+          </span>
         </div>
         <div className="form-action-row">
           <button
@@ -707,37 +729,17 @@ export function FirmwareSubTab({
 
       {/* --------- USB Serial write ------------------------------------- */}
       <div className="form-section">
-        <div className="form-section-title">USB Serial 書き込み</div>
+        <div className="form-section-title">
+          USB Serial 書き込み
+          <span className="form-section-sub-inline">
+            {' '}— USB ケーブル直結で書き込む (Wi-Fi 不要)
+          </span>
+        </div>
         {!isWebSerialSupported() && (
           <div className="form-status err">
-            お使いのブラウザは Web Serial API をサポートしていません
-            (Chrome / Edge を使用してください)。Web Serial は HTTPS または
-            {' '}<code>http://localhost</code> でのみ動作します。
+            このブラウザは Web Serial API 非対応です (Chrome / Edge を使用してください)。
           </div>
         )}
-        <div className="form-status" style={{ marginBottom: 6, color: 'var(--text-primary)' }}>
-          書き込み対象: <span className="mono firmware-target-bright">{selectedSummary || '(未選択)'}</span>
-          {selectedPath && (
-            <div
-              style={{
-                fontSize: 11,
-                marginTop: 2,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-              title={selectedPath}
-            >
-              パス: <span className="mono">{selectedPath}</span>
-            </div>
-          )}
-        </div>
-        <div className="form-status muted" style={{ marginBottom: 6 }}>
-          esptool-js + Web Serial API で書き込みます。デバイスを USB 接続し、
-          {' '}「Serial 書き込み」を押すとブラウザの COM ポート選択ダイアログが
-          開きます。Hapbeat の firmware.bin は merged image なので 0x0 に書き込まれます
-          (ESP32-S3 想定)。
-        </div>
         <div className="form-action-row">
           <button
             className="form-button"
@@ -774,15 +776,14 @@ export function FirmwareSubTab({
             }}
             disabled={serialRunning}
             style={{ marginLeft: 12, fontSize: 11, padding: '4px 10px' }}
-            title="複数の Hapbeat を接続している時に書き込み先を切り替える"
+            title="別の Hapbeat に書き込み先を切り替える"
           >
             COM ポート再選択
           </button>
         </div>
         {eraseAll && (
           <div className="form-status warn" style={{ marginTop: 4 }}>
-            ⚠ 全消去すると Wi-Fi profiles・グループ ID・device 名などの
-            NVS 設定もすべて消えます。
+            ⚠ 全消去すると Wi-Fi 設定・デバイス名などもすべて消えます。
           </div>
         )}
 
@@ -816,15 +817,9 @@ export function FirmwareSubTab({
           </div>
         )}
 
-        {masterMode === 'config' && (
-          <div className="form-status muted" style={{ marginTop: 4 }}>
-            現在 Serial Config 接続中 — 「Serial 書き込み」を押すと自動で切断してから書込みに入ります。
-          </div>
-        )}
-
         {serialRunning && (
           <div className="form-status warn" style={{ marginTop: 4 }}>
-            ⚠ 書き込み中はタブを切り替えないでください (進捗表示が消えます)。
+            ⚠ 書き込み中はタブを切り替えないでください。
           </div>
         )}
       </div>

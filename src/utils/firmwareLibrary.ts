@@ -25,10 +25,11 @@ export interface FirmwareLibraryEntry {
   /** Absolute filesystem path of `firmware.bin` on the dev host
    *  (display only). */
   path: string
-  /** BUILD_TAG baked into the binary at build time (currently a
-   *  random `vNN` from `random_tag.py`; will be replaced by a real
-   *  version string once we cut the first SDK release). */
-  build_tag?: string
+  /** FIRMWARE_VERSION baked into the binary at build time (the semver
+   *  string defined in `src/hapbeat_config.h`). Sole source of truth
+   *  for "which firmware is this" — same value the OLED shows and the
+   *  device returns in `get_info`'s `fw` field. */
+  fwVersion?: string
 }
 
 /** A single region to write during a multi-file flash. */

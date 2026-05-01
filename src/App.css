@@ -27,9 +27,17 @@ body.is-dragging .char-cell.empty:hover {
   --bg-secondary: #16213e;
   --bg-surface: #0f3460;
   --bg-hover: #1a3a6e;
-  --text-primary: #e0e0e0;
-  --text-secondary: #a0a0b0;
-  --text-muted: #707080;
+  /* 3-tier scale (2026-05-01):
+   *   primary  — section headings; near-white anchor
+   *   secondary — body text / values; readable at a glance
+   *   muted    — subtitles / hints / disabled states; intentionally
+   *              dimmer so it doesn't compete with headings.
+   * Subtitles are intentionally a step below body text so a heading +
+   * subtitle pair has visible hierarchy without spelling it out in
+   * size or weight. */
+  --text-primary: #f5f6f8;
+  --text-secondary: #c8cad2;
+  --text-muted: #8e909c;
   --accent: #7c5cbf;
   --accent-light: #a78bfa;
   --accent-dim: #5a3d8f;

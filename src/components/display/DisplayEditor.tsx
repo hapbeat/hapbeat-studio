@@ -30,6 +30,7 @@ import { useDeviceStore } from '@/stores/deviceStore'
 import { useToast } from '@/components/common/Toast'
 import { LedConfigModal } from './LedConfigModal'
 import { VolumeConfigModal } from './VolumeConfigModal'
+import { DevicePill } from '@/components/devices/DevicePill'
 import './DisplayEditor.css'
 
 /** パレットからドラッグ中の要素タイプ + variant */
@@ -613,12 +614,26 @@ export function DisplayEditor() {
     // device studios dangerous to edit. Empty selection → toast +
     // abort rather than fall back to broadcast.
     const { selectedIps, selectedIp } = useDeviceStore.getState()
-    const targets = selectedIps.length > 0
+    const rawTargets = selectedIps.length > 0
       ? selectedIps
       : (selectedIp ? [selectedIp] : [])
-    if (targets.length === 0) {
+    if (rawTargets.length === 0) {
       toast('Devices タブで対象デバイスを選択してください', 'error')
       return
+    }
+    // Display deploy goes through helper TCP 7701; firmware's
+    // `serial_config.cpp` does not yet implement `write_ui_config`,
+    // so a Serial pseudo-device target would just fail at
+    // `_send_tcp_to_many` with `connect failed`. Strip serial: IPs
+    // and warn the user. (2026-04-30)
+    const targets = rawTargets.filter((ip) => !ip.startsWith('serial:'))
+    const droppedSerial = rawTargets.length - targets.length
+    if (targets.length === 0) {
+      toast('Serial 接続では Display 書込みは未対応 — Wi-Fi に乗せてから再試行してください', 'error')
+      return
+    }
+    if (droppedSerial > 0) {
+      toast(`Serial デバイス ${droppedSerial} 台はスキップ — LAN ${targets.length} 台に書き込みます`, 'success')
     }
     setIsDeploying(true)
     const uiConfig = toFirmwareFormat(buildSavedState())
@@ -1154,6 +1169,10 @@ function ControlBar({
       <button className="btn btn-sm" onClick={onImport} title="display-layout.json を読み込み">
         読込
       </button>
+      <div className="control-separator" />
+      {/* Shared DevicePill — identical UI to the Kit tab's WorkDirBar.
+          Pill itself + Devices ▸ button both open the modal. */}
+      <DevicePill />
       <div className="control-separator" />
       <span className="tooltip-wrap">
         <button

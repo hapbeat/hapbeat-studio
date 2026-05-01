@@ -11,6 +11,7 @@ import { KitEventRow } from './editor/KitEventRow'
 import { ClipModeInfoModal } from './editor/ClipModeInfoModal'
 import { ClipCard } from './shared/ClipCard'
 import { ClipEditModal } from './shared/ClipEditModal'
+import { DevicePill } from '@/components/devices/DevicePill'
 import './KitManager.css'
 
 const DND_TYPE_CLIP = 'application/x-hapbeat-clip'
@@ -388,16 +389,9 @@ function WorkDirBar() {
   const setViewMode = useLibraryStore((s) => s.setViewMode)
   const showClipDetails = useLibraryStore((s) => s.showClipDetails)
   const setShowClipDetails = useLibraryStore((s) => s.setShowClipDetails)
-  const { isConnected: helperConnected, devices } = useHelperConnection()
+  const { devices } = useHelperConnection()
   const dev0 = devices[0]
   const volumeWiper = dev0?.volumeWiper ?? null
-  // First-online-or-first-known device, displayed in the kit-page
-  // header so kit authors don't have to flip to Devices tab to see
-  // which Hapbeat is currently active.
-  const headerDevice = devices.find((d) => d.online) ?? dev0 ?? null
-  const otherCount = headerDevice
-    ? Math.max(0, devices.length - 1)
-    : 0
 
   const views: { value: LibraryViewMode; label: string; title: string }[] = [
     { value: 'side', label: '\u2503', title: 'Clips left, kit editor right' },
@@ -418,42 +412,12 @@ function WorkDirBar() {
         title={showClipDetails ? 'Hide clip details (duration, sample rate, tags…)' : 'Show clip details'}
       >i</button>
       <ShortcutHelp />
-      {/* Connected Hapbeat indicator. Tap-target for now; future
-          revisions will open a device picker modal here. */}
-      {headerDevice && (
-        <>
-          <span className="workdir-divider" />
-          <span
-            className="workdir-device"
-            title={
-              `${headerDevice.name || '(unnamed)'}\n` +
-              `IP: ${headerDevice.ipAddress || '-'}\n` +
-              `${headerDevice.online ? 'online' : 'offline'}` +
-              (otherCount > 0 ? `\n他 ${otherCount} 台が接続されています` : '')
-            }
-          >
-            <span
-              className={`workdir-device-dot ${headerDevice.online ? 'online' : 'offline'}`}
-              aria-hidden="true"
-            />
-            <span className="workdir-device-name">
-              {headerDevice.name || '(unnamed)'}
-            </span>
-            {otherCount > 0 && (
-              <span className="workdir-device-more">+{otherCount}</span>
-            )}
-          </span>
-        </>
-      )}
-      {!headerDevice && helperConnected && (
-        <>
-          <span className="workdir-divider" />
-          <span className="workdir-device muted" title="No Hapbeat discovered yet">
-            <span className="workdir-device-dot offline" aria-hidden="true" />
-            no device
-          </span>
-        </>
-      )}
+      {/* Pin the device pill to the right side of the bar — original
+          layout used margin-left:auto on the pill itself; the shared
+          DevicePill stays layout-neutral so this divider takes the
+          push instead. */}
+      <span className="workdir-divider" style={{ marginLeft: 'auto' }} />
+      <DevicePill />
       {volumeWiper !== null && (
         <>
           <span className="workdir-divider" />

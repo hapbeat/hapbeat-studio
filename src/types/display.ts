@@ -192,7 +192,7 @@ export const ELEMENT_FIXED_SIZES: Record<DisplayElementType, [number, number]> =
   wifi_ssid: [8, 1],         // "MySSID__"  最大8文字
   connection_status: [4, 1], // "[--]"      4文字 (compact), standard "[OK]App_" 8文字
   ip_address: [15, 1],       // "192.168.1.100" 最大15文字, compact ".1.100" 6文字
-  firmware_version: [3, 1],  // "FW3"       3文字
+  firmware_version: [6, 1],  // "v2.0.42"  最大6文字 (semver "x.y.zz" 想定)
   device_name: [6, 1],       // "DuoWL2"    6文字, compact 3文字
   gain: [4, 1],              // "G:12"      4文字
   player_number: [4, 1],     // "P:01"      4文字

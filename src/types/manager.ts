@@ -60,6 +60,7 @@ export interface StudioToManagerMessage {
     | 'subscribe_logs'
     | 'unsubscribe_logs'
     | 'ota_data'
+    | 'scan_wifi'
     | 'ping'
   payload: Record<string, unknown>
 }
@@ -84,6 +85,7 @@ export interface ManagerToStudioMessage {
     | 'device_log'
     | 'ota_progress'
     | 'ota_result'
+    | 'scan_wifi_result'
     | 'error'
     | 'pong'
   payload: Record<string, unknown>

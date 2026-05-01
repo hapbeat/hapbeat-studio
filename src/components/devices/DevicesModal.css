@@ -1,0 +1,116 @@
+.devices-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  /* Stack above every per-tab UI we know about:
+   *   - DisplayEditor uses .portal-dropdown z-index: 100000
+   *   - DisplayEditor uses .portal-overlay z-index: 99999
+   *   - LedConfigModal uses 1000 / 1001
+   *   - Toast uses 9999
+   * Setting the modal at 100050 puts it above the Display tab's
+   * drag-drop portal overlays so the panel both renders on top AND
+   * receives clicks (z-index 200 was below the palette stacking
+   * context in Display, which is why clicks fell through). */
+  z-index: 100050;
+  /* Backdrop is transparent — the user explicitly said the
+   * surrounding canvas can stay visible. The modal *panel* itself
+   * is what must be opaque (see below) so its contents read
+   * cleanly against the page behind. */
+  background: transparent;
+  /* Pointer-events still active here so backdrop clicks close the
+   * modal; only the visual layer is invisible. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.devices-modal-panel {
+  position: relative;
+  /* Sized for the DeviceList sidebar only (no DeviceDetail). Keeping
+   * it narrow forces focus on "pick a device" — full per-device
+   * config still lives on the dedicated Devices tab. */
+  width: min(420px, 92vw);
+  max-height: min(720px, 86vh);
+  /* Force fully-opaque background; the elementPalette behind was
+   * bleeding through earlier because the panel area inside the
+   * sidebar had no opaque fill of its own. Explicit color (not just
+   * the var) defends against any future translucency in
+   * --bg-secondary. */
+  background-color: #16213e;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.devices-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-primary);
+}
+
+.devices-modal-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
+}
+
+.devices-modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px 10px;
+  border-radius: 4px;
+}
+.devices-modal-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.devices-modal-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* Inherit the panel's solid fill so any translucent zone inside
+   * DeviceList draws on top of opaque pixels rather than the page
+   * underneath. */
+  background-color: #16213e;
+}
+/* DeviceList renders as <aside class="devices-sidebar">. In the modal
+ * it stands alone, so ensure it fills the panel and scrolls its inner
+ * card list rather than spilling out. */
+.devices-modal-body > .devices-sidebar {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border-right: none;
+  background-color: #16213e;
+}
+
+/* Trigger button shared by Kit / Display toolbars. */
+.devices-modal-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.devices-modal-trigger:hover {
+  background: var(--accent-dim);
+  color: white;
+}

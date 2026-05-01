@@ -7,7 +7,7 @@ import type { DisplayTemplate } from '@/types/display'
  * 各要素のサイズ:
  *   volume: 6, volume_mode: 3, battery(%): 4, battery(bar): 8,
  *   wifi_status: 5, connection_status: 4, player_number: 4,
- *   position: 7, device_name: 6, firmware_version: 3, gain: 4,
+ *   position: 7, device_name: 6, firmware_version: 6, gain: 4,
  *   ip_address: 15, page_indicator: 3, group_id: 4, address: 10
  */
 
