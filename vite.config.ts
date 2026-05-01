@@ -39,17 +39,36 @@ function firmwareDevPlugin(firmwareBuildRoot: string): Plugin {
               size: number
               mtime: number
               path: string
+              build_tag?: string
             }> = []
             for (const env of envs) {
               const binPath = join(firmwareBuildRoot, env, 'firmware.bin')
               try {
                 const st = await fs.stat(binPath)
                 if (st.isFile()) {
+                  // random_tag.py writes the resolved BUILD_TAG to a
+                  // sibling text file at build time. Surfacing it
+                  // here lets Studio render the actual tag baked into
+                  // firmware.bin alongside size / mtime — without
+                  // this, two builds with identical byte size are
+                  // visually indistinguishable and users second-guess
+                  // whether the dev server is serving the latest
+                  // file. (Will switch to a real version field once
+                  // we replace the random tag with semver.)
+                  let buildTag: string | undefined
+                  try {
+                    const tag = await fs.readFile(
+                      join(firmwareBuildRoot, env, 'build_tag.txt'),
+                      'utf-8',
+                    )
+                    buildTag = tag.trim() || undefined
+                  } catch { /* no tag file — older build */ }
                   items.push({
                     env,
                     size: st.size,
                     mtime: st.mtimeMs,
                     path: binPath,
+                    build_tag: buildTag,
                   })
                 }
               } catch { /* env dir without firmware.bin — skip */ }

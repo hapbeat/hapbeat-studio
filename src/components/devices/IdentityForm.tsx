@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
+import { useConfirm } from '@/components/common/useConfirm'
+import { useInputHistory } from '@/hooks/useInputHistory'
 import {
   POSITION_NAMES,
   positionLabel,
@@ -11,6 +13,9 @@ interface Props {
   device: DeviceInfo
   cachedInfo?: { name?: string; group?: number }
   sendTo: (msg: ManagerMessage) => void
+  /** Optional: clears `cachedInfo` from the master after a successful
+   *  set_group/set_name so the live state mirrors the wire. */
+  onChanged?: () => void
 }
 
 /**
@@ -20,13 +25,23 @@ interface Props {
  * any `get_info` cache. Editing is local until "変更" is clicked, at
  * which point the full set_* command is sent to Helper.
  */
-export function IdentityForm({ device, cachedInfo, sendTo }: Props) {
+export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
   const [name, setName] = useState(device.name)
 
   const initial = parseAddress(device.address)
   const [prefix, setPrefix] = useState(initial.prefix)
   const [player, setPlayer] = useState<number>(initial.player)
   const [position, setPosition] = useState<string>(initial.position)
+  // Group ID — was previously a duplicate field inside SerialConfigSection.
+  // Consolidated here (2026-04-30) so both LAN and Serial transports
+  // get the same single Identity form.
+  const [groupStr, setGroupStr] = useState(String(cachedInfo?.group ?? 0))
+  const { ask, dialog: confirmDialog } = useConfirm()
+  // Persisted recall for free-text identity fields. Recent values are
+  // suggested via <datalist> on the same field so a user adding 5 new
+  // Hapbeats doesn't have to type "MyShow/" five times.
+  const nameHistory = useInputHistory('device-name')
+  const prefixHistory = useInputHistory('device-address-prefix')
 
   // Re-sync local state when the user picks a different device
   // (avoids the form silently editing the wrong one).
@@ -36,20 +51,43 @@ export function IdentityForm({ device, cachedInfo, sendTo }: Props) {
     setPrefix(a.prefix)
     setPlayer(a.player)
     setPosition(a.position)
-  }, [device.ipAddress, device.address, device.name, cachedInfo?.name])
+    setGroupStr(String(cachedInfo?.group ?? 0))
+  }, [device.ipAddress, device.address, device.name, cachedInfo?.name, cachedInfo?.group])
 
   const submitName = () => {
     if (!name.trim()) return
     sendTo({ type: 'set_name', payload: { name: name.trim() } })
+    nameHistory.commit(name.trim())
+    onChanged?.()
   }
 
   const submitAddress = () => {
     const addr = buildAddress(prefix, player, position)
     sendTo({ type: 'set_address', payload: { address: addr } })
+    if (prefix.trim()) prefixHistory.commit(prefix.trim())
+    onChanged?.()
+  }
+
+  const submitGroup = () => {
+    const g = Number(groupStr)
+    if (!Number.isFinite(g) || g < 0 || g > 255) return
+    sendTo({ type: 'set_group', payload: { group: g } })
+    onChanged?.()
+  }
+
+  const submitReboot = async () => {
+    const ok = await ask({
+      title: 'リブート',
+      message: 'デバイスをリブートしますか？',
+      confirmLabel: 'リブートする',
+    })
+    if (!ok) return
+    sendTo({ type: 'reboot', payload: {} })
   }
 
   return (
     <div className="form-section">
+      {confirmDialog}
       <div className="form-section-title">デバイス識別</div>
 
       <div className="form-row">
@@ -61,7 +99,11 @@ export function IdentityForm({ device, cachedInfo, sendTo }: Props) {
           maxLength={32}
           placeholder="hapbeat-XXXX"
           disabled={!device.online}
+          list={nameHistory.historyId}
         />
+        <datalist id={nameHistory.historyId}>
+          {nameHistory.history.map((h) => <option key={h} value={h} />)}
+        </datalist>
         <button
           className="form-button"
           onClick={submitName}
@@ -81,7 +123,11 @@ export function IdentityForm({ device, cachedInfo, sendTo }: Props) {
             placeholder="prefix (任意)"
             disabled={!device.online}
             style={{ flex: '1 1 100px' }}
+            list={prefixHistory.historyId}
           />
+          <datalist id={prefixHistory.historyId}>
+            {prefixHistory.history.map((h) => <option key={h} value={h} />)}
+          </datalist>
           <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>player_</span>
           <input
             className="form-input short"
@@ -114,8 +160,41 @@ export function IdentityForm({ device, cachedInfo, sendTo }: Props) {
         </button>
       </div>
 
+      <div className="form-row">
+        <label>グループ</label>
+        <input
+          className="form-input mono short"
+          type="number"
+          min={0}
+          max={255}
+          value={groupStr}
+          onChange={(e) => setGroupStr(e.target.value)}
+          disabled={!device.online}
+        />
+        <button
+          className="form-button"
+          onClick={submitGroup}
+          disabled={!device.online}
+          title="0 = ブロードキャスト (全デバイスが受信)"
+        >
+          変更
+        </button>
+      </div>
+
       <div className="form-status muted">
         現在: <code className="form-input mono" style={{ background: 'transparent', border: 'none', padding: 0, width: 'auto', color: 'var(--text-secondary)' }}>{device.address || '(未設定)'}</code>
+        {' '}· group <code className="form-input mono" style={{ background: 'transparent', border: 'none', padding: 0, width: 'auto', color: 'var(--text-secondary)' }}>{cachedInfo?.group ?? '?'}</code>
+      </div>
+
+      <div className="form-action-row" style={{ marginTop: 8 }}>
+        <button
+          className="form-button-secondary"
+          onClick={submitReboot}
+          disabled={!device.online}
+          title="set_* コマンドの一部はリブート後に有効になる"
+        >
+          リブート
+        </button>
       </div>
     </div>
   )

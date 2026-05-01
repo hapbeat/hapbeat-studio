@@ -26,6 +26,7 @@ import {
   type DisplaySavedState,
 } from '@/utils/displayLayoutIO'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
+import { useDeviceStore } from '@/stores/deviceStore'
 import { useToast } from '@/components/common/Toast'
 import { LedConfigModal } from './LedConfigModal'
 import { VolumeConfigModal } from './VolumeConfigModal'
@@ -605,13 +606,32 @@ export function DisplayEditor() {
       toast('Hapbeat Manager を起動してください', 'error')
       return
     }
+    // Honor the Devices tab's selection so Display deploys to only
+    // the checked device(s) — not every Hapbeat on the LAN. The
+    // user explicitly flagged this (2026-04-30) because Display's
+    // previous behavior of broadcasting to all devices made multi-
+    // device studios dangerous to edit. Empty selection → toast +
+    // abort rather than fall back to broadcast.
+    const { selectedIps, selectedIp } = useDeviceStore.getState()
+    const targets = selectedIps.length > 0
+      ? selectedIps
+      : (selectedIp ? [selectedIp] : [])
+    if (targets.length === 0) {
+      toast('Devices タブで対象デバイスを選択してください', 'error')
+      return
+    }
     setIsDeploying(true)
     const uiConfig = toFirmwareFormat(buildSavedState())
+    // Helper's `_resolve_targets` looks for `payload.targets` (array)
+    // before falling back to `payload.ip` (single) and finally a
+    // broadcast. Passing `targets` matches Studio's multi-select
+    // behavior precisely; the broadcast fallback is exactly what the
+    // user wanted to stop.
     managerSend({
       type: 'write_ui_config',
-      payload: { config: uiConfig },
+      payload: { config: uiConfig, targets },
     })
-  }, [managerConnected, managerSend, buildSavedState])
+  }, [managerConnected, managerSend, buildSavedState, toast])
 
   const handleExport = useCallback(() => {
     exportDisplayLayout(buildSavedState())

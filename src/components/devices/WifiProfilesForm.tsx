@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import type { WifiProfile } from '@/stores/deviceStore'
+import { useInputHistory } from '@/hooks/useInputHistory'
 
 interface Props {
   device: DeviceInfo
@@ -38,6 +39,7 @@ export function WifiProfilesForm({
   const [ssid, setSsid] = useState('')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
+  const ssidHistory = useInputHistory('wifi-ssid')
 
   // Reset form state when the user picks a different device.
   useEffect(() => {
@@ -63,14 +65,18 @@ export function WifiProfilesForm({
 
   const submit = () => {
     if (!ssid.trim()) return
+    // Send both `pass` and `password` so the call works on either
+    // transport without per-route translation:
+    //   - LAN → Helper: helper accepts both keys (server.py:269)
+    //   - Serial → firmware: firmware reads `pass` (serial_config.cpp)
     sendTo({
       type: 'set_wifi',
-      payload: { ssid: ssid.trim(), password },
+      payload: { ssid: ssid.trim(), pass: password, password },
     })
+    ssidHistory.commit(ssid.trim())
     exitEditMode()
     setAddOpen(false)
-    // Manager polls list_wifi_profiles after set_wifi commits; here we
-    // ask for a fresh list so the UI doesn't lag.
+    // Refresh the profile list — the firmware doesn't push, we poll.
     setTimeout(onRefresh, 800)
   }
 
@@ -201,7 +207,11 @@ export function WifiProfilesForm({
               onChange={(e) => setSsid(e.target.value)}
               placeholder="Wi-Fi SSID"
               disabled={!device.online || editingIndex !== null}
+              list={ssidHistory.historyId}
             />
+            <datalist id={ssidHistory.historyId}>
+              {ssidHistory.history.map((h) => <option key={h} value={h} />)}
+            </datalist>
             <span />
           </div>
           <div className="form-row">

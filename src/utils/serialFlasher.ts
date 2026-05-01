@@ -38,26 +38,31 @@ export interface FlashOptionsExt {
   eraseAll?: boolean
   onProgress?: (p: FlashProgress) => void
   onLog?: (line: string) => void
-  /** Bootloader baud (matches Manager: `--baud 921600`). */
+  /**
+   * Bootloader baud. Default 921600 to match `hapbeat-manager`'s
+   * `esptool --baud 921600` invocation, which is the proven-working
+   * configuration for these devices.
+   */
   baudrate?: number
+  /**
+   * Use deflate compression on the wire. Default `true` because
+   * esptool-js 0.6 does not implement the uncompressed write path
+   * (throws "Yet to handle Non Compressed writes"). Setting this to
+   * `false` is reserved for a future esptool-js upgrade.
+   */
+  compress?: boolean
 }
 
 export function isWebSerialSupported(): boolean {
   return typeof navigator !== 'undefined' && 'serial' in navigator
 }
 
-/**
- * Prompt the user to pick a USB-serial device. Throws if the browser
- * doesn't support Web Serial or the user cancels the picker.
- */
-export async function pickSerialPort(): Promise<SerialPort> {
-  if (!isWebSerialSupported()) {
-    throw new Error('Web Serial API is not supported (Chrome / Edge を使ってください)')
-  }
-  // No filters — let the user pick any USB-serial. ESP32-S3 enumerates
-  // as a CDC-ACM device on stock firmware, but custom VID/PIDs vary.
-  return navigator.serial.requestPort({})
-}
+// Note: there's deliberately NO `pickSerialPort` / `getMostRecentSerialPort`
+// here anymore. Studio's single-master invariant (see serialMaster.ts)
+// requires every Web Serial port acquisition to go through
+// `pickConfigPort` / `master.openConfig` so the master is the only
+// thing that can hold a SerialPort handle. `flashRegions` / `eraseFlash`
+// below take an already-opened-by-master port as their first argument.
 
 /**
  * Validate that the supplied `.bin` is the merged image layout this
@@ -192,20 +197,27 @@ export async function flashRegions(
       }
     }
 
+    // esptool-js 0.6's `writeFlash` works with raw Uint8Array directly:
+    // it pads to 4-byte alignment, calls `pako.deflate(image)` which
+    // wants a Uint8Array, and then iterates the deflated output as a
+    // typed array. Earlier wrappers in this file converted to a binary
+    // string for an even older esptool-js, but with 0.6 that triggers
+    // `ESP_TOO_MUCH_DATA (status 201,0)` mid-stream because passing a
+    // string to pako.deflate UTF-8-encodes it, doubling every byte
+    // ≥128. The compsize advertised by `flashDeflBegin` then no longer
+    // matches the actual deflated stream length and the stub aborts.
     const fileArray = regions.map((r) => ({
-      // see u8ToBinaryString — esptool-js iterates `data` as a binary
-      // string per code unit, even though its TS type says Uint8Array.
-      data: u8ToBinaryString(r.bytes),
+      data: r.bytes,
       address: r.address,
     }))
 
     const flashOpts: FlashOptions = {
-      fileArray: fileArray as unknown as { data: Uint8Array; address: number }[],
+      fileArray,
       flashMode: 'keep',
       flashFreq: 'keep',
       flashSize: 'keep',
       eraseAll: false, // explicit eraseFlash above when requested
-      compress: true,
+      compress: opts.compress ?? false,
       reportProgress: (fileIndex, written, _total) => {
         // Roll per-region progress up into a single 0..100 bar across
         // the full multi-region write. Without this, the bar resets to
@@ -235,24 +247,6 @@ export async function flashRegions(
 }
 
 // ---- helpers ----
-
-/**
- * esptool-js's writeFlash signature documents `data: Uint8Array` but the
- * underlying implementation actually iterates the value as a "binary
- * string" (`String.fromCharCode(byte)` per code unit). Passing a
- * Uint8Array directly results in a "ord(...)" type error inside the
- * library. The official examples (esptool-js demo) do this same
- * conversion. Helper kept localized so the rest of the codebase
- * keeps using Uint8Array natively.
- */
-function u8ToBinaryString(u8: Uint8Array): string {
-  let s = ''
-  const chunk = 0x8000
-  for (let i = 0; i < u8.length; i += chunk) {
-    s += String.fromCharCode.apply(null, Array.from(u8.subarray(i, i + chunk)))
-  }
-  return s
-}
 
 function makeTerminal(onLog?: (line: string) => void) {
   if (!onLog) return undefined

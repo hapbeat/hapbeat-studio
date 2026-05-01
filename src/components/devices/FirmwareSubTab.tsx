@@ -2,12 +2,11 @@ import { useCallback, useEffect, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useLogStore } from '@/stores/logStore'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
+import { useConfirm } from '@/components/common/useConfirm'
+import { useSerialMaster } from '@/stores/serialMaster'
 import {
   assertMergedImage,
-  eraseFlash,
-  flashRegions,
   isWebSerialSupported,
-  pickSerialPort,
 } from '@/utils/serialFlasher'
 import {
   loadFileHandle,
@@ -32,12 +31,6 @@ interface OtaProgress {
   message: string
 }
 
-interface SerialProgress {
-  phase: string
-  percent: number
-  message: string
-}
-
 interface Props {
   /** When omitted (onboarding pane / no device selected), only Serial
    *  flashing is offered — OTA needs an online IP. */
@@ -46,6 +39,14 @@ interface Props {
   /** Hide the OTA section even when a device is provided. Used by the
    *  empty-state onboarding view to keep focus on Serial bring-up. */
   serialOnly?: boolean
+  /**
+   * After a successful Serial flash, ask the SerialMaster to wait this
+   * many ms then re-probe the device (re-open the config conn). Used
+   * by the onboarding wizard so the user lands in Wi-Fi setup
+   * automatically. The per-device ファームウェア sub-tab passes 0 to
+   * skip the auto re-probe (the device is already an LAN peer).
+   */
+  postFlashReprobeMs?: number
 }
 
 /**
@@ -66,7 +67,12 @@ interface Props {
  *
  * Wi-Fi OTA and USB Serial both consume whichever source is selected.
  */
-export function FirmwareSubTab({ device, sendTo, serialOnly = false }: Props) {
+export function FirmwareSubTab({
+  device,
+  sendTo,
+  serialOnly = false,
+  postFlashReprobeMs = 0,
+}: Props) {
   // Show the OTA section only when we actually have a target device
   // and the caller hasn't asked for serial-only mode.
   const showOta = !serialOnly && !!device && !!sendTo
@@ -97,14 +103,30 @@ export function FirmwareSubTab({ device, sendTo, serialOnly = false }: Props) {
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
 
-  // USB Serial state — separate from Wi-Fi OTA so the user can run them
-  // independently without the result of one stomping the other.
-  const [serialRunning, setSerialRunning] = useState(false)
-  const [serialProgress, setSerialProgress] = useState<SerialProgress | null>(null)
-  const [serialResult, setSerialResult] = useState<{ ok: boolean; message: string } | null>(null)
+  // USB Serial state lives in the SerialMaster so the wizard, the
+  // per-device 設定 sub-tab, and any future entry point all see the
+  // same progress/result without re-implementing the plumbing.
+  const serialRunning = useSerialMaster((s) => s.flashRunning)
+  const serialProgress = useSerialMaster((s) => s.flashProgress)
+  const serialResult = useSerialMaster((s) => s.flashLastResult)
+  const masterMode = useSerialMaster((s) => s.mode)
+  const masterFlash = useSerialMaster((s) => s.flash)
+  const masterEraseFlash = useSerialMaster((s) => s.eraseFlash)
+  const masterRePick = useSerialMaster((s) => s.rePick)
   const [eraseAll, setEraseAll] = useState(false)
+  const { ask, dialog: confirmDialog } = useConfirm()
+  // Local-only error for "before-flash" issues (file read, etc.) —
+  // these never reach the master. Cleared when a real flash starts.
+  const [localError, setLocalError] = useState<string | null>(null)
 
   // ---- Library: refresh on mount + on demand --------------------------
+
+  // Surfaced in the toolbar so the user can verify the last fetch
+  // actually happened — silent re-fetches were the quietest part of
+  // the previous "更新を押しても反映されない (mtime updated, size old)"
+  // report, where it turned out the request *did* succeed but the
+  // visual toggle reverted from "更新中…" too fast to notice.
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null)
 
   const refreshLibrary = useCallback(async () => {
     setLibLoading(true)
@@ -124,6 +146,17 @@ export function FirmwareSubTab({ device, sendTo, serialOnly = false }: Props) {
         return a.env.localeCompare(b.env)
       })
       setLibEntries(entries)
+      setLastRefreshedAt(Date.now())
+      // Verbose diagnostics — each refresh dumps every env's exact
+      // bytes and mtime to the log drawer so the user can prove the
+      // fetch actually returned new data even when the displayed
+      // formatted size happens to be unchanged (formatBytes rounds
+      // to 0.01 MB, masking small deltas).
+      pushLog('firmware', `library refreshed: ${entries.length} env(s) at ${new Date().toLocaleTimeString()}`)
+      for (const e of entries) {
+        const tag = e.build_tag ? ` BUILD_TAG=${e.build_tag}` : ''
+        pushLog('firmware', `  · ${e.env}:${tag} ${e.size.toLocaleString()} bytes mtime=${formatMtime(e.mtime)}`)
+      }
       // Default-select the most-recently-built env on first load —
       // typically the one the user just rebuilt. Preserve a manual
       // selection across refreshes if it still exists.
@@ -133,12 +166,14 @@ export function FirmwareSubTab({ device, sendTo, serialOnly = false }: Props) {
         return [...entries].sort((a, b) => b.mtime - a.mtime)[0].env
       })
     } catch (err) {
-      setLibError(`一覧取得失敗: ${(err as Error).message}`)
+      const msg = (err as Error).message ?? String(err)
+      setLibError(`一覧取得失敗: ${msg}`)
+      pushLog('firmware', `library refresh failed: ${msg}`)
       setLibEntries([])
     } finally {
       setLibLoading(false)
     }
-  }, [])
+  }, [pushLog])
 
   useEffect(() => {
     void refreshLibrary()
@@ -246,13 +281,17 @@ export function FirmwareSubTab({ device, sendTo, serialOnly = false }: Props) {
   }, [source, libSelected, localHandle])
 
   /**
-   * Resolve the currently-selected source to a **Serial flash region**.
-   * Hapbeat builds always emit merged firmware.bin (bootloader 0x0 +
-   * partitions 0x8000 + app 0x10000 in one file), so the region is
-   * always `[{ address: 0x0, bytes: firmware.bin }]`. `assertMergedImage`
-   * throws if the local-picked .bin doesn't match — better than
-   * silently writing a non-merged blob to 0x0 and corrupting the
-   * bootloader area.
+   * Resolve the currently-selected source to **Serial flash regions**.
+   * Hapbeat builds emit a merged firmware.bin (bootloader 0x0 +
+   * partitions 0x8000 + 0xFF gap covering NVS/otadata + app 0x10000).
+   * To keep distribution as a single binary while still preserving
+   * NVS data on flash, we split it into 2 regions here:
+   *   [0x0,    0x9000)  bootloader + partitions
+   *   [0x10000, end  )  app
+   * The 0x9000–0x10000 gap (NVS + otadata) is left untouched so
+   * Wi-Fi profiles / device name / group ID survive a reflash.
+   * `assertMergedImage` rejects local-picked .bin files that don't
+   * have the merged-layout markers.
    */
   const readSelectedRegions = useCallback(async (): Promise<{
     regions: FirmwareRegion[]
@@ -268,15 +307,25 @@ export function FirmwareSubTab({ device, sendTo, serialOnly = false }: Props) {
         label: `${entry.env} (built ${formatMtime(entry.mtime)})`,
       }
     }
-    // Local file: validate it's a merged image and write at 0x0.
+    // Local file: validate it's a merged image then split with the
+    // same NVS-skipping layout the library path uses.
     const single = await readSelectedBin()
     assertMergedImage(single.bytes)
+    const NVS_GAP_START = 0x9000
+    const APP_START = 0x10000
     return {
-      regions: [{
-        address: 0x0,
-        bytes: single.bytes,
-        label: 'firmware.bin (merged)',
-      }],
+      regions: [
+        {
+          address: 0x0,
+          bytes: single.bytes.slice(0, NVS_GAP_START),
+          label: 'bootloader+partitions (0x0..0x9000)',
+        },
+        {
+          address: APP_START,
+          bytes: single.bytes.slice(APP_START),
+          label: `app (0x10000..${single.bytes.length.toString(16)})`,
+        },
+      ],
       label: single.label,
     }
   }, [source, libSelected, libEntries, readSelectedBin])
@@ -369,121 +418,36 @@ export function FirmwareSubTab({ device, sendTo, serialOnly = false }: Props) {
   // ---- Serial flash --------------------------------------------------
 
   async function onSerialFlash() {
-    setSerialResult(null)
+    setLocalError(null)
     let plan: Awaited<ReturnType<typeof readSelectedRegions>>
     try {
       plan = await readSelectedRegions()
     } catch (err) {
-      setSerialResult({ ok: false, message: String((err as Error).message ?? err) })
+      setLocalError(String((err as Error).message ?? err))
       return
     }
-    // No app-only confirm needed: every Hapbeat firmware.bin is a
-    // merged image (bootloader + partitions + app), so eraseAll is
-    // always safe to combine with a flash — the merged blob restores
-    // every region.
-    setSerialProgress({ phase: 'pick', percent: 0, message: 'COM ポート選択待ち…' })
-    let port: SerialPort
-    try {
-      port = await pickSerialPort()
-    } catch (err) {
-      const msg = (err as Error).message ?? String(err)
-      if ((err as Error).name === 'AbortError' || /cancel/i.test(msg)) {
-        setSerialProgress(null)
-        return
-      }
-      setSerialProgress(null)
-      setSerialResult({ ok: false, message: msg })
-      pushLog('serial', `flash failed: ${msg}`)
-      return
-    }
-    setSerialRunning(true)
-    const totalBytes = plan.regions.reduce((s, r) => s + r.bytes.length, 0)
-    pushLog('serial', `flash → ${plan.label} (${formatBytes(totalBytes)} across ${plan.regions.length} region(s))`)
-    for (const r of plan.regions) {
-      pushLog('serial', `  ${r.label} → 0x${r.address.toString(16).padStart(4, '0')} (${formatBytes(r.bytes.length)})`)
-    }
-    try {
-      await flashRegions(port, plan.regions, {
-        eraseAll,
-        onLog: (line) => pushLog('serial', line),
-        onProgress: (p) => {
-          const phaseLabel: Record<string, string> = {
-            connect: 'チップ検出 / 同期',
-            erase: 'Flash 消去中',
-            write: '書き込み中',
-            reset: 'リセット中',
-            done: '完了',
-          }
-          setSerialProgress({
-            phase: p.phase,
-            percent: p.percent,
-            message: p.message
-              ? `${phaseLabel[p.phase] ?? p.phase} — ${p.message}`
-              : (phaseLabel[p.phase] ?? p.phase),
-          })
-        },
-      })
-      const summary = plan.regions
-        .map((r) => `${r.label}@0x${r.address.toString(16)}`)
-        .join(', ')
-      setSerialResult({
-        ok: true,
-        message: `Serial 書き込み完了 (${plan.label}; ${summary})`,
-      })
-      pushLog('serial', `flash done: ${plan.label}`)
-    } catch (err) {
-      const msg = (err as Error).message ?? String(err)
-      setSerialResult({ ok: false, message: `Serial 書き込み失敗: ${msg}` })
-      pushLog('serial', `flash failed: ${msg}`)
-    } finally {
-      setSerialRunning(false)
-      setTimeout(() => setSerialProgress(null), 3000)
-    }
+    // Hand the firmware bytes off to the master. It owns the port,
+    // closes any active config conn first, runs esptool-js, and
+    // (when postFlashReprobeMs > 0) auto re-probes for the wizard.
+    await masterFlash(plan.regions, {
+      eraseAll,
+      postFlashReprobeMs,
+    })
   }
 
   async function onSerialErase() {
-    if (!confirm(
-      'Flash を全消去しますか？\n'
-      + 'デバイスのファームウェア・Wi-Fi profiles・グループ ID 等の'
-      + ' 設定情報がすべて消えます。',
-    )) {
-      return
-    }
-    setSerialResult(null)
-    setSerialProgress({ phase: 'pick', percent: 0, message: 'COM ポート選択待ち…' })
-    let port: SerialPort
-    try {
-      port = await pickSerialPort()
-    } catch (err) {
-      const msg = (err as Error).message ?? String(err)
-      if ((err as Error).name === 'AbortError' || /cancel/i.test(msg)) {
-        setSerialProgress(null)
-        return
-      }
-      setSerialProgress(null)
-      setSerialResult({ ok: false, message: msg })
-      return
-    }
-    setSerialRunning(true)
-    try {
-      await eraseFlash(port, {
-        onLog: (line) => pushLog('serial', line),
-        onProgress: (p) => setSerialProgress({
-          phase: p.phase,
-          percent: p.percent,
-          message: p.phase === 'erase' ? 'Flash 消去中…' : p.phase,
-        }),
-      })
-      setSerialResult({ ok: true, message: 'Flash 消去完了' })
-      pushLog('serial', 'erase done')
-    } catch (err) {
-      const msg = (err as Error).message ?? String(err)
-      setSerialResult({ ok: false, message: `Flash 消去失敗: ${msg}` })
-      pushLog('serial', `erase failed: ${msg}`)
-    } finally {
-      setSerialRunning(false)
-      setTimeout(() => setSerialProgress(null), 3000)
-    }
+    const ok = await ask({
+      title: 'Flash 全消去',
+      message:
+        'Flash を全消去しますか？\n'
+        + 'デバイスのファームウェア・Wi-Fi profiles・グループ ID 等の'
+        + ' 設定情報がすべて消えます。',
+      confirmLabel: '全消去する',
+      danger: true,
+    })
+    if (!ok) return
+    setLocalError(null)
+    await masterEraseFlash()
   }
 
   // ---- Computed bits for the toolbar / disable states ----------------
@@ -495,9 +459,9 @@ export function FirmwareSubTab({ device, sendTo, serialOnly = false }: Props) {
   const selectedSummary = source === 'library'
     ? (() => {
         const e = libEntries.find((x) => x.env === libSelected)
-        return e
-          ? `${e.env} · ${formatBytes(e.size)} · built ${formatMtime(e.mtime)}`
-          : ''
+        if (!e) return ''
+        const tag = e.build_tag ? `BUILD_TAG=${e.build_tag} · ` : ''
+        return `${e.env} · ${tag}${formatBytes(e.size)} · built ${formatMtime(e.mtime)}`
       })()
     : (localMeta
       ? `${localMeta.name} · ${formatBytes(localMeta.size)} · modified ${formatMtime(localMeta.mtime)}`
@@ -509,6 +473,7 @@ export function FirmwareSubTab({ device, sendTo, serialOnly = false }: Props) {
 
   return (
     <>
+      {confirmDialog}
       {/* --------- Source: Firmware Library (hosted by dev plugin) --------- */}
       <div className="form-section">
         <div
@@ -528,14 +493,26 @@ export function FirmwareSubTab({ device, sendTo, serialOnly = false }: Props) {
               {' '}— device-firmware の最新ビルドを直接ロード
             </span>
           </span>
-          <button
-            className="form-button-secondary"
-            onClick={refreshLibrary}
-            disabled={libLoading}
-            style={{ fontSize: 11, padding: '2px 8px' }}
-          >
-            {libLoading ? '更新中…' : '⟳ 更新'}
-          </button>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            {lastRefreshedAt && (
+              <span
+                className="form-status muted"
+                style={{ fontSize: 11, padding: 0 }}
+                title="最後にディスクから読み込んだ時刻"
+              >
+                last: {new Date(lastRefreshedAt).toLocaleTimeString()}
+              </span>
+            )}
+            <button
+              className="form-button-secondary"
+              onClick={refreshLibrary}
+              disabled={libLoading}
+              style={{ fontSize: 11, padding: '2px 8px' }}
+              title="../hapbeat-device-firmware/.pio/build/<env>/firmware.bin を再読込"
+            >
+              {libLoading ? '更新中…' : '⟳ 更新'}
+            </button>
+          </span>
         </div>
 
         {libError && (
@@ -597,7 +574,25 @@ export function FirmwareSubTab({ device, sendTo, serialOnly = false }: Props) {
               if (!e) return null
               return (
                 <div className="firmware-lib-detail" role="tabpanel">
-                  <div className="firmware-lib-detail-name">{e.env}</div>
+                  <div className="firmware-lib-detail-name">
+                    {e.env}
+                    {e.build_tag && (
+                      <span
+                        style={{
+                          marginLeft: 8,
+                          fontSize: 11,
+                          padding: '2px 6px',
+                          borderRadius: 3,
+                          background: 'var(--accent)',
+                          color: 'white',
+                          fontFamily: 'var(--font-mono)',
+                        }}
+                        title="random_tag.py が振った BUILD_TAG。書込みごとに変わる。将来的に semver に置換予定。"
+                      >
+                        BUILD_TAG: {e.build_tag}
+                      </span>
+                    )}
+                  </div>
                   <div className="firmware-lib-detail-meta">
                     {formatBytes(e.size)} · built {formatMtime(e.mtime)}
                   </div>
@@ -771,6 +766,18 @@ export function FirmwareSubTab({ device, sendTo, serialOnly = false }: Props) {
             />
             書き込み前に Flash を全消去する
           </label>
+          <button
+            className="form-button-secondary"
+            onClick={async () => {
+              const p = await masterRePick()
+              if (p) pushLog('serial', 'COM ポートを再選択しました')
+            }}
+            disabled={serialRunning}
+            style={{ marginLeft: 12, fontSize: 11, padding: '4px 10px' }}
+            title="複数の Hapbeat を接続している時に書き込み先を切り替える"
+          >
+            COM ポート再選択
+          </button>
         </div>
         {eraseAll && (
           <div className="form-status warn" style={{ marginTop: 4 }}>
@@ -788,14 +795,30 @@ export function FirmwareSubTab({ device, sendTo, serialOnly = false }: Props) {
               />
             </div>
             <div className="form-status muted">
-              [{serialProgress.phase}] {serialProgress.percent}% — {serialProgress.message}
+              [{serialProgress.phase}] {serialProgress.percent}%
+              {serialProgress.message ? ` — ${serialProgress.message}` : ''}
             </div>
           </>
         )}
 
+        {localError && (
+          <div className="form-status err">
+            ✗ {localError}
+          </div>
+        )}
+
         {serialResult && (
           <div className={`form-status ${serialResult.ok ? 'ok' : 'err'}`}>
-            {serialResult.ok ? '✓ ' : '✗ '}{serialResult.message}
+            {serialResult.ok ? '✓ ' : '✗ '}
+            {serialResult.message.split('\n').map((line, i) => (
+              <span key={i}>{i > 0 ? <><br />{line}</> : line}</span>
+            ))}
+          </div>
+        )}
+
+        {masterMode === 'config' && (
+          <div className="form-status muted" style={{ marginTop: 4 }}>
+            現在 Serial Config 接続中 — 「Serial 書き込み」を押すと自動で切断してから書込みに入ります。
           </div>
         )}
 

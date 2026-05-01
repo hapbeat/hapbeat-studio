@@ -12,6 +12,9 @@ import { InstalledKitsSection } from './InstalledKitsSection'
 import { SerialConfigSection } from './SerialConfigSection'
 import { TestSubTab } from './TestSubTab'
 import { FirmwareSubTab } from './FirmwareSubTab'
+import { OnboardingWizard } from './OnboardingWizard'
+import { useDeviceTransport } from '@/hooks/useDeviceTransport'
+import { useSerialMaster } from '@/stores/serialMaster'
 
 type SubTab = 'config' | 'kit' | 'test' | 'firmware'
 
@@ -44,10 +47,31 @@ export function DeviceDetail() {
   const debugDumpCache = useDeviceStore((s) => s.debugDumpCache)
   const kitListCache = useDeviceStore((s) => s.kitListCache)
 
-  const device: DeviceInfo | undefined = useMemo(
-    () => devices.find((d) => d.ipAddress === selectedIp),
-    [devices, selectedIp],
-  )
+  // Pull master state for the Serial pseudo-device path. Subscribing
+  // unconditionally is fine — selectors re-render only when the
+  // tracked field actually changes.
+  const masterMode = useSerialMaster((s) => s.mode)
+  const masterInfo = useSerialMaster((s) => s.info)
+  const masterWifiStatus = useSerialMaster((s) => s.wifiStatus)
+  const masterWifiProfiles = useSerialMaster((s) => s.wifiProfiles)
+  const masterWifiProfileMax = useSerialMaster((s) => s.wifiProfileMax)
+
+  const device: DeviceInfo | undefined = useMemo(() => {
+    if (selectedIp?.startsWith('serial:')) {
+      // Synthesize a DeviceInfo from the master so the rest of the
+      // component (IdentityForm / WifiProfilesForm / etc.) sees the
+      // same shape it expects for a LAN device.
+      if (masterMode !== 'config' || !masterInfo) return undefined
+      return {
+        ipAddress: selectedIp,
+        name: masterInfo.name ?? '(unnamed)',
+        address: 'USB Serial',
+        firmwareVersion: masterInfo.fw,
+        online: true,
+      } as DeviceInfo
+    }
+    return devices.find((d) => d.ipAddress === selectedIp)
+  }, [devices, selectedIp, masterMode, masterInfo])
 
   const [subTab, setSubTab] = useState<SubTab>(() => {
     const saved = localStorage.getItem(SUBTAB_KEY)
@@ -59,9 +83,14 @@ export function DeviceDetail() {
 
   const [globalStatus, setGlobalStatus] = useState<{ kind: 'ok' | 'err' | 'warn' | 'muted'; msg: string } | null>(null)
 
-  // Auto-fetch info / wifi when first selecting a device.
+  // Auto-fetch info / wifi when first selecting a LAN device.
+  // Serial pseudo-devices already have their state in the master
+  // (the wizard's probe primed it); double-fetching over WS would
+  // 404 because the IP starts with "serial:" and Helper has no
+  // matching entry.
   useEffect(() => {
-    if (!selectedIp || !device?.online) return
+    if (!selectedIp || selectedIp.startsWith('serial:')) return
+    if (!device?.online) return
     if (wifiProfilesCache[selectedIp]) return
     send({ type: 'list_wifi_profiles', payload: { ip: selectedIp } })
     send({ type: 'get_info', payload: { ip: selectedIp } })
@@ -110,12 +139,43 @@ export function DeviceDetail() {
       setKitList(p.device, kits)
     } else if (t === 'write_result') {
       const ok = p.success === true
-      const msg = (p.message as string) || (p.error as string) || (ok ? 'ok' : 'failed')
-      setGlobalStatus({ kind: ok ? 'ok' : 'err', msg })
-      // Mirror every helper write_result to the log drawer so the user
-      // can audit the full request/response chain (set_wifi success,
-      // play_sent gain, etc.) without having to keep the toast visible.
-      pushLog('helper', `${ok ? '✓' : '✗'} ${msg}`)
+      // Helper now sends both `summary` (one-liner) and `message`
+      // (multi-line with per-target diagnostics). Use the summary in
+      // the floating status pill (room is tight) and the full message
+      // in the log drawer (auditable history).
+      const summary = (p.summary as string)
+        || (p.message as string)
+        || (p.error as string)
+        || (ok ? 'ok' : 'failed')
+      const fullMsg = (p.message as string)
+        || (p.error as string)
+        || (ok ? 'ok' : 'failed')
+      // Pill: collapse to first line for fit.
+      setGlobalStatus({
+        kind: ok ? 'ok' : 'err',
+        msg: summary.split('\n')[0],
+      })
+      // Drawer: every line on its own row so per-target failure
+      // reasons are visible without expanding the entry.
+      const tag = ok ? '✓' : '✗'
+      for (const line of fullMsg.split('\n')) {
+        if (line.trim().length === 0) continue
+        pushLog('helper', `${tag} ${line}`)
+      }
+      // Surface the embedded raw `results` for full forensics — these
+      // are the per-target objects with `phase` ('connect' / 'io' /
+      // 'no_reply'), `cmd`, and the raw firmware response.
+      const results = p.results as Array<Record<string, unknown>> | undefined
+      if (Array.isArray(results)) {
+        for (const r of results) {
+          if (r.success) continue // green path already in fullMsg
+          const ip = r.ip as string ?? '?'
+          const resp = (r.response as Record<string, unknown>) ?? {}
+          const phase = (resp.phase as string) ?? '?'
+          const cmd = (resp.cmd as string) ?? (p.cmd as string) ?? '?'
+          pushLog('helper', `   ↳ ${ip} cmd=${cmd} phase=${phase} resp=${JSON.stringify(resp)}`)
+        }
+      }
     }
   }, [
     lastMessage,
@@ -179,65 +239,62 @@ export function DeviceDetail() {
     )
   }, [selectedIp, send, pushLog])
 
-  if (!device || !selectedIp) {
-    // No device selected — most likely the device hasn't joined Wi-Fi
-    // yet (so it doesn't appear in the LAN PING list). Show Serial
-    // connect at the top: a Hapbeat that already has firmware will
-    // respond to `get_info` and the panel can graduate the user
-    // straight into the config UI. Firmware flash sits below for the
-    // brand-new / bricked case where `get_info` never answers.
-    return (
-      <section className="devices-detail devices-detail-onboarding">
-        <div className="devices-onboarding-header">
-          <div className="devices-onboarding-title">はじめに</div>
-          <div className="devices-onboarding-sub">
-            Wi-Fi 未接続のデバイス (新品 / 工場出荷状態 / Wi-Fi クリア後) は
-            一覧に出ません。まず下の「Serial 接続」を試して、応答があれば
-            Wi-Fi / 名前 / グループの初回設定に進めます。応答が無い (新品 /
-            ブートローダー破損) 場合はその下の「ファームウェア書き込み」で
-            焼き直してから再度 Serial 接続してください。
-            既に Wi-Fi 接続済みのデバイスは <strong>サイドバー</strong>から選択できます。
-          </div>
-        </div>
-        <div className="devices-onboarding-divider">
-          <span>1. Serial 接続で初回設定</span>
-          <span className="devices-onboarding-divider-sub">
-            (USB ケーブルで接続 → Wi-Fi / 名前 / グループを設定)
-          </span>
-        </div>
-        <SerialConfigSection />
-        <div className="devices-onboarding-divider">
-          <span>2. ファームウェア書き込み</span>
-          <span className="devices-onboarding-divider-sub">
-            (Serial 接続が応答しない場合 / チップが空 / ブートローダー破損時)
-          </span>
-        </div>
-        <FirmwareSubTab serialOnly />
-      </section>
-    )
-  }
+  // Transport-agnostic sender: LAN device → Helper WS, Serial
+  // pseudo-device → SerialMaster.sendConfigCmd. Same call shape so
+  // the per-form code (IdentityForm, WifiProfilesForm, …) is
+  // unchanged. Hook is invoked unconditionally (above the early
+  // return) — React's rules-of-hooks would otherwise see a different
+  // hook count between the no-device and device-present renders.
+  const transport = useDeviceTransport(selectedIp)
+  const sendTo = (msg: ManagerMessage) => { void transport.sendTo(msg) }
 
-  const sendTo = (msg: ManagerMessage) => {
-    const next: ManagerMessage = {
-      type: msg.type,
-      payload: { ...msg.payload, ip: selectedIp },
-    }
-    send(next)
+  // No device selected → show the OnboardingWizard.
+  // (Serial pseudo-device selection falls through to the regular
+  // sub-tab UI below; the same Identity / Wi-Fi forms drive both
+  // LAN and Serial transports via `useDeviceTransport`.)
+  if (!device || !selectedIp) {
+    return <OnboardingWizard />
   }
 
   const refreshInfo = () => {
+    if (transport.isSerial) {
+      // Serial path: master.refreshAll re-queries get_info /
+      // get_wifi_status / list_wifi_profiles in one go and pushes
+      // them into the shared store; the LAN-side caches don't apply.
+      void useSerialMaster.getState().refreshAll()
+      return
+    }
     send({ type: 'get_info', payload: { ip: selectedIp } })
     send({ type: 'get_wifi_status', payload: { ip: selectedIp } })
     send({ type: 'list_wifi_profiles', payload: { ip: selectedIp } })
   }
 
   const refreshWifiProfiles = () => {
+    if (transport.isSerial) {
+      void useSerialMaster.getState().refreshAll()
+      return
+    }
     send({ type: 'list_wifi_profiles', payload: { ip: selectedIp } })
   }
 
-  const cachedInfo = infoCache[selectedIp]
-  const wifiStatus = wifiStatusCache[selectedIp]
-  const wifiProfiles = wifiProfilesCache[selectedIp]
+  // For Serial pseudo-device, surface master state in the same
+  // shape the LAN cache uses so per-form components don't need to
+  // know about the transport.
+  const cachedInfo = transport.isSerial
+    ? (masterInfo ? {
+        name: masterInfo.name,
+        mac: masterInfo.mac,
+        fw: masterInfo.fw,
+        group: masterInfo.group,
+        wifi_connected: masterInfo.wifi_connected,
+      } : undefined)
+    : infoCache[selectedIp]
+  const wifiStatus = transport.isSerial
+    ? (masterWifiStatus ?? undefined)
+    : wifiStatusCache[selectedIp]
+  const wifiProfiles = transport.isSerial
+    ? { profiles: masterWifiProfiles, count: masterWifiProfiles.length, max: masterWifiProfileMax }
+    : wifiProfilesCache[selectedIp]
   const debugDump = debugDumpCache[selectedIp]
   const kitList = kitListCache[selectedIp]
 
@@ -294,7 +351,6 @@ export function DeviceDetail() {
       <div className="device-subtab-body">
         {subTab === 'config' && (
           <>
-            <SerialConfigSection />
             <IdentityForm
               device={device}
               cachedInfo={cachedInfo}
@@ -315,6 +371,9 @@ export function DeviceDetail() {
               dump={debugDump}
               sendTo={sendTo}
             />
+            {/* Fallback path: Serial-config link last, low-key, only
+              * useful when LAN-side 設定 isn't responding. */}
+            <SerialConfigSection compact />
           </>
         )}
 

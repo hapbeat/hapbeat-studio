@@ -65,30 +65,39 @@
 }
 
 /* ---- Sidebar row (one device) ---- */
+/*
+ * Visual hierarchy of card states:
+ *   default (not selected, online)   → muted background tint so the
+ *                                      card outline reads against the
+ *                                      sidebar bg (previously
+ *                                      transparent — hard to see)
+ *   :hover                            → brighter bg + accent border
+ *   .checked (multi-select on)        → surface tint
+ *   .primary (single right-pane focus) → accent border + inset bar
+ */
 .device-row {
   display: flex;
   flex-direction: column;
   padding: 8px 10px;
   border-radius: var(--radius);
   cursor: pointer;
-  transition: background var(--transition);
+  transition: background var(--transition), border-color var(--transition);
   border: 1px solid transparent;
+  background: var(--bg-surface);
   margin-bottom: 4px;
 }
 
 .device-row:hover {
   background: var(--bg-hover);
+  border-color: var(--border);
 }
 
-/* `.checked` = the user has ticked this card. This is the
- * authoritative selection state and it also drives broadcast/batch ops.
- * `.primary` = the most-recently-checked card; the right-pane detail
- * view focuses on it. The two can overlap (every primary is checked)
- * but only the primary gets the bright accent border. */
 .device-row.checked {
-  background: var(--bg-surface);
+  background: var(--bg-hover);
+  border-color: var(--border);
 }
 .device-row.primary {
+  background: var(--bg-hover);
   border-color: var(--accent);
   box-shadow: inset 3px 0 0 var(--accent);
   padding-left: 13px;
@@ -96,8 +105,36 @@
 .device-row.primary .device-row-name {
   color: var(--accent-light);
 }
+.device-row.offline {
+  background: transparent;
+}
 .device-row.offline .device-row-name {
   color: var(--text-secondary);
+}
+
+/* Compact Serial-config link — sits at the bottom of the per-device
+   設定 tab as a low-key fallback path. Looks like an inline link
+   rather than a button so it doesn't compete with the LAN forms. */
+.serial-cfg-compact {
+  padding: 8px 12px;
+  background: transparent;
+  border: 1px dashed var(--border);
+}
+.form-link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent-light);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.form-link-button:hover:not(:disabled) {
+  color: var(--accent);
+}
+.form-link-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .device-row-top {

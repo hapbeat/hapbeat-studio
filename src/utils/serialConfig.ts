@@ -36,12 +36,23 @@ export function isWebSerialSupported(): boolean {
 
 /**
  * Prompt the user to pick a USB-serial device for config commands.
- * Distinct from the firmware-flash port picker so the browser
- * remembers each separately.
+ * Reuses a previously-granted port silently when one is available so
+ * the user doesn't have to re-confirm the same COM port across the
+ * Serial connect → Firmware flash flow. Pass `forcePicker: true` to
+ * always show the picker (useful when the user has multiple Hapbeats
+ * plugged in and needs to switch).
  */
-export async function pickConfigPort(): Promise<SerialPort> {
+export async function pickConfigPort(
+  opts: { forcePicker?: boolean } = {},
+): Promise<SerialPort> {
   if (!isWebSerialSupported()) {
     throw new Error('Web Serial API is not supported (Chrome / Edge を使ってください)')
+  }
+  if (!opts.forcePicker) {
+    try {
+      const ports = await navigator.serial.getPorts()
+      if (ports.length > 0) return ports[ports.length - 1]
+    } catch { /* fall through to picker */ }
   }
   return navigator.serial.requestPort({})
 }
@@ -72,23 +83,115 @@ export async function openConfigConnection(
     timer: ReturnType<typeof setTimeout> | null
   }> = []
 
+  // Multi-line JSON accumulation state.
+  //
+  // Why this exists: long firmware responses (notably `scan_wifi`,
+  // which takes ~3 s while ESP-IDF tasks emit `[Wifi] event: ...`
+  // and other Arduino-ESP32 logs) get split when the host
+  // newline-splits the byte stream. The result is:
+  //
+  //   line 1: `{"status":"ok","networks":[{"ssid":"foo"`
+  //   line 2: `[Wifi] event: SCAN_DONE`              ← interleaved log
+  //   line 3: `,"rssi":-40,...]}`
+  //
+  // The previous parser tried to JSON.parse line 1 in isolation and
+  // failed, dropping the response entirely. Now we track curly-brace
+  // depth: when a line starts with `{` we open an accumulator and
+  // append every subsequent line until the depth returns to zero,
+  // then parse the joined buffer. Interleaved non-JSON lines are
+  // still routed to `onLog` so the user sees them.
+  let jsonAccumulator: string[] = []
+  let jsonDepth = 0
+  let inString = false
+  let stringEscape = false
+
+  // Walk every character of `s` and update brace-depth bookkeeping.
+  // Strings (between `"`s) and `\` escapes are honored so a `{` or
+  // `}` inside a string value doesn't move the depth counter.
+  const updateDepth = (s: string) => {
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i]
+      if (inString) {
+        if (stringEscape) { stringEscape = false; continue }
+        if (c === '\\') { stringEscape = true; continue }
+        if (c === '"') inString = false
+        continue
+      }
+      if (c === '"') { inString = true; continue }
+      if (c === '{') jsonDepth++
+      else if (c === '}') jsonDepth = Math.max(0, jsonDepth - 1)
+    }
+  }
+
+  const tryDeliverJsonBlob = (blob: string) => {
+    try {
+      const obj = JSON.parse(blob)
+      const w = waiters.shift()
+      if (w) {
+        if (w.timer) clearTimeout(w.timer)
+        w.resolve(obj as Record<string, unknown>)
+      } else {
+        cb.onLog?.(blob)
+      }
+    } catch {
+      cb.onLog?.(`(parse error) ${blob.slice(0, 200)}${blob.length > 200 ? '…' : ''}`)
+    }
+  }
+
+  // Pattern for log noise the firmware emits while scan_wifi is
+  // running (NVS `nvs_get_str` failures, ArduinoOTA notices, etc.).
+  // Lines matching this are sent to onLog and EXCLUDED from the
+  // JSON accumulator — otherwise they'd corrupt the JSON byte
+  // sequence and break the parser even with brace-depth tracking,
+  // because string-payload `"`s in those logs can flip our
+  // in-string state.
+  //
+  // Heuristic: any line that does NOT contain JSON-shape tokens we
+  // care about (`"`, `{`, `}`, `[`, `]`, `:`) is unlikely to be a
+  // genuine JSON continuation. ESP-IDF logs usually start with
+  // `[<ts>][<lvl>]` brackets but also include free-text after them.
+  // The simplest safe filter: lines starting with `[` (ESP-IDF log
+  // header) or `E (` / `W (` / `I (` are always log noise.
+  const looksLikeFirmwareLog = (s: string) => /^[\[]\s*\d|^[EWID]\s\(\d/.test(s)
+
   const dispatchLine = (line: string) => {
     const trimmed = line.replace(/\r$/, '').trim()
     if (!trimmed) return
+
+    // Always route obvious firmware log lines straight to onLog —
+    // even when we're mid-JSON-accumulation. Preventing them from
+    // entering the accumulator keeps brace-depth + in-string
+    // bookkeeping correct.
+    if (looksLikeFirmwareLog(trimmed)) {
+      cb.onLog?.(trimmed)
+      return
+    }
+
+    // Already inside a multi-line JSON: keep appending until depth
+    // returns to 0.
+    if (jsonAccumulator.length > 0) {
+      jsonAccumulator.push(trimmed)
+      updateDepth(trimmed)
+      if (jsonDepth === 0) {
+        const blob = jsonAccumulator.join('')
+        jsonAccumulator = []
+        inString = false
+        stringEscape = false
+        tryDeliverJsonBlob(blob)
+      }
+      return
+    }
+
     if (trimmed.startsWith('{')) {
-      // JSON line — send to next waiter.
-      try {
-        const obj = JSON.parse(trimmed)
-        const w = waiters.shift()
-        if (w) {
-          if (w.timer) clearTimeout(w.timer)
-          w.resolve(obj as Record<string, unknown>)
-        } else {
-          // Unsolicited JSON (firmware push) — forward as a log line.
-          cb.onLog?.(trimmed)
-        }
-      } catch (err) {
-        cb.onLog?.(`(parse error) ${trimmed}`)
+      jsonDepth = 0
+      inString = false
+      stringEscape = false
+      updateDepth(trimmed)
+      if (jsonDepth === 0) {
+        // Single-line JSON — fast path, no accumulation needed.
+        tryDeliverJsonBlob(trimmed)
+      } else {
+        jsonAccumulator = [trimmed]
       }
     } else {
       cb.onLog?.(trimmed)
@@ -130,15 +233,24 @@ export async function openConfigConnection(
   const send = (cmd: Record<string, unknown>): Promise<Record<string, unknown>> => {
     if (closed) return Promise.reject(new Error('connection closed'))
     return new Promise<Record<string, unknown>>((resolve, reject) => {
-      // 5 s default timeout — firmware should answer within a few
-      // hundred ms for every config command. set_wifi may take longer
-      // because of the connect attempt, but it returns "ok" before
-      // the actual association.
+      // 2 s default timeout — firmware answers within tens of ms
+      // for most config commands. `scan_wifi` is the exception:
+      // WiFi.scanNetworks blocks the firmware for ~1.5–3 s, so we
+      // give it a longer per-command budget. All other commands
+      // stick with the snappy 2 s default — the onboarding wizard
+      // treats a timeout as "no firmware" and routes to flash.
+      const isScan = (cmd as { cmd?: string }).cmd === 'scan_wifi'
+      // 12 s for scan_wifi: WiFi.scanNetworks itself runs ~3 s but
+      // we've seen real-world responses take 6–8 s when the firmware
+      // emits NVS `nvs_get_str len fail` warnings concurrently
+      // (those interleave with the JSON output and slow the
+      // serial-line-by-line accumulator). 12 s leaves headroom.
+      const timeoutMs = isScan ? 12000 : 2000
       const timer = setTimeout(() => {
         const idx = waiters.findIndex((w) => w.resolve === resolve)
         if (idx >= 0) waiters.splice(idx, 1)
         reject(new Error(`serial timeout: ${JSON.stringify(cmd).slice(0, 60)}`))
-      }, 5000)
+      }, timeoutMs)
       waiters.push({ resolve, reject, timer })
       const line = JSON.stringify(cmd) + '\n'
       writer.write(enc.encode(line)).catch((err) => {

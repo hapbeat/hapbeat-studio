@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore } from '@/stores/deviceStore'
+import { useSerialMaster } from '@/stores/serialMaster'
+import type { DeviceInfo } from '@/types/manager'
+
+/**
+ * `serial:<mac-or-rand>` is the convention for a pseudo-device entry
+ * in the sidebar that's connected via USB Serial only (i.e. before
+ * Wi-Fi setup). The detail pane recognizes the prefix and renders the
+ * Serial-config forms instead of the LAN-based DeviceDetail tabs.
+ */
+export const SERIAL_DEVICE_PREFIX = 'serial:'
 
 /**
  * Sidebar listing every Helper-discovered device.
@@ -25,14 +35,33 @@ export function DeviceList() {
   const dismissDevice = useDeviceStore((s) => s.dismissDevice)
   const syncOnlineDevices = useDeviceStore((s) => s.syncOnlineDevices)
 
+  // Promote the active SerialMaster connection (if any) to a
+  // synthetic device entry so an unconfigured Hapbeat — visible only
+  // through USB Serial — still appears in the same Devices list.
+  // The detail pane keys off the `serial:` prefix to render the
+  // Serial-config forms instead of the LAN tabs.
+  const serialMode = useSerialMaster((s) => s.mode)
+  const serialInfo = useSerialMaster((s) => s.info)
+  const serialDevice = useMemo<DeviceInfo | null>(() => {
+    if (serialMode !== 'config' || !serialInfo) return null
+    const id = `${SERIAL_DEVICE_PREFIX}${serialInfo.mac ?? 'active'}`
+    return {
+      ipAddress: id,
+      name: serialInfo.name ?? '(unnamed)',
+      address: 'USB Serial',
+      firmwareVersion: serialInfo.fw,
+      online: true,
+    } as DeviceInfo
+  }, [serialMode, serialInfo])
+
   // Filter out dismissed offline devices. (A previously-dismissed IP
   // that comes back online drops out of dismissedIps automatically via
   // `syncOnlineDevices`, so it'll re-appear without user action.)
   const dismissedSet = useMemo(() => new Set(dismissedIps), [dismissedIps])
-  const visibleDevices = useMemo(
-    () => devices.filter((d) => d.online || !dismissedSet.has(d.ipAddress)),
-    [devices, dismissedSet],
-  )
+  const visibleDevices = useMemo(() => {
+    const lan = devices.filter((d) => d.online || !dismissedSet.has(d.ipAddress))
+    return serialDevice ? [serialDevice, ...lan] : lan
+  }, [devices, dismissedSet, serialDevice])
 
   // Push every online IP through dismissedIps so users don't get
   // stuck with a permanently-hidden card after a reboot.
@@ -126,7 +155,15 @@ export function DeviceList() {
                     />
                   </label>
                   <span className="device-row-name">{dev.name || '(unnamed)'}</span>
-                  {dev.online ? (
+                  {dev.ipAddress.startsWith(SERIAL_DEVICE_PREFIX) ? (
+                    <span
+                      className="device-row-status online"
+                      title="USB Serial 経由で接続中 (Wi-Fi 未設定)"
+                    >
+                      <span style={{ fontSize: 11 }}>🔌</span>
+                      <span>Serial</span>
+                    </span>
+                  ) : dev.online ? (
                     <span
                       className="device-row-status online"
                       title="接続中"

@@ -25,6 +25,10 @@ export interface FirmwareLibraryEntry {
   /** Absolute filesystem path of `firmware.bin` on the dev host
    *  (display only). */
   path: string
+  /** BUILD_TAG baked into the binary at build time (currently a
+   *  random `vNN` from `random_tag.py`; will be replaced by a real
+   *  version string once we cut the first SDK release). */
+  build_tag?: string
 }
 
 /** A single region to write during a multi-file flash. */
@@ -82,32 +86,39 @@ export async function fetchFirmwareBinary(
 }
 
 /**
- * Fetch the merged firmware.bin for one env and return it as a single
- * flash region pinned to 0x0.
+ * Fetch the merged firmware.bin for one env and return it as **two**
+ * flash regions that skip the NVS + otadata gap (0x9000-0x10000).
  *
- * Project convention (2026-04-29 onwards): every Hapbeat firmware build
- * emits `firmware.bin` as a *merged* image (bootloader 0x0 + partitions
- * 0x8000 + app 0x10000 concatenated in one file). Studio writes the
- * whole blob to 0x0 in one shot — no app-only path, no
- * bootloader/partitions sibling fetching, no per-build address
- * detection. This matches PlatformIO's `pio run -t upload` behavior
- * for merged builds and removes a class of bricking bugs we hit when
- * the file layout was ambiguous.
+ * Why split: every Hapbeat build emits a merged firmware.bin
+ * spanning [0x0, ~0x1C0000]. Writing the whole blob with
+ * `write_flash 0x0` overwrites the NVS partition (`partitions.csv`:
+ * `nvs @ 0x9000, 0x5000`), wiping Wi-Fi profiles / device name /
+ * group ID on every flash. Distribution-wise we still want a single
+ * binary, so the SOURCE FILE stays merged — the SPLIT happens here
+ * at flash-time so the writer leaves [0x9000, 0x10000) untouched.
  *
- * Throws if firmware.bin doesn't satisfy the merged-image markers,
- * because writing a non-merged blob to 0x0 corrupts the bootloader.
+ * Layout the split mirrors:
+ *
+ *   [0x0    , 0x9000 ) → bootloader (0x0) + partitions (0x8000)
+ *   [0x9000 , 0x10000) → SKIPPED  (NVS @ 0x9000 + otadata @ 0xE000)
+ *   [0x10000, end    ) → app (ota_0)
+ *
+ * Bootloader / partitions / app start markers are validated up front
+ * so a non-merged image is rejected before any flash bytes are sent.
  */
+const NVS_OTADATA_START = 0x9000
+const APP_START = 0x10000
 export async function fetchFirmwareRegions(
   entry: FirmwareLibraryEntry,
 ): Promise<FirmwareRegion[]> {
   const fw = await fetchRegion(entry.env, 'firmware')
   const b = fw.bytes
   const isMerged =
-    b.length >= 0x10001
+    b.length >= APP_START + 1
     && b[0] === 0xe9
     && b[0x8000] === 0xaa
     && b[0x8001] === 0x50
-    && b[0x10000] === 0xe9
+    && b[APP_START] === 0xe9
   if (!isMerged) {
     throw new Error(
       `firmware.bin for env="${entry.env}" is not a merged image. `
@@ -115,11 +126,18 @@ export async function fetchFirmwareRegions(
       + '(bootloader 0x0 + partitions 0x8000 + app 0x10000).',
     )
   }
-  return [{
-    address: 0x0,
-    bytes: fw.bytes,
-    label: 'firmware.bin (merged)',
-  }]
+  return [
+    {
+      address: 0x0,
+      bytes: b.slice(0, NVS_OTADATA_START),
+      label: 'bootloader+partitions (0x0..0x9000)',
+    },
+    {
+      address: APP_START,
+      bytes: b.slice(APP_START),
+      label: `app (0x10000..${(b.length).toString(16)})`,
+    },
+  ]
 }
 
 async function fetchRegion(
@@ -153,7 +171,13 @@ export function formatMtime(ms: number): string {
 }
 
 export function formatBytes(n: number): string {
-  if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(2)} MB`
-  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`
+  // Match Windows Explorer / macOS Finder list views: KB for small
+  // files, MB / GB only when crossing those thresholds. Two-decimal
+  // MB matched our previous output but reads as more precision than
+  // OS file managers actually offer (Explorer uses no decimals on
+  // KB, one on MB). One decimal everywhere.
+  if (n >= 1024 * 1024 * 1024) return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`
+  if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`
+  if (n >= 1024) return `${Math.round(n / 1024).toLocaleString()} KB`
   return `${n} B`
 }
