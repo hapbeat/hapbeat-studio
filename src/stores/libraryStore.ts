@@ -393,9 +393,19 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const state = get()
     const kit = state.kits.find((k) => k.id === kitId)
     if (!kit) return null
-    if (validateKitName(kit.name)) return null
+    if (validateKitName(kit.name)) {
+      // Invalid kit name — clear 'saving' status to avoid stuck pill.
+      state.setLocalFsStatus('idle')
+      return null
+    }
     const outRoot = state.kitDirHandle ?? state.workDirHandle
-    if (!outRoot) return null
+    if (!outRoot) {
+      // No folder selected — clear 'saving' status so the pill doesn't
+      // stay stuck (the caller sets 'saving' before scheduleKitFlush,
+      // but if we bail here we'd never set 'saved' or 'error').
+      state.setLocalFsStatus('idle')
+      return null
+    }
 
     // The mutation that scheduled this flush set 'saving' with a
     // descriptive op message. If no op message is recorded (e.g. a

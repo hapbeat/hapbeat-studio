@@ -570,6 +570,13 @@ export function DisplayEditor() {
   const { isConnected: managerConnected, lastMessage, send: managerSend } = useHelperConnection()
   const { toast, setAnchor: setToastAnchor } = useToast()
   const [isDeploying, setIsDeploying] = useState(false)
+  // Serial-only selection → deploy button disabled (write_ui_config is
+  // TCP-only; Serial path is not implemented in firmware serial_config.cpp)
+  const selectedIps = useDeviceStore((s) => s.selectedIps)
+  const selectedIp = useDeviceStore((s) => s.selectedIp)
+  const effectiveTargets = selectedIps.length > 0 ? selectedIps : (selectedIp ? [selectedIp] : [])
+  const isSerialOnlySelected =
+    effectiveTargets.length > 0 && effectiveTargets.every((ip) => ip.startsWith('serial:'))
   const deployBtnRef = useCallback((el: HTMLButtonElement | null) => {
     setToastAnchor(el)
   }, [setToastAnchor])
@@ -825,6 +832,7 @@ export function DisplayEditor() {
           onDeploy={handleDeploy}
           managerConnected={managerConnected}
           isDeploying={isDeploying}
+          isSerialOnlySelected={isSerialOnlySelected}
           deployBtnRef={deployBtnRef}
         />
         <input
@@ -1116,6 +1124,7 @@ interface ControlBarProps {
   onDeploy: () => void
   managerConnected: boolean
   isDeploying: boolean
+  isSerialOnlySelected: boolean
   deployBtnRef?: (el: HTMLButtonElement | null) => void
 }
 
@@ -1123,7 +1132,7 @@ function ControlBar({
   pages, activePageIndex, deviceModel, isFlipped,
   onPageChange, onAddPage, onDeletePage,
   onDeviceModelChange, onApplyTemplate, onToggleOrientation,
-  onExport, onImport, onDeploy, managerConnected, isDeploying, deployBtnRef,
+  onExport, onImport, onDeploy, managerConnected, isDeploying, isSerialOnlySelected, deployBtnRef,
 }: ControlBarProps) {
   return (
     <div className="editor-control-bar">
@@ -1179,12 +1188,15 @@ function ControlBar({
           ref={deployBtnRef}
           className="btn btn-sm btn-deploy"
           onClick={onDeploy}
-          disabled={!managerConnected || isDeploying}
+          disabled={!managerConnected || isDeploying || isSerialOnlySelected}
         >
           {isDeploying ? '書込中...' : 'デバイスに書込'}
         </button>
         {!managerConnected && (
           <span className="tooltip-text">Hapbeat Manager を起動してください</span>
+        )}
+        {managerConnected && isSerialOnlySelected && (
+          <span className="tooltip-text">Display 書込みは LAN 接続デバイスのみ対応（Serial は未対応）</span>
         )}
       </span>
     </div>

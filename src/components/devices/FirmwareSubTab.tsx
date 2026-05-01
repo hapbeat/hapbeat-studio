@@ -270,10 +270,23 @@ export function FirmwareSubTab({
   // ---- Reading freshly from disk ------------------------------------
 
   /**
-   * Resolve the currently-selected source to fresh bytes for **Wi-Fi OTA**
-   * (the device's OTA endpoint takes a single app image at 0x10000).
-   * Library rebuilds are fetched no-store; local handles are re-read via
-   * `getFile()` so a disk overwrite is picked up on every flash.
+   * Resolve the currently-selected source to fresh bytes for **Wi-Fi OTA**.
+   *
+   * The device's OTA endpoint (firmware Update.begin/.write/.end) takes
+   * an APP-ONLY image. Hapbeat builds emit a *merged* firmware.bin that
+   * starts with a bootloader at 0x0, the partition table at 0x8000, and
+   * the app at 0x10000. Sending the whole blob to OTA writes bootloader
+   * bytes into the OTA app partition — the image-header check at the end
+   * appears to pass (the bootloader also begins with 0xE9), but the
+   * resulting partition is corrupt and the bootloader rolls back to the
+   * previous slot on the next boot. Symptom: Studio reports OTA success
+   * but the device keeps booting the previous version.
+   *
+   * Fix: detect the merged-image markers and slice off `[0x10000, end)`
+   * (the app portion) before pushing to OTA. Local-picked binaries that
+   * are already app-only (i.e. don't start with the merged-layout
+   * markers) are passed through unchanged so users can still flash a
+   * standalone .bin built without the merge step.
    */
   const readSelectedBin = useCallback(async (): Promise<{
     bytes: Uint8Array
@@ -281,6 +294,10 @@ export function FirmwareSubTab({
     mtime: number
     path: string
   }> => {
+    let raw: Uint8Array
+    let label: string
+    let mtime: number
+    let path: string
     if (source === 'library') {
       if (!libSelected) throw new Error('ファームウェアを選んでください')
       const r = await fetchFirmwareBinary(libSelected)
@@ -290,32 +307,49 @@ export function FirmwareSubTab({
       if (r.bytes.length === 0) {
         throw new Error(`ビルドファイルが空です (${libSelected}) — pio run の完了後に再試行してください`)
       }
-      return {
-        bytes: r.bytes,
-        label: `${libSelected} (built ${formatMtime(r.mtime)})`,
-        mtime: r.mtime,
-        path: r.path,
+      raw = r.bytes
+      label = `${libSelected} (built ${formatMtime(r.mtime)})`
+      mtime = r.mtime
+      path = r.path
+    } else {
+      if (!localHandle) throw new Error('ローカル .bin ファイルを選んでください')
+      const ok = await verifyPermission(localHandle, false)
+      if (!ok) {
+        setLocalPermissionDenied(true)
+        throw new Error('ファイル読込権限がありません — 「参照…」で再選択してください')
       }
+      const f = await localHandle.getFile()
+      if (f.size === 0) {
+        throw new Error('ファイルが空です — 正しい .bin か確認してください')
+      }
+      const buf = await f.arrayBuffer()
+      setLocalMeta({ name: f.name, size: f.size, mtime: f.lastModified })
+      raw = new Uint8Array(buf)
+      label = f.name
+      mtime = f.lastModified
+      path = f.name // browser hides absolute path; show name only
     }
-    if (!localHandle) throw new Error('ローカル .bin ファイルを選んでください')
-    const ok = await verifyPermission(localHandle, false)
-    if (!ok) {
-      setLocalPermissionDenied(true)
-      throw new Error('ファイル読込権限がありません — 「参照…」で再選択してください')
+    // Detect the merged firmware.bin layout (bootloader 0xE9 at 0x0,
+    // partitions 0xAA50 magic at 0x8000, app 0xE9 at 0x10000) and
+    // slice to the app slot only. Same markers `assertMergedImage`
+    // (Serial path) checks for.
+    const APP_START = 0x10000
+    const isMerged =
+      raw.length >= APP_START + 1
+      && raw[0] === 0xe9
+      && raw[0x8000] === 0xaa
+      && raw[0x8001] === 0x50
+      && raw[APP_START] === 0xe9
+    const appBytes = isMerged ? raw.slice(APP_START) : raw
+    if (isMerged) {
+      pushLog(
+        'ota',
+        `merged image detected — sending app slice only `
+        + `(${appBytes.length.toLocaleString()} of ${raw.length.toLocaleString()} bytes)`,
+      )
     }
-    const f = await localHandle.getFile()
-    if (f.size === 0) {
-      throw new Error('ファイルが空です — 正しい .bin か確認してください')
-    }
-    const buf = await f.arrayBuffer()
-    setLocalMeta({ name: f.name, size: f.size, mtime: f.lastModified })
-    return {
-      bytes: new Uint8Array(buf),
-      label: f.name,
-      mtime: f.lastModified,
-      path: f.name, // browser hides absolute path; show name only
-    }
-  }, [source, libSelected, localHandle])
+    return { bytes: appBytes, label, mtime, path }
+  }, [source, libSelected, localHandle, pushLog])
 
   /**
    * Resolve the currently-selected source to **Serial flash regions**.
@@ -432,6 +466,18 @@ export function FirmwareSubTab({
 
   const submit = async () => {
     if (!device || !sendTo) return  // OTA disabled in serial-only mode
+    // Pre-flight: device must be online (reachable via TCP 7701).
+    // If the device's Wi-Fi service is hanging (e.g. after a Wi-Fi
+    // profile switch), OTA will silently fail. Prompt the user to
+    // power-cycle rather than firing a blind OTA that's doomed to fail.
+    if (!device.online) {
+      setResult({
+        ok: false,
+        message: 'デバイスがオフラインです — 電源 OFF/ON してから再試行してください',
+      })
+      pushLog('ota', 'abort — device offline before OTA start')
+      return
+    }
     setResult(null)
     let bin: Awaited<ReturnType<typeof readSelectedBin>>
     try {

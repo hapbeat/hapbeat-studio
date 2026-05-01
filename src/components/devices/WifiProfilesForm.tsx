@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import type { WifiProfile } from '@/stores/deviceStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
-import { useInputHistory } from '@/hooks/useInputHistory'
 import { useSerialMaster, type SerialWifiNetwork } from '@/stores/serialMaster'
 
 interface Props {
@@ -53,21 +52,17 @@ export function WifiProfilesForm({
   const [menuOpen, setMenuOpen] = useState(false)
   const ssidWrapRef = useRef<HTMLDivElement | null>(null)
 
-  // SSID candidates can come from any of three sources, ranked by
-  // relevance:
-  //   1. Device's own scan (Serial path: `WiFi.scanNetworks()`)
-  //   2. PC-side scan via Helper (`scan_wifi` WS message → OS netsh /
-  //      airport / nmcli). Studio assumes PC + Hapbeat are on the
-  //      same LAN, so the PC's neighborhood is a good stand-in when
-  //      the device can't be queried (e.g. it isn't reachable yet).
-  //   3. localStorage SSID history (SSID-only, never the password)
-  // Sources 1+3 are both used on Serial; sources 2+3 on LAN.
+  // SSID candidates come from device-side scan only:
+  //   - Serial path: Device's own `WiFi.scanNetworks()` via serialMaster
+  //   - LAN path: Helper's `scan_wifi` WS message → OS netsh / airport / nmcli
+  // History is intentionally excluded — device scan results reflect what
+  // the Hapbeat itself can see at its location, which is more accurate
+  // than any historically-stored SSID from a different session or place.
   const isSerial = device.ipAddress.startsWith('serial:')
   const masterScanWifi = useSerialMaster((s) => s.scanWifi)
   const { send: helperSend, lastMessage } = useHelperConnection()
   const [scanResults, setScanResults] = useState<SerialWifiNetwork[]>([])
   const [scanState, setScanState] = useState<'idle' | 'scanning' | 'done' | 'error'>('idle')
-  const ssidHistory = useInputHistory('wifi-ssid')
 
   const runScan = useCallback(async () => {
     setScanState('scanning')
@@ -132,23 +127,12 @@ export function WifiProfilesForm({
     return () => document.removeEventListener('mousedown', onDown)
   }, [menuOpen])
 
-  // Combined option list shown in the dropdown — scan first (with
-  // signal info), then history (greyed). Skip history items already
-  // in scan to avoid duplicates.
-  const dropdownOptions = (() => {
-    type Opt = { ssid: string; kind: 'scan' | 'history'; meta?: string }
-    const opts: Opt[] = scanResults.map((n) => ({
-      ssid: n.ssid,
-      kind: 'scan',
-      meta: `${n.rssi}dBm${n.channel ? ` ch${n.channel}` : ''}${n.auth ? ` ${n.auth}` : ''}`,
-    }))
-    for (const h of ssidHistory.history) {
-      if (!opts.some((o) => o.ssid === h)) {
-        opts.push({ ssid: h, kind: 'history' })
-      }
-    }
-    return opts
-  })()
+  // Dropdown shows device scan results only (scan_wifi / WiFi.scanNetworks).
+  // Displayed in signal-strength order (strongest first).
+  const dropdownOptions = scanResults.map((n) => ({
+    ssid: n.ssid,
+    meta: `${n.rssi}dBm${n.channel ? ` ch${n.channel}` : ''}${n.auth ? ` ${n.auth}` : ''}`,
+  }))
 
   // Reset form state when the user picks a different device.
   useEffect(() => {
@@ -192,11 +176,6 @@ export function WifiProfilesForm({
       type: 'set_wifi',
       payload: { ssid: ssid.trim(), pass: password, password },
     })
-    // Save SSID only — never the password — so a re-onboarding user
-    // can pick a previously-typed SSID from the datalist without
-    // having to re-type. Password is intentionally excluded from
-    // localStorage to avoid plaintext credential persistence.
-    ssidHistory.commit(ssid.trim())
     exitEditMode()
     setAddOpen(false)
     // Refresh the profile list — the firmware doesn't push, we poll.
@@ -365,10 +344,10 @@ export function WifiProfilesForm({
                   >
                     {dropdownOptions.map((opt) => (
                       <li
-                        key={`${opt.kind}-${opt.ssid}`}
+                        key={`scan-${opt.ssid}`}
                         role="option"
                         aria-selected={opt.ssid === ssid}
-                        className={`ssid-combobox-item ${opt.kind}${opt.ssid === ssid ? ' selected' : ''}`}
+                        className={`ssid-combobox-item scan${opt.ssid === ssid ? ' selected' : ''}`}
                         onMouseDown={(e) => {
                           // mousedown so the input doesn't blur away
                           // the menu before the click registers.
@@ -378,9 +357,7 @@ export function WifiProfilesForm({
                         }}
                       >
                         <span className="ssid-combobox-name">{opt.ssid}</span>
-                        <span className="ssid-combobox-meta">
-                          {opt.kind === 'scan' ? opt.meta : '履歴'}
-                        </span>
+                        <span className="ssid-combobox-meta">{opt.meta}</span>
                       </li>
                     ))}
                   </ul>
