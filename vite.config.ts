@@ -34,45 +34,38 @@ function firmwareDevPlugin(firmwareBuildRoot: string): Plugin {
           // first-time provisioning (post chip-erase) both work.
           if (url === '/list' || url === '/list/') {
             const envs = await safeReaddir(firmwareBuildRoot)
+            // Each env may emit two artifacts (DEC 2026-05-02):
+            //   - firmware_app_ota.bin    : app-only, for Wi-Fi OTA
+            //   - firmware_full_serial.bin: bootloader+partitions+app
+            //                                merged image, for USB
+            //                                Serial download mode
+            // We also accept the legacy `firmware.bin` filename as
+            // full_serial (back-compat for builds that haven't yet
+            // adopted the dual-output convention).
             const items: Array<{
               env: string
-              size: number
-              mtime: number
-              path: string
               fwVersion?: string
+              appOta?: { size: number; mtime: number; path: string }
+              fullSerial?: { size: number; mtime: number; path: string }
             }> = []
             for (const env of envs) {
-              const binPath = join(firmwareBuildRoot, env, 'firmware.bin')
-              try {
-                const st = await fs.stat(binPath)
-                if (st.isFile()) {
-                  // Sole source of truth for "which firmware is this":
-                  // `#define FIRMWARE_VERSION "x.y.z"` in
-                  // src/hapbeat_config.h. Same value the OLED shows
-                  // and the device returns in get_info's `fw` field,
-                  // so OTA verify can compare them 1:1.
-                  let fwVersion: string | undefined
-                  try {
-                    const header = await fs.readFile(
-                      resolve(
-                        firmwareBuildRoot, '../../src/hapbeat_config.h',
-                      ),
-                      'utf-8',
-                    )
-                    const m = header.match(
-                      /#define\s+FIRMWARE_VERSION\s+"([^"]+)"/,
-                    )
-                    if (m) fwVersion = m[1]
-                  } catch { /* leave undefined — older repos */ }
-                  items.push({
-                    env,
-                    size: st.size,
-                    mtime: st.mtimeMs,
-                    path: binPath,
-                    fwVersion,
-                  })
-                }
-              } catch { /* env dir without firmware.bin — skip */ }
+              const fwVersion = await readFirmwareVersion(firmwareBuildRoot)
+              const appOta = await statArtifact(
+                firmwareBuildRoot, env, 'firmware_app_ota.bin',
+              )
+              let fullSerial = await statArtifact(
+                firmwareBuildRoot, env, 'firmware_full_serial.bin',
+              )
+              if (!fullSerial) {
+                // Back-compat: older builds emit just `firmware.bin`
+                // (the merged image) without the `_full_serial` suffix.
+                fullSerial = await statArtifact(
+                  firmwareBuildRoot, env, 'firmware.bin',
+                )
+              }
+              if (appOta || fullSerial) {
+                items.push({ env, fwVersion, appOta, fullSerial })
+              }
             }
             items.sort((a, b) => a.env.localeCompare(b.env))
             res.setHeader('content-type', 'application/json')
@@ -81,12 +74,13 @@ function firmwareDevPlugin(firmwareBuildRoot: string): Plugin {
             return
           }
 
-          // /firmware-builds/<env>/firmware.bin
-          const m = url.match(/^\/([^/]+)\/firmware\.bin$/)
+          // /firmware-builds/<env>/<filename>.bin
+          // Allow firmware_app_ota.bin / firmware_full_serial.bin /
+          // firmware.bin (legacy alias for full_serial).
+          const m = url.match(/^\/([^/]+)\/(firmware_app_ota|firmware_full_serial|firmware)\.bin$/)
           if (m) {
             const env = m[1]
-            const stem = 'firmware'
-            // basic safety: no path traversal characters
+            const stem = m[2]
             if (env.includes('..') || env.includes('/') || env.includes('\\')) {
               res.statusCode = 400
               res.end('bad env name')
@@ -129,6 +123,35 @@ async function safeReaddir(p: string): Promise<string[]> {
     return entries.filter((e) => e.isDirectory()).map((e) => e.name)
   } catch {
     return []
+  }
+}
+
+async function statArtifact(
+  buildRoot: string, env: string, filename: string,
+): Promise<{ size: number; mtime: number; path: string } | undefined> {
+  const p = join(buildRoot, env, filename)
+  try {
+    const st = await fs.stat(p)
+    if (!st.isFile()) return undefined
+    return { size: st.size, mtime: st.mtimeMs, path: p }
+  } catch {
+    return undefined
+  }
+}
+
+/** Sole source of truth for the human-readable firmware version —
+ *  parsed out of `src/hapbeat_config.h` so OTA verify can compare
+ *  Studio-side metadata against the device's `get_info` reply. */
+async function readFirmwareVersion(buildRoot: string): Promise<string | undefined> {
+  try {
+    const header = await fs.readFile(
+      resolve(buildRoot, '../../src/hapbeat_config.h'),
+      'utf-8',
+    )
+    const m = header.match(/#define\s+FIRMWARE_VERSION\s+"([^"]+)"/)
+    return m ? m[1] : undefined
+  } catch {
+    return undefined
   }
 }
 

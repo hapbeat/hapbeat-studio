@@ -15,8 +15,8 @@ import {
   verifyPermission,
 } from '@/utils/localDirectory'
 import {
-  fetchFirmwareBinary,
-  fetchFirmwareRegions,
+  fetchFirmwareAppOta,
+  fetchFirmwareSerialRegions,
   formatBytes,
   formatMtime,
   listFirmwareBuilds,
@@ -146,15 +146,19 @@ export function FirmwareSubTab({
       pushLog('firmware', `library refreshed: ${entries.length} env(s) at ${new Date().toLocaleTimeString()}`)
       for (const e of entries) {
         const tag = e.fwVersion ? ` fw=${e.fwVersion}` : ''
-        pushLog('firmware', `  · ${e.env}:${tag} ${e.size.toLocaleString()} bytes mtime=${formatMtime(e.mtime)}`)
+        const ota = e.appOta ? `${e.appOta.size.toLocaleString()} B` : 'n/a'
+        const ser = e.fullSerial ? `${e.fullSerial.size.toLocaleString()} B` : 'n/a'
+        pushLog('firmware', `  · ${e.env}:${tag} app_ota=${ota} full_serial=${ser}`)
       }
       // Default-select the most-recently-built env on first load —
-      // typically the one the user just rebuilt. Preserve a manual
-      // selection across refreshes if it still exists.
+      // ranked by whichever artifact was rebuilt last (mtime). Preserve
+      // a manual selection across refreshes if it still exists.
+      const entryMtime = (e: FirmwareLibraryEntry): number =>
+        Math.max(e.appOta?.mtime ?? 0, e.fullSerial?.mtime ?? 0)
       setLibSelected((prev) => {
         if (prev && entries.some((e) => e.env === prev)) return prev
         if (entries.length === 0) return null
-        return [...entries].sort((a, b) => b.mtime - a.mtime)[0].env
+        return [...entries].sort((a, b) => entryMtime(b) - entryMtime(a))[0].env
       })
     } catch (err) {
       const msg = (err as Error).message ?? String(err)
@@ -269,24 +273,43 @@ export function FirmwareSubTab({
 
   // ---- Reading freshly from disk ------------------------------------
 
+  /** Read the local-picked .bin verbatim (no slicing). Shared
+   *  between OTA and Serial paths; each path then interprets the
+   *  raw bytes per its own rules. */
+  const readLocalRaw = useCallback(async (): Promise<{
+    bytes: Uint8Array
+    label: string
+    mtime: number
+    path: string
+  }> => {
+    if (!localHandle) throw new Error('ローカル .bin ファイルを選んでください')
+    const ok = await verifyPermission(localHandle, false)
+    if (!ok) {
+      setLocalPermissionDenied(true)
+      throw new Error('ファイル読込権限がありません — 「参照…」で再選択してください')
+    }
+    const f = await localHandle.getFile()
+    if (f.size === 0) throw new Error('ファイルが空です — 正しい .bin か確認してください')
+    const buf = await f.arrayBuffer()
+    setLocalMeta({ name: f.name, size: f.size, mtime: f.lastModified })
+    return {
+      bytes: new Uint8Array(buf),
+      label: f.name,
+      mtime: f.lastModified,
+      path: f.name, // browser hides absolute path; show name only
+    }
+  }, [localHandle])
+
   /**
    * Resolve the currently-selected source to fresh bytes for **Wi-Fi OTA**.
    *
-   * The device's OTA endpoint (firmware Update.begin/.write/.end) takes
-   * an APP-ONLY image. Hapbeat builds emit a *merged* firmware.bin that
-   * starts with a bootloader at 0x0, the partition table at 0x8000, and
-   * the app at 0x10000. Sending the whole blob to OTA writes bootloader
-   * bytes into the OTA app partition — the image-header check at the end
-   * appears to pass (the bootloader also begins with 0xE9), but the
-   * resulting partition is corrupt and the bootloader rolls back to the
-   * previous slot on the next boot. Symptom: Studio reports OTA success
-   * but the device keeps booting the previous version.
+   * Library: fetch `firmware_app_ota.bin` directly — it's already
+   * app-only, no slicing.
    *
-   * Fix: detect the merged-image markers and slice off `[0x10000, end)`
-   * (the app portion) before pushing to OTA. Local-picked binaries that
-   * are already app-only (i.e. don't start with the merged-layout
-   * markers) are passed through unchanged so users can still flash a
-   * standalone .bin built without the merge step.
+   * Local: a user-supplied .bin may be app-only OR a legacy merged
+   * image. Detect the merged-layout markers and slice off
+   * `[0x10000, end)` so even an accidentally-merged file works for
+   * OTA. App-only files pass through unchanged.
    */
   const readSelectedBin = useCallback(async (): Promise<{
     bytes: Uint8Array
@@ -294,75 +317,57 @@ export function FirmwareSubTab({
     mtime: number
     path: string
   }> => {
-    let raw: Uint8Array
-    let label: string
-    let mtime: number
-    let path: string
     if (source === 'library') {
       if (!libSelected) throw new Error('ファームウェアを選んでください')
-      const r = await fetchFirmwareBinary(libSelected)
-      // Guard against partially-written bins (PlatformIO build still
-      // running or a failed previous build leaving 0-byte stubs).
-      // Letting esptool flash an empty image bricks the device.
+      const entry = libEntries.find((x) => x.env === libSelected)
+      if (!entry?.appOta) {
+        throw new Error(
+          `firmware_app_ota.bin が ${libSelected} のビルド出力にありません — `
+          + `pio run の post-build で 2 ファイル (firmware_app_ota / firmware_full_serial) `
+          + `を出力する設定になっていない可能性があります。`,
+        )
+      }
+      const r = await fetchFirmwareAppOta(libSelected)
       if (r.bytes.length === 0) {
         throw new Error(`ビルドファイルが空です (${libSelected}) — pio run の完了後に再試行してください`)
       }
-      raw = r.bytes
-      label = `${libSelected} (built ${formatMtime(r.mtime)})`
-      mtime = r.mtime
-      path = r.path
-    } else {
-      if (!localHandle) throw new Error('ローカル .bin ファイルを選んでください')
-      const ok = await verifyPermission(localHandle, false)
-      if (!ok) {
-        setLocalPermissionDenied(true)
-        throw new Error('ファイル読込権限がありません — 「参照…」で再選択してください')
+      return {
+        bytes: r.bytes,
+        label: `${libSelected} app-ota (built ${formatMtime(r.mtime)})`,
+        mtime: r.mtime,
+        path: r.path,
       }
-      const f = await localHandle.getFile()
-      if (f.size === 0) {
-        throw new Error('ファイルが空です — 正しい .bin か確認してください')
-      }
-      const buf = await f.arrayBuffer()
-      setLocalMeta({ name: f.name, size: f.size, mtime: f.lastModified })
-      raw = new Uint8Array(buf)
-      label = f.name
-      mtime = f.lastModified
-      path = f.name // browser hides absolute path; show name only
     }
-    // Detect the merged firmware.bin layout (bootloader 0xE9 at 0x0,
-    // partitions 0xAA50 magic at 0x8000, app 0xE9 at 0x10000) and
-    // slice to the app slot only. Same markers `assertMergedImage`
-    // (Serial path) checks for.
+    // Local file: detect merged layout and slice if needed.
+    const raw = await readLocalRaw()
     const APP_START = 0x10000
     const isMerged =
-      raw.length >= APP_START + 1
-      && raw[0] === 0xe9
-      && raw[0x8000] === 0xaa
-      && raw[0x8001] === 0x50
-      && raw[APP_START] === 0xe9
-    const appBytes = isMerged ? raw.slice(APP_START) : raw
+      raw.bytes.length >= APP_START + 1
+      && raw.bytes[0] === 0xe9
+      && raw.bytes[0x8000] === 0xaa
+      && raw.bytes[0x8001] === 0x50
+      && raw.bytes[APP_START] === 0xe9
     if (isMerged) {
+      const sliced = raw.bytes.slice(APP_START)
       pushLog(
         'ota',
         `merged image detected — sending app slice only `
-        + `(${appBytes.length.toLocaleString()} of ${raw.length.toLocaleString()} bytes)`,
+        + `(${sliced.length.toLocaleString()} of ${raw.bytes.length.toLocaleString()} bytes)`,
       )
+      return { ...raw, bytes: sliced }
     }
-    return { bytes: appBytes, label, mtime, path }
-  }, [source, libSelected, localHandle, pushLog])
+    return raw
+  }, [source, libSelected, libEntries, readLocalRaw, pushLog])
 
   /**
    * Resolve the currently-selected source to **Serial flash regions**.
-   * Hapbeat builds emit a merged firmware.bin (bootloader 0x0 +
-   * partitions 0x8000 + 0xFF gap covering NVS/otadata + app 0x10000).
-   * To keep distribution as a single binary while still preserving
-   * NVS data on flash, we split it into 2 regions here:
-   *   [0x0,    0x9000)  bootloader + partitions
-   *   [0x10000, end  )  app
-   * The 0x9000–0x10000 gap (NVS + otadata) is left untouched so
-   * Wi-Fi profiles / device name / group ID survive a reflash.
-   * `assertMergedImage` rejects local-picked .bin files that don't
-   * have the merged-layout markers.
+   *
+   * Library: fetch `firmware_full_serial.bin` (the merged image) and
+   * split into 2 regions skipping the NVS+otadata gap.
+   *
+   * Local: validate that the picked file IS a merged image, then
+   * split it the same way. App-only local files are rejected because
+   * Serial flashing needs bootloader + partitions too.
    */
   const readSelectedRegions = useCallback(async (): Promise<{
     regions: FirmwareRegion[]
@@ -372,34 +377,40 @@ export function FirmwareSubTab({
       if (!libSelected) throw new Error('ファームウェアを選んでください')
       const entry = libEntries.find((e) => e.env === libSelected)
       if (!entry) throw new Error('選択中のビルドが見つかりません')
-      const regions = await fetchFirmwareRegions(entry)
+      if (!entry.fullSerial) {
+        throw new Error(
+          `firmware_full_serial.bin が ${entry.env} のビルド出力にありません — `
+          + `pio run の post-build で merged image を出力する設定になっていない可能性があります。`,
+        )
+      }
+      const regions = await fetchFirmwareSerialRegions(entry)
       return {
         regions,
-        label: `${entry.env} (built ${formatMtime(entry.mtime)})`,
+        label: `${entry.env} full-serial (built ${formatMtime(entry.fullSerial.mtime)})`,
       }
     }
     // Local file: validate it's a merged image then split with the
     // same NVS-skipping layout the library path uses.
-    const single = await readSelectedBin()
-    assertMergedImage(single.bytes)
+    const raw = await readLocalRaw()
+    assertMergedImage(raw.bytes)
     const NVS_GAP_START = 0x9000
     const APP_START = 0x10000
     return {
       regions: [
         {
           address: 0x0,
-          bytes: single.bytes.slice(0, NVS_GAP_START),
+          bytes: raw.bytes.slice(0, NVS_GAP_START),
           label: 'bootloader+partitions (0x0..0x9000)',
         },
         {
           address: APP_START,
-          bytes: single.bytes.slice(APP_START),
-          label: `app (0x10000..${single.bytes.length.toString(16)})`,
+          bytes: raw.bytes.slice(APP_START),
+          label: `app (0x10000..${raw.bytes.length.toString(16)})`,
         },
       ],
-      label: single.label,
+      label: raw.label,
     }
-  }, [source, libSelected, libEntries, readSelectedBin])
+  }, [source, libSelected, libEntries, readLocalRaw])
 
   // ---- UI handlers ---------------------------------------------------
 
@@ -666,9 +677,35 @@ export function FirmwareSubTab({
                         v{e.fwVersion}
                       </span>
                     )}
-                    <span style={{ whiteSpace: 'nowrap' }}>
-                      {formatBytes(e.size)} · {formatMtime(e.mtime)}
-                    </span>
+                  </div>
+                  {/* Per-artifact rows — each path (OTA / Serial)
+                   * resolves to its own .bin so the user can see at a
+                   * glance which file backs which operation, and
+                   * notice if one is missing. */}
+                  <div
+                    className="firmware-lib-detail-artifacts"
+                    style={{
+                      marginTop: 6,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 2,
+                      fontSize: 11,
+                      fontFamily: 'var(--font-mono)',
+                      color: 'var(--text-muted)',
+                    }}
+                  >
+                    <div title={e.appOta?.path ?? ''}>
+                      <span style={{ marginRight: 6 }}>OTA  app:</span>
+                      {e.appOta
+                        ? `${formatBytes(e.appOta.size)} · ${formatMtime(e.appOta.mtime)}`
+                        : '— firmware_app_ota.bin が未生成'}
+                    </div>
+                    <div title={e.fullSerial?.path ?? ''}>
+                      <span style={{ marginRight: 6 }}>SERIAL full:</span>
+                      {e.fullSerial
+                        ? `${formatBytes(e.fullSerial.size)} · ${formatMtime(e.fullSerial.mtime)}`
+                        : '— firmware_full_serial.bin が未生成'}
+                    </div>
                   </div>
                 </div>
               )

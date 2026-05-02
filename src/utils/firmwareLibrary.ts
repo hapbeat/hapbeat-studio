@@ -15,16 +15,30 @@
  * rest of the file is unchanged.
  */
 
+/** Per-artifact metadata returned by the dev plugin's `/list`. */
+export interface FirmwareArtifact {
+  /** Bytes on disk. */
+  size: number
+  /** Last-modified time (ms since epoch). */
+  mtime: number
+  /** Absolute filesystem path on the dev host (display only). */
+  path: string
+}
+
 export interface FirmwareLibraryEntry {
   /** PlatformIO environment name, e.g. `necklace_v3_claude`. */
   env: string
-  /** `firmware.bin` size in bytes. */
-  size: number
-  /** Last-modified time of `firmware.bin` (ms since epoch). */
-  mtime: number
-  /** Absolute filesystem path of `firmware.bin` on the dev host
-   *  (display only). */
-  path: string
+  /** App-only image for **Wi-Fi OTA** (firmware_app_ota.bin). The
+   *  ESP32 OTA mechanism (`Update.write` → ota_X partition) accepts
+   *  this and only this — sending a merged image instead writes
+   *  bootloader bytes into the OTA app slot and the device rolls back
+   *  on next boot. */
+  appOta?: FirmwareArtifact
+  /** Merged image for **USB Serial download mode**
+   *  (firmware_full_serial.bin) — bootloader 0x0 + partitions 0x8000
+   *  + app 0x10000. Esptool-js writes each region to its own offset.
+   *  Unused for OTA. */
+  fullSerial?: FirmwareArtifact
   /** FIRMWARE_VERSION baked into the binary at build time (the semver
    *  string defined in `src/hapbeat_config.h`). Sole source of truth
    *  for "which firmware is this" — same value the OLED shows and the
@@ -58,61 +72,40 @@ export async function listFirmwareBuilds(): Promise<FirmwareLibraryEntry[]> {
 }
 
 /**
- * Fetch the app binary (firmware.bin only) for one env.
+ * Fetch the **app-only** binary (firmware_app_ota.bin) for Wi-Fi OTA.
  *
- * For iterative app updates this is enough — the bootloader and
- * partition table from the previous flash stay in place. For full
- * provisioning (after a chip-erase, or first time) use
- * `fetchFirmwareRegions` which pulls all 3 files (bootloader 0x0 +
- * partitions 0x8000 + firmware 0x10000) so the device boots cleanly.
+ * The ESP32 OTA mechanism (`Update.write` in firmware) writes the
+ * supplied bytes into the next OTA app partition starting from
+ * offset 0. It cannot update bootloader (lives at 0x0) or partition
+ * table (0x8000) — those need USB Serial download mode. So OTA must
+ * receive an app-only image, not the merged blob.
  */
-export async function fetchFirmwareBinary(
+export async function fetchFirmwareAppOta(
   env: string,
 ): Promise<{ bytes: Uint8Array; mtime: number; size: number; path: string }> {
-  const r = await fetch(
-    `${firmwareBaseUrl()}/${encodeURIComponent(env)}/firmware.bin`,
-    { cache: 'no-store' },
-  )
-  if (!r.ok) {
-    throw new Error(
-      `firmware fetch failed (${r.status} ${r.statusText}) for env="${env}"`,
-    )
-  }
-  const buf = await r.arrayBuffer()
-  const bytes = new Uint8Array(buf)
-  const mtime = Number(r.headers.get('x-firmware-mtime') ?? '0')
-  const size = Number(r.headers.get('x-firmware-size') ?? bytes.length)
-  const path = r.headers.get('x-firmware-path') ?? ''
-  return { bytes, mtime, size, path }
+  return fetchArtifact(env, 'firmware_app_ota')
 }
 
+const NVS_OTADATA_START = 0x9000
+const APP_START = 0x10000
 /**
- * Fetch the merged firmware.bin for one env and return it as **two**
- * flash regions that skip the NVS + otadata gap (0x9000-0x10000).
+ * Fetch the **merged** image (firmware_full_serial.bin) for USB Serial
+ * download-mode flashing and return it as 2 regions that skip the
+ * NVS + otadata gap (0x9000-0x10000) so reflashing preserves Wi-Fi
+ * profiles / device name / group ID.
  *
- * Why split: every Hapbeat build emits a merged firmware.bin
- * spanning [0x0, ~0x1C0000]. Writing the whole blob with
- * `write_flash 0x0` overwrites the NVS partition (`partitions.csv`:
- * `nvs @ 0x9000, 0x5000`), wiping Wi-Fi profiles / device name /
- * group ID on every flash. Distribution-wise we still want a single
- * binary, so the SOURCE FILE stays merged — the SPLIT happens here
- * at flash-time so the writer leaves [0x9000, 0x10000) untouched.
- *
- * Layout the split mirrors:
- *
+ * Layout of the merged image:
  *   [0x0    , 0x9000 ) → bootloader (0x0) + partitions (0x8000)
- *   [0x9000 , 0x10000) → SKIPPED  (NVS @ 0x9000 + otadata @ 0xE000)
+ *   [0x9000 , 0x10000) → SKIPPED (NVS @ 0x9000 + otadata @ 0xE000)
  *   [0x10000, end    ) → app (ota_0)
  *
  * Bootloader / partitions / app start markers are validated up front
  * so a non-merged image is rejected before any flash bytes are sent.
  */
-const NVS_OTADATA_START = 0x9000
-const APP_START = 0x10000
-export async function fetchFirmwareRegions(
+export async function fetchFirmwareSerialRegions(
   entry: FirmwareLibraryEntry,
 ): Promise<FirmwareRegion[]> {
-  const fw = await fetchRegion(entry.env, 'firmware')
+  const fw = await fetchArtifact(entry.env, 'firmware_full_serial')
   const b = fw.bytes
   const isMerged =
     b.length >= APP_START + 1
@@ -122,8 +115,8 @@ export async function fetchFirmwareRegions(
     && b[APP_START] === 0xe9
   if (!isMerged) {
     throw new Error(
-      `firmware.bin for env="${entry.env}" is not a merged image. `
-      + 'Hapbeat builds must emit merged firmware.bin '
+      `firmware_full_serial.bin for env="${entry.env}" is not a merged image. `
+      + 'Hapbeat builds must emit a merged firmware_full_serial.bin '
       + '(bootloader 0x0 + partitions 0x8000 + app 0x10000).',
     )
   }
@@ -141,24 +134,38 @@ export async function fetchFirmwareRegions(
   ]
 }
 
-async function fetchRegion(
+async function fetchArtifact(
   env: string,
-  stem: 'firmware' | 'bootloader' | 'partitions',
-): Promise<{ bytes: Uint8Array }> {
-  const r = await fetch(
-    `${firmwareBaseUrl()}/${encodeURIComponent(env)}/${stem}.bin`,
-    { cache: 'no-store' },
-  )
-  if (!r.ok) {
-    throw new Error(
-      `${stem}.bin fetch failed (${r.status} ${r.statusText}) for env="${env}"`,
+  stem: 'firmware_app_ota' | 'firmware_full_serial' | 'firmware',
+): Promise<{ bytes: Uint8Array; mtime: number; size: number; path: string }> {
+  const tryStems = stem === 'firmware_full_serial'
+    // Back-compat: older builds emit the merged image as `firmware.bin`
+    // without the `_full_serial` suffix.
+    ? ['firmware_full_serial', 'firmware']
+    : [stem]
+  let lastErr: Error | null = null
+  for (const s of tryStems) {
+    const r = await fetch(
+      `${firmwareBaseUrl()}/${encodeURIComponent(env)}/${s}.bin`,
+      { cache: 'no-store' },
+    )
+    if (r.ok) {
+      const buf = await r.arrayBuffer()
+      const bytes = new Uint8Array(buf)
+      if (bytes.length === 0) {
+        lastErr = new Error(`${s}.bin is empty for env="${env}"`)
+        continue
+      }
+      const mtime = Number(r.headers.get('x-firmware-mtime') ?? '0')
+      const size = Number(r.headers.get('x-firmware-size') ?? bytes.length)
+      const path = r.headers.get('x-firmware-path') ?? ''
+      return { bytes, mtime, size, path }
+    }
+    lastErr = new Error(
+      `${s}.bin fetch failed (${r.status} ${r.statusText}) for env="${env}"`,
     )
   }
-  const bytes = new Uint8Array(await r.arrayBuffer())
-  if (bytes.length === 0) {
-    throw new Error(`${stem}.bin is empty for env="${env}"`)
-  }
-  return { bytes }
+  throw lastErr ?? new Error(`fetch failed for env="${env}"`)
 }
 
 export function formatMtime(ms: number): string {
