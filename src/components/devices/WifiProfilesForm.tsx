@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import type { WifiProfile } from '@/stores/deviceStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
-import { useSerialMaster, type SerialWifiNetwork } from '@/stores/serialMaster'
+import type { SerialWifiNetwork } from '@/stores/serialMaster'
 
 interface Props {
   device: DeviceInfo
@@ -52,47 +52,28 @@ export function WifiProfilesForm({
   const [menuOpen, setMenuOpen] = useState(false)
   const ssidWrapRef = useRef<HTMLDivElement | null>(null)
 
-  // SSID candidates come from device-side scan only:
-  //   - Serial path: Device's own `WiFi.scanNetworks()` via serialMaster
-  //   - LAN path: Helper's `scan_wifi` WS message → OS netsh / airport / nmcli
-  // History is intentionally excluded — device scan results reflect what
-  // the Hapbeat itself can see at its location, which is more accurate
-  // than any historically-stored SSID from a different session or place.
-  const isSerial = device.ipAddress.startsWith('serial:')
-  const masterScanWifi = useSerialMaster((s) => s.scanWifi)
+  // SSID candidates always come from Helper-side OS scan
+  // (netsh / airport / nmcli on the PC running Studio).
+  // The PC and Hapbeat share a LAN by assumption (otherwise Helper
+  // can't talk to LAN devices), so PC neighborhood ≈ device neighborhood.
+  // Device-side `WiFi.scanNetworks()` was previously used for Serial
+  // path but failed during onboarding (radio not initialized in
+  // factory state), so we unified to Helper-only.
   const { send: helperSend, lastMessage } = useHelperConnection()
   const [scanResults, setScanResults] = useState<SerialWifiNetwork[]>([])
   const [scanState, setScanState] = useState<'idle' | 'scanning' | 'done' | 'error'>('idle')
 
-  const runScan = useCallback(async () => {
+  const runScan = useCallback(() => {
     setScanState('scanning')
-    if (isSerial) {
-      // Device's own WiFi.scanNetworks() — most accurate, reflects
-      // what the Hapbeat itself can see when it's powered on at the
-      // user's location.
-      try {
-        const r = await masterScanWifi()
-        setScanResults(r)
-        setScanState('done')
-      } catch {
-        setScanResults([])
-        setScanState('error')
-      }
-      return
-    }
-    // LAN device — ask Helper to run an OS-side scan. The reply
-    // arrives async via lastMessage (`scan_wifi_result`); the effect
-    // below picks it up. Studio + PC + Hapbeat share a LAN by
-    // assumption, so the PC's neighborhood approximates the device's.
     helperSend({ type: 'scan_wifi', payload: {} })
-  }, [isSerial, masterScanWifi, helperSend])
+  }, [helperSend])
 
   // Drain Helper's scan_wifi_result. Only set state while a scan is
   // actually in flight (scanState === 'scanning') so a late reply from
   // a device-switch race doesn't overwrite the new view's results.
   useEffect(() => {
     if (!lastMessage || lastMessage.type !== 'scan_wifi_result') return
-    if (scanState !== 'scanning' || isSerial) return
+    if (scanState !== 'scanning') return
     const p = lastMessage.payload as Record<string, unknown>
     const networks = (p.networks as SerialWifiNetwork[] | undefined) ?? []
     const error = p.error as string | undefined
@@ -103,7 +84,7 @@ export function WifiProfilesForm({
       setScanResults(networks)
       setScanState('done')
     }
-  }, [lastMessage, scanState, isSerial])
+  }, [lastMessage, scanState])
 
   // Auto-fill the field with the strongest scan result the moment a
   // scan finishes — only when the user hasn't typed anything yet
@@ -127,7 +108,7 @@ export function WifiProfilesForm({
     return () => document.removeEventListener('mousedown', onDown)
   }, [menuOpen])
 
-  // Dropdown shows device scan results only (scan_wifi / WiFi.scanNetworks).
+  // Dropdown shows Helper-side OS scan results (netsh / airport / nmcli).
   // Displayed in signal-strength order (strongest first).
   const dropdownOptions = scanResults.map((n) => ({
     ssid: n.ssid,
@@ -368,11 +349,7 @@ export function WifiProfilesForm({
                 className="form-button-secondary"
                 onClick={() => void runScan()}
                 disabled={scanState === 'scanning' || editingIndex !== null}
-                title={
-                  isSerial
-                    ? 'デバイスに WiFi.scanNetworks() を実行させる (約 3 秒)'
-                    : 'PC 側で OS-native な Wi-Fi スキャンを実行'
-                }
+                title="PC 側で OS-native な Wi-Fi スキャンを実行 (Helper 経由)"
                 style={{ flexShrink: 0, whiteSpace: 'nowrap' }}
               >
                 {scanState === 'scanning' ? 'スキャン中…' : '⟳ スキャン'}
@@ -382,11 +359,7 @@ export function WifiProfilesForm({
           </div>
           {editingIndex === null && (
             <div className="form-status muted" style={{ padding: '0 4px' }}>
-              {scanState === 'scanning' && (
-                isSerial
-                  ? 'デバイス側で SSID をスキャン中…'
-                  : 'PC 側で SSID をスキャン中…'
-              )}
+              {scanState === 'scanning' && 'PC 側で SSID をスキャン中…'}
               {scanState === 'done' && scanResults.length === 0 && (
                 'スキャン結果なし — SSID を手動で入力してください'
               )}

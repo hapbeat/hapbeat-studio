@@ -85,10 +85,10 @@ export async function openConfigConnection(
 
   // Multi-line JSON accumulation state.
   //
-  // Why this exists: long firmware responses (notably `scan_wifi`,
-  // which takes ~3 s while ESP-IDF tasks emit `[Wifi] event: ...`
-  // and other Arduino-ESP32 logs) get split when the host
-  // newline-splits the byte stream. The result is:
+  // Why this exists: long firmware responses get split when the
+  // host newline-splits the byte stream while ESP-IDF tasks emit
+  // `[Wifi] event: ...` and other Arduino-ESP32 logs that interleave
+  // with our JSON output. The result is:
   //
   //   line 1: `{"status":"ok","networks":[{"ssid":"foo"`
   //   line 2: `[Wifi] event: SCAN_DONE`              ← interleaved log
@@ -138,13 +138,12 @@ export async function openConfigConnection(
     }
   }
 
-  // Pattern for log noise the firmware emits while scan_wifi is
-  // running (NVS `nvs_get_str` failures, ArduinoOTA notices, etc.).
-  // Lines matching this are sent to onLog and EXCLUDED from the
-  // JSON accumulator — otherwise they'd corrupt the JSON byte
-  // sequence and break the parser even with brace-depth tracking,
-  // because string-payload `"`s in those logs can flip our
-  // in-string state.
+  // Pattern for log noise the firmware emits during long operations
+  // (NVS `nvs_get_str` failures, ArduinoOTA notices, etc.). Lines
+  // matching this are sent to onLog and EXCLUDED from the JSON
+  // accumulator — otherwise they'd corrupt the JSON byte sequence
+  // and break the parser even with brace-depth tracking, because
+  // string-payload `"`s in those logs can flip our in-string state.
   //
   // Heuristic: any line that does NOT contain JSON-shape tokens we
   // care about (`"`, `{`, `}`, `[`, `]`, `:`) is unlikely to be a
@@ -233,19 +232,13 @@ export async function openConfigConnection(
   const send = (cmd: Record<string, unknown>): Promise<Record<string, unknown>> => {
     if (closed) return Promise.reject(new Error('connection closed'))
     return new Promise<Record<string, unknown>>((resolve, reject) => {
-      // 2 s default timeout — firmware answers within tens of ms
-      // for most config commands. `scan_wifi` is the exception:
-      // WiFi.scanNetworks blocks the firmware for ~1.5–3 s, so we
-      // give it a longer per-command budget. All other commands
-      // stick with the snappy 2 s default — the onboarding wizard
-      // treats a timeout as "no firmware" and routes to flash.
-      const isScan = (cmd as { cmd?: string }).cmd === 'scan_wifi'
-      // 12 s for scan_wifi: WiFi.scanNetworks itself runs ~3 s but
-      // we've seen real-world responses take 6–8 s when the firmware
-      // emits NVS `nvs_get_str len fail` warnings concurrently
-      // (those interleave with the JSON output and slow the
-      // serial-line-by-line accumulator). 12 s leaves headroom.
-      const timeoutMs = isScan ? 12000 : 2000
+      // 2 s default timeout — firmware answers within tens of ms for
+      // all config commands. The onboarding wizard treats a timeout
+      // as "no firmware" and routes to flash. (Wi-Fi SSID scan was
+      // previously routed via Serial with a 12 s timeout; we now
+      // unify all scans through Helper, so this commented-out branch
+      // doesn't apply anymore.)
+      const timeoutMs = 2000
       const timer = setTimeout(() => {
         const idx = waiters.findIndex((w) => w.resolve === resolve)
         if (idx >= 0) waiters.splice(idx, 1)

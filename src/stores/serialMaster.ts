@@ -105,10 +105,6 @@ interface SerialMasterState {
   ) => Promise<void>
   /** Run a chip erase on the held port (or pick one if not held). */
   eraseFlash: () => Promise<void>
-  /** Ask the device to scan for nearby Wi-Fi networks. Returns the
-   *  sorted list (strongest first) or an empty list on error. Blocks
-   *  for up to ~3 s while the chip's WiFi.scanNetworks() runs. */
-  scanWifi: () => Promise<SerialWifiNetwork[]>
   /** Re-pull `get_info` / Wi-Fi state into the store. */
   refreshAll: () => Promise<void>
   /** Release everything — close conn, close port, clear state. */
@@ -446,22 +442,6 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       } finally {
         set({ flashRunning: false })
         setTimeout(() => set({ flashProgress: null }), 3000)
-      }
-    },
-
-    scanWifi: async () => {
-      const { conn } = get()
-      if (!conn) return []
-      // Per-command timeout (8 s for scan_wifi) is now handled inside
-      // openConfigConnection's send(), so we just await the response.
-      try {
-        const r = await conn.send({ cmd: 'scan_wifi' })
-        const arr = (r.networks as SerialWifiNetwork[] | undefined) ?? []
-        log(`scan_wifi: ${arr.length} network(s)`)
-        return arr.slice().sort((a, b) => b.rssi - a.rssi)
-      } catch (err) {
-        log(`scan_wifi failed: ${(err as Error).message}`)
-        return []
       }
     },
 
