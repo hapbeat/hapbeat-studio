@@ -153,6 +153,23 @@ body {
   background: var(--text-muted);
 }
 
+.connection-status--clickable {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: none;
+}
+
+.connection-status--clickable:hover {
+  color: var(--text-primary);
+}
+
+.connection-status--clickable:hover .status-dot.disconnected {
+  background: var(--error, #e05252);
+  box-shadow: 0 0 6px var(--error, #e05252);
+}
+
 /* ========================================
    Header Toggle
    ======================================== */

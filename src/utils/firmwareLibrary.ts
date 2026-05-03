@@ -1,18 +1,19 @@
 /**
- * Firmware library — discover and fetch official builds the dev server
- * relays from `hapbeat-device-firmware/.pio/build/<env>/firmware.bin`.
+ * Firmware library — discover and fetch official builds.
  *
- * The Vite plugin in `vite.config.ts` exposes:
- *   GET /firmware-builds/list                              → { envs: [...] }
- *   GET /firmware-builds/<env>/firmware.bin         → bytes
+ * Dev mode (Vite dev server):
+ *   The `firmwareDevPlugin` in vite.config.ts exposes:
+ *     GET /firmware-builds/list         → { envs: [...] }
+ *     GET /firmware-builds/<env>/<stem>.bin → bytes
+ *   Always fetched with `cache: 'no-store'` so a fresh PlatformIO build
+ *   is picked up on the very next click.
  *
- * Always sent with `cache: 'no-store'` so a fresh PlatformIO build is
- * picked up on the very next click — that was the *whole point* of
- * adding this layer (file-picker re-selection was missing rebuilds).
- *
- * Production: when devtools.hapbeat.com gets a CDN of canonical
- * firmware builds, replace `firmwareBaseUrl()` with that URL and the
- * rest of the file is unchanged.
+ * Production (deployed devtools.hapbeat.com):
+ *   Firmware artifacts are hosted on GitHub Releases for
+ *   `hapbeat/hapbeat-device-firmware`. A `manifest.json` at the release
+ *   root lists available envs and artifact filenames. Artifact files use
+ *   the naming convention `<env>_<stem>.bin` to avoid name collisions
+ *   across environments in the same release.
  */
 
 /** Per-artifact metadata returned by the dev plugin's `/list`. */
@@ -56,19 +57,87 @@ export interface FirmwareRegion {
   label: string
 }
 
-/** Single source of truth for the dev-plugin URL prefix. Override at
- *  build time if a CDN is published. */
-function firmwareBaseUrl(): string {
-  return '/firmware-builds'
+/** GitHub Releases base URL for production firmware distribution. */
+const PROD_FIRMWARE_RELEASE_BASE =
+  'https://github.com/Hapbeat/hapbeat-device-firmware/releases/latest/download'
+
+/**
+ * In development (Vite dev server) the `firmwareDevPlugin` serves
+ * `/firmware-builds/…` locally. In production we fetch from GitHub Releases.
+ */
+function isProdMode(): boolean {
+  return import.meta.env.PROD
 }
 
 export async function listFirmwareBuilds(): Promise<FirmwareLibraryEntry[]> {
-  const r = await fetch(`${firmwareBaseUrl()}/list`, { cache: 'no-store' })
+  if (isProdMode()) {
+    return listFirmwareBuildsFromGitHubReleases()
+  }
+  // Dev: use Vite middleware
+  const r = await fetch('/firmware-builds/list', { cache: 'no-store' })
   if (!r.ok) {
     throw new Error(`firmware list failed (${r.status} ${r.statusText})`)
   }
   const json = (await r.json()) as { envs: FirmwareLibraryEntry[] }
   return json.envs ?? []
+}
+
+/**
+ * Fetch the `manifest.json` from the latest GitHub Release and parse it
+ * into the same `FirmwareLibraryEntry[]` shape the dev plugin returns.
+ *
+ * Expected manifest shape:
+ * ```json
+ * {
+ *   "envs": [
+ *     {
+ *       "env": "necklace_v3_claude",
+ *       "fwVersion": "v0.5.1",
+ *       "appOta":     { "filename": "necklace_v3_claude_firmware_app_ota.bin",     "size": 1234567, "mtime": 1714723200000 },
+ *       "fullSerial": { "filename": "necklace_v3_claude_firmware_full_serial.bin", "size": 1556789, "mtime": 1714723200000 }
+ *     }
+ *   ]
+ * }
+ * ```
+ */
+async function listFirmwareBuildsFromGitHubReleases(): Promise<FirmwareLibraryEntry[]> {
+  const manifestUrl = `${PROD_FIRMWARE_RELEASE_BASE}/manifest.json`
+  const r = await fetch(manifestUrl, { cache: 'no-store' })
+  if (!r.ok) {
+    throw new Error(
+      `firmware manifest fetch failed (${r.status} ${r.statusText}) — `
+      + `are firmware artifacts published to GitHub Releases?`,
+    )
+  }
+
+  interface ManifestEnv {
+    env: string
+    fwVersion?: string
+    appOta?: { filename: string; size: number; mtime: number }
+    fullSerial?: { filename: string; size: number; mtime: number }
+  }
+  const json = (await r.json()) as { envs: ManifestEnv[] }
+
+  return (json.envs ?? []).map((e) => ({
+    env: e.env,
+    fwVersion: e.fwVersion,
+    appOta: e.appOta
+      ? {
+          size: e.appOta.size,
+          mtime: e.appOta.mtime,
+          // Expose the GH release download URL as `path` so display components
+          // can show it (they currently show `path` as a tooltip / label).
+          path: `${PROD_FIRMWARE_RELEASE_BASE}/${e.appOta.filename}`,
+        }
+      : undefined,
+    fullSerial: e.fullSerial
+      ? {
+          size: e.fullSerial.size,
+          mtime: e.fullSerial.mtime,
+          path: `${PROD_FIRMWARE_RELEASE_BASE}/${e.fullSerial.filename}`,
+        }
+      : undefined,
+  }))
 }
 
 /**
@@ -138,6 +207,16 @@ async function fetchArtifact(
   env: string,
   stem: 'firmware_app_ota' | 'firmware_full_serial' | 'firmware',
 ): Promise<{ bytes: Uint8Array; mtime: number; size: number; path: string }> {
+  if (isProdMode()) {
+    return fetchArtifactFromGitHubReleases(env, stem)
+  }
+  return fetchArtifactFromDevPlugin(env, stem)
+}
+
+async function fetchArtifactFromDevPlugin(
+  env: string,
+  stem: 'firmware_app_ota' | 'firmware_full_serial' | 'firmware',
+): Promise<{ bytes: Uint8Array; mtime: number; size: number; path: string }> {
   const tryStems = stem === 'firmware_full_serial'
     // Back-compat: older builds emit the merged image as `firmware.bin`
     // without the `_full_serial` suffix.
@@ -146,7 +225,7 @@ async function fetchArtifact(
   let lastErr: Error | null = null
   for (const s of tryStems) {
     const r = await fetch(
-      `${firmwareBaseUrl()}/${encodeURIComponent(env)}/${s}.bin`,
+      `/firmware-builds/${encodeURIComponent(env)}/${s}.bin`,
       { cache: 'no-store' },
     )
     if (r.ok) {
@@ -166,6 +245,42 @@ async function fetchArtifact(
     )
   }
   throw lastErr ?? new Error(`fetch failed for env="${env}"`)
+}
+
+/**
+ * Fetch a firmware artifact from GitHub Releases.
+ * Artifact naming: `<env>_<stem>.bin` (e.g. `necklace_v3_claude_firmware_app_ota.bin`).
+ * Falls back to `<env>_firmware.bin` for full_serial (legacy back-compat).
+ */
+async function fetchArtifactFromGitHubReleases(
+  env: string,
+  stem: 'firmware_app_ota' | 'firmware_full_serial' | 'firmware',
+): Promise<{ bytes: Uint8Array; mtime: number; size: number; path: string }> {
+  const tryFilenames =
+    stem === 'firmware_full_serial'
+      ? [`${env}_firmware_full_serial.bin`, `${env}_firmware.bin`]
+      : [`${env}_${stem}.bin`]
+
+  let lastErr: Error | null = null
+  for (const filename of tryFilenames) {
+    const url = `${PROD_FIRMWARE_RELEASE_BASE}/${filename}`
+    const r = await fetch(url, { cache: 'no-store' })
+    if (r.ok) {
+      const buf = await r.arrayBuffer()
+      const bytes = new Uint8Array(buf)
+      if (bytes.length === 0) {
+        lastErr = new Error(`${filename} is empty for env="${env}"`)
+        continue
+      }
+      // GitHub Releases does not return custom headers; use Content-Length
+      const size = Number(r.headers.get('content-length') ?? bytes.length)
+      return { bytes, mtime: 0, size, path: url }
+    }
+    lastErr = new Error(
+      `${filename} fetch failed (${r.status} ${r.statusText})`,
+    )
+  }
+  throw lastErr ?? new Error(`GitHub Releases fetch failed for env="${env}"`)
 }
 
 export function formatMtime(ms: number): string {

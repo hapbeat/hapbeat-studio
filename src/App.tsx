@@ -1,9 +1,10 @@
-import { useState, useEffect, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, type ReactNode } from 'react'
 import { WaveformEditor } from '@/components/waveform/WaveformEditor'
 import { DisplayEditor } from '@/components/display/DisplayEditor'
 import { KitManager } from '@/components/kit/KitManager'
 import { Devices } from '@/components/devices/Devices'
 import { LogDrawer } from '@/components/log/LogDrawer'
+import { HelperOnboardingModal } from '@/components/common/HelperOnboardingModal'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import './App.css'
 
@@ -66,7 +67,19 @@ export function App() {
       return next
     })
   }, [activeTab])
-  const { isConnected } = useHelperConnection()
+  const { isConnected, send } = useHelperConnection()
+  const [helperModalOpen, setHelperModalOpen] = useState(false)
+
+  // Auto-close modal when Helper connects
+  useEffect(() => {
+    if (isConnected) setHelperModalOpen(false)
+  }, [isConnected])
+
+  const handleRetry = useCallback(() => {
+    // Send a ping to trigger an immediate reconnect attempt via the provider's
+    // reconnect loop — also refreshes the device list if already connected.
+    send({ type: 'ping', payload: {} })
+  }, [send])
 
   return (
     <div className="app">
@@ -83,13 +96,28 @@ export function App() {
             </button>
           ))}
         </div>
-        <div className="connection-status">
-          <span className={`status-dot ${isConnected ? 'connected' : 'disconnected'}`} />
-          {isConnected
-            ? 'Helper 接続中'
-            : 'Helper 未接続 — `hapbeat-helper start --foreground` で起動してください'}
-        </div>
+        {isConnected ? (
+          <div className="connection-status">
+            <span className="status-dot connected" />
+            Helper 接続中
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="connection-status connection-status--clickable"
+            onClick={() => setHelperModalOpen(true)}
+            title="クリックでセットアップ方法を表示"
+          >
+            <span className="status-dot disconnected" />
+            Helper 未接続
+          </button>
+        )}
       </header>
+      <HelperOnboardingModal
+        open={helperModalOpen}
+        onClose={() => setHelperModalOpen(false)}
+        onRetry={handleRetry}
+      />
       <main className="tab-content">
         <PersistentTab active={activeTab === 'waveform'} visited={visitedTabs.has('waveform')}>
           <WaveformEditor />
