@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import './HelperOnboardingModal.css'
 
-type OsTab = 'mac' | 'win' | 'linux'
+type OsTab = 'mac' | 'win'
 
 interface HelperOnboardingModalProps {
   open: boolean
@@ -13,8 +13,7 @@ interface HelperOnboardingModalProps {
 function detectOs(): OsTab {
   const ua = navigator.userAgent.toLowerCase()
   if (ua.includes('mac')) return 'mac'
-  if (ua.includes('win')) return 'win'
-  return 'linux'
+  return 'win'
 }
 
 function CopyableCommand({ cmd }: { cmd: string }) {
@@ -110,14 +109,14 @@ export function HelperOnboardingModal({
 
             {/* OS tabs */}
             <div className="helper-modal-tabs">
-              {(['mac', 'win', 'linux'] as OsTab[]).map((tab) => (
+              {(['mac', 'win'] as OsTab[]).map((tab) => (
                 <button
                   key={tab}
                   type="button"
                   className={`helper-modal-tab ${activeTab === tab ? 'active' : ''}`}
                   onClick={() => setActiveTab(tab)}
                 >
-                  {tab === 'mac' ? 'Mac' : tab === 'win' ? 'Windows' : 'Linux'}
+                  {tab === 'mac' ? 'Mac' : 'Windows'}
                 </button>
               ))}
             </div>
@@ -140,16 +139,6 @@ export function HelperOnboardingModal({
                 </p>
               </div>
             )}
-
-            {activeTab === 'linux' && (
-              <div className="helper-modal-tab-body">
-                <CopyableCommand cmd="hapbeat-helper install-service" />
-                <p className="helper-modal-hint">
-                  systemd --user で登録されます。ログアウト後も動かしたい場合は:<br />
-                  <code>loginctl enable-linger $(whoami)</code>
-                </p>
-              </div>
-            )}
           </section>
 
           {/* Alternative: foreground */}
@@ -157,7 +146,7 @@ export function HelperOnboardingModal({
             <h3 className="helper-modal-section-title">
               今だけ起動（フォアグラウンド）
             </h3>
-            <CopyableCommand cmd="hapbeat-helper start --foreground" />
+            <CopyableCommand cmd="hapbeat-helper start" />
             <p className="helper-modal-hint">
               未インストールの場合は先に:{' '}
               <code>pipx install hapbeat-helper</code>

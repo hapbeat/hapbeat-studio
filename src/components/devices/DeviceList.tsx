@@ -92,7 +92,7 @@ export function DeviceList() {
         </div>
         <div className="devices-empty">
           Helper 未接続<br />
-          <code>hapbeat-helper start --foreground</code>
+          <code>hapbeat-helper start</code>
         </div>
       </aside>
     )
