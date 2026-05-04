@@ -75,7 +75,7 @@ export function WifiForm({ device, wifiStatus, sendTo }: Props) {
             type={showPass ? 'text' : 'password'}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="(パスワード)"
+            placeholder="Wi-Fi パスワード（保存後は確認できなくなります）"
             disabled={!device.online}
             autoComplete="off"
           />

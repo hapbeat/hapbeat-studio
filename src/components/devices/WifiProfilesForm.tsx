@@ -137,7 +137,7 @@ export function WifiProfilesForm({
   const enterEditMode = (p: WifiProfile) => {
     setEditingIndex(p.index)
     setSsid(p.ssid)
-    setPassword(p.pass ?? '')
+    setPassword('')   // 編集時は常に空欄。上書きするには再入力必須。
     setAddOpen(true)
   }
 
@@ -149,13 +149,16 @@ export function WifiProfilesForm({
 
   const submit = () => {
     if (!ssid.trim()) return
+    // password が空欄の場合は pass フィールド自体を含めない
+    // (空文字送信で既存パスワードを破壊しないよう write-only 仕様に準拠)
     // Send both `pass` and `password` so the call works on either
     // transport without per-route translation:
     //   - LAN → Helper: helper accepts both keys (server.py:269)
     //   - Serial → firmware: firmware reads `pass` (serial_config.cpp)
+    const passFields = password.length > 0 ? { pass: password, password } : {}
     sendTo({
       type: 'set_wifi',
-      payload: { ssid: ssid.trim(), pass: password, password },
+      payload: { ssid: ssid.trim(), ...passFields },
     })
     exitEditMode()
     setAddOpen(false)
@@ -215,7 +218,17 @@ export function WifiProfilesForm({
           >
             {p.active ? '●' : '○'}
           </span>
-          <span className="wifi-profile-ssid">{p.ssid || '(no SSID)'}</span>
+          <span className="wifi-profile-ssid">
+            {p.ssid || '(no SSID)'}
+            {p.has_pass && (
+              <span
+                title="パスワードは保存されていますが表示できません"
+                style={{ marginLeft: 4, opacity: 0.6, fontSize: '0.85em' }}
+              >
+                🔒
+              </span>
+            )}
+          </span>
           {p.active ? (
             <span className="wifi-profile-badge">接続中</span>
           ) : (
@@ -380,7 +393,11 @@ export function WifiProfilesForm({
                 type={showPass ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="(パスワード)"
+                placeholder={
+                  editingIndex !== null
+                    ? '変更する場合のみ入力。空欄なら現在のパスワードを維持'
+                    : '(パスワード)'
+                }
                 disabled={!device.online}
                 autoComplete="off"
                 /* flex:1 so the input absorbs available width — without

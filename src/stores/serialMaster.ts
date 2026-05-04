@@ -49,7 +49,8 @@ export interface SerialWifiStatus {
 export interface SerialWifiProfile {
   index: number
   ssid: string
-  pass?: string
+  /** パスワードは write-only: firmware は読み出しを許可しない。 */
+  has_pass?: boolean
   active?: boolean
 }
 

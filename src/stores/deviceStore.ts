@@ -7,7 +7,9 @@ const STORAGE_KEY_DISMISSED = 'hapbeat-studio-dismissed-devices'
 export interface WifiProfile {
   index: number
   ssid: string
-  pass?: string
+  /** パスワードは write-only: firmware は読み出しを許可しない。
+   *  パスワードが設定済みかどうかのフラグのみ受け取る。 */
+  has_pass?: boolean
   active?: boolean
 }
 
