@@ -27,8 +27,8 @@
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
+  gap: 8px;
   flex-shrink: 0;
 }
 
@@ -43,11 +43,36 @@
 .devices-sidebar-count {
   font-size: 12px;
   color: var(--text-muted);
+  margin-right: auto;
 }
 
 .devices-sidebar-checked {
   color: var(--accent-light);
   font-weight: 600;
+}
+
+.devices-sidebar-refresh {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 1px 6px;
+  font-size: 14px;
+  line-height: 1;
+  transition: color 120ms, border-color 120ms;
+}
+.devices-sidebar-refresh:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+.devices-sidebar-refresh.spinning {
+  animation: devices-sidebar-refresh-spin 700ms linear;
+  pointer-events: none;
+}
+@keyframes devices-sidebar-refresh-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .devices-sidebar-list {

@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useSerialMaster } from '@/stores/serialMaster'
-import type { DeviceInfo } from '@/types/manager'
+import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 
 /**
  * `serial:<mac-or-rand>` is the convention for a pseudo-device entry
@@ -11,6 +11,35 @@ import type { DeviceInfo } from '@/types/manager'
  * Serial-config forms instead of the LAN-based DeviceDetail tabs.
  */
 export const SERIAL_DEVICE_PREFIX = 'serial:'
+
+/**
+ * Manual rescan trigger.
+ * Sends `rescan` to Helper which fires an immediate UDP broadcast PING
+ * and pushes the latest device_list ~250ms later.
+ *
+ * Visual feedback: spin the icon for 700ms (matches the broadcast +
+ * pong + push round-trip) so the user sees the action registered even
+ * if no device state actually changes.
+ */
+function RefreshButton({ send }: { send: (msg: ManagerMessage) => void }) {
+  const [spinning, setSpinning] = useState(false)
+  const onClick = useCallback(() => {
+    send({ type: 'rescan', payload: {} })
+    setSpinning(true)
+    window.setTimeout(() => setSpinning(false), 700)
+  }, [send])
+  return (
+    <button
+      type="button"
+      className={`devices-sidebar-refresh${spinning ? ' spinning' : ''}`}
+      onClick={onClick}
+      title="デバイス検索を再実行"
+      aria-label="再スキャン"
+    >
+      ⟳
+    </button>
+  )
+}
 
 /**
  * Sidebar listing every Helper-discovered device.
@@ -26,7 +55,7 @@ export const SERIAL_DEVICE_PREFIX = 'serial:'
  * is populated without an extra click.
  */
 export function DeviceList() {
-  const { isConnected, devices } = useHelperConnection()
+  const { isConnected, devices, send } = useHelperConnection()
   const selectedIp = useDeviceStore((s) => s.selectedIp)
   const selectedIps = useDeviceStore((s) => s.selectedIps)
   const dismissedIps = useDeviceStore((s) => s.dismissedIps)
@@ -113,6 +142,7 @@ export function DeviceList() {
             </>
           )}
         </span>
+        <RefreshButton send={send} />
       </div>
       <div className="devices-sidebar-list">
         {visibleDevices.length === 0 ? (

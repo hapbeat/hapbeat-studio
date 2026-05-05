@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx",
     "test": "vitest",
-    "gen:library": "node scripts/generate-library-index.mjs"
+    "gen:library": "node scripts/generate-library-index.mjs",
+    "strip:wav-meta": "node scripts/strip-wav-metadata.mjs"
   },
   "dependencies": {
     "esptool-js": "^0.6.0",
