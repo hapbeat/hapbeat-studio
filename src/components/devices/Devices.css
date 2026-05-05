@@ -946,6 +946,35 @@
   border-color: var(--border-light);
 }
 
+/* Inner tabs: version + flavor within a family. */
+.firmware-version-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 8px;
+}
+
+.firmware-version-tab {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: color 120ms, background 120ms, border-color 120ms;
+}
+.firmware-version-tab:hover {
+  color: var(--text-primary);
+  border-color: var(--border-light);
+}
+.firmware-version-tab.selected {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
 .firmware-lib-detail {
   padding: 10px 12px;
   background: var(--bg-primary);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useLogStore } from '@/stores/logStore'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
@@ -23,6 +23,40 @@ import {
   type FirmwareLibraryEntry,
   type FirmwareRegion,
 } from '@/utils/firmwareLibrary'
+
+type EnvFamily = 'necklace' | 'band' | 'other'
+
+interface ParsedEnv {
+  family: EnvFamily
+  version: string  // "v3", "v4", or env name fallback for "other"
+  flavor: string | null  // e.g. "claude" for `band_v3_claude`
+}
+
+/**
+ * Parse a PlatformIO env name into {family, version, flavor}.
+ *
+ * Patterns:
+ *   `necklace_v3`       → { family: necklace, version: v3, flavor: null }
+ *   `band_v4_claude`    → { family: band, version: v4, flavor: claude }
+ *   `something_else`    → { family: other, version: <env>, flavor: null }
+ */
+function parseEnv(env: string): ParsedEnv {
+  const m = env.match(/^(necklace|band)_(v\d+)(?:_(.+))?$/)
+  if (!m) return { family: 'other', version: env, flavor: null }
+  return { family: m[1] as EnvFamily, version: m[2], flavor: m[3] ?? null }
+}
+
+const FAMILY_RANK: Record<EnvFamily, number> = {
+  necklace: 0,
+  band: 1,
+  other: 2,
+}
+
+const FAMILY_LABEL: Record<EnvFamily, string> = {
+  necklace: 'NECKLACE',
+  band: 'BAND',
+  other: 'OTHER',
+}
 
 interface OtaProgress {
   device: string
@@ -88,6 +122,7 @@ export function FirmwareSubTab({
   const [libLoading, setLibLoading] = useState(false)
   const [libError, setLibError] = useState<string | null>(null)
   const [libSelected, setLibSelected] = useState<string | null>(null)
+  const [selectedFamily, setSelectedFamily] = useState<EnvFamily | null>(null)
 
   // Local file state — handle is the source of truth, bytes is read on demand
   const [localHandle, setLocalHandle] = useState<FileSystemFileHandle | null>(null)
@@ -131,9 +166,8 @@ export function FirmwareSubTab({
       // toggle feel disorientating. The visual prominence should
       // match the physical product line, not the build timestamp.
       const entries = [...raw].sort((a, b) => {
-        const rank = (env: string) =>
-          env.startsWith('necklace') ? 0 : env.startsWith('band') ? 1 : 2
-        const ra = rank(a.env), rb = rank(b.env)
+        const ra = FAMILY_RANK[parseEnv(a.env).family]
+        const rb = FAMILY_RANK[parseEnv(b.env).family]
         if (ra !== rb) return ra - rb
         return a.env.localeCompare(b.env)
       })
@@ -173,6 +207,59 @@ export function FirmwareSubTab({
   useEffect(() => {
     void refreshLibrary()
   }, [refreshLibrary])
+
+  // ---- Family / version selection ------------------------------------
+
+  /** Available env families (in display order), only those with entries. */
+  const families = useMemo<EnvFamily[]>(() => {
+    const seen = new Set<EnvFamily>()
+    for (const e of libEntries) seen.add(parseEnv(e.env).family)
+    return (['necklace', 'band', 'other'] as EnvFamily[]).filter((f) => seen.has(f))
+  }, [libEntries])
+
+  /** Entries belonging to the currently-selected family. */
+  const entriesInFamily = useMemo(() => {
+    if (!selectedFamily) return []
+    return libEntries.filter((e) => parseEnv(e.env).family === selectedFamily)
+  }, [libEntries, selectedFamily])
+
+  // Auto-default selectedFamily — sync with whatever env libSelected
+  // points at (so a fresh load lands on the family of the most-recent
+  // build). Falls back to families[0] if no env is selected yet.
+  useEffect(() => {
+    if (libEntries.length === 0) {
+      setSelectedFamily(null)
+      return
+    }
+    const curFamily = libSelected
+      ? parseEnv(libSelected).family
+      : null
+    if (curFamily && families.includes(curFamily)) {
+      setSelectedFamily((prev) => prev ?? curFamily)
+      return
+    }
+    setSelectedFamily((prev) =>
+      prev && families.includes(prev) ? prev : families[0] ?? null,
+    )
+  }, [libEntries, libSelected, families])
+
+  // When the user switches families, jump libSelected to the first env
+  // of the new family if the current selection is in a different one.
+  const selectFamily = useCallback(
+    (family: EnvFamily) => {
+      setSelectedFamily(family)
+      const inFamily = libEntries.filter(
+        (e) => parseEnv(e.env).family === family,
+      )
+      if (inFamily.length === 0) return
+      const cur = libSelected ? parseEnv(libSelected) : null
+      if (!cur || cur.family !== family) {
+        setLibSelected(inFamily[0].env)
+        setSource('library')
+      }
+    },
+    [libEntries, libSelected],
+  )
 
   // ---- Local file: restore handle from IDB on mount ------------------
 
@@ -607,40 +694,73 @@ export function FirmwareSubTab({
 
         {libEntries.length > 0 && (
           <>
-            <div className="firmware-lib-toggle" role="tablist" aria-label="ファームウェア種別">
-              {libEntries.map((e) => {
-                const selected = source === 'library' && libSelected === e.env
-                const variant = e.env.startsWith('necklace')
-                  ? 'necklace'
-                  : e.env.startsWith('band')
-                    ? 'band'
-                    : 'other'
+            {/* Outer tabs: device family (necklace / band / ...). */}
+            <div
+              className="firmware-lib-toggle"
+              role="tablist"
+              aria-label="ファームウェア種別"
+            >
+              {families.map((family) => {
+                const isSelected = selectedFamily === family
                 return (
                   <button
-                    key={e.env}
+                    key={family}
                     type="button"
                     role="tab"
-                    aria-selected={selected}
-                    className={`firmware-lib-toggle-btn variant-${variant}${selected ? ' selected' : ''}`}
-                    onClick={() => {
-                      setSource('library')
-                      setLibSelected(e.env)
-                    }}
+                    aria-selected={isSelected}
+                    className={`firmware-lib-toggle-btn variant-${family}${isSelected ? ' selected' : ''}`}
+                    onClick={() => selectFamily(family)}
                   >
                     <span className="firmware-lib-toggle-icon" aria-hidden="true">
-                      {variant === 'necklace' ? <NecklaceIcon /> : variant === 'band' ? <BandIcon /> : '◇'}
+                      {family === 'necklace' ? <NecklaceIcon /> : family === 'band' ? <BandIcon /> : '◇'}
                     </span>
                     <span className="firmware-lib-toggle-label">
-                      {variant === 'necklace'
-                        ? 'NECKLACE'
-                        : variant === 'band'
-                          ? 'BAND'
-                          : e.env.toUpperCase()}
+                      {FAMILY_LABEL[family]}
                     </span>
                   </button>
                 )
               })}
             </div>
+
+            {/* Inner sub-tabs: version + flavor within the selected family. */}
+            {selectedFamily && entriesInFamily.length > 0 && (
+              <div
+                className="firmware-version-tabs"
+                role="tablist"
+                aria-label="バージョン"
+              >
+                {entriesInFamily.map((e) => {
+                  const parsed = parseEnv(e.env)
+                  const isSelected =
+                    source === 'library' && libSelected === e.env
+                  // For "other" family the version field IS the env name,
+                  // so trim a noisy fallback. For known families show
+                  // "v3" / "v3 (claude)".
+                  const label =
+                    parsed.family === 'other'
+                      ? e.env
+                      : parsed.flavor
+                        ? `${parsed.version} (${parsed.flavor})`
+                        : parsed.version
+                  return (
+                    <button
+                      key={e.env}
+                      type="button"
+                      role="tab"
+                      aria-selected={isSelected}
+                      className={`firmware-version-tab${isSelected ? ' selected' : ''}`}
+                      onClick={() => {
+                        setSource('library')
+                        setLibSelected(e.env)
+                      }}
+                      title={e.env}
+                    >
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
 
             {(() => {
               const e = libEntries.find((x) => x.env === libSelected)
@@ -938,6 +1058,10 @@ function NecklaceIcon() {
 }
 
 function BandIcon() {
+  // Top-down view of a wristband: a thick open ring with a small
+  // protruding unit. The ring shape reads more clearly as "wristband"
+  // than the previous flat-ellipse-with-pad icon, which several users
+  // mistook for a watch face.
   return (
     <svg
       width="22"
@@ -945,17 +1069,23 @@ function BandIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.6"
+      strokeWidth="2.4"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      {/* wristband — wide ring with strap visible at top + bottom */}
-      <ellipse cx="12" cy="12" rx="8" ry="5.5" />
-      {/* clasp marks */}
-      <path d="M4 12 L2 12 M20 12 L22 12" />
-      {/* haptic pad face */}
-      <rect x="9" y="9.5" width="6" height="5" rx="0.6" />
-      <circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none" />
+      {/* Strap: thick C-shape (open at the right where the clasp is). */}
+      <path d="M 17.5 6.5 A 8 8 0 1 0 17.5 17.5" />
+      {/* Haptic unit / clasp on the open side — a small filled bump
+          that reads as the device module clipped onto the band. */}
+      <rect
+        x="14.6"
+        y="9"
+        width="5.4"
+        height="6"
+        rx="1"
+        fill="currentColor"
+        stroke="none"
+      />
     </svg>
   )
 }
