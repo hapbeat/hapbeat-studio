@@ -110,6 +110,7 @@ export function DeviceDetail() {
         fw: p.fw as string | undefined,
         group: p.group as number | undefined,
         wifi_connected: p.wifi_connected as boolean | undefined,
+        board: p.board as string | undefined,
       })
     } else if (t === 'wifi_status_result' && typeof p.device === 'string') {
       setWifiStatus(p.device, {

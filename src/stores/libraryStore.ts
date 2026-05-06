@@ -84,14 +84,18 @@ export function composeKitEventId(kitName: string, clipName: string): string {
 }
 
 /**
- * Validate a kit name against contracts (`^[a-z0-9_-]+$`, ≤ 64 chars).
+ * Validate a kit name. Aligned with contracts' `kit_id` pattern
+ * `^[a-z][a-z0-9-]*$` so kit_id, manifest.name, and the on-disk
+ * folder name can all share a single value (no need for separate
+ * id-vs-display variants). Underscores are NOT allowed — use `-`.
+ *
  * Returns null on success, otherwise an error message.
  */
 export function validateKitName(name: string): string | null {
   if (!name) return 'Kit name is required'
   if (name.length > 64) return 'Kit name must be 64 chars or fewer'
-  if (!/^[a-z0-9_-]+$/.test(name)) {
-    return 'Kit name must use only [a-z0-9_-] (lowercase, no spaces or dots)'
+  if (!/^[a-z][a-z0-9-]*$/.test(name)) {
+    return 'Kit name must start with a-z and use only [a-z 0-9 -]'
   }
   return null
 }
@@ -350,6 +354,24 @@ const lastOpMessage = new Map<string, string>()
 function setOp(kitId: string, msg: string) {
   lastOpMessage.set(kitId, msg)
   useLibraryStore.getState().setLocalFsStatus('saving', msg)
+}
+
+/**
+ * Drop all per-kit module-level bookkeeping. Called when the user
+ * switches kitDir / disconnects it — the previous folder's kits go
+ * out of scope and any pending writes targeting them must NOT fire
+ * against the new folder.
+ */
+function resetKitMemory() {
+  for (const t of kitFlushTimers.values()) window.clearTimeout(t)
+  kitFlushTimers.clear()
+  for (const t of retryTimers.values()) window.clearTimeout(t)
+  retryTimers.clear()
+  retryAttempts.clear()
+  kitFlushChain.clear()
+  lastWrittenPackId.clear()
+  lastBuiltKit.clear()
+  lastOpMessage.clear()
 }
 
 export const useLibraryStore = create<LibraryState>((set, get) => ({
@@ -796,8 +818,17 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (!isFileSystemAccessSupported()) return false
     const handle = await pickWorkDirectory('kitdir')
     if (!handle) return false
-    set({ kitDirHandle: handle, kitDirName: handle.name })
-    // ユーザーが選んだフォルダが既存の Hapbeat kit を含んでいれば自動取り込み
+    // Switching the kit folder = changing the source of truth for
+    // kits. Drop the in-memory kit list and all per-kit bookkeeping
+    // BEFORE pointing outRoot at the new folder, so:
+    //   1) The new folder's contents are loaded as-is (no merge with
+    //      the previous folder's kits).
+    //   2) No leftover scheduleKitFlush / retry timer fires against
+    //      the new folder and copies a previous-folder kit into it.
+    // Disk on either side is untouched: we just re-orient Studio.
+    resetKitMemory()
+    set({ kits: [], activeKitId: null, kitDirHandle: handle, kitDirName: handle.name })
+    // Discover kits already living under the newly chosen folder.
     await get().importKitsFromOutputDir().catch((err) => console.error('Auto-import after pickKitDir failed:', err))
     return true
   },
@@ -816,7 +847,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
   disconnectKitDir: async () => {
     await clearDirectoryHandle('kitdir')
-    set({ kitDirHandle: null, kitDirName: null })
+    // Same reasoning as pickKitDir — drop kits keyed to the folder
+    // we just disconnected. Then fall back to scanning the library
+    // workdir if one is configured (kits live there by default when
+    // no dedicated kitDir is set).
+    resetKitMemory()
+    set({ kits: [], activeKitId: null, kitDirHandle: null, kitDirName: null })
+    if (get().workDirHandle) {
+      await get().importKitsFromOutputDir().catch((err) => console.error('Re-scan after disconnectKitDir failed:', err))
+    }
   },
 
   importKitsFromOutputDir: async () => {
@@ -875,10 +914,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     }
 
     let importedCount = 0
-    for (const { manifestJson, clipFiles } of discovered as DiscoveredKit[]) {
+    for (const { folderName, manifestJson, clipFiles } of discovered as DiscoveredKit[]) {
       if (!manifestJson || typeof manifestJson !== 'object') continue
+      // `name` is the only kit identifier in modern manifests; older
+      // exports also carried `kit_id` which we now ignore (it always
+      // equalled `name` anyway).
       const m = manifestJson as {
-        kit_id?: string; name?: string; version?: string; description?: string
+        name?: string; version?: string; description?: string
         created_at?: string; events?: Record<string, unknown>
         target_device?: {
           firmware_version_min?: string
@@ -889,7 +931,11 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           volume_steps?: number
         }
       }
-      const packId = String(m.kit_id ?? m.name ?? '').trim()
+      // The on-disk folder name is the truth for the kit identifier.
+      // What the user sees in OS Explorer must match what they see in
+      // Studio. manifest.name (or any legacy kit_id) is ignored — if
+      // the user renames the folder externally, Studio follows.
+      const packId = folderName.trim()
       if (!packId) continue
 
       const events: KitEvent[] = []
@@ -933,7 +979,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         })
       }
 
-      const existingIdx = updatedKits.findIndex((k) => k.name === (m.name ?? packId) || k.name === packId)
+      const existingIdx = updatedKits.findIndex((k) => k.name === packId)
       // Author tuning context — read every supported field, drop the
       // ones that are absent so we don't leave stale numeric defaults.
       const td = m.target_device ?? {}
@@ -946,7 +992,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       if (typeof td.volume_steps === 'number') targetDevice.volume_steps = td.volume_steps
       const kit: KitDefinition = {
         id: existingIdx >= 0 ? updatedKits[existingIdx].id : generateId(),
-        name: String(m.name ?? packId),
+        // Folder name = display name. Lossless round-trip with disk.
+        name: packId,
         version: String(m.version ?? '1.0.0'),
         description: String(m.description ?? ''),
         events,

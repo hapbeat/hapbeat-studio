@@ -258,11 +258,17 @@ export async function exportKitAsPack(
   if (typeof td.volume_wiper === 'number') targetDevice.volume_wiper = td.volume_wiper
   if (typeof td.volume_steps === 'number') targetDevice.volume_steps = td.volume_steps
 
+  // The on-disk folder name IS the kit's identity. Keeping a
+  // separate `kit_id` field next to `name` was just two ways to
+  // spell the same string — they always carried the identical
+  // value and nothing read both. Collapsed to a single `name`.
+  // device firmware reads manifest["name"] (kit_loader.cpp) and
+  // wire payloads carry the directory name in their `kit_id`
+  // field (set by the caller, not pulled from manifest).
   const manifest = {
     schema_version: '1.0.0',
-    kit_id: packId,
     version: kit.version || '1.0.0',
-    name: kit.name,
+    name: packId,
     description: kit.description,
     author: '',
     created_at: new Date().toISOString(),

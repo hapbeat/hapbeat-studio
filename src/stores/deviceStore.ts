@@ -3,6 +3,7 @@ import { create } from 'zustand'
 const STORAGE_KEY_SELECTED = 'hapbeat-studio-selected-device'
 const STORAGE_KEY_SELECTED_SET = 'hapbeat-studio-selected-devices'
 const STORAGE_KEY_DISMISSED = 'hapbeat-studio-dismissed-devices'
+const STORAGE_KEY_LAST_FLASHED_BOARD = 'hapbeat-studio-last-flashed-board'
 
 export interface WifiProfile {
   index: number
@@ -38,6 +39,13 @@ interface DeviceState {
     fw?: string
     group?: number
     wifi_connected?: boolean
+    /**
+     * Hardware board ID reported by the device firmware
+     * (e.g. `band_wl_v3`, `band_wl_v4`, `duo_wl_v3`). Used by the
+     * Firmware sub-tab to pre-check that the user-selected build
+     * matches the physical board before flashing.
+     */
+    board?: string
   }>
 
   /** Per-IP cache of the most recent get_wifi_status response. */
@@ -76,6 +84,25 @@ interface DeviceState {
    *  this so dismissed-but-now-online IPs un-dismiss themselves. Idempotent. */
   syncOnlineDevices: (onlineIps: string[]) => void
   setInfo: (ip: string, info: DeviceState['infoCache'][string]) => void
+  /**
+   * Drop the cached `board` for an IP. Called immediately after a
+   * successful flash: the binary just written may target a different
+   * BOARD_ID than what the device used to report. Clearing forces the
+   * next pre-flight check to skip board comparison (rather than fire
+   * a stale-data mismatch) until DeviceDetail re-queries get_info on
+   * the post-reboot online transition and writes the fresh value.
+   */
+  invalidateBoard: (ip: string) => void
+
+  /**
+   * Record the BOARD_ID expected by the most recently flashed env on
+   * this device. Used as a fallback for `checkBoardMatch` when the
+   * device hasn't yet replied to get_info (first session, post-flash
+   * before reboot, etc), so the warning is symmetric across flashes.
+   * Persisted in localStorage so it survives a page reload.
+   */
+  lastFlashedBoard: Record<string, string>
+  setLastFlashedBoard: (ip: string, board: string) => void
   setWifiStatus: (ip: string, status: DeviceState['wifiStatusCache'][string]) => void
   setWifiProfiles: (ip: string, profiles: WifiProfile[], count: number, max: number) => void
   setDebugDump: (ip: string, dump: Record<string, unknown>) => void
@@ -126,6 +153,26 @@ const persist = (key: string, value: string[] | string | null) => {
   }
 }
 
+// Hydrate the per-IP last-flashed-board map from localStorage so the
+// pre-flight comparison survives a Studio reload.
+const initialLastFlashedBoard: Record<string, string> = (() => {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_LAST_FLASHED_BOARD)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const out: Record<string, string> = {}
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === 'string') out[k] = v
+      }
+      return out
+    }
+    return {}
+  } catch {
+    return {}
+  }
+})()
+
 export const useDeviceStore = create<DeviceState>((set) => ({
   selectedIp: initialSelected,
   selectedIps: initialSelectedIps,
@@ -135,6 +182,7 @@ export const useDeviceStore = create<DeviceState>((set) => ({
   wifiProfilesCache: {},
   debugDumpCache: {},
   kitListCache: {},
+  lastFlashedBoard: initialLastFlashedBoard,
 
   selectDevice: (ip) => {
     persist(STORAGE_KEY_SELECTED, ip)
@@ -215,6 +263,24 @@ export const useDeviceStore = create<DeviceState>((set) => ({
 
   setInfo: (ip, info) =>
     set((s) => ({ infoCache: { ...s.infoCache, [ip]: { ...s.infoCache[ip], ...info } } })),
+
+  invalidateBoard: (ip) =>
+    set((s) => {
+      const cur = s.infoCache[ip]
+      if (!cur || cur.board === undefined) return {}
+      const { board: _drop, ...rest } = cur
+      void _drop
+      return { infoCache: { ...s.infoCache, [ip]: rest } }
+    }),
+
+  setLastFlashedBoard: (ip, board) =>
+    set((s) => {
+      const next = { ...s.lastFlashedBoard, [ip]: board }
+      try {
+        localStorage.setItem(STORAGE_KEY_LAST_FLASHED_BOARD, JSON.stringify(next))
+      } catch { /* quota / privacy mode */ }
+      return { lastFlashedBoard: next }
+    }),
 
   setWifiStatus: (ip, status) =>
     set((s) => ({

@@ -5,6 +5,7 @@ import { KitManager } from '@/components/kit/KitManager'
 import { Devices } from '@/components/devices/Devices'
 import { LogDrawer } from '@/components/log/LogDrawer'
 import { HelperOnboardingModal } from '@/components/common/HelperOnboardingModal'
+import { HelperToastBridge } from '@/components/common/HelperToastBridge'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import './App.css'
 
@@ -133,6 +134,7 @@ export function App() {
         </PersistentTab>
       </main>
       <LogDrawer />
+      <HelperToastBridge />
     </div>
   )
 }

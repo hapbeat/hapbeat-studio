@@ -581,26 +581,29 @@ export function DisplayEditor() {
     setToastAnchor(el)
   }, [setToastAnchor])
 
-  // write_result / deploy_result レスポンスの監視
+  // Display 自身の deploy だけ拾うため cmd で filter する。
+  // 失敗の汎用 toast は HelperToastBridge (App.tsx 直下) が出すので
+  // ここでは Display 専用の "書き込みました" / "選択なし" 系に絞る。
   useEffect(() => {
     if (!lastMessage) return
-    if (lastMessage.type === 'write_result' || lastMessage.type === 'deploy_result') {
-      setIsDeploying(false)
-      const success = lastMessage.payload.success as boolean
-      const deviceConfirmed = lastMessage.payload.device_confirmed as boolean | undefined
-      const reason = (lastMessage.payload.error ?? lastMessage.payload.message ?? '') as string
-      if (!success && reason.includes('no_device')) {
-        toast('デバイスが選択されていません', 'warning')
-      } else if (success) {
-        if (deviceConfirmed) {
-          toast('デバイスに書き込みました', 'success')
-        } else {
-          toast('Manager に送信しました', 'info')
-        }
+    if (lastMessage.type !== 'write_result') return
+    const cmd = lastMessage.payload?.cmd
+    if (cmd !== 'write_ui_config') return
+    setIsDeploying(false)
+    const success = lastMessage.payload.success as boolean
+    const deviceConfirmed = lastMessage.payload.device_confirmed as boolean | undefined
+    const reason = (lastMessage.payload.error ?? lastMessage.payload.message ?? '') as string
+    if (!success && reason.includes('no_device')) {
+      toast('デバイスが選択されていません', 'warning')
+    } else if (success) {
+      if (deviceConfirmed) {
+        toast('デバイスに書き込みました', 'success')
       } else {
-        toast(`書き込みに失敗しました: ${reason || '不明なエラー'}`, 'error')
+        toast('Helper に送信しました', 'info')
       }
     }
+    // 失敗時は HelperToastBridge が cmd / message を入れた error toast を出すので、
+    // ここで重複表示しない。
   }, [lastMessage, toast])
 
   // --- エクスポート / インポート / デバイス書き込み ---

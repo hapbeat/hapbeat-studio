@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useLogStore } from '@/stores/logStore'
+import { useDeviceStore } from '@/stores/deviceStore'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import { useConfirm } from '@/components/common/useConfirm'
 import { useSerialMaster } from '@/stores/serialMaster'
@@ -44,6 +45,28 @@ function parseEnv(env: string): ParsedEnv {
   const m = env.match(/^(necklace|band)_(v\d+)(?:_(.+))?$/)
   if (!m) return { family: 'other', version: env, flavor: null }
   return { family: m[1] as EnvFamily, version: m[2], flavor: m[3] ?? null }
+}
+
+/**
+ * Map a PlatformIO env to the BOARD_ID the firmware will report once
+ * flashed. Used to pre-flight check the user's selection against the
+ * actual hardware reported via cmdGetInfo, so flashing a `band_v3`
+ * build onto a `band_v4` board (or vice-versa) prompts a confirm
+ * instead of silently bricking the OLED.
+ *
+ * Mapping mirrors `hapbeat-device-firmware/src/hapbeat_config.h`:
+ *   NECKLACE_V3 → duo_wl_v3
+ *   BAND_V3     → band_wl_v3
+ *   BAND_V4     → band_wl_v4
+ *
+ * Returns null when the env doesn't follow the necklace/band scheme
+ * (unknown family — skip the check rather than block the user).
+ */
+function envExpectsBoard(env: string): string | null {
+  const m = env.match(/^(necklace|band)_(v\d+)/)
+  if (!m) return null
+  const family = m[1] === 'necklace' ? 'duo' : 'band'
+  return `${family}_wl_${m[2]}`
 }
 
 const FAMILY_RANK: Record<EnvFamily, number> = {
@@ -147,8 +170,69 @@ export function FirmwareSubTab({
   const masterFlash = useSerialMaster((s) => s.flash)
   const masterEraseFlash = useSerialMaster((s) => s.eraseFlash)
   const masterRePick = useSerialMaster((s) => s.rePick)
+  const serialMasterBoard = useSerialMaster((s) => s.info?.board)
   const [eraseAll, setEraseAll] = useState(false)
   const { ask, dialog: confirmDialog } = useConfirm()
+  // Pull the device's reported BOARD_ID from the get_info cache (LAN)
+  // or, when flashing a Serial-attached device pre-onboarding, from
+  // the SerialMaster's last config probe. Either way, we only have a
+  // value if the device has spoken to us at least once.
+  const lanBoard = useDeviceStore((s) =>
+    device ? s.infoCache[device.ipAddress]?.board : undefined,
+  )
+  const lastFlashedBoardForIp = useDeviceStore((s) => {
+    const key = device?.ipAddress ?? 'serial:current'
+    return s.lastFlashedBoard[key]
+  })
+  const invalidateBoard = useDeviceStore((s) => s.invalidateBoard)
+  const setLastFlashedBoard = useDeviceStore((s) => s.setLastFlashedBoard)
+  // Resolution order: live get_info > Serial probe > last-flashed
+  // record. The fallback to lastFlashedBoard makes the warning
+  // symmetric across consecutive flashes — the very first flash on
+  // a fresh device is still skipped (we have nothing to compare to)
+  // but every subsequent one has a stable reference point.
+  const knownBoard = lanBoard ?? serialMasterBoard ?? lastFlashedBoardForIp ?? null
+
+  /**
+   * Pre-flight: warn when the selected library env targets a board
+   * different from what the connected device reports. Returns true if
+   * it's OK to proceed (no mismatch, or the user chose to override).
+   * Returns false to abort. When source = 'local' or env / board is
+   * unknown, skips silently because we can't infer the binary's
+   * intent from a user-picked file.
+   */
+  const checkBoardMatch = useCallback(async (
+    via: 'OTA' | 'Serial',
+  ): Promise<boolean> => {
+    if (source !== 'library' || !libSelected) return true
+    const expected = envExpectsBoard(libSelected)
+    if (!expected) return true
+    if (!knownBoard || knownBoard === 'unknown') return true
+    if (expected === knownBoard) return true
+    const ok = await ask({
+      title: '基板バージョン不一致',
+      message: (
+        `選択中のファームウェアは ${expected} 用ですが、`
+        + `デバイスは ${knownBoard} を報告しています。\n`
+        + `異なるバージョン用のビルドを書き込むと OLED が表示されない等の `
+        + `不具合が起きます。書き込みを続行しますか？\n\n`
+        + `※ デバイスが報告する board は現在書き込まれている firmware の `
+        + `ビルド設定で決まります (物理基板を直接識別する機構は無し)。\n`
+        + `過去に誤った firmware を書いてしまった場合、デバイスは間違った `
+        + `バージョンを報告します — band 本体のラベルと突き合わせて確認してください。\n\n`
+        + `(${via} で書き込もうとしている)`
+      ),
+      confirmLabel: '不一致のまま書き込む',
+      danger: true,
+    })
+    if (!ok) {
+      pushLog(
+        'firmware',
+        `flash aborted — board mismatch (env=${libSelected} expects ${expected}, device=${knownBoard})`,
+      )
+    }
+    return ok
+  }, [source, libSelected, knownBoard, ask, pushLog])
   // Local-only error for "before-flash" issues (file read, etc.) —
   // these never reach the master. Cleared when a real flash starts.
   const [localError, setLocalError] = useState<string | null>(null)
@@ -324,6 +408,20 @@ export function FirmwareSubTab({
       // (~6 s for STA reconnect), then ask for `get_info` and compare
       // BUILD_TAG. Mismatch implies otadata didn't flip — the
       // "sometimes runs old version" symptom from the user report.
+      if (ok && device) {
+        // Drop the cached `board` immediately. The new firmware may
+        // target a different BOARD_ID; until verify get_info comes
+        // back, the next pre-flight check should skip board comparison
+        // rather than flag a (now-stale) mismatch.
+        invalidateBoard(device.ipAddress)
+        // Record what env we just flashed so the next pre-flight
+        // check has a stable reference even if get_info hasn't come
+        // back yet (verify is async, ~8 s post-reboot).
+        if (source === 'library' && libSelected) {
+          const flashed = envExpectsBoard(libSelected)
+          if (flashed) setLastFlashedBoard(device.ipAddress, flashed)
+        }
+      }
       if (ok && expectedFwVersion && device && sendTo) {
         const ip = device.ipAddress
         pushLog('ota', `verify scheduled in 8 s (expected fw=${expectedFwVersion})`)
@@ -356,7 +454,8 @@ export function FirmwareSubTab({
       }
       setExpectedFwVersion(null)
     }
-  }, [lastMessage, expectedFwVersion, device, sendTo, pushLog])
+  }, [lastMessage, expectedFwVersion, device, sendTo, pushLog,
+      source, libSelected, invalidateBoard, setLastFlashedBoard])
 
   // ---- Reading freshly from disk ------------------------------------
 
@@ -576,6 +675,7 @@ export function FirmwareSubTab({
       pushLog('ota', 'abort — device offline before OTA start')
       return
     }
+    if (!(await checkBoardMatch('OTA'))) return
     setResult(null)
     let bin: Awaited<ReturnType<typeof readSelectedBin>>
     try {
@@ -611,6 +711,7 @@ export function FirmwareSubTab({
 
   async function onSerialFlash() {
     setLocalError(null)
+    if (!(await checkBoardMatch('Serial'))) return
     let plan: Awaited<ReturnType<typeof readSelectedRegions>>
     try {
       plan = await readSelectedRegions()
@@ -625,6 +726,19 @@ export function FirmwareSubTab({
       eraseAll,
       postFlashReprobeMs,
     })
+    // Remember what we flashed so the next pre-flight has a stable
+    // reference. Serial flashing may target a device that doesn't
+    // have an LAN IP yet — fall back to the device's MAC-prefixed
+    // pseudo-IP if available, otherwise tag the flash on a stable
+    // "serial" key so the warning still fires for back-to-back
+    // Serial flashes from the same browser session.
+    if (source === 'library' && libSelected) {
+      const flashed = envExpectsBoard(libSelected)
+      if (flashed) {
+        const ip = device?.ipAddress ?? 'serial:current'
+        setLastFlashedBoard(ip, flashed)
+      }
+    }
   }
 
   async function onSerialErase() {

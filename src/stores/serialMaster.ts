@@ -360,7 +360,13 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
           onLog: (line) => pushLog('serial', line),
           onProgress: (p) => set({ flashProgress: p }),
         })
-        set({
+        // Drop the cached `board` from `info`. The freshly flashed
+        // firmware may target a different BOARD_ID; keeping the old
+        // value would make the next flash's board pre-flight check
+        // compare against stale data. The next openConfig() refills
+        // `info` (including board) via get_info.
+        set((s) => ({
+          info: s.info ? { ...s.info, board: undefined } : s.info,
           flashLastResult: {
             ok: true,
             message: `Serial 書き込み完了 (${regions.map((r) => r.label).join(', ')})`
@@ -368,7 +374,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
           },
           flashProgress: { phase: 'done', percent: 100 },
           mode: 'idle',
-        })
+        }))
         pushLog('serial', `flash done`)
         // Step 3: drop the held port handle so the next openConfig
         // pulls a fresh one out of `navigator.serial.getPorts()`.

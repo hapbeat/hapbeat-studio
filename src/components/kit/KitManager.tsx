@@ -18,8 +18,8 @@ const DND_TYPE_CLIP = 'application/x-hapbeat-clip'
 const DND_TYPE_KIT_EVENT = 'application/x-hapbeat-kit-event'
 
 function randomKitName(): string {
-  // Lowercase + hyphen-only by default so the suggestion already obeys
-  // the contracts regex (`^[a-z0-9_-]+$`).
+  // Lowercase + hyphen-only by default so the suggestion already
+  // obeys contracts' kit_id regex (`^[a-z][a-z0-9-]*$`).
   const adj = ['alpha', 'beta', 'gamma', 'delta', 'echo', 'zeta', 'nova', 'pulse', 'volt', 'rush']
   const noun = ['kit', 'pack', 'set', 'mix', 'drop', 'vibe', 'hit', 'boom', 'wave', 'beat']
   return `${adj[Math.floor(Math.random() * adj.length)]}-${noun[Math.floor(Math.random() * noun.length)]}`
@@ -1031,7 +1031,7 @@ function KitEditor() {
   const flagKitNameInvalid = useCallback(() => {
     if (!kitNameWarnArmedRef.current) return
     kitNameWarnArmedRef.current = false
-    toast('英小文字 / 数字 / -, _ のみ使用できます', 'warning')
+    toast('英小文字 / 数字 / - のみ使用できます (先頭は英小文字)', 'warning')
     window.setTimeout(() => { kitNameWarnArmedRef.current = true }, 1200)
   }, [toast])
 
@@ -1219,9 +1219,14 @@ function KitEditor() {
     // Match the same constraint applied in the rename input — strip
     // disallowed characters silently before persisting.
     const raw = (name ?? placeholderName.current).trim()
-    const cleaned = raw.toLowerCase().replace(/[^a-z0-9_-]/g, '')
+    // Strip everything that isn't lowercase a-z / 0-9 / hyphen so
+    // the resulting name passes validateKitName + serves as a valid
+    // contracts kit_id without further normalisation.
+    let cleaned = raw.toLowerCase().replace(/[^a-z0-9-]/g, '')
+    // Drop leading non-letters — kit_id must start with a-z.
+    cleaned = cleaned.replace(/^[^a-z]+/, '')
     if (!cleaned) {
-      toast('Kit 名は英小文字 / 数字 / -, _ のみ使用できます', 'error')
+      toast('Kit 名は英小文字 / 数字 / - のみ・先頭は英小文字', 'error')
       return
     }
     await createKit(cleaned)
@@ -1323,24 +1328,25 @@ function KitEditor() {
                 <div className={`kit-details-inline ${dropActive ? 'drop-active' : ''}`}>
                   <div className="kit-meta-fields">
                     <label className="kit-meta-field">
-                      <span>Name <span className="field-hint">英小文字 / 数字 / -, _ のみ</span></span>
+                      <span>Name <span className="field-hint">英小文字 / 数字 / - のみ・先頭は英小文字</span></span>
                       <input
                         type="text"
                         value={activeKit.name}
                         // Strip-on-input: silently drop disallowed chars and
                         // lowercase as the user types, so they cannot create
-                        // an invalid kit name in the first place. Pasting "My Kit"
-                        // becomes "mykit" — and a (throttled) toast tells the
-                        // user *why* their character disappeared.
+                        // an invalid kit name in the first place. Pasting
+                        // "My_Kit 2" becomes "mykit2" — a (throttled) toast
+                        // explains *why* their character disappeared.
                         onChange={(e) => {
                           const raw = e.target.value
-                          const cleaned = raw.toLowerCase().replace(/[^a-z0-9_-]/g, '')
+                          let cleaned = raw.toLowerCase().replace(/[^a-z0-9-]/g, '')
+                          cleaned = cleaned.replace(/^[^a-z]+/, '')
                           if (cleaned !== raw) flagKitNameInvalid()
                           if (cleaned !== activeKit.name) updateKit(activeKit.id, { name: cleaned })
                         }}
                         maxLength={64}
-                        pattern="[a-z0-9_-]+"
-                        title={validateKitName(activeKit.name) ?? '英小文字 / 数字 / -, _ のみ'}
+                        pattern="[a-z][a-z0-9-]*"
+                        title={validateKitName(activeKit.name) ?? '英小文字 / 数字 / - のみ・先頭は英小文字'}
                         style={validateKitName(activeKit.name) ? { borderColor: 'var(--error)' } : undefined}
                       />
                       {validateKitName(activeKit.name) && (
@@ -1614,17 +1620,25 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
     } else if (t === 'deploy_result' && typeof p.ip === 'string') {
       // Per-device finish (helper sends one of these per target after
       // its run). We only mark done for the one that finished.
+      const ip = p.ip as string
+      const ok = p.success === true
+      const msg = String(p.message ?? (ok ? 'complete' : 'failed'))
       setProgressByIp((cur) => ({
         ...cur,
-        [p.ip as string]: {
-          pct: p.success === true ? 100 : (cur[p.ip as string]?.pct ?? 0),
-          msg: String(p.message ?? (p.success === true ? 'complete' : 'failed')),
+        [ip]: {
+          pct: ok ? 100 : (cur[ip]?.pct ?? 0),
+          msg,
           done: true,
-          ok: p.success === true,
+          ok,
         },
       }))
+      // Surface failures via toast — the inline progress row also
+      // shows the same message but the user often misses it. Helper
+      // already includes the "TCP 7701 connect failed → power-cycle
+      // the device" hint in its message text.
+      if (!ok) toast(`${ip} 配信失敗: ${msg}`, 'error')
     }
-  }, [lastMessage])
+  }, [lastMessage, toast])
   const kitDirHandle = useLibraryStore((s) => s.kitDirHandle)
   // kit-out dir が設定されていればそちらを、無ければ library workDir を root にする。
   // どちらの場合も root 直下に `<packId>/` フォルダを作る (kits/ 階層は挟まない)。
@@ -1689,7 +1703,10 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
       const ab = await out.blob.arrayBuffer(); const bytes = new Uint8Array(ab)
       let bin = ''; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
       send({ type: 'deploy_kit_data', payload: { kit_id: out.packId, zip_base64: btoa(bin), targets: devices.map((d) => d.ipAddress) }})
-      toast(`Sent "${out.packId}" to ${devices.length} device(s)`, 'success')
+      // Don't claim "sent" success here — the helper hasn't reached the
+      // device yet. Per-device deploy_result will toast either
+      // success or failure once the TCP write actually settles.
+      toast(`Sending "${out.packId}" to ${devices.length} device(s)…`, 'info')
     } catch (err) { toast(`Deploy failed: ${err instanceof Error ? err.message : err}`, 'error') }
     finally { setIsExporting(false) }
   }, [kit, managerConnected, devices, send, outRoot, setIsExporting, toast])
