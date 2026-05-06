@@ -5,7 +5,6 @@ import { useLibraryStore } from '@/stores/libraryStore'
 import { useLogStore } from '@/stores/logStore'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import { IdentityForm } from './IdentityForm'
-import { ConnectedAppCard } from './ConnectedAppCard'
 import { WifiProfilesForm } from './WifiProfilesForm'
 import { UiConfigForm } from './UiConfigForm'
 import { DebugDumpSection } from './DebugDumpSection'
@@ -112,9 +111,6 @@ export function DeviceDetail() {
         group: p.group as number | undefined,
         wifi_connected: p.wifi_connected as boolean | undefined,
         board: p.board as string | undefined,
-        app_connected: p.app_connected as boolean | undefined,
-        app_name: p.app_name as string | undefined,
-        app_device: p.app_device as string | undefined,
       })
     } else if (t === 'wifi_status_result' && typeof p.device === 'string') {
       setWifiStatus(p.device, {
@@ -361,7 +357,6 @@ export function DeviceDetail() {
               cachedInfo={cachedInfo}
               sendTo={sendTo}
             />
-            <ConnectedAppCard device={device} cachedInfo={cachedInfo} />
             <WifiProfilesForm
               device={device}
               profiles={wifiProfiles?.profiles ?? []}

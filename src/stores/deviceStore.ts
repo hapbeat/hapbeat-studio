@@ -46,15 +46,6 @@ interface DeviceState {
      * matches the physical board before flashing.
      */
     board?: string
-    /**
-     * Live SDK / app connection status (CONNECT_STATUS 0x20 payload).
-     * `app_connected` flips false when the device hasn't received a
-     * CONNECT_STATUS within the firmware's timeout. `app_name` and
-     * `app_device` are only meaningful while connected.
-     */
-    app_connected?: boolean
-    app_name?: string
-    app_device?: string
   }>
 
   /** Per-IP cache of the most recent get_wifi_status response. */

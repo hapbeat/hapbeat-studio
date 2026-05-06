@@ -35,6 +35,12 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
     case 'ip_address':        return '192.168.100.123'                           // 15文字
     case 'firmware_version':  return 'v2.0.0'                                     // 6文字 (semver)
     case 'device_name':       return 'DuoWL2'                                   // 6文字
+    case 'app_name':
+      // CONNECT_STATUS payload の app_name (Unity SDK 等が送信)。
+      // variant でプレビュー文字数を切替: compact=4 / standard=8 / wide=16
+      if (variant === 'compact') return 'MyAp'                                   // 4文字
+      if (variant === 'wide')    return 'MyHapbeatApp_v01'                       // 16文字
+      return 'MyApp   '                                                          // 8文字
     case 'gain':              return 'G:12'                                      // 4文字
     case 'player_number':     return `P:${String(s.player).padStart(2, '0')}`    // 4文字
     case 'position':          return `Pos:${String(s.position).padStart(3, '0')}` // 7文字
@@ -56,6 +62,7 @@ export function getElementDescription(type: DisplayElementType): string {
     case 'ip_address':        return 'Full IP'
     case 'firmware_version':  return 'FW ver'
     case 'device_name':       return 'Name'
+    case 'app_name':          return 'App名'
     case 'gain':              return 'G:XX'
     case 'address':           return 'pN/pos'
     case 'player_number':     return 'P:XX'

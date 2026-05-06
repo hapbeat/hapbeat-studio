@@ -14,6 +14,9 @@ export const elementMetas: DisplayElementMeta[] = [
   { type: 'ip_address',        label: 'IP アドレス',      description: 'IP',             icon: '\u2316' },
   { type: 'firmware_version',  label: 'FW Ver',           description: 'バージョン',     icon: 'v' },
   { type: 'device_name',       label: 'デバイス名',        description: '設定名称',       icon: 'D' },
+  { type: 'app_name', variant: 'compact',  label: 'App Name 4字',  description: 'アプリ名 (短)',     icon: 'A' },
+  { type: 'app_name',                       label: 'App Name 8字',  description: 'アプリ名 (標準)',   icon: 'A' },
+  { type: 'app_name', variant: 'wide',      label: 'App Name 16字', description: 'アプリ名 (行全体)', icon: 'A' },
   { type: 'gain',              label: 'ゲイン',            description: '出力ゲイン',     icon: 'G' },
   { type: 'address',           label: 'アドレス',          description: 'player/pos',     icon: 'A' },
   { type: 'player_number',     label: 'プレイヤー',        description: 'Player番号',     icon: 'P' },
@@ -48,7 +51,15 @@ export function ElementPalette({ selectedType, onSelectType, usedTypes }: Elemen
           const size = getElementSize(meta.type, meta.variant)
           const key = metaKey(meta)
           const isSelected = selectedType === meta.type && !meta.variant
-          const isUsed = usedTypes.has(meta.type) && !meta.variant
+          // app_name は variant (compact / standard / wide) で表示幅が
+          // 違うだけで意味は同一。1 ページに 1 個だけ配置可とし、
+          // どれか 1 variant が置かれたら 3 つとも palette でグレーアウト
+          // する (= 残り 2 つの異 variant も "使用中" 扱い)。
+          // battery は variant 毎に意味が違う (% / bar) ので per-variant 個別
+          // 配置可能。これは既存挙動を維持。
+          const isUsed = meta.type === 'app_name'
+            ? usedTypes.has('app_name')
+            : usedTypes.has(meta.type) && !meta.variant
           return (
             <button
               key={key}

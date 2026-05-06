@@ -203,6 +203,7 @@ export function fromFirmwareFormat(fw: FirmwareUiConfig): Partial<DisplaySavedSt
       }
       if (el.variant === 'compact') base.variant = 'compact'
       if (el.variant === 'bar') base.variant = 'bar'
+      if (el.variant === 'wide') base.variant = 'wide'
       if (el.font_scale && el.font_scale !== 1) base.font_scale = el.font_scale as 1 | 2
       return base
     }),

@@ -4,7 +4,7 @@ export interface DisplayElement {
   id: string
   type: DisplayElementType
   pos: [number, number]  // [col, row]
-  variant?: 'standard' | 'compact' | 'bar'
+  variant?: 'standard' | 'compact' | 'bar' | 'wide'
   font_scale?: 1 | 2
 }
 
@@ -18,6 +18,7 @@ export type DisplayElementType =
   | 'ip_address'
   | 'firmware_version'
   | 'device_name'
+  | 'app_name'
   | 'gain'
   | 'player_number'
   | 'position'
@@ -84,7 +85,7 @@ export interface DisplayTemplate {
 
 export interface DisplayElementMeta {
   type: DisplayElementType
-  variant?: 'standard' | 'compact' | 'bar'
+  variant?: 'standard' | 'compact' | 'bar' | 'wide'
   label: string
   description: string
   icon: string
@@ -194,6 +195,7 @@ export const ELEMENT_FIXED_SIZES: Record<DisplayElementType, [number, number]> =
   ip_address: [15, 1],       // "192.168.1.100" 最大15文字, compact ".1.100" 6文字
   firmware_version: [6, 1],  // "v2.0.42"  最大6文字 (semver "x.y.zz" 想定)
   device_name: [6, 1],       // "DuoWL2"    6文字, compact 3文字
+  app_name: [8, 1],          // "MyApp__"   標準 8文字 (compact=4, wide=16)
   gain: [4, 1],              // "G:12"      4文字
   player_number: [4, 1],     // "P:01"      4文字
   position: [7, 1],          // "Pos:001"   7文字
@@ -205,5 +207,14 @@ export const ELEMENT_FIXED_SIZES: Record<DisplayElementType, [number, number]> =
 /** Get element size considering variant. Battery "bar" variant is wider. */
 export function getElementSize(type: DisplayElementType, variant?: string): [number, number] {
   if (type === 'battery' && variant === 'bar') return [8, 1] // "BAT[||||]" 8文字
+  if (type === 'app_name') {
+    // app_name は 3 サイズ展開:
+    //   compact = 4 文字 (短いプロジェクト名)
+    //   standard (default) = 8 文字
+    //   wide = 16 文字 (行全体)
+    if (variant === 'compact') return [4, 1]
+    if (variant === 'wide') return [16, 1]
+    return [8, 1]
+  }
   return ELEMENT_FIXED_SIZES[type]
 }

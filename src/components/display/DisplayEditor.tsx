@@ -11,7 +11,7 @@ import type {
   LedConfig,
   VolumeConfig,
 } from '@/types/display'
-import { ELEMENT_FIXED_SIZES, getElementSize, DEFAULT_LED_RULES, DEFAULT_VOLUME_CONFIG } from '@/types/display'
+import { getElementSize, DEFAULT_LED_RULES, DEFAULT_VOLUME_CONFIG } from '@/types/display'
 import type { DeviceModel, DeviceHardwareSpec } from '@/types/device'
 import { DEVICE_SPECS } from '@/types/device'
 import { ElementPalette, elementMetas, getElementMeta } from '@/components/common/ElementPalette'
@@ -201,14 +201,20 @@ function buildHoldActionGroups(pages: DisplayPage[], holdMode: import('@/types/d
 
 
 
-/** 衝突チェック: 指定位置に要素を置けるか */
+/** 衝突チェック: 指定位置に要素を置けるか。
+ *
+ * variant 必須化 (2026-05-07): 旧実装は ELEMENT_FIXED_SIZES[type] を
+ * 直接見ていたため battery 'bar' (8 文字) 等の variant 拡幅サイズを
+ * 反映できず、ドラッグ時の影と実サイズが合っていなかった。
+ */
 function canPlace(
   page: DisplayPage,
   type: DisplayElementType,
   pos: [number, number],
   excludeId?: string,
+  variant?: string,
 ): boolean {
-  const size = ELEMENT_FIXED_SIZES[type]
+  const size = getElementSize(type, variant)
   if (pos[0] + size[0] > GRID_COLS || pos[1] + size[1] > GRID_ROWS) return false
   return !page.elements.some((el) => {
     if (el.id === excludeId) return false
@@ -326,7 +332,7 @@ export function DisplayEditor() {
           Math.max(0, Math.min(newPos[0], GRID_COLS - size[0])),
           Math.max(0, Math.min(newPos[1], GRID_ROWS - size[1])),
         ]
-        if (!canPlace(page, el.type, clamped, elementId)) return prev
+        if (!canPlace(page, el.type, clamped, elementId, el.variant)) return prev
         const updatedElements = page.elements.map((e) =>
           e.id === elementId ? { ...e, pos: clamped } : e
         )
@@ -346,8 +352,18 @@ export function DisplayEditor() {
     (type: DisplayElementType, pos: [number, number], mouseX?: number, mouseY?: number, variant?: string): boolean => {
       const page = layout.pages[activePageIndex]
       if (!page) return false
-      // 同一 type + variant の重複チェック
-      if (page.elements.some((el) => el.type === type && (el.variant ?? 'standard') === (variant ?? 'standard'))) {
+      // 重複チェック:
+      //   app_name は variant (4/8/16 文字) が違っても意味は同じ表示なので
+      //     1 ページ 1 個だけに制限。
+      //   それ以外は (type + variant) 単位でユニーク (battery は % と bar
+      //     が共存可能)。
+      const dupExists = type === 'app_name'
+        ? page.elements.some((el) => el.type === 'app_name')
+        : page.elements.some(
+            (el) => el.type === type
+              && (el.variant ?? 'standard') === (variant ?? 'standard'),
+          )
+      if (dupExists) {
         if (mouseX != null && mouseY != null) showToast('この要素は既に配置済みです', mouseX, mouseY)
         return false
       }
@@ -356,12 +372,14 @@ export function DisplayEditor() {
         Math.max(0, Math.min(pos[0], GRID_COLS - size[0])),
         Math.max(0, Math.min(pos[1], GRID_ROWS - size[1])),
       ]
-      if (!canPlace(page, type, clampedPos)) {
+      if (!canPlace(page, type, clampedPos, undefined, variant)) {
         if (mouseX != null && mouseY != null) showToast('スペースが不足しています', mouseX, mouseY)
         return false
       }
       const newEl: import('@/types/display').DisplayElement = { id: generateId(), type, pos: clampedPos }
-      if (variant && variant !== 'standard') newEl.variant = variant as 'compact' | 'bar'
+      if (variant && variant !== 'standard') {
+        newEl.variant = variant as 'compact' | 'bar' | 'wide'
+      }
       setLayout((prev) => {
         const newPages = [...prev.pages]
         const p = newPages[activePageIndex]
@@ -462,20 +480,37 @@ export function DisplayEditor() {
   const dragType = externalDragType ?? internalDrag?.type ?? null
   const dragOffsetCol = internalDrag?.offsetCol ?? 0
 
+  /** ドラッグ中の variant — 内部移動ならその要素の variant、
+   *  パレットからのドラッグなら setCurrentDragVariant() で設定された値。
+   *  variant 込みで size 計算しないと battery 'bar' (8 文字) などで
+   *  影と実サイズがずれる。 */
+  const dragVariant = useMemo(() => {
+    if (internalDrag && activePage) {
+      return activePage.elements.find((e) => e.id === internalDrag.id)?.variant
+    }
+    return externalDragType ? getCurrentDragVariant() : undefined
+    // externalDragType を依存に入れることで「パレットから新たに drag 開始
+    // → variant が更新された」タイミングで再計算される。
+  }, [internalDrag, activePage, externalDragType])
+
   /** マウス位置をクランプした配置候補 */
   const clampedDragPos = useMemo(() => {
     if (!dragType || !dragPos) return null
-    const size = ELEMENT_FIXED_SIZES[dragType]
+    const size = getElementSize(dragType, dragVariant)
     return {
       col: Math.max(0, Math.min(dragPos.col - dragOffsetCol, GRID_COLS - size[0])),
       row: Math.max(0, Math.min(dragPos.row, GRID_ROWS - size[1])),
     }
-  }, [dragType, dragPos, dragOffsetCol])
+  }, [dragType, dragVariant, dragPos, dragOffsetCol])
 
   const dragCanPlace = useMemo(() => {
     if (!clampedDragPos || !activePage) return false
-    return canPlace(activePage, dragType!, [clampedDragPos.col, clampedDragPos.row], internalDrag?.id)
-  }, [clampedDragPos, activePage, dragType, internalDrag])
+    return canPlace(
+      activePage, dragType!,
+      [clampedDragPos.col, clampedDragPos.row],
+      internalDrag?.id, dragVariant,
+    )
+  }, [clampedDragPos, activePage, dragType, internalDrag, dragVariant])
 
   // 内部ドラッグ時: 配置可能な位置を記録
   useEffect(() => {
@@ -487,7 +522,9 @@ export function DisplayEditor() {
   /** ドラッグ中のプレビュー影 */
   const dragPreview = useMemo(() => {
     if (!dragType) return null
-    const size = ELEMENT_FIXED_SIZES[dragType]
+    // variant を考慮したサイズ。battery 'bar' / app_name 各 variant で
+    // ELEMENT_FIXED_SIZES とは異なる幅になる。
+    const size = getElementSize(dragType, dragVariant)
     if (internalDrag) {
       // 内部移動: 配置可能ならその位置、不可なら最後の有効位置にとどまる
       const pos = dragCanPlace ? clampedDragPos : lastValidPos
@@ -497,7 +534,7 @@ export function DisplayEditor() {
     // パレットからのドラッグ
     if (!clampedDragPos) return null
     return { col: clampedDragPos.col, row: clampedDragPos.row, w: size[0], h: size[1], canPlace: dragCanPlace }
-  }, [dragType, internalDrag, clampedDragPos, dragCanPlace, lastValidPos])
+  }, [dragType, dragVariant, internalDrag, clampedDragPos, dragCanPlace, lastValidPos])
 
   // 内部移動: mouse イベントで追跡（HTML5 drag を使わないのでカーソルが安定）
   const lastValidPosRef = useRef(lastValidPos)
