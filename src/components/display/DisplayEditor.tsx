@@ -186,8 +186,9 @@ function buildHoldActionGroups(pages: DisplayPage[], holdMode: import('@/types/d
     // (firmware \u306f\u6b21/\u524d\u3078\u300c\u9032\u3081\u308b\u300d\u3060\u3051\u3067\u96e2\u3057\u3066\u3082\u81ea\u52d5\u3067\u623b\u3089\u306a\u3044\u306e\u3067\u3001
     // \u53b3\u5bc6\u306a tmp \u6319\u52d5\u306f hold_page:N \u306e\u307b\u3046\u306e\u307f\u3002next/prev \u306f\u5b9f\u8cea latch \u3068\u540c\u7b49)
     const pageItems: ActionItem[] = [
-      { value: 'next_page', label: 'Next Page' },
+      // \u7269\u7406\u30dc\u30bf\u30f3\u914d\u7f6e\u306b\u5408\u308f\u305b\u3066 prev (\u5de6) \u2192 next (\u53f3) \u306e\u4e26\u3073\u3002
       { value: 'prev_page', label: 'Prev Page' },
+      { value: 'next_page', label: 'Next Page' },
       ...pages.map((p, i) => ({
         value: `hold_page:${i}`, label: `\u2192 ${p.name} (tmp)`,
       })),

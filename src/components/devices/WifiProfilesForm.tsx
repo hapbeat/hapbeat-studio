@@ -212,12 +212,20 @@ export function WifiProfilesForm({
       )}
       {profiles.map((p) => (
         <div key={p.index} className="wifi-profile-row">
-          <span
-            className={`wifi-profile-marker ${p.active ? 'active' : ''}`}
-            title={p.active ? 'このプロファイルで接続中' : ''}
-          >
-            {p.active ? '●' : '○'}
-          </span>
+          {p.active ? (
+            <span
+              className="wifi-profile-marker active"
+              title="このプロファイルで接続中"
+              aria-label="接続中"
+            >
+              ●
+            </span>
+          ) : (
+            // 非接続プロファイルは marker を出さない (○ があるとクリックで
+            // チェック切替できるように見えてしまうため)。レイアウトずれを
+            // 防ぐため空の span でスペースだけ確保する。
+            <span className="wifi-profile-marker" aria-hidden="true" />
+          )}
           <span className="wifi-profile-ssid">
             {p.ssid || '(no SSID)'}
             {p.has_pass && (
