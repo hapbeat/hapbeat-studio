@@ -9,16 +9,71 @@
   padding: 10px 12px;
 }
 
+.palette-item { position: relative; }
+
 .palette-hint {
   font-size: 13px;
   color: var(--text-muted);
   margin-bottom: 8px;
 }
 
-/* コンパクトグリッド: 最小150pxで自動列数増加 */
+/* セクション (5 グループ) */
+.palette-section + .palette-section { margin-top: 10px; }
+
+.palette-section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 2px 6px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+.palette-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-light);
+  letter-spacing: 0.02em;
+}
+.palette-section-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* variant picker (S/M/L) — カード右側に詰める */
+.palette-variant-picker {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.palette-variant-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+}
+.palette-variant-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.palette-variant-btn.active {
+  color: var(--accent-light);
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+.palette-item.used .palette-variant-picker { opacity: 0.4; pointer-events: none; }
+
+/* コンパクトグリッド: 最小165pxで自動列数増加 (AppName [16x1] が収まる幅) */
 .palette-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(165px, 1fr));
   gap: 3px;
 }
 
@@ -81,6 +136,14 @@
   text-overflow: ellipsis;
 }
 
+.palette-size {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-left: 2px;
+}
+
 .palette-desc {
   font-size: 12px;
   color: var(--text-muted);
@@ -91,11 +154,26 @@
 }
 
 .palette-used-badge {
-  font-size: 11px;
-  color: var(--accent);
-  background: var(--accent-dim);
-  padding: 1px 4px;
-  border-radius: 3px;
-  flex-shrink: 0;
-  font-family: var(--font-mono);
+  position: absolute;
+  top: 50%;
+  left: 6px;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  background: var(--accent);
+  border-radius: var(--radius);
+  pointer-events: none;
+  line-height: 1;
 }
+
+.palette-item.used .palette-icon { visibility: hidden; }
+
+.palette-item.used .palette-info { opacity: 0.6; }
+.palette-item.used .palette-icon { opacity: 0.6; }
+.palette-item.used { opacity: 1; }

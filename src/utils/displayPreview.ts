@@ -36,9 +36,21 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
       if (variant === 'bar') return 'BAT\u2588\u2588\u2588\u2588\u2581'          // 8文字 (bar meter)
       return ' 85%'                                                               // 4文字 (percent)
     case 'wifi_status':       return 'W:---'                                     // 5文字 (padding)
-    case 'wifi_ssid':         return 'MySSID  '                                  // 8文字
+    case 'wifi_ssid': {
+      // 4/8/16 variant 対応。サンプル SSID 'MyAccessPoint01' を左から N 文字。
+      const sample = 'MyAccessPoint01'
+      if (variant === 'compact') return sample.padEnd(4, ' ').slice(0, 4)
+      if (variant === 'wide')    return sample.padEnd(16, ' ').slice(0, 16)
+      return sample.padEnd(8, ' ').slice(0, 8)
+    }
     case 'connection_status': return '[--]'                                      // 4文字
-    case 'ip_address':        return '192.168.100.123'                           // 15文字
+    case 'ip_address': {
+      // 4/8/16 variant 対応。サンプル IP '192.168.100.123' (15 文字) を左から N。
+      const sample = '192.168.100.123'
+      if (variant === 'compact') return sample.padEnd(4, ' ').slice(0, 4)
+      if (variant === 'wide')    return sample.padEnd(16, ' ').slice(0, 16)
+      return sample.padEnd(8, ' ').slice(0, 8)
+    }
     case 'firmware_version':  return 'v2.0.0'                                     // 6文字 (semver)
     case 'device_name':       return 'DuoWL2'                                   // 6文字
     case 'app_name':
@@ -69,9 +81,9 @@ export function getElementDescription(type: DisplayElementType): string {
     case 'volume_mode':       return 'Fix/Var'
     case 'battery':           return 'XX%'
     case 'wifi_status':       return 'W:dBm'
-    case 'wifi_ssid':         return 'SSID/AP'
+    case 'wifi_ssid':         return 'SSID 左 N 文字'
     case 'connection_status': return '[OK]app'
-    case 'ip_address':        return 'Full IP'
+    case 'ip_address':        return 'IP 左 N 文字'
     case 'firmware_version':  return 'FW ver'
     case 'device_name':       return 'Name'
     case 'app_name':          return 'App名'
