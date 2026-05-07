@@ -61,6 +61,11 @@ export interface StudioToManagerMessage {
     | 'unsubscribe_logs'
     | 'ota_data'
     | 'scan_wifi'
+    | 'enter_ap_mode'
+    | 'enter_sta_mode'
+    | 'set_ap_pass'
+    | 'clear_ap_pass'
+    | 'get_ap_status'
     | 'ping'
   payload: Record<string, unknown>
 }
@@ -86,6 +91,7 @@ export interface ManagerToStudioMessage {
     | 'ota_progress'
     | 'ota_result'
     | 'scan_wifi_result'
+    | 'ap_status_result'
     | 'error'
     | 'pong'
   payload: Record<string, unknown>

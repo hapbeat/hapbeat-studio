@@ -59,6 +59,7 @@ export function DeviceList() {
   const selectedIp = useDeviceStore((s) => s.selectedIp)
   const selectedIps = useDeviceStore((s) => s.selectedIps)
   const dismissedIps = useDeviceStore((s) => s.dismissedIps)
+  const infoCache = useDeviceStore((s) => s.infoCache)
   const selectDevice = useDeviceStore((s) => s.selectDevice)
   const toggleSelect = useDeviceStore((s) => s.toggleSelect)
   const dismissDevice = useDeviceStore((s) => s.dismissDevice)
@@ -163,6 +164,7 @@ export function DeviceList() {
               if (target.closest('.device-row-checkbox-input')) return
               toggleSelect(dev.ipAddress)
             }
+            const isApMode = infoCache[dev.ipAddress]?.mode === 'ap'
             return (
               <div
                 key={dev.ipAddress || dev.name}
@@ -185,6 +187,11 @@ export function DeviceList() {
                     />
                   </label>
                   <span className="device-row-name">{dev.name || '(unnamed)'}</span>
+                  {isApMode && (
+                    <span className="ap-mode-badge ap-mode-badge-sm" title="SoftAP モードで動作中">
+                      AP
+                    </span>
+                  )}
                   {dev.ipAddress.startsWith(SERIAL_DEVICE_PREFIX) ? (
                     <span
                       className="device-row-status online"

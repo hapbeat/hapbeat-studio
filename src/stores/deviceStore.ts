@@ -46,6 +46,13 @@ interface DeviceState {
      * matches the physical board before flashing.
      */
     board?: string
+    /** Current Wi-Fi mode: "sta" (normal) or "ap" (SoftAP). Added in firmware v0.1.0. */
+    mode?: 'sta' | 'ap'
+    /** AP mode info — present only when mode === "ap" */
+    ap_ssid?: string
+    ap_ip?: string
+    ap_has_pass?: boolean
+    ap_client_count?: number
   }>
 
   /** Per-IP cache of the most recent get_wifi_status response. */
@@ -84,6 +91,14 @@ interface DeviceState {
    *  this so dismissed-but-now-online IPs un-dismiss themselves. Idempotent. */
   syncOnlineDevices: (onlineIps: string[]) => void
   setInfo: (ip: string, info: DeviceState['infoCache'][string]) => void
+  /** Merge AP status into infoCache (from get_ap_status or get_info extension). */
+  setApStatus: (ip: string, status: {
+    mode?: 'sta' | 'ap'
+    ap_ssid?: string
+    ap_ip?: string
+    ap_has_pass?: boolean
+    ap_client_count?: number
+  }) => void
   /**
    * Drop the cached `board` for an IP. Called immediately after a
    * successful flash: the binary just written may target a different
@@ -263,6 +278,9 @@ export const useDeviceStore = create<DeviceState>((set) => ({
 
   setInfo: (ip, info) =>
     set((s) => ({ infoCache: { ...s.infoCache, [ip]: { ...s.infoCache[ip], ...info } } })),
+
+  setApStatus: (ip, status) =>
+    set((s) => ({ infoCache: { ...s.infoCache, [ip]: { ...s.infoCache[ip], ...status } } })),
 
   invalidateBoard: (ip) =>
     set((s) => {

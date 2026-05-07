@@ -364,6 +364,28 @@
   font-weight: 600;
 }
 
+/* AP MODE badge — magenta, matches OLED LED color in AP mode */
+.ap-mode-badge {
+  display: inline-block;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-family: var(--font-ui);
+  font-weight: 700;
+  background: rgba(214, 73, 214, 0.2);
+  color: #d649d6;
+  border: 1px solid rgba(214, 73, 214, 0.5);
+  text-transform: uppercase;
+}
+
+/* Smaller variant used inside sidebar cards */
+.ap-mode-badge-sm {
+  font-size: 10px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+
 /* ---- Sub-tabs (per-device pages) ---- */
 .device-subtabs {
   display: flex;

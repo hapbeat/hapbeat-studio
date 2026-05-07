@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore, type WifiProfile } from '@/stores/deviceStore'
+import { ApModeSection } from './ApModeSection'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useLogStore } from '@/stores/logStore'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
@@ -37,6 +38,7 @@ export function DeviceDetail() {
   const pushLog = useLogStore((s) => s.push)
   const selectedIp = useDeviceStore((s) => s.selectedIp)
   const setInfo = useDeviceStore((s) => s.setInfo)
+  const setApStatus = useDeviceStore((s) => s.setApStatus)
   const setWifiStatus = useDeviceStore((s) => s.setWifiStatus)
   const setWifiProfiles = useDeviceStore((s) => s.setWifiProfiles)
   const setDebugDump = useDeviceStore((s) => s.setDebugDump)
@@ -95,6 +97,7 @@ export function DeviceDetail() {
     send({ type: 'list_wifi_profiles', payload: { ip: selectedIp } })
     send({ type: 'get_info', payload: { ip: selectedIp } })
     send({ type: 'get_wifi_status', payload: { ip: selectedIp } })
+    send({ type: 'get_ap_status', payload: { ip: selectedIp } })
   }, [selectedIp, device?.online, wifiProfilesCache, send])
 
   // Drain helper push messages.
@@ -111,6 +114,20 @@ export function DeviceDetail() {
         group: p.group as number | undefined,
         wifi_connected: p.wifi_connected as boolean | undefined,
         board: p.board as string | undefined,
+        // SoftAP extension fields (firmware ≥ v0.1.0)
+        mode: p.mode as 'sta' | 'ap' | undefined,
+        ap_ssid: p.ap_ssid as string | undefined,
+        ap_ip: p.ap_ip as string | undefined,
+        ap_has_pass: p.ap_has_pass as boolean | undefined,
+        ap_client_count: p.ap_client_count as number | undefined,
+      })
+    } else if (t === 'ap_status_result' && typeof p.device === 'string') {
+      setApStatus(p.device, {
+        mode: p.mode as 'sta' | 'ap' | undefined,
+        ap_ssid: p.ap_ssid as string | undefined,
+        ap_ip: p.ap_ip as string | undefined,
+        ap_has_pass: p.ap_has_pass as boolean | undefined,
+        ap_client_count: p.ap_client_count as number | undefined,
       })
     } else if (t === 'wifi_status_result' && typeof p.device === 'string') {
       setWifiStatus(p.device, {
@@ -182,6 +199,7 @@ export function DeviceDetail() {
     lastMessage,
     pushLog,
     setInfo,
+    setApStatus,
     setWifiStatus,
     setWifiProfiles,
     setDebugDump,
@@ -268,6 +286,13 @@ export function DeviceDetail() {
     send({ type: 'get_info', payload: { ip: selectedIp } })
     send({ type: 'get_wifi_status', payload: { ip: selectedIp } })
     send({ type: 'list_wifi_profiles', payload: { ip: selectedIp } })
+    send({ type: 'get_ap_status', payload: { ip: selectedIp } })
+  }
+
+  const refreshApStatus = () => {
+    if (!transport.isSerial) {
+      send({ type: 'get_ap_status', payload: { ip: selectedIp } })
+    }
   }
 
   const refreshWifiProfiles = () => {
@@ -298,6 +323,13 @@ export function DeviceDetail() {
     : wifiProfilesCache[selectedIp]
   const debugDump = debugDumpCache[selectedIp]
   const kitList = kitListCache[selectedIp]
+  const apInfo = {
+    mode: cachedInfo?.mode,
+    ap_ssid: cachedInfo?.ap_ssid,
+    ap_ip: cachedInfo?.ap_ip,
+    ap_has_pass: cachedInfo?.ap_has_pass,
+    ap_client_count: cachedInfo?.ap_client_count,
+  }
 
   return (
     <section className="devices-detail">
@@ -307,6 +339,9 @@ export function DeviceDetail() {
         </div>
         <div className="devices-detail-sub">
           <span className="device-detail-pill selected-pill">SELECTED</span>
+          {apInfo.mode === 'ap' && (
+            <span className="device-detail-pill ap-mode-badge">AP MODE</span>
+          )}
           {device.ipAddress}
           {device.firmwareVersion && <> · fw {device.firmwareVersion}</>}
           {device.address && <> · {device.address}</>}
@@ -365,6 +400,12 @@ export function DeviceDetail() {
               wifiStatus={wifiStatus}
               sendTo={sendTo}
               onRefresh={refreshWifiProfiles}
+            />
+            <ApModeSection
+              device={device}
+              apInfo={apInfo}
+              sendTo={sendTo}
+              onRefreshApStatus={refreshApStatus}
             />
             <UiConfigForm device={device} sendTo={sendTo} />
             <DebugDumpSection
