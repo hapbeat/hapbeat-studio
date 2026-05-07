@@ -198,8 +198,9 @@ export const ELEMENT_FIXED_SIZES: Record<DisplayElementType, [number, number]> =
   wifi_status: [5, 1],       // "W:---"     5文字 (standard), compact 同
   wifi_ssid: [8, 1],         // "MySSID__"  標準 8文字 (compact=4, wide=16)
   connection_status: [4, 1], // "[--]"      4文字 (compact), standard "[OK]App_" 8文字
-  ip_address: [9, 1],        // "168.0.147" 標準 9文字 (compact=4, wide=13)。
+  ip_address: [6, 1],        // ".0.147"   標準 6文字 (compact=4, wide=13)。
                              // 同 LAN は前半オクテットが被るため右から N 文字切出し
+                             // (3rd オクテットも被ることが多いので standard は 6 で十分)
   firmware_version: [6, 1],  // "v2.0.42"  最大6文字 (semver "x.y.zz" 想定)
   device_name: [6, 1],       // "DuoWL2"    6文字, compact 3文字
   app_name: [8, 1],          // "MyApp__"   標準 8文字 (compact=4, wide=16)
@@ -240,10 +241,10 @@ export function getElementSize(type: DisplayElementType, variant?: string): [num
   }
   if (type === 'ip_address') {
     // IP は右から N 文字 (同 LAN は前半オクテットが被るので右側ほど重要)。
-    // compact=4 (".147"), standard=9 ("168.0.147"), wide=13 (フル IP).
+    // compact=4 (".147"), standard=6 (".0.147"), wide=13 (フル IP).
     if (variant === 'compact') return [4, 1]
     if (variant === 'wide') return [13, 1]
-    return [9, 1]
+    return [6, 1]
   }
   if (type === 'position') {
     // pos_xxx 名を表示。標準=8 (e.g. "pos:neck"), compact=4 (名前のみ),

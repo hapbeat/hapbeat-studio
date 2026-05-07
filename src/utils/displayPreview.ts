@@ -47,14 +47,14 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
     case 'ip_address': {
       // 同 LAN は 192.168.x や 10.0.x のように前半オクテットが基本被るため、
       // **右から N 文字** で切出すと重要部分 (末尾 1-2 オクテット) を残せる。
-      // compact=4 (".147"), standard=9 ("168.0.147"), wide=13 (フル "192.168.0.147")
+      // compact=4 (".147"), standard=6 (".0.147"), wide=13 (フル "192.168.0.147")
       const sample = '192.168.0.147'
       const pickRight = (n: number) => sample.length >= n
         ? sample.slice(-n)
         : sample.padStart(n, ' ')
       if (variant === 'compact') return pickRight(4)
       if (variant === 'wide')    return pickRight(13)
-      return pickRight(9)
+      return pickRight(6)
     }
     case 'firmware_version':  return 'v0.1.0'                                     // 6文字 (semver)
     case 'device_name':       return 'Duo-1'                                   // 6文字
