@@ -45,11 +45,16 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
     }
     case 'connection_status': return '[--]'                                      // 4文字
     case 'ip_address': {
-      // 4/8/16 variant 対応。サンプル IP '192.168.100.123' (15 文字) を左から N。
-      const sample = '192.168.100.123'
-      if (variant === 'compact') return sample.padEnd(4, ' ').slice(0, 4)
-      if (variant === 'wide')    return sample.padEnd(16, ' ').slice(0, 16)
-      return sample.padEnd(8, ' ').slice(0, 8)
+      // 同 LAN は 192.168.x や 10.0.x のように前半オクテットが基本被るため、
+      // **右から N 文字** で切出すと重要部分 (末尾 1-2 オクテット) を残せる。
+      // compact=4 (".147"), standard=9 ("168.0.147"), wide=13 (フル "192.168.0.147")
+      const sample = '192.168.0.147'
+      const pickRight = (n: number) => sample.length >= n
+        ? sample.slice(-n)
+        : sample.padStart(n, ' ')
+      if (variant === 'compact') return pickRight(4)
+      if (variant === 'wide')    return pickRight(13)
+      return pickRight(9)
     }
     case 'firmware_version':  return 'v0.1.0'                                     // 6文字 (semver)
     case 'device_name':       return 'Duo-1'                                   // 6文字
@@ -94,7 +99,7 @@ export function getElementDescription(type: DisplayElementType): string {
     case 'wifi_status':       return 'W:dBm'
     case 'wifi_ssid':         return 'SSID 左 N 文字'
     case 'connection_status': return '[OK]app'
-    case 'ip_address':        return 'IP 左 N 文字'
+    case 'ip_address':        return 'IP 右 N 文字'
     case 'firmware_version':  return 'FW ver'
     case 'device_name':       return 'Name'
     case 'app_name':          return 'App名'

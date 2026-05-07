@@ -198,8 +198,8 @@ export const ELEMENT_FIXED_SIZES: Record<DisplayElementType, [number, number]> =
   wifi_status: [5, 1],       // "W:---"     5文字 (standard), compact 同
   wifi_ssid: [8, 1],         // "MySSID__"  標準 8文字 (compact=4, wide=16)
   connection_status: [4, 1], // "[--]"      4文字 (compact), standard "[OK]App_" 8文字
-  ip_address: [8, 1],        // "168.100." 標準 8文字 (compact=4, wide=16)。
-                             // 表示は full IP の左 N 文字を切り出し
+  ip_address: [9, 1],        // "168.0.147" 標準 9文字 (compact=4, wide=13)。
+                             // 同 LAN は前半オクテットが被るため右から N 文字切出し
   firmware_version: [6, 1],  // "v2.0.42"  最大6文字 (semver "x.y.zz" 想定)
   device_name: [6, 1],       // "DuoWL2"    6文字, compact 3文字
   app_name: [8, 1],          // "MyApp__"   標準 8文字 (compact=4, wide=16)
@@ -232,12 +232,18 @@ export function getElementSize(type: DisplayElementType, variant?: string): [num
     if (variant === 'wide') return [16, 1]
     return [8, 1]
   }
-  if (type === 'wifi_ssid' || type === 'ip_address') {
-    // 同じ 4/8/16 のサイズ展開。SSID は左から N 文字 / IP も左から N 文字。
-    // (firmware 側 renderer も同じ rule で合わせる)
+  if (type === 'wifi_ssid') {
+    // SSID は左から N 文字。4/8/16 の 3 サイズ展開。
     if (variant === 'compact') return [4, 1]
     if (variant === 'wide') return [16, 1]
     return [8, 1]
+  }
+  if (type === 'ip_address') {
+    // IP は右から N 文字 (同 LAN は前半オクテットが被るので右側ほど重要)。
+    // compact=4 (".147"), standard=9 ("168.0.147"), wide=13 (フル IP).
+    if (variant === 'compact') return [4, 1]
+    if (variant === 'wide') return [13, 1]
+    return [9, 1]
   }
   if (type === 'position') {
     // pos_xxx 名を表示。標準=8 (e.g. "pos:neck"), compact=4 (名前のみ),

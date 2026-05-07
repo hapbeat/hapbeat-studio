@@ -82,7 +82,7 @@ const PALETTE_SECTIONS: PaletteSection[] = [
     items: [
       { type: 'wifi_status', label: 'Wi-Fi Signal', description: 'RSSI',           icon: '◎' },
       { type: 'wifi_ssid',   label: 'Wi-Fi SSID',   description: 'SSID 左 N 文字', icon: '○', variants: sizeVariants },
-      { type: 'ip_address',  label: 'IP Address',   description: 'IP 左 N 文字',   icon: '⌖', variants: sizeVariants },
+      { type: 'ip_address',  label: 'IP Address',   description: 'IP 右 N 文字 (末尾オクテット重視)', icon: '⌖', variants: sizeVariants },
     ],
   },
   {
@@ -168,7 +168,7 @@ export function ElementPalette({ selectedType, onSelectType, usedTypes }: Elemen
           OLED 上をクリック or パレットからドラッグ
         </div>
         <div className="palette-hint palette-hint-secondary">
-          サイズ <code className="palette-hint-key">S</code>/<code className="palette-hint-key">M</code>/<code className="palette-hint-key">L</code> = 4 / 8 / 16 文字幅
+          サイズ <code className="palette-hint-key">S</code>/<code className="palette-hint-key">M</code>/<code className="palette-hint-key">L</code> = 短 / 中 / 長 (要素により幅は異なる、ボタンに hover で確認)
         </div>
       </div>
       {PALETTE_SECTIONS.map((sec) => (
