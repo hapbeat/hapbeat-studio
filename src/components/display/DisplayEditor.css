@@ -514,6 +514,16 @@ button.btn-deploy:disabled {
   color: #d0e0ff;
 }
 
+/* font_scale=2 (倍角描画) — 横 2x 高 2x。OLED 上では 1 文字 = 16x32px に
+   なるが、シミュレータでは見た目の倍率感を出すため文字を ~44px に拡大。 */
+.grid-element-2x .grid-element-chars .char-text {
+  font-size: 44px;
+}
+.grid-element-2x .grid-element-name {
+  /* 倍角中はヘッダー名を控えめに (場所が狭くなるため) */
+  font-size: 9px;
+}
+
 /* 削除ボタン */
 .grid-element-delete {
   position: absolute; top: 0; right: 0;
@@ -527,6 +537,32 @@ button.btn-deploy:disabled {
 }
 .grid-element:hover .grid-element-delete { opacity: 1; }
 .grid-element-delete:hover { background: rgba(244, 67, 54, 1); transform: scale(1.1); }
+
+/* font_scale (1x / 2x) トグル — 削除ボタンの左隣 */
+.grid-element-scale {
+  position: absolute; top: 0; right: 18px;
+  height: 18px;
+  min-width: 22px;
+  padding: 0 3px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(124, 92, 191, 0.7);
+  border: none;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s, background 0.1s;
+  z-index: 15;
+  line-height: 1;
+}
+.grid-element:hover .grid-element-scale { opacity: 1; }
+.grid-element-scale:hover { background: rgba(124, 92, 191, 1); }
+.grid-element-scale.active {
+  background: var(--accent);
+  opacity: 1;  /* 2x のときは常時表示 (現在の状態が分かるように) */
+}
 
 /* ========================================
    Drag Preview Shadow (ドラッグ中 — 配置先プレビュー)
