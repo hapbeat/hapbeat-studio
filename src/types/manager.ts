@@ -75,6 +75,7 @@ export interface ManagerToStudioMessage {
   type:
     | 'device_list'
     | 'write_result'
+    | 'write_progress'
     | 'deploy_result'
     | 'stream_ack'
     | 'space_result'

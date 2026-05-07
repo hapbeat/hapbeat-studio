@@ -656,6 +656,14 @@ export function DisplayEditor() {
   const { isConnected: managerConnected, lastMessage, send: managerSend } = useHelperConnection()
   const { toast, setAnchor: setToastAnchor } = useToast()
   const [isDeploying, setIsDeploying] = useState(false)
+  // Per-target deploy progress sourced from Helper's `write_progress` push.
+  // null = aggregate state collapsed (no active deploy or finished long enough ago).
+  // 単一ターゲット時はインデターミネートバー、複数時は IP ごとに状態行を表示。
+  type DeployTargetState = { phase: 'sending' | 'done' | 'failed'; message?: string }
+  const [deployProgress, setDeployProgress] = useState<{
+    total: number
+    targets: Record<string, DeployTargetState>
+  } | null>(null)
   // Serial-only selection → deploy button disabled (write_ui_config is
   // TCP-only; Serial path is not implemented in firmware serial_config.cpp)
   const selectedIps = useDeviceStore((s) => s.selectedIps)
@@ -672,10 +680,28 @@ export function DisplayEditor() {
   // ここでは Display 専用の "書き込みました" / "選択なし" 系に絞る。
   useEffect(() => {
     if (!lastMessage) return
+    // ----- Per-target progress (write_progress) -----
+    if (lastMessage.type === 'write_progress') {
+      const cmd = lastMessage.payload?.cmd
+      if (cmd !== 'write_ui_config') return
+      const ip = lastMessage.payload.ip as string
+      const total = (lastMessage.payload.total as number) ?? 1
+      const phase = lastMessage.payload.phase as DeployTargetState['phase']
+      const message = lastMessage.payload.message as string | undefined
+      setDeployProgress((prev) => {
+        const targets = { ...(prev?.targets ?? {}), [ip]: { phase, message } }
+        return { total, targets }
+      })
+      return
+    }
+    // ----- Final result (write_result) -----
     if (lastMessage.type !== 'write_result') return
     const cmd = lastMessage.payload?.cmd
     if (cmd !== 'write_ui_config') return
     setIsDeploying(false)
+    // 成否確定後、進捗 UI を 1.5s 残してから消す (ユーザーに最終状態を見せる)。
+    const fadeOut = window.setTimeout(() => setDeployProgress(null), 1500)
+    void fadeOut
     const success = lastMessage.payload.success as boolean
     const deviceConfirmed = lastMessage.payload.device_confirmed as boolean | undefined
     const reason = (lastMessage.payload.error ?? lastMessage.payload.message ?? '') as string
@@ -729,6 +755,13 @@ export function DisplayEditor() {
       return
     }
     setIsDeploying(true)
+    // Pre-seed progress so the UI shows immediately ("sending" for each
+    // target). Helper's per-target `write_progress` will overwrite the
+    // phase as each one completes.
+    setDeployProgress({
+      total: targets.length,
+      targets: Object.fromEntries(targets.map((ip) => [ip, { phase: 'sending' }])),
+    })
     const uiConfig = toFirmwareFormat(buildSavedState())
     // Helper's `_resolve_targets` looks for `payload.targets` (array)
     // before falling back to `payload.ip` (single) and finally a
@@ -938,6 +971,12 @@ export function DisplayEditor() {
           style={{ display: 'none' }}
           onChange={handleImport}
         />
+        {deployProgress && (
+          <DeployProgressBar
+            total={deployProgress.total}
+            targets={deployProgress.targets}
+          />
+        )}
       </div>
 
       {/* トースト警告 */}
@@ -1443,6 +1482,61 @@ function InlineButtonConfig({ action, allItems, actionGroups, holdGroups, btnId,
           </div>
         )
       })}
+    </div>
+  )
+}
+
+// ========================================
+// DeployProgressBar — write_progress 受信に追従する per-target 進捗 UI
+// ========================================
+//
+// - 1 ターゲット: インデターミネートな (流れる) バーで「動いている」感を表示
+// - 多ターゲット: IP ごとに status icon + (任意) 1 行メッセージ
+// - 完了: write_result 受信から ~1.5s で fade-out (DisplayEditor 側 setTimeout)
+
+interface DeployProgressBarProps {
+  total: number
+  targets: Record<string, { phase: 'sending' | 'done' | 'failed'; message?: string }>
+}
+
+function DeployProgressBar({ total, targets }: DeployProgressBarProps) {
+  const entries = Object.entries(targets)
+  const doneCount = entries.filter(([, s]) => s.phase !== 'sending').length
+  const okCount = entries.filter(([, s]) => s.phase === 'done').length
+  const failCount = entries.filter(([, s]) => s.phase === 'failed').length
+  const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0
+  const allDone = doneCount === total && total > 0
+  const headLabel = allDone
+    ? `完了 ${okCount}/${total}${failCount > 0 ? ` (失敗 ${failCount})` : ''}`
+    : `書込中 ${doneCount}/${total}`
+
+  // 1 ターゲットのときは細かい行 UI を出さず、indeterminate バーだけで十分。
+  const single = total === 1
+
+  return (
+    <div className="deploy-progress" role="status" aria-live="polite">
+      <div className="deploy-progress-header">
+        <span className="deploy-progress-label">{headLabel}</span>
+      </div>
+      <div className={`deploy-progress-bar ${single && !allDone ? 'indeterminate' : ''}`}>
+        <div
+          className={`deploy-progress-fill ${failCount > 0 && allDone ? 'has-fail' : ''}`}
+          style={{ width: single && !allDone ? '100%' : `${pct}%` }}
+        />
+      </div>
+      {!single && (
+        <ul className="deploy-progress-list">
+          {entries.map(([ip, s]) => (
+            <li key={ip} className={`deploy-progress-row deploy-progress-row--${s.phase}`}>
+              <span className="deploy-progress-icon" aria-hidden="true">
+                {s.phase === 'sending' ? '…' : s.phase === 'done' ? '✓' : '✗'}
+              </span>
+              <span className="deploy-progress-ip">{ip}</span>
+              {s.message && <span className="deploy-progress-msg">{s.message}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }
