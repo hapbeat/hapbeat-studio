@@ -235,18 +235,34 @@ const STORAGE_KEY = 'hapbeat-studio-display'
 interface SavedState {
   layout: DisplayLayout
   deviceModel: DeviceModel
-  orientation: DisplayOrientation
+  /** デバイスモデル別の回転状態 (Duo / Band 個別に保持)。 */
+  orientationByModel: Record<DeviceModel, DisplayOrientation>
   perButtonActions: PerButtonActions
   simState: SimState
   ledConfig: LedConfig
   volumeConfig: VolumeConfig
 }
 
+/**
+ * 旧フォーマット (single `orientation` field) からのマイグレーション
+ * を含む読み込み。リリース前のローカル開発状態を捨てたくないので
+ * 一度だけ変換する小さな migration を入れる。
+ */
 function loadSaved(): SavedState | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return null
-    return JSON.parse(raw) as SavedState
+    const data = JSON.parse(raw) as Partial<SavedState> & {
+      orientation?: DisplayOrientation
+    }
+    if (!data.orientationByModel) {
+      const old: DisplayOrientation = data.orientation ?? 'normal'
+      const model: DeviceModel = data.deviceModel ?? 'duo_wl'
+      data.orientationByModel = { duo_wl: 'normal', band_wl: 'normal' }
+      data.orientationByModel[model] = old
+      delete data.orientation
+    }
+    return data as SavedState
   } catch { return null }
 }
 
@@ -267,7 +283,13 @@ export function DisplayEditor() {
   const [layout, setLayout] = useState<DisplayLayout>(saved?.layout ?? structuredClone(standardTemplate.layout))
   const [activePageIndex, setActivePageIndex] = useState(0)
   const [deviceModel, setDeviceModel] = useState<DeviceModel>(saved?.deviceModel ?? 'duo_wl')
-  const [orientation, setOrientation] = useState<DisplayOrientation>(saved?.orientation ?? 'normal')
+  // 回転状態は Duo / Band 個別に保持。エディタ上のモデル切替で
+  // 各デバイスの最後の向き設定が復元される。
+  const [orientationByModel, setOrientationByModel] = useState<
+    Record<DeviceModel, DisplayOrientation>
+  >(saved?.orientationByModel ?? { duo_wl: 'normal', band_wl: 'normal' })
+  // 表示用 (現アクティブモデルの orientation を派生)。
+  const orientation: DisplayOrientation = orientationByModel[deviceModel]
   const [perButtonActions, setPerButtonActions] = useState<PerButtonActions>(
     saved?.perButtonActions ?? createDefaultPerButtonActions(DEVICE_SPECS['duo_wl'])
   )
@@ -288,10 +310,10 @@ export function DisplayEditor() {
 
   // 自動保存: 状態変更のたびに localStorage + sessionStorage + IndexedDB に保存
   useEffect(() => {
-    const state: DisplaySavedState = { layout, deviceModel, orientation, perButtonActions, simState, ledConfig, volumeConfig }
+    const state: DisplaySavedState = { layout, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig }
     saveTo(state)
     saveDisplayToIDB(state)
-  }, [layout, deviceModel, orientation, perButtonActions, simState, ledConfig, volumeConfig])
+  }, [layout, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig])
 
   const oledRef = useRef<HTMLDivElement>(null)
   const deviceSpec = DEVICE_SPECS[deviceModel]
@@ -646,8 +668,8 @@ export function DisplayEditor() {
   // --- エクスポート / インポート / デバイス書き込み ---
 
   const buildSavedState = useCallback((): DisplaySavedState => ({
-    layout, deviceModel, orientation, perButtonActions, simState, ledConfig, volumeConfig,
-  }), [layout, deviceModel, orientation, perButtonActions, simState, ledConfig, volumeConfig])
+    layout, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig,
+  }), [layout, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig])
 
   const handleDeploy = useCallback(() => {
     if (!managerConnected) {
@@ -709,7 +731,13 @@ export function DisplayEditor() {
       const imported = await importDisplayLayout(file)
       if (imported.layout) setLayout(imported.layout)
       if (imported.deviceModel) setDeviceModel(imported.deviceModel)
-      if (imported.orientation) setOrientation(imported.orientation)
+      // Import 由来は **その deviceModel の orientation のみ** を上書きし、
+      // もう一方のモデルの設定は触らない (= ユーザーが両モデル別個に
+      // 編集していた状態を保護)。fromFirmwareFormat がこの shape で返す
+      // 前提なので、merge 戦略のみ使う。
+      if (imported.orientationByModel) {
+        setOrientationByModel((prev) => ({ ...prev, ...imported.orientationByModel }))
+      }
       if (imported.perButtonActions) setPerButtonActions(imported.perButtonActions)
       if (imported.ledConfig) setLedConfig(imported.ledConfig)
       if (imported.volumeConfig) setVolumeConfig(imported.volumeConfig)
@@ -866,7 +894,10 @@ export function DisplayEditor() {
           onDeletePage={handleDeletePage}
           onDeviceModelChange={handleDeviceModelChange}
           onApplyTemplate={handleApplyTemplate}
-          onToggleOrientation={() => setOrientation(isFlipped ? 'normal' : 'flipped')}
+          onToggleOrientation={() => setOrientationByModel((prev) => ({
+            ...prev,
+            [deviceModel]: prev[deviceModel] === 'flipped' ? 'normal' : 'flipped',
+          }))}
           onExport={handleExport}
           onImport={() => fileInputRef.current?.click()}
           onDeploy={handleDeploy}

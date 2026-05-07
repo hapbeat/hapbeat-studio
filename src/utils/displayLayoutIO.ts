@@ -92,7 +92,16 @@ export interface FirmwareUiConfig {
 export interface DisplaySavedState {
   layout: DisplayLayout
   deviceModel: DeviceModel
-  orientation: DisplayOrientation
+  /**
+   * 回転状態は **デバイスモデル別** に保持する。Duo と Band で物理的な
+   * 装着向きが異なる (Duo は首掛け、Band は手首) ため、エディタ上で
+   * モデルを切り替えたときに前回設定した向きを思い出してほしい。
+   *
+   * Firmware への deploy 時は `orientationByModel[deviceModel]` を
+   * 単一の `orientation` として書き出す (firmware は 1 機種 1 設定の
+   * ためモデル別の概念は不要)。
+   */
+  orientationByModel: Record<DeviceModel, DisplayOrientation>
   perButtonActions: PerButtonActions
   simState: SimState
   ledConfig: LedConfig
@@ -102,7 +111,9 @@ export interface DisplaySavedState {
 // ---- 変換: Studio → Firmware ------------------------------------------------
 
 export function toFirmwareFormat(state: DisplaySavedState): FirmwareUiConfig {
-  const { layout, deviceModel, orientation, perButtonActions, ledConfig, volumeConfig } = state
+  const { layout, deviceModel, orientationByModel, perButtonActions, ledConfig, volumeConfig } = state
+  // Firmware は単一 orientation を期待する。deploy 対象 model のものだけを書き出す。
+  const orientation: DisplayOrientation = orientationByModel[deviceModel] ?? 'normal'
 
   const pages: FirmwarePage[] = layout.pages.map((page, idx) => ({
     id: `page_${idx}`,
@@ -244,10 +255,21 @@ export function fromFirmwareFormat(fw: FirmwareUiConfig): Partial<DisplaySavedSt
     default_level: fw.volume.default_level,
   } : { ...DEFAULT_VOLUME_CONFIG }
 
+  // Firmware は 1 デバイスにつき 1 orientation しか持たない。import した
+  // モデルだけにその orientation を設定し、もう一方のモデルは normal で
+  // 初期化する (Studio 側で merge される)。
+  const importedModel: DeviceModel = (display.device_model as DeviceModel) ?? 'duo_wl'
+  const importedOrientation: DisplayOrientation = display.orientation ?? 'normal'
+  const orientationByModel: Record<DeviceModel, DisplayOrientation> = {
+    duo_wl: 'normal',
+    band_wl: 'normal',
+  }
+  orientationByModel[importedModel] = importedOrientation
+
   return {
     layout,
-    deviceModel: (display.device_model as DeviceModel) ?? 'duo_wl',
-    orientation: display.orientation ?? 'normal',
+    deviceModel: importedModel,
+    orientationByModel,
     perButtonActions,
     ledConfig,
     volumeConfig,
