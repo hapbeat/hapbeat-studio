@@ -73,7 +73,7 @@ const PALETTE_SECTIONS: PaletteSection[] = [
       { type: 'device_name', label: 'Device Name', description: 'ホスト名',   icon: 'D' },
       { type: 'address',     label: 'Address',     description: 'prefix',     icon: 'A', variants: sizeVariants },
       { type: 'app_name',    label: 'AppName',     description: '接続アプリ名', icon: 'A', variants: sizeVariants },
-      { type: 'position',    label: 'Position',    description: '装着位置',     icon: '⬦' },
+      { type: 'position',    label: 'Position',    description: '装着位置 (pos_xxx)', icon: '⬦', variants: sizeVariants },
     ],
   },
   {

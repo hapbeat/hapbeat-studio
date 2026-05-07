@@ -204,7 +204,8 @@ export const ELEMENT_FIXED_SIZES: Record<DisplayElementType, [number, number]> =
   device_name: [6, 1],       // "DuoWL2"    6文字, compact 3文字
   app_name: [8, 1],          // "MyApp__"   標準 8文字 (compact=4, wide=16)
   player_number: [4, 1],     // "P:01"      4文字
-  position: [7, 1],          // "Pos:001"   7文字
+  position: [8, 1],          // "pos:neck"  標準 8文字 (compact=4, wide=16)。
+                             // 数値ではなく NVS の pos_xxx 名を表示
   page_indicator: [3, 1],    // "1/2"       3文字
   group_id: [4, 1],          // "Gr:1"      4文字
   address: [8, 1],           // "prefix__"  標準 8文字 (compact=4, wide=16)。
@@ -234,6 +235,13 @@ export function getElementSize(type: DisplayElementType, variant?: string): [num
   if (type === 'wifi_ssid' || type === 'ip_address') {
     // 同じ 4/8/16 のサイズ展開。SSID は左から N 文字 / IP も左から N 文字。
     // (firmware 側 renderer も同じ rule で合わせる)
+    if (variant === 'compact') return [4, 1]
+    if (variant === 'wide') return [16, 1]
+    return [8, 1]
+  }
+  if (type === 'position') {
+    // pos_xxx 名を表示。標準=8 (e.g. "pos:neck"), compact=4 (名前のみ),
+    // wide=16 (フル prefix 付き)。
     if (variant === 'compact') return [4, 1]
     if (variant === 'wide') return [16, 1]
     return [8, 1]

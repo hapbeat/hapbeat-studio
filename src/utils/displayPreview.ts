@@ -51,22 +51,33 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
       if (variant === 'wide')    return sample.padEnd(16, ' ').slice(0, 16)
       return sample.padEnd(8, ' ').slice(0, 8)
     }
-    case 'firmware_version':  return 'v2.0.0'                                     // 6文字 (semver)
-    case 'device_name':       return 'DuoWL2'                                   // 6文字
+    case 'firmware_version':  return 'v0.1.0'                                     // 6文字 (semver)
+    case 'device_name':       return 'Duo-1'                                   // 6文字
     case 'app_name':
       // CONNECT_STATUS payload の app_name (Unity SDK 等が送信)。
       // variant でプレビュー文字数を切替: compact=4 / standard=8 / wide=16
-      if (variant === 'compact') return 'MyAp'                                   // 4文字
-      if (variant === 'wide')    return 'MyHapbeatApp_v01'                       // 16文字
-      return 'MyApp   '                                                          // 8文字
+      if (variant === 'compact') return 'N.C.'                                   // 4文字
+      if (variant === 'wide')    return 'App: unconnected'                       // 16文字
+      return 'App N.C.'                                                          // 8文字
     case 'player_number':     return `P:${String(s.player).padStart(2, '0')}`    // 4文字
-    case 'position':          return `Pos:${String(s.position).padStart(3, '0')}` // 7文字
+    case 'position': {
+      // NVS の `pos_xxx` 名を表示 (数値ではない)。サンプル `pos_l_wrist` を
+      // 4/8/16 variant に成形する。
+      //   compact (4) = name 部のみ truncate (e.g. 'l_wr')
+      //   standard (8) = `pos:` + name 4 字 (e.g. 'pos:l_wr')
+      //   wide (16)    = `pos: ` + full name pad (e.g. 'pos: l_wrist    ')
+      const sample = 'pos_l_wrist'
+      const name = sample.startsWith('pos_') ? sample.slice(4) : sample
+      if (variant === 'compact') return name.padEnd(4, ' ').slice(0, 4)
+      if (variant === 'wide')    return `pos: ${name}`.padEnd(16, ' ').slice(0, 16)
+      return `pos:${name}`.padEnd(8, ' ').slice(0, 8)
+    }
     case 'page_indicator':    return '1/2'                                       // 3文字
     case 'group_id':          return `Gr:${s.group}`                             // 4文字
     case 'address': {
       // address は player_ より前の prefix 部分のみ表示。
       // variant でプレビュー文字数を切替: compact=4 / standard=8 / wide=16
-      const sample = 'MyHapbeatGroup'
+      const sample = 'red/alpha/delta'
       if (variant === 'compact') return sample.padEnd(4, ' ').slice(0, 4)
       if (variant === 'wide')    return sample.padEnd(16, ' ').slice(0, 16)
       return sample.padEnd(8, ' ').slice(0, 8)
@@ -89,7 +100,7 @@ export function getElementDescription(type: DisplayElementType): string {
     case 'app_name':          return 'App名'
     case 'address':           return 'prefix'
     case 'player_number':     return 'P:XX'
-    case 'position':          return 'Pos:XXX'
+    case 'position':          return 'pos:xxx'
     case 'page_indicator':    return 'N/N'
     case 'group_id':          return 'Gr:X'
   }
