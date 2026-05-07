@@ -125,9 +125,17 @@ interface DeviceState {
   clearCachesFor: (ip: string) => void
 }
 
+// Serial pseudo-device entries (`serial:<mac>`) are inherently bound to
+// the *current* USB connection and don't survive a Studio reload —
+// reusing a stale `serial:` IP after the cable is gone produces ghost
+// "N 台選択" counts and noisy "Serial をスキップ" toasts on deploy.
+// Filter them at hydration so persisted state only carries LAN IPs.
+const isSerialId = (s: string): boolean => s.startsWith('serial:')
+
 const initialSelected = (() => {
   try {
-    return localStorage.getItem(STORAGE_KEY_SELECTED) || null
+    const v = localStorage.getItem(STORAGE_KEY_SELECTED)
+    return v && !isSerialId(v) ? v : null
   } catch {
     return null
   }
@@ -145,7 +153,7 @@ const readJsonArray = (key: string): string[] => {
 }
 
 const initialSelectedIps = (() => {
-  const arr = readJsonArray(STORAGE_KEY_SELECTED_SET)
+  const arr = readJsonArray(STORAGE_KEY_SELECTED_SET).filter((s) => !isSerialId(s))
   // Backward compat: if a legacy single `selectedIp` exists but the
   // multi-select array doesn't, promote it.
   if (arr.length === 0 && initialSelected) return [initialSelected]

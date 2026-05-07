@@ -721,15 +721,12 @@ export function DisplayEditor() {
     // `serial_config.cpp` does not yet implement `write_ui_config`,
     // so a Serial pseudo-device target would just fail at
     // `_send_tcp_to_many` with `connect failed`. Strip serial: IPs
-    // and warn the user. (2026-04-30)
+    // silently — Serial-only selection (= LAN ターゲットなし) のときだけ
+    // 案内を出す。普段は黙って LAN ターゲットだけ使う。
     const targets = rawTargets.filter((ip) => !ip.startsWith('serial:'))
-    const droppedSerial = rawTargets.length - targets.length
     if (targets.length === 0) {
       toast('Serial 接続では Display 書込みは未対応 — Wi-Fi に乗せてから再試行してください', 'error')
       return
-    }
-    if (droppedSerial > 0) {
-      toast(`Serial デバイス ${droppedSerial} 台はスキップ — LAN ${targets.length} 台に書き込みます`, 'success')
     }
     setIsDeploying(true)
     const uiConfig = toFirmwareFormat(buildSavedState())
