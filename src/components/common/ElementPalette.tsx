@@ -202,6 +202,12 @@ export function ElementPalette({ selectedType, onSelectType, usedTypes }: Elemen
                 setVariantByType((prev) => ({ ...prev, [item.type]: v }))
               }
 
+              // variant の有無に関わらず必ず数字ボタンを 1 つ以上表示
+              // (非 variant 要素は 1 個固定サイズボタンを always-active で表示)。
+              const sizeButtons = item.variants
+                ? item.variants
+                : [{ value: '_fixed_', label: String(size[0]) }]
+
               return (
                 <button
                   key={key}
@@ -217,38 +223,42 @@ export function ElementPalette({ selectedType, onSelectType, usedTypes }: Elemen
                     setCurrentDragType(item.type)
                     setCurrentDragVariant(effectiveVariant)
                   }}
+                  title={item.description}
                 >
-                  <span className="palette-icon">{item.icon}</span>
                   <div className="palette-info">
-                    <span className="palette-label">
-                      {item.label} <span className="palette-size">[{size[0]}x{size[1]}]</span>
-                    </span>
+                    <div className="palette-row-1">
+                      <span className="palette-label">{item.label}</span>
+                      <div
+                        className="palette-variant-picker"
+                        // 親 button の onClick / onMouseDown を発火させない
+                        onClick={(e) => e.stopPropagation()}
+                        onMouseDown={(e) => e.stopPropagation()}
+                      >
+                        {sizeButtons.map((v) => {
+                          const w = item.variants
+                            ? getElementSize(item.type, v.value === 'standard' ? undefined : v.value)[0]
+                            : size[0]
+                          // variant 無し → 単一ボタンで常時 active 風
+                          const isActive = item.variants
+                            ? selectedVariant === v.value
+                            : true
+                          return (
+                            <button
+                              key={v.value}
+                              type="button"
+                              className={`palette-variant-btn ${isActive ? 'active' : ''}`}
+                              onClick={() => item.variants && onPickVariant(v.value)}
+                              disabled={!item.variants}
+                              title={item.variants ? `${v.label} = ${w} 文字` : `${w} 文字 (固定)`}
+                            >
+                              {w}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
                     <span className="palette-desc">{item.description}</span>
                   </div>
-                  {item.variants && (
-                    <div
-                      className="palette-variant-picker"
-                      // 親 button の onClick / onMouseDown を発火させない
-                      onClick={(e) => e.stopPropagation()}
-                      onMouseDown={(e) => e.stopPropagation()}
-                    >
-                      {item.variants.map((v) => {
-                        const w = getElementSize(item.type, v.value === 'standard' ? undefined : v.value)[0]
-                        return (
-                          <button
-                            key={v.value}
-                            type="button"
-                            className={`palette-variant-btn ${selectedVariant === v.value ? 'active' : ''}`}
-                            onClick={() => onPickVariant(v.value)}
-                            title={`${v.label} = ${w} 文字`}
-                          >
-                            {w}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-                  {isUsed && <span className="palette-used-badge" title="使用中">✓</span>}
                 </button>
               )
             })}

@@ -62,18 +62,17 @@
   color: var(--text-secondary);
 }
 
-/* variant picker (S/M/L) — カード右側に詰める */
+/* variant picker (数字ボタン群) — 1 段目右端、コンパクト */
 .palette-variant-picker {
   display: flex;
   gap: 2px;
-  margin-left: auto;
   flex-shrink: 0;
 }
 .palette-variant-btn {
-  min-width: 24px;
-  height: 22px;
-  padding: 0 4px;
-  font-size: 12px;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 3px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-secondary);
   background: var(--bg-primary);
@@ -81,8 +80,9 @@
   border-radius: 3px;
   cursor: pointer;
   font-family: var(--font-mono);
+  line-height: 1;
 }
-.palette-variant-btn:hover {
+.palette-variant-btn:hover:not(:disabled) {
   color: var(--text-primary);
   background: var(--bg-hover);
 }
@@ -91,7 +91,11 @@
   background: var(--accent-dim);
   border-color: var(--accent);
 }
-.palette-item.used .palette-variant-picker { opacity: 0.4; pointer-events: none; }
+/* 非 variant 要素の単一固定ボタン: クリック不能 + active 表示 */
+.palette-variant-btn:disabled {
+  cursor: default;
+}
+.palette-item.used .palette-variant-picker { opacity: 0.5; pointer-events: none; }
 
 /* コンパクトグリッド: 最小165pxで自動列数増加 (AppName [16x1] が収まる幅) */
 .palette-grid {
@@ -102,9 +106,8 @@
 
 .palette-item {
   display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 7px;
+  align-items: stretch;
+  padding: 5px 8px;
   /* 常時うっすら背景 + 枠でカードらしく見せる (hover 前から判別可能に) */
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -127,28 +130,36 @@
   box-shadow: 0 0 0 1px var(--accent-dim);
 }
 
+/* 使用中 (already placed) — チェックバッジは廃止し、背景色 + 文字色のみで示す。
+   全体を accent 寄りの薄色で「すでに使われている」感を出す。 */
 .palette-item.used {
-  opacity: 0.45;
+  background: rgba(124, 92, 191, 0.22);
+  border-color: var(--accent-dim);
   cursor: default;
+  opacity: 0.7;
 }
-
-.palette-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  background: var(--bg-surface);
-  border-radius: var(--radius);
-  font-size: 14px;
-  flex-shrink: 0;
-  font-family: var(--font-mono);
+.palette-item.used .palette-label,
+.palette-item.used .palette-desc {
+  color: var(--text-secondary);
 }
 
 .palette-info {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+/* 1 段目: ラベル (左) + サイズボタン群 (右) */
+.palette-row-1 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+}
+.palette-row-1 .palette-label {
+  flex: 1;
   min-width: 0;
 }
 
@@ -160,14 +171,6 @@
   text-overflow: ellipsis;
 }
 
-.palette-size {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--text-muted);
-  margin-left: 2px;
-}
-
 .palette-desc {
   font-size: 13px;
   color: var(--text-secondary);
@@ -176,28 +179,3 @@
   text-overflow: ellipsis;
   font-family: var(--font-mono);
 }
-
-.palette-used-badge {
-  position: absolute;
-  top: 50%;
-  left: 6px;
-  transform: translateY(-50%);
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-primary);
-  background: var(--accent);
-  border-radius: var(--radius);
-  pointer-events: none;
-  line-height: 1;
-}
-
-.palette-item.used .palette-icon { visibility: hidden; }
-
-.palette-item.used .palette-info { opacity: 0.6; }
-.palette-item.used .palette-icon { opacity: 0.6; }
-.palette-item.used { opacity: 1; }
