@@ -28,6 +28,7 @@ import {
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useToast } from '@/components/common/Toast'
+import { useConfirm } from '@/components/common/useConfirm'
 import { LedConfigModal } from './LedConfigModal'
 import { VolumeConfigModal } from './VolumeConfigModal'
 import { DevicePill } from '@/components/devices/DevicePill'
@@ -301,6 +302,11 @@ export function DisplayEditor() {
   const [volumeModalOpen, setVolumeModalOpen] = useState(false)
   const [dropHint, setDropHint] = useState<{ msg: string; x: number; y: number } | null>(null)
   const [externalDragType, setExternalDragType] = useState<DisplayElementType | null>(null)
+
+  // 共通 confirm ダイアログ (window.confirm 置換)。
+  // handleResetToDefault などのハンドラから先に参照されるため、
+  // 他の hook より前に取得する。
+  const { ask: askConfirm, dialog: confirmDialog } = useConfirm()
 
   // パレットからのドラッグ通知を受け取る
   useEffect(() => {
@@ -619,15 +625,20 @@ export function DisplayEditor() {
 
   /** 工場出荷状態に戻す: standardTemplate を全置換で適用。
    *  ページ追加で個別に組み立てる UX とは別の「リセット導線」。 */
-  const handleResetToDefault = useCallback(() => {
-    if (!window.confirm(
-      '初期レイアウトに戻します。\n' +
-      '現在のページ・ボタン設定はすべて置き換えられます。続行しますか？'
-    )) return
+  const handleResetToDefault = useCallback(async () => {
+    const ok = await askConfirm({
+      title: '初期レイアウトに戻す',
+      message:
+        '現在のページ・ボタン設定はすべて初期レイアウトに置き換えられます。\n続行しますか？',
+      confirmLabel: '初期化する',
+      cancelLabel: 'キャンセル',
+      danger: true,
+    })
+    if (!ok) return
     setLayout(structuredClone(standardTemplate.layout))
     setActivePageIndex(0)
     setPopupPos(null)
-  }, [])
+  }, [askConfirm])
 
   const handleInsertPagePreset = useCallback((presetIndex: number) => {
     const preset = pagePresets[presetIndex]
@@ -959,6 +970,9 @@ export function DisplayEditor() {
           onClose={() => setVolumeModalOpen(false)}
         />
       )}
+
+      {/* 共通 confirm ダイアログ (window.confirm 置換) */}
+      {confirmDialog}
     </div>
   )
 }
