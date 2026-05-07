@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useLogStore } from '@/stores/logStore'
 import { useDeviceStore } from '@/stores/deviceStore'
@@ -160,6 +160,11 @@ export function FirmwareSubTab({
   const [progress, setProgress] = useState<OtaProgress | null>(null)
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
+  // OTA stuck-detection — 進捗が途絶えたら 3 秒で警告を出す。
+  // (deploy 中に WiFi が切れたケース等で 'ぐるぐる回ったまま無反応'
+  //  になるのを早期に教える)
+  const [otaStuck, setOtaStuck] = useState(false)
+  const lastOtaProgressAtRef = useRef<number>(0)
 
   // USB Serial state lives in the SerialMaster so the wizard, the
   // per-device 設定 sub-tab, and any future entry point all see the
@@ -398,8 +403,11 @@ export function FirmwareSubTab({
         percent: Number(p.percent ?? 0),
         message: String(p.message ?? ''),
       })
+      lastOtaProgressAtRef.current = Date.now()
+      if (otaStuck) setOtaStuck(false)
     } else if (t === 'ota_result' && typeof p.device === 'string') {
       setRunning(false)
+      setOtaStuck(false)
       const ok = p.success === true
       setResult({ ok, message: String(p.message ?? '') })
       setTimeout(() => setProgress(null), 3000)
@@ -455,7 +463,23 @@ export function FirmwareSubTab({
       setExpectedFwVersion(null)
     }
   }, [lastMessage, expectedFwVersion, device, sendTo, pushLog,
-      source, libSelected, invalidateBoard, setLastFlashedBoard])
+      source, libSelected, invalidateBoard, setLastFlashedBoard, otaStuck])
+
+  // OTA 進捗が 3 秒以上途絶えたら 'stuck' フラグを立てて警告表示。
+  // running = true の間だけ走らせる。 ota_progress / ota_result が来たら
+  // 上で lastOtaProgressAtRef を更新 + setOtaStuck(false) で解除される。
+  useEffect(() => {
+    if (!running) {
+      setOtaStuck(false)
+      return
+    }
+    lastOtaProgressAtRef.current = Date.now()  // arm at start
+    const tick = window.setInterval(() => {
+      const elapsed = Date.now() - lastOtaProgressAtRef.current
+      if (elapsed >= 3000) setOtaStuck(true)
+    }, 500)
+    return () => window.clearInterval(tick)
+  }, [running])
 
   // ---- Reading freshly from disk ------------------------------------
 
@@ -1026,13 +1050,21 @@ export function FirmwareSubTab({
           <>
             <div className="firmware-progress">
               <div
-                className="firmware-progress-fill"
+                className={`firmware-progress-fill ${otaStuck ? 'stuck' : ''}`}
                 style={{ width: `${progress.percent}%` }}
               />
             </div>
             <div className="form-status muted">
               [{progress.phase}] {progress.percent}% — {progress.message}
             </div>
+            {otaStuck && (
+              <div className="form-status warn">
+                ⚠ OTA の進捗が 3 秒以上途絶えています — Wi-Fi 接続が切れた、
+                デバイスがフリーズしている、TCP セッションが詰まっている等の
+                可能性があります。さらに 30 秒待っても応答が無ければ
+                「電源 OFF/ON → USB Serial 経由で書込」を推奨。
+              </div>
+            )}
           </>
         )}
 

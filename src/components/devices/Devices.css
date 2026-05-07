@@ -470,7 +470,16 @@
 .firmware-progress-fill {
   height: 100%;
   background: var(--accent);
-  transition: width 200ms ease;
+  transition: width 200ms ease, background 200ms ease;
+}
+.firmware-progress-fill.stuck {
+  /* 進捗 3 秒以上途絶え時 — warning 色 + パルス */
+  background: var(--warning, #f5a623);
+  animation: firmware-progress-stuck-pulse 1s ease-in-out infinite;
+}
+@keyframes firmware-progress-stuck-pulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
 }
 
 /* ---- Form section card ---- */
