@@ -29,14 +29,14 @@
   margin-bottom: 6px;
 }
 .palette-section-title {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--accent-light);
   letter-spacing: 0.02em;
 }
 .palette-section-hint {
-  font-size: 11px;
-  color: var(--text-muted);
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
 /* variant picker (S/M/L) — カード右側に詰める */
@@ -145,8 +145,8 @@
 }
 
 .palette-desc {
-  font-size: 12px;
-  color: var(--text-muted);
+  font-size: 13px;
+  color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

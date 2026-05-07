@@ -37,7 +37,9 @@ body.is-dragging .char-cell.empty:hover {
    * size or weight. */
   --text-primary: #f5f6f8;
   --text-secondary: #c8cad2;
-  --text-muted: #8e909c;
+  /* 2026-05-08: 旧 #8e909c は dark bg 上で読みづらかった。
+     primary / secondary との階段感は維持しつつ +20% 程度明るく。 */
+  --text-muted: #adafba;
   --accent: #7c5cbf;
   --accent-light: #a78bfa;
   --accent-dim: #5a3d8f;
