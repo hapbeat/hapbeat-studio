@@ -135,12 +135,14 @@ function buildActionGroups(pages: DisplayPage[], deviceModel: DeviceModel): Acti
   const groups: ActionGroup[] = [
     { label: 'Page', items: pageItems },
     {
-      label: 'Player / Position',
+      // Position はボタン操作対象外 (設定でのみ変更)。
+      // Group はマルチプレイヤー時にボタンで切替できる。
+      label: 'Player / Group',
       items: [
         { value: 'player_inc', label: 'Player +1' },
         { value: 'player_dec', label: 'Player -1' },
-        { value: 'position_inc', label: 'Pos +1' },
-        { value: 'position_dec', label: 'Pos -1' },
+        { value: 'group_inc', label: 'Group +1' },
+        { value: 'group_dec', label: 'Group -1' },
       ],
     },
   ]
@@ -854,8 +856,8 @@ export function DisplayEditor() {
       switch (action) {
         case 'player_inc': setSimState((s) => ({ ...s, player: s.player + 1 })); break
         case 'player_dec': setSimState((s) => ({ ...s, player: Math.max(0, s.player - 1) })); break
-        case 'position_inc': setSimState((s) => ({ ...s, position: s.position + 1 })); break
-        case 'position_dec': setSimState((s) => ({ ...s, position: Math.max(0, s.position - 1) })); break
+        case 'group_inc': setSimState((s) => ({ ...s, group: s.group + 1 })); break
+        case 'group_dec': setSimState((s) => ({ ...s, group: Math.max(0, s.group - 1) })); break
         case 'vib_mode': setSimState((s) => ({ ...s, volumeAdcEnabled: !s.volumeAdcEnabled })); break
         case 'wifi_select': break // Wi-Fi 選択モード遷移はファーム側で OLED が固定描画する。Studio のプレビューでは表現しない
       }
@@ -902,8 +904,8 @@ export function DisplayEditor() {
       switch (holdAction) {
         case 'player_inc': setSimState((s) => ({ ...s, player: s.player + 1 })); break
         case 'player_dec': setSimState((s) => ({ ...s, player: Math.max(0, s.player - 1) })); break
-        case 'position_inc': setSimState((s) => ({ ...s, position: s.position + 1 })); break
-        case 'position_dec': setSimState((s) => ({ ...s, position: Math.max(0, s.position - 1) })); break
+        case 'group_inc': setSimState((s) => ({ ...s, group: s.group + 1 })); break
+        case 'group_dec': setSimState((s) => ({ ...s, group: Math.max(0, s.group - 1) })); break
         case 'vib_mode': setSimState((s) => ({ ...s, volumeAdcEnabled: !s.volumeAdcEnabled })); break
         case 'wifi_select': break // Wi-Fi 選択モード遷移はファーム側で OLED が固定描画する。Studio のプレビューでは表現しない
       }

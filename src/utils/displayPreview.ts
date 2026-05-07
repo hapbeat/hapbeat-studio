@@ -1,8 +1,13 @@
 import type { DisplayElementType } from '@/types/display'
 
-/** シミュレーション状態 */
+/** シミュレーション状態
+ *  - player / group はボタン操作で増減 (player_inc/dec, group_inc/dec)
+ *  - position は設定で決まる固定値 (ボタン操作対象外) なのでサンプル表示用
+ *  - volume / volumeAdcEnabled は volume / vib_mode 系ボタンで変化
+ */
 export interface SimState {
   player: number
+  group: number
   position: number
   volume: number
   volumeAdcEnabled: boolean
@@ -10,6 +15,7 @@ export interface SimState {
 
 export const DEFAULT_SIM_STATE: SimState = {
   player: 0,
+  group: 0,
   position: 0,
   volume: 5,
   volumeAdcEnabled: true,
@@ -44,7 +50,7 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
     case 'player_number':     return `P:${String(s.player).padStart(2, '0')}`    // 4文字
     case 'position':          return `Pos:${String(s.position).padStart(3, '0')}` // 7文字
     case 'page_indicator':    return '1/2'                                       // 3文字
-    case 'group_id':          return 'Gr:1'                                      // 4文字
+    case 'group_id':          return `Gr:${s.group}`                             // 4文字
     case 'address': {
       // address は player_ より前の prefix 部分のみ表示。
       // variant でプレビュー文字数を切替: compact=4 / standard=8 / wide=16
