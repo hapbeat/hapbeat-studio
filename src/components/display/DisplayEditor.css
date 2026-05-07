@@ -71,7 +71,8 @@
   background: var(--accent-dim); border-color: var(--accent); color: var(--accent-light);
 }
 
-.template-select { min-width: 100px; font-size: 14px; padding: 4px 8px; }
+.template-select { min-width: 110px; font-size: 14px; padding: 4px 8px; }
+.preset-select { min-width: 110px; font-size: 14px; padding: 4px 8px; margin-left: 4px; }
 
 /* ========================================
    Fixed Top Area (シミュレータ + コントロールバーまとめて sticky)

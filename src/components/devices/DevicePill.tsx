@@ -68,14 +68,8 @@ export function DevicePill() {
           no device
         </button>
       ) : null}
-      <button
-        type="button"
-        className="devices-modal-trigger"
-        onClick={() => setOpen(true)}
-        title="Devices モーダルを開く"
-      >
-        Devices ▸
-      </button>
+      {/* "Devices ▸" 個別ボタンは header の Devices タブと冗長なので削除済み。
+          pill 自体クリックでモーダルを開く。 */}
       <DevicesModal open={open} onClose={() => setOpen(false)} />
     </>
   )

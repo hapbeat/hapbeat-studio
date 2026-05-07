@@ -83,6 +83,13 @@ export interface DisplayTemplate {
   layout: DisplayLayout
 }
 
+/** 1 ページ分のプリセット。既存レイアウトに追加・差替するための単位。 */
+export interface PagePreset {
+  name: string
+  description: string
+  page: DisplayPage
+}
+
 export interface DisplayElementMeta {
   type: DisplayElementType
   variant?: 'standard' | 'compact' | 'bar' | 'wide'

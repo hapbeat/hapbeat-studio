@@ -17,7 +17,7 @@ import { DEVICE_SPECS } from '@/types/device'
 import { ElementPalette, elementMetas, getElementMeta } from '@/components/common/ElementPalette'
 import { getElementPreviewText, DEFAULT_SIM_STATE } from '@/utils/displayPreview'
 import type { SimState } from '@/utils/displayPreview'
-import { allTemplates, standardTemplate } from '@/utils/templates'
+import { allTemplates, pagePresets, standardTemplate } from '@/utils/templates'
 import {
   exportDisplayLayout,
   importDisplayLayout,
@@ -619,11 +619,27 @@ export function DisplayEditor() {
 
   const handleApplyTemplate = useCallback((templateIndex: number) => {
     const template = allTemplates[templateIndex]
-    if (!template || !window.confirm(`テンプレート「${template.name}」を適用？`)) return
+    if (!template) return
+    if (!window.confirm(
+      `全レイアウト「${template.name}」を適用します。\n` +
+      `現在のページ・ボタン設定はすべて置き換えられます。続行しますか？`
+    )) return
     setLayout(structuredClone(template.layout))
     setActivePageIndex(0)
     setPopupPos(null)
   }, [])
+
+  const handleInsertPagePreset = useCallback((presetIndex: number) => {
+    const preset = pagePresets[presetIndex]
+    if (!preset) return
+    setLayout((prev) => {
+      const inserted: DisplayPage = { name: '', elements: structuredClone(preset.page.elements) }
+      const newPages = renamePages([...prev.pages, inserted])
+      return { ...prev, pages: newPages }
+    })
+    setActivePageIndex(layout.pages.length)
+    setPopupPos(null)
+  }, [layout.pages.length])
 
   // --- Helper 接続 ---
   const { isConnected: managerConnected, lastMessage, send: managerSend } = useHelperConnection()
@@ -892,6 +908,7 @@ export function DisplayEditor() {
           onPageChange={(idx) => { setActivePageIndex(idx); setPopupPos(null) }}
           onAddPage={handleAddPage}
           onDeletePage={handleDeletePage}
+          onInsertPagePreset={handleInsertPagePreset}
           onDeviceModelChange={handleDeviceModelChange}
           onApplyTemplate={handleApplyTemplate}
           onToggleOrientation={() => setOrientationByModel((prev) => ({
@@ -1187,6 +1204,7 @@ interface ControlBarProps {
   onPageChange: (idx: number) => void
   onAddPage: () => void
   onDeletePage: (idx: number) => void
+  onInsertPagePreset: (idx: number) => void
   onDeviceModelChange: (model: DeviceModel) => void
   onApplyTemplate: (idx: number) => void
   onToggleOrientation: () => void
@@ -1201,7 +1219,7 @@ interface ControlBarProps {
 
 function ControlBar({
   pages, activePageIndex, deviceModel, isFlipped,
-  onPageChange, onAddPage, onDeletePage,
+  onPageChange, onAddPage, onDeletePage, onInsertPagePreset,
   onDeviceModelChange, onApplyTemplate, onToggleOrientation,
   onExport, onImport, onDeploy, managerConnected, isDeploying, isSerialOnlySelected, deployBtnRef,
 }: ControlBarProps) {
@@ -1219,7 +1237,22 @@ function ControlBar({
             )}
           </div>
         ))}
-        <button className="btn btn-sm" onClick={onAddPage}>+ Page</button>
+        <button className="btn btn-sm" onClick={onAddPage} title="空ページを追加">+ Page</button>
+        <select
+          className="select select-sm preset-select"
+          defaultValue=""
+          title="プリセットからページを追加"
+          onChange={(e) => {
+            const i = parseInt(e.target.value, 10)
+            if (!isNaN(i)) onInsertPagePreset(i)
+            e.target.value = ''
+          }}
+        >
+          <option value="" disabled>＋ プリセット</option>
+          {pagePresets.map((p, idx) => (
+            <option key={p.name} value={idx} title={p.description}>{p.name}</option>
+          ))}
+        </select>
       </div>
       <div className="control-separator" />
       <div className="device-toggle">
@@ -1232,11 +1265,12 @@ function ControlBar({
         ))}
       </div>
       <select className="select select-sm template-select" defaultValue=""
+        title="全レイアウトを置き換え (確認あり)"
         onChange={(e) => { const i = parseInt(e.target.value, 10); if (!isNaN(i)) onApplyTemplate(i); e.target.value = '' }}
       >
-        <option value="" disabled>テンプレート</option>
+        <option value="" disabled>全レイアウト ▾</option>
         {allTemplates.map((t, idx) => (
-          <option key={t.name} value={idx}>{t.name}</option>
+          <option key={t.name} value={idx} title={t.description}>{t.name}</option>
         ))}
       </select>
       <button className={`btn btn-sm ${isFlipped ? 'active' : ''}`} onClick={onToggleOrientation}>
