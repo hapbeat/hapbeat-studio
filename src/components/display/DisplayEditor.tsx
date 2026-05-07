@@ -59,18 +59,9 @@ const BORDER_W = 2  // CSS border width on .oled-screen
 /** グリッド行内のアイテム（空セルまたは要素カード） */
 type GridItem =
   | { kind: 'empty'; col: number }
-  | { kind: 'element'; col: number; span: number; rowSpan: number; el: import('@/types/display').DisplayElement; text: string }
+  | { kind: 'element'; col: number; span: number; el: import('@/types/display').DisplayElement; text: string }
 
-/** font_scale 込みの effective セル占有サイズ。
- *  font_scale=2 → 1 文字 = 2x2 セル分 (横幅・縦幅とも 2 倍)。
- *  base 縦幅 1 の要素なら font_scale=2 で 2 行占有。 */
-function getEffectiveSize(el: import('@/types/display').DisplayElement): [number, number] {
-  const [w, h] = getElementSize(el.type, el.variant)
-  const scale = el.font_scale ?? 1
-  return [w * scale, h * scale]
-}
-
-/** 各行を「空セル / 要素カード」のリストに変換。font_scale 反映。 */
+/** 各行を「空セル / 要素カード」のリストに変換 */
 function buildGridRows(page: DisplayPage | undefined, simState: SimState): GridItem[][] {
   const rows: GridItem[][] = Array.from({ length: GRID_ROWS }, () => [])
   if (!page) {
@@ -79,37 +70,28 @@ function buildGridRows(page: DisplayPage | undefined, simState: SimState): GridI
     return rows
   }
 
-  // 占有マップ: どのセルがどの要素に属するか (font_scale 込み)
+  // 占有マップ: どのセルがどの要素に属するか
   const occupied: (string | null)[][] = Array.from({ length: GRID_ROWS }, () =>
     Array.from({ length: GRID_COLS }, () => null)
   )
   for (const el of page.elements) {
-    const [ew, eh] = getEffectiveSize(el)
-    for (let dy = 0; dy < eh; dy++) {
-      for (let dx = 0; dx < ew; dx++) {
-        const col = el.pos[0] + dx
-        const row = el.pos[1] + dy
-        if (col < GRID_COLS && row < GRID_ROWS) occupied[row][col] = el.id
-      }
+    const size = getElementSize(el.type, el.variant)
+    for (let dx = 0; dx < size[0]; dx++) {
+      const col = el.pos[0] + dx
+      if (col < GRID_COLS && el.pos[1] < GRID_ROWS) occupied[el.pos[1]][col] = el.id
     }
   }
 
-  // 要素はトップ行 (el.pos[1] と一致する行) でのみカード描画する。
-  // 配下の行は "covered" 扱いで empty も element も rendering しない。
   for (let r = 0; r < GRID_ROWS; r++) {
     let c = 0
     while (c < GRID_COLS) {
       const elId = occupied[r][c]
       if (elId) {
         const el = page.elements.find((e) => e.id === elId)!
-        const [ew, eh] = getEffectiveSize(el)
-        // top row のみ描画
-        if (el.pos[1] === r) {
-          const text = getElementPreviewText(el.type, simState, el.variant)
-          rows[r].push({ kind: 'element', col: c, span: ew, rowSpan: eh, el, text })
-        }
-        // covered cells はスキップ
-        c += ew
+        const size = getElementSize(el.type, el.variant)
+        const text = getElementPreviewText(el.type, simState, el.variant)
+        rows[r].push({ kind: 'element', col: c, span: size[0], el, text })
+        c += size[0]
       } else {
         rows[r].push({ kind: 'empty', col: c })
         c++
@@ -234,19 +216,15 @@ function canPlace(
   pos: [number, number],
   excludeId?: string,
   variant?: string,
-  fontScale?: number,
 ): boolean {
-  const [bw, bh] = getElementSize(type, variant)
-  const scale = fontScale ?? 1
-  const w = bw * scale
-  const h = bh * scale
-  if (pos[0] + w > GRID_COLS || pos[1] + h > GRID_ROWS) return false
+  const size = getElementSize(type, variant)
+  if (pos[0] + size[0] > GRID_COLS || pos[1] + size[1] > GRID_ROWS) return false
   return !page.elements.some((el) => {
     if (el.id === excludeId) return false
-    const [esw, esh] = getEffectiveSize(el)
+    const s = getElementSize(el.type, el.variant)
     return (
-      pos[0] < el.pos[0] + esw && pos[0] + w > el.pos[0] &&
-      pos[1] < el.pos[1] + esh && pos[1] + h > el.pos[1]
+      pos[0] < el.pos[0] + s[0] && pos[0] + size[0] > el.pos[0] &&
+      pos[1] < el.pos[1] + s[1] && pos[1] + size[1] > el.pos[1]
     )
   })
 }
@@ -384,48 +362,16 @@ export function DisplayEditor() {
         if (!page) return prev
         const el = page.elements.find((e) => e.id === elementId)
         if (!el) return prev
-        // font_scale 込みの effective サイズで clamp / canPlace
-        const [ew, eh] = getEffectiveSize(el)
+        const size = getElementSize(el.type, el.variant)
         const clamped: [number, number] = [
-          Math.max(0, Math.min(newPos[0], GRID_COLS - ew)),
-          Math.max(0, Math.min(newPos[1], GRID_ROWS - eh)),
+          Math.max(0, Math.min(newPos[0], GRID_COLS - size[0])),
+          Math.max(0, Math.min(newPos[1], GRID_ROWS - size[1])),
         ]
-        if (!canPlace(page, el.type, clamped, elementId, el.variant, el.font_scale)) return prev
+        if (!canPlace(page, el.type, clamped, elementId, el.variant)) return prev
         const updatedElements = page.elements.map((e) =>
           e.id === elementId ? { ...e, pos: clamped } : e
         )
         newPages[activePageIndex] = { ...page, elements: updatedElements }
-        return { ...prev, pages: newPages }
-      })
-    },
-    [activePageIndex]
-  )
-
-  /** 配置済み要素の font_scale を切替える。
-   *  scale=2 のとき effective サイズが 2 倍になるため、現在位置で衝突
-   *  または範囲外になる場合は変更を拒否し、ユーザーに toast 警告。 */
-  const handleToggleFontScale = useCallback(
-    (elementId: string, mouseX?: number, mouseY?: number) => {
-      setLayout((prev) => {
-        const newPages = [...prev.pages]
-        const page = newPages[activePageIndex]
-        if (!page) return prev
-        const el = page.elements.find((e) => e.id === elementId)
-        if (!el) return prev
-        const nextScale: 1 | 2 = (el.font_scale ?? 1) === 2 ? 1 : 2
-        // 1→2 の場合のみ衝突 / overflow を再評価。2→1 は必ず縮小なので OK。
-        if (nextScale === 2) {
-          if (!canPlace(page, el.type, el.pos, elementId, el.variant, 2)) {
-            if (mouseX != null && mouseY != null) {
-              showToast('2x にすると他要素と衝突します', mouseX, mouseY)
-            }
-            return prev
-          }
-        }
-        const updated = page.elements.map((e) =>
-          e.id === elementId ? { ...e, font_scale: nextScale } : e
-        )
-        newPages[activePageIndex] = { ...page, elements: updated }
         return { ...prev, pages: newPages }
       })
     },
@@ -582,34 +528,24 @@ export function DisplayEditor() {
     // → variant が更新された」タイミングで再計算される。
   }, [internalDrag, activePage, externalDragType])
 
-  /** ドラッグ対象が内部移動なら、その要素の font_scale を取得 (倍角を維持して移動)。
-   *  パレットからの新規ドラッグは常に 1x で開始 (配置後にトグル可)。 */
-  const dragFontScale: number = useMemo(() => {
-    if (!internalDrag || !activePage) return 1
-    const el = activePage.elements.find((e) => e.id === internalDrag.id)
-    return el?.font_scale ?? 1
-  }, [internalDrag, activePage])
-
-  /** マウス位置をクランプした配置候補 (font_scale 込み) */
+  /** マウス位置をクランプした配置候補 */
   const clampedDragPos = useMemo(() => {
     if (!dragType || !dragPos) return null
-    const [bw, bh] = getElementSize(dragType, dragVariant)
-    const w = bw * dragFontScale
-    const h = bh * dragFontScale
+    const size = getElementSize(dragType, dragVariant)
     return {
-      col: Math.max(0, Math.min(dragPos.col - dragOffsetCol, GRID_COLS - w)),
-      row: Math.max(0, Math.min(dragPos.row, GRID_ROWS - h)),
+      col: Math.max(0, Math.min(dragPos.col - dragOffsetCol, GRID_COLS - size[0])),
+      row: Math.max(0, Math.min(dragPos.row, GRID_ROWS - size[1])),
     }
-  }, [dragType, dragVariant, dragPos, dragOffsetCol, dragFontScale])
+  }, [dragType, dragVariant, dragPos, dragOffsetCol])
 
   const dragCanPlace = useMemo(() => {
     if (!clampedDragPos || !activePage) return false
     return canPlace(
       activePage, dragType!,
       [clampedDragPos.col, clampedDragPos.row],
-      internalDrag?.id, dragVariant, dragFontScale,
+      internalDrag?.id, dragVariant,
     )
-  }, [clampedDragPos, activePage, dragType, internalDrag, dragVariant, dragFontScale])
+  }, [clampedDragPos, activePage, dragType, internalDrag, dragVariant])
 
   // 内部ドラッグ時: 配置可能な位置を記録
   useEffect(() => {
@@ -618,22 +554,22 @@ export function DisplayEditor() {
     }
   }, [internalDrag, clampedDragPos, dragCanPlace])
 
-  /** ドラッグ中のプレビュー影 (font_scale 込みのサイズ) */
+  /** ドラッグ中のプレビュー影 */
   const dragPreview = useMemo(() => {
     if (!dragType) return null
-    const [bw, bh] = getElementSize(dragType, dragVariant)
-    const w = bw * dragFontScale
-    const h = bh * dragFontScale
+    // variant を考慮したサイズ。battery 'bar' / app_name 各 variant で
+    // ELEMENT_FIXED_SIZES とは異なる幅になる。
+    const size = getElementSize(dragType, dragVariant)
     if (internalDrag) {
       // 内部移動: 配置可能ならその位置、不可なら最後の有効位置にとどまる
       const pos = dragCanPlace ? clampedDragPos : lastValidPos
       if (!pos) return null
-      return { col: pos.col, row: pos.row, w, h, canPlace: true }
+      return { col: pos.col, row: pos.row, w: size[0], h: size[1], canPlace: true }
     }
     // パレットからのドラッグ
     if (!clampedDragPos) return null
-    return { col: clampedDragPos.col, row: clampedDragPos.row, w, h, canPlace: dragCanPlace }
-  }, [dragType, dragVariant, dragFontScale, internalDrag, clampedDragPos, dragCanPlace, lastValidPos])
+    return { col: clampedDragPos.col, row: clampedDragPos.row, w: size[0], h: size[1], canPlace: dragCanPlace }
+  }, [dragType, dragVariant, internalDrag, clampedDragPos, dragCanPlace, lastValidPos])
 
   // 内部移動: mouse イベントで追跡（HTML5 drag を使わないのでカーソルが安定）
   const lastValidPosRef = useRef(lastValidPos)
@@ -1017,7 +953,6 @@ export function DisplayEditor() {
             if (el) setLastValidPos({ col: el.pos[0], row: el.pos[1] })
           }}
           onDeleteElement={handleDeleteElement}
-          onToggleFontScale={handleToggleFontScale}
           onPopupSelect={handlePopupSelect}
           onPopupClose={() => setPopupPos(null)}
           onSimButtonClick={handleSimButtonClick}
@@ -1117,7 +1052,6 @@ interface OledSimulatorProps {
   dragPreview: { col: number; row: number; w: number; h: number; canPlace: boolean } | null
   onInternalDragStart: (id: string, type: DisplayElementType, offsetCol: number) => void
   onDeleteElement: (id: string) => void
-  onToggleFontScale: (id: string, mouseX?: number, mouseY?: number) => void
   onPopupSelect: (type: DisplayElementType) => void
   onPopupClose: () => void
   onSimButtonClick: (buttonId: string) => void
@@ -1135,7 +1069,7 @@ function OledSimulator({
   popupPos, usedTypes,
   onOledClick,
   dragPreview, onInternalDragStart,
-  onDeleteElement, onToggleFontScale, onPopupSelect, onPopupClose, onSimButtonClick, onSimButtonDown, onSimButtonUp,
+  onDeleteElement, onPopupSelect, onPopupClose, onSimButtonClick, onSimButtonDown, onSimButtonUp,
   pages, perButtonActions, onActionChange, onLedClick, onVolumeClick,
 }: OledSimulatorProps) {
   // ボタンをグリッドエリアに振り分け
@@ -1194,12 +1128,11 @@ function OledSimulator({
                       return <div key={`${rowIdx}-${item.col}`} className="char-cell empty" />
                     }
                     const meta = getElementMeta(item.el.type, item.el.variant)
-                    const scale = item.el.font_scale ?? 1
                     return (
                       <div
                         key={item.el.id}
-                        className={`grid-element ${scale === 2 ? 'grid-element-2x' : ''}`}
-                        style={{ gridColumn: `span ${item.span}`, gridRow: `span ${item.rowSpan}` }}
+                        className="grid-element"
+                        style={{ gridColumn: `span ${item.span}` }}
                         onMouseDown={(e) => {
                           if (e.button !== 0) return
                           e.preventDefault()
@@ -1216,17 +1149,6 @@ function OledSimulator({
                             <span key={ci} className="char-text">{ch}</span>
                           ))}
                         </div>
-                        <button
-                          className={`grid-element-scale ${scale === 2 ? 'active' : ''}`}
-                          onMouseDown={(e) => { e.stopPropagation(); e.preventDefault() }}
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            onToggleFontScale(item.el.id, e.clientX, e.clientY)
-                          }}
-                          title={scale === 2 ? '通常サイズに戻す (2x → 1x)' : '倍角表示にする (1x → 2x)'}
-                        >
-                          {scale === 2 ? '2x' : '1x'}
-                        </button>
                         <button
                           className="grid-element-delete"
                           onMouseDown={(e) => { e.stopPropagation(); e.preventDefault() }}
