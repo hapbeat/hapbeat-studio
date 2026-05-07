@@ -371,7 +371,9 @@
   box-shadow: 0 0 10px 3px rgba(110, 168, 254, 0.7);
 }
 
-/* Deploy button — 書き込み（緑系） */
+/* Deploy button — 書き込み（緑系）
+   min-width: 'デバイスに書込' / '書込中...' でボタンの幅が変わって
+   レイアウトがズレるのを防ぐため、両方が収まる幅を最小値として固定。 */
 button.btn-deploy {
   background: #2a8a4a;
   border: 1px solid #3aa05a;
@@ -379,6 +381,9 @@ button.btn-deploy {
   font-weight: 600;
   padding: 6px 14px;
   border-radius: 6px;
+  min-width: 130px;
+  text-align: center;
+  justify-content: center;
 }
 button.btn-deploy:hover:not(:disabled) {
   background: #35a05a;
