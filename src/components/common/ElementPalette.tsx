@@ -162,9 +162,14 @@ export function ElementPalette({ selectedType, onSelectType, usedTypes }: Elemen
 
   return (
     <div className="element-palette">
-      <div className="panel-title">要素パレット</div>
-      <div className="palette-hint">
-        OLED 上をクリック or パレットからドラッグ
+      <div className="palette-header">
+        <div className="panel-title">要素パレット</div>
+        <div className="palette-hint">
+          OLED 上をクリック or パレットからドラッグ
+        </div>
+        <div className="palette-hint palette-hint-secondary">
+          サイズ <code className="palette-hint-key">S</code>/<code className="palette-hint-key">M</code>/<code className="palette-hint-key">L</code> = 4 / 8 / 16 文字幅
+        </div>
       </div>
       {PALETTE_SECTIONS.map((sec) => (
         <section key={sec.title} className="palette-section">
