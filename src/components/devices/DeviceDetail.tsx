@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore, type WifiProfile } from '@/stores/deviceStore'
 import { ApModeSection } from './ApModeSection'
+import { OledBrightnessSection } from './OledBrightnessSection'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useLogStore } from '@/stores/logStore'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
@@ -98,6 +99,7 @@ export function DeviceDetail() {
     send({ type: 'get_info', payload: { ip: selectedIp } })
     send({ type: 'get_wifi_status', payload: { ip: selectedIp } })
     send({ type: 'get_ap_status', payload: { ip: selectedIp } })
+    send({ type: 'get_oled_brightness', payload: { ip: selectedIp } })
   }, [selectedIp, device?.online, wifiProfilesCache, send])
 
   // Drain helper push messages.
@@ -129,6 +131,9 @@ export function DeviceDetail() {
         ap_has_pass: p.ap_has_pass as boolean | undefined,
         ap_client_count: p.ap_client_count as number | undefined,
       })
+    } else if (t === 'oled_brightness_result' && typeof p.device === 'string') {
+      // setInfo は infoCache の partial merge を行うのでこの 1 フィールドも乗せられる。
+      setInfo(p.device, { oled_brightness: p.level as number | undefined })
     } else if (t === 'wifi_status_result' && typeof p.device === 'string') {
       setWifiStatus(p.device, {
         connected: p.connected as boolean | undefined,
@@ -287,6 +292,7 @@ export function DeviceDetail() {
     send({ type: 'get_wifi_status', payload: { ip: selectedIp } })
     send({ type: 'list_wifi_profiles', payload: { ip: selectedIp } })
     send({ type: 'get_ap_status', payload: { ip: selectedIp } })
+    send({ type: 'get_oled_brightness', payload: { ip: selectedIp } })
   }
 
   const refreshApStatus = () => {
@@ -406,6 +412,11 @@ export function DeviceDetail() {
               apInfo={apInfo}
               sendTo={sendTo}
               onRefreshApStatus={refreshApStatus}
+            />
+            <OledBrightnessSection
+              device={device}
+              level={cachedInfo?.oled_brightness}
+              sendTo={sendTo}
             />
             <UiConfigForm device={device} sendTo={sendTo} />
             <DebugDumpSection

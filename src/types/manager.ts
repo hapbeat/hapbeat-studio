@@ -66,6 +66,8 @@ export interface StudioToManagerMessage {
     | 'set_ap_pass'
     | 'clear_ap_pass'
     | 'get_ap_status'
+    | 'set_oled_brightness'
+    | 'get_oled_brightness'
     | 'ping'
   payload: Record<string, unknown>
 }
@@ -93,6 +95,7 @@ export interface ManagerToStudioMessage {
     | 'ota_result'
     | 'scan_wifi_result'
     | 'ap_status_result'
+    | 'oled_brightness_result'
     | 'error'
     | 'pong'
   payload: Record<string, unknown>

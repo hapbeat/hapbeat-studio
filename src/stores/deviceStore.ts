@@ -53,6 +53,8 @@ interface DeviceState {
     ap_ip?: string
     ap_has_pass?: boolean
     ap_client_count?: number
+    /** OLED brightness (1=low / 2=mid / 3=high). Firmware ≥ v0.1.x. */
+    oled_brightness?: number
   }>
 
   /** Per-IP cache of the most recent get_wifi_status response. */
