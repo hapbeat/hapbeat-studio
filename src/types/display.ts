@@ -201,7 +201,8 @@ export const ELEMENT_FIXED_SIZES: Record<DisplayElementType, [number, number]> =
   ip_address: [6, 1],        // ".0.147"   標準 6文字 (compact=4, wide=13)。
                              // 同 LAN は前半オクテットが被るため右から N 文字切出し
                              // (3rd オクテットも被ることが多いので standard は 6 で十分)
-  firmware_version: [6, 1],  // "v2.0.42"  最大6文字 (semver "x.y.zz" 想定)
+  firmware_version: [8, 1],  // " v0.1.0" 標準 8文字 (compact=6)。
+                             // device は左 truncate / 右 pad で width に追従。
   device_name: [6, 1],       // "DuoWL2"    6文字, compact 3文字
   app_name: [8, 1],          // "MyApp__"   標準 8文字 (compact=4, wide=16)
   player_number: [4, 1],     // "P:01"      4文字
@@ -251,6 +252,12 @@ export function getElementSize(type: DisplayElementType, variant?: string): [num
     // wide=16 (フル prefix 付き)。
     if (variant === 'compact') return [4, 1]
     if (variant === 'wide') return [16, 1]
+    return [8, 1]
+  }
+  if (type === 'firmware_version') {
+    // 'v0.1.0' (= 6 文字) が基本で 8 文字なら左 pad で右寄せ。
+    // wide は不要 (semver 以上の長さは想定しない)。
+    if (variant === 'compact') return [6, 1]
     return [8, 1]
   }
   return ELEMENT_FIXED_SIZES[type]

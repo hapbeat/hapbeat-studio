@@ -44,6 +44,11 @@ const sizeVariants: VariantOption[] = [
   { value: 'standard', label: 'M' },
   { value: 'wide',     label: 'L' },
 ]
+// FW Ver は wide が無いので S/M (=6/8) のみ。
+const sizeVariantsSM: VariantOption[] = [
+  { value: 'compact',  label: 'S' },
+  { value: 'standard', label: 'M' },
+]
 
 export const PALETTE_SECTIONS: PaletteSection[] = [
   {
@@ -89,7 +94,7 @@ export const PALETTE_SECTIONS: PaletteSection[] = [
     title: 'メタ',
     hint: 'サポート情報',
     items: [
-      { type: 'firmware_version', label: 'FW Ver', description: 'バージョン', icon: 'v' },
+      { type: 'firmware_version', label: 'FW Ver', description: 'バージョン', icon: 'v', variants: sizeVariantsSM },
     ],
   },
 ]

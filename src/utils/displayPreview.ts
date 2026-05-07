@@ -56,7 +56,15 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
       if (variant === 'wide')    return pickRight(13)
       return pickRight(6)
     }
-    case 'firmware_version':  return 'v0.1.0'                                     // 6文字 (semver)
+    case 'firmware_version': {
+      // device 側は左 truncate / 右 pad で width に追従。
+      // compact (6) = 'v0.1.0' (= 6 chars exact)
+      // standard (8) = ' v0.1.0' を pad で 8 にする (右寄せ風)
+      const sample = 'v0.1.0'
+      if (variant === 'compact') return sample.padEnd(6, ' ').slice(0, 6)
+      // 標準 8 chars: 左に space 2 個入れて見た目右寄せ風
+      return sample.padStart(8, ' ').slice(0, 8)
+    }
     case 'device_name':       return 'Duo-1'                                   // 6文字
     case 'app_name':
       // CONNECT_STATUS payload の app_name (Unity SDK 等が送信)。
