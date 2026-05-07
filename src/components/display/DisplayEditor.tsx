@@ -297,7 +297,12 @@ export function DisplayEditor() {
     saved?.perButtonActions ?? createDefaultPerButtonActions(DEVICE_SPECS['duo_wl'])
   )
   const [popupPos, setPopupPos] = useState<{ col: number; row: number; x: number; y: number; screenX: number; screenY: number } | null>(null)
-  const [simState, setSimState] = useState<SimState>(saved?.simState ?? { ...DEFAULT_SIM_STATE })
+  // 旧バージョンで保存された simState は新規追加フィールド (e.g. 2026-05-08
+  // 追加の group) を持たない → そのまま使うと undefined が UI に出てしまう。
+  // 必ず DEFAULT を baseline に spread merge する。
+  const [simState, setSimState] = useState<SimState>(
+    () => ({ ...DEFAULT_SIM_STATE, ...(saved?.simState ?? {}) })
+  )
   const [ledConfig, setLedConfig] = useState<LedConfig>(saved?.ledConfig ?? { globalBrightness: 255, rules: [...DEFAULT_LED_RULES] })
   const [volumeConfig, setVolumeConfig] = useState<VolumeConfig>(saved?.volumeConfig ?? { ...DEFAULT_VOLUME_CONFIG })
   const [ledModalOpen, setLedModalOpen] = useState(false)
