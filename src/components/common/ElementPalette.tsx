@@ -168,7 +168,7 @@ export function ElementPalette({ selectedType, onSelectType, usedTypes }: Elemen
           OLED 上をクリック or パレットからドラッグ
         </div>
         <div className="palette-hint palette-hint-secondary">
-          サイズ <code className="palette-hint-key">S</code>/<code className="palette-hint-key">M</code>/<code className="palette-hint-key">L</code> = 短 / 中 / 長 (要素により幅は異なる、ボタンに hover で確認)
+          サイズボタンの数字 = 文字幅
         </div>
       </div>
       {PALETTE_SECTIONS.map((sec) => (
@@ -232,17 +232,20 @@ export function ElementPalette({ selectedType, onSelectType, usedTypes }: Elemen
                       onClick={(e) => e.stopPropagation()}
                       onMouseDown={(e) => e.stopPropagation()}
                     >
-                      {item.variants.map((v) => (
-                        <button
-                          key={v.value}
-                          type="button"
-                          className={`palette-variant-btn ${selectedVariant === v.value ? 'active' : ''}`}
-                          onClick={() => onPickVariant(v.value)}
-                          title={`${v.label} = ${getElementSize(item.type, v.value === 'standard' ? undefined : v.value)[0]} 文字`}
-                        >
-                          {v.label}
-                        </button>
-                      ))}
+                      {item.variants.map((v) => {
+                        const w = getElementSize(item.type, v.value === 'standard' ? undefined : v.value)[0]
+                        return (
+                          <button
+                            key={v.value}
+                            type="button"
+                            className={`palette-variant-btn ${selectedVariant === v.value ? 'active' : ''}`}
+                            onClick={() => onPickVariant(v.value)}
+                            title={`${v.label} = ${w} 文字`}
+                          >
+                            {w}
+                          </button>
+                        )
+                      })}
                     </div>
                   )}
                   {isUsed && <span className="palette-used-badge" title="使用中">✓</span>}
