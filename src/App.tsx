@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react'
-import { WaveformEditor } from '@/components/waveform/WaveformEditor'
+// Wave Editor は WIP のため初回公開では非表示にする (2026-05-07)。
+// 再有効化する時は Tab union / TABS / TAB_LABELS / PersistentTab block / import を
+// 一括で復活させるだけで OK。コンポーネント本体 (components/waveform/) は
+// 削除せず保持してある。
 import { DisplayEditor } from '@/components/display/DisplayEditor'
 import { KitManager } from '@/components/kit/KitManager'
 import { Devices } from '@/components/devices/Devices'
@@ -9,16 +12,19 @@ import { HelperToastBridge } from '@/components/common/HelperToastBridge'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import './App.css'
 
-type Tab = 'waveform' | 'kit' | 'display' | 'devices'
+type Tab = 'kit' | 'display' | 'devices'
 
-const TABS: Tab[] = ['waveform', 'kit', 'display', 'devices']
+const TABS: Tab[] = ['kit', 'display', 'devices']
 
 const TAB_LABELS: Record<Tab, string> = {
-  waveform: 'Wave Editor',
   kit: 'Kit',
   display: 'Display',
   devices: 'Devices',
 }
+
+const DEFAULT_TAB: Tab = 'kit'
+
+const DOCS_URL = 'https://devtools.hapbeat.com/docs/studio/getting-started/'
 
 /**
  * Render a tab pane that mounts on first visit and stays mounted on
@@ -47,7 +53,9 @@ function PersistentTab({
 export function App() {
   const [activeTab, setActiveTab] = useState<Tab>(() => {
     const saved = localStorage.getItem('hapbeat-studio-tab')
-    return (TABS as string[]).includes(saved ?? '') ? (saved as Tab) : 'waveform'
+    // 旧 'waveform' タブの localStorage 値が残っていても安全に
+    // DEFAULT_TAB へフォールバックさせる (TABS に含まれない値は無視)。
+    return (TABS as string[]).includes(saved ?? '') ? (saved as Tab) : DEFAULT_TAB
   })
 
   // Track which tabs the user has visited at least once. We mount each
@@ -55,7 +63,7 @@ export function App() {
   const [visitedTabs, setVisitedTabs] = useState<Set<Tab>>(() => new Set([
     (() => {
       const saved = localStorage.getItem('hapbeat-studio-tab')
-      return (TABS as string[]).includes(saved ?? '') ? (saved as Tab) : 'waveform'
+      return (TABS as string[]).includes(saved ?? '') ? (saved as Tab) : DEFAULT_TAB
     })(),
   ]))
 
@@ -97,22 +105,33 @@ export function App() {
             </button>
           ))}
         </div>
-        {isConnected ? (
-          <div className="connection-status">
-            <span className="status-dot connected" />
-            Helper 接続中
-          </div>
-        ) : (
-          <button
-            type="button"
-            className="connection-status connection-status--clickable"
-            onClick={() => setHelperModalOpen(true)}
-            title="クリックでセットアップ方法を表示"
+        <div className="header-meta">
+          <a
+            className="header-docs-link"
+            href={DOCS_URL}
+            target="_blank"
+            rel="noreferrer"
+            title="Hapbeat Studio docs を新しいタブで開く"
           >
-            <span className="status-dot disconnected" />
-            Helper 未接続
-          </button>
-        )}
+            Docs ↗
+          </a>
+          {isConnected ? (
+            <div className="connection-status">
+              <span className="status-dot connected" />
+              Helper 接続中
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="connection-status connection-status--clickable"
+              onClick={() => setHelperModalOpen(true)}
+              title="クリックでセットアップ方法を表示"
+            >
+              <span className="status-dot disconnected" />
+              Helper 未接続
+            </button>
+          )}
+        </div>
       </header>
       <HelperOnboardingModal
         open={helperModalOpen}
@@ -120,9 +139,6 @@ export function App() {
         onRetry={handleRetry}
       />
       <main className="tab-content">
-        <PersistentTab active={activeTab === 'waveform'} visited={visitedTabs.has('waveform')}>
-          <WaveformEditor />
-        </PersistentTab>
         <PersistentTab active={activeTab === 'kit'} visited={visitedTabs.has('kit')}>
           <KitManager />
         </PersistentTab>
