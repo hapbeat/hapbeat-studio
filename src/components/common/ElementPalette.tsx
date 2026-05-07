@@ -4,25 +4,26 @@ import { setCurrentDragType, setCurrentDragVariant } from '@/components/display/
 import './ElementPalette.css'
 
 export const elementMetas: DisplayElementMeta[] = [
-  { type: 'volume',            label: 'Volume',             description: 'vol:00',         icon: '\u266a' },
-  { type: 'volume_mode',       label: 'Vol Mode',           description: 'Fix/Var',        icon: 'M' },
-  { type: 'battery',           label: 'Battery %',         description: '残量パーセント', icon: '\u26a1' },
-  { type: 'battery', variant: 'bar', label: 'Battery Bar', description: '残量バーメーター', icon: '\u2588' },
-  { type: 'wifi_status',       label: 'Wi-Fi 強度',       description: 'RSSI表示',       icon: '\u25ce' },
-  { type: 'wifi_ssid',         label: 'Wi-Fi 接続先',     description: 'SSID/AP名',      icon: '\u25cb' },
-  { type: 'connection_status', label: '接続状態',          description: 'Wi-Fi+アプリ',   icon: '\u25c9' },
-  { type: 'ip_address',        label: 'IP アドレス',      description: 'IP',             icon: '\u2316' },
-  { type: 'firmware_version',  label: 'FW Ver',           description: 'バージョン',     icon: 'v' },
-  { type: 'device_name',       label: 'デバイス名',        description: '設定名称',       icon: 'D' },
-  { type: 'app_name', variant: 'compact',  label: 'App Name S',  description: 'Short — 4 chars',  icon: 'A' },
-  { type: 'app_name',                       label: 'App Name M',  description: 'Medium — 8 chars', icon: 'A' },
-  { type: 'app_name', variant: 'wide',      label: 'App Name L',  description: 'Long — 16 chars',  icon: 'A' },
-  { type: 'gain',              label: 'ゲイン',            description: '出力ゲイン',     icon: 'G' },
-  { type: 'address',           label: 'アドレス',          description: 'player/pos',     icon: 'A' },
-  { type: 'player_number',     label: 'プレイヤー',        description: 'Player番号',     icon: 'P' },
-  { type: 'position',          label: 'ポジション',        description: '装着位置',       icon: '\u2b26' },
-  { type: 'page_indicator',    label: 'Page',               description: 'Page indicator', icon: '#' },
-  { type: 'group_id',          label: 'グループ',          description: 'グループID',     icon: 'Gr' },
+  { type: 'volume',            label: 'Volume',           description: '音量',          icon: '♪' },
+  { type: 'volume_mode',       label: 'Vol Mode',         description: 'Fix/Var',       icon: 'M' },
+  { type: 'battery',           label: 'Battery %',        description: '残量%',         icon: '⚡' },
+  { type: 'battery', variant: 'bar', label: 'Battery Bar', description: '残量バー',     icon: '█' },
+  { type: 'wifi_status',       label: 'Wi-Fi Signal',     description: 'RSSI',          icon: '◎' },
+  { type: 'wifi_ssid',         label: 'Wi-Fi SSID',       description: 'SSID',          icon: '○' },
+  { type: 'connection_status', label: 'Status',           description: 'Wi-Fi+アプリ',  icon: '◉' },
+  { type: 'ip_address',        label: 'IP Address',       description: 'IP',            icon: '⌖' },
+  { type: 'firmware_version',  label: 'FW Ver',           description: 'バージョン',    icon: 'v' },
+  { type: 'device_name',       label: 'Device Name',      description: '設定名称',      icon: 'D' },
+  { type: 'app_name', variant: 'compact', label: 'AppName', description: '接続アプリ名', icon: 'A' },
+  { type: 'app_name',                     label: 'AppName', description: '接続アプリ名', icon: 'A' },
+  { type: 'app_name', variant: 'wide',    label: 'AppName', description: '接続アプリ名', icon: 'A' },
+  { type: 'address', variant: 'compact', label: 'Address',  description: 'prefix のみ', icon: 'A' },
+  { type: 'address',                     label: 'Address',  description: 'prefix のみ', icon: 'A' },
+  { type: 'address', variant: 'wide',    label: 'Address',  description: 'prefix のみ', icon: 'A' },
+  { type: 'player_number',     label: 'Player',           description: 'Player番号',    icon: 'P' },
+  { type: 'position',          label: 'Position',         description: '装着位置',      icon: '⬦' },
+  { type: 'page_indicator',    label: 'Page',             description: 'ページ番号',    icon: '#' },
+  { type: 'group_id',          label: 'Group',            description: 'グループID',    icon: 'Gr' },
 ]
 
 function metaKey(meta: DisplayElementMeta): string {
@@ -96,12 +97,12 @@ export function ElementPalette({ selectedType, onSelectType, usedTypes }: Elemen
             >
               <span className="palette-icon">{meta.icon}</span>
               <div className="palette-info">
-                <span className="palette-label">{meta.label}</span>
-                <span className="palette-desc">
-                  {meta.description} ({size[0]}x{size[1]})
+                <span className="palette-label">
+                  {meta.label} <span className="palette-size">[{size[0]}x{size[1]}]</span>
                 </span>
+                <span className="palette-desc">{meta.description}</span>
               </div>
-              {isUsed && <span className="palette-used-badge">使用中</span>}
+              {isUsed && <span className="palette-used-badge" title="使用中">✓</span>}
             </button>
           )
         })}

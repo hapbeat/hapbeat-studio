@@ -41,12 +41,18 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
       if (variant === 'compact') return 'MyAp'                                   // 4文字
       if (variant === 'wide')    return 'MyHapbeatApp_v01'                       // 16文字
       return 'MyApp   '                                                          // 8文字
-    case 'gain':              return 'G:12'                                      // 4文字
     case 'player_number':     return `P:${String(s.player).padStart(2, '0')}`    // 4文字
     case 'position':          return `Pos:${String(s.position).padStart(3, '0')}` // 7文字
     case 'page_indicator':    return '1/2'                                       // 3文字
     case 'group_id':          return 'Gr:1'                                      // 4文字
-    case 'address':           return `p${s.player}/pos_nck`                      // 10文字
+    case 'address': {
+      // address は player_ より前の prefix 部分のみ表示。
+      // variant でプレビュー文字数を切替: compact=4 / standard=8 / wide=16
+      const sample = 'MyHapbeatGroup'
+      if (variant === 'compact') return sample.padEnd(4, ' ').slice(0, 4)
+      if (variant === 'wide')    return sample.padEnd(16, ' ').slice(0, 16)
+      return sample.padEnd(8, ' ').slice(0, 8)
+    }
   }
 }
 
@@ -63,8 +69,7 @@ export function getElementDescription(type: DisplayElementType): string {
     case 'firmware_version':  return 'FW ver'
     case 'device_name':       return 'Name'
     case 'app_name':          return 'App名'
-    case 'gain':              return 'G:XX'
-    case 'address':           return 'pN/pos'
+    case 'address':           return 'prefix'
     case 'player_number':     return 'P:XX'
     case 'position':          return 'Pos:XXX'
     case 'page_indicator':    return 'N/N'

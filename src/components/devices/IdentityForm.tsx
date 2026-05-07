@@ -128,7 +128,7 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
           <datalist id={prefixHistory.historyId}>
             {prefixHistory.history.map((h) => <option key={h} value={h} />)}
           </datalist>
-          <span style={{ color: 'var(--text-muted)', fontSize: 14 }}>player_</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 14 }}>/&nbsp;player_</span>
           <input
             className="form-input short"
             type="number"

@@ -11,7 +11,7 @@ import type { DisplayTemplate, PagePreset, DisplayPage } from '@/types/display'
  * 各要素のサイズ:
  *   volume: 6, volume_mode: 3, battery(%): 4, battery(bar): 8,
  *   wifi_status: 5, connection_status: 4, player_number: 4,
- *   position: 7, device_name: 6, firmware_version: 6, gain: 4,
+ *   position: 7, device_name: 6, firmware_version: 6,
  *   ip_address: 15, page_indicator: 3, group_id: 4, address: 10
  */
 
@@ -58,7 +58,6 @@ const infoPage: DisplayPage = {
     { id: 'el-wifi', type: 'wifi_status', pos: [7, 0] },
     { id: 'el-page', type: 'page_indicator', pos: [13, 0] },
     { id: 'el-fw', type: 'firmware_version', pos: [0, 1] },
-    { id: 'el-gain', type: 'gain', pos: [4, 1] },
     { id: 'el-bat', type: 'battery', pos: [9, 1] },
   ],
 }
@@ -90,7 +89,7 @@ export const pagePresets: PagePreset[] = [
   { name: 'Main', description: 'VOL + Player + Mode + Battery + Conn', page: mainPage },
   { name: 'Simple', description: 'VOL + Mode + Battery のみ', page: simplePage },
   { name: 'Player', description: 'Main + Page indicator', page: playerPage },
-  { name: 'Info', description: 'Device / Wi-Fi / FW / Gain / Bat%', page: infoPage },
+  { name: 'Info', description: 'Device / Wi-Fi / FW / Bat%', page: infoPage },
   { name: 'Network', description: 'Wi-Fi SSID + IP Address', page: networkPage },
   { name: 'App', description: 'アプリ名 + 接続状態 + Battery', page: appPage },
   { name: 'Empty', description: '空ページ (要素なし)', page: emptyPage },

@@ -19,7 +19,6 @@ export type DisplayElementType =
   | 'firmware_version'
   | 'device_name'
   | 'app_name'
-  | 'gain'
   | 'player_number'
   | 'position'
   | 'page_indicator'
@@ -203,12 +202,13 @@ export const ELEMENT_FIXED_SIZES: Record<DisplayElementType, [number, number]> =
   firmware_version: [6, 1],  // "v2.0.42"  最大6文字 (semver "x.y.zz" 想定)
   device_name: [6, 1],       // "DuoWL2"    6文字, compact 3文字
   app_name: [8, 1],          // "MyApp__"   標準 8文字 (compact=4, wide=16)
-  gain: [4, 1],              // "G:12"      4文字
   player_number: [4, 1],     // "P:01"      4文字
   position: [7, 1],          // "Pos:001"   7文字
   page_indicator: [3, 1],    // "1/2"       3文字
   group_id: [4, 1],          // "Gr:1"      4文字
-  address: [10, 1],          // "p1/pos_nck" 10文字, compact 7文字
+  address: [8, 1],           // "prefix__"  標準 8文字 (compact=4, wide=16)。
+                             // 表示は address の prefix 部分のみ
+                             // (player_/pos は別要素として持つため重複させない)
 }
 
 /** Get element size considering variant. Battery "bar" variant is wider. */
@@ -219,6 +219,13 @@ export function getElementSize(type: DisplayElementType, variant?: string): [num
     //   compact = 4 文字 (短いプロジェクト名)
     //   standard (default) = 8 文字
     //   wide = 16 文字 (行全体)
+    if (variant === 'compact') return [4, 1]
+    if (variant === 'wide') return [16, 1]
+    return [8, 1]
+  }
+  if (type === 'address') {
+    // address は prefix (player_ より前の部分) のみ表示。3 サイズ展開:
+    //   compact = 4 文字 / standard (default) = 8 文字 / wide = 16 文字
     if (variant === 'compact') return [4, 1]
     if (variant === 'wide') return [16, 1]
     return [8, 1]
