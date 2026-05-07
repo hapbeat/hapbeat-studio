@@ -1,7 +1,7 @@
 /* Inline badge, not absolute-positioned. Sits at the right end of the
    details row or control row. */
 .wiper-badge {
-  font-size: 11px;
+  font-size: 13px;
   font-family: var(--font-mono);
   color: var(--text-secondary);
   opacity: 0.7;

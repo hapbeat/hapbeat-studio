@@ -190,7 +190,7 @@ export function DeviceList() {
                       className="device-row-status online"
                       title="USB Serial 経由で接続中 (Wi-Fi 未設定)"
                     >
-                      <span style={{ fontSize: 11 }}>🔌</span>
+                      <span style={{ fontSize: 13 }}>🔌</span>
                       <span>Serial</span>
                     </span>
                   ) : dev.online ? (

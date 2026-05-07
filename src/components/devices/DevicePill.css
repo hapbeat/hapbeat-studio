@@ -6,7 +6,7 @@
   align-items: center;
   gap: 5px;
   padding: 2px 8px;
-  font-size: 13px;
+  font-size: 15px;
   font-family: var(--font-ui);
   color: var(--text-primary);
   background: var(--bg-surface);
@@ -25,7 +25,7 @@
 }
 .device-pill-more {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
 }
 .device-pill-dot {

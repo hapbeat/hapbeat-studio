@@ -41,7 +41,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius) 0 0 var(--radius);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 15px;
   font-family: var(--font-ui);
   cursor: pointer;
   transition: background var(--transition), color var(--transition);
@@ -56,7 +56,7 @@
   border-left: none;
   border-radius: 0 var(--radius) var(--radius) 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 13px;
   font-family: var(--font-mono);
   cursor: pointer;
 }
@@ -71,7 +71,7 @@
   background: var(--accent-dim); border-color: var(--accent); color: var(--accent-light);
 }
 
-.template-select { min-width: 100px; font-size: 12px; padding: 4px 8px; }
+.template-select { min-width: 100px; font-size: 14px; padding: 4px 8px; }
 
 /* ========================================
    Fixed Top Area (シミュレータ + コントロールバーまとめて sticky)
@@ -228,7 +228,7 @@
   flex-shrink: 0;
   transition: transform 0.1s ease, filter 0.1s ease;
 }
-.device-button-label { font-size: 10px; color: var(--text-primary); font-family: var(--font-mono); white-space: nowrap; }
+.device-button-label { font-size: 12px; color: var(--text-primary); font-family: var(--font-mono); white-space: nowrap; }
 
 /* LED dot */
 .device-abs-led {
@@ -243,7 +243,7 @@
   flex-shrink: 0;
 }
 .device-config-label {
-  font-size: 11px; color: var(--accent-light, #8bb8ff); font-family: var(--font-ui);
+  font-size: 13px; color: var(--accent-light, #8bb8ff); font-family: var(--font-ui);
   white-space: nowrap; text-decoration: underline; text-underline-offset: 2px;
 }
 .device-grid-vol:hover .device-config-label,
@@ -316,12 +316,14 @@ button.btn-deploy:disabled {
   box-shadow: 0 0 8px rgba(100, 200, 255, 0.3);
 }
 
-/* カード上部のヘッダーバー（要素名） */
+/* カード上部のヘッダーバー（要素名）
+ * 全体 +2 (9→11) とは別に追加で +2 (11→13) している: 配置済み要素の
+ * 識別ラベルなので一目で読める方が UX 上重要、というユーザー要請。 */
 .grid-element-name {
   display: block;
   padding: 0px 3px;
   background: rgba(70, 90, 140, 0.9);
-  font-size: 9px;
+  font-size: 13px;
   font-family: var(--font-mono);
   color: rgba(220, 230, 255, 0.85);
   white-space: nowrap;
@@ -342,7 +344,7 @@ button.btn-deploy:disabled {
 .grid-element-chars .char-text {
   flex: 1;
   text-align: center;
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 600;
   line-height: 1;
   color: #d0e0ff;
@@ -355,7 +357,7 @@ button.btn-deploy:disabled {
   display: flex; align-items: center; justify-content: center;
   background: rgba(244, 67, 54, 0.85);
   border: none; border-radius: 0 3px 0 4px;
-  color: #fff; font-size: 11px; font-family: var(--font-mono);
+  color: #fff; font-size: 13px; font-family: var(--font-mono);
   cursor: pointer; opacity: 0; transition: opacity 0.1s;
   z-index: 15; padding: 0; line-height: 1;
 }
@@ -431,7 +433,7 @@ button.btn-deploy:disabled {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text-primary);
-  font-size: 11px; font-family: var(--font-ui);
+  font-size: 13px; font-family: var(--font-ui);
   cursor: pointer; white-space: nowrap;
   transition: background 0.1s, border-color 0.1s;
 }
@@ -454,13 +456,13 @@ button.btn-deploy:disabled {
   padding: 3px 8px;
   background: rgba(0, 0, 0, 0.85);
   color: #fff;
-  font-size: 10px;
+  font-size: 12px;
   border-radius: 3px;
   white-space: nowrap;
   z-index: 30;
   pointer-events: none;
 }
-.popup-palette-icon { font-family: var(--font-mono); font-size: 11px; }
+.popup-palette-icon { font-family: var(--font-mono); font-size: 13px; }
 
 /* ========================================
    Bottom Panels (パレット + ボタン設定)
@@ -476,7 +478,7 @@ button.btn-deploy:disabled {
   padding: 6px 14px;
   background: rgba(244, 67, 54, 0.9);
   color: #fff;
-  font-size: 12px;
+  font-size: 14px;
   font-family: var(--font-ui);
   border-radius: var(--radius);
   pointer-events: none;
@@ -515,7 +517,7 @@ button.btn-deploy:disabled {
 }
 
 .inline-config-label {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--text-primary);
   font-family: var(--font-mono);
   min-width: 30px;
@@ -528,7 +530,7 @@ button.btn-deploy:disabled {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text-primary);
-  font-size: 10px;
+  font-size: 12px;
   font-family: var(--font-ui);
   cursor: pointer;
   white-space: nowrap;
@@ -557,7 +559,7 @@ button.btn-deploy:disabled {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: 13px;
   font-family: var(--font-ui);
   cursor: pointer;
   white-space: nowrap;
@@ -585,7 +587,7 @@ button.btn-deploy:disabled {
   padding: 4px 8px;
   background: #222;
   color: #eee;
-  font-size: 11px;
+  font-size: 13px;
   border-radius: 4px;
   white-space: nowrap;
   z-index: 100;
@@ -597,7 +599,7 @@ button.btn-deploy:disabled {
 
 .action-dropdown-group { margin-bottom: 4px; }
 .action-dropdown-group-label {
-  font-size: 9px; color: var(--text-muted); font-family: var(--font-mono);
+  font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);
   padding: 2px 4px; margin-bottom: 2px;
 }
 
@@ -613,7 +615,7 @@ button.btn-deploy:disabled {
   border: 1px solid transparent;
   border-radius: var(--radius);
   color: var(--text-primary);
-  font-size: 11px; font-family: var(--font-ui);
+  font-size: 13px; font-family: var(--font-ui);
   cursor: pointer; text-align: left;
   white-space: nowrap;
 }

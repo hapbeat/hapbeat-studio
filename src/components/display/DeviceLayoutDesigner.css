@@ -21,7 +21,7 @@
 }
 
 .layout-designer-title {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -42,7 +42,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-secondary);
   cursor: pointer;
   user-select: none;
@@ -90,7 +90,7 @@
 }
 
 .layout-oled-label {
-  font-size: 12px;
+  font-size: 14px;
   color: #555;
   font-family: var(--font-mono);
 }
@@ -142,7 +142,7 @@
 }
 
 .layout-item-label {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-secondary);
   font-family: var(--font-mono);
   white-space: nowrap;
@@ -150,7 +150,7 @@
 }
 
 .layout-item-coords {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--accent);
   font-family: var(--font-mono);
   white-space: nowrap;
@@ -175,7 +175,7 @@
 .layout-designer-table table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .layout-designer-table th {
@@ -185,7 +185,7 @@
   font-weight: 500;
   border-bottom: 1px solid var(--border);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .layout-designer-table td {

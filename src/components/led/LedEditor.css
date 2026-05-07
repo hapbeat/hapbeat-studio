@@ -23,7 +23,7 @@
 }
 
 .led-preview-label {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-muted);
 }
 
@@ -142,12 +142,12 @@
 }
 
 .led-pattern-name {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
 }
 
 .led-pattern-desc {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
 }
 
@@ -156,6 +156,6 @@
   padding: 20px;
   text-align: center;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.8;
 }

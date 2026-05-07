@@ -131,7 +131,7 @@ export function SerialConfigSection({
           <button
             className="form-button-secondary"
             onClick={() => void release()}
-            style={{ fontSize: 12, padding: '4px 12px' }}
+            style={{ fontSize: 14, padding: '4px 12px' }}
           >
             切断
           </button>

@@ -789,7 +789,7 @@ export function FirmwareSubTab({
               className="form-button-secondary"
               onClick={refreshLibrary}
               disabled={libLoading}
-              style={{ fontSize: 11, padding: '2px 8px' }}
+              style={{ fontSize: 13, padding: '2px 8px' }}
             >
               {libLoading ? '更新中…' : '⟳ 更新'}
             </button>
@@ -897,7 +897,7 @@ export function FirmwareSubTab({
                     {e.fwVersion && (
                       <span
                         style={{
-                          fontSize: 11,
+                          fontSize: 13,
                           padding: '2px 8px',
                           borderRadius: 3,
                           background: 'var(--accent)',
@@ -923,7 +923,7 @@ export function FirmwareSubTab({
                       display: 'flex',
                       flexDirection: 'column',
                       gap: 2,
-                      fontSize: 11,
+                      fontSize: 13,
                       fontFamily: 'var(--font-mono)',
                       color: 'var(--text-muted)',
                     }}
@@ -988,7 +988,7 @@ export function FirmwareSubTab({
               {localMeta?.name ?? '未選択'}
             </span>
             {localMeta && (
-              <span style={{ color: 'var(--text-muted)', fontSize: 11, fontFamily: 'var(--font-mono)' }}>
+              <span style={{ color: 'var(--text-muted)', fontSize: 13, fontFamily: 'var(--font-mono)' }}>
                 {formatBytes(localMeta.size)} · {formatMtime(localMeta.mtime)}
               </span>
             )}
@@ -1092,7 +1092,7 @@ export function FirmwareSubTab({
               if (p) pushLog('serial', 'COM ポートを再選択しました')
             }}
             disabled={serialRunning}
-            style={{ marginLeft: 12, fontSize: 11, padding: '4px 10px' }}
+            style={{ marginLeft: 12, fontSize: 13, padding: '4px 10px' }}
             title="別の Hapbeat に書き込み先を切り替える"
           >
             COM ポート再選択

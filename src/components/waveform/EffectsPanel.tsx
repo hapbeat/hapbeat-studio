@@ -108,7 +108,7 @@ export function EffectsPanel() {
       <div className="effects-chain">
         <div className="effects-chain-header">
           <span>Effects</span>
-          <span style={{ fontSize: '10px', fontWeight: 'normal' }}>
+          <span style={{ fontSize: '12px', fontWeight: 'normal' }}>
             {effects.length} effect{effects.length !== 1 ? 's' : ''}
           </span>
         </div>

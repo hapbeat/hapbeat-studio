@@ -10,7 +10,7 @@
 }
 
 .palette-hint {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   margin-bottom: 8px;
 }
@@ -61,7 +61,7 @@
   height: 24px;
   background: var(--bg-surface);
   border-radius: var(--radius);
-  font-size: 12px;
+  font-size: 14px;
   flex-shrink: 0;
   font-family: var(--font-mono);
 }
@@ -74,7 +74,7 @@
 }
 
 .palette-label {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
@@ -82,7 +82,7 @@
 }
 
 .palette-desc {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -91,7 +91,7 @@
 }
 
 .palette-used-badge {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--accent);
   background: var(--accent-dim);
   padding: 1px 4px;

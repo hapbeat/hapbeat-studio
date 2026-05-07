@@ -1037,7 +1037,7 @@ function OledSimulator({
                     if (item.kind === 'empty') {
                       return <div key={`${rowIdx}-${item.col}`} className="char-cell empty" />
                     }
-                    const meta = getElementMeta(item.el.type)
+                    const meta = getElementMeta(item.el.type, item.el.variant)
                     return (
                       <div
                         key={item.el.id}

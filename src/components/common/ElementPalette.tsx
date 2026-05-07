@@ -14,9 +14,9 @@ export const elementMetas: DisplayElementMeta[] = [
   { type: 'ip_address',        label: 'IP アドレス',      description: 'IP',             icon: '\u2316' },
   { type: 'firmware_version',  label: 'FW Ver',           description: 'バージョン',     icon: 'v' },
   { type: 'device_name',       label: 'デバイス名',        description: '設定名称',       icon: 'D' },
-  { type: 'app_name', variant: 'compact',  label: 'App Name 4字',  description: 'アプリ名 (短)',     icon: 'A' },
-  { type: 'app_name',                       label: 'App Name 8字',  description: 'アプリ名 (標準)',   icon: 'A' },
-  { type: 'app_name', variant: 'wide',      label: 'App Name 16字', description: 'アプリ名 (行全体)', icon: 'A' },
+  { type: 'app_name', variant: 'compact',  label: 'App Name S',  description: 'Short — 4 chars',  icon: 'A' },
+  { type: 'app_name',                       label: 'App Name M',  description: 'Medium — 8 chars', icon: 'A' },
+  { type: 'app_name', variant: 'wide',      label: 'App Name L',  description: 'Long — 16 chars',  icon: 'A' },
   { type: 'gain',              label: 'ゲイン',            description: '出力ゲイン',     icon: 'G' },
   { type: 'address',           label: 'アドレス',          description: 'player/pos',     icon: 'A' },
   { type: 'player_number',     label: 'プレイヤー',        description: 'Player番号',     icon: 'P' },
@@ -29,8 +29,26 @@ function metaKey(meta: DisplayElementMeta): string {
   return meta.variant ? `${meta.type}:${meta.variant}` : meta.type
 }
 
-export function getElementMeta(type: DisplayElementType): DisplayElementMeta | undefined {
-  return elementMetas.find((m) => m.type === type)
+/**
+ * 指定 type (+ variant) の meta を返す。
+ *
+ * variant 必須化 (2026-05-07): 旧実装は variant を無視して最初に見つかった
+ * meta を返していたため、複数 variant を持つ要素 (app_name S/M/L など) は
+ * 配置済みカードの label が常に palette 1 番目のもの (e.g. "App Name S")
+ * になるバグがあった。variant を明示渡しで一致 meta を選ぶ。
+ *
+ * variant 省略時は variant なし meta (= "標準") を優先し、無ければ
+ * 同 type の最初のものを返す (battery 互換)。
+ */
+export function getElementMeta(
+  type: DisplayElementType,
+  variant?: string,
+): DisplayElementMeta | undefined {
+  if (variant && variant !== 'standard') {
+    return elementMetas.find((m) => m.type === type && m.variant === variant)
+  }
+  return elementMetas.find((m) => m.type === type && !m.variant)
+    ?? elementMetas.find((m) => m.type === type)
 }
 
 interface ElementPaletteProps {

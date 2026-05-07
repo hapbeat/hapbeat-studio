@@ -93,7 +93,7 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
           className="form-button-secondary"
           onClick={refresh}
           disabled={!device.online}
-          style={{ fontSize: 11, padding: '2px 8px' }}
+          style={{ fontSize: 13, padding: '2px 8px' }}
         >
           ⟳ 一覧取得
         </button>

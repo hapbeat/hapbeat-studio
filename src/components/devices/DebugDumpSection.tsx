@@ -26,7 +26,7 @@ export function DebugDumpSection({ device, dump, sendTo }: Props) {
           className="form-button-secondary"
           onClick={fetchDump}
           disabled={!device.online}
-          style={{ fontSize: 11, padding: '2px 8px' }}
+          style={{ fontSize: 13, padding: '2px 8px' }}
         >
           取得
         </button>

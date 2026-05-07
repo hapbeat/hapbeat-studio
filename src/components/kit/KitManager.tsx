@@ -1350,7 +1350,7 @@ function KitEditor() {
                         style={validateKitName(activeKit.name) ? { borderColor: 'var(--error)' } : undefined}
                       />
                       {validateKitName(activeKit.name) && (
-                        <span className="kit-meta-error" style={{ color: 'var(--error)', fontSize: 11, marginTop: 2 }}>
+                        <span className="kit-meta-error" style={{ color: 'var(--error)', fontSize: 13, marginTop: 2 }}>
                           {validateKitName(activeKit.name)}
                         </span>
                       )}

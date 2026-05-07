@@ -128,7 +128,7 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
           <datalist id={prefixHistory.historyId}>
             {prefixHistory.history.map((h) => <option key={h} value={h} />)}
           </datalist>
-          <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>player_</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 14 }}>player_</span>
           <input
             className="form-input short"
             type="number"
@@ -138,7 +138,7 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
             onChange={(e) => setPlayer(Math.max(1, Math.min(99, Number(e.target.value) || 1)))}
             disabled={!device.online}
           />
-          <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>/</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: 14 }}>/</span>
           <select
             className="form-select"
             value={position}

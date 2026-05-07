@@ -35,14 +35,14 @@
 
 .modal-header h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .modal-close {
   background: none;
   border: none;
   color: var(--text-muted, #888);
-  font-size: 18px;
+  font-size: 20px;
   cursor: pointer;
   padding: 0 4px;
 }
@@ -71,12 +71,12 @@
 }
 
 .led-global-brightness-label {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
 }
 
 .led-global-brightness-value {
-  font-size: 13px;
+  font-size: 15px;
   font-family: monospace;
   color: var(--text-muted, #888);
 }
@@ -105,7 +105,7 @@
 }
 
 .led-brightness-num {
-  font-size: 11px;
+  font-size: 13px;
   font-family: monospace;
   color: var(--text-muted, #888);
   width: 24px;
@@ -121,7 +121,7 @@
   align-items: center;
   gap: 3px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .led-brightness-override-toggle input[type="checkbox"] {
@@ -166,13 +166,13 @@
 
 .led-rule-name {
   font-weight: 600;
-  font-size: 13px;
+  font-size: 15px;
   white-space: nowrap;
 }
 
 .led-rule-desc {
   color: var(--text-muted, #888);
-  font-size: 11px;
+  font-size: 13px;
   margin-left: auto;
 }
 
@@ -188,7 +188,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .led-setting input[type="color"] {
@@ -203,7 +203,7 @@
 .led-setting input[type="number"] {
   width: 56px;
   padding: 2px 4px;
-  font-size: 12px;
+  font-size: 14px;
   border: 1px solid var(--border, #444);
   border-radius: 3px;
   background: var(--bg, #111);
@@ -212,7 +212,7 @@
 
 .led-setting-hint {
   color: var(--text-muted, #888);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 /* ---- Volume Modal ---- */
@@ -227,7 +227,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .volume-modal-label {
@@ -260,5 +260,5 @@
 
 .volume-modal-hint {
   color: var(--text-muted, #888);
-  font-size: 11px;
+  font-size: 13px;
 }
