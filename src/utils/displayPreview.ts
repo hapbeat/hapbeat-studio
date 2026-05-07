@@ -82,10 +82,23 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
     case 'address': {
       // address は player_ より前の prefix 部分のみ表示。
       // variant でプレビュー文字数を切替: compact=4 / standard=8 / wide=16
-      const sample = 'red/alpha/delta'
-      if (variant === 'compact') return sample.padEnd(4, ' ').slice(0, 4)
-      if (variant === 'wide')    return sample.padEnd(16, ' ').slice(0, 16)
-      return sample.padEnd(8, ' ').slice(0, 8)
+      // NVS は通常 `<prefix>/player_N/pos_xxx` 形式。prefix が無い
+      // (`player_N/...` 形式 or 未設定) 場合は [unset] にフォールバックして
+      // player_N が漏れて表示されないようにする (firmware 側も同 rule)。
+      const fullSample = 'red/alpha/player_5/pos_neck'
+      const idx = fullSample.indexOf('/player_')
+      const headBeforePlayer = idx < 0
+        ? (fullSample.startsWith('player_') ? '' : fullSample)
+        : fullSample.slice(0, idx)
+      const isUnset = headBeforePlayer.length === 0
+      const text = isUnset
+        ? (variant === 'compact' ? 'none'
+          : variant === 'wide'    ? '[unset prefix]'
+          :                         '[unset]')
+        : headBeforePlayer
+      if (variant === 'compact') return text.padEnd(4, ' ').slice(0, 4)
+      if (variant === 'wide')    return text.padEnd(16, ' ').slice(0, 16)
+      return text.padEnd(8, ' ').slice(0, 8)
     }
   }
 }
