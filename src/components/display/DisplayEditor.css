@@ -239,12 +239,20 @@
 .fixed-top-area {
   position: sticky;
   top: 0;
-  /* z-index なし — 子要素のドロップダウンが stacking context に閉じ込められないように */
+  /* スクロール時に下のパレットが OLED にかぶらないよう sticky 側を上に。
+     ドロップダウンは Portal (z-index 99999+) で body 直下に描画されるので
+     ここに stacking context ができても閉じ込められない。 */
+  z-index: 10;
   display: flex;
   flex-direction: column;
   gap: 6px;
   background: var(--bg-primary);
   padding-bottom: 6px;
+  /* .tab-content の padding-top (24px) 分だけ背景を上に拡張して、
+     スクロール時にその余白からパレットが覗かないようにする。
+     box-shadow は overflow:auto の親 (.tab-content) でクリップされるので
+     実際にはみ出す範囲は scrollport top までに収まる。 */
+  box-shadow: 0 -100px 0 var(--bg-primary);
 }
 
 .hardware-preview-sticky {
