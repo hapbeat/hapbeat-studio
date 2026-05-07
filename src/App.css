@@ -121,7 +121,7 @@ body {
 }
 
 .app-header h1 {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 600;
   color: var(--accent-light);
   letter-spacing: 0.5px;
@@ -131,7 +131,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--text-secondary);
   font-family: var(--font-mono);
 }
@@ -188,7 +188,7 @@ body {
   border: none;
   border-radius: calc(var(--radius) - 2px);
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 15px;
   font-family: var(--font-ui);
   cursor: pointer;
   transition: color var(--transition), background var(--transition);
@@ -222,7 +222,7 @@ body {
   border: none;
   border-bottom: 2px solid transparent;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 15px;
   font-family: var(--font-ui);
   cursor: pointer;
   transition: color var(--transition), border-color var(--transition), background var(--transition);
@@ -262,7 +262,7 @@ body {
 }
 
 .panel-title {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
   color: var(--text-primary);
   margin-bottom: 16px;
@@ -279,7 +279,7 @@ body {
   border: 1px solid var(--border-light);
   border-radius: var(--radius);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 15px;
   font-family: var(--font-ui);
   cursor: pointer;
   transition: background var(--transition), border-color var(--transition);
@@ -303,12 +303,12 @@ body {
 
 .btn-sm {
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .mono {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 /* ========================================
@@ -321,7 +321,7 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 15px;
   font-family: var(--font-ui);
   outline: none;
   transition: border-color var(--transition);
@@ -337,7 +337,7 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 15px;
   font-family: var(--font-ui);
   outline: none;
   cursor: pointer;
@@ -345,7 +345,7 @@ body {
 
 .label {
   display: block;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-secondary);
   margin-bottom: 4px;
 }
@@ -365,16 +365,16 @@ body {
 }
 
 .placeholder-page .icon {
-  font-size: 48px;
+  font-size: 50px;
   opacity: 0.4;
 }
 
 .placeholder-page .message {
-  font-size: 16px;
+  font-size: 18px;
 }
 
 .placeholder-page .hint {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--text-muted);
 }
 
@@ -393,7 +393,7 @@ body {
 
   .toggle-btn {
     padding: 5px 12px;
-    font-size: 12px;
+    font-size: 14px;
   }
 
   .tab-content {
