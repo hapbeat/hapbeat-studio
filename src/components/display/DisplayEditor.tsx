@@ -182,11 +182,18 @@ function buildActionGroups(pages: DisplayPage[], deviceModel: DeviceModel): Acti
 function buildHoldActionGroups(pages: DisplayPage[], holdMode: import('@/types/display').HoldMode, deviceModel: DeviceModel): ActionGroup[] {
   if (holdMode === 'momentary') {
     // Tmp: 離したら戻せるアクションのみ（ファーム側で hold_page: として処理）
-    const pageItems: ActionItem[] = pages.map((p, i) => ({
-      value: `hold_page:${i}`, label: `\u2192 ${p.name} (tmp)`,
-    }))
+    // next_page / prev_page \u3082\u30da\u30fc\u30b8\u79fb\u52d5\u64cd\u4f5c\u3068\u3057\u3066 hold \u306b\u7f6e\u3051\u308b\u3088\u3046\u8ffd\u52a0\u3002
+    // (firmware \u306f\u6b21/\u524d\u3078\u300c\u9032\u3081\u308b\u300d\u3060\u3051\u3067\u96e2\u3057\u3066\u3082\u81ea\u52d5\u3067\u623b\u3089\u306a\u3044\u306e\u3067\u3001
+    // \u53b3\u5bc6\u306a tmp \u6319\u52d5\u306f hold_page:N \u306e\u307b\u3046\u306e\u307f\u3002next/prev \u306f\u5b9f\u8cea latch \u3068\u540c\u7b49)
+    const pageItems: ActionItem[] = [
+      { value: 'next_page', label: 'Next Page' },
+      { value: 'prev_page', label: 'Prev Page' },
+      ...pages.map((p, i) => ({
+        value: `hold_page:${i}`, label: `\u2192 ${p.name} (tmp)`,
+      })),
+    ]
     return [
-      ...(pageItems.length > 0 ? [{ label: 'Page', items: pageItems }] : []),
+      { label: 'Page', items: pageItems },
       {
         label: 'Toggle',
         items: [
