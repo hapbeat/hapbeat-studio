@@ -620,10 +620,20 @@ button.btn-deploy:disabled {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
 }
 
-/* ポップアップパレット用: flex wrap で横並び */
+/* ポップアップパレット用: セクションを縦に積み、各セクション内は横 wrap。
+   セクション間は罫線で区切る (常時パレットと同じ並び順を維持)。 */
 .portal-dropdown.popup-palette-content {
-  display: flex; flex-wrap: wrap; gap: 3px;
+  display: flex; flex-direction: column; gap: 4px;
   max-width: 400px;
+}
+
+.popup-palette-section {
+  display: flex; flex-wrap: wrap; gap: 3px;
+}
+.popup-palette-section.has-divider {
+  padding-top: 5px;
+  border-top: 1px solid var(--border);
+  margin-top: 1px;
 }
 
 .popup-palette-item {

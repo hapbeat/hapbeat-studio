@@ -14,7 +14,7 @@ import type {
 import { getElementSize, DEFAULT_LED_RULES, DEFAULT_VOLUME_CONFIG } from '@/types/display'
 import type { DeviceModel, DeviceHardwareSpec } from '@/types/device'
 import { DEVICE_SPECS } from '@/types/device'
-import { ElementPalette, elementMetas, getElementMeta } from '@/components/common/ElementPalette'
+import { ElementPalette, getElementMeta, PALETTE_SECTIONS } from '@/components/common/ElementPalette'
 import { getElementPreviewText, DEFAULT_SIM_STATE } from '@/utils/displayPreview'
 import type { SimState } from '@/utils/displayPreview'
 import { pagePresets, standardTemplate } from '@/utils/templates'
@@ -1320,23 +1320,32 @@ function PopupPalette({ screenX, screenY, gridCol, gridRow, page, usedTypes, onS
     <>
       <div className="portal-overlay" onClick={onClose} />
       <div className="portal-dropdown popup-palette-content" style={{ left: clampedX, top: screenY }}>
-        {elementMetas.map((meta) => {
-          const used = usedTypes.has(meta.type)
-          const noSpace = page ? !canPlace(page, meta.type, [gridCol, gridRow]) : true
-          const disabled = used || noSpace
-          return (
-            <button
-              key={meta.type}
-              className={`popup-palette-item ${used ? 'used' : ''} ${noSpace && !used ? 'no-space' : ''}`}
-              disabled={disabled}
-              onClick={() => onSelect(meta.type)}
-              title={used ? '使用中' : noSpace ? 'スペースが不足しています' : meta.label}
-            >
-              <span className="popup-palette-icon">{meta.icon}</span>
-              {meta.label}
-            </button>
-          )
-        })}
+        {PALETTE_SECTIONS.map((sec, sIdx) => (
+          <div
+            key={sec.title}
+            className={`popup-palette-section ${sIdx > 0 ? 'has-divider' : ''}`}
+            title={`${sec.title} — ${sec.hint}`}
+          >
+            {sec.items.map((item) => {
+              const used = usedTypes.has(item.type)
+              const noSpace = page ? !canPlace(page, item.type, [gridCol, gridRow], undefined, item.variant) : true
+              const disabled = used || noSpace
+              const key = `${item.type}:${item.variant ?? '-'}`
+              return (
+                <button
+                  key={key}
+                  className={`popup-palette-item ${used ? 'used' : ''} ${noSpace && !used ? 'no-space' : ''}`}
+                  disabled={disabled}
+                  onClick={() => onSelect(item.type)}
+                  title={used ? '使用中' : noSpace ? 'スペースが不足しています' : item.label}
+                >
+                  <span className="popup-palette-icon">{item.icon}</span>
+                  {item.label}
+                </button>
+              )
+            })}
+          </div>
+        ))}
       </div>
     </>,
     document.body

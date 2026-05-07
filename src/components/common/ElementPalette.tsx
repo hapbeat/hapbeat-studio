@@ -22,7 +22,7 @@ import './ElementPalette.css'
 
 interface VariantOption { value: string; label: string }
 
-interface PaletteItemDef {
+export interface PaletteItemDef {
   type: DisplayElementType
   label: string
   description: string
@@ -33,7 +33,7 @@ interface PaletteItemDef {
   variants?: VariantOption[]
 }
 
-interface PaletteSection {
+export interface PaletteSection {
   title: string
   hint: string
   items: PaletteItemDef[]
@@ -45,7 +45,7 @@ const sizeVariants: VariantOption[] = [
   { value: 'wide',     label: 'L' },
 ]
 
-const PALETTE_SECTIONS: PaletteSection[] = [
+export const PALETTE_SECTIONS: PaletteSection[] = [
   {
     title: 'ステータス',
     hint: '動的に変化 / 常時表示向き',
