@@ -653,7 +653,7 @@ export function DisplayEditor() {
   }, [layout.pages.length])
 
   // --- Helper 接続 ---
-  const { isConnected: managerConnected, lastMessage, send: managerSend } = useHelperConnection()
+  const { isConnected: managerConnected, lastMessage, send: managerSend, devices } = useHelperConnection()
   const { toast, setAnchor: setToastAnchor } = useToast()
   const [isDeploying, setIsDeploying] = useState(false)
   // Per-target deploy progress sourced from Helper's `write_progress` push.
@@ -743,16 +743,32 @@ export function DisplayEditor() {
       toast('Devices タブで対象デバイスを選択してください', 'error')
       return
     }
-    // Display deploy goes through helper TCP 7701; firmware's
-    // `serial_config.cpp` does not yet implement `write_ui_config`,
-    // so a Serial pseudo-device target would just fail at
-    // `_send_tcp_to_many` with `connect failed`. Strip serial: IPs
-    // silently — Serial-only selection (= LAN ターゲットなし) のときだけ
-    // 案内を出す。普段は黙って LAN ターゲットだけ使う。
-    const targets = rawTargets.filter((ip) => !ip.startsWith('serial:'))
-    if (targets.length === 0) {
+    // Drop serial: IPs silently (Display deploy は TCP 7701 専用、
+    // Serial 経路は firmware の serial_config.cpp に write_ui_config が
+    // 未実装)。Serial-only 選択時だけ案内 toast。
+    const lanTargets = rawTargets.filter((ip) => !ip.startsWith('serial:'))
+    if (lanTargets.length === 0) {
       toast('Serial 接続では Display 書込みは未対応 — Wi-Fi に乗せてから再試行してください', 'error')
       return
+    }
+    // Helper の現在のデバイス一覧と突き合わせて、オンラインの IP だけを
+    // 残す。永続化された stale 選択や、helper が dismiss 済の古い IP を
+    // 抱えていてもここで確実に弾ける (deploy 進捗 UI が "2 台" 出る等の
+    // ゴーストを防止)。
+    const onlineSet = new Set(devices.filter((d) => d.online).map((d) => d.ipAddress))
+    const targets = lanTargets.filter((ip) => onlineSet.has(ip))
+    if (targets.length === 0) {
+      toast('選択中のデバイスが現在オフラインです', 'error')
+      return
+    }
+    if (targets.length < lanTargets.length) {
+      // 黙って弾くと "選択した数 != 進捗バーの台数" になって不可解なので
+      // 簡潔にログだけ残す (toast は出さない — 失敗ではないため)。
+      // eslint-disable-next-line no-console
+      console.info(
+        `[deploy] dropped ${lanTargets.length - targets.length} offline target(s):`,
+        lanTargets.filter((ip) => !onlineSet.has(ip)),
+      )
     }
     setIsDeploying(true)
     // Pre-seed progress so the UI shows immediately ("sending" for each
@@ -772,7 +788,7 @@ export function DisplayEditor() {
       type: 'write_ui_config',
       payload: { config: uiConfig, targets },
     })
-  }, [managerConnected, managerSend, buildSavedState, toast])
+  }, [managerConnected, managerSend, buildSavedState, toast, devices])
 
   const handleExport = useCallback(() => {
     exportDisplayLayout(buildSavedState())
