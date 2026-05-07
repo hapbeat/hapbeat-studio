@@ -15,9 +15,19 @@
 .editor-control-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
   padding: 4px 0;
+}
+
+/* control bar 内のボタン・select は btn-sm 相当の高さに統一。
+   ブラウザ既定の line-height や padding 差で 1〜2px ズレるのを抑える。 */
+.editor-control-bar .btn,
+.editor-control-bar .select,
+.editor-control-bar .page-tab,
+.editor-control-bar .page-tab-delete {
+  height: 28px;
+  box-sizing: border-box;
 }
 
 .control-separator {
@@ -71,8 +81,24 @@
   background: var(--accent-dim); border-color: var(--accent); color: var(--accent-light);
 }
 
-.template-select { min-width: 110px; font-size: 14px; padding: 4px 8px; }
-.preset-select { min-width: 110px; font-size: 14px; padding: 4px 8px; margin-left: 4px; }
+.preset-select { min-width: 92px; padding: 0 8px; }
+.preset-select::-ms-expand { display: none; }
+
+/* デバイスモデル切替トグル — 単一ボタン + ⇄ で切替動作を示す */
+.device-toggle-btn-single {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+}
+.device-toggle-btn-single .device-toggle-icon {
+  font-size: 13px;
+  opacity: 0.7;
+  font-weight: 600;
+}
+
+/* 初期化ボタン — controlBar 内で他と高さ統一 */
+.btn-reset { padding: 0 10px; }
 
 /* ========================================
    Fixed Top Area (シミュレータ + コントロールバーまとめて sticky)

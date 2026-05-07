@@ -370,6 +370,16 @@ body {
   cursor: pointer;
 }
 
+/* btn-sm と高さを揃えた小型 select。
+   - padding: btn-sm と同じ 4px 10px
+   - font-size: 14px
+   - line-height を統一して垂直方向のセンタリングずれを防ぐ */
+.select-sm {
+  padding: 4px 10px;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
 .label {
   display: block;
   font-size: 14px;

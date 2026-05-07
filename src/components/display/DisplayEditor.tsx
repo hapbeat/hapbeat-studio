@@ -17,7 +17,7 @@ import { DEVICE_SPECS } from '@/types/device'
 import { ElementPalette, elementMetas, getElementMeta } from '@/components/common/ElementPalette'
 import { getElementPreviewText, DEFAULT_SIM_STATE } from '@/utils/displayPreview'
 import type { SimState } from '@/utils/displayPreview'
-import { allTemplates, pagePresets, standardTemplate } from '@/utils/templates'
+import { pagePresets, standardTemplate } from '@/utils/templates'
 import {
   exportDisplayLayout,
   importDisplayLayout,
@@ -617,14 +617,14 @@ export function DisplayEditor() {
     [layout.pages.length, activePageIndex]
   )
 
-  const handleApplyTemplate = useCallback((templateIndex: number) => {
-    const template = allTemplates[templateIndex]
-    if (!template) return
+  /** 工場出荷状態に戻す: standardTemplate を全置換で適用。
+   *  ページ追加で個別に組み立てる UX とは別の「リセット導線」。 */
+  const handleResetToDefault = useCallback(() => {
     if (!window.confirm(
-      `全レイアウト「${template.name}」を適用します。\n` +
-      `現在のページ・ボタン設定はすべて置き換えられます。続行しますか？`
+      '初期レイアウトに戻します。\n' +
+      '現在のページ・ボタン設定はすべて置き換えられます。続行しますか？'
     )) return
-    setLayout(structuredClone(template.layout))
+    setLayout(structuredClone(standardTemplate.layout))
     setActivePageIndex(0)
     setPopupPos(null)
   }, [])
@@ -910,7 +910,7 @@ export function DisplayEditor() {
           onDeletePage={handleDeletePage}
           onInsertPagePreset={handleInsertPagePreset}
           onDeviceModelChange={handleDeviceModelChange}
-          onApplyTemplate={handleApplyTemplate}
+          onResetToDefault={handleResetToDefault}
           onToggleOrientation={() => setOrientationByModel((prev) => ({
             ...prev,
             [deviceModel]: prev[deviceModel] === 'flipped' ? 'normal' : 'flipped',
@@ -1206,7 +1206,7 @@ interface ControlBarProps {
   onDeletePage: (idx: number) => void
   onInsertPagePreset: (idx: number) => void
   onDeviceModelChange: (model: DeviceModel) => void
-  onApplyTemplate: (idx: number) => void
+  onResetToDefault: () => void
   onToggleOrientation: () => void
   onExport: () => void
   onImport: () => void
@@ -1220,7 +1220,7 @@ interface ControlBarProps {
 function ControlBar({
   pages, activePageIndex, deviceModel, isFlipped,
   onPageChange, onAddPage, onDeletePage, onInsertPagePreset,
-  onDeviceModelChange, onApplyTemplate, onToggleOrientation,
+  onDeviceModelChange, onResetToDefault, onToggleOrientation,
   onExport, onImport, onDeploy, managerConnected, isDeploying, isSerialOnlySelected, deployBtnRef,
 }: ControlBarProps) {
   return (
@@ -1248,31 +1248,39 @@ function ControlBar({
             e.target.value = ''
           }}
         >
-          <option value="" disabled>＋ プリセット</option>
+          <option value="" disabled>プリセット…</option>
           {pagePresets.map((p, idx) => (
             <option key={p.name} value={idx} title={p.description}>{p.name}</option>
           ))}
         </select>
       </div>
       <div className="control-separator" />
-      <div className="device-toggle">
-        {(Object.keys(DEVICE_SPECS) as DeviceModel[]).map((model) => (
+      {(() => {
+        // 単一トグル: 現在のモデルを表示し、クリックで次のモデルへ循環。
+        // ⇄ アイコンで「切り替え動作」であることを明示する。
+        const models = Object.keys(DEVICE_SPECS) as DeviceModel[]
+        const idx = models.indexOf(deviceModel)
+        const next = models[(idx + 1) % models.length]
+        return (
           <button
-            key={model}
-            className={`btn btn-sm device-toggle-btn ${deviceModel === model ? 'active' : ''}`}
-            onClick={() => onDeviceModelChange(model)}
-          >{DEVICE_SPECS[model].name}</button>
-        ))}
-      </div>
-      <select className="select select-sm template-select" defaultValue=""
-        title="全レイアウトを置き換え (確認あり)"
-        onChange={(e) => { const i = parseInt(e.target.value, 10); if (!isNaN(i)) onApplyTemplate(i); e.target.value = '' }}
+            type="button"
+            className="btn btn-sm device-toggle-btn-single"
+            onClick={() => onDeviceModelChange(next)}
+            title={`デバイスモデル切替 (現在: ${DEVICE_SPECS[deviceModel].name} → クリックで ${DEVICE_SPECS[next].name})`}
+          >
+            <span>{DEVICE_SPECS[deviceModel].name}</span>
+            <span className="device-toggle-icon" aria-hidden="true">⇄</span>
+          </button>
+        )
+      })()}
+      <button
+        type="button"
+        className="btn btn-sm btn-reset"
+        onClick={onResetToDefault}
+        title="ページ・ボタン設定を初期レイアウトに戻す (確認あり)"
       >
-        <option value="" disabled>全レイアウト ▾</option>
-        {allTemplates.map((t, idx) => (
-          <option key={t.name} value={idx} title={t.description}>{t.name}</option>
-        ))}
-      </select>
+        ⟲ 初期化
+      </button>
       <button className={`btn btn-sm ${isFlipped ? 'active' : ''}`} onClick={onToggleOrientation}>
         {isFlipped ? '\u21bb 180\u00b0' : '\u21bb \u901a\u5e38'}
       </button>
@@ -1284,8 +1292,10 @@ function ControlBar({
         読込
       </button>
       <div className="control-separator" />
-      {/* Shared DevicePill — identical UI to the Kit tab's WorkDirBar.
-          Pill itself + Devices ▸ button both open the modal. */}
+      {/* Shared DevicePill — Kit tab の WorkDirBar と共通。
+          pill 自体クリックで Devices モーダルを開く。
+          以前あった "Devices ▸" 補助ボタンは header の Devices タブと
+          冗長なため削除済み。 */}
       <DevicePill />
       <div className="control-separator" />
       <span className="tooltip-wrap">
