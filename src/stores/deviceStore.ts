@@ -90,6 +90,12 @@ interface DeviceState {
   /** Helper-driven housekeeping: every push of the device list calls
    *  this so dismissed-but-now-online IPs un-dismiss themselves. Idempotent. */
   syncOnlineDevices: (onlineIps: string[]) => void
+  /** Drop selection entries that no longer correspond to any *known*
+   *  device (i.e. the helper's mDNS list never returned this IP this
+   *  session). Use to clean up stale persisted IPs from previous
+   *  Studio sessions — e.g. a device whose DHCP lease changed leaves
+   *  the old IP in localStorage as a phantom "選択済". Idempotent. */
+  pruneSelectionsToKnown: (knownIps: string[]) => void
   setInfo: (ip: string, info: DeviceState['infoCache'][string]) => void
   /** Merge AP status into infoCache (from get_ap_status or get_info extension). */
   setApStatus: (ip: string, status: {
@@ -282,6 +288,23 @@ export const useDeviceStore = create<DeviceState>((set) => ({
       if (filtered.length === s.dismissedIps.length) return {}
       persist(STORAGE_KEY_DISMISSED, filtered)
       return { dismissedIps: filtered }
+    }),
+
+  pruneSelectionsToKnown: (knownIps) =>
+    set((s) => {
+      // serial: は USB に紐付いた揮発エントリで knownIps とは別系統で
+      // 管理されるため (DeviceList 側の serialDevice 合流) ここでは
+      // ふるい落とさない。LAN IP だけを対象に絞る。
+      const known = new Set(knownIps)
+      const isStale = (ip: string) => !ip.startsWith('serial:') && !known.has(ip)
+      const nextSelectedIps = s.selectedIps.filter((ip) => !isStale(ip))
+      const nextSelectedIp = s.selectedIp && isStale(s.selectedIp) ? null : s.selectedIp
+      const setChanged = nextSelectedIps.length !== s.selectedIps.length
+      const primaryChanged = nextSelectedIp !== s.selectedIp
+      if (!setChanged && !primaryChanged) return {}
+      if (setChanged) persist(STORAGE_KEY_SELECTED_SET, nextSelectedIps)
+      if (primaryChanged) persist(STORAGE_KEY_SELECTED, nextSelectedIp)
+      return { selectedIps: nextSelectedIps, selectedIp: nextSelectedIp }
     }),
 
   setInfo: (ip, info) =>

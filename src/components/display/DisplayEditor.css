@@ -30,6 +30,7 @@
   box-sizing: border-box;
 }
 
+
 .control-separator {
   width: 1px;
   height: 24px;
@@ -51,7 +52,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius) 0 0 var(--radius);
   color: var(--text-secondary);
-  font-size: 15px;
+  font-size: 14px;
   font-family: var(--font-ui);
   cursor: pointer;
   transition: background var(--transition), color var(--transition);
@@ -157,6 +158,46 @@
 @keyframes deploy-progress-slide {
   0% { transform: translateX(-110%); }
   100% { transform: translateX(380%); }
+}
+
+/* 多ターゲット時: determinate なバーの上に "光が流れる" shimmer を
+   オーバーレイして、進行中であることを視覚的に示す。 */
+.deploy-progress-bar.shimmer::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  width: 40%;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.35) 50%,
+    transparent 100%);
+  animation: deploy-progress-shimmer 1.4s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes deploy-progress-shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(280%); }
+}
+
+/* ヘッダー右側の小型スピナー — 進行中の常時可視サイン */
+.deploy-progress-spinner,
+.deploy-progress-spinner-inline {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--accent-dim);
+  border-top-color: var(--accent-light);
+  border-radius: 50%;
+  animation: deploy-progress-spin 0.8s linear infinite;
+  vertical-align: middle;
+}
+.deploy-progress-spinner-inline {
+  width: 10px;
+  height: 10px;
+  border-width: 2px;
+}
+@keyframes deploy-progress-spin {
+  to { transform: rotate(360deg); }
 }
 
 .deploy-progress-list {

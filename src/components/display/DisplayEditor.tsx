@@ -1504,8 +1504,10 @@ function DeployProgressBar({ total, targets }: DeployProgressBarProps) {
   const doneCount = entries.filter(([, s]) => s.phase !== 'sending').length
   const okCount = entries.filter(([, s]) => s.phase === 'done').length
   const failCount = entries.filter(([, s]) => s.phase === 'failed').length
+  const sendingCount = entries.filter(([, s]) => s.phase === 'sending').length
   const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0
   const allDone = doneCount === total && total > 0
+  const inProgress = !allDone && sendingCount > 0
   const headLabel = allDone
     ? `完了 ${okCount}/${total}${failCount > 0 ? ` (失敗 ${failCount})` : ''}`
     : `書込中 ${doneCount}/${total}`
@@ -1517,11 +1519,18 @@ function DeployProgressBar({ total, targets }: DeployProgressBarProps) {
     <div className="deploy-progress" role="status" aria-live="polite">
       <div className="deploy-progress-header">
         <span className="deploy-progress-label">{headLabel}</span>
+        {inProgress && (
+          <span className="deploy-progress-spinner" aria-hidden="true" />
+        )}
       </div>
-      <div className={`deploy-progress-bar ${single && !allDone ? 'indeterminate' : ''}`}>
+      <div
+        className={`deploy-progress-bar ${
+          inProgress ? (single ? 'indeterminate' : 'shimmer') : ''
+        }`}
+      >
         <div
           className={`deploy-progress-fill ${failCount > 0 && allDone ? 'has-fail' : ''}`}
-          style={{ width: single && !allDone ? '100%' : `${pct}%` }}
+          style={{ width: single && inProgress ? '100%' : `${pct}%` }}
         />
       </div>
       {!single && (
@@ -1529,7 +1538,9 @@ function DeployProgressBar({ total, targets }: DeployProgressBarProps) {
           {entries.map(([ip, s]) => (
             <li key={ip} className={`deploy-progress-row deploy-progress-row--${s.phase}`}>
               <span className="deploy-progress-icon" aria-hidden="true">
-                {s.phase === 'sending' ? '…' : s.phase === 'done' ? '✓' : '✗'}
+                {s.phase === 'sending'
+                  ? <span className="deploy-progress-spinner-inline" />
+                  : s.phase === 'done' ? '✓' : '✗'}
               </span>
               <span className="deploy-progress-ip">{ip}</span>
               {s.message && <span className="deploy-progress-msg">{s.message}</span>}

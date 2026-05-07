@@ -100,6 +100,22 @@ export function DeviceList() {
     syncOnlineDevices(onlineIps)
   }, [devices, syncOnlineDevices])
 
+  // One-shot prune of stale selections from previous Studio sessions.
+  // Background: localStorage carries `selectedIps` across reloads, so a
+  // device whose DHCP lease changed (or that was unplugged for good)
+  // leaves a phantom IP in the selection — the sidebar count says
+  // "2選択" even though only 1 device is actually here. We wait for the
+  // first non-empty `devices` push (helper has done initial mDNS scan)
+  // before pruning; after that, the user's own toggles drive the set.
+  const didPruneRef = useRef(false)
+  const pruneSelectionsToKnown = useDeviceStore((s) => s.pruneSelectionsToKnown)
+  useEffect(() => {
+    if (didPruneRef.current) return
+    if (devices.length === 0) return
+    didPruneRef.current = true
+    pruneSelectionsToKnown(devices.map((d) => d.ipAddress))
+  }, [devices, pruneSelectionsToKnown])
+
   // First-time auto-select: when devices first appear, pick the first
   // one so the detail pane is populated without an extra click.
   // Critically, this runs ONCE — when the user explicitly unchecks the
