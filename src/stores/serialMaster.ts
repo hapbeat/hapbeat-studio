@@ -418,6 +418,12 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
           },
           flashProgress: { phase: 'done', percent: 100 },
           mode: 'idle',
+          // probeStatus を 'idle' に戻す。failed のまま残ると Wizard の
+          // 「failed && step=configure → flash」効果が flash 完了直後の
+          // configure 遷移で即発火し、step=2↔3 を行き来するバグになる
+          // (User report 2026-05-09)。
+          probeStatus: 'idle',
+          probeMessage: null,
         }))
         pushLog('serial', `flash done`)
         // Step 3: drop the held port handle so the next openConfig
