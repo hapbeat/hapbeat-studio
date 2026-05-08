@@ -208,8 +208,13 @@ export function FirmwareSubTab({
     device ? s.infoCache[device.ipAddress]?.board : undefined,
   )
   const lastFlashedBoardForIp = useDeviceStore((s) => {
-    const key = device?.ipAddress ?? 'serial:current'
-    return s.lastFlashedBoard[key]
+    // ipAddress が確定していないとき (= Step 2 で初めて書き込む新品 / 別個体)
+    // にグローバル fallback キー 'serial:current' を使うと、直前にこの
+    // ブラウザセッションで書いた A の board が B の判定に流入してしまう
+    // (User report 2026-05-09: 「Duo→Band で書き込もうとすると警告が出る」)。
+    // 個体特定できないときは判定対象なしとして扱う。
+    const key = device?.ipAddress
+    return key ? s.lastFlashedBoard[key] : undefined
   })
   const invalidateBoard = useDeviceStore((s) => s.invalidateBoard)
   const setLastFlashedBoard = useDeviceStore((s) => s.setLastFlashedBoard)
@@ -832,16 +837,13 @@ export function FirmwareSubTab({
       postFlashReprobeMs,
     })
     // Remember what we flashed so the next pre-flight has a stable
-    // reference. Serial flashing may target a device that doesn't
-    // have an LAN IP yet — fall back to the device's MAC-prefixed
-    // pseudo-IP if available, otherwise tag the flash on a stable
-    // "serial" key so the warning still fires for back-to-back
-    // Serial flashes from the same browser session.
-    if (source === 'library' && libSelected) {
+    // reference. **個体特定できる ipAddress がある場合のみ** 記録する
+    // (旧実装のグローバル fallback キー 'serial:current' は別個体への
+    // 流入の元なので廃止 — 別個体の連続書き込みで誤警告が出ていた問題の対処)。
+    if (source === 'library' && libSelected && device?.ipAddress) {
       const flashed = envExpectsBoard(libSelected)
       if (flashed) {
-        const ip = device?.ipAddress ?? 'serial:current'
-        setLastFlashedBoard(ip, flashed)
+        setLastFlashedBoard(device.ipAddress, flashed)
       }
     }
   }

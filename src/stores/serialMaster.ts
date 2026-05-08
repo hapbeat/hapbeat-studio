@@ -137,7 +137,18 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
           // The chip rebooted (e.g. after `set_wifi`) or the cable was
           // pulled. Clear the conn so subscribers see we're back to
           // idle, but keep `port` so a re-probe can reuse it.
-          set({ conn: null, mode: 'idle', info: null, wifiStatus: null })
+          // flashLastResult もクリア — そうしないと A の flash 成功後に
+          // ケーブルを抜いて B を繋いだ時、Wizard が「flash 成功」を見て
+          // step を 'configure' に固定したまま戻れなくなる
+          // (User report 2026-05-09: 「Step 3 のままになる」)。
+          set({
+            conn: null,
+            mode: 'idle',
+            info: null,
+            wifiStatus: null,
+            wifiProfiles: [],
+            flashLastResult: null,
+          })
         },
       })
     } catch (err) {
@@ -238,6 +249,10 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
         setProbe('failed', 'Web Serial API がこのブラウザでサポートされていません')
         return null
       }
+      // 別個体に挿し替えて再 probe する場合、A の flash success を引きずらない
+      // (User report 2026-05-09)。ここで毎回クリアしておけば B の flow は
+      // 自然な状態 (= probe 成功 → configure / 失敗 → flash) で開始する。
+      set({ flashLastResult: null, info: null, wifiStatus: null, wifiProfiles: [] })
       setProbe('connecting', 'COM ポートを確認中…')
 
       // Guardian timeout: probe='connecting' のまま 20 秒経過したら強制的に

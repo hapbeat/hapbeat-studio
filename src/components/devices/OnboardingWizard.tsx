@@ -50,7 +50,10 @@ export function OnboardingWizard() {
       setStep('configure')
       return
     }
-    if (probeStatus === 'failed' && step === 'probe') {
+    if (probeStatus === 'failed' && (step === 'probe' || step === 'configure')) {
+      // step=='configure' のままだと別個体 (download mode) を挿した時に
+      // 「再接続」UI で Failed メッセージだけ出して止まる。flash へ遷移して
+      // ファーム書き込みフローに切り替える (User report 2026-05-09)。
       setStep('flash')
     }
   }, [probeStatus, mode, conn, step])
