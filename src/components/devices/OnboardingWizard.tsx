@@ -1,12 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useSerialMaster } from '@/stores/serialMaster'
 import { isWebSerialSupported } from '@/utils/serialConfig'
-import { useDeviceTransport } from '@/hooks/useDeviceTransport'
-import type { DeviceInfo, ManagerMessage } from '@/types/manager'
-import type { WifiProfile } from '@/stores/deviceStore'
 import { FirmwareSubTab } from './FirmwareSubTab'
-import { WifiProfilesForm } from './WifiProfilesForm'
 import './OnboardingWizard.css'
 
 const SERIAL_DEVICE_PREFIX = 'serial:'
@@ -286,89 +282,33 @@ function ConfigureStep({
     )
   }
 
-  // 接続あり: Step 3 内に Wi-Fi 設定フォームを埋め込む。
-  // 旧挙動 (左サイドバーへ誘導) はユーザ要望で撤廃 — onboarding 中に
-  // 「一般の設定タブに飛ばされる」のは初心者に酷。Wi-Fi 設定が終わったら
-  // 「完了して設定タブへ」ボタンで明示的に DeviceDetail に切り替える。
-  return <Step3WifiPanel onDisconnect={onDisconnect} />
-}
-
-function Step3WifiPanel({ onDisconnect }: { onDisconnect: () => void }) {
+  // 接続あり: 設定タブ (Wi-Fi sub-tab) へのハンドオフ。
+  // Wi-Fi 設定 UI は DeviceDetail の Wi-Fi tab に集約しており、ここでは
+  // 重複させない。「Wi-Fi 設定へ進む」ボタンで selectDevice を呼ぶと、
+  // DeviceDetail 側が wifi_connected=false → Wi-Fi sub-tab を自動選択する。
   const masterInfo = useSerialMaster((s) => s.info)
-  const masterWifiStatus = useSerialMaster((s) => s.wifiStatus)
-  const masterWifiProfiles = useSerialMaster((s) => s.wifiProfiles)
-  const masterWifiProfileMax = useSerialMaster((s) => s.wifiProfileMax)
-  const refreshAll = useSerialMaster((s) => s.refreshAll)
-
-  const serialId = masterInfo
-    ? `${SERIAL_DEVICE_PREFIX}${masterInfo.mac ?? 'active'}`
-    : null
-
-  const transport = useDeviceTransport(serialId)
-  const sendTo = (msg: ManagerMessage) => { void transport.sendTo(msg) }
-
-  // WifiProfilesForm が期待する DeviceInfo を masterInfo から合成。
-  const device: DeviceInfo | null = useMemo(() => {
-    if (!serialId || !masterInfo) return null
-    return {
-      ipAddress: serialId,
-      name: masterInfo.name ?? '(unnamed)',
-      address: 'USB Serial',
-      firmwareVersion: masterInfo.fw,
-      online: true,
-    } as DeviceInfo
-  }, [serialId, masterInfo])
-
-  const profiles: WifiProfile[] = (masterWifiProfiles ?? []).map((p) => ({
-    index: p.index,
-    ssid: p.ssid,
-    has_pass: p.has_pass,
-    active: p.active,
-  }))
-
   const handleFinish = () => {
-    if (serialId) {
-      // ここで初めて DeviceDetail へ切り替え (= サイドバー選択)。
-      useDeviceStore.getState().selectDevice(serialId)
-    }
+    if (!masterInfo) return
+    const id = `${SERIAL_DEVICE_PREFIX}${masterInfo.mac ?? 'active'}`
+    useDeviceStore.getState().selectDevice(id)
   }
-
-  const wifiConnected = !!masterWifiStatus?.connected
-
-  if (!device) {
-    return (
-      <div className="form-section onboarding-step">
-        <div className="form-section-title">Step 3 — 接続情報を取得中…</div>
-      </div>
-    )
-  }
-
   return (
     <div className="form-section onboarding-step">
-      <div className="form-section-title">Step 3 — Wi-Fi 設定</div>
+      <div className="form-section-title">Step 3 — Wi-Fi 設定へ進む</div>
       <div className="onboarding-step-body">
         <p style={{ marginTop: 0 }}>
-          下のフォームで <strong>Wi-Fi の SSID / パスワード</strong> を登録してください。
-          {wifiConnected
-            ? ' 既に接続中です。完了するとデバイスが LAN 上に表示されます。'
-            : ' 登録後にデバイスが Wi-Fi に接続すると LAN 上の別カードとして表示されます。'}
+          シリアル接続できました。下のボタンで <strong>Wi-Fi 設定タブ</strong> に進み、
+          SSID とパスワードを登録してください。Wi-Fi 接続が確立するとデバイスが
+          LAN 上に表示され、設定タブから残りの項目 (デバイス識別 / UI Config / Debug Dump)
+          にアクセスできます。
         </p>
-        <WifiProfilesForm
-          device={device}
-          profiles={profiles}
-          count={profiles.length}
-          max={masterWifiProfileMax ?? 5}
-          wifiStatus={masterWifiStatus ?? undefined}
-          sendTo={sendTo}
-          onRefresh={() => { void refreshAll() }}
-        />
-        <div className="form-action-row" style={{ marginTop: 12 }}>
+        <div className="form-action-row">
           <button
             className="form-button onboarding-cta"
             onClick={handleFinish}
-            title="設定タブ (デバイス識別 / UI Config / Debug Dump) に切り替えます"
+            title="DeviceDetail の Wi-Fi タブを開きます"
           >
-            完了して設定タブへ →
+            Wi-Fi 設定タブへ進む →
           </button>
           <button className="form-button-secondary" onClick={onDisconnect}>
             切断して Step 1 に戻る

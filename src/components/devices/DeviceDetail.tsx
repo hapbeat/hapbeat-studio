@@ -17,9 +17,10 @@ import { OnboardingWizard } from './OnboardingWizard'
 import { useDeviceTransport } from '@/hooks/useDeviceTransport'
 import { useSerialMaster } from '@/stores/serialMaster'
 
-type SubTab = 'config' | 'kit' | 'test' | 'firmware'
+type SubTab = 'wifi' | 'config' | 'kit' | 'test' | 'firmware'
 
 const SUB_TABS: { id: SubTab; label: string }[] = [
+  { id: 'wifi', label: 'Wi-Fi' },
   { id: 'config', label: '設定' },
   { id: 'kit', label: 'Kit' },
   { id: 'test', label: '再生テスト' },
@@ -77,11 +78,26 @@ export function DeviceDetail() {
 
   const [subTab, setSubTab] = useState<SubTab>(() => {
     const saved = localStorage.getItem(SUBTAB_KEY)
-    return SUB_TABS.some((t) => t.id === saved) ? (saved as SubTab) : 'config'
+    return SUB_TABS.some((t) => t.id === saved) ? (saved as SubTab) : 'wifi'
   })
   useEffect(() => {
     localStorage.setItem(SUBTAB_KEY, subTab)
   }, [subTab])
+
+  // 初見ユーザ向け: 選択中のデバイスがまだ Wi-Fi 未接続なら Wi-Fi タブを
+  // 自動選択する (post-flash / 顧客の初期受領 を想定)。「同じセッション内で
+  // 一度ユーザがタブを切替えたら以降は尊重」したいので、selectedIp 変更時
+  // のみ判定する。Wi-Fi 接続済の場合は最後に開いていたタブ (config 等) を維持。
+  const lastEvaluatedIpRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!selectedIp) return
+    if (lastEvaluatedIpRef.current === selectedIp) return
+    lastEvaluatedIpRef.current = selectedIp
+    const wifiOk = selectedIp.startsWith('serial:')
+      ? !!useSerialMaster.getState().wifiStatus?.connected
+      : !!wifiStatusCache[selectedIp]?.connected
+    if (!wifiOk) setSubTab('wifi')
+  }, [selectedIp, wifiStatusCache])
 
   const [globalStatus, setGlobalStatus] = useState<{ kind: 'ok' | 'err' | 'warn' | 'muted'; msg: string } | null>(null)
 
@@ -401,13 +417,8 @@ export function DeviceDetail() {
       </div>
 
       <div className="device-subtab-body">
-        {subTab === 'config' && (
+        {subTab === 'wifi' && (
           <>
-            <IdentityForm
-              device={device}
-              cachedInfo={cachedInfo}
-              sendTo={sendTo}
-            />
             <WifiProfilesForm
               device={device}
               profiles={wifiProfiles?.profiles ?? []}
@@ -422,6 +433,16 @@ export function DeviceDetail() {
               apInfo={apInfo}
               sendTo={sendTo}
               onRefreshApStatus={refreshApStatus}
+            />
+          </>
+        )}
+
+        {subTab === 'config' && (
+          <>
+            <IdentityForm
+              device={device}
+              cachedInfo={cachedInfo}
+              sendTo={sendTo}
             />
             {/* OLED 輝度は UI タブ → "UI 設定" モーダルへ移動 (2026-05-08)。
               * Per-device の即時調整は UI モーダル内のスライダで行い、
