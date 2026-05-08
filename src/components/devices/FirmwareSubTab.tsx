@@ -648,17 +648,26 @@ export function FirmwareSubTab({
       }
     }
     // Local file: validate it's a merged image then split with the
-    // same NVS-skipping layout the library path uses.
+    // same NVS-skipping + otadata-erase layout the library path uses.
+    // (See firmwareLibrary.fetchFirmwareSerialRegions for the rationale
+    // behind the otadata erase region.)
     const raw = await readLocalRaw()
     assertMergedImage(raw.bytes)
     const NVS_GAP_START = 0x9000
+    const OTADATA_START = 0xE000
     const APP_START = 0x10000
+    const OTADATA_SIZE = APP_START - OTADATA_START
     return {
       regions: [
         {
           address: 0x0,
           bytes: raw.bytes.slice(0, NVS_GAP_START),
           label: 'bootloader+partitions (0x0..0x9000)',
+        },
+        {
+          address: OTADATA_START,
+          bytes: new Uint8Array(OTADATA_SIZE).fill(0xff),
+          label: 'otadata erase (0xE000..0x10000)',
         },
         {
           address: APP_START,

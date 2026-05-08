@@ -155,18 +155,33 @@ export async function fetchFirmwareAppOta(
   return fetchArtifact(env, 'firmware_app_ota')
 }
 
-const NVS_OTADATA_START = 0x9000
+const NVS_GAP_START = 0x9000
+const OTADATA_START = 0xE000
 const APP_START = 0x10000
+const OTADATA_SIZE = APP_START - OTADATA_START  // 8 KB
+
 /**
  * Fetch the **merged** image (firmware_full_serial.bin) for USB Serial
- * download-mode flashing and return it as 2 regions that skip the
- * NVS + otadata gap (0x9000-0x10000) so reflashing preserves Wi-Fi
- * profiles / device name / group ID.
+ * download-mode flashing and return it as 3 regions:
+ *   1. bootloader + partitions      (write)
+ *   2. otadata erase (8 KB of 0xFF) (write — forces ota_0 boot)
+ *   3. app                          (write to ota_0)
+ * NVS (0x9000-0xE000) is skipped so Wi-Fi profiles / device name / group
+ * ID survive across reflashes.
  *
  * Layout of the merged image:
- *   [0x0    , 0x9000 ) → bootloader (0x0) + partitions (0x8000)
- *   [0x9000 , 0x10000) → SKIPPED (NVS @ 0x9000 + otadata @ 0xE000)
- *   [0x10000, end    ) → app (ota_0)
+ *   [0x0    , 0x9000 ) → bootloader (0x0) + partitions (0x8000)        ← write
+ *   [0x9000 , 0xE000 ) → NVS                                            ← SKIP
+ *   [0xE000 , 0x10000) → otadata                                        ← erase (write 0xFF)
+ *   [0x10000, end    ) → app (ota_0)                                    ← write
+ *
+ * Why otadata is reset (2026-05-09 fix):
+ *   After a successful OTA, otadata points at ota_1. If we serial-flash
+ *   only ota_0 and skip otadata, the bootloader still picks ota_1 and
+ *   boots the OLD firmware — symptom: OLED shows old version, get_info.fw
+ *   mismatches the bin we just flashed. Writing 0xFF to otadata makes
+ *   the bootloader treat OTA selection as uninitialized → boot ota_0
+ *   (the slot we just wrote).
  *
  * Bootloader / partitions / app start markers are validated up front
  * so a non-merged image is rejected before any flash bytes are sent.
@@ -192,8 +207,13 @@ export async function fetchFirmwareSerialRegions(
   return [
     {
       address: 0x0,
-      bytes: b.slice(0, NVS_OTADATA_START),
+      bytes: b.slice(0, NVS_GAP_START),
       label: 'bootloader+partitions (0x0..0x9000)',
+    },
+    {
+      address: OTADATA_START,
+      bytes: new Uint8Array(OTADATA_SIZE).fill(0xff),
+      label: 'otadata erase (0xE000..0x10000)',
     },
     {
       address: APP_START,
