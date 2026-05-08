@@ -186,15 +186,16 @@ const INITIAL_BUTTON_ACTIONS_DUO: PerButtonActions = {
 }
 
 /** Band (3 ボタン) の出荷時 button action 既定。
- *  ハードウェアが 3 ボタンしかないので Duo の 5 ボタン分を当てはめられない。
- *  - btn_l (左): short=prev_page, hold=display_toggle (latch) — ページ送り + 表示 ON/OFF
- *  - btn_c (中): short=vib_mode,  hold=wifi_select  (latch) — モード切替 + Wi-Fi 設定
- *  - btn_r (右): short=next_page, hold=led_toggle   (latch) — ページ送り + LED ON/OFF
- *  player / group 切替が必要なら現場で再割当てする想定。 */
+ *  3 ボタン構成 — Duo の 5 ボタン分を当てはめられないので独自割当て:
+ *  - btn_l (左): short=group_inc,   hold=volume_up    (latch) — グループ +1 / 音量 UP
+ *  - btn_c (中): short=toggle_page, hold=wifi_select  (latch) — ページ切替 / Wi-Fi 設定
+ *  - btn_r (右): short=group_dec,   hold=volume_down  (latch) — グループ -1 / 音量 DOWN
+ *  (2026-05-09 ユーザ提供 ui-config 061935.json 由来)
+ *  player 番号変更は現場で再割当てする想定。 */
 const INITIAL_BUTTON_ACTIONS_BAND: PerButtonActions = {
-  btn_l: { short_press: 'prev_page', long_press: 'none', hold_tmp: 'none', hold_latch: 'display_toggle', hold_mode: 'latch' },
-  btn_c: { short_press: 'vib_mode',  long_press: 'none', hold_tmp: 'none', hold_latch: 'wifi_select',    hold_mode: 'latch' },
-  btn_r: { short_press: 'next_page', long_press: 'none', hold_tmp: 'none', hold_latch: 'led_toggle',     hold_mode: 'latch' },
+  btn_l: { short_press: 'group_inc',   long_press: 'none', hold_tmp: 'none', hold_latch: 'volume_up',   hold_mode: 'latch' },
+  btn_c: { short_press: 'toggle_page', long_press: 'none', hold_tmp: 'none', hold_latch: 'wifi_select', hold_mode: 'latch' },
+  btn_r: { short_press: 'group_dec',   long_press: 'none', hold_tmp: 'none', hold_latch: 'volume_down', hold_mode: 'latch' },
 }
 
 /** 出荷時の per-button actions (Duo 5 + Band 3 を同居)。
