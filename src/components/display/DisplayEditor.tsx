@@ -259,7 +259,12 @@ function canPlace(
 // 自動保存
 // ========================================
 
-const STORAGE_KEY = 'hapbeat-studio-display'
+// 2026-05-09: v2 にバンプ。layoutByModel / hold_tmp / hold_latch / INITIAL_*
+// 改修で旧フォーマット (~v1) を抱えたユーザは「初期化を押さないと現状の
+// INITIAL を見られない」状態になっていた。ベース = 初期化として揃えるため
+// schema 変更時はキー bump で旧データを破棄する (pre-release なので
+// migration コードは持たない)。
+const STORAGE_KEY = 'hapbeat-studio-display-v2'
 
 interface SavedState {
   /** Duo と Band で OLED レイアウトを **個別に** 保持 (2026-05-09 ユーザ要望)。 */
@@ -275,37 +280,19 @@ interface SavedState {
 }
 
 /**
- * 旧フォーマットからのマイグレーション込みの読み込み:
- *   - 旧 single `orientation` field → `orientationByModel`
- *   - 旧 single `layout` field → `layoutByModel` (両モデルにクローン
- *     して既存の編集成果を失わないようにする。ユーザは Duo/Band
- *     どちらでも続きを編集できる。)
- * リリース前のローカル開発状態を捨てたくないので一度だけ変換する。
+ * v2 storage の読み込み。schema 不一致は捨てる (= INITIAL_* を初期値に使う)。
+ * pre-release なので旧 v1 データのマイグレーションは行わない。
  */
 function loadSaved(): SavedState | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return null
-    const data = JSON.parse(raw) as Partial<SavedState> & {
-      orientation?: DisplayOrientation
-      /** 旧 (2026-05-09 以前): 単一 layout を共有していた時代の field。 */
-      layout?: DisplayLayout
-    }
+    const data = JSON.parse(raw) as Partial<SavedState>
+    // 必須フィールド (layoutByModel) が無いデータは破棄して INITIAL_* に
+    // フォールバックさせる。ベース = 初期化 (= INITIAL_*) を保証する。
+    if (!data.layoutByModel) return null
     if (!data.orientationByModel) {
-      const old: DisplayOrientation = data.orientation ?? 'normal'
-      const model: DeviceModel = data.deviceModel ?? 'duo_wl'
       data.orientationByModel = { duo_wl: 'normal', band_wl: 'normal' }
-      data.orientationByModel[model] = old
-      delete data.orientation
-    }
-    if (!data.layoutByModel && data.layout) {
-      // 旧 single layout を両モデルにクローンして移行 (どちらのモデル
-      // でも編集成果を失わないようにする)。
-      data.layoutByModel = {
-        duo_wl: structuredClone(data.layout),
-        band_wl: structuredClone(data.layout),
-      }
-      delete data.layout
     }
     return data as SavedState
   } catch { return null }
@@ -1533,7 +1520,12 @@ function ControlBar({
       renameInputRef.current.focus()
       renameInputRef.current.select()
     }
-  }, [renaming])
+    // dep を `renaming` (object ref) にすると、入力 1 文字ごとに新しい
+    // {idx,draft} オブジェクトになって useEffect が再 fire → select() で
+    // 全選択 → 次のキーで上書き → 1 文字しか残らない bug になる。
+    // idx だけを deps にして「rename 開始 (null↔idx 遷移) のときだけ
+    // focus + select」する。
+  }, [renaming?.idx])
 
   const commitRename = () => {
     if (!renaming) return

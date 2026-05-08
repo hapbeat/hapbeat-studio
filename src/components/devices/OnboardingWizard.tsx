@@ -111,6 +111,7 @@ export function OnboardingWizard() {
           probeStatus={probeStatus}
           probeMessage={probeMessage}
           onTryProbe={() => openConfig()}
+          onCancel={() => { void release() }}
         />
       )}
 
@@ -133,10 +134,12 @@ function ProbeStep({
   probeStatus,
   probeMessage,
   onTryProbe,
+  onCancel,
 }: {
   probeStatus: ReturnType<typeof useSerialMaster> extends never ? never : string
   probeMessage: string | null
   onTryProbe: () => void
+  onCancel: () => void
 }) {
   const busy = probeStatus === 'connecting'
   return (
@@ -161,6 +164,18 @@ function ProbeStep({
           >
             {busy ? '接続中…' : '🔌 USB Serial で接続'}
           </button>
+          {/* 接続が応答しないとき (port.open() で詰まる / get_info に応答が来ない 等)、
+              guardian の 20 秒を待たずに UI からキャンセルできるように 中止 ボタンを
+              並べる。release() で port.close + state リセット。 */}
+          {busy && (
+            <button
+              className="form-button-secondary"
+              onClick={onCancel}
+              title="接続を中止して Step 1 に戻る"
+            >
+              ⨯ 中止
+            </button>
+          )}
         </div>
         {probeMessage && (
           <div className={`form-status ${
