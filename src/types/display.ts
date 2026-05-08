@@ -108,10 +108,18 @@ export type LedCondition =
   | 'volume_mute'
   | 'app_connected'
   | 'idle_wifi'
-  | 'idle_espnow'
-  | 'idle_fix'
-  | 'idle_volume'
-  | 'always'
+
+/**
+ * UI 上のグループ分け。
+ * - `warning`: 優先度が高く、他のルールより前に発火する例外状態 (バッテリー / Wi-Fi 切断 / ミュート)
+ * - `state`: 通常運用での状態遷移 (待機 ⇄ アプリ接続中)
+ *
+ * `idle_fix` / `idle_volume` (mode) や `always` (fallback) は 2026-05-08 に
+ * 削除した。Wi-Fi 接続中はほぼ表示されない条件のため、Studio 上で扱う
+ * 価値が薄かった。ESP-NOW のみで動作させるユースケースが立ち上がった
+ * 段階で再導入する想定。
+ */
+export type LedConditionGroup = 'warning' | 'state'
 
 export interface LedRule {
   id: string
@@ -135,32 +143,27 @@ export interface LedConditionMeta {
   condition: LedCondition
   label: string
   description: string
+  group: LedConditionGroup
 }
 
 export const LED_CONDITION_METAS: LedConditionMeta[] = [
-  { condition: 'battery_critical', label: 'バッテリー危険', description: '残量 ≤5%、間もなく停止' },
-  { condition: 'battery_low', label: 'バッテリー低下', description: '残量 ≤15%、充電推奨' },
-  { condition: 'wifi_disconnected', label: 'Wi-Fi 未接続', description: '設定済みなのに未接続' },
-  { condition: 'volume_mute', label: '音量ミュート', description: '音量 = 0、振動しない' },
-  { condition: 'app_connected', label: 'アプリ接続中', description: '正常動作中' },
-  { condition: 'idle_wifi', label: '待機 (Wi-Fi)', description: 'Wi-Fi 接続済み・待機' },
-  { condition: 'idle_espnow', label: '待機 (ESP-NOW)', description: 'ESP-NOW のみ' },
-  { condition: 'idle_fix', label: '待機 (Fix)', description: 'Fix モード' },
-  { condition: 'idle_volume', label: '待機 (Volume)', description: 'Volume モード' },
-  { condition: 'always', label: 'フォールバック', description: '他の条件に該当しない場合' },
+  // 警告 (priority 高、常に最優先で発火)
+  { condition: 'battery_critical',  label: 'バッテリー危険',  description: '残量 ≤5%、間もなく停止',         group: 'warning' },
+  { condition: 'battery_low',       label: 'バッテリー低下',  description: '残量 ≤15%、充電推奨',             group: 'warning' },
+  { condition: 'wifi_disconnected', label: 'Wi-Fi 未接続',    description: '設定済みなのに未接続',           group: 'warning' },
+  { condition: 'volume_mute',       label: '音量ミュート',    description: '音量 = 0、振動しない',           group: 'warning' },
+  // 状態遷移: 待機 ⇄ アプリ接続中
+  { condition: 'idle_wifi',         label: '待機',             description: 'Wi-Fi 接続済み・アプリ非接続',   group: 'state' },
+  { condition: 'app_connected',     label: 'アプリ接続中',     description: 'アプリから CONNECT_STATUS 受信中', group: 'state' },
 ]
 
 export const DEFAULT_LED_RULES: LedRule[] = [
-  { id: 'battery_critical', condition: 'battery_critical', enabled: true, color: [255, 0, 0], blink_sec: 0.5, fade: false, priority: 1 },
-  { id: 'battery_low', condition: 'battery_low', enabled: true, color: [255, 120, 0], blink_sec: 2, fade: true, priority: 2 },
-  { id: 'wifi_disconnected', condition: 'wifi_disconnected', enabled: true, color: [255, 200, 0], blink_sec: 1, fade: false, priority: 3 },
-  { id: 'volume_mute', condition: 'volume_mute', enabled: true, color: [180, 0, 255], blink_sec: 0, fade: false, priority: 4 },
-  { id: 'app_connected', condition: 'app_connected', enabled: true, color: [0, 0, 80], blink_sec: 2, fade: true, priority: 5 },
-  { id: 'idle_wifi', condition: 'idle_wifi', enabled: true, color: [0, 60, 0], blink_sec: 0, fade: false, priority: 6 },
-  { id: 'idle_espnow', condition: 'idle_espnow', enabled: true, color: [0, 50, 50], blink_sec: 0, fade: false, priority: 7 },
-  { id: 'idle_fix', condition: 'idle_fix', enabled: true, color: [5, 5, 5], blink_sec: 0, fade: false, priority: 8 },
-  { id: 'idle_volume', condition: 'idle_volume', enabled: true, color: [0, 0, 5], blink_sec: 0, fade: false, priority: 9 },
-  { id: 'always', condition: 'always', enabled: true, color: [0, 0, 0], blink_sec: 0, fade: false, priority: 10 },
+  { id: 'battery_critical',  condition: 'battery_critical',  enabled: true, color: [255, 0, 0],   blink_sec: 0.5, fade: false, priority: 1 },
+  { id: 'battery_low',       condition: 'battery_low',       enabled: true, color: [255, 120, 0], blink_sec: 2,   fade: true,  priority: 2 },
+  { id: 'wifi_disconnected', condition: 'wifi_disconnected', enabled: true, color: [255, 200, 0], blink_sec: 1,   fade: false, priority: 3 },
+  { id: 'volume_mute',       condition: 'volume_mute',       enabled: true, color: [180, 0, 255], blink_sec: 0,   fade: false, priority: 4 },
+  { id: 'idle_wifi',         condition: 'idle_wifi',         enabled: true, color: [0, 60, 0],    blink_sec: 0,   fade: false, priority: 5 },
+  { id: 'app_connected',     condition: 'app_connected',     enabled: true, color: [0, 0, 80],    blink_sec: 2,   fade: true,  priority: 6 },
 ]
 
 // ========================================
@@ -179,6 +182,57 @@ export const DEFAULT_VOLUME_CONFIG: VolumeConfig = {
   steps: 24,
   direction: 'ascending',
   default_level: 12,
+}
+
+// ========================================
+// その他 UI 設定 (OLED 輝度 / Hold 時間)
+// ========================================
+
+/**
+ * Studio の "UI 設定" モーダルにまとめている本体側 UI パラメータ。
+ *
+ * Hold タイミングは 3 段階で制御する:
+ *
+ *   t=0                        press 開始 (LED は通常の rule 色)
+ *   t=hold_feedback_start_ms    LED が hold_feedback_color に切替、最大輝度
+ *                              (= hold_feedback_brightness) からスタート
+ *   t=hold_ms                  線形に 0 まで減衰 → hold アクション発火
+ *
+ * `hold_feedback_start_ms` < `hold_ms` を必ず満たすこと。
+ *
+ * 発火予告は **指定色の輝度を線形にフェードアウト** することで表現する。
+ *   - 進捗が連続的に分かる (徐々に暗くなる)
+ *   - 0 (= 完全消灯) で発火する瞬間に明確な区切りができる
+ *   - 色は LED rule とは別系統で固定指定 (hold 中だと一目で分かる)
+ *   - 輝度は別軸で調整可能 (LED 設定の global brightness とは独立)
+ *
+ * - `oled_brightness`: 1=Low / 2=Mid / 3=High。
+ * - `hold_ms`: 発火時間 (default 1000)。
+ * - `hold_feedback_start_ms`: 色切替 + 輝度減衰開始時刻 (default 300)。
+ * - `hold_feedback_color`: 切替時の色 (default `[0, 255, 255]` = 純 cyan)。
+ *   raw RGB 値で持つが、実際の出力は brightness で scale される。
+ * - `hold_feedback_brightness`: 切替直後の輝度 (raw 0-255、default 30 ≈ 12%)。
+ *   LED 設定の global brightness とは独立。デバイスが顔の近くにある前提で
+ *   控えめのデフォルトにしてある。
+ * - `hold_show_oled_indicator`: hold 待機中 OLED に "Hold..." を出すか
+ *   (default false — 短押し時の pos/group 切替表示を遮らないため)。
+ */
+export interface UiSettings {
+  oled_brightness: 1 | 2 | 3
+  hold_ms: number
+  hold_feedback_start_ms: number
+  hold_feedback_color: [number, number, number]
+  hold_feedback_brightness: number
+  hold_show_oled_indicator: boolean
+}
+
+export const DEFAULT_UI_SETTINGS: UiSettings = {
+  oled_brightness: 2,
+  hold_ms: 1000,
+  hold_feedback_start_ms: 300,
+  hold_feedback_color: [0, 255, 255],   // 純 cyan (brightness で scale される)
+  hold_feedback_brightness: 30,         // raw 0-255、default ≈ 12%
+  hold_show_oled_indicator: false,
 }
 
 /**

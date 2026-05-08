@@ -16,10 +16,22 @@ type Tab = 'kit' | 'display' | 'devices'
 
 const TABS: Tab[] = ['kit', 'display', 'devices']
 
-const TAB_LABELS: Record<Tab, string> = {
-  kit: 'Kit',
-  display: 'Display',
-  devices: 'Devices',
+const TAB_LABELS: Record<Tab, { main: string; sub: string }> = {
+  // 上部タブは「主タイトル + サブタイトル」の 2 行構成。
+  //
+  // 'devices' → 'Manage' へリネーム (2026-05-08)。Wi-Fi 設定 / ファーム
+  // 書込み / 各種テストなど「複数台のデバイスを統合管理する」位置付けが
+  // 実態に近いため。Hardware は物理寄り、Setup は初期設定寄りで却下、
+  // Console / Admin は技術色が強すぎるため不採用。
+  //
+  // サブタイトルは英語で統一 (2026-05-08 改訂)。
+  // - Kit  / Vibration Clips: クリップという呼称が UI 全体で使われており直観的
+  // - UI   / Display etc.   : OLED 配置以外にも LED / ボタン / 輝度 / Hold 時間
+  //                            などを含むため "etc." で包括性を示す
+  // - Manage / Config       : Wi-Fi / ファーム / 各種設定。dev tool らしく短く
+  kit:     { main: 'Kit',    sub: 'Vibration Clips' },
+  display: { main: 'UI',     sub: 'Display etc.' },
+  devices: { main: 'Manage', sub: 'Config' },
 }
 
 const DEFAULT_TAB: Tab = 'kit'
@@ -76,8 +88,9 @@ export function App() {
       return next
     })
   }, [activeTab])
-  const { isConnected, send } = useHelperConnection()
+  const { isConnected, helperVersion, send } = useHelperConnection()
   const [helperModalOpen, setHelperModalOpen] = useState(false)
+  const [showHelperVersion, setShowHelperVersion] = useState(false)
 
   // Auto-close modal when Helper connects
   useEffect(() => {
@@ -94,14 +107,15 @@ export function App() {
     <div className="app">
       <header className="app-header">
         <h1>Hapbeat Studio</h1>
-        <div className="header-toggle">
+        <div className="header-toggle header-toggle-tabs">
           {TABS.map((tab) => (
             <button
               key={tab}
-              className={`toggle-btn ${activeTab === tab ? 'active' : ''}`}
+              className={`toggle-btn tab-btn-stacked ${activeTab === tab ? 'active' : ''}`}
               onClick={() => setActiveTab(tab)}
             >
-              {TAB_LABELS[tab]}
+              <span className="tab-btn-main">{TAB_LABELS[tab].main}</span>
+              <span className="tab-btn-sub">{TAB_LABELS[tab].sub}</span>
             </button>
           ))}
         </div>
@@ -116,10 +130,18 @@ export function App() {
             Docs ↗
           </a>
           {isConnected ? (
-            <div className="connection-status">
+            <button
+              type="button"
+              className="connection-status connection-status--clickable"
+              onClick={() => setShowHelperVersion((v) => !v)}
+              title={helperVersion ? `hapbeat-helper ${helperVersion} (クリックで表示切替)` : 'helper version 不明 (古い helper の可能性)'}
+            >
               <span className="status-dot connected" />
               Helper 接続中
-            </div>
+              {showHelperVersion && helperVersion && (
+                <span className="helper-version-badge">v{helperVersion}</span>
+              )}
+            </button>
           ) : (
             <button
               type="button"

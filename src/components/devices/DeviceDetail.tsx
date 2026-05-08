@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore, type WifiProfile } from '@/stores/deviceStore'
 import { ApModeSection } from './ApModeSection'
-import { OledBrightnessSection } from './OledBrightnessSection'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useLogStore } from '@/stores/logStore'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
@@ -413,11 +412,9 @@ export function DeviceDetail() {
               sendTo={sendTo}
               onRefreshApStatus={refreshApStatus}
             />
-            <OledBrightnessSection
-              device={device}
-              level={cachedInfo?.oled_brightness}
-              sendTo={sendTo}
-            />
+            {/* OLED 輝度は UI タブ → "UI 設定" モーダルへ移動 (2026-05-08)。
+              * Per-device の即時調整は UI モーダル内のスライダで行い、
+              * 永続化は通常の Deploy 経路 (ui-config.json) に集約する。 */}
             <UiConfigForm device={device} sendTo={sendTo} />
             <DebugDumpSection
               device={device}

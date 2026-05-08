@@ -238,6 +238,23 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       }
       setProbe('connecting', 'COM ポートを確認中…')
 
+      // Guardian timeout: probe='connecting' のまま 20 秒経過したら強制的に
+      // 'failed' へ遷移させる。port.open() / get_info / 他の await が想定外に
+      // 長引いた / 例外を握りつぶしている等の潜在バグでも、ユーザーが「接続中」
+      // のまま動けなくなる事態を防ぐ最後の安全網
+      // (報告 2026-05-08: 「ターゲットが見つからないとリロードしないと戻れない」)。
+      const guardianTimer = setTimeout(() => {
+        const s = get()
+        if (s.probeStatus === 'connecting') {
+          log('openConfig guardian: still "connecting" after 20s — forcing failed')
+          setProbe(
+            'failed',
+            '接続処理が応答しません (20秒経過)。USB を抜き差ししてから再試行してください。',
+          )
+        }
+      }, 20000)
+      const clearGuardian = () => clearTimeout(guardianTimer)
+
       // Helper that prompts for a port, opening it via the picker.
       const promptForPort = async (): Promise<SerialPort | null> => {
         try {
@@ -255,41 +272,51 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
         }
       }
 
-      let port: SerialPort | null = cur.port
-      if (forcePicker || !port) {
-        port = forcePicker
-          ? await promptForPort()
-          : (await pickConfigPort({}).catch(() => null))
-        if (!port) return null
-        set({ port })
-      }
-      // Defensive close: if the port was previously opened (e.g. by
-      // an earlier session that didn't tear down cleanly), we'd hit
-      // `InvalidStateError: The port is already open` in
-      // openConfigConnection. Closing first is a no-op when already
-      // closed and idempotent so it's safe to do unconditionally.
-      try { await port.close() } catch { /* not open / already closed */ }
+      try {
+        let port: SerialPort | null = cur.port
+        if (forcePicker || !port) {
+          port = forcePicker
+            ? await promptForPort()
+            : (await pickConfigPort({}).catch(() => null))
+          if (!port) return null
+          set({ port })
+        }
+        // Defensive close: if the port was previously opened (e.g. by
+        // an earlier session that didn't tear down cleanly), we'd hit
+        // `InvalidStateError: The port is already open` in
+        // openConfigConnection. Closing first is a no-op when already
+        // closed and idempotent so it's safe to do unconditionally.
+        try { await port.close() } catch { /* not open / already closed */ }
 
-      // First attach attempt with the held / freshly-picked port.
-      const result = await attachConfigConn(port)
-      if (result) return result
+        // First attach attempt with the held / freshly-picked port.
+        const result = await attachConfigConn(port)
+        if (result) return result
 
-      // Re-attach failed (probeStatus is now 'failed' with a hint).
-      // If the failure was specifically a `port.open()` error — the
-      // port handle is stale (another app holds the COM port, USB
-      // unplugged, etc.) — drop it and re-prompt the user. Without
-      // this fallback the user is stuck: there's no COM picker
-      // visible because we silently reused a now-invalid grant.
-      const lastMsg = get().probeMessage ?? ''
-      if (/Failed to open serial port|InvalidStateError|already open|Failed to execute 'open'/.test(lastMsg)) {
-        log(`stale port handle, re-prompting: ${lastMsg}`)
-        set({ port: null })
-        const fresh = await promptForPort()
-        if (!fresh) return null
-        try { await fresh.close() } catch { /* ignore */ }
-        return attachConfigConn(fresh)
+        // Re-attach failed (probeStatus is now 'failed' with a hint).
+        // If the failure was specifically a `port.open()` error — the
+        // port handle is stale (another app holds the COM port, USB
+        // unplugged, etc.) — drop it and re-prompt the user. Without
+        // this fallback the user is stuck: there's no COM picker
+        // visible because we silently reused a now-invalid grant.
+        const lastMsg = get().probeMessage ?? ''
+        // 注: `timed out` (port.open 5s timeout) は **再 prompt 対象から外す**。
+        // タイムアウトは「ユーザーが選んだ port は存在するがデバイスが応答
+        // しない」ケースで、ピッカー再表示よりは明確な失敗メッセージを
+        // 残してユーザー自身に判断させる方が UX が良い。
+        if (/Failed to open serial port|InvalidStateError|already open|Failed to execute 'open'/.test(lastMsg)) {
+          log(`stale port handle, re-prompting: ${lastMsg}`)
+          set({ port: null })
+          const fresh = await promptForPort()
+          if (!fresh) return null
+          try { await fresh.close() } catch { /* ignore */ }
+          return await attachConfigConn(fresh)
+        }
+        return null
+      } finally {
+        // 必ず guardian を解除して、上で何が起きても (return / throw / 例外
+        // 握りつぶし) 後続セッションに影響しないようにする。
+        clearGuardian()
       }
-      return null
     },
 
     closeConfig: async () => {

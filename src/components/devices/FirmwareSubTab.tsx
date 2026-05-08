@@ -24,6 +24,7 @@ import {
   type FirmwareLibraryEntry,
   type FirmwareRegion,
 } from '@/utils/firmwareLibrary'
+import { validateOtaImage } from '@/utils/otaImageValidation'
 
 type EnvFamily = 'necklace' | 'band' | 'other'
 
@@ -140,12 +141,33 @@ export function FirmwareSubTab({
   type Source = 'library' | 'local'
   const [source, setSource] = useState<Source>('library')
 
-  // Library state
+  // Library state — selection is persisted in localStorage so the user
+  // doesn't have to re-pick their preferred env (e.g. necklace_v3) every
+  // time they open the Firmware tab. Without this, the default falls back
+  // to the most-recently-built env (often band_v4 in the office where the
+  // workshop machine builds Band by default), which is rarely what the
+  // user actually wants.
+  const LIB_SELECTED_KEY = 'hapbeat-studio-firmware-lib-selected'
   const [libEntries, setLibEntries] = useState<FirmwareLibraryEntry[]>([])
   const [libLoading, setLibLoading] = useState(false)
   const [libError, setLibError] = useState<string | null>(null)
-  const [libSelected, setLibSelected] = useState<string | null>(null)
+  const [libSelected, setLibSelected] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(LIB_SELECTED_KEY)
+    } catch { return null }
+  })
   const [selectedFamily, setSelectedFamily] = useState<EnvFamily | null>(null)
+
+  // Persist selection on every change so the next mount restores it.
+  useEffect(() => {
+    try {
+      if (libSelected) {
+        localStorage.setItem(LIB_SELECTED_KEY, libSelected)
+      } else {
+        localStorage.removeItem(LIB_SELECTED_KEY)
+      }
+    } catch { /* localStorage unavailable */ }
+  }, [libSelected])
 
   // Local file state — handle is the source of truth, bytes is read on demand
   const [localHandle, setLocalHandle] = useState<FileSystemFileHandle | null>(null)
@@ -481,6 +503,32 @@ export function FirmwareSubTab({
     return () => window.clearInterval(tick)
   }, [running])
 
+  /**
+   * Stuck 状態 (= 3秒以上進捗なし) でユーザーが「中止」を押した時の処理。
+   *
+   * Helper 側の TCP セッションは Studio から能動的に止められない (firmware が
+   * 応答するか TCP read timeout で落ちるまで継続) が、UI の running 状態だけ
+   * 解除すれば再試行ボタンが押せるようになる。helper から後で `ota_result`
+   * が遅れて返ってきても、`expectedFwVersion` を null にしてあるので
+   * post-flight verify が誤発火しない。
+   *
+   * 報告 2026-05-08: 「送信中で警告が出るタイミングで試行を止めて (またボタンが
+   * 押せるように) してほしい」。
+   */
+  const cancelStuckOta = useCallback(() => {
+    pushLog('ota', 'user cancelled stuck OTA — UI released, helper session may still drain')
+    setRunning(false)
+    setOtaStuck(false)
+    setProgress(null)
+    setExpectedFwVersion(null)
+    setResult({
+      ok: false,
+      message:
+        'ユーザーによりキャンセルされました。デバイス側で書込が完了している可能性は'
+        + '残るため、再起動後に fw バージョンを確認してください。',
+    })
+  }, [pushLog])
+
   // ---- Reading freshly from disk ------------------------------------
 
   /** Read the local-picked .bin verbatim (no slicing). Shared
@@ -708,6 +756,30 @@ export function FirmwareSubTab({
       setResult({ ok: false, message: String((err as Error).message ?? err) })
       return
     }
+
+    // Pre-flight validation: check ESP32 image header before sending.
+    // 不正な .bin (空ファイル / merged image / 別チップ向け / 破損) を
+    // ここで弾けば、partition を汚染して bootloader rollback で旧版起動
+    // するという固有のバグを未然に防げる。
+    // Firmware 側にも同じ検証を入れているが、ここで先に止めれば 1MB を
+    // 無駄に送らずに済むしユーザー側の説明も分かりやすい。
+    const validation = validateOtaImage(bin.bytes)
+    if (!validation.ok) {
+      pushLog('ota', `pre-flight FAILED: ${validation.reason}`)
+      setResult({
+        ok: false,
+        message: `書き込みを中止しました (プリフライト検証失敗): ${validation.reason}`,
+      })
+      return
+    }
+    pushLog(
+      'ota',
+      `pre-flight OK: ${validation.info!.chipName} app, `
+      + `${formatBytes(validation.info!.sizeBytes)}, `
+      + `segments=${validation.info!.segments}, `
+      + `hash=${validation.info!.hashAppended ? 'appended' : 'header-only'}`,
+    )
+
     setRunning(true)
     pushLog('ota', `flash → ${bin.label} (${formatBytes(bin.bytes.length)})`)
     // Capture the firmware version so the post-OTA verify can compare
@@ -1036,6 +1108,8 @@ export function FirmwareSubTab({
           </span>
         </div>
         <div className="form-action-row">
+          {/* 通常時 / 進捗中: OTA 開始ボタン (stuck の間は disabled のまま)。
+            * stuck 時: 並んで「中止する」ボタンを出して UI を解放する。 */}
           <button
             className="form-button"
             onClick={submit}
@@ -1043,6 +1117,16 @@ export function FirmwareSubTab({
           >
             {running ? '送信中…' : 'OTA 書き込み'}
           </button>
+          {running && otaStuck && (
+            <button
+              type="button"
+              className="form-button-secondary"
+              onClick={cancelStuckOta}
+              title="3 秒以上進捗が無いため UI を解放します。helper 側の TCP セッションは drain します"
+            >
+              中止する
+            </button>
+          )}
           {!device?.online && <span className="form-status muted">デバイスがオフラインです</span>}
         </div>
 
@@ -1059,10 +1143,9 @@ export function FirmwareSubTab({
             </div>
             {otaStuck && (
               <div className="form-status warn">
-                ⚠ OTA の進捗が 3 秒以上途絶えています — Wi-Fi 接続が切れた、
-                デバイスがフリーズしている、TCP セッションが詰まっている等の
-                可能性があります。さらに 30 秒待っても応答が無ければ
-                「電源 OFF/ON → USB Serial 経由で書込」を推奨。
+                ⚠ OTA の進捗が 3 秒以上途絶えています。デバイスの再起動（電源 OFF/ON）を試してください。
+                Wi-Fi 接続が切れた、デバイスがフリーズしている、TCP セッションが詰まっている等の
+                可能性があります。それでも改善しなければUSB Serial 経由での書込を推奨します。
               </div>
             )}
           </>

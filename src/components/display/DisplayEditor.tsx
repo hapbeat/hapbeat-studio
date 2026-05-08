@@ -11,7 +11,7 @@ import type {
   LedConfig,
   VolumeConfig,
 } from '@/types/display'
-import { getElementSize, DEFAULT_LED_RULES, DEFAULT_VOLUME_CONFIG } from '@/types/display'
+import { getElementSize, DEFAULT_LED_RULES, DEFAULT_VOLUME_CONFIG, LED_CONDITION_METAS } from '@/types/display'
 import type { DeviceModel, DeviceHardwareSpec } from '@/types/device'
 import { DEVICE_SPECS } from '@/types/device'
 import { ElementPalette, getElementMeta, PALETTE_SECTIONS } from '@/components/common/ElementPalette'
@@ -25,6 +25,9 @@ import {
   toFirmwareFormat,
   type DisplaySavedState,
 } from '@/utils/displayLayoutIO'
+import type { UiSettings } from '@/types/display'
+import { DEFAULT_UI_SETTINGS } from '@/types/display'
+import { UiSettingsModal } from './UiSettingsModal'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useToast } from '@/components/common/Toast'
@@ -252,6 +255,7 @@ interface SavedState {
   simState: SimState
   ledConfig: LedConfig
   volumeConfig: VolumeConfig
+  uiSettings?: UiSettings
 }
 
 /**
@@ -311,10 +315,34 @@ export function DisplayEditor() {
   const [simState, setSimState] = useState<SimState>(
     () => ({ ...DEFAULT_SIM_STATE, ...(saved?.simState ?? {}) })
   )
-  const [ledConfig, setLedConfig] = useState<LedConfig>(saved?.ledConfig ?? { globalBrightness: 255, rules: [...DEFAULT_LED_RULES] })
+  // Migration: drop rules whose `condition` is no longer in
+  // LED_CONDITION_METAS (e.g. legacy `idle_espnow` / `charging` from before
+  // 2026-05-08). Without this, deploy would still ship the orphan rules to
+  // firmware where they sit silently, and the modal couldn't render them.
+  const [ledConfig, setLedConfig] = useState<LedConfig>(() => {
+    if (!saved?.ledConfig) {
+      return { globalBrightness: 255, rules: [...DEFAULT_LED_RULES] }
+    }
+    const validConditions = new Set(LED_CONDITION_METAS.map((m) => m.condition))
+    const kept = saved.ledConfig.rules.filter((r) => validConditions.has(r.condition))
+    // Re-add any default rule that isn't in the saved state (migration safety).
+    for (const def of DEFAULT_LED_RULES) {
+      if (!kept.some((r) => r.condition === def.condition)) {
+        kept.push({ ...def })
+      }
+    }
+    return { ...saved.ledConfig, rules: kept }
+  })
   const [volumeConfig, setVolumeConfig] = useState<VolumeConfig>(saved?.volumeConfig ?? { ...DEFAULT_VOLUME_CONFIG })
+  // 旧バージョンで保存された uiSettings は新規追加フィールド (e.g. 2026-05-08
+  // 追加の hold_feedback_color / hold_feedback_start_ms) を持たない可能性が
+  // あるため、必ず DEFAULT を baseline に spread merge する。
+  const [uiSettings, setUiSettings] = useState<UiSettings>(
+    () => ({ ...DEFAULT_UI_SETTINGS, ...(saved?.uiSettings ?? {}) })
+  )
   const [ledModalOpen, setLedModalOpen] = useState(false)
   const [volumeModalOpen, setVolumeModalOpen] = useState(false)
+  const [uiSettingsModalOpen, setUiSettingsModalOpen] = useState(false)
   const [dropHint, setDropHint] = useState<{ msg: string; x: number; y: number } | null>(null)
   const [externalDragType, setExternalDragType] = useState<DisplayElementType | null>(null)
 
@@ -331,10 +359,10 @@ export function DisplayEditor() {
 
   // 自動保存: 状態変更のたびに localStorage + sessionStorage + IndexedDB に保存
   useEffect(() => {
-    const state: DisplaySavedState = { layout, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig }
+    const state: DisplaySavedState = { layout, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig, uiSettings }
     saveTo(state)
     saveDisplayToIDB(state)
-  }, [layout, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig])
+  }, [layout, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig, uiSettings])
 
   const oledRef = useRef<HTMLDivElement>(null)
   const deviceSpec = DEVICE_SPECS[deviceModel]
@@ -736,8 +764,8 @@ export function DisplayEditor() {
   // --- エクスポート / インポート / デバイス書き込み ---
 
   const buildSavedState = useCallback((): DisplaySavedState => ({
-    layout, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig,
-  }), [layout, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig])
+    layout, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig, uiSettings,
+  }), [layout, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig, uiSettings])
 
   const handleDeploy = useCallback(() => {
     if (!managerConnected) {
@@ -829,6 +857,7 @@ export function DisplayEditor() {
       if (imported.perButtonActions) setPerButtonActions(imported.perButtonActions)
       if (imported.ledConfig) setLedConfig(imported.ledConfig)
       if (imported.volumeConfig) setVolumeConfig(imported.volumeConfig)
+      if (imported.uiSettings) setUiSettings(imported.uiSettings)
       setActivePageIndex(0)
       setPopupPos(null)
       toast('レイアウトを読み込みました', 'success')
@@ -971,6 +1000,7 @@ export function DisplayEditor() {
           onActionChange={handlePerButtonActionChange}
           onLedClick={() => setLedModalOpen(true)}
           onVolumeClick={() => setVolumeModalOpen(true)}
+          onUiSettingsClick={() => setUiSettingsModalOpen(true)}
         />
         <ControlBar
           pages={layout.pages}
@@ -1038,6 +1068,16 @@ export function DisplayEditor() {
         />
       )}
 
+      {/* UI 設定モーダル (OLED 輝度 / Hold 時間) */}
+      {uiSettingsModalOpen && (
+        <UiSettingsModal
+          uiSettings={uiSettings}
+          onUiSettingsChange={setUiSettings}
+          managerSend={managerSend}
+          onClose={() => setUiSettingsModalOpen(false)}
+        />
+      )}
+
       {/* 共通 confirm ダイアログ (window.confirm 置換) */}
       {confirmDialog}
     </div>
@@ -1070,6 +1110,7 @@ interface OledSimulatorProps {
   onActionChange: (buttonId: string, field: keyof SingleButtonAction, value: ButtonActionType) => void
   onLedClick: () => void
   onVolumeClick: () => void
+  onUiSettingsClick: () => void
 }
 
 function OledSimulator({
@@ -1078,7 +1119,7 @@ function OledSimulator({
   onOledClick,
   dragPreview, onInternalDragStart,
   onDeleteElement, onPopupSelect, onPopupClose, onSimButtonClick, onSimButtonDown, onSimButtonUp,
-  pages, perButtonActions, onActionChange, onLedClick, onVolumeClick,
+  pages, perButtonActions, onActionChange, onLedClick, onVolumeClick, onUiSettingsClick,
 }: OledSimulatorProps) {
   // ボタンをグリッドエリアに振り分け
   const leftBtns = deviceSpec.model === 'duo_wl'
@@ -1224,6 +1265,24 @@ function OledSimulator({
         <div className="device-grid-led" onClick={onLedClick}>
           <div className="device-abs-led" />
           <span className="device-config-label">LED 設定</span>
+        </div>
+
+        {/* UI 設定 (OLED 輝度 / Hold 時間) — grid-area: ui */}
+        <div className="device-grid-ui" onClick={onUiSettingsClick} title="OLED 輝度・Hold 時間">
+          <svg className="device-config-ui-icon" viewBox="0 0 16 14" width="14" height="12">
+            <circle cx="8" cy="7" r="2.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
+            <g stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+              <line x1="8" y1="1" x2="8" y2="3" />
+              <line x1="8" y1="11" x2="8" y2="13" />
+              <line x1="1" y1="7" x2="3" y2="7" />
+              <line x1="13" y1="7" x2="15" y2="7" />
+              <line x1="2.8" y1="1.8" x2="4.2" y2="3.2" />
+              <line x1="11.8" y1="10.8" x2="13.2" y2="12.2" />
+              <line x1="2.8" y1="12.2" x2="4.2" y2="10.8" />
+              <line x1="11.8" y1="3.2" x2="13.2" y2="1.8" />
+            </g>
+          </svg>
+          <span className="device-config-label">UI 設定</span>
         </div>
       </div>
     </div>

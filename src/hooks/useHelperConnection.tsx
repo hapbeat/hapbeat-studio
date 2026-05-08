@@ -15,6 +15,9 @@ const RECONNECT_INTERVAL_MAX = 30000
 
 interface HelperConnectionValue {
   isConnected: boolean
+  /** Helper version (e.g. "0.2.3") sent by helper on connect. null until
+   *  the `helper_hello` message arrives. */
+  helperVersion: string | null
   devices: DeviceInfo[]
   lastMessage: ManagerMessage | null
   send: (message: ManagerMessage) => void
@@ -29,6 +32,7 @@ const HelperConnectionContext = createContext<HelperConnectionValue | null>(null
  */
 export function HelperConnectionProvider({ children }: { children: ReactNode }) {
   const [isConnected, setIsConnected] = useState(false)
+  const [helperVersion, setHelperVersion] = useState<string | null>(null)
   const [devices, setDevices] = useState<DeviceInfo[]>([])
   const [lastMessage, setLastMessage] = useState<ManagerMessage | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
@@ -82,6 +86,10 @@ export function HelperConnectionProvider({ children }: { children: ReactNode }) 
         if (message.type === 'device_list' && Array.isArray(message.payload.devices)) {
           setDevices(message.payload.devices as DeviceInfo[])
         }
+        if (message.type === 'helper_hello') {
+          const v = (message.payload as { version?: string }).version
+          if (v) setHelperVersion(v)
+        }
       } catch (err) {
         console.error('[Helper] メッセージのパースに失敗:', err)
       }
@@ -91,6 +99,7 @@ export function HelperConnectionProvider({ children }: { children: ReactNode }) 
       if (wsRef.current !== ws) return
       console.log('[Helper] 接続が切断されました')
       setIsConnected(false)
+      setHelperVersion(null)
       wsRef.current = null
       scheduleReconnect()
     }
@@ -141,7 +150,7 @@ export function HelperConnectionProvider({ children }: { children: ReactNode }) 
   }, [connect, clearReconnectTimer])
 
   return (
-    <HelperConnectionContext.Provider value={{ isConnected, devices, lastMessage, send }}>
+    <HelperConnectionContext.Provider value={{ isConnected, helperVersion, devices, lastMessage, send }}>
       {children}
     </HelperConnectionContext.Provider>
   )

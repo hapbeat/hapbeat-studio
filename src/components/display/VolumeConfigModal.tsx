@@ -12,7 +12,7 @@ export function VolumeConfigModal({ volumeConfig, onVolumeChange, onClose }: Vol
   return createPortal(
     <>
       <div className="modal-overlay" onClick={onClose} />
-      <div className="led-config-modal">
+      <div className="led-config-modal is-narrow">
         <div className="modal-header">
           <h3>Volume 設定</h3>
           <button className="modal-close" onClick={onClose}>x</button>

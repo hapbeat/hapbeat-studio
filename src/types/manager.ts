@@ -75,6 +75,7 @@ export interface StudioToManagerMessage {
 // Helper -> Studio messages
 export interface ManagerToStudioMessage {
   type:
+    | 'helper_hello'
     | 'device_list'
     | 'write_result'
     | 'write_progress'

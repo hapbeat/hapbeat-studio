@@ -15,11 +15,13 @@ import type {
   LedConfig,
   LedRule,
   VolumeConfig,
+  UiSettings,
 } from '@/types/display'
 import {
   getElementSize,
   DEFAULT_LED_RULES,
   DEFAULT_VOLUME_CONFIG,
+  DEFAULT_UI_SETTINGS,
 } from '@/types/display'
 import { DEVICE_SPECS, type DeviceModel } from '@/types/device'
 import type { SimState } from '@/utils/displayPreview'
@@ -80,11 +82,21 @@ interface FirmwareVolumeSection {
   default_level: number
 }
 
+interface FirmwareUiSettingsSection {
+  oled_brightness: number
+  hold_ms: number
+  hold_feedback_start_ms: number
+  hold_feedback_color: [number, number, number]
+  hold_feedback_brightness: number
+  hold_show_oled_indicator: boolean
+}
+
 /** ファームウェアに送る統合 JSON の型 */
 export interface FirmwareUiConfig {
   display: FirmwareDisplaySection
   led: FirmwareLedSection
   volume: FirmwareVolumeSection
+  ui?: FirmwareUiSettingsSection
 }
 
 // ---- Studio SavedState (DisplayEditor と同じ構造) ---------------------------
@@ -106,12 +118,13 @@ export interface DisplaySavedState {
   simState: SimState
   ledConfig: LedConfig
   volumeConfig: VolumeConfig
+  uiSettings: UiSettings
 }
 
 // ---- 変換: Studio → Firmware ------------------------------------------------
 
 export function toFirmwareFormat(state: DisplaySavedState): FirmwareUiConfig {
-  const { layout, deviceModel, orientationByModel, perButtonActions, ledConfig, volumeConfig } = state
+  const { layout, deviceModel, orientationByModel, perButtonActions, ledConfig, volumeConfig, uiSettings } = state
   // Firmware は単一 orientation を期待する。deploy 対象 model のものだけを書き出す。
   const orientation: DisplayOrientation = orientationByModel[deviceModel] ?? 'normal'
 
@@ -197,6 +210,18 @@ export function toFirmwareFormat(state: DisplaySavedState): FirmwareUiConfig {
       direction: volumeConfig?.direction ?? DEFAULT_VOLUME_CONFIG.direction,
       default_level: volumeConfig?.default_level ?? DEFAULT_VOLUME_CONFIG.default_level,
     },
+    ui: {
+      oled_brightness: uiSettings?.oled_brightness ?? DEFAULT_UI_SETTINGS.oled_brightness,
+      hold_ms: uiSettings?.hold_ms ?? DEFAULT_UI_SETTINGS.hold_ms,
+      hold_feedback_start_ms:
+        uiSettings?.hold_feedback_start_ms ?? DEFAULT_UI_SETTINGS.hold_feedback_start_ms,
+      hold_feedback_color:
+        uiSettings?.hold_feedback_color ?? DEFAULT_UI_SETTINGS.hold_feedback_color,
+      hold_feedback_brightness:
+        uiSettings?.hold_feedback_brightness ?? DEFAULT_UI_SETTINGS.hold_feedback_brightness,
+      hold_show_oled_indicator:
+        uiSettings?.hold_show_oled_indicator ?? DEFAULT_UI_SETTINGS.hold_show_oled_indicator,
+    },
   }
 }
 
@@ -255,6 +280,28 @@ export function fromFirmwareFormat(fw: FirmwareUiConfig): Partial<DisplaySavedSt
     default_level: fw.volume.default_level,
   } : { ...DEFAULT_VOLUME_CONFIG }
 
+  const uiSettings: UiSettings = fw.ui
+    ? {
+        oled_brightness: ((): 1 | 2 | 3 => {
+          const v = fw.ui!.oled_brightness
+          return (v === 1 || v === 2 || v === 3 ? v : DEFAULT_UI_SETTINGS.oled_brightness)
+        })(),
+        hold_ms: typeof fw.ui.hold_ms === 'number' ? fw.ui.hold_ms : DEFAULT_UI_SETTINGS.hold_ms,
+        hold_feedback_start_ms:
+          typeof fw.ui.hold_feedback_start_ms === 'number'
+            ? fw.ui.hold_feedback_start_ms
+            : DEFAULT_UI_SETTINGS.hold_feedback_start_ms,
+        hold_feedback_color: Array.isArray(fw.ui.hold_feedback_color)
+          ? (fw.ui.hold_feedback_color as [number, number, number])
+          : DEFAULT_UI_SETTINGS.hold_feedback_color,
+        hold_feedback_brightness:
+          typeof fw.ui.hold_feedback_brightness === 'number'
+            ? fw.ui.hold_feedback_brightness
+            : DEFAULT_UI_SETTINGS.hold_feedback_brightness,
+        hold_show_oled_indicator: !!fw.ui.hold_show_oled_indicator,
+      }
+    : { ...DEFAULT_UI_SETTINGS }
+
   // Firmware は 1 デバイスにつき 1 orientation しか持たない。import した
   // モデルだけにその orientation を設定し、もう一方のモデルは normal で
   // 初期化する (Studio 側で merge される)。
@@ -273,6 +320,7 @@ export function fromFirmwareFormat(fw: FirmwareUiConfig): Partial<DisplaySavedSt
     perButtonActions,
     ledConfig,
     volumeConfig,
+    uiSettings,
   }
 }
 

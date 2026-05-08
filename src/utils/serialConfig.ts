@@ -51,10 +51,48 @@ export async function pickConfigPort(
   if (!opts.forcePicker) {
     try {
       const ports = await navigator.serial.getPorts()
+      // 過去に grant 済の port を黙って再利用するが、`port.open` の段階で
+      // stale (USB 抜けた / 別アプリが掴んでる) ことが分かると open() が
+      // 無限待ちする実装があるため、上位 (openPortWithTimeout) で 5s で
+      // 弾く。ここでは複数 grant がある場合も一番新しいものを返す。
       if (ports.length > 0) return ports[ports.length - 1]
     } catch { /* fall through to picker */ }
   }
   return navigator.serial.requestPort({})
+}
+
+/**
+ * `port.open()` を timeout 付きで呼ぶ。Windows の Web Serial 実装は
+ * 応答しない USB-Serial デバイスに対して open() が無限待ちすることがあり、
+ * そのまま握ると probeStatus='connecting' から永遠に戻ってこない
+ * (ユーザー報告 2026-05-08: 「ターゲットが見つからないと接続中のまま」)。
+ *
+ * 5 秒で諦めて Error を投げ、上位 (attachConfigConn) で probe='failed' に
+ * 遷移させる。port は open 試行中なので close を試みるが、open 自体が
+ * 進んでいない可能性が高いため失敗は無視。
+ */
+async function openPortWithTimeout(
+  port: SerialPort,
+  baudRate: number,
+  timeoutMs: number = 5000,
+): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      // open() が返ってこなくてもタイマーは fire する。ぶら下がった
+      // open() promise はそのまま放置 (Chrome 内部で eventually 解決される)。
+      reject(new Error(
+        `port.open() timed out after ${timeoutMs}ms — `
+        + `デバイスが応答していない可能性があります。USB を抜き差しするか`
+        + `別のポートを選び直してください。`,
+      ))
+    }, timeoutMs)
+  })
+  try {
+    await Promise.race([port.open({ baudRate }), timeoutPromise])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 /**
@@ -67,7 +105,7 @@ export async function openConfigConnection(
   port: SerialPort,
   cb: SerialConfigCallbacks = {},
 ): Promise<SerialConfigConn> {
-  await port.open({ baudRate: 921600 })
+  await openPortWithTimeout(port, 921600, 5000)
 
   const decoder = new TextDecoder()
   let buf = ''
@@ -145,13 +183,19 @@ export async function openConfigConnection(
   // and break the parser even with brace-depth tracking, because
   // string-payload `"`s in those logs can flip our in-string state.
   //
-  // Heuristic: any line that does NOT contain JSON-shape tokens we
-  // care about (`"`, `{`, `}`, `[`, `]`, `:`) is unlikely to be a
-  // genuine JSON continuation. ESP-IDF logs usually start with
-  // `[<ts>][<lvl>]` brackets but also include free-text after them.
-  // The simplest safe filter: lines starting with `[` (ESP-IDF log
-  // header) or `E (` / `W (` / `I (` are always log noise.
-  const looksLikeFirmwareLog = (s: string) => /^[\[]\s*\d|^[EWID]\s\(\d/.test(s)
+  // Heuristic — match all the firmware log shapes we have:
+  //  - `[<digit>` ESP-IDF timestamps (e.g. `[ 12345][I][...]`)
+  //  - `[<letter>` tagged firmware logs: `[Button]`, `[LED]`, `[Main]`,
+  //    `[OTA]`, `[TCP]`, `[ConnStatus]`, `[Display]`, `[Audio]`,
+  //    `[UDP]`, `[Wifi]`, `[mDNS]`, `[Battery]`, `[Volume]`, etc.
+  //  - `E (` / `W (` / `I (` / `D (` ESP-IDF level prefixes
+  //
+  // JSON responses always start with `{` so they're never confused
+  // with `[<...>`. JSON arrays start with `[` followed by digit or
+  // whitespace or `{` or `"` — never a single letter, so `[<letter>`
+  // is a safe firmware-log signature.
+  const looksLikeFirmwareLog = (s: string) =>
+    /^[\[]\s*\d|^[\[][A-Za-z]|^[EWID]\s\(\d/.test(s)
 
   const dispatchLine = (line: string) => {
     const trimmed = line.replace(/\r$/, '').trim()

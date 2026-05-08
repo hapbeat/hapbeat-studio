@@ -17,12 +17,21 @@
   background: var(--bg-surface, #1e1e2e);
   border: 1px solid var(--border, #444);
   border-radius: 8px;
-  width: 480px;
-  max-height: 80vh;
+  /* LED モーダルはルール 9 件 × 4 グループで縦長になるため、
+   * 2 列レイアウト前提で幅を広げる。Volume / UI モーダルは
+   * 別 className が無いので同じ幅になるが、内容が少ないので
+   * 中央寄せで自然に収まる。 */
+  width: min(880px, 96vw);
+  max-height: 88vh;
   display: flex;
   flex-direction: column;
   z-index: 1001;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+/* Volume / UI モーダル用に狭幅 variant を用意 (今後 className を分ける場合のフック) */
+.led-config-modal.is-narrow {
+  width: 480px;
 }
 
 .modal-header {
@@ -136,10 +145,85 @@
   gap: 8px;
 }
 
+/* グループ見出し (警告 / 状態 / モード / フォールバック) */
+.led-group-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 14px 0 2px;
+  color: var(--text-muted, #9aa3b2);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.led-group-note {
+  color: var(--text-muted, #888);
+  font-size: 11.5px;
+  line-height: 1.5;
+  margin: 0 0 6px;
+  padding: 0 2px;
+}
+.led-group-heading:first-of-type {
+  margin-top: 4px;
+}
+.led-group-heading::before,
+.led-group-heading::after {
+  content: '';
+  flex: 1;
+  border-top: 1px dashed var(--border, #333);
+}
+
+/* グループ内ルールリスト (6 件 = 1 列で十分。2026-05-08 に
+ * mode / fallback グループを削除して縦長問題が解消したため
+ * 2 列レイアウトを撤回) */
+.led-rule-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 優先度バッジ (#1〜#9) */
+.led-rule-priority {
+  display: inline-block;
+  min-width: 22px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text-muted, #9aa3b2);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 9px;
+  margin-right: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 状態遷移ヒント (Wi-Fi 待機 → アプリ接続中) */
+.led-state-flow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 4px 0 8px;
+  padding: 6px 10px;
+  background: rgba(80, 100, 200, 0.08);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--text-muted, #9aa3b2);
+}
+.led-state-flow b {
+  color: var(--text, #ddd);
+  font-weight: 500;
+}
+.led-state-flow .arrow {
+  color: var(--accent, #5577ff);
+  font-weight: 600;
+}
+
 .led-rule {
   border: 1px solid var(--border, #444);
   border-radius: 6px;
-  padding: 8px 10px;
+  padding: 7px 9px;
+  min-width: 0; /* grid cell が縦長コンテンツで膨らまないように */
 }
 
 .led-rule.disabled {
@@ -166,14 +250,16 @@
 
 .led-rule-name {
   font-weight: 600;
-  font-size: 15px;
+  font-size: 14px;
   white-space: nowrap;
 }
 
 .led-rule-desc {
   color: var(--text-muted, #888);
-  font-size: 13px;
+  font-size: 11.5px;
   margin-left: auto;
+  text-align: right;
+  line-height: 1.35;
 }
 
 .led-rule-settings {
@@ -261,4 +347,162 @@
 .volume-modal-hint {
   color: var(--text-muted, #888);
   font-size: 13px;
+}
+
+/* ========================================
+   UI 設定モーダル (OLED 輝度 / Hold 時間)
+   ======================================== */
+
+.ui-settings-section {
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 6px;
+  border: 1px solid var(--border, #2a2a3a);
+}
+
+.ui-settings-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text, #ddd);
+  margin-bottom: 8px;
+}
+
+.ui-settings-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ui-settings-slider {
+  flex: 1;
+  min-width: 160px;
+}
+
+.ui-settings-num {
+  width: 64px;
+  padding: 4px 6px;
+  border: 1px solid var(--border, #444);
+  border-radius: 3px;
+  background: var(--bg, #111);
+  color: var(--text, #eee);
+  text-align: right;
+}
+
+.ui-settings-unit {
+  color: var(--text-muted, #888);
+  font-size: 12px;
+}
+
+.ui-settings-presets {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.ui-settings-presets .btn {
+  font-size: 11px;
+  padding: 3px 8px;
+}
+.ui-settings-presets .btn.active {
+  background: var(--accent, #5577ff);
+  color: #fff;
+  border-color: var(--accent, #5577ff);
+}
+
+.ui-settings-hint,
+.ui-settings-hint-block {
+  color: var(--text-muted, #888);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ui-settings-hint-block {
+  margin-top: 6px;
+}
+
+.ui-settings-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text, #ddd);
+}
+
+.ui-settings-footer-note {
+  color: var(--text-muted, #888);
+  font-size: 11px;
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border, #333);
+}
+
+.ui-settings-row-label {
+  font-size: 12px;
+  color: var(--text-muted, #9aa3b2);
+  width: 78px;
+  flex-shrink: 0;
+}
+
+.ui-settings-color {
+  width: 36px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border, #444);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+/* Hold タイムライン (タップ → 発火予告 → 発火) */
+.hold-timeline {
+  margin: 6px 0 4px;
+}
+.hold-timeline-bar {
+  display: flex;
+  height: 22px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--bg, #111);
+  border: 1px solid var(--border, #333);
+}
+.hold-timeline-seg {
+  position: relative;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  transition: width 0.15s, background 0.15s;
+}
+.hold-timeline-tap {
+  background: rgba(255, 255, 255, 0.06);
+}
+.hold-timeline-pending {
+  /* 色変化色は inline style で指定 (uiSettings.hold_feedback_color) */
+  background: rgb(0, 30, 30);
+  justify-content: space-between; /* 予告ラベル左 / ▾発火 右 */
+}
+.hold-timeline-seg-label {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 6px;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.6);
+  font-variant-numeric: tabular-nums;
+}
+.hold-timeline-tap .hold-timeline-seg-label {
+  color: var(--text-muted, #aab);
+  text-shadow: none;
+}
+.hold-timeline-fire {
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  padding: 0 6px;
+  text-shadow: 0 0 2px rgba(0, 0, 0, 0.7);
+  white-space: nowrap;
 }
