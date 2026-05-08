@@ -54,8 +54,10 @@ export function OnboardingWizard() {
       return
     }
     if (probeStatus === 'failed' && step === 'probe') {
-      const t = setTimeout(() => setStep('flash'), 800)
-      return () => clearTimeout(t)
+      // 応答なし = 新品 / ファーム未書込 が大半。即遷移して操作テンポを稼ぐ。
+      // (旧 800ms 待ちは「赤字エラー文を読ませる」意図だったが、エラーではなく
+      //  通常フローなので待たせる必要がない。)
+      setStep('flash')
     }
   }, [probeStatus, mode, conn, step])
 
@@ -89,7 +91,7 @@ export function OnboardingWizard() {
         <StepPill index={1} label="シリアル接続" state={stepStateFor('probe', step)}
           onClick={() => setStep('probe')} />
         <StepArrow />
-        <StepPill index={2} label="ファーム書き込み" state={stepStateFor('flash', step)} subtle="(必要な場合のみ)"
+        <StepPill index={2} label="ファーム書き込み" state={stepStateFor('flash', step)}
           onClick={() => setStep('flash')} />
         <StepArrow />
         <StepPill index={3} label="Wi-Fi 設定" state={stepStateFor('configure', step)}
@@ -179,16 +181,12 @@ function ProbeStep({
         </div>
         {probeMessage && (
           <div className={`form-status ${
-            probeStatus === 'failed' ? 'err'
-            : probeStatus === 'success' ? 'ok'
-            : 'muted'}`}
+            // failed = 「ファーム未書込」など通常フローのケースが大半。
+            // 赤エラー (err) ではなく info/muted で表示し、ユーザーに
+            // 「異常が起きた」印象を与えない。
+            probeStatus === 'success' ? 'ok' : 'muted'}`}
           >
             {probeMessage}
-          </div>
-        )}
-        {probeStatus === 'failed' && (
-          <div className="form-status warn" style={{ marginTop: 6 }}>
-            ファームウェアが書き込まれていない可能性が高いので、自動で Step 2 (ファーム書き込み) へ移動します…
           </div>
         )}
       </div>

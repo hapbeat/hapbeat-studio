@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore, type WifiProfile } from '@/stores/deviceStore'
 import { ApModeSection } from './ApModeSection'
@@ -85,21 +85,32 @@ export function DeviceDetail() {
 
   const [globalStatus, setGlobalStatus] = useState<{ kind: 'ok' | 'err' | 'warn' | 'muted'; msg: string } | null>(null)
 
-  // Auto-fetch info / wifi when first selecting a LAN device.
-  // Serial pseudo-devices already have their state in the master
-  // (the wizard's probe primed it); double-fetching over WS would
-  // 404 because the IP starts with "serial:" and Helper has no
-  // matching entry.
+  // 選択中 LAN デバイス変更時に info / wifi を毎回 fresh fetch する。
+  // 旧実装は wifiProfilesCache hit で短絡していたが、ユーザ要望
+  // (2026-05-09): デバイス情報はキャッシュ保持せず都度デバイスから取得すること。
+  // 切替時に旧 IP の cache を捨ててから新 IP の get_* を並列発行する。
+  const clearCachesFor = useDeviceStore((s) => s.clearCachesFor)
+  const prevSelectedRef = useRef<string | null>(null)
   useEffect(() => {
-    if (!selectedIp || selectedIp.startsWith('serial:')) return
+    if (!selectedIp || selectedIp.startsWith('serial:')) {
+      prevSelectedRef.current = selectedIp ?? null
+      return
+    }
+    // Drop the previously-selected device's cache (if any) so stale
+    // values don't bleed into the new selection's UI for the brief
+    // window before fresh responses arrive.
+    const prev = prevSelectedRef.current
+    if (prev && prev !== selectedIp && !prev.startsWith('serial:')) {
+      clearCachesFor(prev)
+    }
+    prevSelectedRef.current = selectedIp
     if (!device?.online) return
-    if (wifiProfilesCache[selectedIp]) return
     send({ type: 'list_wifi_profiles', payload: { ip: selectedIp } })
     send({ type: 'get_info', payload: { ip: selectedIp } })
     send({ type: 'get_wifi_status', payload: { ip: selectedIp } })
     send({ type: 'get_ap_status', payload: { ip: selectedIp } })
     send({ type: 'get_oled_brightness', payload: { ip: selectedIp } })
-  }, [selectedIp, device?.online, wifiProfilesCache, send])
+  }, [selectedIp, device?.online, send, clearCachesFor])
 
   // Drain helper push messages.
   useEffect(() => {

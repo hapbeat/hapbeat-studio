@@ -26,7 +26,10 @@ export interface SerialConfigCallbacks {
 
 export interface SerialConfigConn {
   port: SerialPort
-  send: (cmd: Record<string, unknown>) => Promise<Record<string, unknown>>
+  send: (
+    cmd: Record<string, unknown>,
+    opts?: { timeoutMs?: number },
+  ) => Promise<Record<string, unknown>>
   close: () => Promise<void>
 }
 
@@ -273,16 +276,16 @@ export async function openConfigConnection(
   const writer = port.writable!.getWriter()
   const enc = new TextEncoder()
 
-  const send = (cmd: Record<string, unknown>): Promise<Record<string, unknown>> => {
+  const send = (
+    cmd: Record<string, unknown>,
+    opts: { timeoutMs?: number } = {},
+  ): Promise<Record<string, unknown>> => {
     if (closed) return Promise.reject(new Error('connection closed'))
     return new Promise<Record<string, unknown>>((resolve, reject) => {
-      // 2 s default timeout — firmware answers within tens of ms for
-      // all config commands. The onboarding wizard treats a timeout
-      // as "no firmware" and routes to flash. (Wi-Fi SSID scan was
-      // previously routed via Serial with a 12 s timeout; we now
-      // unify all scans through Helper, so this commented-out branch
-      // doesn't apply anymore.)
-      const timeoutMs = 2000
+      // 2 s default — firmware answers within tens of ms for normal
+      // config commands. Probe path overrides with 1s for fast fail
+      // (新品 / ファーム未書込 のとき onboarding が即 Step 2 へ遷移する)。
+      const timeoutMs = opts.timeoutMs ?? 2000
       const timer = setTimeout(() => {
         const idx = waiters.findIndex((w) => w.resolve === resolve)
         if (idx >= 0) waiters.splice(idx, 1)

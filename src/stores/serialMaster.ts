@@ -160,9 +160,11 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
     // and only publish (mode='config' + conn) atomically after
     // get_info confirms there's actually a working firmware to talk
     // to. See user report 2026-04-30: "勝手に wi-fi設定に移って".
-    setProbe('connecting', 'デバイス情報を取得中…')
+    setProbe('connecting', 'デバイス情報を確認中…')
     try {
-      const info = await c.send({ cmd: 'get_info' })
+      // 1s timeout: 正常ファームなら数十 ms で応答、新品/未書込なら無応答
+      // でこちらが先に切る → onboarding Step 2 (書き込み) に即遷移できる。
+      const info = await c.send({ cmd: 'get_info' }, { timeoutMs: 1000 })
       // get_info answered → publish conn + mode atomically.
       set({
         conn: c,
@@ -202,7 +204,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       await c.close().catch(() => { /* already closed */ })
       setProbe(
         'failed',
-        'デバイスから応答がありません — ファームウェアが書き込まれていない可能性があります。',
+        'ファームウェア未書込のようです。Step 2 で書き込みます…',
       )
       return null
     }
