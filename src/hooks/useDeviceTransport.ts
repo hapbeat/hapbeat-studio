@@ -38,7 +38,7 @@ const SERIAL_GET_CMD_TO_RESULT: Record<string, string> = {
  *
  *   - **Serial pseudo-devices** (`ipAddress` starts with `serial:`)
  *     — go through `serialMaster.sendConfigCmd()`. The same wire
- *     command names (`set_name`, `set_wifi`, `set_group`, …) work
+ *     command names (`set_name`, `set_wifi`, `set_address`, …) work
  *     because the firmware's serial-config and TCP-config handlers
  *     parse the same JSON shape.
  *

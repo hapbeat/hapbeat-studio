@@ -14,7 +14,7 @@ interface Props {
   cachedInfo?: { name?: string; group?: number }
   sendTo: (msg: ManagerMessage) => void
   /** Optional: clears `cachedInfo` from the master after a successful
-   *  set_group/set_name so the live state mirrors the wire. */
+   *  set_name so the live state mirrors the wire. */
   onChanged?: () => void
 }
 
@@ -32,10 +32,11 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
   const [prefix, setPrefix] = useState(initial.prefix)
   const [player, setPlayer] = useState<number>(initial.player)
   const [position, setPosition] = useState<string>(initial.position)
-  // Group ID — was previously a duplicate field inside SerialConfigSection.
-  // Consolidated here (2026-04-30) so both LAN and Serial transports
-  // get the same single Identity form.
-  const [groupStr, setGroupStr] = useState(String(cachedInfo?.group ?? 0))
+  // Group は contracts spec §2 改定 (2026-05-07, DEC-030) で
+  // address 末尾の `/group_<N>` 任意セグメントに統合された。
+  // 旧 set_group (uint8) は廃止 — source of truth は address のみ。
+  // -1 = 未指定 (suffix なし、全グループ受信)、1..99 = 指定。
+  const [group, setGroup] = useState<number>(initial.group)
   const { ask, dialog: confirmDialog } = useConfirm()
   // Persisted recall for free-text identity fields. Recent values are
   // suggested via <datalist> on the same field so a user adding 5 new
@@ -51,8 +52,8 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
     setPrefix(a.prefix)
     setPlayer(a.player)
     setPosition(a.position)
-    setGroupStr(String(cachedInfo?.group ?? 0))
-  }, [device.ipAddress, device.address, device.name, cachedInfo?.name, cachedInfo?.group])
+    setGroup(a.group)
+  }, [device.ipAddress, device.address, device.name, cachedInfo?.name])
 
   const submitName = () => {
     if (!name.trim()) return
@@ -62,16 +63,9 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
   }
 
   const submitAddress = () => {
-    const addr = buildAddress(prefix, player, position)
+    const addr = buildAddress(prefix, player, position, group)
     sendTo({ type: 'set_address', payload: { address: addr } })
     if (prefix.trim()) prefixHistory.commit(prefix.trim())
-    onChanged?.()
-  }
-
-  const submitGroup = () => {
-    const g = Number(groupStr)
-    if (!Number.isFinite(g) || g < 0 || g > 255) return
-    sendTo({ type: 'set_group', payload: { group: g } })
     onChanged?.()
   }
 
@@ -150,6 +144,25 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
               <option key={p} value={p}>{positionLabel(p)}</option>
             ))}
           </select>
+          <span style={{ color: 'var(--text-muted)', fontSize: 14 }}>/&nbsp;group_</span>
+          <input
+            className="form-input short"
+            type="number"
+            min={1}
+            max={99}
+            value={group < 1 ? '' : group}
+            placeholder="未指定"
+            onChange={(e) => {
+              const v = e.target.value
+              if (v === '') setGroup(-1)
+              else {
+                const n = Number(v)
+                if (Number.isFinite(n) && n >= 1 && n <= 99) setGroup(n)
+              }
+            }}
+            disabled={!device.online}
+            title="1〜99 で指定、空欄で全グループ受信 (suffix なし)"
+          />
         </div>
         <button
           className="form-button"
@@ -160,30 +173,8 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
         </button>
       </div>
 
-      <div className="form-row">
-        <label>グループ</label>
-        <input
-          className="form-input mono short"
-          type="number"
-          min={0}
-          max={255}
-          value={groupStr}
-          onChange={(e) => setGroupStr(e.target.value)}
-          disabled={!device.online}
-        />
-        <button
-          className="form-button"
-          onClick={submitGroup}
-          disabled={!device.online}
-          title="0 = ブロードキャスト (全デバイスが受信)"
-        >
-          変更
-        </button>
-      </div>
-
       <div className="form-status muted">
         現在: <code className="form-input mono" style={{ background: 'transparent', border: 'none', padding: 0, width: 'auto', color: 'var(--text-secondary)' }}>{device.address || '(未設定)'}</code>
-        {' '}· group <code className="form-input mono" style={{ background: 'transparent', border: 'none', padding: 0, width: 'auto', color: 'var(--text-secondary)' }}>{cachedInfo?.group ?? '?'}</code>
       </div>
 
       <div className="form-action-row" style={{ marginTop: 8 }}>

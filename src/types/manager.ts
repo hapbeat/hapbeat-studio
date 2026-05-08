@@ -43,7 +43,6 @@ export interface StudioToManagerMessage {
     | 'query_volume'
     | 'set_name'
     | 'set_address'
-    | 'set_group'
     | 'set_wifi'
     | 'clear_wifi'
     | 'reboot'

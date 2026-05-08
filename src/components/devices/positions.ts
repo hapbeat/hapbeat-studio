@@ -25,20 +25,34 @@ export function positionLabel(key: string): string {
 }
 
 /**
- * Parse "[prefix/]player_N/pos_xxx" → { prefix, player, position }.
+ * Parse "[prefix/]player_N/pos_xxx[/group_M]" → { prefix, player, position, group }.
  *
- * Prefix may itself contain "/" (e.g. "red/alpha"), so the last two
- * segments are assumed to be `player_N` and `pos_xxx` and the rest is
- * the prefix.
+ * Prefix may itself contain "/" (e.g. "red/alpha"). 末尾の `group_<N>` は
+ * 任意セグメント (contracts spec §2 改定後)。group=-1 は未指定 (suffix なし)。
  */
 export function parseAddress(address: string): {
   prefix: string
   player: number
   position: string
+  group: number
 } {
-  if (!address) return { prefix: '', player: 1, position: 'pos_chest' }
+  if (!address) return { prefix: '', player: 1, position: 'pos_chest', group: -1 }
   const parts = address.split('/')
-  if (parts.length < 2) return { prefix: '', player: 1, position: 'pos_chest' }
+
+  // 末尾が group_<N> なら抽出して parts から除く (1..99 のみ valid)
+  let group = -1
+  if (parts.length >= 1 && parts[parts.length - 1].startsWith('group_')) {
+    const gStr = parts[parts.length - 1].slice(6)
+    const gNum = Number(gStr)
+    if (Number.isFinite(gNum) && gNum >= 1 && gNum <= 99) {
+      group = gNum
+      parts.pop()
+    }
+  }
+
+  if (parts.length < 2) {
+    return { prefix: '', player: 1, position: 'pos_chest', group }
+  }
   const playerStr = parts[parts.length - 2]
   const position = parts[parts.length - 1]
   const prefix = parts.slice(0, -2).join('/')
@@ -47,10 +61,19 @@ export function parseAddress(address: string): {
     const n = Number(playerStr.slice(7))
     if (Number.isFinite(n) && n > 0) player = n
   }
-  return { prefix, player, position }
+  return { prefix, player, position, group }
 }
 
-export function buildAddress(prefix: string, player: number, position: string): string {
+export function buildAddress(
+  prefix: string,
+  player: number,
+  position: string,
+  group: number = -1,
+): string {
   const tail = `player_${player}/${position}`
-  return prefix.trim() ? `${prefix.trim()}/${tail}` : tail
+  let addr = prefix.trim() ? `${prefix.trim()}/${tail}` : tail
+  if (group >= 1 && group <= 99) {
+    addr += `/group_${group}`
+  }
+  return addr
 }
