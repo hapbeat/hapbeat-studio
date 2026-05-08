@@ -241,10 +241,13 @@ export const INITIAL_UI_SETTINGS: UiSettings = {
   hold_show_oled_indicator: false,
 }
 
-/** 出荷時の orientation: 両モデル normal。 */
+/** 出荷時の orientation:
+ *  - Duo: normal
+ *  - Band: flipped (装着時 OLED が上下逆になる物理配置のため、JSON 由来)
+ */
 export const INITIAL_ORIENTATION_BY_MODEL: Record<DeviceModel, DisplayOrientation> = {
   duo_wl: 'normal',
-  band_wl: 'normal',
+  band_wl: 'flipped',
 }
 
 /** Helper: クローン込みの初期 layoutByModel。`structuredClone` で参照を切る。 */
