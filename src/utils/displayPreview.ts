@@ -65,7 +65,14 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
       // 標準 8 chars: 左に space 2 個入れて見た目右寄せ風
       return sample.padStart(8, ' ').slice(0, 8)
     }
-    case 'device_name':       return 'Duo-1'                                   // 6文字
+    case 'device_name': {
+      // 設定された dev_name (NVS) を左から N 文字で切出し / 右 pad。
+      // compact = 4 ('Duo1') / standard = 5 ('Duo-1') / wide = 16 (フル)
+      const sample = 'MyHapbeat-Neck01'
+      if (variant === 'compact') return sample.padEnd(4, ' ').slice(0, 4)
+      if (variant === 'wide')    return sample.padEnd(16, ' ').slice(0, 16)
+      return sample.padEnd(5, ' ').slice(0, 5)
+    }
     case 'app_name':
       // CONNECT_STATUS payload の app_name (Unity SDK 等が送信)。
       // variant でプレビュー文字数を切替: compact=4 / standard=8 / wide=16
@@ -86,7 +93,7 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
       return `pos:${name}`.padEnd(8, ' ').slice(0, 8)
     }
     case 'page_indicator':    return '1/2'                                       // 3文字
-    case 'group_id':          return `Gr:${s.group}`                             // 4文字
+    case 'group_id':          return `Gr:${String(s.group).padStart(2, '0').slice(-2)}` // 5文字 (Gr:01〜Gr:99)
     case 'address': {
       // address は player_ より前の prefix 部分のみ表示。
       // variant でプレビュー文字数を切替: compact=4 / standard=8 / wide=16
@@ -128,6 +135,6 @@ export function getElementDescription(type: DisplayElementType): string {
     case 'player_number':     return 'P:XX'
     case 'position':          return 'pos:xxx'
     case 'page_indicator':    return 'N/N'
-    case 'group_id':          return 'Gr:X'
+    case 'group_id':          return 'Gr:XX'
   }
 }

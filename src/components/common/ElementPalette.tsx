@@ -75,7 +75,7 @@ export const PALETTE_SECTIONS: PaletteSection[] = [
     title: '識別',
     hint: '設定で決まる固定情報',
     items: [
-      { type: 'device_name', label: 'Device Name', description: 'ホスト名',   icon: 'D' },
+      { type: 'device_name', label: 'Device Name', description: 'ホスト名',   icon: 'D', variants: sizeVariants },
       { type: 'address',     label: 'Address',     description: 'prefix',     icon: 'A', variants: sizeVariants },
       { type: 'app_name',    label: 'AppName',     description: '接続アプリ名', icon: 'A', variants: sizeVariants },
       { type: 'position',    label: 'Position',    description: '装着位置 (pos_xxx)', icon: '⬦', variants: sizeVariants },

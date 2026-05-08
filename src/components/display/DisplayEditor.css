@@ -60,6 +60,19 @@
 .page-tab:hover { background: var(--bg-hover); color: var(--text-primary); }
 .page-tab.active { background: var(--bg-surface); color: var(--accent-light); border-color: var(--accent-dim); }
 
+/* インライン rename 用 input。.page-tab を継承して縦幅 / 角丸 / borders を
+   揃え、編集中であることを accent 色で示す。 */
+.page-tab-rename-input {
+  width: 12ch;
+  outline: none;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-color: var(--accent);
+  font-size: 14px;
+  font-family: var(--font-ui);
+  padding: 5px 10px;
+}
+
 .page-tab-delete {
   padding: 5px 6px;
   background: var(--bg-secondary);

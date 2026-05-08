@@ -49,10 +49,31 @@ export type ButtonActionType =
 /** Hold 動作モード: momentary=離したら戻す, latch=1回押しと同じ */
 export type HoldMode = 'momentary' | 'latch'
 
+/**
+ * 1 ボタン分の action 設定。
+ *
+ * Hold 系は **Tmp / Exec で独立に保持** する設計 (2026-05-09):
+ *   - `hold_tmp`   …… `hold_mode='momentary'` (Tmp) のときに有効な action
+ *   - `hold_latch` …… `hold_mode='latch'`     (Exec) のときに有効な action
+ *   - `hold`       …… firmware に渡す runtime-active な値 (= 上記どちらかを
+ *                      `hold_mode` で選んだコピー)。Studio 上では UI 表示も
+ *                      含めて hold_tmp / hold_latch を真として扱い、`hold`
+ *                      は `displayLayoutIO.ts` の serialize 時に派生される。
+ *
+ * Tmp と Exec を別フィールドにすることで、mode 切替時に他方の値が消えず、
+ * かつ UI の "selected" ハイライトが片方の menu にしか出ない (= ユーザの
+ * 「両方選択されているように見える」混乱を構造的に解消)。
+ */
 export interface SingleButtonAction {
   short_press: ButtonActionType
   long_press: ButtonActionType
+  /** runtime-active hold action (= hold_tmp or hold_latch picked by hold_mode).
+   *  Studio 上では使わず、firmware への serialize 時にだけ生成する。 */
   hold?: ButtonActionType
+  /** Tmp (momentary) モード時の hold action */
+  hold_tmp?: ButtonActionType
+  /** Exec (latch) モード時の hold action */
+  hold_latch?: ButtonActionType
   hold_mode?: HoldMode
 }
 
@@ -62,6 +83,8 @@ export interface ButtonAction {
   short_press: ButtonActionType
   long_press: ButtonActionType
   hold?: ButtonActionType
+  hold_tmp?: ButtonActionType
+  hold_latch?: ButtonActionType
   hold_mode?: HoldMode
 }
 
@@ -257,13 +280,13 @@ export const ELEMENT_FIXED_SIZES: Record<DisplayElementType, [number, number]> =
                              // (3rd オクテットも被ることが多いので standard は 6 で十分)
   firmware_version: [8, 1],  // " v0.1.0" 標準 8文字 (compact=6)。
                              // device は左 truncate / 右 pad で width に追従。
-  device_name: [6, 1],       // "DuoWL2"    6文字, compact 3文字
+  device_name: [5, 1],       // "Duo-1"     standard 5文字 (compact=4, wide=16)
   app_name: [8, 1],          // "MyApp__"   標準 8文字 (compact=4, wide=16)
   player_number: [4, 1],     // "P:01"      4文字
   position: [8, 1],          // "pos:neck"  標準 8文字 (compact=4, wide=16)。
                              // 数値ではなく NVS の pos_xxx 名を表示
   page_indicator: [3, 1],    // "1/2"       3文字
-  group_id: [4, 1],          // "Gr:1"      4文字
+  group_id: [5, 1],          // "Gr:01"     5文字 (2 桁ゼロ埋め、player_number と統一)
   address: [8, 1],           // "prefix__"  標準 8文字 (compact=4, wide=16)。
                              // 表示は address の prefix 部分のみ
                              // (player_/pos は別要素として持つため重複させない)
@@ -313,6 +336,16 @@ export function getElementSize(type: DisplayElementType, variant?: string): [num
     // wide は不要 (semver 以上の長さは想定しない)。
     if (variant === 'compact') return [6, 1]
     return [8, 1]
+  }
+  if (type === 'device_name') {
+    // ホスト名 (NVS の dev_name)。3 サイズ展開:
+    //   compact = 4 文字 (e.g. "Duo1")
+    //   standard (default) = 5 文字 (e.g. "Duo-1")
+    //   wide = 16 文字 (1 行全部、e.g. "MyHapbeat-Neck01")
+    // firmware は elem.width に合わせて左から N 文字を切出し / 右 pad。
+    if (variant === 'compact') return [4, 1]
+    if (variant === 'wide') return [16, 1]
+    return [5, 1]
   }
   return ELEMENT_FIXED_SIZES[type]
 }

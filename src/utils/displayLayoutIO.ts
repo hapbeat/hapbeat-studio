@@ -102,16 +102,21 @@ export interface FirmwareUiConfig {
 // ---- Studio SavedState (DisplayEditor と同じ構造) ---------------------------
 
 export interface DisplaySavedState {
-  layout: DisplayLayout
+  /**
+   * OLED レイアウトは **デバイスモデル別** に保持する。Duo と Band で
+   * 物理画面サイズは同じだが、ボタン配置 / 装着向き / 利用シナリオが
+   * 異なるためレイアウトも別々に最適化したい (2026-05-09 ユーザ要望)。
+   *
+   * Firmware への deploy 時は `layoutByModel[deviceModel]` を単一の
+   * pages として書き出す (firmware は 1 機種 1 レイアウトのため
+   * モデル別の概念は不要)。
+   */
+  layoutByModel: Record<DeviceModel, DisplayLayout>
   deviceModel: DeviceModel
   /**
-   * 回転状態は **デバイスモデル別** に保持する。Duo と Band で物理的な
-   * 装着向きが異なる (Duo は首掛け、Band は手首) ため、エディタ上で
-   * モデルを切り替えたときに前回設定した向きを思い出してほしい。
-   *
-   * Firmware への deploy 時は `orientationByModel[deviceModel]` を
-   * 単一の `orientation` として書き出す (firmware は 1 機種 1 設定の
-   * ためモデル別の概念は不要)。
+   * 回転状態も **デバイスモデル別**。Duo と Band で物理的な装着向きが
+   * 異なる (Duo は首掛け、Band は手首) ため、エディタ上でモデルを
+   * 切り替えたときに前回設定した向きを思い出してほしい。
    */
   orientationByModel: Record<DeviceModel, DisplayOrientation>
   perButtonActions: PerButtonActions
@@ -121,12 +126,27 @@ export interface DisplaySavedState {
   uiSettings: UiSettings
 }
 
+/**
+ * `fromFirmwareFormat` の戻り値専用 shape。firmware は 1 機種ぶんの
+ * レイアウトしか持たないので、import は **単一の `layout` ヒント** と
+ * 「どのモデル向けか (`deviceModel`)」を返す。caller (DisplayEditor) が
+ * 既存 `layoutByModel` の該当スロットだけ上書きする = もう一方のモデル
+ * の編集状態は保護される。
+ */
+export interface ImportedFirmwareState
+  extends Omit<Partial<DisplaySavedState>, 'layoutByModel'> {
+  /** Imported firmware が持っていた単一レイアウト。caller が
+   *  `layoutByModel[deviceModel]` に書き込む。 */
+  layout?: DisplayLayout
+}
+
 // ---- 変換: Studio → Firmware ------------------------------------------------
 
 export function toFirmwareFormat(state: DisplaySavedState): FirmwareUiConfig {
-  const { layout, deviceModel, orientationByModel, perButtonActions, ledConfig, volumeConfig, uiSettings } = state
-  // Firmware は単一 orientation を期待する。deploy 対象 model のものだけを書き出す。
+  const { layoutByModel, deviceModel, orientationByModel, perButtonActions, ledConfig, volumeConfig, uiSettings } = state
+  // Firmware は単一 orientation / 単一レイアウトを期待する。deploy 対象 model のものだけを書き出す。
   const orientation: DisplayOrientation = orientationByModel[deviceModel] ?? 'normal'
+  const layout = layoutByModel[deviceModel]
 
   const pages: FirmwarePage[] = layout.pages.map((page, idx) => ({
     id: `page_${idx}`,
@@ -163,13 +183,19 @@ export function toFirmwareFormat(state: DisplaySavedState): FirmwareUiConfig {
   if (perButtonActions) {
     for (const [btnId, action] of Object.entries(perButtonActions)) {
       if (!validBtnIds.has(btnId)) continue
+      // hold_tmp / hold_latch は Studio 内部のみ。firmware には active な
+      // mode の値を `hold` として渡す (= firmware 側の wire 仕様は不変)。
+      const holdMode = action.hold_mode ?? 'momentary'
+      const activeHold = (holdMode === 'momentary' ? action.hold_tmp : action.hold_latch)
+        ?? action.hold
+        ?? 'none'
       const entry: FirmwareButtonActions[string] = {
         short_press: toFirmwareAction(action.short_press ?? 'none'),
         long_press: toFirmwareAction(action.long_press ?? 'none'),
-        hold: toFirmwareAction(action.hold ?? 'none'),
+        hold: toFirmwareAction(activeHold),
       }
-      if (action.hold_mode && action.hold_mode !== 'momentary') {
-        entry.hold_mode = action.hold_mode
+      if (holdMode !== 'momentary') {
+        entry.hold_mode = holdMode
       }
       button_actions[btnId] = entry
     }
@@ -227,7 +253,7 @@ export function toFirmwareFormat(state: DisplaySavedState): FirmwareUiConfig {
 
 // ---- 変換: Firmware → Studio ------------------------------------------------
 
-export function fromFirmwareFormat(fw: FirmwareUiConfig): Partial<DisplaySavedState> {
+export function fromFirmwareFormat(fw: FirmwareUiConfig): ImportedFirmwareState {
   const display = fw.display
   const pages = display.pages.map((page) => ({
     name: page.name,
@@ -255,11 +281,18 @@ export function fromFirmwareFormat(fw: FirmwareUiConfig): Partial<DisplaySavedSt
   const perButtonActions: PerButtonActions = {}
   if (display.button_actions) {
     for (const [btnId, action] of Object.entries(display.button_actions)) {
+      const mode: import('@/types/display').HoldMode =
+        (action as Record<string, unknown>).hold_mode === 'latch' ? 'latch' : 'momentary'
+      const hold = normalizeAction(action.hold ?? 'none')
+      // hold は active mode 側にだけマップ。もう片方は 'none' で初期化。
+      // Studio 内部表現に展開してから serialize 時に再度 active 側へ畳む。
       perButtonActions[btnId] = {
         short_press: normalizeAction(action.short_press ?? 'none'),
         long_press: normalizeAction(action.long_press ?? 'none'),
-        hold: normalizeAction(action.hold ?? 'none'),
-        hold_mode: (action as Record<string, unknown>).hold_mode === 'latch' ? 'latch' : 'momentary',
+        hold,
+        hold_tmp: mode === 'momentary' ? hold : 'none',
+        hold_latch: mode === 'latch' ? hold : 'none',
+        hold_mode: mode,
       }
     }
   }
@@ -334,7 +367,15 @@ export function exportUiConfig(state: DisplaySavedState): void {
 
   const a = document.createElement('a')
   a.href = url
-  const ts = new Date().toISOString().replace(/[-:]/g, '').replace('T', '_').slice(0, 15)
+  // ファイル名のタイムスタンプはローカル時刻 (= ユーザの腕時計と一致) で
+  // 出力する。旧コードは `toISOString()` (= 常に UTC) を使っていたため、
+  // JST で 02:31 に保存されたファイルが UTC 換算で `..._173158` のように
+  // 9 時間ずれて見えるユーザ報告 (2026-05-09) を解消。
+  // 同一 PC 内の運用では local time のほうがソート / 検索とも自然。
+  const d = new Date()
+  const pad = (n: number): string => String(n).padStart(2, '0')
+  const ts = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
+    + `_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
   a.download = `ui-config_${ts}.json`
   document.body.appendChild(a)
   a.click()
@@ -349,7 +390,7 @@ export const exportDisplayLayout = exportUiConfig
 
 // ---- ファイルインポート -----------------------------------------------------
 
-export async function importUiConfig(file: File): Promise<Partial<DisplaySavedState>> {
+export async function importUiConfig(file: File): Promise<ImportedFirmwareState> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => {

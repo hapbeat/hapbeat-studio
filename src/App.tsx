@@ -90,7 +90,6 @@ export function App() {
   }, [activeTab])
   const { isConnected, helperVersion, send } = useHelperConnection()
   const [helperModalOpen, setHelperModalOpen] = useState(false)
-  const [showHelperVersion, setShowHelperVersion] = useState(false)
 
   // Auto-close modal when Helper connects
   useEffect(() => {
@@ -130,18 +129,13 @@ export function App() {
             Docs ↗
           </a>
           {isConnected ? (
-            <button
-              type="button"
-              className="connection-status connection-status--clickable"
-              onClick={() => setShowHelperVersion((v) => !v)}
-              title={helperVersion ? `hapbeat-helper ${helperVersion} (クリックで表示切替)` : 'helper version 不明 (古い helper の可能性)'}
+            <div
+              className="connection-status connection-status--with-tip"
+              data-tip={helperVersion ? `hapbeat-helper v${helperVersion}` : 'helper version 不明 (古い helper)'}
             >
               <span className="status-dot connected" />
               Helper 接続中
-              {showHelperVersion && helperVersion && (
-                <span className="helper-version-badge">v{helperVersion}</span>
-              )}
-            </button>
+            </div>
           ) : (
             <button
               type="button"

@@ -165,16 +165,34 @@ body {
   font-family: var(--font-mono);
 }
 
-/* helper version (e.g. v0.2.3) — small dimmed badge next to "Helper 接続中" */
-.helper-version-badge {
-  font-size: 11px;
+/* helper version は常時表示せず hover tooltip で見せる。
+   標準 title 属性はカーソル付近に出てカーソル自身に隠れるので、
+   data-tip + ::after でセル下方に独立した tip を描画する。 */
+.connection-status--with-tip {
+  position: relative;
+}
+.connection-status--with-tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  padding: 4px 8px;
+  background: rgba(0, 0, 0, 0.9);
+  color: var(--text-primary);
+  font-size: 12px;
   font-family: var(--font-mono);
-  color: var(--text-muted, #aab);
-  padding: 1px 6px;
-  border: 1px solid var(--border-light, var(--border));
-  border-radius: 9px;
-  letter-spacing: 0.02em;
-  font-variant-numeric: tabular-nums;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  z-index: 1000;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.connection-status--with-tip:hover::after {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .status-dot {
@@ -220,7 +238,7 @@ body {
   gap: 2px;
   background: var(--bg-primary);
   border-radius: var(--radius);
-  padding: 2px;
+  overflow: hidden;        /* | 区切りや active 背景を角丸でクリップ */
 }
 
 .toggle-btn {

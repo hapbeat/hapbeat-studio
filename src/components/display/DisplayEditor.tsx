@@ -11,13 +11,21 @@ import type {
   LedConfig,
   VolumeConfig,
 } from '@/types/display'
-import { getElementSize, DEFAULT_LED_RULES, DEFAULT_VOLUME_CONFIG, LED_CONDITION_METAS } from '@/types/display'
+import { getElementSize, LED_CONDITION_METAS } from '@/types/display'
 import type { DeviceModel, DeviceHardwareSpec } from '@/types/device'
 import { DEVICE_SPECS } from '@/types/device'
 import { ElementPalette, getElementMeta, PALETTE_SECTIONS } from '@/components/common/ElementPalette'
 import { getElementPreviewText, DEFAULT_SIM_STATE } from '@/utils/displayPreview'
 import type { SimState } from '@/utils/displayPreview'
-import { pagePresets, standardTemplate } from '@/utils/templates'
+import {
+  getPagePresetsFor, duoStandardTemplate, bandStandardTemplate,
+  buildInitialLayoutByModel,
+  INITIAL_PER_BUTTON_ACTIONS,
+  INITIAL_LED_CONFIG,
+  INITIAL_VOLUME_CONFIG,
+  INITIAL_UI_SETTINGS,
+  INITIAL_ORIENTATION_BY_MODEL,
+} from '@/utils/templates'
 import {
   exportDisplayLayout,
   importDisplayLayout,
@@ -26,7 +34,6 @@ import {
   type DisplaySavedState,
 } from '@/utils/displayLayoutIO'
 import type { UiSettings } from '@/types/display'
-import { DEFAULT_UI_SETTINGS } from '@/types/display'
 import { UiSettingsModal } from './UiSettingsModal'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore } from '@/stores/deviceStore'
@@ -105,18 +112,30 @@ function buildGridRows(page: DisplayPage | undefined, simState: SimState): GridI
 }
 
 const DEFAULT_BUTTON_ACTION: SingleButtonAction = {
-  short_press: 'none', long_press: 'none', hold: 'none', hold_mode: 'momentary',
+  short_press: 'none', long_press: 'none',
+  // hold_tmp / hold_latch を独立保持。`hold` は serialize 時に派生される
+  // ので UI/ロジックでは使わない。
+  hold_tmp: 'none', hold_latch: 'none', hold_mode: 'momentary',
+}
+
+/**
+ * `action.hold_mode` に対応する hold action を返す。
+ * Tmp/Exec を独立保持する仕組みのため、UI / シミュレータは常にこの helper を
+ * 経由して active 値を読む (= legacy `action.hold` を直接読まない)。
+ */
+function getActiveHoldAction(action: SingleButtonAction | undefined): ButtonActionType {
+  if (!action) return 'none'
+  const mode = action.hold_mode ?? 'momentary'
+  return (mode === 'momentary' ? action.hold_tmp : action.hold_latch) ?? 'none'
 }
 
 function generateId(): string {
   return `el-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
 }
 
-function createDefaultPerButtonActions(spec: DeviceHardwareSpec): PerButtonActions {
-  const actions: PerButtonActions = {}
-  for (const btn of spec.buttons) actions[btn.id] = { ...DEFAULT_BUTTON_ACTION }
-  return actions
-}
+// `createDefaultPerButtonActions` (= 全 button を 'none' で埋める旧 helper)
+// は撤去。出荷時 button actions は templates.ts の
+// `INITIAL_PER_BUTTON_ACTIONS` を使う (Duo 5 + Band 3 を JSON 由来の値で埋める)。
 
 /** アクション選択肢を2列グリッドで表示するためにグループ化 */
 /** ページ名に応じた goto_page ラベルを動的生成 */
@@ -188,22 +207,18 @@ function buildHoldActionGroups(pages: DisplayPage[], holdMode: import('@/types/d
     // next_page / prev_page \u3082\u30da\u30fc\u30b8\u79fb\u52d5\u64cd\u4f5c\u3068\u3057\u3066 hold \u306b\u7f6e\u3051\u308b\u3088\u3046\u8ffd\u52a0\u3002
     // (firmware \u306f\u6b21/\u524d\u3078\u300c\u9032\u3081\u308b\u300d\u3060\u3051\u3067\u96e2\u3057\u3066\u3082\u81ea\u52d5\u3067\u623b\u3089\u306a\u3044\u306e\u3067\u3001
     // \u53b3\u5bc6\u306a tmp \u6319\u52d5\u306f hold_page:N \u306e\u307b\u3046\u306e\u307f\u3002next/prev \u306f\u5b9f\u8cea latch \u3068\u540c\u7b49)
-    const pageItems: ActionItem[] = [
-      // \u7269\u7406\u30dc\u30bf\u30f3\u914d\u7f6e\u306b\u5408\u308f\u305b\u3066 prev (\u5de6) \u2192 next (\u53f3) \u306e\u4e26\u3073\u3002
-      { value: 'prev_page', label: 'Prev Page' },
-      { value: 'next_page', label: 'Next Page' },
-      ...pages.map((p, i) => ({
-        value: `hold_page:${i}`, label: `\u2192 ${p.name} (tmp)`,
-      })),
-    ]
+    // Tmp: pageItems \u306f hold_page:N \u306e\u307f (= \u96e2\u3057\u305f\u3089\u5143\u30da\u30fc\u30b8\u306b\u623b\u308b)\u3002
+    // prev_page / next_page \u306f firmware \u304c\u300c\u9032\u3081\u308b\u300d\u3060\u3051\u3067\u96e2\u3057\u3066\u3082\u623b\u3089\u306a\u3044 =
+    // \u5b9f\u8cea latch \u306a\u306e\u3067 Tmp menu \u304b\u3089\u306f\u9664\u5916 (2026-05-09 \u30e6\u30fc\u30b6\u8981\u671b)\u3002
+    const pageItems: ActionItem[] = pages.map((p, i) => ({
+      value: `hold_page:${i}`, label: `\u2192 ${p.name} (tmp)`,
+    }))
     return [
       { label: 'Page', items: pageItems },
       {
         label: 'Toggle',
         items: [
           { value: 'display_toggle', label: 'Display ON/OFF' },
-          { value: 'led_toggle', label: 'LED ON/OFF' },
-          { value: 'vib_mode', label: 'VibMode Var/Fix' },
           { value: 'none', label: '\u2014 (None)' },
         ],
       },
@@ -247,7 +262,8 @@ function canPlace(
 const STORAGE_KEY = 'hapbeat-studio-display'
 
 interface SavedState {
-  layout: DisplayLayout
+  /** Duo と Band で OLED レイアウトを **個別に** 保持 (2026-05-09 ユーザ要望)。 */
+  layoutByModel: Record<DeviceModel, DisplayLayout>
   deviceModel: DeviceModel
   /** デバイスモデル別の回転状態 (Duo / Band 個別に保持)。 */
   orientationByModel: Record<DeviceModel, DisplayOrientation>
@@ -259,9 +275,12 @@ interface SavedState {
 }
 
 /**
- * 旧フォーマット (single `orientation` field) からのマイグレーション
- * を含む読み込み。リリース前のローカル開発状態を捨てたくないので
- * 一度だけ変換する小さな migration を入れる。
+ * 旧フォーマットからのマイグレーション込みの読み込み:
+ *   - 旧 single `orientation` field → `orientationByModel`
+ *   - 旧 single `layout` field → `layoutByModel` (両モデルにクローン
+ *     して既存の編集成果を失わないようにする。ユーザは Duo/Band
+ *     どちらでも続きを編集できる。)
+ * リリース前のローカル開発状態を捨てたくないので一度だけ変換する。
  */
 function loadSaved(): SavedState | null {
   try {
@@ -269,6 +288,8 @@ function loadSaved(): SavedState | null {
     if (!raw) return null
     const data = JSON.parse(raw) as Partial<SavedState> & {
       orientation?: DisplayOrientation
+      /** 旧 (2026-05-09 以前): 単一 layout を共有していた時代の field。 */
+      layout?: DisplayLayout
     }
     if (!data.orientationByModel) {
       const old: DisplayOrientation = data.orientation ?? 'normal'
@@ -276,6 +297,15 @@ function loadSaved(): SavedState | null {
       data.orientationByModel = { duo_wl: 'normal', band_wl: 'normal' }
       data.orientationByModel[model] = old
       delete data.orientation
+    }
+    if (!data.layoutByModel && data.layout) {
+      // 旧 single layout を両モデルにクローンして移行 (どちらのモデル
+      // でも編集成果を失わないようにする)。
+      data.layoutByModel = {
+        duo_wl: structuredClone(data.layout),
+        band_wl: structuredClone(data.layout),
+      }
+      delete data.layout
     }
     return data as SavedState
   } catch { return null }
@@ -295,18 +325,55 @@ function saveTo(state: SavedState) {
 
 export function DisplayEditor() {
   const saved = useRef(loadSaved()).current
-  const [layout, setLayout] = useState<DisplayLayout>(saved?.layout ?? structuredClone(standardTemplate.layout))
+  // OLED レイアウトはモデル別に独立保持 (2026-05-09 ユーザ要望)。
+  // 表示用に一旦 derived `layout` に展開するが、編集は `setLayout` 経由で
+  // 該当モデルのスロットだけが書き換わる。
+  const [layoutByModel, setLayoutByModel] = useState<Record<DeviceModel, DisplayLayout>>(
+    // 初期出荷状態: Duo は main / exhibit / debug の 3 ページ、
+    // Band は main / debug の 2 ページ (2026-05-09 ユーザ提供 JSON 由来)。
+    () => saved?.layoutByModel ?? buildInitialLayoutByModel()
+  )
   const [activePageIndex, setActivePageIndex] = useState(0)
   const [deviceModel, setDeviceModel] = useState<DeviceModel>(saved?.deviceModel ?? 'duo_wl')
+  // 現アクティブモデルの layout を派生。`setLayout` は該当スロットのみ更新する。
+  const layout = layoutByModel[deviceModel]
+  // `setLayout` は React 標準 setter と同じく **stable reference** で
+  // 提供する (= deps を持たない)。理由: handleMoveElement / addElement /
+  // handleDeleteElement / handleAddPage 等の useCallback は設計時点では
+  // `setLayout` を deps に入れていない (旧実装は React useState setter
+  // で stable だったため)。ここで deviceModel を deps に入れた useCallback
+  // を返すと、下流コールバックが **初回 render 時の古い setLayout を
+  // 捕まえ** て deviceModel 切替後も常に旧モデルのスロットに書き続ける
+  // バグを引き起こす (2026-05-09 ユーザ報告: Band 切替後に編集が反映
+  // されない)。ref で現 deviceModel を読みに行く形にして deps ゼロを保つ。
+  const deviceModelRef = useRef(deviceModel)
+  useEffect(() => { deviceModelRef.current = deviceModel }, [deviceModel])
+  const setLayout = useCallback(
+    (next: DisplayLayout | ((prev: DisplayLayout) => DisplayLayout)) => {
+      setLayoutByModel((prev) => {
+        const model = deviceModelRef.current
+        const cur = prev[model]
+        const updated = typeof next === 'function'
+          ? (next as (p: DisplayLayout) => DisplayLayout)(cur)
+          : next
+        return { ...prev, [model]: updated }
+      })
+    },
+    [],
+  )
   // 回転状態は Duo / Band 個別に保持。エディタ上のモデル切替で
   // 各デバイスの最後の向き設定が復元される。
   const [orientationByModel, setOrientationByModel] = useState<
     Record<DeviceModel, DisplayOrientation>
-  >(saved?.orientationByModel ?? { duo_wl: 'normal', band_wl: 'normal' })
+  >(saved?.orientationByModel ?? { ...INITIAL_ORIENTATION_BY_MODEL })
   // 表示用 (現アクティブモデルの orientation を派生)。
   const orientation: DisplayOrientation = orientationByModel[deviceModel]
+  // 出荷時の per-button actions (Duo 5 + Band 3) を初期値として使う。
+  // 旧実装は createDefaultPerButtonActions で「全 button が none」だったため
+  // ユーザ提供 JSON の hold (prev_page / next_page 等) が反映されず、
+  // 「btn_1/btn_4 の hold が none になっている」報告 (2026-05-09) の原因。
   const [perButtonActions, setPerButtonActions] = useState<PerButtonActions>(
-    saved?.perButtonActions ?? createDefaultPerButtonActions(DEVICE_SPECS['duo_wl'])
+    saved?.perButtonActions ?? structuredClone(INITIAL_PER_BUTTON_ACTIONS)
   )
   const [popupPos, setPopupPos] = useState<{ col: number; row: number; x: number; y: number; screenX: number; screenY: number } | null>(null)
   // 旧バージョンで保存された simState は新規追加フィールド (e.g. 2026-05-08
@@ -321,24 +388,27 @@ export function DisplayEditor() {
   // firmware where they sit silently, and the modal couldn't render them.
   const [ledConfig, setLedConfig] = useState<LedConfig>(() => {
     if (!saved?.ledConfig) {
-      return { globalBrightness: 255, rules: [...DEFAULT_LED_RULES] }
+      return structuredClone(INITIAL_LED_CONFIG)
     }
+    // Migration: drop rules whose condition no longer exists, re-add missing
+    // default-rule conditions. Baseline は INITIAL_LED_CONFIG を使う。
     const validConditions = new Set(LED_CONDITION_METAS.map((m) => m.condition))
     const kept = saved.ledConfig.rules.filter((r) => validConditions.has(r.condition))
-    // Re-add any default rule that isn't in the saved state (migration safety).
-    for (const def of DEFAULT_LED_RULES) {
+    for (const def of INITIAL_LED_CONFIG.rules) {
       if (!kept.some((r) => r.condition === def.condition)) {
         kept.push({ ...def })
       }
     }
     return { ...saved.ledConfig, rules: kept }
   })
-  const [volumeConfig, setVolumeConfig] = useState<VolumeConfig>(saved?.volumeConfig ?? { ...DEFAULT_VOLUME_CONFIG })
+  const [volumeConfig, setVolumeConfig] = useState<VolumeConfig>(
+    saved?.volumeConfig ?? { ...INITIAL_VOLUME_CONFIG }
+  )
   // 旧バージョンで保存された uiSettings は新規追加フィールド (e.g. 2026-05-08
   // 追加の hold_feedback_color / hold_feedback_start_ms) を持たない可能性が
-  // あるため、必ず DEFAULT を baseline に spread merge する。
+  // あるため、必ず INITIAL を baseline に spread merge する。
   const [uiSettings, setUiSettings] = useState<UiSettings>(
-    () => ({ ...DEFAULT_UI_SETTINGS, ...(saved?.uiSettings ?? {}) })
+    () => ({ ...INITIAL_UI_SETTINGS, ...(saved?.uiSettings ?? {}) })
   )
   const [ledModalOpen, setLedModalOpen] = useState(false)
   const [volumeModalOpen, setVolumeModalOpen] = useState(false)
@@ -359,10 +429,10 @@ export function DisplayEditor() {
 
   // 自動保存: 状態変更のたびに localStorage + sessionStorage + IndexedDB に保存
   useEffect(() => {
-    const state: DisplaySavedState = { layout, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig, uiSettings }
+    const state: DisplaySavedState = { layoutByModel, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig, uiSettings }
     saveTo(state)
     saveDisplayToIDB(state)
-  }, [layout, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig, uiSettings])
+  }, [layoutByModel, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig, uiSettings])
 
   const oledRef = useRef<HTMLDivElement>(null)
   const deviceSpec = DEVICE_SPECS[deviceModel]
@@ -381,14 +451,33 @@ export function DisplayEditor() {
 
   const handleDeviceModelChange = useCallback((model: DeviceModel) => {
     setDeviceModel(model)
-    // 既存のボタン設定はすべて保持。新モデルのボタンで未設定のもののみデフォルトで補完
+    // 既存のボタン設定はすべて保持。新モデルのボタンで未設定のもののみ
+    // 出荷時の INITIAL_PER_BUTTON_ACTIONS から補完する。
+    // (旧実装は createDefaultPerButtonActions で全 'none' を入れていたため、
+    //  Band 初回切替時に hold が 'none' のままになっていた。)
+    const modelButtonIds = new Set(DEVICE_SPECS[model].buttons.map((b) => b.id))
     setPerButtonActions((prev) => {
-      const defaults = createDefaultPerButtonActions(DEVICE_SPECS[model])
-      return { ...prev, ...Object.fromEntries(
-        Object.entries(defaults).filter(([id]) => !prev[id])
-      ) }
+      const fill: PerButtonActions = {}
+      for (const id of modelButtonIds) {
+        if (!prev[id] && INITIAL_PER_BUTTON_ACTIONS[id]) {
+          fill[id] = structuredClone(INITIAL_PER_BUTTON_ACTIONS[id])
+        }
+      }
+      return Object.keys(fill).length === 0 ? prev : { ...prev, ...fill }
     })
   }, [])
+
+  // activePageIndex が現モデルのページ数を超えると、
+  // setLayout 系ハンドラ (`if (!page) return prev`) が silent bail-out
+  // して **編集が反映されない** (2026-05-09 ユーザ報告)。
+  //   例: Duo で 2 ページに増やして page 1 表示中 → Band に切替 → Band は
+  //       1 ページ → activePageIndex=1 のまま → ハンドラ bail-out。
+  // モデル別レイアウト保持で各モデルのページ数が独立になったので、
+  // モデル切替 / レイアウト変更のたびに index を有効範囲にクランプする。
+  useEffect(() => {
+    const max = Math.max(0, layout.pages.length - 1)
+    if (activePageIndex > max) setActivePageIndex(max)
+  }, [layout.pages.length, activePageIndex])
 
   const handleMoveElement = useCallback(
     (elementId: string, newPos: [number, number]) => {
@@ -641,24 +730,47 @@ export function DisplayEditor() {
 
   // HTML5 drag ハンドラは不要（全て mouse ベースに移行済み）
 
-  const renamePages = (pages: DisplayPage[]): DisplayPage[] =>
-    pages.map((p, i) => ({ ...p, name: `Page ${i + 1}` }))
+  // 既存のページ名 (例: 'main' / 'exhibit' / 'debug') を保護したいので、
+  // 旧 renamePages (= 全ページを `Page N` で書き換え) は撤去。
+  // 新規追加ページのデフォルト名のみ衝突しない `Page N` を当てる。
+  const nextDefaultPageName = (existing: DisplayPage[]): string => {
+    const names = new Set(existing.map((p) => p.name))
+    for (let n = existing.length + 1; ; n++) {
+      const candidate = `Page ${n}`
+      if (!names.has(candidate)) return candidate
+    }
+  }
 
   const handleAddPage = useCallback(() => {
-    setLayout((prev) => {
-      const newPages = renamePages([...prev.pages, { name: '', elements: [] }])
-      return { ...prev, pages: newPages }
-    })
+    setLayout((prev) => ({
+      ...prev,
+      pages: [...prev.pages, { name: nextDefaultPageName(prev.pages), elements: [] }],
+    }))
     setActivePageIndex(layout.pages.length)
   }, [layout.pages.length])
+
+  /** ページ名を rename。空文字 / 全角空白だけは弾いて元の名前を維持。 */
+  const handleRenamePage = useCallback((index: number, rawName: string) => {
+    const trimmed = rawName.replace(/　/g, ' ').trim()
+    if (trimmed.length === 0) return  // 空入力は無視 (= キャンセル相当)
+    setLayout((prev) => {
+      if (index < 0 || index >= prev.pages.length) return prev
+      if (prev.pages[index].name === trimmed) return prev  // 変化なし
+      return {
+        ...prev,
+        pages: prev.pages.map((p, i) => i === index ? { ...p, name: trimmed } : p),
+      }
+    })
+  }, [])
 
   const handleDeletePage = useCallback(
     (index: number) => {
       if (layout.pages.length <= 1) return
-      setLayout((prev) => {
-        const newPages = renamePages(prev.pages.filter((_, i) => i !== index))
-        return { ...prev, pages: newPages }
-      })
+      // ページ名は保持 (= 削除位置以外のページの name は触らない)。
+      setLayout((prev) => ({
+        ...prev,
+        pages: prev.pages.filter((_, i) => i !== index),
+      }))
       if (activePageIndex >= layout.pages.length - 1) {
         setActivePageIndex(Math.max(0, layout.pages.length - 2))
       }
@@ -666,34 +778,65 @@ export function DisplayEditor() {
     [layout.pages.length, activePageIndex]
   )
 
-  /** 工場出荷状態に戻す: standardTemplate を全置換で適用。
-   *  ページ追加で個別に組み立てる UX とは別の「リセット導線」。 */
+  /** 工場出荷状態に戻す: 現アクティブモデルの **全 state** を初期値に戻す。
+   *
+   *  対象 (2026-05-09 ユーザ要望):
+   *    - 現モデルの OLED ページレイアウト (= INITIAL layout)
+   *    - per-button actions (Duo 5 + Band 3 を `INITIAL_PER_BUTTON_ACTIONS` で
+   *      丸ごと置換 → 旧版で hold が 'none' になっていたケースが解消)
+   *    - LED / volume / UI 設定 (グローバル全体: モデル別ではない)
+   *
+   *  もう一方のモデルの **layout は touch しない** (Duo を init しても Band
+   *  の編集状態は保護)。LED/volume/UI はグローバルなのでリセット対象に含む。
+   */
   const handleResetToDefault = useCallback(async () => {
     const ok = await askConfirm({
-      title: '初期レイアウトに戻す',
+      title: '初期状態に戻す',
       message:
-        '現在のページ・ボタン設定はすべて初期レイアウトに置き換えられます。\n続行しますか？',
+        '現在のモデル (' + (deviceModel === 'duo_wl' ? 'Duo' : 'Band')
+        + ') のページ + ボタン + LED + Volume + UI 設定が初期値に置き換わります。\n'
+        + 'もう一方のモデルのレイアウトは触りません。続行しますか？',
       confirmLabel: '初期化する',
       cancelLabel: 'キャンセル',
       danger: true,
     })
     if (!ok) return
-    setLayout(structuredClone(standardTemplate.layout))
+    const template = deviceModel === 'duo_wl' ? duoStandardTemplate : bandStandardTemplate
+    setLayout(structuredClone(template.layout))
+    setPerButtonActions(structuredClone(INITIAL_PER_BUTTON_ACTIONS))
+    setLedConfig(structuredClone(INITIAL_LED_CONFIG))
+    setVolumeConfig({ ...INITIAL_VOLUME_CONFIG })
+    setUiSettings({ ...INITIAL_UI_SETTINGS })
     setActivePageIndex(0)
     setPopupPos(null)
-  }, [askConfirm])
+  }, [askConfirm, deviceModel])
+
+  // 現アクティブモデルに紐づく preset 一覧 (Duo: main/exhibit/debug/empty,
+  // Band: main/debug/empty)。Insert preset メニューと handleInsertPagePreset
+  // の index 解決に使う。
+  const activePresets = useMemo(() => getPagePresetsFor(deviceModel), [deviceModel])
 
   const handleInsertPagePreset = useCallback((presetIndex: number) => {
-    const preset = pagePresets[presetIndex]
+    const preset = activePresets[presetIndex]
     if (!preset) return
     setLayout((prev) => {
-      const inserted: DisplayPage = { name: '', elements: structuredClone(preset.page.elements) }
-      const newPages = renamePages([...prev.pages, inserted])
-      return { ...prev, pages: newPages }
+      // preset の name (= 'main' / 'exhibit' / 'debug' / 'empty') をそのまま採用。
+      // 既に同名ページが存在する場合は `name (2)` で suffix。
+      const usedNames = new Set(prev.pages.map((p) => p.name))
+      let pageName = preset.page.name
+      let dup = 2
+      while (usedNames.has(pageName)) {
+        pageName = `${preset.page.name} (${dup++})`
+      }
+      const inserted: DisplayPage = {
+        name: pageName,
+        elements: structuredClone(preset.page.elements),
+      }
+      return { ...prev, pages: [...prev.pages, inserted] }
     })
     setActivePageIndex(layout.pages.length)
     setPopupPos(null)
-  }, [layout.pages.length])
+  }, [layout.pages.length, activePresets])
 
   // --- Helper 接続 ---
   const { isConnected: managerConnected, lastMessage, send: managerSend, devices } = useHelperConnection()
@@ -764,8 +907,8 @@ export function DisplayEditor() {
   // --- エクスポート / インポート / デバイス書き込み ---
 
   const buildSavedState = useCallback((): DisplaySavedState => ({
-    layout, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig, uiSettings,
-  }), [layout, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig, uiSettings])
+    layoutByModel, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig, uiSettings,
+  }), [layoutByModel, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig, uiSettings])
 
   const handleDeploy = useCallback(() => {
     if (!managerConnected) {
@@ -845,12 +988,18 @@ export function DisplayEditor() {
     if (!file) return
     try {
       const imported = await importDisplayLayout(file)
-      if (imported.layout) setLayout(imported.layout)
+      // firmware は単一機種ぶんの ui-config しか持たないので、import は
+      // その deviceModel のレイアウトスロットだけを上書きする = もう一方の
+      // モデルの編集状態は保護される。deviceModel 自体も切替えるので、
+      // ユーザは import 直後にそのモデルの新レイアウトを見ることになる。
+      const importedModel: DeviceModel = imported.deviceModel ?? deviceModel
+      if (imported.layout) {
+        setLayoutByModel((prev) => ({ ...prev, [importedModel]: imported.layout! }))
+      }
       if (imported.deviceModel) setDeviceModel(imported.deviceModel)
       // Import 由来は **その deviceModel の orientation のみ** を上書きし、
       // もう一方のモデルの設定は触らない (= ユーザーが両モデル別個に
-      // 編集していた状態を保護)。fromFirmwareFormat がこの shape で返す
-      // 前提なので、merge 戦略のみ使う。
+      // 編集していた状態を保護)。
       if (imported.orientationByModel) {
         setOrientationByModel((prev) => ({ ...prev, ...imported.orientationByModel }))
       }
@@ -865,7 +1014,7 @@ export function DisplayEditor() {
       toast(err instanceof Error ? err.message : 'インポートに失敗しました', 'error')
     }
     e.target.value = ''
-  }, [])
+  }, [deviceModel])
 
   const handlePerButtonActionChange = useCallback(
     (buttonId: string, field: keyof SingleButtonAction, value: ButtonActionType) => {
@@ -914,7 +1063,9 @@ export function DisplayEditor() {
   const handleSimButtonDown = useCallback(
     (buttonId: string) => {
       const btnAction = perButtonActions[buttonId]
-      const holdAction = btnAction?.hold as string | undefined
+      // Tmp/Exec で別フィールドに保存されているので getActiveHoldAction で
+      // mode に応じた値を取り出す。
+      const holdAction = getActiveHoldAction(btnAction) as string
       if (!holdAction || holdAction === 'none') return
       const holdMode = btnAction?.hold_mode ?? 'momentary'
       const n = layout.pages.length
@@ -927,10 +1078,8 @@ export function DisplayEditor() {
           if (isNaN(idx) || idx < 0 || idx >= n || idx === activePageIndex) return
           holdReturnPageRef.current = activePageIndex
           setActivePageIndex(idx)
-        } else if (holdAction === 'vib_mode') {
-          setSimState((s) => ({ ...s, volumeAdcEnabled: !s.volumeAdcEnabled }))
         }
-        // display_toggle / led_toggle: ファーム側で処理、UI シミュレーションは省略
+        // display_toggle: ファーム側で処理、UI シミュレーションは省略
         return
       }
 
@@ -1010,6 +1159,7 @@ export function DisplayEditor() {
           onPageChange={(idx) => { setActivePageIndex(idx); setPopupPos(null) }}
           onAddPage={handleAddPage}
           onDeletePage={handleDeletePage}
+          onRenamePage={handleRenamePage}
           onInsertPagePreset={handleInsertPagePreset}
           onDeviceModelChange={handleDeviceModelChange}
           onResetToDefault={handleResetToDefault}
@@ -1353,6 +1503,7 @@ interface ControlBarProps {
   onPageChange: (idx: number) => void
   onAddPage: () => void
   onDeletePage: (idx: number) => void
+  onRenamePage: (idx: number, newName: string) => void
   onInsertPagePreset: (idx: number) => void
   onDeviceModelChange: (model: DeviceModel) => void
   onResetToDefault: () => void
@@ -1368,20 +1519,57 @@ interface ControlBarProps {
 
 function ControlBar({
   pages, activePageIndex, deviceModel, isFlipped,
-  onPageChange, onAddPage, onDeletePage, onInsertPagePreset,
+  onPageChange, onAddPage, onDeletePage, onRenamePage, onInsertPagePreset,
   onDeviceModelChange, onResetToDefault, onToggleOrientation,
   onExport, onImport, onDeploy, managerConnected, isDeploying, isSerialOnlySelected, deployBtnRef,
 }: ControlBarProps) {
+  // ページ名のインライン編集状態。null = 編集中なし、{idx, draft} = idx 番目を
+  // 編集中で draft が現在の入力中文字列。double-click でモード突入、Enter or
+  // blur で commit、Escape で cancel。
+  const [renaming, setRenaming] = useState<{ idx: number; draft: string } | null>(null)
+  const renameInputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (renaming && renameInputRef.current) {
+      renameInputRef.current.focus()
+      renameInputRef.current.select()
+    }
+  }, [renaming])
+
+  const commitRename = () => {
+    if (!renaming) return
+    onRenamePage(renaming.idx, renaming.draft)
+    setRenaming(null)
+  }
+  const cancelRename = () => setRenaming(null)
+
   return (
     <div className="editor-control-bar">
       <div className="page-tabs">
         {pages.map((page, idx) => (
           <div key={idx} className="page-tab-wrapper">
-            <button
-              className={`page-tab ${idx === activePageIndex ? 'active' : ''}`}
-              onClick={() => onPageChange(idx)}
-            >{page.name}</button>
-            {pages.length > 1 && (
+            {renaming?.idx === idx ? (
+              <input
+                ref={renameInputRef}
+                className="page-tab page-tab-rename-input"
+                value={renaming.draft}
+                onChange={(e) => setRenaming({ idx, draft: e.target.value })}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); commitRename() }
+                  else if (e.key === 'Escape') { e.preventDefault(); cancelRename() }
+                }}
+                maxLength={32}
+                title="Enter で確定、Esc でキャンセル"
+              />
+            ) : (
+              <button
+                className={`page-tab ${idx === activePageIndex ? 'active' : ''}`}
+                onClick={() => onPageChange(idx)}
+                onDoubleClick={() => setRenaming({ idx, draft: page.name })}
+                title="ダブルクリックで rename"
+              >{page.name}</button>
+            )}
+            {pages.length > 1 && renaming?.idx !== idx && (
               <button className="page-tab-delete" onClick={() => onDeletePage(idx)}>x</button>
             )}
           </div>
@@ -1398,7 +1586,10 @@ function ControlBar({
           }}
         >
           <option value="" disabled>プリセット…</option>
-          {pagePresets.map((p, idx) => (
+          {/* preset リストは deviceModel に応じて切替 (Duo: main/exhibit/debug/empty,
+              Band: main/debug/empty)。handleInsertPagePreset 側も同じ
+              `getPagePresetsFor(deviceModel)` で index 解決するため整合する。 */}
+          {getPagePresetsFor(deviceModel).map((p, idx) => (
             <option key={p.name} value={idx} title={p.description}>{p.name}</option>
           ))}
         </select>
@@ -1492,7 +1683,17 @@ function InlineButtonConfig({ action, allItems, actionGroups, holdGroups, btnId,
   }, [holdGroups, allItems])
 
   const handleSelect = (field: keyof SingleButtonAction, value: string) => {
-    onActionChange(btnId, field, value as ButtonActionType)
+    // UI 上 'hold' という擬似フィールドで mode 別の hold_tmp / hold_latch
+    // を切り替えて編集している。実際のセーブ先は active mode 側だけに送る
+    // (もう片方は保持)。
+    if (field === 'hold') {
+      const target: keyof SingleButtonAction = (action.hold_mode ?? 'momentary') === 'momentary'
+        ? 'hold_tmp'
+        : 'hold_latch'
+      onActionChange(btnId, target, value as ButtonActionType)
+    } else {
+      onActionChange(btnId, field, value as ButtonActionType)
+    }
     setOpenField(null)
   }
 
@@ -1514,7 +1715,11 @@ function InlineButtonConfig({ action, allItems, actionGroups, holdGroups, btnId,
       {(['short_press', 'hold'] as const).map((field) => {
         const groups = field === 'hold' ? holdGroups : actionGroups
         const items = field === 'hold' ? holdAllItems : allItems
-        const currentValue = (action[field] as string) ?? 'none'
+        // hold \u306f mode \u5225 (hold_tmp / hold_latch) \u306b\u72ec\u7acb\u4fdd\u6301\u3057\u3066\u3044\u308b\u306e\u3067
+        // active \u306a\u65b9\u3092\u8aad\u3080\u3002short_press \u306f\u305d\u306e\u307e\u307e\u3002
+        const currentValue: string = field === 'hold'
+          ? (getActiveHoldAction(action) as string)
+          : ((action[field] as string) ?? 'none')
         const currentLabel = items.find((i) => i.value === currentValue)?.label ?? '\u2014'
         const isOpen = openField === field
         return (

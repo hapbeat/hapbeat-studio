@@ -21,6 +21,16 @@ interface HelperConnectionValue {
   devices: DeviceInfo[]
   lastMessage: ManagerMessage | null
   send: (message: ManagerMessage) => void
+  /**
+   * Push a synthetic `ManagerMessage` into the `lastMessage` channel as
+   * if it had arrived from helper. Used by the Serial transport
+   * (`useDeviceTransport`) to forward firmware responses through the
+   * same `*_result` handlers that LAN devices use — the alternative is
+   * to duplicate the deviceStore wiring in both transports. Synthetic
+   * messages must carry `payload.device = <selectedIp>` so the
+   * existing handlers that key on `p.device` route them correctly.
+   */
+  injectMessage: (message: ManagerMessage) => void
 }
 
 const HelperConnectionContext = createContext<HelperConnectionValue | null>(null)
@@ -133,6 +143,10 @@ export function HelperConnectionProvider({ children }: { children: ReactNode }) 
     }
   }, [])
 
+  const injectMessage = useCallback((message: ManagerMessage) => {
+    setLastMessage(message)
+  }, [])
+
   useEffect(() => {
     connect()
     return () => {
@@ -150,7 +164,7 @@ export function HelperConnectionProvider({ children }: { children: ReactNode }) 
   }, [connect, clearReconnectTimer])
 
   return (
-    <HelperConnectionContext.Provider value={{ isConnected, helperVersion, devices, lastMessage, send }}>
+    <HelperConnectionContext.Provider value={{ isConnected, helperVersion, devices, lastMessage, send, injectMessage }}>
       {children}
     </HelperConnectionContext.Provider>
   )
