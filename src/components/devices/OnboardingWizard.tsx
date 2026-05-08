@@ -27,6 +27,7 @@ export function OnboardingWizard() {
   const conn = useSerialMaster((s) => s.conn)
   const openConfig = useSerialMaster((s) => s.openConfig)
   const release = useSerialMaster((s) => s.release)
+  const flashLastResult = useSerialMaster((s) => s.flashLastResult)
 
   const [step, setStep] = useState<Step>('probe')
 
@@ -35,17 +36,13 @@ export function OnboardingWizard() {
   //   success → step 3 (set the Serial pseudo-device as the
   //             primary selection so the regular DeviceDetail
   //             sub-tab UI takes over the right pane)
-  //   failed  → step 2 (firmware flash) after 0.8 s
+  //   failed  → step 2 (firmware flash) immediately
   //
   // Keying on probeStatus (not mode) avoids the mid-handshake jump
   // where mode briefly flipped to 'config' before get_info returned.
   useEffect(() => {
     if (probeStatus === 'success' && mode === 'config' && conn && step === 'probe') {
       setStep('configure')
-      // Reach into deviceStore at-call-time (avoids a re-render
-      // dependency loop) and select the freshly-published Serial
-      // pseudo-device by its `serial:<mac>` id. The DeviceList
-      // synthesizes the same id from master.info, so the IDs match.
       const info = useSerialMaster.getState().info
       if (info) {
         const id = `${SERIAL_DEVICE_PREFIX}${info.mac ?? 'active'}`
@@ -54,27 +51,23 @@ export function OnboardingWizard() {
       return
     }
     if (probeStatus === 'failed' && step === 'probe') {
-      // 応答なし = 新品 / ファーム未書込 が大半。即遷移して操作テンポを稼ぐ。
-      // (旧 800ms 待ちは「赤字エラー文を読ませる」意図だったが、エラーではなく
-      //  通常フローなので待たせる必要がない。)
       setStep('flash')
     }
   }, [probeStatus, mode, conn, step])
 
-  // Auto-return to Step 1 when the live serial conn drops mid-setup.
-  // Triggered when:
-  //   - User physically unplugs the USB cable while in Step 3
-  //   - Device reboots after `set_wifi` (firmware emits "disconnected"
-  //     to onDisconnect callback)
-  //   - User power-cycles the device after Step 2 flash to re-enter
-  //     run mode → wizard already nudged them back to Step 1 via
-  //     flashLastResult, but if they were lingering on Step 3 from a
-  //     previous session this catches it too.
+  // 書き込み成功 → 自動で Step 3 へ遷移 (ユーザ要望 2026-05-09)。
+  // 旧フローは「Step 1 に戻って再接続」を要求していたが、success が
+  // 出ているのにユーザに余分な操作をさせる必然性がない。conn は flash
+  // 後に切断されているので Step 3 側で「電源 OFF→ON → 再接続」を促す。
   useEffect(() => {
-    if (step === 'configure' && (mode !== 'config' || !conn)) {
-      setStep('probe')
+    if (flashLastResult?.ok && step === 'flash') {
+      setStep('configure')
     }
-  }, [step, mode, conn])
+  }, [flashLastResult, step])
+
+  // Step 3 中に conn が落ちても auto で Step 1 に戻さない (旧挙動を撤廃)。
+  // ケーブル抜け / set_wifi 後 reboot / post-flash いずれも「Step 3 内で
+  // 再接続」させる方が動線が短い (= ユーザ要望)。
 
   const goProbe = () => setStep('probe')
 
@@ -95,8 +88,8 @@ export function OnboardingWizard() {
           onClick={() => setStep('flash')} />
         <StepArrow />
         <StepPill index={3} label="Wi-Fi 設定" state={stepStateFor('configure', step)}
-          onClick={() => mode === 'config' && conn ? setStep('configure') : undefined}
-          disabledReason={mode === 'config' && conn ? null : 'Step 1 でデバイスに接続してから移動できます'} />
+          onClick={() => setStep('configure')}
+          /* conn 無しでも Step 3 を開けるようにする (再接続 UI を出すため) */ />
       </ol>
 
       {!isWebSerialSupported() && (
@@ -121,8 +114,15 @@ export function OnboardingWizard() {
         <FlashStep onBack={goProbe} />
       )}
 
-      {step === 'configure' && conn && (
-        <ConfigureStep onDisconnect={async () => { await release(); setStep('probe') }} />
+      {step === 'configure' && (
+        <ConfigureStep
+          hasConn={!!conn}
+          probeStatus={probeStatus}
+          probeMessage={probeMessage}
+          onReconnect={() => openConfig()}
+          onCancelReconnect={() => { void release() }}
+          onDisconnect={async () => { await release(); setStep('probe') }}
+        />
       )}
     </section>
   )
@@ -205,8 +205,8 @@ function FlashStep({ onBack }: { onBack: () => void }) {
             「Serial 書き込み」ボタンを押して完了するまで待ってください。
           </p>
           <div className="form-status muted">
-            👉 書き込み完了後、デバイスは書き込みモードのままなので
-            <strong> 電源を一度 OFF→ON </strong>してください。その後 Step 1 に戻って「USB Serial で接続」を押せば自動で Step 3 (Wi-Fi 設定) に進みます。
+            👉 書き込み完了後、自動で Step 3 (Wi-Fi 設定) に進みます。
+            その後デバイスの<strong> 電源を一度 OFF→ON </strong>してから「USB Serial で再接続」を押してください。
           </div>
           <div className="form-action-row" style={{ marginTop: 8 }}>
             <button className="form-button-secondary" onClick={onBack}>
@@ -222,17 +222,67 @@ function FlashStep({ onBack }: { onBack: () => void }) {
 }
 
 function ConfigureStep({
+  hasConn,
+  probeStatus,
+  probeMessage,
+  onReconnect,
+  onCancelReconnect,
   onDisconnect,
 }: {
+  hasConn: boolean
+  probeStatus: string
+  probeMessage: string | null
+  onReconnect: () => void
+  onCancelReconnect: () => void
   onDisconnect: () => void
 }) {
-  // Step 3 doesn't ship its own duplicated identity / Wi-Fi forms —
-  // the user explicitly asked (2026-04-30) for "one Identity form,
-  // shared with the 設定 sub-tab". Selecting the Serial pseudo-
-  // device in the sidebar now drops them into the regular per-
-  // device sub-tab UI (Identity / Wi-Fi / UI Config / Debug Dump),
-  // which routes through `useDeviceTransport` and works over USB
-  // Serial transparently. So Step 3 is just a hand-off card.
+  const busy = probeStatus === 'connecting'
+
+  // 接続なし: post-flash / cable 抜け / set_wifi 後 reboot のいずれかで
+  // conn が外れた状態。Step 1 に戻さず、ここで電源 OFF→ON + 再接続を促す。
+  if (!hasConn) {
+    return (
+      <div className="form-section onboarding-step">
+        <div className="form-section-title">Step 3 — Wi-Fi 設定 (再接続待ち)</div>
+        <div className="onboarding-step-body">
+          <p>
+            ファーム書き込みが完了しました。<strong>デバイスの電源を一度 OFF→ON</strong> してから、
+            下のボタンで USB Serial に再接続してください。
+          </p>
+          <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+            再接続できたら設定タブの Wi-Fi セクションで SSID / パスワードを入力できます。
+          </p>
+          <div className="form-action-row">
+            <button
+              className="form-button onboarding-cta"
+              onClick={onReconnect}
+              disabled={busy || !isWebSerialSupported()}
+            >
+              {busy ? '接続中…' : '🔌 USB Serial で再接続'}
+            </button>
+            {busy && (
+              <button
+                className="form-button-secondary"
+                onClick={onCancelReconnect}
+                title="再接続を中止"
+              >
+                ⨯ 中止
+              </button>
+            )}
+          </div>
+          {probeMessage && (
+            <div className={`form-status ${
+              probeStatus === 'success' ? 'ok' : 'muted'
+            }`} style={{ marginTop: 6 }}>
+              {probeMessage}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // 接続あり: 通常の Step 3 ハンドオフ (左サイドバーで設定継続)。
   return (
     <div className="form-section onboarding-step">
       <div className="form-section-title">Step 3 — 設定 (左サイドバーで続行)</div>
