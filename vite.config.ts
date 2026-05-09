@@ -139,13 +139,38 @@ async function statArtifact(
   }
 }
 
-/** Sole source of truth for the human-readable firmware version —
- *  parsed out of `src/hapbeat_config.h` so OTA verify can compare
- *  Studio-side metadata against the device's `get_info` reply. */
+/** Sole source of truth for the human-readable firmware version.
+ *
+ *  Source-of-truth migrated 2026-05-10 (firmware `1be8711`):
+ *  `FIRMWARE_VERSION` is now generated per-build by
+ *  `scripts/build_version.py` into `src/build_version.h`
+ *  (gitignored, regenerated each build). Tag-exact commits produce
+ *  e.g. `0.1.1`, dev commits produce e.g. `0.1.2d1` (where N counts
+ *  commits since last `v*` tag).
+ *
+ *  Old location (`src/hapbeat_config.h`) kept as fallback because
+ *  build_version.h only exists after at least one PlatformIO build.
+ *  On a fresh checkout pre-build, fall through to undefined.
+ */
 async function readFirmwareVersion(buildRoot: string): Promise<string | undefined> {
+  const firmwareSrc = resolve(buildRoot, '../../src')
+  // 1. Primary: build_version.h (auto-generated, contains dev suffix
+  //    like "0.1.2d1" for non-tagged commits).
   try {
     const header = await fs.readFile(
-      resolve(buildRoot, '../../src/hapbeat_config.h'),
+      resolve(firmwareSrc, 'build_version.h'),
+      'utf-8',
+    )
+    const m = header.match(/#define\s+FIRMWARE_VERSION\s+"([^"]+)"/)
+    if (m) return m[1]
+  } catch {
+    // build_version.h not yet generated (no build run) — fall through.
+  }
+  // 2. Fallback: hapbeat_config.h (legacy, pre-1be8711). Some older
+  //    branches may still define FIRMWARE_VERSION here.
+  try {
+    const header = await fs.readFile(
+      resolve(firmwareSrc, 'hapbeat_config.h'),
       'utf-8',
     )
     const m = header.match(/#define\s+FIRMWARE_VERSION\s+"([^"]+)"/)
