@@ -134,8 +134,14 @@ export function FirmwareSubTab({
   // Show the OTA section only when we actually have a target device
   // and the caller hasn't asked for serial-only mode.
   const showOta = !serialOnly && !!device && !!sendTo
-  const { lastMessage } = useHelperConnection()
+  const { lastMessage, send: helperSend, devices } = useHelperConnection()
   const pushLog = useLogStore((s) => s.push)
+  // Multi-target OTA reads selectedIps to fan out to every multi-selected
+  // online LAN device.  When only one IP is selected, falls back to the
+  // legacy single-target flow via `sendTo`.  `devices` (online list)
+  // comes from useHelperConnection — the deviceStore only owns selection
+  // and per-IP caches, not the live LAN inventory.
+  const selectedIps = useDeviceStore((s) => s.selectedIps)
 
   // ---- Source selection ------------------------------------------------
   type Source = 'library' | 'local'
@@ -807,14 +813,54 @@ export function FirmwareSubTab({
     } else {
       setExpectedFwVersion(null)
     }
+    // Multi-device OTA: when the user has multi-selected several
+    // devices in the sidebar, fan out to **all** of them.  Helper runs
+    // them sequentially (one Wi-Fi can't reliably stream two 1.7 MB
+    // OTAs in parallel — the second would just queue behind the first
+    // anyway) and emits per-device ``ota_progress`` / ``ota_result``
+    // events so the existing UI handlers Just Work.
+    //
+    // Fallback to the focused device when only one IP is selected.
+    // Filter out Serial pseudo-IPs (prefix ``serial:``) and offline
+    // devices — Helper would just immediately fail the OTA on those
+    // and pollute the result toast queue.
+    const lanCandidates = selectedIps.filter((ip) => !ip.startsWith('serial:'))
+    const onlineLan = lanCandidates
+      .map((ip) => devices.find((d) => d.ipAddress === ip))
+      .filter((d): d is DeviceInfo => !!d && d.online)
+      .map((d) => d.ipAddress)
+    const targets = onlineLan.length > 1
+      ? onlineLan
+      : [device.ipAddress]
+    if (targets.length > 1) {
+      pushLog(
+        'ota',
+        `multi-target: streaming to ${targets.length} devices sequentially `
+        + `[${targets.join(', ')}]`,
+      )
+    }
     setProgress({
       device: device.ipAddress, phase: 'begin', percent: 0,
-      message: `OTA 開始要求… (${bin.label})`,
+      message: targets.length > 1
+        ? `OTA 開始要求… (${targets.length} 台 / ${bin.label})`
+        : `OTA 開始要求… (${bin.label})`,
     })
-    sendTo({
-      type: 'ota_data',
-      payload: { bin_base64: bytesToBase64(bin.bytes) },
-    })
+    if (targets.length > 1) {
+      // Multi-target — bypass `sendTo` (which auto-stamps the focused
+      // ``ip``) and go straight to helperSend with a ``targets`` array.
+      helperSend({
+        type: 'ota_data',
+        payload: {
+          bin_base64: bytesToBase64(bin.bytes),
+          targets,
+        },
+      })
+    } else {
+      sendTo({
+        type: 'ota_data',
+        payload: { bin_base64: bytesToBase64(bin.bytes) },
+      })
+    }
   }
 
   // ---- Serial flash --------------------------------------------------
@@ -1118,6 +1164,25 @@ export function FirmwareSubTab({
             {' '}— LAN 経由で選択中ファームを上書き (デバイスは自動再起動)
           </span>
         </div>
+        {/* Multi-target preview: surface how many devices the next OTA
+          *   will hit so the user doesn't accidentally trigger a 5-device
+          *   batch when they meant to flash the focused one. Counted with
+          *   the same filter as ``submit()`` so what the badge shows is
+          *   exactly what helper will receive. */}
+        {(() => {
+          const lan = selectedIps.filter((ip) => !ip.startsWith('serial:'))
+          const onlineLan = lan
+            .map((ip) => devices.find((d) => d.ipAddress === ip))
+            .filter((d) => !!d && d.online).length
+          if (onlineLan > 1) {
+            return (
+              <div className="form-section-sub-inline" style={{ opacity: 0.85 }}>
+                サイドバーで {onlineLan} 台選択中 — 順番に書き込みます
+              </div>
+            )
+          }
+          return null
+        })()}
         <div className="form-action-row">
           {/* 通常時 / 進捗中: OTA 開始ボタン (stuck の間は disabled のまま)。
             * stuck 時: 並んで「中止する」ボタンを出して UI を解放する。 */}
@@ -1126,7 +1191,15 @@ export function FirmwareSubTab({
             onClick={submit}
             disabled={!haveSelection || !device?.online || running}
           >
-            {running ? '送信中…' : 'OTA 書き込み'}
+            {running ? '送信中…' : (() => {
+              const lan = selectedIps.filter((ip) => !ip.startsWith('serial:'))
+              const onlineLan = lan
+                .map((ip) => devices.find((d) => d.ipAddress === ip))
+                .filter((d) => !!d && d.online).length
+              return onlineLan > 1
+                ? `OTA 書き込み (${onlineLan} 台)`
+                : 'OTA 書き込み'
+            })()}
           </button>
           {running && otaStuck && (
             <button
