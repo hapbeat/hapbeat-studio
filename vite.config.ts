@@ -2,6 +2,28 @@ import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve, join } from 'path'
 import { promises as fs } from 'fs'
+import { execSync } from 'child_process'
+
+/** Resolve build metadata: short git SHA (with -dirty suffix if working
+ *  tree has uncommitted changes) + ISO build date. Inlined into the
+ *  bundle via Vite `define` so Studio can self-report for debugging
+ *  (Helper Manage modal). Never throws — falls back to 'unknown' if
+ *  the working tree isn't a git checkout (e.g. CI tarball). */
+function buildMeta(): { sha: string; date: string } {
+  let sha = 'unknown'
+  try {
+    sha = execSync('git rev-parse --short HEAD', {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim()
+    const dirty = execSync('git status --porcelain', {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim()
+    if (dirty) sha += '-dirty'
+  } catch {
+    /* not a git checkout */
+  }
+  return { sha, date: new Date().toISOString() }
+}
 
 /**
  * Dev-server proxy for hapbeat-device-firmware build artifacts.
@@ -186,20 +208,27 @@ const FIRMWARE_BUILD_ROOT = resolve(
   '../hapbeat-device-firmware/.pio/build',
 )
 
-export default defineConfig(({ command }) => ({
-  base: command === 'build' ? '/studio/' : '/',
-  plugins: [react(), firmwareDevPlugin(FIRMWARE_BUILD_ROOT)],
-  resolve: {
-    alias: {
-      '@': resolve(__dirname, 'src'),
+export default defineConfig(({ command }) => {
+  const meta = buildMeta()
+  // Expose as VITE_-prefixed env so `import.meta.env.VITE_BUILD_*`
+  // resolves at both dev (per-request transform) and build time.
+  process.env.VITE_BUILD_SHA = meta.sha
+  process.env.VITE_BUILD_DATE = meta.date
+  return {
+    base: command === 'build' ? '/studio/' : '/',
+    plugins: [react(), firmwareDevPlugin(FIRMWARE_BUILD_ROOT)],
+    resolve: {
+      alias: {
+        '@': resolve(__dirname, 'src'),
+      },
     },
-  },
-  server: {
-    port: 5173,
-    open: true,
-  },
-  build: {
-    outDir: 'dist',
-    sourcemap: true,
-  },
-}))
+    server: {
+      port: 5173,
+      open: true,
+    },
+    build: {
+      outDir: 'dist',
+      sourcemap: true,
+    },
+  }
+})

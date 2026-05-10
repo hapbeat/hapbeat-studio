@@ -8,6 +8,8 @@ import { KitManager } from '@/components/kit/KitManager'
 import { Devices } from '@/components/devices/Devices'
 import { LogDrawer } from '@/components/log/LogDrawer'
 import { HelperOnboardingModal } from '@/components/common/HelperOnboardingModal'
+import { HelperManageModal } from '@/components/common/HelperManageModal'
+import { ExternalLinkIcon } from '@/components/common/ExternalLinkIcon'
 import { HelperToastBridge } from '@/components/common/HelperToastBridge'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import './App.css'
@@ -90,6 +92,7 @@ export function App() {
   }, [activeTab])
   const { isConnected, helperVersion, send } = useHelperConnection()
   const [helperModalOpen, setHelperModalOpen] = useState(false)
+  const [helperManageOpen, setHelperManageOpen] = useState(false)
 
   // Auto-close modal when Helper connects
   useEffect(() => {
@@ -126,16 +129,18 @@ export function App() {
             rel="noreferrer"
             title="Hapbeat Studio docs を新しいタブで開く"
           >
-            Docs ↗
+            Docs <ExternalLinkIcon />
           </a>
           {isConnected ? (
-            <div
-              className="connection-status connection-status--with-tip"
-              data-tip={helperVersion ? `hapbeat-helper v${helperVersion}` : 'helper version 不明 (古い helper)'}
+            <button
+              type="button"
+              className="connection-status connection-status--clickable connection-status--with-tip"
+              onClick={() => setHelperManageOpen(true)}
+              data-tip={helperVersion ? `hapbeat-helper v${helperVersion} (クリックで管理)` : 'helper version 不明 (クリックで管理)'}
             >
               <span className="status-dot connected" />
               Helper 接続中
-            </div>
+            </button>
           ) : (
             <button
               type="button"
@@ -153,6 +158,11 @@ export function App() {
         open={helperModalOpen}
         onClose={() => setHelperModalOpen(false)}
         onRetry={handleRetry}
+      />
+      <HelperManageModal
+        open={helperManageOpen}
+        onClose={() => setHelperManageOpen(false)}
+        helperVersion={helperVersion}
       />
       <main className="tab-content">
         <PersistentTab active={activeTab === 'kit'} visited={visitedTabs.has('kit')}>

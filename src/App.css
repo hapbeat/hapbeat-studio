@@ -2,15 +2,12 @@
    Hapbeat Studio — Global Styles
    ======================================== */
 
-/* スクロールバー表示でページが動くのを防止 */
-html {
-  overflow-y: scroll;
-}
-
-/* 狭すぎるビューポートで KitManager (min-width: 720px) を潰さないよう
-   body で横スクロールを許可する */
-body {
-  overflow-x: auto;
+/* .app が height: 100vh で全領域を占めるため、html / body 自身に
+   スクロール領域は発生しない。実際のスクロールは .tab-content
+   (overflow: auto) で 1 本だけ出るようにし、html / body の
+   スクロールバーは抑制する。 */
+html, body {
+  overflow: hidden;
 }
 
 /* ドラッグ中はカーソルを move に固定 + 空セルホバー抑制 */

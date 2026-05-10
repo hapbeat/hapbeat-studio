@@ -57,6 +57,28 @@
   background: var(--error, #e05252);
   box-shadow: 0 0 6px var(--error, #e05252);
 }
+.helper-modal-dot.connected {
+  background: var(--success, #4caf50);
+  box-shadow: 0 0 6px var(--success, #4caf50);
+}
+
+/* Studio build hash + date — 控えめに muted 色で */
+.helper-modal-build-meta {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  text-align: center;
+  user-select: text;
+}
+.helper-modal-build-meta code {
+  color: var(--text-secondary);
+  font-family: inherit;
+  background: none;
+  padding: 0;
+}
 
 .helper-modal-close {
   background: none;

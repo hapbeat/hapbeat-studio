@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { ExternalLinkIcon } from './ExternalLinkIcon'
 import './HelperOnboardingModal.css'
 
 type OsTab = 'mac' | 'win'
@@ -162,7 +163,7 @@ export function HelperOnboardingModal({
             target="_blank"
             rel="noreferrer"
           >
-            Helper のドキュメント →
+            Helper のドキュメント <ExternalLinkIcon />
           </a>
           <button
             type="button"
