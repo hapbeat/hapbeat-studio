@@ -6,3 +6,6 @@ dist/
 .DS_Store
 Thumbs.db
 .claude/
+
+# Internal dev notes (use workspace dev-notes/<repo-name>/ instead)
+dev-notes/
