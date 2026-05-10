@@ -10,8 +10,8 @@ Studio では各 Event に 3 つの再生 mode があります。用途に応じ
 | Mode | 内部名 | 表示 | 配置先 | 適性 |
 |------|-------|------|--------|------|
 | **FIRE** | command | ▶ | デバイスローカル（Kit 内に WAV 同梱） | 短い one-shot 効果音、最低遅延 |
-| **CLIP** | stream_clip | ♪ | Manager が PCM ストリーミング | 長めの効果音、動的に gain / pan 制御 |
-| **LIVE** | stream_source | ~ | Manager が PC 音源を直接ストリーミング | リアルタイム音響（マイク・楽器・ゲーム音声） |
+| **CLIP** | stream_clip | ♪ | Helper が PCM ストリーミング | 長めの効果音、動的に gain / pan 制御 |
+| **LIVE** | stream_source | ~ | Helper が PC 音源を直接ストリーミング | リアルタイム音響（マイク・楽器・ゲーム音声） |
 
 ## FIRE（推奨デフォルト）
 
@@ -26,25 +26,25 @@ Studio では各 Event に 3 つの再生 mode があります。用途に応じ
 
 ## CLIP（長めの素材 + 動的パラメータ）
 
-**Manager が PCM (16 kHz, MTU ≤ 1024 B chunk) をストリーミング**します。
+**Helper が PCM (16 kHz, MTU ≤ 1024 B chunk) をストリーミング**します。
 
-- **遅延**: 数十 ms（chunk 単位の bufferring + 送信）
+- **遅延**: 数十 ms（chunk 単位の buffering + 送信）
 - **長さ**: 任意（数十秒、ループ可）
 - **動的制御**: 強度・gain・pan を再生中に変更可能
 - **典型用途**: BGM 的な持続触覚、長めの環境振動、Unity ParameterBinding と組み合わせた距離減衰など
 
-CLIP は Manager と Wi-Fi が必要です。Manager が起動していないと再生できません。
+CLIP は hapbeat-helper と Wi-Fi が必要です。Helper が起動していないと再生できません。
 
 ## LIVE（リアルタイム音源）
 
-**Manager が PC のオーディオデバイス（マイク、システム音等）を捕捉してそのまま UDP ストリーミング**します。
+**Studio が PC のオーディオデバイス（マイク、システム音等）を捕捉してそのまま UDP ストリーミング**します。
 
 - **遅延**: ~50 ms（WASAPI バースト drain + 48 kHz → 16 kHz デシメーション + UDP wall-clock pacing）
 - **長さ**: 連続（ストリーミング中はずっと再生）
 - **動的制御**: ソース切替、ミュート
 - **典型用途**: ライブパフォーマンスでの実音連動、ゲーム音声からのリアルタイム触覚化、楽器の身体伝達
 
-Manager の "Live Audio" タブでソース（System Speakers / Microphone / 特定アプリ）を選択し、Studio 側の LIVE Event でその source をルーティングします。
+Studio の Streaming Test（Manage タブ内）でソース（System Speakers / Microphone 等）を選択し、LIVE Event と組み合わせて使います。
 
 ## どれを選ぶか — 判断フロー
 

@@ -1,16 +1,15 @@
 # Hapbeat Studio
 
-Hapbeat デバイスのための Web ベース統合デザインツールです。触覚コンテンツのデザイン、OLED ディスプレイレイアウトの編集、LED 設定、Pack ファイルのビルド・エクスポートを行います。
+Hapbeat デバイスのための Web ベース統合デザインツールです。触覚コンテンツのデザイン、OLED ディスプレイレイアウトの編集、LED 設定、Kit ファイルのビルド・デプロイを行います。
 
 ## 機能一覧
 
 | 機能 | 説明 |
 |------|------|
-| 波形エディタ | WAV ファイルの読み込み・波形表示・触覚パターンのデザイン |
-| ディスプレイエディタ | OLED (128x64) のブロック配置・ページ管理・ボタン設定 |
-| LED 設定 | 待機色・パターン（常時点灯/呼吸/パルス）・イベント連動色 |
-| Pack ビルド | イベント定義・クリップ割り当て・Pack ファイルのエクスポート |
-| テンプレート | 標準・シンプル・詳細の定義済みレイアウト |
+| Kit エディタ | WAV ファイルの読み込み・Event 定義・Kit のビルド・デバイスへのデプロイ |
+| UI エディタ | OLED (128x64) のブロック配置・ページ管理・ボタン設定・LED カラー設定 |
+| Manage タブ | デバイス検出・Wi-Fi 設定・ファームウェア OTA・Kit デプロイ管理 |
+| 初期セットアップ | USB Serial 接続 → ファームウェア書き込み → Wi-Fi 設定のウィザード |
 | プロジェクト管理 | IndexedDB への自動保存・JSON インポート/エクスポート |
 | Helper 連携 | WebSocket 経由でデバイスへの書き込み・プレビュー（`hapbeat-helper` daemon が必要） |
 
@@ -88,8 +87,7 @@ Mac / Win / Linux にインストールできます。
 ### 接続方法
 
 1. `pipx install hapbeat-helper`（初回のみ）
-2. `hapbeat-helper start --foreground` で常駐起動（WebSocket サーバーが
-   `localhost:7703` で動作）
+2. `hapbeat-helper install-service` で自動起動を登録（推奨）、または `hapbeat-helper start` で手動起動
 3. Hapbeat Studio をブラウザで開く
 4. ヘッダー右上の接続ステータスが「Helper 接続中」に変わることを確認
 
@@ -102,8 +100,7 @@ Mac / Win / Linux にインストールできます。
 
 Helper が起動していない場合でも、Studio の編集・エクスポート機能は全て利用可能です。
 
-> Web Serial API 経由の USB 書き込みは Helper を介さず Studio から直接行います
-> （Phase 3 で実装予定）。
+> Web Serial API 経由の USB 書き込みは Helper を介さず Studio から直接行います（Manage タブ内 Firmware サブタブ）。
 
 ### ブラウザ別の注意
 
@@ -118,7 +115,7 @@ Helper が起動していない場合でも、Studio の編集・エクスポー
 - **react-grid-layout** — ドラッグ＆ドロップによるレイアウト編集
 - **WaveSurfer.js** — 波形表示
 - **idb** — IndexedDB ラッパー
-- **JSZip** — Pack ファイルのアーカイブ
+- **JSZip** — Kit ファイルのアーカイブ
 
 ## サウンド素材クレジット
 

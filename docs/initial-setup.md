@@ -1,9 +1,11 @@
 ---
-title: Hapbeat 初期セットアップ (初回作業)
+title: Hapbeat 初期セットアップ
 description: Hapbeat 入手後に 1 回だけ行う初期設定 — シリアル接続 → (必要なら) ファーム書き込み → Wi-Fi 設定までの一本道。
+sidebar:
+  order: 1
 ---
 
-Hapbeat を箱から出して、初めて使えるようにするまでの作業です。**Studio の Devices タブ右側に表示されるオンボーディング ウィザード** がこの流れに沿って案内します。一度 Wi-Fi に乗ってしまえば、以降は USB ケーブルを繋ぐ必要はありません。
+Hapbeat を初めて使えるようにするまでの作業です。**Studio の Devices タブ右側に表示されるオンボーディング ウィザード** がこの流れに沿って案内します。一度 Wi-Fi に乗ってしまえば、以降は USB ケーブルを繋ぐ必要はありません。
 
 > 💡 USB ケーブルでファームウェアを書き込み、Wi-Fi 設定を一回行うだけです。次回以降は電源を入れれば LAN/Wi-Fi で自動的に Studio に表示されます。
 
@@ -47,8 +49,8 @@ Hapbeat を箱から出して、初めて使えるようにするまでの作業
 ## Step 0: Studio を開いて Helper を起動
 
 1. ブラウザで Studio を開く: <https://devtools.hapbeat.com/studio/>
-2. 別ターミナルで `hapbeat-helper` を起動 (まだ動いていなければ)。Studio 上部に **「Helper 接続中」** と緑色で表示されれば OK。
-3. **Devices タブ** をクリック。サイドバーにデバイスが何も無い状態だと右側にウィザードが表示されます。
+2. `hapbeat-helper` が起動していることを確認。初回は `hapbeat-helper install-service` で自動起動を登録（推奨）、または `hapbeat-helper start` で手動起動。Studio 上部に **「Helper 接続中」** と緑色で表示されれば OK。
+3. **Manage タブ** をクリック。サイドバーにデバイスが何も無い状態だと右側にウィザードが表示されます。
 
 ## Step 1: USB Serial で接続を試す
 
