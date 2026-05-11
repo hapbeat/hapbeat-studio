@@ -57,13 +57,14 @@ export interface FirmwareRegion {
   label: string
 }
 
-/** GitHub Releases base URL for production firmware distribution. */
-const PROD_FIRMWARE_RELEASE_BASE =
-  'https://github.com/Hapbeat/hapbeat-device-firmware/releases/latest/download'
+/** Base URL for production firmware distribution (served as static files from Studio). */
+const PROD_FIRMWARE_BASE = `${import.meta.env.BASE_URL}firmware`
 
 /**
  * In development (Vite dev server) the `firmwareDevPlugin` serves
- * `/firmware-builds/…` locally. In production we fetch from GitHub Releases.
+ * `/firmware-builds/…` locally. In production, firmware artifacts are
+ * downloaded from the private hapbeat-device-firmware GitHub Release at
+ * CI build time and bundled under public/firmware/ → dist/firmware/.
  */
 function isProdMode(): boolean {
   return import.meta.env.PROD
@@ -101,7 +102,7 @@ export async function listFirmwareBuilds(): Promise<FirmwareLibraryEntry[]> {
  * ```
  */
 async function listFirmwareBuildsFromGitHubReleases(): Promise<FirmwareLibraryEntry[]> {
-  const manifestUrl = `${PROD_FIRMWARE_RELEASE_BASE}/manifest.json`
+  const manifestUrl = `${PROD_FIRMWARE_BASE}/manifest.json`
   const r = await fetch(manifestUrl, { cache: 'no-store' })
   if (!r.ok) {
     throw new Error(
@@ -127,14 +128,14 @@ async function listFirmwareBuildsFromGitHubReleases(): Promise<FirmwareLibraryEn
           mtime: e.appOta.mtime,
           // Expose the GH release download URL as `path` so display components
           // can show it (they currently show `path` as a tooltip / label).
-          path: `${PROD_FIRMWARE_RELEASE_BASE}/${e.appOta.filename}`,
+          path: `${PROD_FIRMWARE_BASE}/${e.appOta.filename}`,
         }
       : undefined,
     fullSerial: e.fullSerial
       ? {
           size: e.fullSerial.size,
           mtime: e.fullSerial.mtime,
-          path: `${PROD_FIRMWARE_RELEASE_BASE}/${e.fullSerial.filename}`,
+          path: `${PROD_FIRMWARE_BASE}/${e.fullSerial.filename}`,
         }
       : undefined,
   }))
@@ -283,7 +284,7 @@ async function fetchArtifactFromGitHubReleases(
 
   let lastErr: Error | null = null
   for (const filename of tryFilenames) {
-    const url = `${PROD_FIRMWARE_RELEASE_BASE}/${filename}`
+    const url = `${PROD_FIRMWARE_BASE}/${filename}`
     const r = await fetch(url, { cache: 'no-store' })
     if (r.ok) {
       const buf = await r.arrayBuffer()

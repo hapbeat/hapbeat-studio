@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - master
+  repository_dispatch:
+    types: [firmware-released]
 
 jobs:
   build-and-deploy:
@@ -12,6 +14,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download firmware artifacts
+        run: |
+          gh release download \
+            --repo Hapbeat/hapbeat-device-firmware \
+            --dir public/firmware \
+            --pattern "*.bin" \
+            --pattern "manifest.json" \
+            --clobber
+        env:
+          GH_TOKEN: ${{ secrets.FIRMWARE_REPO_PAT }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

@@ -9,3 +9,6 @@ Thumbs.db
 
 # Internal dev notes (use workspace dev-notes/<repo-name>/ instead)
 dev-notes/
+
+# Firmware artifacts downloaded at CI build time (not committed)
+public/firmware/
