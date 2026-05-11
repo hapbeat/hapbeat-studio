@@ -7,6 +7,10 @@ on:
   repository_dispatch:
     types: [firmware-released]
 
+# Opt into Node.js 24 now (Node 20 deprecation starts 2026-06-02).
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-and-deploy:
     name: Build and FTP Deploy
