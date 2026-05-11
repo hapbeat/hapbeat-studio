@@ -26,7 +26,7 @@ flowchart TD
     B -->|応答あり → ファームOK| D
     B -->|応答なし → ファームNG| C
     C["Step 2 — ファームウェア書き込み"]
-    C --> E["電源 OFF → ON"]
+    C --> E["再起動（電源 OFF → ON）"]
     E --> B
     D["Step 3 — Wi-Fi / 名前 / グループ設定"]
     D --> F([完了 — Studio サイドバーに表示される])
