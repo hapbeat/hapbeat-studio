@@ -23,8 +23,8 @@ Hapbeat を初めて使えるようにするまでの作業です。**Studio の
 flowchart TD
     A([Hapbeat 入手]) --> B
     B["Step 1 — USB Serial 接続を試す"]
-    B -->|応答あり / 出荷時ファーム済み| D
-    B -->|応答なし / 新品・ブートローダー空| C
+    B -->|応答あり → ファームOK| D
+    B -->|応答なし → ファームNG| C
     C["Step 2 — ファームウェア書き込み"]
     C --> E["電源 OFF → ON"]
     E --> B
