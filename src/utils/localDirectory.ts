@@ -425,6 +425,94 @@ export async function archiveClipFile(
 
 // ---- Kit folder operations ----
 
+/**
+ * Filename Studio uses inside each `<packId>/` folder to record the
+ * per-WAV source-blob hashes that were last written to that folder.
+ *
+ * Lives **on disk**, next to the kit's `<packId>-manifest.json`, so
+ * the skip-write ledger survives:
+ *   - browser data clears (was a problem with the previous IDB-based
+ *     ledger),
+ *   - switching browsers (Chrome ↔ Edge),
+ *   - moving the kit folder between machines (e.g. a synced cloud
+ *     folder).
+ *
+ * Naming: dot-prefix follows the industry convention for tool-internal
+ * metadata (`.git`, `.vscode`, …) so it's hidden on Unix and easy to
+ * gitignore. Windows shows it but the name signals "not user data".
+ *
+ * Format: see `KitDiskCache` below. Device / Helper / SDK never read
+ * this file — it's purely a Studio runtime optimization. `buildKitZip`
+ * also doesn't include it in the Deploy ZIP (the ZIP is built from
+ * `ExportFile[]` and this file isn't in that list).
+ */
+export const STUDIO_CACHE_FILENAME = '.studio-cache.json'
+
+/**
+ * Per-kit skip-write ledger persisted as `<packId>/.studio-cache.json`.
+ *
+ * `wavs` maps **kit-relative path** (e.g. `install-clips/foo.wav`) to
+ * the SHA-1 hex of the *source audio blob* whose encoding produced
+ * that WAV. `flushKitFolderNow` compares the current source hash
+ * against this on every save; matching hash + matching path + the
+ * on-disk file still existing means the disk write can be skipped.
+ */
+export interface KitDiskCache {
+  /** Schema version. Bump on incompatible format changes. */
+  schemaVersion: 1
+  /** Per-WAV: relative path → source-blob SHA-1 hex. */
+  wavs: Record<string, string>
+  /** ISO timestamp of the last successful flush (debug only). */
+  writtenAt?: string
+  /** Kit name at write time. Helps human inspection when the folder
+   *  has been renamed without an accompanying flush. */
+  writtenByKitName?: string
+}
+
+export async function loadKitDiskCache(
+  root: FileSystemDirectoryHandle,
+  packId: string,
+): Promise<KitDiskCache | null> {
+  try {
+    const kitDir = await root.getDirectoryHandle(packId, { create: false })
+    const fileHandle = await kitDir.getFileHandle(STUDIO_CACHE_FILENAME, { create: false })
+    const text = await (await fileHandle.getFile()).text()
+    const parsed = JSON.parse(text) as Partial<KitDiskCache>
+    if (
+      parsed && typeof parsed === 'object'
+      && parsed.schemaVersion === 1
+      && parsed.wavs && typeof parsed.wavs === 'object'
+    ) {
+      return parsed as KitDiskCache
+    }
+    return null
+  } catch {
+    // File not found / unreadable / malformed JSON — caller falls back
+    // to "write everything". This is the first-save path for any kit
+    // that pre-dates the disk cache or was authored outside Studio.
+    return null
+  }
+}
+
+export async function saveKitDiskCache(
+  root: FileSystemDirectoryHandle,
+  packId: string,
+  cache: KitDiskCache,
+): Promise<void> {
+  try {
+    const kitDir = await root.getDirectoryHandle(packId, { create: true })
+    const fileHandle = await kitDir.getFileHandle(STUDIO_CACHE_FILENAME, { create: true })
+    const writable = await fileHandle.createWritable()
+    await writable.write(JSON.stringify(cache, null, 2))
+    await writable.close()
+  } catch (err) {
+    // Cache save failure must not fail the export — the WAVs and
+    // manifest landed correctly; we'll just be unable to skip writes
+    // on the next flush. Surface in the console for debugging.
+    console.warn('[kit] disk cache save failed', err)
+  }
+}
+
 export async function writeKitFolder(
   root: FileSystemDirectoryHandle,
   kitName: string,
