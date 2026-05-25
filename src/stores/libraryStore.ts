@@ -512,23 +512,13 @@ const lastWrittenPackId = new Map<string, string>()
  * removal so a stale build can't end up on the wire.
  */
 const lastBuiltKit = new Map<string, { files: ExportFile[]; packId: string }>()
-/**
- * Per-kit "WAV write ledger" used by `flushKitFolderNow` to skip disk
- * writes for unchanged WAVs.
- *   key   = `${kit.id}`
- *   value = {
- *     packId,                 // packId at the time of the last write
- *     pathHash: Map<path,sha1>// sourceHash that was written to <packId>/<path>
- *   }
- * `flushKitFolderNow` only writes a WAV when its current `sourceHash`
- * differs from the ledger entry for the same path — or when the
- * packId changed (kit rename), or when the on-disk file disappeared
- * (user manually deleted it).
- */
-const lastWrittenWavs = new Map<
-  string,
-  { packId: string; pathHash: Map<string, string> }
->()
+// Skip-write ledger is no longer in-memory: the IDB encoded-wavs cache
+// already records (sourceHash → encodedBlob) per (eventId, mode), so
+// `flushKitFolderNow` reads `ExportFile.cached` (set by exportKitAsPack
+// when loadEncodedWav hits) + a kitFileExists check to decide whether
+// to skip the disk write. Earlier versions kept an in-memory map here,
+// but that was empty after browser reload — defeating the skip on the
+// very first Save Folder of a session.
 
 /**
  * Per-kit flush mutex. Prevents two `flushKitFolderNow` calls for the
@@ -583,7 +573,6 @@ function resetKitMemory() {
   kitFlushChain.clear()
   lastWrittenPackId.clear()
   lastBuiltKit.clear()
-  lastWrittenWavs.clear()
   lastOpMessage.clear()
 }
 
@@ -734,37 +723,48 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       } catch { /* no existing manifest — first save */ }
 
       // ---- Skip-write heuristic ----
-      // For each WAV, write it only when its sourceHash differs from
-      // what we last wrote to the same path under the same packId, OR
-      // the on-disk file is missing (user deleted it / first save).
-      // manifest.json is always written (small, may differ on every
-      // edit). When packId changed (rename → archive), the previous
-      // ledger is invalid — fall back to "write everything".
-      const prevLedger = lastWrittenWavs.get(kit.id)
-      const ledgerValid = !packIdChanged && !!prevLedger && prevLedger.packId === packId
+      // For each WAV, skip the disk write when:
+      //   (a) `f.cached === true` — the encoded blob came from the IDB
+      //       encoded-wavs cache (so its sourceHash already matched the
+      //       current source audio), AND
+      //   (b) packId hasn't changed (= no kit rename → no folder move), AND
+      //   (c) the file actually exists at <packId>/<f.path> on disk
+      //       (caches the user-deleted-it-manually case).
+      // manifest.json (sourceHash === null) is always rewritten — it's
+      // tiny and its parameters can shift on every edit. Note: there's
+      // no in-memory ledger; the IDB encoded-wavs store IS the ledger
+      // (survives reload), so amp-only changes skip the WAV write even
+      // on the very first Save Folder after a fresh browser open.
       const filesToWrite: ExportFile[] = []
+      let skippedCount = 0
       for (const f of result.files) {
         if (f.sourceHash === null) {
-          // manifest.json — always write
+          filesToWrite.push(f) // manifest — always write
+          continue
+        }
+        if (!f.cached) {
+          // Cache miss this turn — fresh encode produced new bytes
+          // that may differ from the on-disk file. Write them.
           filesToWrite.push(f)
           continue
         }
-        if (!ledgerValid) {
+        if (packIdChanged) {
+          // Folder was renamed (or archived). The new <packId>/ has no
+          // copy of this WAV yet, regardless of whether the bytes match.
           filesToWrite.push(f)
           continue
         }
-        const prevHash = prevLedger!.pathHash.get(f.path)
-        if (prevHash !== f.sourceHash) {
-          filesToWrite.push(f)
-          continue
-        }
-        // Cache says hash matches — verify the on-disk file still
-        // exists (catches the "user deleted the WAV manually" case).
         const exists = await kitFileExists(outRoot, packId, f.path)
         if (!exists) {
           filesToWrite.push(f)
+          continue
         }
-        // else: skip the write — file on disk already matches cache.
+        skippedCount++
+      }
+      if (skippedCount > 0) {
+        console.info(
+          `[kit] flush "${kit.name}": ${skippedCount} WAV(s) unchanged, skipped write`,
+        )
       }
       await writeKitFolder(outRoot, packId, filesToWrite)
 
@@ -824,15 +824,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
       lastWrittenPackId.set(kit.id, packId)
       lastBuiltKit.set(kit.id, { files: result.files, packId })
-
-      // Update the WAV write ledger: now-on-disk hash per path. Build
-      // a fresh Map every flush (cheap; map is small) so deleted /
-      // renamed paths fall out automatically.
-      const newPathHash = new Map<string, string>()
-      for (const f of result.files) {
-        if (f.sourceHash) newPathHash.set(f.path, f.sourceHash)
-      }
-      lastWrittenWavs.set(kit.id, { packId, pathHash: newPathHash })
 
       // Success: reset retry bookkeeping for this kit.
       retryAttempts.delete(kit.id)
@@ -2131,7 +2122,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       }
       lastWrittenPackId.delete(kit.id)
       lastBuiltKit.delete(kit.id)
-      lastWrittenWavs.delete(kit.id)
     }
     get().setLocalFsStatus('saved', `kit "${kit?.name ?? id}" を archive`)
   },
