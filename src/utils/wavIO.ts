@@ -200,6 +200,88 @@ export function formatDuration(seconds: number): string {
   return `${mins}:${secs.toFixed(3).padStart(6, '0')}`
 }
 
+/**
+ * Lightweight WAV header parser.
+ *
+ * Reads enough of the file to identify format / sample rate / channel
+ * count / bit depth / data chunk size — no decode, no AudioContext.
+ * Used by kitExporter to detect when a source blob is **already** in
+ * the device target format (16 kHz PCM16) and can be passed through
+ * to disk verbatim, instead of going through decode → re-encode and
+ * accumulating float ⇄ int16 round-trip error.
+ *
+ * Returns `null` for non-WAV blobs, non-PCM WAVs we don't recognise,
+ * or malformed headers — caller falls back to the standard decode +
+ * encode path.
+ */
+export interface WavInfo {
+  /** WAV format tag from the fmt chunk. 1 = PCM, 3 = IEEE float. We
+   *  only treat 1 as pass-through-eligible. */
+  formatTag: number
+  channels: number
+  sampleRate: number
+  bitsPerSample: number
+  /** Raw byte count of the data chunk (= samples * channels * bytesPerSample). */
+  dataBytes: number
+  /** Audio duration in seconds, derived from dataBytes + format. */
+  duration: number
+}
+
+export async function parseWavInfo(blob: Blob): Promise<WavInfo | null> {
+  try {
+    // Read up to 2 KB — enough to walk past the RIFF / fmt / fact /
+    // LIST chunks of any real-world WAV before we reach `data`.
+    const headerBytes = await blob.slice(0, Math.min(blob.size, 2048)).arrayBuffer()
+    const view = new DataView(headerBytes)
+    const u32be = (off: number) => view.getUint32(off, false)
+
+    // RIFF / WAVE check (big-endian 4-CC stored as MSB-first uint32).
+    //   'R'=0x52, 'I'=0x49, 'F'=0x46, 'F'=0x46 → 0x52494646
+    //   'W'=0x57, 'A'=0x41, 'V'=0x56, 'E'=0x45 → 0x57415645
+    if (view.byteLength < 12) return null
+    if (u32be(0) !== 0x52494646) return null
+    if (u32be(8) !== 0x57415645) return null
+
+    let formatTag = 0, channels = 0, sampleRate = 0, bitsPerSample = 0
+    let dataBytes = 0
+    let cursor = 12
+    let fmtSeen = false
+    let dataSeen = false
+
+    // Walk chunks until we've seen both fmt and data, or run out of buffer.
+    while (cursor + 8 <= view.byteLength && (!fmtSeen || !dataSeen)) {
+      const id = u32be(cursor)
+      const size = view.getUint32(cursor + 4, true) // chunk sizes are LE
+      const body = cursor + 8
+      if (id === 0x666d7420) {        // 'fmt '
+        if (body + 16 > view.byteLength) return null
+        formatTag      = view.getUint16(body + 0, true)
+        channels       = view.getUint16(body + 2, true)
+        sampleRate     = view.getUint32(body + 4, true)
+        bitsPerSample  = view.getUint16(body + 14, true)
+        fmtSeen = true
+      } else if (id === 0x64617461) { // 'data'
+        dataBytes = size
+        dataSeen = true
+        break // we don't need to read the audio bytes here
+      }
+      // Chunks are padded to even sizes. The padding byte is not counted
+      // in `size`, so step by size + 1 if odd.
+      cursor = body + size + (size & 1)
+    }
+
+    if (!fmtSeen || !dataSeen) return null
+    if (channels === 0 || sampleRate === 0 || bitsPerSample === 0) return null
+
+    const bytesPerSample = bitsPerSample / 8
+    const numFrames = dataBytes / (channels * bytesPerSample)
+    const duration = numFrames / sampleRate
+    return { formatTag, channels, sampleRate, bitsPerSample, dataBytes, duration }
+  } catch {
+    return null
+  }
+}
+
 // ---- Internal helpers ----
 
 /**

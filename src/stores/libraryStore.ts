@@ -1295,7 +1295,23 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const ctx = new AudioContext()
     const now = new Date().toISOString()
     const updatedClips = [...get().clips]
-    const updatedKits = [...get().kits]
+    // We need the existing kits (from IDB) for ev.id / audio preservation
+    // matching below. At init time, restoreKitDir runs us BEFORE
+    // loadLibrary has populated zustand state, so `get().kits` may be
+    // empty even though IDB has kits saved from a previous session.
+    // Fall back to a direct IDB load in that case, and run them through
+    // migrateKit so the rest of this function sees the modern shape.
+    let updatedKits = [...get().kits]
+    if (updatedKits.length === 0) {
+      try {
+        const idbKits = await listKits()
+        if (idbKits.length > 0) {
+          updatedKits = idbKits.map((k) => migrateKit(k, updatedClips))
+        }
+      } catch (err) {
+        console.warn('[importKitsFromOutputDir] preload from IDB failed:', err)
+      }
+    }
 
     // NOTE — `ensureClip` (library auto-import from kit folder) was
     // intentionally removed. The library and kits are independent now:
@@ -1502,6 +1518,38 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // the loop so a mid-loop failure doesn't leave half-saved blobs.
       const eventAudioToSave: Array<{ eventId: string; blob: Blob }> = []
 
+      // ---- Match-and-preserve against existing IDB kit ----
+      //
+      // If the user already has a kit in IDB with this packId, we want
+      // to **preserve the existing ev.id** for any event whose wire
+      // `eventId` is the same — and crucially, **keep the existing
+      // audio blob in IDB** rather than overwriting it with whatever
+      // is currently on disk.
+      //
+      // Why this matters: on the FIRST Save Folder the source audio
+      // is the user's original drop (e.g. 44.1 kHz stereo). We encode
+      // it to 16 kHz PCM16 and write that to disk. If we later
+      // **re-import** from disk (after a hard reload / folder
+      // re-pick), the disk WAV — being already 16 kHz PCM16 — becomes
+      // the new "source" if we let it overwrite IDB. That changes
+      // sourceHash, busts the encoded-wavs cache, and produces
+      // slightly different bytes on re-encode (float ⇄ int16 round
+      // trip costs ~1 ULP per sample). Net effect: every Save Folder
+      // after a reload would rewrite every WAV even though nothing
+      // user-visible changed.
+      //
+      // By keeping IDB audio when the matched event already has audio,
+      // we keep the ORIGINAL source bytes across reloads. sourceHash
+      // stays stable, encoded-wavs cache hits, outputHash stays stable,
+      // and the disk skip-write check matches.
+      const existingKitForMatch = updatedKits.find((k) => k.name === packId)
+      const existingEventByWireId = new Map<string, KitEvent>()
+      if (existingKitForMatch) {
+        for (const ev of existingKitForMatch.events) {
+          existingEventByWireId.set(ev.eventId, ev)
+        }
+      }
+
       for (const [baseEventId, group] of buckets) {
         // Mergeable when both buckets reference the same WAV with identical
         // intensity / loop. device_wiper is only on the command side in
@@ -1514,13 +1562,26 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
             r.loop === group[0].loop
           )
 
+        // Look up an existing event by wire eventId to potentially
+        // preserve its ev.id and audio. If the new modes list disagrees
+        // with the existing event (e.g. user toggled FIRE → CLIP outside
+        // Studio), we still preserve ev.id; subsequent saves will reflect
+        // the new modes via the manifest.
+        const existingEv = existingEventByWireId.get(baseEventId)
+        const shouldKeepAudio = async (eventId: string): Promise<boolean> => {
+          try {
+            const blob = await loadKitEventAudio(eventId)
+            return !!blob
+          } catch { return false }
+        }
+
         if (mergeable) {
           const order: Record<KitEventMode, number> = { command: 0, stream_clip: 1 }
           const modes = group.map((r) => r.mode).sort((a, b) => order[a] - order[b])
           // command 側に device_wiper があれば優先 (stream 側には記録されないため)
           const cmdEntry = group.find((r) => r.mode === 'command')
           const seed = cmdEntry ?? group[0]
-          const newId = generateId()
+          const newId = existingEv?.id ?? generateId()
           events.push({
             id: newId,
             eventId: baseEventId,
@@ -1535,10 +1596,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
             intensity: seed.intensity,
             deviceWiper: seed.deviceWiper,
           })
-          if (seed.clipBlob) eventAudioToSave.push({ eventId: newId, blob: seed.clipBlob })
+          // Only import disk audio when IDB doesn't already have one
+          // for this ev.id. Preserves the original source bytes.
+          if (seed.clipBlob && !(existingEv && await shouldKeepAudio(newId))) {
+            eventAudioToSave.push({ eventId: newId, blob: seed.clipBlob })
+          }
         } else {
           for (const r of group) {
-            const newId = generateId()
+            const newId = existingEv?.id ?? generateId()
             events.push({
               id: newId,
               eventId: r.eventId,
@@ -1553,7 +1618,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
               intensity: r.intensity,
               deviceWiper: r.deviceWiper,
             })
-            if (r.clipBlob) eventAudioToSave.push({ eventId: newId, blob: r.clipBlob })
+            if (r.clipBlob && !(existingEv && await shouldKeepAudio(newId))) {
+              eventAudioToSave.push({ eventId: newId, blob: r.clipBlob })
+            }
           }
         }
       }

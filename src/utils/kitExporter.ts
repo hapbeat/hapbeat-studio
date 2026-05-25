@@ -37,7 +37,7 @@ import {
   type EncodedMode,
   type EncodedWavEntry,
 } from '@/utils/libraryStorage'
-import { encodeStereoWavBlob, encodeWavBlob } from '@/utils/wavIO'
+import { encodeStereoWavBlob, encodeWavBlob, parseWavInfo } from '@/utils/wavIO'
 
 /** firmware は 16 kHz I2S 固定でパック内 WAV を resample しないため、
  *  Pack 化するすべての WAV は事前に 16 kHz PCM16 に normalize する。
@@ -285,82 +285,122 @@ export async function exportKitAsPack(
     for (const mode of modes) {
       const cacheMode: EncodedMode = mode === 'command' ? 'command' : 'stream_clip'
 
-      // Cache check — if hit, we can avoid decode + encode entirely
-      // and reuse the device-format WAV blob we wrote last time. The
-      // install_clips metadata is reconstructed from cache fields so
-      // the manifest stays consistent with the on-disk WAV.
-      const cached = await loadEncodedWav(ev.id, cacheMode, sourceHash)
+      // ---- Encoding for this mode ----
+      //
+      // Three paths in priority order. Each one assigns `encodedBlob`,
+      // `encodedChannels`, `encodedDuration`, `outputHash`, and (for
+      // telemetry only) `cachedThisTurn` exactly once.
+      //
+      // [A] Pass-through: source is **already** PCM16 at the target
+      //     sample rate with the matching channel count. Use bytes
+      //     verbatim. This is what saves hard-reload + re-pick scenarios:
+      //     re-import of the on-disk WAV gives us a source identical
+      //     to what's already on disk, and pass-through emits the same
+      //     bytes back so outputHash matches the disk cache → skip.
+      //     The float ⇄ int16 round trip (decode `/32768`, encode
+      //     `*0x7fff`) costs ~1 ULP / sample of error, so the standard
+      //     path is NOT bit-exact even when nothing changed.
+      //
+      // [B] IDB encoded-wavs hit: we encoded this exact source before
+      //     (sourceHash match). Reuse the cached encoded blob.
+      //
+      // [C] Decode + encode: standard path. Decodes via AudioContext,
+      //     resamples to 16 kHz, encodes to PCM16. Caches result.
+      //
+      // Pass-through eligibility (path A):
+      //   - PCM (formatTag === 1), 16-bit, 16 kHz
+      //   - command mode: any channel count (output preserves source ch)
+      //   - stream_clip mode: stereo only (mono inputs need duplication)
+      const wavInfo = await parseWavInfo(sourceBlob)
+      const isPCM16AtTargetRate =
+        !!wavInfo
+        && wavInfo.formatTag === 1
+        && wavInfo.bitsPerSample === 16
+        && wavInfo.sampleRate === PACK_TARGET_SAMPLE_RATE
+      const eligibleForPassThrough =
+        isPCM16AtTargetRate
+        && (mode === 'command' || (mode === 'stream_clip' && wavInfo!.channels === 2))
 
       let encodedBlob: Blob
       let encodedChannels: number
       let encodedDuration: number
-      // SHA-1 of `encodedBlob` bytes — see ExportFile.outputHash for
-      // why we surface this up to the file-write decision.
       let outputHash: string
+      let cachedThisTurn = false
 
-      if (cached) {
-        encodedBlob = cached.encodedBlob
-        encodedChannels = cached.channels
-        encodedDuration = cached.duration
-        // Older cache entries may pre-date the outputHash field. Hash
-        // the cached blob lazily and write the value back so the next
-        // save can skip the hash compute too.
-        if (cached.outputHash) {
-          outputHash = cached.outputHash
-        } else {
-          outputHash = await sha1Hex(encodedBlob)
-          try {
-            await saveEncodedWav(ev.id, cacheMode, { ...cached, outputHash })
-          } catch (err) {
-            console.warn('[kitExporter] backfill outputHash failed', err)
-          }
-        }
-      } else {
-        // Miss — decode (lazy, shared across modes) + encode for this
-        // mode, then persist for the next save.
-        const dec = await ensureDecoded()
-        if (mode === 'command') {
-          // install-clips/ preserves the source channel count — mono
-          // stays mono (device flash is happy with either), stereo
-          // stays stereo. This is the cheaper / smaller-on-flash form
-          // and is the only thing the device firmware reads.
-          encodedBlob = dec.buffer
-            ? await encodeWavBlob(dec.buffer, PACK_TARGET_SAMPLE_RATE)
-            : dec.fallback!
-          encodedChannels = dec.buffer ? dec.buffer.numberOfChannels : dec.sourceChannels
-          encodedDuration = dec.duration
-        } else {
-          // stream-clips/ は SDK 側が必ず stereo 16 kHz を仮定 (UDP stream
-          // pipeline で L/R を per-side actuator に dispatch するため)。
-          // Mono は encodeStereoWavBlob が duplicate して 2ch にする。
-          encodedBlob = dec.buffer
-            ? await encodeStereoWavBlob(dec.buffer, PACK_TARGET_SAMPLE_RATE)
-            : dec.fallback!
-          encodedChannels = 2
-          encodedDuration = dec.duration
-        }
-
+      if (eligibleForPassThrough) {
+        // [A] Pass-through — bytes-identical to source.
+        encodedBlob = sourceBlob
+        encodedChannels = wavInfo!.channels
+        encodedDuration = wavInfo!.duration
         outputHash = await sha1Hex(encodedBlob)
-
-        // Only cache successful decodes. Fallback bytes (= raw source
-        // blob passed through unchanged) aren't worth caching because
-        // they'd reduce to a copy of the audio store entry, doubling
-        // IDB size for no compute saving.
-        if (dec.buffer) {
-          const entry: EncodedWavEntry = {
-            sourceHash,
-            encodedBlob,
-            outputHash,
-            sampleRate: PACK_TARGET_SAMPLE_RATE,
-            channels: encodedChannels,
-            duration: encodedDuration,
+        cachedThisTurn = true // CPU-equivalent to a cache hit
+      } else {
+        const cached = await loadEncodedWav(ev.id, cacheMode, sourceHash)
+        if (cached) {
+          // [B] IDB cache hit — reuse the encoded blob we built before.
+          encodedBlob = cached.encodedBlob
+          encodedChannels = cached.channels
+          encodedDuration = cached.duration
+          // Older cache entries may pre-date the outputHash field.
+          // Hash the cached blob lazily + back-fill so next save is fast.
+          if (cached.outputHash) {
+            outputHash = cached.outputHash
+          } else {
+            outputHash = await sha1Hex(encodedBlob)
+            try {
+              await saveEncodedWav(ev.id, cacheMode, { ...cached, outputHash })
+            } catch (err) {
+              console.warn('[kitExporter] backfill outputHash failed', err)
+            }
           }
-          try {
-            await saveEncodedWav(ev.id, cacheMode, entry)
-          } catch (err) {
-            // IDB save failure shouldn't fail the export — log + carry on.
-            // Next save will retry the cache write.
-            console.warn('[kitExporter] encoded-WAV cache save failed', err)
+          cachedThisTurn = true
+        } else {
+          // [C] Miss — decode (lazy, shared across modes) + encode for
+          // this mode, then persist for the next save.
+          const dec = await ensureDecoded()
+          if (mode === 'command') {
+            // install-clips/ preserves the source channel count — mono
+            // stays mono (device flash is happy with either), stereo
+            // stays stereo. This is the cheaper / smaller-on-flash
+            // form and is the only thing the device firmware reads.
+            encodedBlob = dec.buffer
+              ? await encodeWavBlob(dec.buffer, PACK_TARGET_SAMPLE_RATE)
+              : dec.fallback!
+            encodedChannels = dec.buffer ? dec.buffer.numberOfChannels : dec.sourceChannels
+            encodedDuration = dec.duration
+          } else {
+            // stream-clips/ は SDK 側が必ず stereo 16 kHz を仮定 (UDP
+            // stream pipeline で L/R を per-side actuator に dispatch する
+            // ため)。Mono は encodeStereoWavBlob が duplicate して 2ch
+            // にする。
+            encodedBlob = dec.buffer
+              ? await encodeStereoWavBlob(dec.buffer, PACK_TARGET_SAMPLE_RATE)
+              : dec.fallback!
+            encodedChannels = 2
+            encodedDuration = dec.duration
+          }
+
+          outputHash = await sha1Hex(encodedBlob)
+
+          // Only cache successful decodes. Fallback bytes (= raw source
+          // blob passed through unchanged on decode failure) aren't
+          // worth caching because they'd reduce to a copy of the audio
+          // store entry, doubling IDB size for no compute saving.
+          if (dec.buffer) {
+            const entry: EncodedWavEntry = {
+              sourceHash,
+              encodedBlob,
+              outputHash,
+              sampleRate: PACK_TARGET_SAMPLE_RATE,
+              channels: encodedChannels,
+              duration: encodedDuration,
+            }
+            try {
+              await saveEncodedWav(ev.id, cacheMode, entry)
+            } catch (err) {
+              // IDB save failure shouldn't fail the export — log + carry on.
+              console.warn('[kitExporter] encoded-WAV cache save failed', err)
+            }
           }
         }
       }
@@ -375,7 +415,7 @@ export async function exportKitAsPack(
         }
         usedCommandNames.add(fname)
         const filePath = `install-clips/${fname}`
-        files.push({ path: filePath, blob: encodedBlob, outputHash, cached: !!cached })
+        files.push({ path: filePath, blob: encodedBlob, outputHash, cached: cachedThisTurn })
         fileHashByPath.set(filePath, outputHash)
 
         events[ev.eventId] = {
@@ -404,7 +444,7 @@ export async function exportKitAsPack(
         }
         usedStreamNames.add(fname)
         const filePath = `stream-clips/${fname}`
-        files.push({ path: filePath, blob: encodedBlob, outputHash, cached: !!cached })
+        files.push({ path: filePath, blob: encodedBlob, outputHash, cached: cachedThisTurn })
         fileHashByPath.set(filePath, outputHash)
 
         // stream_events の parameters は SDK 側のみが参照する。device_wiper
