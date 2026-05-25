@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import type { LibraryClip, KitDefinition, KitEvent, KitEventMode, LibraryFilter, BuiltinClipMeta, BuiltinLibraryIndex, LibraryViewMode, ClipAmpPreset } from '@/types/library'
-import { KIT_EVENT_MODE_SUFFIX } from '@/types/library'
 import {
   saveClip,
   listClips,
@@ -10,6 +9,7 @@ import {
   saveKitEventAudio,
   loadKitEventAudio,
   deleteKitEventAudio,
+  deleteEncodedWavsForEvent,
   saveKit,
   listKits,
   deleteKit,
@@ -164,8 +164,9 @@ interface LibraryState {
   /**
    * Same as flushKitFolderNow but seeds an `opMsg` first so the
    * footer status pill announces `saving → saved` (or `error`) to the
-   * user. Use this for *explicit* save actions (e.g. the "Save Folder"
-   * button) where we want UI feedback. Direct `flushKitFolderNow`
+   * user. Use this for *explicit* save actions (e.g. the
+   * "Save Folder" button) where we want UI feedback. Direct
+   * `flushKitFolderNow`
    * stays silent on success so background-build callers (Deploy
    * pre-flight) don't spam the pill.
    */
@@ -290,8 +291,9 @@ interface LibraryState {
   /**
    * Add a kit event. The caller must pass the audio blob — the store
    * saves it into the kit-event-owned IDB slot under the new event's
-   * generated id. Pass `null` only when the event genuinely has no
-   * audio (legacy stream_source-without-clip case).
+   * generated id. `null` is no longer a valid value post schema 2.0.0
+   * (clip required in both buckets); kept in the signature for the
+   * gradual call-site cleanup.
    */
   addEventToKit: (kitId: string, event: Omit<KitEvent, 'id'>, audioBlob: Blob | null) => Promise<string | null>
   /** Remove an event by its per-kit id (not eventId — duplicates are allowed). */
@@ -1207,8 +1209,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // exports also carried `kit_id` which we now ignore (it always
       // equalled `name` anyway).
       const m = manifestJson as {
+        schema_version?: string
         name?: string; version?: string; description?: string
-        created_at?: string; events?: Record<string, unknown>
+        created_at?: string
+        // schema 1.x: `events` は command / stream / source 混在 (mode field で区別)
+        // schema 2.0.0 (DEC-031): `events` を command 専用に narrow + `stream_events` を新設
+        events?: Record<string, unknown>
+        stream_events?: Record<string, unknown>
         target_device?: {
           firmware_version_min?: string
           firmware_version_max?: string
@@ -1227,19 +1234,25 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
       // ---- Parse + group manifest entries into KitEvents -----------------
       //
-      // Studio kitExporter writes one manifest entry per mode. When a single
-      // KitEvent had `modes: ['command', 'stream_clip']`, it landed on disk
-      // as `<base>.fire` + `<base>.clip` — two entries that share the same
-      // base eventId. To make the in-Studio round-trip lossless we detect
-      // these pairs here and re-group them into one KitEvent with `modes`
-      // populated. Pairs that disagree on clip / intensity / loop /
-      // deviceWiper / localName stay as separate KitEvents (safer than
-      // silently picking one side's value).
+      // schema 2.0.0 (DEC-031): `events` (command-only) + `stream_events` 2 buckets.
+      //   Mode is derived from the bucket; clip subdir is derived from the bucket.
+      //   Same eventId in both buckets = BOTH mode authored — merged into a
+      //   single KitEvent with `modes: ['command', 'stream_clip']`.
+      //
+      //   注: `events` という名前は schema 1.x からの継承 (command-mode 専用に
+      //   narrow 化されただけで rename していない)。device firmware の
+      //   kit_loader が既に `doc["events"]` を読んでいるため、bucket 名を
+      //   保つことで firmware 無変更で済む (DEC-031 Option C)。
+      //
+      // schema 1.x (legacy): 同じく `events` だが command / stream / source が
+      //   混在し、各 entry の `mode` field で区別。Multi-mode events は
+      //   `<eventId>.fire` / `<eventId>.clip` で JSON-key dedup されていた。
+      //   検出は schema_version (>= "2.") または「stream_events フィールドが
+      //   存在する」or「いずれの events entry にも mode field / suffix が
+      //   無い」で行う。検出後、suffix を strip + mode を suffix から復元する。
       type RawEv = {
-        manifestKey: string
-        baseEventId: string
-        suffixMode: KitEventMode | null
-        mode: KitEventMode
+        eventId: string       // base eventId (suffix already stripped if legacy)
+        mode: KitEventMode    // 'command' or 'stream_clip' (bucket-derived for v2 / suffix-derived for legacy)
         clipFilename: string  // basename only — on-disk filename inside install-clips/ or stream-clips/
         clipName: string      // display-friendly name derived from filename
         clipDuration: number
@@ -1252,39 +1265,26 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         deviceWiper: number | null
       }
 
-      const stripModeSuffix = (key: string): { base: string; mode: KitEventMode | null } => {
-        for (const m of ['command', 'stream_clip', 'stream_source'] as const) {
-          const tail = `.${KIT_EVENT_MODE_SUFFIX[m]}`
-          if (key.endsWith(tail)) return { base: key.slice(0, -tail.length), mode: m }
-        }
-        return { base: key, mode: null }
-      }
-
       const raws: RawEv[] = []
-      for (const [manifestKey, rawEv] of Object.entries(m.events ?? {})) {
-        if (!rawEv || typeof rawEv !== 'object') continue
-        const ev = rawEv as {
-          mode?: string; clip?: string; parameters?: Record<string, unknown>
-        }
-        const explicitMode = ev.mode as KitEventMode | undefined
-        const { base, mode: suffixMode } = stripModeSuffix(manifestKey)
-        const mode: KitEventMode = explicitMode ?? suffixMode ?? 'command'
 
-        // Locate the on-disk WAV. Path may be `<file>.wav` (command,
-        // implicit install-clips/) or `stream-clips/<file>.wav` etc.
+      const decodeAndPushRaw = async (
+        eventId: string,
+        mode: KitEventMode,
+        rawEv: unknown,
+        subdir: 'install-clips' | 'stream-clips',
+      ) => {
+        if (!rawEv || typeof rawEv !== 'object') return
+        const ev = rawEv as { clip?: string; parameters?: Record<string, unknown> }
         let clipFile: File | undefined
         let clipFilename = ''
         if (ev.clip) {
-          const relKey = ev.clip.includes('/') ? ev.clip : `install-clips/${ev.clip}`
+          // schema 2.0.0: bare filename. Legacy v1.x stream entries may carry
+          // a `stream-clips/foo.wav` prefixed path — both forms resolve here.
+          const relKey = ev.clip.includes('/') ? ev.clip : `${subdir}/${ev.clip}`
           clipFile = clipFiles.get(relKey) ?? clipFiles.get(ev.clip)
           clipFilename = (ev.clip.split('/').pop() || ev.clip)
         }
 
-        // Decode for metadata + cache the blob for kit-event audio
-        // store. We do NOT push the WAV back into the library — the
-        // library is user-curated (drag from disk, archive with the
-        // × button) and shouldn't be auto-populated from kits. The
-        // long comment near the top of this function spells out why.
         let clipDuration = 0, clipChannels = 1, clipSampleRate = 16000, clipFileSize = 0
         let clipBlob: Blob | undefined
         if (clipFile) {
@@ -1299,18 +1299,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           } catch (err) {
             console.warn(`[importKitsFromOutputDir] decode failed for ${clipFilename}:`, err)
           }
-          // Independence: kit events own their own snapshot + blob.
-          // We DO NOT push the WAV back into the library here — see
-          // the long comment near the top of this function.
         }
 
         const params = (ev.parameters ?? {}) as { intensity?: number; loop?: boolean; device_wiper?: number }
-        const clipName = clipFilename.replace(/\.wav$/i, '') || base
+        const clipName = clipFilename.replace(/\.wav$/i, '') || eventId
 
         raws.push({
-          manifestKey,
-          baseEventId: base,
-          suffixMode,
+          eventId,
           mode,
           clipFilename,
           clipName,
@@ -1325,12 +1320,66 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         })
       }
 
-      // Bucket by baseEventId so a `.fire` + `.clip` pair lands together.
+      // v2 検出 — 以下のいずれかで「これは schema 2.0.0 manifest」と判定:
+      //   (a) schema_version が "2." で始まる (明示宣言)
+      //   (b) stream_events フィールドが存在する (legacy v1.x には無い field)
+      //   (c) (a)/(b) いずれも無いが、events 内のどの entry にも mode field /
+      //       .fire/.clip/.source suffix が無い → 暗黙的に command-only と解釈
+      //
+      // v1.x (legacy) は events に command/stream_clip/source が混在し、
+      // 各 entry に mode field または .fire/.clip suffix が付く。
+      const eventsObj = m.events ?? {}
+      const hasV2Marker = (m.schema_version?.startsWith('2.') ?? false)
+        || (m.stream_events !== undefined)
+      const hasLegacyMarker = Object.entries(eventsObj).some(([k, v]) => {
+        if (k.endsWith('.fire') || k.endsWith('.clip') || k.endsWith('.source')) return true
+        const ev = v as { mode?: string } | null
+        return !!(ev && typeof ev === 'object' && typeof ev.mode === 'string')
+      })
+      const isV2 = hasV2Marker || !hasLegacyMarker
+
+      if (isV2) {
+        // schema 2.0.0 path — `events` は command 専用、`stream_events` は stream 専用。
+        for (const [eventId, rawEv] of Object.entries(eventsObj)) {
+          await decodeAndPushRaw(eventId, 'command', rawEv, 'install-clips')
+        }
+        for (const [eventId, rawEv] of Object.entries(m.stream_events ?? {})) {
+          await decodeAndPushRaw(eventId, 'stream_clip', rawEv, 'stream-clips')
+        }
+      } else {
+        // Legacy v1.x path — single `events` dict with mode field + optional
+        // `.fire` / `.clip` suffix for multi-mode. Strip suffix to recover the
+        // base eventId; mode comes from explicit field or from suffix.
+        const stripLegacySuffix = (key: string): { base: string; mode: KitEventMode | null } => {
+          if (key.endsWith('.fire')) return { base: key.slice(0, -5), mode: 'command' }
+          if (key.endsWith('.clip')) return { base: key.slice(0, -5), mode: 'stream_clip' }
+          // 旧 .source は schema 2.0.0 で廃止 — base のみ取り出して command 扱い
+          if (key.endsWith('.source')) return { base: key.slice(0, -7), mode: 'command' }
+          return { base: key, mode: null }
+        }
+        for (const [manifestKey, rawEv] of Object.entries(eventsObj)) {
+          if (!rawEv || typeof rawEv !== 'object') continue
+          const evObj = rawEv as { mode?: string }
+          const explicitMode = evObj.mode as string | undefined
+          const { base, mode: suffixMode } = stripLegacySuffix(manifestKey)
+          // 旧 stream_source は schema 2.0.0 で廃止 → command 扱いに正規化
+          const normalized: KitEventMode =
+            explicitMode === 'stream_clip' ? 'stream_clip' :
+            explicitMode === 'command' ? 'command' :
+            suffixMode ?? 'command'
+          const subdir: 'install-clips' | 'stream-clips' =
+            normalized === 'command' ? 'install-clips' : 'stream-clips'
+          await decodeAndPushRaw(base, normalized, rawEv, subdir)
+        }
+      }
+
+      // Bucket by eventId — same eventId in `events` (command) + stream_events
+      // (or `.fire`/`.clip` siblings in legacy v1.x) merge into one KitEvent.
       const buckets = new Map<string, RawEv[]>()
       for (const r of raws) {
-        const arr = buckets.get(r.baseEventId)
+        const arr = buckets.get(r.eventId)
         if (arr) arr.push(r)
-        else buckets.set(r.baseEventId, [r])
+        else buckets.set(r.eventId, [r])
       }
 
       const events: KitEvent[] = []
@@ -1340,21 +1389,23 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       const eventAudioToSave: Array<{ eventId: string; blob: Blob }> = []
 
       for (const [baseEventId, group] of buckets) {
-        const allSuffixed = group.every((r) => r.suffixMode !== null)
+        // Mergeable when both buckets reference the same WAV with identical
+        // intensity / loop. device_wiper is only on the command side in
+        // schema 2.0.0 so we don't require its equality.
         const mergeable =
           group.length > 1 &&
-          allSuffixed &&
           group.every((r) =>
             r.clipFilename === group[0].clipFilename &&
             Math.abs(r.intensity - group[0].intensity) < 1e-6 &&
-            r.loop === group[0].loop &&
-            r.deviceWiper === group[0].deviceWiper
+            r.loop === group[0].loop
           )
 
         if (mergeable) {
-          const order: Record<KitEventMode, number> = { command: 0, stream_clip: 1, stream_source: 2 }
+          const order: Record<KitEventMode, number> = { command: 0, stream_clip: 1 }
           const modes = group.map((r) => r.mode).sort((a, b) => order[a] - order[b])
-          const seed = group[0]
+          // command 側に device_wiper があれば優先 (stream 側には記録されないため)
+          const cmdEntry = group.find((r) => r.mode === 'command')
+          const seed = cmdEntry ?? group[0]
           const newId = generateId()
           events.push({
             id: newId,
@@ -1376,7 +1427,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
             const newId = generateId()
             events.push({
               id: newId,
-              eventId: r.manifestKey,
+              eventId: r.eventId,
               clipName: r.clipName,
               clipSourceFilename: r.clipFilename,
               clipDuration: r.clipDuration,
@@ -1956,6 +2007,16 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // Cancel any pending autosave so it doesn't recreate the folder
     // we're about to archive.
     get().cancelKitFlush(id)
+    // Prune per-event audio + encoded-WAV cache for this kit. The
+    // encoded-WAV cache was added in DB v2 so older browsers may not
+    // have the store yet — wrap each in try/catch so a stale entry
+    // doesn't block kit removal.
+    if (kit) {
+      for (const ev of kit.events) {
+        try { await deleteKitEventAudio(ev.id) } catch { /* ignore */ }
+        try { await deleteEncodedWavsForEvent(ev.id) } catch { /* ignore */ }
+      }
+    }
     await deleteKit(id)
     const newKits = get().kits.filter((k) => k.id !== id)
     set({
@@ -2047,6 +2108,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // IDB indefinitely. Best-effort; a missing blob is fine (e.g. for
     // events whose audio failed to import).
     try { await deleteKitEventAudio(kitEventId) } catch { /* ignore */ }
+    // Drop the encoded-WAV cache too so the removed event doesn't keep
+    // a stale device-format blob around. Failure is non-fatal.
+    try { await deleteEncodedWavsForEvent(kitEventId) } catch { /* ignore */ }
     const { workDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
     // Pack rebuild deferred to Deploy (see addEventToKit comment).

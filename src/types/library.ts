@@ -131,29 +131,17 @@ export interface KitDefinition {
 }
 
 /**
- * Playback mode for a Kit event (hapbeat-contracts DEC-023).
+ * Playback mode for a Kit event (hapbeat-contracts DEC-031, schema 2.0.0).
  *
- * - command: Device plays the WAV clip from flash (legacy mode, default)
- * - stream_clip: SDK streams the WAV over UDP; device only receives the PCM stream
- * - stream_source: SDK captures a live AudioSource and streams it; no clip needed
- */
-export type KitEventMode = 'command' | 'stream_clip' | 'stream_source'
-
-/**
- * Suffix appended to `eventId` in the on-disk manifest when a single Studio
- * KitEvent emits more than one mode entry. Studio keeps the user-authored
- * eventId pristine in-memory; the suffix only appears in manifest output and
- * in re-import grouping. JSON object keys must be unique, so the suffix is
- * what lets `mykit.foo` exist as both FIRE and CLIP entries side-by-side.
+ * - command: Device plays the WAV clip from flash. Manifest entry lives in
+ *   `events` (command-only since schema 2.0.0). Wire eventId on PLAY/STOP.
+ * - stream_clip: SDK streams the WAV over UDP. Manifest entry lives in
+ *   `stream_events`. Device does not see the eventId (STREAM_BEGIN has no
+ *   eventId field).
  *
- * `stream_source` is hidden from the UI but still maps to a suffix for the
- * sake of any legacy kit that round-trips through Studio.
+ * 旧 `stream_source` mode は DEC-031 (schema 2.0.0) で廃止。
  */
-export const KIT_EVENT_MODE_SUFFIX: Record<KitEventMode, string> = {
-  command: 'fire',
-  stream_clip: 'clip',
-  stream_source: 'source',
-}
+export type KitEventMode = 'command' | 'stream_clip'
 
 export interface KitEvent {
   /** Stable per-kit id, generated on add. Used as the React key, the handle
@@ -195,11 +183,14 @@ export interface KitEvent {
   clipFileSize: number
   /**
    * Selected playback modes. Length ≥ 1 (UI enforces). When length === 1 the
-   * kit exporter emits a single manifest entry under `eventId`. When length
-   * > 1 it emits one entry per mode with `<eventId>.<mode-suffix>` as the
-   * JSON key (see `KIT_EVENT_MODE_SUFFIX`).
+   * kit exporter emits one manifest entry into either `events` (command) or
+   * `stream_events`. When length === 2 (BOTH mode) it emits two entries —
+   * one in each bucket — under the same base eventId (schema 2.0.0 bucket
+   * separation, DEC-031).
    *
-   * intensity / loop / deviceWiper are shared across modes.
+   * intensity / loop / deviceWiper are shared across modes (the kit exporter
+   * applies them per-bucket where relevant; device_wiper is dropped from
+   * stream_events as it has no SDK meaning).
    */
   modes: KitEventMode[]
   /** Loop playback */

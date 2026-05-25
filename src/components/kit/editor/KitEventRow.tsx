@@ -1,6 +1,5 @@
 import { type DragEvent } from 'react'
 import type { KitEvent, KitEventMode } from '@/types/library'
-import { KIT_EVENT_MODE_SUFFIX } from '@/types/library'
 import { ClipCard } from '../shared/ClipCard'
 import './KitEventRow.css'
 
@@ -52,19 +51,13 @@ export interface KitEventRowProps {
  *
  *   UI "FIRE" → modes: ['command']
  *   UI "CLIP" → modes: ['stream_clip']
- *   UI "BOTH" → modes: ['command', 'stream_clip']   (suffix-emitted as .fire / .clip)
+ *   UI "BOTH" → modes: ['command', 'stream_clip']
  *
- * BOTH is intentionally subordinate (smaller / dimmer): it produces two
- * manifest entries with `.fire` / `.clip` suffixes, which is mainly
- * useful while authoring/testing — once a kit ships, the author picks
- * one transport per event. The radio behaviour means a single click
- * swaps state in any direction, matching the toggle UX that radio
- * buttons enforce by convention.
- *
- * `stream_source` (LIVE) is retained in the type system + manifest
- * schema for future use, but the Unity SDK retired it on 2026-04-22.
- * Legacy `modes: ['stream_source']` kits still load — they just don't
- * map to any of the three pills, so all pills render inactive.
+ * BOTH produces 2 manifest entries — one in `events` (command) and one in
+ * `stream_events` — under the same base eventId (schema 2.0.0 bucket
+ * separation). BOTH is subordinate (smaller / dimmer) because it's mainly
+ * useful while authoring/testing; once a kit ships, the author picks one
+ * transport per event.
  */
 type ModeChoice = 'fire' | 'clip' | 'both'
 
@@ -78,7 +71,7 @@ interface ModeOption {
 const MODE_OPTIONS: ModeOption[] = [
   { choice: 'fire', symbol: '>', label: 'FIRE', title: 'Fire — デバイス内蔵 WAV を再生 (Event ID + 強度を UDP で送信)' },
   { choice: 'clip', symbol: '♪', label: 'CLIP', title: 'Stream Clip — SDK が Kit の WAV を UDP でストリーム' },
-  { choice: 'both', symbol: '>♪', label: 'BOTH', title: 'BOTH — FIRE と CLIP の両 entry を manifest に出力 (eventId に .fire / .clip suffix が付く)。主に開発段階で両モードを試したいときに使用。' },
+  { choice: 'both', symbol: '>♪', label: 'BOTH', title: 'BOTH — FIRE と CLIP の両 entry を manifest に出力 (events と stream_events に同じ base eventId で並存)。主に開発段階で両モードを試したいときに使用。' },
 ]
 
 const CHOICE_TO_MODES: Record<ModeChoice, KitEventMode[]> = {
@@ -88,14 +81,13 @@ const CHOICE_TO_MODES: Record<ModeChoice, KitEventMode[]> = {
 }
 
 /** Map the stored `modes` array to one of the three UI choices. Returns
- *  `null` for shapes that don't match any pill (e.g. legacy stream_source
- *  only), so the UI renders all pills inactive rather than picking a
- *  wrong default. */
+ *  `null` for shapes that don't match any pill, so the UI renders all
+ *  pills inactive rather than picking a wrong default. */
 function modesToChoice(modes: KitEventMode[]): ModeChoice | null {
   if (modes.length === 1) {
     if (modes[0] === 'command') return 'fire'
     if (modes[0] === 'stream_clip') return 'clip'
-    return null  // stream_source only — no pill matches
+    return null
   }
   if (modes.length === 2 && modes.includes('command') && modes.includes('stream_clip')) {
     return 'both'
@@ -139,9 +131,8 @@ export function KitEventRow({
    * already-active pill is a no-op (no "uncheck the last mode" worry
    * because radio always leaves exactly one selection).
    *
-   * This intentionally collapses any legacy modes shape (e.g.
-   * stream_source-only) into a canonical 1-or-2 entry array on first
-   * pill click, which is the cheapest migration path — the next save
+   * This intentionally collapses any unexpected modes shape into a
+   * canonical 1-or-2 entry array on first pill click — the next save
    * persists the cleaned-up modes.
    */
   const pickChoice = (target: ModeChoice) => {
@@ -153,23 +144,18 @@ export function KitEventRow({
   // the kit is independent. Library archive / rename never affects what
   // shows here.
   const name = event.clipName || '(missing clip)'
-  // EventId badge is hidden on kit cards — composed IDs like
-  // `mykit.z1_pin_hit.fire` are long enough that they crowd the
-  // header without telling the user anything they can't see in the
-  // Edit modal's read-only Event ID field. Use the modal when you
-  // need the literal string.
-  // Detail line: clip metadata + a trailing suffix hint when both modes
-  // are selected. The hint sits at the right end of the same row so it
-  // doesn't take vertical space; the side rail stays clean. Single-mode
-  // events get no extra text (eventId on the card is what lands on disk).
+  // EventId badge is hidden on kit cards — base eventId is already
+  // shown in the Edit modal's read-only Event ID field. Use the modal
+  // when you need the literal string.
+  // Detail line: clip metadata. Single-mode events get no extra text;
+  // BOTH events get a small "FIRE + CLIP" hint at the row's right edge
+  // so the user can see the dual emit at a glance without opening Edit.
   const detailBase = event.clipDuration > 0
     ? `${Math.round(event.clipDuration * 1000)}ms | ${event.clipChannels === 1 ? 'Mono' : 'Stereo'} | ${event.clipSampleRate / 1000}kHz | ${formatBytes(event.clipFileSize)}`
     : undefined
-  const suffixHint = modes.length > 1
-    ? modes.map((m) => `.${KIT_EVENT_MODE_SUFFIX[m]}`).join(' / ')
-    : null
-  const details = detailBase && suffixHint
-    ? `${detailBase}  ·  ${suffixHint}`
+  const dualHint = modes.length > 1 ? 'FIRE + CLIP' : null
+  const details = detailBase && dualHint
+    ? `${detailBase}  ·  ${dualHint}`
     : detailBase
   // Kit events don't carry tags (tags are a library-side concept tied
   // to clip search/filtering; kits are sealed bundles).

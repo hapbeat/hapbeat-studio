@@ -37,7 +37,7 @@ function normalizeEvents(kit: KitEntry): NormalizedEvent[] {
   })
 }
 
-const STREAM_MODES = new Set(['stream_clip', 'stream_source'])
+const STREAM_MODES = new Set(['stream_clip'])
 
 /**
  * Mirrors the Manager's "インストール済み Kit" tree: per-kit list of

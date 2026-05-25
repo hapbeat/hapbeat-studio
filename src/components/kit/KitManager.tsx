@@ -1677,16 +1677,16 @@ function KitEditor() {
                         // 鳴りっぱなしを防ぐために現在のプレビューを止める。
                         stopPreview()
                         // Bulk replace each event's modes wholesale.
-                        // `both` = ['command', 'stream_clip'] (both FIRE+CLIP
-                        // → suffix-emitted as `.fire` / `.clip`). Single-mode
-                        // options replace with `[mode]` so any existing
-                        // multi-mode events collapse to one.
+                        // `both` = ['command', 'stream_clip'] (FIRE+CLIP
+                        // → schema 2.0.0 で `events` (command) + stream_events
+                        // の両 bucket に同 base eventId を emit)。
+                        // Single-mode options replace with `[mode]` so any
+                        // existing multi-mode events collapse to one.
                         type KEM = import('@/types/library').KitEventMode
                         const nextModes: KEM[] =
                           v === 'both'    ? ['command', 'stream_clip'] :
                           v === 'command' ? ['command'] :
                           v === 'stream_clip' ? ['stream_clip'] :
-                          v === 'stream_source' ? ['stream_source'] :
                           ['command']
                         const nextEvents = activeKit.events.map((ev) => {
                           const same =
@@ -1702,8 +1702,7 @@ function KitEditor() {
                       <option value="" disabled>一括変更…</option>
                       <option value="command">&gt; FIRE — 全て</option>
                       <option value="stream_clip">♪ CLIP — 全て</option>
-                      <option value="both">&gt;♪ BOTH — 全て (.fire / .clip 両方)</option>
-                      <option value="stream_source">~ LIVE — 全て</option>
+                      <option value="both">&gt;♪ BOTH — 全て (command + stream 両 bucket)</option>
                     </select>
                   </div>
 
@@ -1921,13 +1920,9 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
     const kitErr = validateKitName(kit.name)
     if (kitErr) { toast(`Kit name invalid: ${kitErr}`, 'error'); return false }
 
-    // Every selected mode except stream_source uses the eventId on the
-    // wire (FIRE → device command, CLIP → SDK manifest lookup), so any
-    // event with at least one such mode must have a non-empty eventId.
-    const needsEventId = kit.events.filter(
-      (e) => (e.modes ?? ['command']).some((m) => m !== 'stream_source'),
-    )
-    const missing = needsEventId.filter((e) => !e.eventId)
+    // FIRE / CLIP どちらも eventId を manifest key として使うので、
+    // mode の如何にかかわらず非空の eventId が必須。
+    const missing = kit.events.filter((e) => !e.eventId)
     if (missing.length > 0) {
       alert(
         `${missing.length} event(s) have no Event ID.\n` +
@@ -1950,15 +1945,19 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
   }, [outRoot, managerConnected, devices, kit, toast])
 
   /**
-   * Save Folder = ローカル保存 + WAV 整形 (16kHz / install-clips: モノラル
-   * 保持 / stream-clips: ステレオ強制). Device 送信は伴わない。Deploy の
-   * 事前段階としても使えるし、device 未接続のままフォルダだけ整形する
-   * オフライン用途にも使う。
+   * Save Folder = Kit メタ + manifest + WAV を kit フォルダに書き出す。
+   * 内部的には Deploy と同じ exportKitAsPack を通すが、Helper への
+   * 送信は行わない。
    *
-   * Auto-flush を廃止 (2026-05-25) したので、Kit 編集中の差分を実ファイル
-   * に反映するには Save Folder か Deploy のどちらかを明示的に実行する
-   * 必要がある。Save Folder は device の有無に関わらず動く点が Deploy
-   * との違い。
+   * パフォーマンス: WAV の re-encode は IDB の encoded-WAV キャッシュ
+   * (キーは event の source-blob SHA-1 hash) で skip される。前回保存
+   * 以降に音声が変わっていない event は decode + 16 kHz resample +
+   * encode を全部 skip するので、amp / intensity / device_wiper を
+   * 触っただけのケースは manifest 書き換えのみで完了する。
+   *
+   * Kit メタ (kits-meta.json) は各編集アクションで自動保存されるが、
+   * Kit フォルダ内の WAV / manifest の書き出しは明示クリック必須
+   * (2026-05-25 で per-edit auto-flush を廃止)。
    */
   const handleSaveFolder = useCallback(async () => {
     if (!preflightKit(false)) return
@@ -1966,16 +1965,16 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
     try {
       const out = await useLibraryStore.getState().requestKitFolderSave(
         kit.id,
-        `kit "${kit.name}" をフォーマット整形して保存`,
+        `kit "${kit.name}" をフォルダに保存`,
       )
       if (out) {
-        toast(`Saved "${out.packId}" (WAV を 16kHz に整形)`, 'success')
+        toast(`Saved "${out.packId}" to kit folder`, 'success')
       } else {
         // requestKitFolderSave's underlying flushKitFolderNow already
         // pushed an error / retrying pill — toast a top-level summary
         // so the user sees something even if they're not watching the
         // footer.
-        toast('Kit folder の保存に失敗しました (詳細はステータス表示)', 'error')
+        toast('フォルダ保存に失敗しました (詳細はステータス表示)', 'error')
       }
     } catch (err) {
       toast(`Save failed: ${err instanceof Error ? err.message : err}`, 'error')
@@ -2051,8 +2050,9 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
           disabled={saveBlocked}
           onClick={handleSaveFolder}
           title={
-            'Kit folder をローカルに保存し、WAV をデバイス互換 (16 kHz / install-clips: モノラル保持 / stream-clips: ステレオ強制) に整形する。\n' +
-            'Deploy せずファイルだけ整形したい時に使う。'
+            'Kit メタ + manifest + WAV を kit フォルダに保存する。\n' +
+            'Device には送らない (Deploy せずローカル保存だけしたい時に使う)。\n' +
+            '音声が前回保存時から変わっていない event は WAV 再 encode を skip するので、amp / intensity 調整のみのケースは高速。'
           }
         >Save Folder</button>
 
@@ -2063,9 +2063,10 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
           {Object.keys(progressByIp).length === 0 ? (
             <span className="kit-export-info muted">
               {/* Save status (saving / saved / error) takes precedence
-                  over the passive deploy-readiness hints — explicit Save
-                  Folder works without devices, so a "デバイスが見つかりません"
-                  message would lie about what's actually happening. */}
+                  over the passive deploy-readiness hints — explicit
+                  Save Folder works without devices, so a
+                  "デバイスが見つかりません" message would lie about what's
+                  actually happening. */}
               {!outRoot
                 ? 'Library または Kit Folder を選択してください'
                 : saveStatusLabel
@@ -2075,48 +2076,25 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
                   : `${devices.length} device(s) ready`}
             </span>
           ) : (
+            // 1-line compact rows: [ip] [bar] [pct] [msg]
+            // Keeps section height stable regardless of how many
+            // devices are deploying (>2 devices scroll inside).
             Object.entries(progressByIp).map(([ip, st]) => (
               <div key={ip} className="kit-deploy-progress-row">
-                <div className="kit-deploy-progress-head">
-                  <span className="kit-deploy-progress-ip">{ip}</span>
-                  <span className="kit-deploy-progress-pct">{st.pct}%</span>
-                </div>
+                <span className="kit-deploy-progress-ip">{ip}</span>
                 <div className="kit-deploy-progress-bar">
                   <div
                     className={`kit-deploy-progress-fill ${st.done ? (st.ok ? 'ok' : 'err') : ''}`}
                     style={{ width: `${st.pct}%` }}
                   />
                 </div>
-                <div className="kit-deploy-progress-msg">{st.msg}</div>
+                <span className="kit-deploy-progress-pct">{st.pct}%</span>
+                <span className="kit-deploy-progress-msg">{st.msg}</span>
               </div>
             ))
           )}
         </div>
       </div>
-
-      {/* (legacy) the per-device progress block now lives inline next
-          to the Deploy button. We keep this empty branch for the rare
-          case where the user wants the stacked-below-bar layout — the
-          inline block above is the default. */}
-      {false && Object.keys(progressByIp).length > 0 && (
-        <div className="kit-deploy-progress">
-          {Object.entries(progressByIp).map(([ip, st]) => (
-            <div key={ip} className="kit-deploy-progress-row">
-              <div className="kit-deploy-progress-head">
-                <span className="kit-deploy-progress-ip">{ip}</span>
-                <span className="kit-deploy-progress-pct">{st.pct}%</span>
-              </div>
-              <div className="kit-deploy-progress-bar">
-                <div
-                  className={`kit-deploy-progress-fill ${st.done ? (st.ok ? 'ok' : 'err') : ''}`}
-                  style={{ width: `${st.pct}%` }}
-                />
-              </div>
-              <div className="kit-deploy-progress-msg">{st.msg}</div>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   )
 }

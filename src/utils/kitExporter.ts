@@ -1,25 +1,42 @@
 /**
  * Kit → Pack 形式 ZIP エクスポーター
  *
- * hapbeat-contracts の kit-format.md に準拠した ZIP を生成する。
- * ZIP 内構造 (DEC-027: clips/ → install-clips/, manifest.clips → manifest.install_clips):
+ * hapbeat-contracts の kit-format.md (schema 2.0.0) に準拠した ZIP を生成する。
+ * ZIP 内構造:
  *   <kit_id>/
- *     <kit_id>-manifest.json   ← 旧 manifest.json (kit 名前置で識別性 ↑)
- *     install-clips/      ← command mode events の WAV (device flash 用)
+ *     <kit_id>-manifest.json
+ *     install-clips/      ← events (command) の WAV (device flash 用)
  *       <clip-file>.wav
- *     stream-clips/       ← stream_clip mode events の WAV (SDK import 用, device には焼かない)
+ *     stream-clips/       ← stream_events の WAV (SDK import 用, device には焼かない)
  *       <clip-file>.wav
  *
- * mode フィールド (DEC-023):
- *   - command      : device に焼かれる WAV clip。install-clips/ に配置。manifest に mode 省略 or "command" で記録。
- *   - stream_clip  : SDK が UDP ストリームで流す WAV。stream-clips/ に配置。device binary 除外。
- *   - stream_source: live audio capture。clip 不要。device binary 除外。
+ * manifest 構造 (schema 2.0.0, DEC-031):
+ *   - `events` (required): schema 1.x 由来の単一 bucket を schema 2.0.0 で
+ *     **command-mode 専用に narrow 化**。キーは PLAY/STOP packet の wire eventId
+ *     に直接対応。device kit_loader は引き続き `doc["events"]` を読む。
+ *   - `stream_events` (optional): SDK が UDP audio stream で送る event 辞書。
+ *     device はこのキーを認識しない (STREAM_BEGIN に eventId が乗らないため)。
+ *   - 同一 eventId が `events` と `stream_events` 双方に存在することは valid
+ *     (Studio の BOTH モード)。
+ *   - `mode` フィールド廃止: bucket で意味が決まる。
+ *   - `stream_source` 廃止: stream_events.clip は required。
+ *
+ * Option C 命名: `events` を `command_events` に rename する案も検討したが、
+ * device firmware の kit_loader が既に `doc["events"]` を参照しているため、
+ * 名前を保つことで firmware 無変更で済むメリットを取った。将来別件で firmware
+ * を更新する機会に rename を検討。詳細は DEC-031 参照。
  */
 
 import JSZip from 'jszip'
 import type { KitDefinition, KitEvent, KitEventMode } from '@/types/library'
-import { KIT_EVENT_MODE_SUFFIX } from '@/types/library'
-import { loadKitEventAudio } from '@/utils/libraryStorage'
+import {
+  loadEncodedWav,
+  loadKitEventAudio,
+  saveEncodedWav,
+  sha1Hex,
+  type EncodedMode,
+  type EncodedWavEntry,
+} from '@/utils/libraryStorage'
 import { encodeStereoWavBlob, encodeWavBlob } from '@/utils/wavIO'
 
 /** firmware は 16 kHz I2S 固定でパック内 WAV を resample しないため、
@@ -112,31 +129,14 @@ function resolveModes(ev: KitEvent): KitEventMode[] {
 }
 
 /**
- * Compose the manifest JSON key for `(eventId, mode)`. When `eventId` already
- * ends with the suffix for `mode` (the user authored it manually), don't
- * double-append. Otherwise append `.<suffix>` so multiple modes on the same
- * base eventId emit unique JSON keys.
- *
- * Only invoked when `modes.length > 1` — single-mode events keep the bare
- * eventId so existing kits stay byte-identical on round-trip.
- */
-function composeSuffixedEventId(baseEventId: string, mode: KitEventMode): string {
-  const suffix = KIT_EVENT_MODE_SUFFIX[mode]
-  const tail = `.${suffix}`
-  return baseEventId.endsWith(tail) ? baseEventId : `${baseEventId}${tail}`
-}
-
-/**
- * Kit を Pack 形式の ZIP にエクスポートする。
+ * Kit を Pack 形式の ZIP にエクスポートする (schema 2.0.0)。
  *
  * 各 KitEvent は `modes: KitEventMode[]` で複数 mode を選択可。
- *   - command      → install-clips/ に WAV 配置、manifest entry に clip フィールド (bare filename)
- *   - stream_clip  → stream-clips/ に WAV 配置、manifest entry に mode + clip (stream-clips/<filename>)
- *   - stream_source → WAV 不要 (clip 未設定時)、manifest entry に mode のみ
+ *   - command     → install-clips/ に WAV 配置、`events` に bare filename で記録
+ *   - stream_clip → stream-clips/ に WAV 配置、`stream_events` に bare filename で記録
  *
- * 複数 mode 選択時: 同じ KitEvent から mode ごとに 1 entry ずつ emit。
- * JSON dict は key 重複できないので eventId に `.fire` / `.clip` suffix を付ける
- * (`KIT_EVENT_MODE_SUFFIX`)。単一 mode の event は suffix を付けない。
+ * BOTH モード (modes=['command','stream_clip']) は同じ base eventId を両 bucket に
+ * emit する。JSON dict 重複キー問題は bucket 分離で解消したため suffix 不要。
  *
  * @param kit - Kit 定義 (events は KitEvent[]、各 event が自前の clip data を保持)
  * @returns ZIP の Blob とファイル名
@@ -149,20 +149,22 @@ export async function exportKitAsPack(
   const zip = new JSZip()
   const root = zip.folder(packId)!
 
-  // manifest に書き込む events / clips テーブル
+  // manifest に書き込む 2 bucket + install-clips metadata
+  // 注: `events` bucket は command-mode 専用 (schema 2.0.0)
   const events: Record<string, unknown> = {}
+  const streamEvents: Record<string, unknown> = {}
   const clipsMeta: Record<string, unknown> = {}
 
   // ファイル名の重複回避（install-clips / stream-clips それぞれ独立した namespace）
   const usedCommandNames = new Set<string>()
   const usedStreamNames = new Set<string>()
 
-  // Cache the *decoded* AudioBuffer per kit event so a multi-mode
-  // (FIRE+CLIP) event decodes once but encodes per output format —
-  // command preserves the source channel count (mono stays mono),
-  // stream forces stereo 16 kHz. Keeping the decode cached but the
-  // encode per-mode is what enables both behaviours without a second
-  // round trip through the AudioContext.
+  // Per-event lazy decode. When every mode of this event hits the IDB
+  // encoded-WAV cache (sourceHash unchanged since the last save), the
+  // decoder is never touched — the dominant cost of Save Folder /
+  // Deploy when the user only adjusts amp / intensity. The decode is
+  // shared across modes (command + stream_clip) so multi-mode events
+  // decode at most once.
   type DecodedAudio = {
     /** Decoded AudioBuffer ready to be re-encoded. `null` only when
      *  decode failed — in that case `fallback` is the raw bytes the
@@ -170,87 +172,141 @@ export async function exportKitAsPack(
     buffer: AudioBuffer | null
     fallback: Blob | null
     duration: number
-    /** Source sample rate / channel count — for metadata reporting,
-     *  not the on-wire output (which is always normalised to
-     *  PACK_TARGET_SAMPLE_RATE). */
-    sourceSampleRate: number
     sourceChannels: number
   }
-  const decodeCache = new Map<string, DecodedAudio | null>()
   // Warning de-dup: a multi-mode event would otherwise log the same
   // "16 kHz に変換" notice twice (once per mode).
   const warnedSampleRate = new Set<string>()
   const warnedDecodeFail = new Set<string>()
 
-  const ensureDecode = async (ev: KitEvent): Promise<DecodedAudio | null> => {
-    const cached = decodeCache.get(ev.id)
-    if (cached !== undefined) return cached
-    const audioBlob = await loadKitEventAudio(ev.id)
-    if (!audioBlob) {
-      decodeCache.set(ev.id, null)
-      return null
-    }
-    let result: DecodedAudio
+  const decodeSource = async (ev: KitEvent, sourceBlob: Blob): Promise<DecodedAudio> => {
     try {
-      const arrayBuffer = await audioBlob.arrayBuffer()
+      const arrayBuffer = await sourceBlob.arrayBuffer()
       const ctx = new OfflineAudioContext(1, 1, 44100)
       const decoded = await ctx.decodeAudioData(arrayBuffer.slice(0))
-      result = {
-        buffer: decoded,
-        fallback: null,
-        duration: decoded.duration,
-        sourceSampleRate: decoded.sampleRate,
-        sourceChannels: decoded.numberOfChannels,
-      }
       if (decoded.sampleRate !== PACK_TARGET_SAMPLE_RATE && !warnedSampleRate.has(ev.id)) {
         warnings.push(`"${ev.clipName}" を ${decoded.sampleRate}Hz → ${PACK_TARGET_SAMPLE_RATE}Hz に変換しました`)
         warnedSampleRate.add(ev.id)
+      }
+      return {
+        buffer: decoded,
+        fallback: null,
+        duration: decoded.duration,
+        sourceChannels: decoded.numberOfChannels,
       }
     } catch (err) {
       if (!warnedDecodeFail.has(ev.id)) {
         warnings.push(`"${ev.clipName}" のデコードに失敗。元バイトをそのまま格納します (${err instanceof Error ? err.message : err})`)
         warnedDecodeFail.add(ev.id)
       }
-      result = {
+      return {
         buffer: null,
-        fallback: audioBlob,
+        fallback: sourceBlob,
         duration: ev.clipDuration || 0,
-        sourceSampleRate: ev.clipSampleRate || PACK_TARGET_SAMPLE_RATE,
         sourceChannels: ev.clipChannels || 1,
       }
     }
-    decodeCache.set(ev.id, result)
-    return result
   }
 
   for (const ev of kit.events) {
     const modes = resolveModes(ev)
-    const isMulti = modes.length > 1
+
+    // Event without backing clip is invalid in schema 2.0.0 (clip required
+    // in both `events` and `stream_events`). Warn and skip.
+    const hasClip = ev.clipName !== '' && ev.clipName !== undefined && ev.clipFileSize > 0
+    if (!hasClip) {
+      warnings.push(`"${ev.clipName || ev.eventId}" に音声が設定されていません (schema 2.0.0 では clip 必須)`)
+      continue
+    }
+
+    // Load source blob + compute hash up front. We always need the
+    // hash (cache key) and the blob serves as decode input on cache
+    // miss / fallback bytes on decode failure.
+    const sourceBlob = await loadKitEventAudio(ev.id)
+    if (!sourceBlob) {
+      warnings.push(`音声データが見つかりません: "${ev.clipName}" (event ${ev.id})`)
+      continue
+    }
+    let sourceHash: string
+    try {
+      sourceHash = await sha1Hex(sourceBlob)
+    } catch {
+      // Insecure context / SubtleCrypto unavailable. Fall back to an
+      // identity-marker that never matches cache; we still re-encode
+      // every time but at least don't crash.
+      sourceHash = `nohash-${ev.id}-${sourceBlob.size}`
+    }
+
+    // Lazy decode — only triggered when at least one mode misses the
+    // encoded-WAV cache. Shared across modes of the same event.
+    let decoded: DecodedAudio | null = null
+    const ensureDecoded = async (): Promise<DecodedAudio> => {
+      if (!decoded) decoded = await decodeSource(ev, sourceBlob)
+      return decoded
+    }
 
     for (const mode of modes) {
-      const manifestKey = isMulti ? composeSuffixedEventId(ev.eventId, mode) : ev.eventId
+      const cacheMode: EncodedMode = mode === 'command' ? 'command' : 'stream_clip'
 
-      // --- stream_source で clip なし: WAV 省略、manifest に mode のみ記録 ---
-      // Event with no clip data set is treated as "no audio" (consistent
-      // with previous behaviour for stream_source kits authored without
-      // a backing clip).
-      const hasClip = ev.clipName !== '' && ev.clipName !== undefined && ev.clipFileSize > 0
-      if (mode === 'stream_source' && !hasClip) {
-        events[manifestKey] = {
-          mode: 'stream_source',
-          description: '',
-          parameters: {
-            intensity: round2(ev.intensity),
-          },
+      // Cache check — if hit, we can avoid decode + encode entirely
+      // and reuse the device-format WAV blob we wrote last time. The
+      // install_clips metadata is reconstructed from cache fields so
+      // the manifest stays consistent with the on-disk WAV.
+      const cached = await loadEncodedWav(ev.id, cacheMode, sourceHash)
+
+      let encodedBlob: Blob
+      let encodedChannels: number
+      let encodedDuration: number
+
+      if (cached) {
+        encodedBlob = cached.encodedBlob
+        encodedChannels = cached.channels
+        encodedDuration = cached.duration
+      } else {
+        // Miss — decode (lazy, shared across modes) + encode for this
+        // mode, then persist for the next save.
+        const dec = await ensureDecoded()
+        if (mode === 'command') {
+          // install-clips/ preserves the source channel count — mono
+          // stays mono (device flash is happy with either), stereo
+          // stays stereo. This is the cheaper / smaller-on-flash form
+          // and is the only thing the device firmware reads.
+          encodedBlob = dec.buffer
+            ? await encodeWavBlob(dec.buffer, PACK_TARGET_SAMPLE_RATE)
+            : dec.fallback!
+          encodedChannels = dec.buffer ? dec.buffer.numberOfChannels : dec.sourceChannels
+          encodedDuration = dec.duration
+        } else {
+          // stream-clips/ は SDK 側が必ず stereo 16 kHz を仮定 (UDP stream
+          // pipeline で L/R を per-side actuator に dispatch するため)。
+          // Mono は encodeStereoWavBlob が duplicate して 2ch にする。
+          encodedBlob = dec.buffer
+            ? await encodeStereoWavBlob(dec.buffer, PACK_TARGET_SAMPLE_RATE)
+            : dec.fallback!
+          encodedChannels = 2
+          encodedDuration = dec.duration
         }
-        continue
-      }
 
-      // --- command / stream_clip / stream_source(clip あり): WAV が必要 ---
-      const decoded = await ensureDecode(ev)
-      if (!decoded) {
-        warnings.push(`音声データが見つかりません: "${ev.clipName}" (event ${ev.id})`)
-        continue
+        // Only cache successful decodes. Fallback bytes (= raw source
+        // blob passed through unchanged) aren't worth caching because
+        // they'd reduce to a copy of the audio store entry, doubling
+        // IDB size for no compute saving.
+        if (dec.buffer) {
+          const entry: EncodedWavEntry = {
+            sourceHash,
+            encodedBlob,
+            sampleRate: PACK_TARGET_SAMPLE_RATE,
+            channels: encodedChannels,
+            duration: encodedDuration,
+          }
+          try {
+            await saveEncodedWav(ev.id, cacheMode, entry)
+          } catch (err) {
+            // IDB save failure shouldn't fail the export — log + carry on.
+            // Next save will retry the cache write.
+            console.warn('[kitExporter] encoded-WAV cache save failed', err)
+          }
+        }
       }
 
       if (mode === 'command') {
@@ -262,23 +318,9 @@ export async function exportKitAsPack(
           fname = `${base}_${n}.wav`
         }
         usedCommandNames.add(fname)
+        root.file(`install-clips/${fname}`, encodedBlob)
 
-        // install-clips/ preserves the source channel count — mono
-        // stays mono (device flash is happy with either), stereo
-        // stays stereo. This is the cheaper / smaller-on-flash form
-        // and is the only thing the device firmware reads.
-        const cmdBlob = decoded.buffer
-          ? await encodeWavBlob(decoded.buffer, PACK_TARGET_SAMPLE_RATE)
-          : decoded.fallback!
-        const cmdChannels = decoded.buffer ? decoded.buffer.numberOfChannels : decoded.sourceChannels
-        root.file(`install-clips/${fname}`, cmdBlob)
-
-        // manifest: command 単独時は mode フィールド省略 (firmware の default=command と一致)。
-        //   - 単一 mode (modes=['command']): mode 省略
-        //   - multi mode (modes=['command', 'stream_clip']): 明示的に mode='command' を出力
-        //     (suffix 付き key だけだと UI / SDK が mode を foldable しにくいため)
-        events[manifestKey] = {
-          ...(isMulti ? { mode: 'command' } : {}),
+        events[ev.eventId] = {
           clip: fname,
           description: '',
           parameters: {
@@ -289,20 +331,12 @@ export async function exportKitAsPack(
         }
 
         clipsMeta[fname] = {
-          duration_ms: round2(decoded.duration * 1000),
+          duration_ms: round2(encodedDuration * 1000),
           sample_rate: PACK_TARGET_SAMPLE_RATE,
-          channels: cmdChannels,
+          channels: encodedChannels,
           format: 'pcm_s16le',
         }
       } else {
-        // stream_clip / stream_source(clip あり): SDK import 用に stream-clips/ に配置。
-        // **Always emit at stereo 16 kHz** — the SDK's streaming
-        // pipeline assumes a fixed format so it can pre-allocate
-        // buffers and dispatch L/R to per-side haptic actuators.
-        // Mono sources are upmixed by duplicating to both channels
-        // (encodeStereoWavBlob handles that). Decode failures fall
-        // back to the raw input bytes; that path warns above but
-        // can't itself guarantee stereo, so downstream may complain.
         let fname = eventFileName(ev)
         if (usedStreamNames.has(fname)) {
           const base = fname.replace(/\.wav$/, '')
@@ -311,33 +345,21 @@ export async function exportKitAsPack(
           fname = `${base}_${n}.wav`
         }
         usedStreamNames.add(fname)
+        root.file(`stream-clips/${fname}`, encodedBlob)
 
-        const streamBlob = decoded.buffer
-          ? await encodeStereoWavBlob(decoded.buffer, PACK_TARGET_SAMPLE_RATE)
-          : decoded.fallback!
-        root.file(`stream-clips/${fname}`, streamBlob)
-
-        // parameters: stream モード自体は loop / device_wiper を解釈しないが、
-        // multi-mode 出力時は **command 側と同じ parameters** を書き出す。
-        // import 時の bucket-merge 判定が「loop / deviceWiper 完全一致」を
-        // 要求するため、片側だけ field を落とすと re-import で merge が
-        // 壊れて KitEvent が分裂する round-trip regression が起きる
-        // (self-review 2026-05-17)。single-mode の stream は従来通り
-        // intensity のみで構わない (merge 判定対象にならないため)。
-        events[manifestKey] = {
-          mode,  // 'stream_clip' or 'stream_source'
-          clip: `stream-clips/${fname}`,
+        // stream_events の parameters は SDK 側のみが参照する。device_wiper
+        // は stream モードでは無意味なので含めない (schema 2.0.0 仕様)。
+        // loop は SDK 側ループ判断に使うので常に含める。
+        streamEvents[ev.eventId] = {
+          clip: fname,
           description: '',
           parameters: {
             intensity: round2(ev.intensity),
-            ...(isMulti ? {
-              loop: ev.loop,
-              ...(ev.deviceWiper !== null ? { device_wiper: ev.deviceWiper } : {}),
-            } : {}),
+            loop: ev.loop,
           },
         }
-        // stream-clips の metadata は将来的に独立テーブルで管理 (device binary には不要)。
       }
+      // 他 mode (旧 stream_source 等) は schema 2.0.0 で削除済。
     }
   }
 
@@ -362,7 +384,7 @@ export async function exportKitAsPack(
   // wire payloads carry the directory name in their `kit_id`
   // field (set by the caller, not pulled from manifest).
   const manifest = {
-    schema_version: '1.0.0',
+    schema_version: '2.0.0',
     version: kit.version || '1.0.0',
     name: packId,
     description: kit.description,
@@ -370,6 +392,7 @@ export async function exportKitAsPack(
     created_at: new Date().toISOString(),
     target_device: targetDevice,
     events,
+    ...(Object.keys(streamEvents).length > 0 ? { stream_events: streamEvents } : {}),
     install_clips: clipsMeta,
   }
 

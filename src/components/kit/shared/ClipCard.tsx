@@ -46,7 +46,7 @@ export interface ClipCardProps {
   /** Play/stop toggle */
   playing: boolean
   onTogglePlay: () => void
-  /** Disable the play button (e.g. stream_source events have no previewable clip) */
+  /** Disable the play button (e.g. when there's no decodable clip blob) */
   playDisabled?: boolean
 
   /** Optional: double-click card to trigger (edit/details) */
