@@ -8,6 +8,7 @@ import type { LibraryClip, LibraryViewMode, KitDefinition } from '@/types/librar
 import type { DeviceInfo } from '@/types/manager'
 import { CapacityGauge } from './CapacityGauge'
 import { KitEventRow } from './editor/KitEventRow'
+import { KitEventEditModal } from './editor/KitEventEditModal'
 import { ClipModeInfoModal } from './editor/ClipModeInfoModal'
 import { ClipCard } from './shared/ClipCard'
 import { ClipEditModal } from './shared/ClipEditModal'
@@ -619,10 +620,18 @@ function ClipsPanel() {
   const editingClipId = useLibraryStore((s) => s.editingClipId)
   const setEditingClipId = useLibraryStore((s) => s.setEditingClipId)
   const showClipDetails = useLibraryStore((s) => s.showClipDetails)
+  // Page-wide single selection — see `LibraryState.activeSelection`.
+  // Clicking a library card sets `{ panel: 'library', id }`, which
+  // automatically deselects any kit-side highlight.
+  const activeSelection = useLibraryStore((s) => s.activeSelection)
+  const setActiveSelection = useLibraryStore((s) => s.setActiveSelection)
+  const selectedId = activeSelection?.panel === 'library' ? activeSelection.id : null
+  const setSelectedId = useCallback((id: string | null) => {
+    setActiveSelection(id === null ? null : { panel: 'library', id })
+  }, [setActiveSelection])
   const { toast } = useToast()
   const [dragOver, setDragOver] = useState(false)
   const [listMode, setListMode] = useState<ClipListMode>('tree')
-  const [selectedId, setSelectedId] = useState<string | null>(null)
   // Tree view で開いているフォルダ集合 (path で管理)。キーボード選択が
   // 別フォルダに移ったときに自動で祖先フォルダを開いて、選択カードが
   // 画面からも見えるようにするため、parent 管理にする。
@@ -693,28 +702,64 @@ function ClipsPanel() {
 
   const addClipToActiveKit = useCallback(async (clip: LibraryClip) => {
     if (!activeKitId) { toast('Select or create a Kit first', 'error'); return }
-    // eventId is auto-derived inside the store (kit name × clip name).
+    // Independence: copy the library clip's metadata + audio bytes into
+    // a fresh KitEvent. After this the kit owns its own snapshot — the
+    // library can be archived, renamed, or deleted without affecting
+    // this row. The audio blob is read once and saved under the new
+    // event id inside `addEventToKit`.
+    const blob = await getClipAudio(clip.id)
+    if (!blob) { toast(`"${clip.name}" の audio data が見つかりません`, 'error'); return }
     const newId = await addEventToKit(activeKitId, {
-      eventId: '', clipId: clip.id, loop: false, intensity: getIntensity(clip.id), deviceWiper: null,
-    })
+      eventId: '',
+      clipName: clip.name,
+      clipSourceFilename: clip.sourceFilename,
+      clipDuration: clip.duration,
+      clipChannels: clip.channels,
+      clipSampleRate: clip.sampleRate,
+      clipFileSize: clip.fileSize,
+      // Inherit the library clip's note — the original filename auto-
+      // captured at import (or anything the user typed manually) is
+      // useful to keep alongside the kit event. The user can edit it
+      // independently afterwards; library renames don't propagate.
+      ...(clip.note ? { note: clip.note } : {}),
+      modes: ['command'],
+      loop: false,
+      intensity: getIntensity(clip.id),
+      deviceWiper: null,
+    }, blob)
     if (newId) toast(`Added "${clip.name}" to kit`, 'success')
     else toast('Kit not found', 'error')
-  }, [activeKitId, addEventToKit, toast, getIntensity])
+  }, [activeKitId, addEventToKit, toast, getIntensity, getClipAudio])
 
   // キーボードショートカット: Space=再生、↑↓=選択移動、←→=Amp 増減
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const panel = panelRef.current
       if (!panel) return
-      // テキスト入力中はスキップ。range スライダー上では Space は通すが矢印はネイティブに任せる
+      // テキスト入力中はスキップ。range スライダー (intensity) 上では:
+      //   - ←→ は native の value adjust に任せる (既存挙動)
+      //   - ↑↓ は card 切替に振る (panel handler で扱う + e.preventDefault で
+      //     native value change も同時に抑制する)。
+      //   こうしないとスライダーに focus している間 ↑↓ で intensity も
+      //   動いてカード移動できない問題が起きる。
       const active = document.activeElement as HTMLElement | null
       const tag = active?.tagName
       const isRange = tag === 'INPUT' && (active as HTMLInputElement).type === 'range'
       const isTextField = tag === 'TEXTAREA' || (tag === 'INPUT' && !isRange)
       if (isTextField) return
-      if (isRange && e.key.startsWith('Arrow')) return
+      if (isRange && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return
       if (editingClipId) return
-      if (!panel.contains(active) && !panel.matches(':hover')) return
+      // Page-wide single selection: this handler only runs when the
+      // library panel "owns" the current selection. If kit has it,
+      // bail so ↑↓/Space don't fire here. When nothing is selected
+      // yet, fall back to mouse hover / focus so a first key press
+      // still picks up the first card under the user's cursor.
+      const myPanelActive = activeSelection?.panel === 'library'
+      const otherPanelActive = activeSelection?.panel === 'kit'
+      if (otherPanelActive) return
+      if (!myPanelActive) {
+        if (!panel.contains(active) && !panel.matches(':hover')) return
+      }
       if (orderedClips.length === 0) return
 
       const curIdx = selectedId ? orderedClips.findIndex((c) => c.id === selectedId) : -1
@@ -722,6 +767,11 @@ function ClipsPanel() {
         const clamped = Math.max(0, Math.min(orderedClips.length - 1, idx))
         const next = orderedClips[clamped]
         if (!next || next.id === selectedId) return
+        // Blur any range input that still has focus from the previous
+        // row — without this, ←→ continues to target the OLD slider
+        // because the browser routes the key event to the focused
+        // input instead of bubbling to the panel handler.
+        if (isRange) (active as HTMLInputElement).blur()
         // 選択を動かすときは再生中のプレビューを停止 (= 停止ボタンと同じ挙動)
         stopPreview()
         setSelectedId(next.id)
@@ -761,7 +811,7 @@ function ClipsPanel() {
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [orderedClips, selectedId, editingClipId, toggle, stopPreview, getClipAudio, getIntensity, setIntensity, clips, addClipToActiveKit])
+  }, [orderedClips, selectedId, setSelectedId, editingClipId, activeSelection, toggle, stopPreview, getClipAudio, getIntensity, setIntensity, clips, addClipToActiveKit])
 
   const handleImport = useCallback(async (files: FileList) => {
     for (const f of Array.from(files)) { try { await addClipFromFile(f) } catch (e) { console.error(e) } }
@@ -785,6 +835,38 @@ function ClipsPanel() {
       onIntensityChange={(v) => setIntensity(c.id, v)}
       selected={selectedId === c.id}
       onSelect={() => setSelectedId(c.id)}
+      onArchive={() => {
+        // Archive moves the wav into clips/archive/ and drops the row.
+        // The file stays on disk so users can drag it back to recover.
+        // Same UX as the Kit list's × button (which moves a kit folder
+        // into _archive/<kit>/). No confirm dialog: the action is
+        // reversible — adding a confirm here would over-fortify a
+        // non-destructive operation.
+        void archiveClip(c.id)
+      }}
+      onSwap={async () => {
+        // Resolve the *current* clip from the store on every click
+        // instead of trusting the `c` closure — the closure can latch
+        // a stale snapshot if `renderClipRow` was last called between
+        // an in-flight rename and its store update. The lock in
+        // ClipCard already prevents a second swap from starting
+        // while the first is mid-flight, but reading fresh here is a
+        // belt-and-suspenders guarantee.
+        const cur = useLibraryStore.getState().clips.find((x) => x.id === c.id)
+        if (!cur) return
+        const prevName = cur.name
+        const prevNote = (cur.note ?? '').trim()
+        if (!prevNote) return
+        const stripped = prevNote.replace(/\.(wav|mp3|ogg|flac|aac|m4a)$/i, '')
+        const newName = stripped.toLowerCase().replace(/[^a-z0-9_-]/g, '_').replace(/^_+|_+$/g, '')
+        if (!newName) return
+        await updateClip(cur.id, { name: newName, note: prevName })
+        // Wait for the on-disk WAV rename to settle BEFORE letting
+        // the swap lock release (ClipCard handles that). Without this
+        // the second click would catch an in-progress filename
+        // transition and corrupt one of the two strings.
+        await commitClipRename(cur.id)
+      }}
     />
   )
 
@@ -943,6 +1025,12 @@ interface ClipRowProps {
   onIntensityChange: (v: number) => void
   selected: boolean
   onSelect: () => void
+  /** Archive (move to clips/archive/) — same UX as Kit list's × button. */
+  onArchive: () => void
+  /** Swap clip.name ↔ clip.note. Returns once IDB + on-disk file
+   *  rename have settled, so the card-level lock stays held for the
+   *  whole sequence. */
+  onSwap: () => Promise<void>
 }
 
 function ClipRow({
@@ -958,6 +1046,8 @@ function ClipRow({
   onIntensityChange,
   selected,
   onSelect,
+  onArchive,
+  onSwap,
 }: ClipRowProps) {
   const metaSummary = `${Math.round(clip.duration * 1000)}ms | ${clip.channels === 1 ? 'Mono' : 'Stereo'} | ${clip.sampleRate / 1000}kHz | ${formatFileSize(clip.fileSize)}`
   return (
@@ -969,6 +1059,7 @@ function ClipRow({
       details={metaSummary}
       tags={clip.tags}
       showDetails={showDetails}
+      note={clip.note}
       intensity={intensity}
       onIntensityChange={onIntensityChange}
       playing={playingId === clip.id}
@@ -984,6 +1075,11 @@ function ClipRow({
       }
       drag={{ type: DND_TYPE_CLIP, payload: clip.id, dragTitle: 'ドラッグして Kit に追加' }}
       onRenameCommit={(next) => { void onRenameCommit(next) }}
+      onClose={onArchive}
+      closeTitle="Archive — Studio から非表示 (元ファイルは管理ディレクトリに退避)"
+      onSwap={onSwap}
+      swapDisabled={!(clip.note ?? '').trim()}
+      swapTitle={`Name ↔ Note を入れ替え (現在: "${clip.name}" ↔ "${clip.note ?? ''}")`}
       actions={[
         { label: '+ Kit', variant: 'primary', onClick: onAddToKit, disabled: !kitAvailable,
           title: kitAvailable ? 'Add to active kit' : 'Select a kit first' },
@@ -1008,6 +1104,7 @@ function KitEditor() {
   const updateKitEvent = useLibraryStore((s) => s.updateKitEvent)
   const updateKit = useLibraryStore((s) => s.updateKit)
   const addEventToKit = useLibraryStore((s) => s.addEventToKit)
+  const getKitEventAudio = useLibraryStore((s) => s.getKitEventAudio)
   const showClipDetails = useLibraryStore((s) => s.showClipDetails)
   const workDirSupported = useLibraryStore((s) => s.workDirSupported)
   const kitDirName = useLibraryStore((s) => s.kitDirName)
@@ -1021,8 +1118,21 @@ function KitEditor() {
   const [isExporting, setIsExporting] = useState(false)
   const [dropActive, setDropActive] = useState(false)
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
-  const [selectedEventId, setSelectedEventId] = useState<string | null>(null)
+  // Page-wide single selection — see `LibraryState.activeSelection`.
+  // The kit panel "owns" the selection only when panel === 'kit'; if
+  // the user last clicked a library card, this returns null and the
+  // kit's keyboard handler stays out of the way.
+  const activeSelection = useLibraryStore((s) => s.activeSelection)
+  const setActiveSelection = useLibraryStore((s) => s.setActiveSelection)
+  const selectedEventId = activeSelection?.panel === 'kit' ? activeSelection.id : null
+  const setSelectedEventId = useCallback((id: string | null) => {
+    setActiveSelection(id === null ? null : { panel: 'kit', id })
+  }, [setActiveSelection])
   const [modeInfoOpen, setModeInfoOpen] = useState(false)
+  // KitEvent edit modal — opens when the user clicks a row's Edit
+  // action. Lives at the KitEditor level (not inside KitEventRow) so
+  // it overlays the whole panel rather than the single row.
+  const [editingEventId, setEditingEventId] = useState<string | null>(null)
   const placeholderName = useRef(randomKitName())
   const kitPanelRef = useRef<HTMLDivElement>(null)
   // Throttled "invalid character" toast — same shape as the one inside
@@ -1099,25 +1209,34 @@ function KitEditor() {
       return kitSort.order === 'asc' ? arr : arr.reverse()
     }
     arr.sort((a, b) => {
-      const ca = clips.find((c) => c.id === a.clipId)
-      const cb = clips.find((c) => c.id === b.clipId)
+      // Independence: sort by the event's OWN copied clip metadata
+      // rather than looking it up in the library (which may have
+      // archived/renamed the source entry). 'date' sort falls back
+      // to the kit's updatedAt — KitEvents don't carry their own
+      // updatedAt so per-event date sort isn't meaningful here.
       let cmp = 0
       if (kitSort.by === 'name') {
-        cmp = (ca?.name ?? '').toLowerCase().localeCompare((cb?.name ?? '').toLowerCase())
+        cmp = (a.clipName ?? '').toLowerCase().localeCompare((b.clipName ?? '').toLowerCase())
       } else if (kitSort.by === 'date') {
-        cmp = (ca?.updatedAt ?? '').localeCompare(cb?.updatedAt ?? '')
+        // No per-event date — leave order stable (cmp stays 0).
       } else if (kitSort.by === 'duration') {
-        cmp = (ca?.duration ?? 0) - (cb?.duration ?? 0)
+        cmp = (a.clipDuration ?? 0) - (b.clipDuration ?? 0)
       }
       return kitSort.order === 'asc' ? cmp : -cmp
     })
     return arr
-  }, [activeKit, clips, kitSort])
+  }, [activeKit, kitSort])
 
   // Kit を切り替えたら選択をクリアし、再生中のプレビューも止める。
+  // Only clear OUR side of the shared selection — don't wipe a
+  // library selection the user might have set.
   useEffect(() => {
-    setSelectedEventId(null)
+    if (activeSelection?.panel === 'kit') setActiveSelection(null)
     stopPreview()
+    // setActiveSelection / activeSelection deps left out intentionally:
+    // we only want to react to activeKitId changes, not selection
+    // churn (which would re-clear on every click).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKitId, stopPreview])
 
   // 選択変更時に画面内にスクロール（Kit Editor 内で完結）
@@ -1134,14 +1253,28 @@ function KitEditor() {
     const onKey = (e: KeyboardEvent) => {
       const panel = kitPanelRef.current
       if (!panel || !activeKit) return
-      // テキスト入力中はスキップ。range スライダー上では Space は通すが矢印はネイティブに任せる
+      // テキスト入力中はスキップ。range スライダー (intensity) 上では:
+      //   - ←→ は native の value adjust に任せる (既存挙動)
+      //   - ↑↓ は card 切替に振る (panel handler で扱う + e.preventDefault で
+      //     native value change も同時に抑制する)。
+      //   こうしないとスライダーに focus している間 ↑↓ で intensity も
+      //   動いてカード移動できない問題が起きる。
       const active = document.activeElement as HTMLElement | null
       const tag = active?.tagName
       const isRange = tag === 'INPUT' && (active as HTMLInputElement).type === 'range'
       const isTextField = tag === 'TEXTAREA' || (tag === 'INPUT' && !isRange)
       if (isTextField) return
-      if (isRange && e.key.startsWith('Arrow')) return
-      if (!panel.contains(active) && !panel.matches(':hover')) return
+      if (isRange && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return
+      // Page-wide single selection: only the panel that owns the
+      // current selection handles arrow keys. If library has it, bail
+      // here. When nothing is selected yet, fall back to focus / hover
+      // so a first key press still picks up a card under the cursor.
+      const myPanelActive = activeSelection?.panel === 'kit'
+      const otherPanelActive = activeSelection?.panel === 'library'
+      if (otherPanelActive) return
+      if (!myPanelActive) {
+        if (!panel.contains(active) && !panel.matches(':hover')) return
+      }
       // 視覚順 (name 昇順) に揃える。追加順で辿ると表示とバラバラに動く。
       const events = sortedEvents
       if (events.length === 0) return
@@ -1151,6 +1284,10 @@ function KitEditor() {
         const clamped = Math.max(0, Math.min(events.length - 1, idx))
         const next = events[clamped]
         if (!next || next.id === selectedEventId) return
+        // Blur the range input that still has focus on the previous
+        // row — otherwise ←→ keeps adjusting the OLD card's intensity
+        // because the browser routes the event to the focused input.
+        if (isRange) (active as HTMLInputElement).blur()
         // 選択を動かすときは再生中のプレビューを停止 (= 停止ボタンと同じ挙動)
         stopPreview()
         setSelectedEventId(next.id)
@@ -1184,7 +1321,7 @@ function KitEditor() {
         case 'Spacebar':
           if (currentEvent) {
             e.preventDefault()
-            togglePreview(currentEvent.id, () => getClipAudio(currentEvent.clipId), currentEvent.intensity)
+            togglePreview(currentEvent.id, () => getKitEventAudio(currentEvent.id), currentEvent.intensity)
             const w = getDeviceWiper()
             if (w !== null && w !== currentEvent.deviceWiper) {
               updateKitEvent(activeKit.id, currentEvent.id, { deviceWiper: w })
@@ -1213,7 +1350,7 @@ function KitEditor() {
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [activeKit, sortedEvents, selectedEventId, updateKitEvent, togglePreview, stopPreview, getClipAudio, getDeviceWiper, removeEventFromKit])
+  }, [activeKit, sortedEvents, selectedEventId, setSelectedEventId, activeSelection, updateKitEvent, togglePreview, stopPreview, getKitEventAudio, getDeviceWiper, removeEventFromKit])
 
   const handleCreate = useCallback(async (name?: string) => {
     // Match the same constraint applied in the rename input — strip
@@ -1240,7 +1377,26 @@ function KitEditor() {
     const cid = e.dataTransfer.getData(DND_TYPE_CLIP)
     if (cid) {
       const c = clips.find((x) => x.id === cid); if (!c) return
-      const newId = await addEventToKit(activeKitId, { eventId: '', clipId: c.id, loop: false, intensity: 0.5, deviceWiper: null })
+      // Same copy-on-add semantics as `addClipToActiveKit` — the dropped
+      // clip's audio bytes get duplicated into the kit-event-owned IDB
+      // slot so the kit is independent of the library entry.
+      const blob = await getClipAudio(c.id)
+      if (!blob) { toast(`"${c.name}" の audio data が見つかりません`, 'error'); return }
+      const newId = await addEventToKit(activeKitId, {
+        eventId: '',
+        clipName: c.name,
+        clipSourceFilename: c.sourceFilename,
+        clipDuration: c.duration,
+        clipChannels: c.channels,
+        clipSampleRate: c.sampleRate,
+        clipFileSize: c.fileSize,
+        // Inherit library note (see addClipToActiveKit comment).
+        ...(c.note ? { note: c.note } : {}),
+        modes: ['command'],
+        loop: false,
+        intensity: 0.5,
+        deviceWiper: null,
+      }, blob)
       if (newId) toast(`Added "${c.name}"`, 'success')
       else toast('Kit not found', 'error')
       return
@@ -1261,11 +1417,20 @@ function KitEditor() {
 
   // Kit のデバイス flash 使用量は FIRE (command) モードのイベントだけ数える。
   // CLIP / LIVE はデバイスに WAV を載せず SDK 側ストリームで送るため flash を消費しない。
+  // multi-mode (FIRE+CLIP) は command 側だけが install-clips/ に焼かれる
+  // ので、ev.modes に 'command' が含まれていれば 1 回だけ計上する。
   const kitSize = activeKit
     ? activeKit.events.reduce((s, ev) => {
-        const m = ev.mode ?? 'command'
-        if (m !== 'command') return s
-        return s + (clips.find((c) => c.id === ev.clipId)?.fileSize ?? 0)
+        const hasCommand = ev.modes?.length
+          ? ev.modes.includes('command')
+          : true  // legacy event without modes[] — assume command
+        if (!hasCommand) return s
+        // Independence: each event carries its own clipFileSize snapshot
+        // (no library lookup). The estimate is roughly the source byte
+        // count — the actual on-disk install-clips/ WAV is 16 kHz PCM16
+        // which may be smaller, but this is the right ballpark for the
+        // user's "is this kit going to fit on flash?" sanity check.
+        return s + (ev.clipFileSize ?? 0)
       }, 0) + 1024
     : 0
 
@@ -1506,17 +1671,30 @@ function KitEditor() {
                       value=""
                       disabled={activeKit.events.length === 0}
                       onChange={(e) => {
-                        const m = e.target.value as import('@/types/library').KitEventMode
-                        if (!m) return
+                        const v = e.target.value
+                        if (!v) return
                         // モードが変わると再生挙動 (device 内蔵 / stream) が変わるので
                         // 鳴りっぱなしを防ぐために現在のプレビューを止める。
                         stopPreview()
-                        // 全件を 1 回の updateKit で置き換える。
-                        // events 配列ごと差し替えるので UI は 1 フレームで一斉に切り替わる
-                        // (updateKitEvent を逐次 await すると 1 件ずつ変わるのが見えてしまう)。
-                        const nextEvents = activeKit.events.map((ev) =>
-                          (ev.mode ?? 'command') === m ? ev : { ...ev, mode: m }
-                        )
+                        // Bulk replace each event's modes wholesale.
+                        // `both` = ['command', 'stream_clip'] (both FIRE+CLIP
+                        // → suffix-emitted as `.fire` / `.clip`). Single-mode
+                        // options replace with `[mode]` so any existing
+                        // multi-mode events collapse to one.
+                        type KEM = import('@/types/library').KitEventMode
+                        const nextModes: KEM[] =
+                          v === 'both'    ? ['command', 'stream_clip'] :
+                          v === 'command' ? ['command'] :
+                          v === 'stream_clip' ? ['stream_clip'] :
+                          v === 'stream_source' ? ['stream_source'] :
+                          ['command']
+                        const nextEvents = activeKit.events.map((ev) => {
+                          const same =
+                            ev.modes &&
+                            ev.modes.length === nextModes.length &&
+                            ev.modes.every((m, i) => m === nextModes[i])
+                          return same ? ev : { ...ev, modes: [...nextModes] }
+                        })
                         void updateKit(activeKit.id, { events: nextEvents })
                       }}
                       title="Kit 内の全イベントを選択したモードに一括変更"
@@ -1524,6 +1702,7 @@ function KitEditor() {
                       <option value="" disabled>一括変更…</option>
                       <option value="command">&gt; FIRE — 全て</option>
                       <option value="stream_clip">♪ CLIP — 全て</option>
+                      <option value="both">&gt;♪ BOTH — 全て (.fire / .clip 両方)</option>
                       <option value="stream_source">~ LIVE — 全て</option>
                     </select>
                   </div>
@@ -1537,31 +1716,35 @@ function KitEditor() {
                         <KitEventRow
                           key={ev.id}
                           event={ev}
-                          clip={clips.find((c) => c.id === ev.clipId) ?? null}
                           playing={playingId === ev.id}
                           showDetails={showClipDetails}
                           selected={selectedEventId === ev.id}
                           onSelect={() => setSelectedEventId(ev.id)}
                           onTogglePlay={() => {
-                            togglePreview(ev.id, () => getClipAudio(ev.clipId), ev.intensity)
+                            togglePreview(ev.id, () => getKitEventAudio(ev.id), ev.intensity)
                             const w = getDeviceWiper()
                             if (w !== null && w !== ev.deviceWiper) updateKitEvent(activeKit.id, ev.id, { deviceWiper: w })
                           }}
                           onIntensityChange={(v) => updateKitEvent(activeKit.id, ev.id, { intensity: v })}
-                          onModeChange={(mode) => updateKitEvent(activeKit.id, ev.id, { mode })}
+                          onModesChange={(modes) => {
+                            // Stop playback before mutating modes — the same
+                            // KitEvent can switch transport (device-flash
+                            // FIRE vs SDK CLIP), and leaving an in-flight
+                            // preview behind would race the new state.
+                            stopPreview()
+                            void updateKitEvent(activeKit.id, ev.id, { modes })
+                          }}
                           onDelete={() => removeEventFromKit(activeKit.id, ev.id)}
                           onRenameCommit={async (next) => {
-                            // Kit-local rename: writes only to this
-                            // KitEvent's `localName`. The library clip
-                            // and any other kit referencing it stay
-                            // untouched. The on-disk install-clips/
-                            // file picks up the new name on the next
-                            // flush; stale-prune deletes the old one.
+                            // Kit-side rename: mutates this KitEvent's owned
+                            // clipName (and recomposed eventId). Independent
+                            // of the source library entry — the library clip
+                            // the user originally dragged in stays untouched.
                             const cleaned = next.trim()
                             if (!cleaned) return
                             const newEventId = composeKitEventId(activeKit.name, cleaned)
                             await updateKitEvent(activeKit.id, ev.id, {
-                              localName: cleaned,
+                              clipName: cleaned,
                               eventId: newEventId,
                             })
                           }}
@@ -1569,6 +1752,32 @@ function KitEditor() {
                           // clip を新規 drop する場合は末尾追加にフォールバックする。
                           onDragOverRow={() => { /* noop: 名前順表示のため挿入位置を固定できない */ void i }}
                           dragOverIndicator={false}
+                          onStartEdit={() => setEditingEventId(ev.id)}
+                          onSwap={async () => {
+                            // Resolve fresh state (not the loop's `ev`
+                            // closure) — see ClipRow.onSwap comment.
+                            const kits = useLibraryStore.getState().kits
+                            const cur = kits
+                              .find((k) => k.id === activeKit.id)
+                              ?.events.find((e) => e.id === ev.id)
+                            if (!cur) return
+                            const prevName = cur.clipName
+                            const prevNote = (cur.note ?? '').trim()
+                            if (!prevNote) return
+                            const stripped = prevNote.replace(/\.(wav|mp3|ogg|flac|aac|m4a)$/i, '')
+                            const newName = stripped.toLowerCase().replace(/[^a-z0-9_-]/g, '_').replace(/^_+|_+$/g, '')
+                            if (!newName) return
+                            // updateKitEvent does NOT auto-recompose
+                            // eventId from clipName changes, so we set
+                            // it explicitly here (same as the in-row
+                            // rename path).
+                            const newEventId = composeKitEventId(activeKit.name, newName)
+                            await updateKitEvent(activeKit.id, ev.id, {
+                              clipName: newName,
+                              eventId: newEventId,
+                              note: prevName,
+                            })
+                          }}
                         />
                       ))}
                   </div>
@@ -1582,6 +1791,42 @@ function KitEditor() {
         })}
       </div>
       {modeInfoOpen && <ClipModeInfoModal onClose={() => setModeInfoOpen(false)} />}
+      {editingEventId && activeKit && (() => {
+        // Resolve fresh each render so the modal reflects the latest
+        // event state (e.g. clipName edits that auto-recompose eventId).
+        // If the event was removed elsewhere mid-edit, drop the modal.
+        const ev = activeKit.events.find((e) => e.id === editingEventId)
+        if (!ev) {
+          setEditingEventId(null)
+          return null
+        }
+        return (
+          <KitEventEditModal
+            event={ev}
+            onClose={() => setEditingEventId(null)}
+            onUpdate={async (updates) => {
+              // When clipName changes, recompose eventId in the same
+              // patch so the on-disk filename + manifest stay in sync
+              // — same rule the in-row rename uses.
+              if (updates.clipName !== undefined && updates.clipName !== ev.clipName) {
+                const cleaned = updates.clipName.trim()
+                if (!cleaned) return
+                const newEventId = composeKitEventId(activeKit.name, cleaned)
+                await updateKitEvent(activeKit.id, ev.id, {
+                  ...updates,
+                  clipName: cleaned,
+                  eventId: newEventId,
+                })
+                return
+              }
+              await updateKitEvent(activeKit.id, ev.id, updates)
+            }}
+            onRemove={async () => {
+              await removeEventFromKit(activeKit.id, ev.id)
+            }}
+          />
+        )
+      })()}
     </div>
   )
 }
@@ -1656,17 +1901,31 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
   const fsStatus = useLibraryStore((s) => s.localFsStatus)
   const fsLastMsg = useLibraryStore((s) => s.localFsLastMsg)
 
-  const handleDeploy = useCallback(async () => {
-    if (!outRoot) { toast('Select an output folder first', 'error'); return }
-    if (!managerConnected || devices.length === 0) { toast('No devices', 'error'); return }
-
-    // User-facing validation. The store's flush silently skips invalid
-    // kits — Deploy must surface those errors loudly.
+  /**
+   * Shared pre-flight for Deploy and Save Folder. Returns true when
+   * the kit is OK to build (valid name, all events have well-formed
+   * eventIds). On failure, surfaces the reason via toast / alert and
+   * returns false so the caller bails. `requireDevices` is the only
+   * difference between the two flows — Save Folder doesn't need
+   * Helper / devices, just an outRoot.
+   */
+  const preflightKit = useCallback((requireDevices: boolean): boolean => {
+    if (!outRoot) {
+      toast('Library / Kit Folder を選択してください', 'error')
+      return false
+    }
+    if (requireDevices && (!managerConnected || devices.length === 0)) {
+      toast('No devices', 'error')
+      return false
+    }
     const kitErr = validateKitName(kit.name)
-    if (kitErr) { toast(`Kit name invalid: ${kitErr}`, 'error'); return }
+    if (kitErr) { toast(`Kit name invalid: ${kitErr}`, 'error'); return false }
 
+    // Every selected mode except stream_source uses the eventId on the
+    // wire (FIRE → device command, CLIP → SDK manifest lookup), so any
+    // event with at least one such mode must have a non-empty eventId.
     const needsEventId = kit.events.filter(
-      (e) => (e.mode ?? 'command') !== 'stream_source',
+      (e) => (e.modes ?? ['command']).some((m) => m !== 'stream_source'),
     )
     const missing = needsEventId.filter((e) => !e.eventId)
     if (missing.length > 0) {
@@ -1674,7 +1933,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
         `${missing.length} event(s) have no Event ID.\n` +
         `These usually have a clip with an empty Name — open the clip and set one.`
       )
-      return
+      return false
     }
 
     const validations = validateEventIds(kit)
@@ -1685,8 +1944,46 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
         `${invalid.length} event(s) have an Event ID that breaks the contracts format ` +
         `(category.name, only [a-z 0-9 _ -]):\n${ids}`
       )
-      return
+      return false
     }
+    return true
+  }, [outRoot, managerConnected, devices, kit, toast])
+
+  /**
+   * Save Folder = ローカル保存 + WAV 整形 (16kHz / install-clips: モノラル
+   * 保持 / stream-clips: ステレオ強制). Device 送信は伴わない。Deploy の
+   * 事前段階としても使えるし、device 未接続のままフォルダだけ整形する
+   * オフライン用途にも使う。
+   *
+   * Auto-flush を廃止 (2026-05-25) したので、Kit 編集中の差分を実ファイル
+   * に反映するには Save Folder か Deploy のどちらかを明示的に実行する
+   * 必要がある。Save Folder は device の有無に関わらず動く点が Deploy
+   * との違い。
+   */
+  const handleSaveFolder = useCallback(async () => {
+    if (!preflightKit(false)) return
+    setIsExporting(true)
+    try {
+      const out = await useLibraryStore.getState().requestKitFolderSave(
+        kit.id,
+        `kit "${kit.name}" をフォーマット整形して保存`,
+      )
+      if (out) {
+        toast(`Saved "${out.packId}" (WAV を 16kHz に整形)`, 'success')
+      } else {
+        // requestKitFolderSave's underlying flushKitFolderNow already
+        // pushed an error / retrying pill — toast a top-level summary
+        // so the user sees something even if they're not watching the
+        // footer.
+        toast('Kit folder の保存に失敗しました (詳細はステータス表示)', 'error')
+      }
+    } catch (err) {
+      toast(`Save failed: ${err instanceof Error ? err.message : err}`, 'error')
+    } finally { setIsExporting(false) }
+  }, [kit, preflightKit, setIsExporting, toast])
+
+  const handleDeploy = useCallback(async () => {
+    if (!preflightKit(true)) return
 
     setIsExporting(true)
     setProgressByIp(
@@ -1709,12 +2006,14 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
       toast(`Sending "${out.packId}" to ${devices.length} device(s)…`, 'info')
     } catch (err) { toast(`Deploy failed: ${err instanceof Error ? err.message : err}`, 'error') }
     finally { setIsExporting(false) }
-  }, [kit, managerConnected, devices, send, outRoot, setIsExporting, toast])
+  }, [kit, devices, send, preflightKit, setIsExporting, toast])
 
-  // Status copy shown beside the Deploy button. Blocker conditions
-  // take precedence so the user always knows the precise reason
-  // saving isn't happening.
-  const autoSaveLabel = (() => {
+  // Status copy shown beside the Deploy button. Save Folder / Deploy
+  // both push their `saving → saved` transition through the store's
+  // localFsStatus, so this label reflects whichever ran last. Blocker
+  // conditions (no outRoot / invalid kit name) take precedence so the
+  // user always knows why nothing is happening.
+  const saveStatusLabel = (() => {
     if (!outRoot) return '⚠ Library / Kit Folder を選択してください'
     if (validateKitName(kit.name)) return '⚠ kit 名が無効'
     // fsLastMsg references the last touched kit name — show the
@@ -1724,22 +2023,38 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
     if (!refersToThisKit) return ''
     switch (fsStatus) {
       case 'saving': return '保存中…'
-      case 'saved': return '✓ 自動保存済み'
+      case 'saved': return '✓ 保存済み'
+      case 'retrying': return `⟳ ${fsLastMsg}`
       case 'error': return `✗ ${fsLastMsg}`
       case 'idle':
       default: return ''
     }
   })()
 
+  // Save Folder is enabled whenever a folder is picked and the kit
+  // name is valid — device / Helper presence is irrelevant. Deploy
+  // additionally requires Helper online + at least one device.
+  const saveBlocked = kit.events.length === 0 || isExporting || !outRoot || !!validateKitName(kit.name)
+  const deployBlocked = saveBlocked || !managerConnected || devices.length === 0
+
   return (
     <div className="kit-export-section-wrap">
       <div className="kit-export-section">
         <button
           className="library-btn primary"
-          disabled={kit.events.length === 0 || isExporting || !managerConnected || devices.length === 0 || !outRoot}
+          disabled={deployBlocked}
           onClick={handleDeploy}
-          title="自動保存済み Kit を Helper 経由でデバイスに転送する"
+          title="Kit folder をビルド後、Helper 経由でデバイスに転送する"
         >Deploy</button>
+        <button
+          className="library-btn"
+          disabled={saveBlocked}
+          onClick={handleSaveFolder}
+          title={
+            'Kit folder をローカルに保存し、WAV をデバイス互換 (16 kHz / install-clips: モノラル保持 / stream-clips: ステレオ強制) に整形する。\n' +
+            'Deploy せずファイルだけ整形したい時に使う。'
+          }
+        >Save Folder</button>
 
         {/* Per-device deploy progress sits to the *right* of the
             Deploy button — the user's eye stays on the same row.
@@ -1747,14 +2062,17 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
         <div className="kit-deploy-progress-inline">
           {Object.keys(progressByIp).length === 0 ? (
             <span className="kit-export-info muted">
+              {/* Save status (saving / saved / error) takes precedence
+                  over the passive deploy-readiness hints — explicit Save
+                  Folder works without devices, so a "デバイスが見つかりません"
+                  message would lie about what's actually happening. */}
               {!outRoot
                 ? 'Library または Kit Folder を選択してください'
-                : !managerConnected ? 'Helper offline'
-                : devices.length === 0 ? 'デバイスが見つかりません'
-                // autoSaveLabel covers the kit-side state ("クリップを追加",
-                // "保存中", etc). When idle and everything is OK it falls
-                // through to a passive "device count" hint.
-                : autoSaveLabel || `${devices.length} device(s) ready`}
+                : saveStatusLabel
+                  ? saveStatusLabel
+                  : !managerConnected ? 'Helper offline'
+                  : devices.length === 0 ? 'デバイスが見つかりません'
+                  : `${devices.length} device(s) ready`}
             </span>
           ) : (
             Object.entries(progressByIp).map(([ip, st]) => (

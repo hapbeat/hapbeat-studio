@@ -358,6 +358,14 @@
   font-family: var(--font-ui);
 }
 
+/* Firmware build commit SHA (7-char) shown next to fw in the Manage
+ * tab header. Same monospace face, slightly dimmer to indicate it's
+ * a secondary disambiguator, not the primary version. */
+.device-detail-build-sha {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
 .selected-pill {
   background: var(--accent);
   color: #fff;

@@ -65,6 +65,29 @@ export async function updateClipMeta(id: string, updates: Partial<LibraryClip>):
   await db.put(STORE_CLIPS, updated)
 }
 
+// ---- Kit-event audio ----
+// Kit events own their audio independently of the library (the
+// `clipId → library` dependency was removed so library archive
+// doesn't break kit events). The blob lives in the same STORE_AUDIO
+// table but is keyed by `event.id` rather than `clip.id`. IDs are
+// globally unique strings (`generateId()`) so the two namespaces
+// share the store without collision.
+
+export async function saveKitEventAudio(eventId: string, audioBlob: Blob): Promise<void> {
+  const db = await getDb()
+  await db.put(STORE_AUDIO, audioBlob, eventId)
+}
+
+export async function loadKitEventAudio(eventId: string): Promise<Blob | undefined> {
+  const db = await getDb()
+  return db.get(STORE_AUDIO, eventId)
+}
+
+export async function deleteKitEventAudio(eventId: string): Promise<void> {
+  const db = await getDb()
+  await db.delete(STORE_AUDIO, eventId)
+}
+
 // ---- Kits ----
 
 export async function saveKit(kit: KitDefinition): Promise<void> {

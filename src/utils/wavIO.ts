@@ -93,6 +93,44 @@ export async function encodeWavBlob(
 }
 
 /**
+ * Encode as **stereo** WAV at `targetSampleRate`, upmixing mono to
+ * stereo by duplicating the single channel into both L and R (this
+ * is the WHATWG / Web Audio default downmix in reverse: identical L/R
+ * gives a centred image, no width inflation).
+ *
+ * Used by kitExporter for `stream-clips/` outputs — the SDK-side
+ * streaming pipeline expects a fixed stereo 16 kHz format so the
+ * receiver can dispatch each side to a separate haptic channel.
+ * Channels beyond L/R (5.1 surround, etc.) are silently dropped to
+ * the first two; this matches the firmware / SDK assumptions.
+ */
+export async function encodeStereoWavBlob(
+  buffer: AudioBuffer,
+  targetSampleRate: SampleRate,
+): Promise<Blob> {
+  let workBuffer = buffer
+  if (buffer.sampleRate !== targetSampleRate) {
+    workBuffer = await resampleBuffer(buffer, targetSampleRate)
+  }
+
+  let leftData: Float32Array
+  let rightData: Float32Array
+  if (workBuffer.numberOfChannels === 1) {
+    const mono = workBuffer.getChannelData(0)
+    leftData = mono
+    rightData = mono
+  } else {
+    leftData = workBuffer.getChannelData(0)
+    rightData = workBuffer.getChannelData(1)
+  }
+
+  const int16Left = float32ToInt16(leftData)
+  const int16Right = float32ToInt16(rightData)
+  const wavArrayBuffer = writeWavFile([int16Left, int16Right], targetSampleRate, 2)
+  return new Blob([wavArrayBuffer], { type: 'audio/wav' })
+}
+
+/**
  * Encode as mono WAV, converting stereo to mono if needed.
  */
 export async function encodeMonoWavBlob(

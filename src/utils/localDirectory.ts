@@ -182,8 +182,54 @@ async function ensureSubdir(
 
 const AUDIO_EXT = /\.(wav|mp3|ogg|flac|aac|m4a)$/i
 
-/** Directory names under clips/ that are hidden from the UI. */
-const HIDDEN_CLIP_DIRS = new Set(['archive'])
+/**
+ * Directory name under `clips/` for the library UI's "recycle bin" —
+ * archived clips live here, hidden from the visible list but
+ * recoverable from OS Explorer.
+ *
+ * We tried `_archive~` originally (tilde suffix = Unity asset-import
+ * ignore convention) but Chrome's File System Access API rejects
+ * names ending in `~` with "TypeError: Name is not allowed". Until
+ * the browser side relaxes (or a different cross-engine sigil emerges),
+ * we use plain `_archive`:
+ *   - `_` prefix: sorts to top in OS Explorer, signals "managed by
+ *     Studio, don't edit".
+ *   - No Unity ignore protection — if users point their workdir at a
+ *     Unity Assets/ tree, archived WAVs will get re-imported as
+ *     AudioClip assets. Mitigation lives in docs ("add `_archive` to
+ *     your `.gitignore` or place the workdir outside Assets/").
+ *
+ * Legacy `archive` (the original pre-rename name) is still recognised
+ * via HIDDEN_CLIP_DIRS so kits authored before the rename keep their
+ * archived clips invisible; `migrateLegacyArchiveFolders` also moves
+ * its contents into `_archive/` on startup.
+ */
+export const ARCHIVE_CLIP_DIR = '_archive'
+const LEGACY_ARCHIVE_CLIP_DIR = 'archive'
+const HIDDEN_CLIP_DIRS = new Set([ARCHIVE_CLIP_DIR, LEGACY_ARCHIVE_CLIP_DIR])
+
+/**
+ * Folder names that Studio considers "managed internal — don't show
+ * in any UI" regardless of where they appear (library scan, kit scan,
+ * Devices > Streaming test browser, …). Used by `isHiddenStudioDir()`
+ * so all browse paths skip the same set instead of each maintaining
+ * its own list. Covers:
+ *   - `_archive`      → canonical kit / clip archive
+ *   - `_archive~`     → leftover from the short-lived tilde experiment
+ *                       (browser blocks new creation, but the folder
+ *                       can still exist if a user copied it manually)
+ *   - `archive`       → legacy clip-archive name (pre-rename)
+ */
+const STUDIO_HIDDEN_DIRS = new Set(['_archive', '_archive~', 'archive'])
+
+/**
+ * Whether a folder name is one Studio manages internally and should
+ * hide from any user-facing list. Folder browsers (Streaming test,
+ * picker UIs) call this before adding an entry.
+ */
+export function isHiddenStudioDir(name: string): boolean {
+  return STUDIO_HIDDEN_DIRS.has(name)
+}
 
 /**
  * Recursively lists all audio files under clips/, skipping hidden folders
@@ -338,12 +384,17 @@ export async function archiveClipFile(
   root: FileSystemDirectoryHandle,
   relPath: string,
 ): Promise<string | null> {
+  console.info('[archiveClipFile] start', { root: root.name, relPath })
   const file = await readClipFile(root, relPath)
-  if (!file) return null
+  if (!file) {
+    console.warn('[archiveClipFile] source file not found at clips/' + relPath)
+    return null
+  }
   const blob = new Blob([await file.arrayBuffer()], { type: 'audio/wav' })
 
   const basename = relPath.split('/').pop() ?? relPath
-  const archiveDir = await (await ensureSubdir(root, 'clips')).getDirectoryHandle('archive', { create: true })
+  const archiveDir = await (await ensureSubdir(root, 'clips')).getDirectoryHandle(ARCHIVE_CLIP_DIR, { create: true })
+  console.info('[archiveClipFile] archive dir resolved:', `clips/${ARCHIVE_CLIP_DIR}/`)
 
   // Pick a non-colliding destination name.
   let destName = basename
@@ -365,9 +416,11 @@ export async function archiveClipFile(
   const writable = await fh.createWritable()
   await writable.write(blob)
   await writable.close()
+  console.info('[archiveClipFile] wrote', `clips/${ARCHIVE_CLIP_DIR}/${destName}`, blob.size, 'bytes')
 
   await deleteClipFile(root, relPath)
-  return `archive/${destName}`
+  console.info('[archiveClipFile] deleted', `clips/${relPath}`)
+  return `${ARCHIVE_CLIP_DIR}/${destName}`
 }
 
 // ---- Kit folder operations ----
@@ -402,8 +455,18 @@ export async function writeKitFolder(
  * `<root>/_archive/<kitName>/` instead of deleting it, so a true
  * delete still requires the user to act in their OS file explorer.
  *
- * Leading underscore keeps it sorted ahead of normal kits and signals
- * "managed by Studio, do not edit". `scanKitOutputFolder` skips it.
+ * Naming:
+ *  - `_` prefix: sorts it ahead of normal kits in OS Explorer and signals
+ *    "managed by Studio, do not edit".
+ *  - No tilde suffix: Chrome's File System Access API rejects directory
+ *    names ending in `~` ("TypeError: Name is not allowed"). Unity's
+ *    asset-import ignore convention requires trailing tilde, so we
+ *    can't satisfy both — browser writes win because they're a hard
+ *    blocker. Users pointing their workdir at a Unity project should
+ *    add `_archive` to their `.gitignore` (or place the workdir
+ *    outside the Assets/ tree).
+ *
+ * `scanKitOutputFolder` skips this folder.
  */
 export const ARCHIVE_KIT_DIR = '_archive'
 
@@ -551,10 +614,40 @@ export interface DiscoveredKit {
 }
 
 /**
+ * Locate the kit manifest file inside *kitFolder*.
+ *
+ * Convention (2026-05-17): kits write `<folderName>-manifest.json`
+ * so multiple kits stay identifiable in OS Explorer. We try the
+ * preferred name first, then fall back to any file named
+ * `*manifest*.json` (covers legacy `manifest.json` and any custom
+ * suffix). Returns null if no manifest-like file exists.
+ */
+export async function findKitManifestHandle(
+  kitFolder: FileSystemDirectoryHandle,
+): Promise<FileSystemFileHandle | null> {
+  // 1) Preferred: `<folderName>-manifest.json` exact match.
+  try {
+    return await kitFolder.getFileHandle(`${kitFolder.name}-manifest.json`)
+  } catch { /* fall through */ }
+  // 2) Fallback: scan for any `*manifest*.json`. Returns the first
+  //    match — kits shouldn't ship more than one manifest per folder.
+  try {
+    for await (const child of kitFolder.values()) {
+      if (child.kind !== 'file') continue
+      const n = child.name.toLowerCase()
+      if (n.endsWith('.json') && n.includes('manifest')) {
+        return child as FileSystemFileHandle
+      }
+    }
+  } catch { /* directory iteration failed */ }
+  return null
+}
+
+/**
  * Scan `root` for immediate subfolders that look like an exported Hapbeat Kit
- * (= contain a `manifest.json`). For each one, parse the manifest and load
- * every wav under `clips/` and `stream-clips/` so the caller can register
- * them into the Studio library.
+ * (= contain a `<name>-manifest.json` or any `*manifest*.json` fallback). For
+ * each one, parse the manifest and load every wav under `install-clips/` and
+ * `stream-clips/` so the caller can register them into the Studio library.
  *
  * 存在しない / 壊れた manifest は黙ってスキップする。
  */
@@ -562,19 +655,37 @@ export async function scanKitOutputFolder(
   root: FileSystemDirectoryHandle,
 ): Promise<DiscoveredKit[]> {
   const out: DiscoveredKit[] = []
+  // Track folders we touched but couldn't claim as a kit so the caller
+  // (libraryStore) can console.warn them. Helps diagnose the case where
+  // a user expects an old kit to load but the manifest file got renamed
+  // or removed externally.
+  const skipped: { folder: string; reason: string }[] = []
   for await (const entry of root.values()) {
     if (entry.kind !== 'directory') continue
-    // _archive/ holds kits the user "deleted" from the UI. They stay on
-    // disk for manual recovery but must not show up in the Studio list.
-    if (entry.name === ARCHIVE_KIT_DIR) continue
+    // _archive/ holds kits the user "deleted" from the UI. They stay
+    // on disk for manual recovery but must not show up in the Studio
+    // list. (We also skip `_archive~` so any folder accidentally
+    // created with that name by an earlier tilde-suffix attempt
+    // doesn't appear as a kit.)
+    if (entry.name === ARCHIVE_KIT_DIR || entry.name === '_archive~') continue
+    // Also skip the library's own `clips/` workdir — it isn't a kit.
+    if (entry.name === 'clips') continue
     const kitFolder = entry as FileSystemDirectoryHandle
     let manifestJson: unknown
+    const mf = await findKitManifestHandle(kitFolder)
+    if (!mf) {
+      skipped.push({ folder: kitFolder.name, reason: 'no manifest file' })
+      continue
+    }
     try {
-      const mf = await kitFolder.getFileHandle('manifest.json')
       const text = await (await mf.getFile()).text()
       manifestJson = JSON.parse(text)
-    } catch {
-      // manifest.json が無い / parse 失敗 → この folder は Hapbeat kit ではない
+    } catch (err) {
+      // manifest 読込失敗 → この folder は Hapbeat kit ではない
+      skipped.push({
+        folder: kitFolder.name,
+        reason: `manifest parse failed (${err instanceof Error ? err.message : 'unknown'})`,
+      })
       continue
     }
     const clipFiles = new Map<string, File>()
@@ -593,7 +704,120 @@ export async function scanKitOutputFolder(
     }
     out.push({ folderName: kitFolder.name, manifestJson, clipFiles })
   }
+  if (skipped.length > 0) {
+    console.warn(
+      '[scanKitOutputFolder] skipped',
+      skipped.length,
+      'sub-folder(s) under',
+      root.name,
+      '(no Hapbeat kit recognised). Details:',
+      skipped,
+      '— a Hapbeat kit folder must contain `<folder-name>-manifest.json` or any `*manifest*.json`.',
+    )
+  }
   return out
+}
+
+// ---- Legacy archive folder migration ----
+//
+// History:
+//   - Clip archive used to live at `clips/archive/`; renamed to
+//     `clips/_archive/` for naming consistency with the kit archive.
+//   - Kit archive has always been at `_archive/` (unchanged).
+//   - A brief attempt at `_archive~/` (tilde suffix, Unity ignore
+//     convention) was reverted because Chrome's File System Access
+//     API rejects trailing `~` in directory names. Any workdir that
+//     was opened during that window may have a `_archive~/` folder
+//     created OUTSIDE of Studio (e.g., manual file move from OS), so
+//     we sweep it into the canonical `_archive/` on the next run.
+//
+// Best-effort: failures log a warning but never abort startup. On
+// collision the source is suffixed with `_2`, `_3`, … to make room.
+
+async function moveAllEntries(
+  src: FileSystemDirectoryHandle,
+  dst: FileSystemDirectoryHandle,
+): Promise<void> {
+  for await (const entry of src.values()) {
+    if (entry.kind === 'file') {
+      const srcFile = await (entry as FileSystemFileHandle).getFile()
+      // Pick a non-colliding destination name.
+      const existing = new Set<string>()
+      for await (const e of dst.values()) existing.add(e.name)
+      let destName = entry.name
+      if (existing.has(destName)) {
+        const dot = entry.name.lastIndexOf('.')
+        const stem = dot > 0 ? entry.name.slice(0, dot) : entry.name
+        const ext = dot > 0 ? entry.name.slice(dot) : ''
+        for (let i = 2; i < 10000; i++) {
+          const candidate = `${stem}_${i}${ext}`
+          if (!existing.has(candidate)) { destName = candidate; break }
+        }
+      }
+      const dstFile = await dst.getFileHandle(destName, { create: true })
+      const writable = await dstFile.createWritable()
+      await writable.write(await srcFile.arrayBuffer())
+      await writable.close()
+      try { await src.removeEntry(entry.name) } catch { /* leave behind on conflict */ }
+    } else if (entry.kind === 'directory') {
+      // Recurse — kit subfolders contain install-clips/ / stream-clips/.
+      const srcSub = entry as FileSystemDirectoryHandle
+      const dstSub = await dst.getDirectoryHandle(entry.name, { create: true })
+      await moveAllEntries(srcSub, dstSub)
+      try { await src.removeEntry(entry.name, { recursive: true }) } catch { /* ignore */ }
+    }
+  }
+}
+
+/**
+ * Sweep legacy / aborted-rename archive locations into the canonical
+ * `_archive/` directories. Call this once per session right after the
+ * workdir handle is restored / picked. Safe to call repeatedly —
+ * when no legacy folder exists (most users) it's a no-op.
+ *
+ * Migrations:
+ *   - `<workdir>/clips/archive/`  → `<workdir>/clips/_archive/`
+ *   - `<workdir>/_archive~/`      → `<workdir>/_archive/`           (aborted tilde experiment)
+ *   - `<workdir>/clips/_archive~/` → `<workdir>/clips/_archive/`    (same)
+ *
+ * The `_archive~` sweep can't be triggered by Studio itself (the
+ * File System Access API would reject the name on `getDirectoryHandle`)
+ * but the folder may exist on disk if the user manually copied a
+ * folder from elsewhere with that name. The sweep tries to read it
+ * via `getDirectoryHandle` — if the read also fails, we just leave
+ * the folder in place.
+ */
+export async function migrateLegacyArchiveFolders(
+  workDirHandle: FileSystemDirectoryHandle,
+): Promise<void> {
+  const sweep = async (
+    parent: FileSystemDirectoryHandle,
+    fromName: string,
+    toName: string,
+    label: string,
+  ) => {
+    try {
+      const src = await parent.getDirectoryHandle(fromName, { create: false })
+      const dst = await parent.getDirectoryHandle(toName, { create: true })
+      await moveAllEntries(src, dst)
+      try { await parent.removeEntry(fromName, { recursive: true }) } catch { /* ignore */ }
+      console.info(`[archive-migration] ${label} done`)
+    } catch {
+      // Source doesn't exist (typical case) or browser rejected the
+      // name (e.g. `_archive~`) — silent no-op.
+    }
+  }
+
+  // Kit archive at workdir root — only the tilde sweep is relevant
+  // (the canonical name `_archive` was unchanged across versions).
+  await sweep(workDirHandle, '_archive~', ARCHIVE_KIT_DIR, '_archive~/ → _archive/ (kit)')
+
+  // Clip archive under clips/.
+  try {
+    const clipsDir = await workDirHandle.getDirectoryHandle('clips', { create: false })
+    await sweep(clipsDir, LEGACY_ARCHIVE_CLIP_DIR, ARCHIVE_CLIP_DIR, 'clips/archive/ → clips/_archive/')
+    await sweep(clipsDir, '_archive~', ARCHIVE_CLIP_DIR, 'clips/_archive~/ → clips/_archive/')
+  } catch { /* no clips/ dir yet */ }
 }
 
 // ---- Metadata JSON ----

@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
+import { checkHelperCompat, type HelperCompat } from '@/config/helperCompat'
 
 const HELPER_WS_URL = 'ws://localhost:7703'
 const RECONNECT_INTERVAL_BASE = 2000
@@ -18,6 +19,14 @@ interface HelperConnectionValue {
   /** Helper version (e.g. "0.2.3") sent by helper on connect. null until
    *  the `helper_hello` message arrives. */
   helperVersion: string | null
+  /**
+   * Compatibility verdict from comparing `helperVersion` against
+   * `MIN_HELPER_VERSION` (see `config/helperCompat.ts`).
+   * - `unknown` until `helper_hello` lands
+   * - `ok` for current Helpers
+   * - `outdated` when an upgrade is needed (banner + upgrade hint UI)
+   */
+  helperCompat: HelperCompat
   devices: DeviceInfo[]
   lastMessage: ManagerMessage | null
   send: (message: ManagerMessage) => void
@@ -163,8 +172,10 @@ export function HelperConnectionProvider({ children }: { children: ReactNode }) 
     }
   }, [connect, clearReconnectTimer])
 
+  const helperCompat = checkHelperCompat(helperVersion)
+
   return (
-    <HelperConnectionContext.Provider value={{ isConnected, helperVersion, devices, lastMessage, send, injectMessage }}>
+    <HelperConnectionContext.Provider value={{ isConnected, helperVersion, helperCompat, devices, lastMessage, send, injectMessage }}>
       {children}
     </HelperConnectionContext.Provider>
   )

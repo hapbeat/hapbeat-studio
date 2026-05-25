@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { MIN_HELPER_VERSION, type HelperCompat } from '@/config/helperCompat'
 import './HelperOnboardingModal.css'
 
 interface HelperManageModalProps {
   open: boolean
   onClose: () => void
   helperVersion: string | null
+  /** Optional — when omitted the modal hides the upgrade-required section.
+   *  Treat absent as 'unknown' so older callers keep working. */
+  helperCompat?: HelperCompat
 }
 
 function CopyableCommand({ cmd }: { cmd: string }) {
@@ -34,7 +38,8 @@ function CopyableCommand({ cmd }: { cmd: string }) {
   )
 }
 
-export function HelperManageModal({ open, onClose, helperVersion }: HelperManageModalProps) {
+export function HelperManageModal({ open, onClose, helperVersion, helperCompat }: HelperManageModalProps) {
+  const outdated = helperCompat === 'outdated'
   const closeRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -60,8 +65,10 @@ export function HelperManageModal({ open, onClose, helperVersion }: HelperManage
       >
         <div className="helper-modal-header">
           <span className="helper-modal-title">
-            <span className="helper-modal-dot connected" />
-            Helper 接続中{helperVersion ? ` (v${helperVersion})` : ''}
+            <span className={`helper-modal-dot ${outdated ? 'outdated' : 'connected'}`} />
+            {outdated
+              ? `Helper 要更新${helperVersion ? ` (v${helperVersion} → v${MIN_HELPER_VERSION}+)` : ''}`
+              : `Helper 接続中${helperVersion ? ` (v${helperVersion})` : ''}`}
           </span>
           <button
             ref={closeRef}
@@ -75,6 +82,33 @@ export function HelperManageModal({ open, onClose, helperVersion }: HelperManage
         </div>
 
         <div className="helper-modal-body">
+          {outdated && (
+            <section className="helper-modal-section helper-modal-section--warning">
+              <h3 className="helper-modal-section-title">⚠ Helper の更新が必要です</h3>
+              <p className="helper-modal-section-desc">
+                現在の Helper は <code>v{helperVersion ?? '?'}</code> です。
+                Studio はバージョン <code>v{MIN_HELPER_VERSION}</code> 以上を必要としています
+                (Kit deploy / device 情報取得などで破壊的な変更があるため)。
+                以下の手順で更新してください:
+              </p>
+              <p className="helper-modal-section-desc">
+                <strong>1. 動作中の daemon を停止:</strong>
+              </p>
+              <CopyableCommand cmd="hapbeat-helper stop" />
+              <p className="helper-modal-section-desc">
+                <strong>2. 最新版へ更新:</strong>
+              </p>
+              <CopyableCommand cmd="pipx upgrade hapbeat-helper" />
+              <p className="helper-modal-section-desc">
+                <strong>3. 再起動</strong> (Task Scheduler / launchd 経由なら自動、手動なら下記):
+              </p>
+              <CopyableCommand cmd="hapbeat-helper start" />
+              <p className="helper-modal-section-desc">
+                完了後この modal を閉じて、Helper pill が緑色 (Helper 接続中) になれば OK。
+              </p>
+            </section>
+          )}
+
           <p className="helper-modal-desc">
             <code>hapbeat-helper</code> はバックグラウンドで動作中です。
             停止・自動起動の解除・アンインストールはターミナルから以下のコマンドを実行してください。

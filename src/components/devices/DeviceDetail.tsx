@@ -3,6 +3,7 @@ import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore, type WifiProfile } from '@/stores/deviceStore'
 import { ApModeSection } from './ApModeSection'
 import { useLibraryStore } from '@/stores/libraryStore'
+import { KIT_EVENT_MODE_SUFFIX, type KitDefinition, type KitEvent } from '@/types/library'
 import { useLogStore } from '@/stores/logStore'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import { IdentityForm } from './IdentityForm'
@@ -139,6 +140,7 @@ export function DeviceDetail() {
         name: p.name as string | undefined,
         mac: p.mac as string | undefined,
         fw: p.fw as string | undefined,
+        build: p.build as string | undefined,
         group: p.group as number | undefined,
         wifi_connected: p.wifi_connected as boolean | undefined,
         board: p.board as string | undefined,
@@ -266,14 +268,39 @@ export function DeviceDetail() {
     let intensity = 1.0
     let kitId: string | null = null
     let mode: string | null = null
-    for (const k of kits) {
-      const ev = k.events.find((e) => e.eventId === eventId)
-      if (ev && typeof ev.intensity === 'number') {
-        intensity = ev.intensity
-        kitId = k.id
-        mode = ev.mode ?? 'command'
-        break
+    // Multi-mode events emit manifest keys like `<base>.fire` / `<base>.clip`,
+    // but the Studio KitEvent stores the base eventId. Try the exact match
+    // first (single-mode); fall back to stripping a known suffix to find the
+    // base event so intensity / mode resolve correctly for FIRE+CLIP rows.
+    const stripSuffix = (id: string): { base: string; suffixMode: string | null } => {
+      for (const m of ['command', 'stream_clip', 'stream_source'] as const) {
+        const tail = `.${KIT_EVENT_MODE_SUFFIX[m]}`
+        if (id.endsWith(tail)) return { base: id.slice(0, -tail.length), suffixMode: m }
       }
+      return { base: id, suffixMode: null }
+    }
+    const tryFind = (matchId: string): { ev: KitEvent; k: KitDefinition } | null => {
+      for (const k of kits) {
+        const ev = k.events.find((e) => e.eventId === matchId)
+        if (ev && typeof ev.intensity === 'number') return { ev, k }
+      }
+      return null
+    }
+    const exact = tryFind(eventId)
+    const stripped = exact ? null : (() => {
+      const { base, suffixMode } = stripSuffix(eventId)
+      const hit = base !== eventId ? tryFind(base) : null
+      return hit ? { ...hit, suffixMode } : null
+    })()
+    const hit = exact ?? stripped
+    if (hit) {
+      intensity = hit.ev.intensity
+      kitId = hit.k.id
+      // For multi-mode events report which transport this play corresponds
+      // to (taken from the suffix on the device-supplied eventId). For
+      // single-mode events fall back to the event's only mode.
+      const stripHit = stripped as { suffixMode: string | null } | null
+      mode = stripHit?.suffixMode ?? hit.ev.modes?.[0] ?? 'command'
     }
     const payload = { event_id: eventId, target: '', gain: intensity }
     send({ type: 'preview_event', payload })
@@ -343,6 +370,7 @@ export function DeviceDetail() {
         name: masterInfo.name,
         mac: masterInfo.mac,
         fw: masterInfo.fw,
+        build: masterInfo.build,
         group: masterInfo.group,
         wifi_connected: masterInfo.wifi_connected,
       } : undefined)
@@ -375,7 +403,14 @@ export function DeviceDetail() {
             <span className="device-detail-pill ap-mode-badge">AP MODE</span>
           )}
           {device.ipAddress}
-          {device.firmwareVersion && <> · fw {device.firmwareVersion}</>}
+          {device.firmwareVersion && (
+            <>
+              {' '}· fw {device.firmwareVersion}
+              {cachedInfo?.build && (
+                <span className="device-detail-build-sha"> ({cachedInfo.build})</span>
+              )}
+            </>
+          )}
           {device.address && <> · {device.address}</>}
           {!device.online && <> · offline</>}
         </div>

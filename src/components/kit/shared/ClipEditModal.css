@@ -105,3 +105,42 @@
   cursor: not-allowed;
   opacity: 0.5;
 }
+
+/* Read-only Event ID surface inside the Kit event edit modal —
+ * shown as a `<code>` block so users can copy the value if needed
+ * but can't edit it directly (it's derived from kit × clip name). */
+.kit-event-edit-eventid {
+  display: block;
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+/* Name ↔ Note swap button — small inline action next to the Name
+ * label so users can toggle which string is the "primary" display
+ * name without losing either. Disabled when there's nothing to
+ * swap (note is empty). */
+.clip-edit-swap-btn {
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 11px;
+  background: rgba(124, 92, 191, 0.18);
+  color: var(--accent-light);
+  border: 1px solid rgba(124, 92, 191, 0.45);
+  border-radius: 3px;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background 0.12s, opacity 0.12s;
+}
+.clip-edit-swap-btn:hover:not(:disabled) {
+  background: rgba(124, 92, 191, 0.32);
+}
+.clip-edit-swap-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}

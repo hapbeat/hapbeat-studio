@@ -63,6 +63,11 @@ export async function streamClip(
 ): Promise<void> {
   const signal = options?.signal
   const targetRate = options?.sampleRate ?? 16000
+  // Hapbeat SDK の stream session は単一 format で固定 (rate+channels 共通)。
+  // mono / stereo が混在する Kit を deploy / 同時 stream すると session mismatch で
+  // reject されるので、Studio で **2ch に upmix して送る** ことで衝突回避する。
+  // mono ソースは Web Audio の up-mix ルールで L=R duplicate される。
+  const targetChannels = 2
   const intensity = options?.intensity ?? 1.0
   const control = options?.control
 
@@ -71,8 +76,8 @@ export async function streamClip(
   const ctx = new OfflineAudioContext(1, 1, 44100)
   const decoded = await ctx.decodeAudioData(arrayBuffer)
 
-  // Resample to target rate, preserving original channel count
-  const resampled = await resample(decoded, targetRate)
+  // Resample to target rate AND force channels to 2 (stereo) で session 統一。
+  const resampled = await resample(decoded, targetRate, targetChannels)
   const channels = resampled.numberOfChannels
   const pcm16 = audioBufferToPcm16Interleaved(resampled)
 
@@ -199,9 +204,17 @@ function audioBufferToPcm16Interleaved(buffer: AudioBuffer): Int16Array {
   return pcm
 }
 
-async function resample(buffer: AudioBuffer, targetRate: number): Promise<AudioBuffer> {
+async function resample(
+  buffer: AudioBuffer,
+  targetRate: number,
+  targetChannels?: number,
+): Promise<AudioBuffer> {
   const length = Math.ceil(buffer.length * targetRate / buffer.sampleRate)
-  const offCtx = new OfflineAudioContext(buffer.numberOfChannels, length, targetRate)
+  // targetChannels が指定されていれば up/down-mix される。Web Audio の標準ルール:
+  //   mono → stereo: L = R = mono サンプル
+  //   stereo → mono: L+R 平均
+  const channels = targetChannels ?? buffer.numberOfChannels
+  const offCtx = new OfflineAudioContext(channels, length, targetRate)
   const src = offCtx.createBufferSource()
   src.buffer = buffer
   src.connect(offCtx.destination)

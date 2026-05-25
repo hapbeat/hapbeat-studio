@@ -9,9 +9,21 @@
    uses two visible rows by default (three with details shown).
    ============================================================ */
 .clip-card {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  /* Three-column grid:
+   *   col 1 = variable content (play+name in row 1, intensity in row 2)
+   *   col 2 = primary action track (Swap + first action button)
+   *   col 3 = secondary action track (Close + second action button)
+   * Both action cols are `auto`-sized so each grows to the widest
+   * item in that column. Buttons placed in those tracks STRETCH to
+   * fill the cell — when Swap is narrower than +Kit, Swap visually
+   * grows to match +Kit; when × is narrower than Edit, × grows to
+   * match Edit. All four buttons line up at left/right edges.
+   * Details row spans all three cols via `grid-column: 1 / -1`. */
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  grid-auto-rows: auto;
+  column-gap: 6px;
+  row-gap: 4px;
   padding: 8px 10px;
   margin: 4px 0;
   border-radius: var(--radius);
@@ -20,11 +32,51 @@
   border-top-width: 2px;
   position: relative;
   min-width: 0;
+  align-items: center;
   /* OS-explorer-style affordance: the whole row is the drag source.
      Default cursor stays normal; while the user is mid-drag the
      browser flips to grabbing automatically. */
   cursor: default;
   transition: background 0.12s, border-color 0.12s;
+}
+
+/* Left content cells. */
+.clip-card-header-left {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.clip-card-controls-left {
+  grid-column: 1;
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* Primary / secondary action tracks. Buttons in these classes stretch
+ * to the full track width (default `justify-self: stretch`) so the
+ * track sizes to the wider of (row-1 button, row-2 button) and both
+ * buttons visually match. This is what aligns Swap with +Kit and ×
+ * with Edit. */
+.clip-card-col-primary {
+  grid-column: 2;
+}
+.clip-card-col-secondary {
+  grid-column: 3;
+}
+/* Row assignment is implicit by document order — Swap / × come
+ * first (row 1), then action buttons (row 2). Explicit grid-row
+ * defends against future markup reordering and `:empty` cells. */
+.clip-card-swap-btn { grid-row: 1; }
+.clip-card-close-inline { grid-row: 1; }
+.clip-card-action-btn { grid-row: 2; }
+
+.clip-card-details {
+  grid-column: 1 / -1;
 }
 .clip-card[draggable="true"]:active { cursor: grabbing; }
 .clip-card:hover {
@@ -37,6 +89,82 @@
   box-shadow: 0 0 0 1px var(--accent) inset;
 }
 .clip-card.drag-over-indicator { border-top-color: var(--accent); }
+
+/* Inline archive button — sits in the header row next to Swap so the
+ * two actions share one visual line at the same height. Replaces the
+ * earlier top-right absolute corner; matches Swap's height/border so
+ * the pair reads as a unit. Subtle by default, red on hover so an
+ * accidental click is easy to spot. */
+.clip-card-close-inline {
+  /* width/min-width omitted on purpose — the button stretches to the
+   * grid track set by `clip-card-col-secondary`, which takes the
+   * width of the wider of (× row 1, Edit row 2). When library shows
+   * "Edit" below, × visually grows to match Edit's width. */
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  background: rgba(244, 67, 54, 0.06);
+  color: var(--text-secondary);
+  border: 1px solid rgba(244, 67, 54, 0.20);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0.65;
+  transition: background 0.12s, color 0.12s, opacity 0.12s, border-color 0.12s;
+}
+.clip-card-close-inline:hover {
+  opacity: 1;
+  background: rgba(244, 67, 54, 0.25);
+  color: var(--error, #e05252);
+  border-color: rgba(244, 67, 54, 0.55);
+}
+
+/* In-card Name ↔ Note swap button. Anchored at the RIGHT end of the
+ * header row (after the flexible spacer, before the event-id badge)
+ * so its position doesn't shift with the name's width — easier to
+ * develop muscle memory than a name-adjacent button that moves
+ * around as the user renames clips.
+ *
+ * Wider hit area than the original tight square so users with
+ * imprecise pointing devices (trackpad / touch) land it reliably.
+ * Quiet by default; accent colour brightens on hover.
+ */
+.clip-card-swap-btn {
+  /* min-width: 58px provides a baseline for cards that have no row-2
+   * primary action (= no Library `+ Kit` to stretch the column).
+   * When +Kit is present, the col auto-grows past this. */
+  min-width: 58px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 8px;
+  background: rgba(124, 92, 191, 0.10);
+  color: var(--text-secondary);
+  border: 1px solid rgba(124, 92, 191, 0.30);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  line-height: 1;
+  opacity: 0.75;
+  transition: background 0.12s, color 0.12s, opacity 0.12s, border-color 0.12s;
+}
+.clip-card-swap-btn:hover:not(:disabled) {
+  opacity: 1;
+  color: var(--accent-light);
+  background: rgba(124, 92, 191, 0.25);
+  border-color: rgba(124, 92, 191, 0.55);
+}
+.clip-card-swap-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
 
 /* ---- Row 1: header (handle / play / name / event-id) ---- */
 .clip-card-header {
@@ -224,6 +352,25 @@
   max-width: 80px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Note text on the details row — right-aligned via `margin-left: auto`
+ * so the original filename / author memo shows up next to the wiper
+ * badge without a hover. Italic + muted so it reads as "annotation"
+ * rather than primary data; truncates with ellipsis when wide. */
+.clip-card-details-note {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-style: italic;
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 0 1 auto;
+  max-width: 50%;
 }
 /* When details row is hidden but Vol needs to show, render a
    minimal row with just the badge right-aligned. */

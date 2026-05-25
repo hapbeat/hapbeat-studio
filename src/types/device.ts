@@ -93,9 +93,15 @@ export const BAND_WL_SPEC: DeviceHardwareSpec = {
   name: 'Band WL',
   description: '長方形筐体・ボタン3個',
   buttons: [
-    { id: 'btn_l', label: '左', x: 12, y: 10 },
-    { id: 'btn_c', label: '中', x: 50, y: 10 },
-    { id: 'btn_r', label: '右', x: 88, y: 10 },
+    // Visual numbering (left→right): 1, 2, 3 — matches Duo WL label
+    // convention (`<num>(<position>)`) so the same UI mental model
+    // applies across models. The number is a UI-only visual aid;
+    // firmware addresses these buttons by id (`btn_l`/`btn_c`/`btn_r`),
+    // and the internal `idx` ordering is independent (see header
+    // comment: btn_r=0, btn_l=1, btn_c=2).
+    { id: 'btn_l', label: '1(左)', x: 12, y: 10 },
+    { id: 'btn_c', label: '2(中)', x: 50, y: 10 },
+    { id: 'btn_r', label: '3(右)', x: 88, y: 10 },
   ],
   led: { x: 100, y: 65 },
   volumeIcon: { x: 100, y: 85 },

@@ -31,6 +31,14 @@ export interface ClipCardProps {
   /** Global toggle (see libraryStore.showClipDetails) */
   showDetails?: boolean
 
+  /**
+   * Optional clip/event note to surface on the details row. Rendered
+   * right-aligned (between tags and the wiper badge) so the user can
+   * see the original filename / author memo at a glance without
+   * hovering. Truncates with ellipsis when long.
+   */
+  note?: string
+
   /** Amp (0–1). Pass null to hide the control. */
   intensity: number | null
   onIntensityChange?: (v: number) => void
@@ -83,6 +91,37 @@ export interface ClipCardProps {
    * pass this; kit-side cards do not (kits should not mutate clips).
    */
   onRenameCommit?: (next: string) => void
+
+  /**
+   * Optional close (archive) handler. When set, renders a small "×"
+   * button anchored to the card's top-right corner. Library cards use
+   * this to move the underlying clip into clips/archive/ — same UX as
+   * the Kit list's per-row close button. Kit-event rows do NOT pass
+   * this prop because they own a wider wrap with their own delete
+   * corner that lives outside the ClipCard (positioned past the side
+   * rail). Click-through is stopped so the card's onSelect doesn't
+   * fire when the user really meant to archive.
+   */
+  onClose?: () => void
+  /** Tooltip for the close-corner button (defaults to "Archive"). */
+  closeTitle?: string
+
+  /**
+   * Optional Name ↔ Note swap handler. Library rows wire this so the
+   * user can flip the displayed name with a single in-card click (e.g.
+   * `z1_pin_hit` ↔ `sin_100hz.wav`) without opening the edit modal.
+   * The callback is responsible for the actual swap + any on-disk
+   * follow-up (file rename, kit flush, etc).
+   *
+   * The card owns the re-entry lock — `swappingRef` guards against
+   * rapid double-clicks beating the visual `disabled` flag, which
+   * only takes effect after React re-renders.
+   */
+  onSwap?: () => Promise<void> | void
+  /** Hover hint for the swap button. Defaults to a Japanese explainer. */
+  swapTitle?: string
+  /** Hide the swap button even if `onSwap` is provided (e.g. note empty). */
+  swapDisabled?: boolean
 }
 
 /**
@@ -97,6 +136,7 @@ export function ClipCard({
   details,
   tags,
   showDetails,
+  note,
   intensity,
   onIntensityChange,
   playing,
@@ -114,8 +154,16 @@ export function ClipCard({
   actions,
   title,
   onRenameCommit,
+  onClose,
+  closeTitle,
+  onSwap,
+  swapTitle,
+  swapDisabled,
 }: ClipCardProps) {
   const [renaming, setRenaming] = useState(false)
+  // Re-entry guard for the in-card Swap button — see prop docs.
+  const swappingRef = useRef(false)
+  const [swapping, setSwapping] = useState(false)
   const [draftName, setDraftName] = useState(name)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const { toast } = useToast()
@@ -153,8 +201,19 @@ export function ClipCard({
   }
 
   const onRenameKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') { e.preventDefault(); commitRename() }
-    else if (e.key === 'Escape') { e.preventDefault(); setRenaming(false); setDraftName(name) }
+    if (e.key === 'Enter' || e.key === 'Escape') {
+      // Stop the document-level keydown listener (Library panel's
+      // Enter = "+ Kit", or anything that might react). Without this,
+      // pressing Enter to commit a rename also fires the global
+      // shortcut and the clip is added with its PRE-rename name (the
+      // commit's state update hasn't propagated yet at bubble time).
+      // Synthetic event stopPropagation propagates to the native
+      // event in React, so the document listener never sees it.
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.key === 'Enter') commitRename()
+      else { setRenaming(false); setDraftName(name) }
+    }
   }
   // Drag is intentionally absent: per user request the card is a
   // pure click-target. "+ Kit" and the sort selector are the only
@@ -170,34 +229,32 @@ export function ClipCard({
       onClick={onSelect}
       onDoubleClick={onDoubleClick}
     >
-      {/* Row 1 — header: play / name / spacer / event-id
-          The spacer between name and event-id (or trailing edge in
-          library mode) is what shows the note tooltip on hover. The
-          name span is sized to its text so clicking literally "on the
-          name" is what triggers rename — not the empty area to its
-          right. */}
-      <div className="clip-card-header">
+      {/* The card is a 3-column grid: `1fr auto auto`.
+          - col 1 holds the variable-width left content (play+name in
+            row 1, intensity in row 2). The 1fr eats spare width.
+          - col 2 = "primary action" track. Row 1 puts Swap here; row 2
+            puts the first action button (+Kit on library, Edit on kit).
+            Both items share the same `auto` track so the track width
+            grows to the wider of them → Swap's left edge always
+            aligns with the first action button's left edge, AND both
+            stretch to a matching width (no narrower-than-+Kit Swap).
+          - col 3 = "secondary action" track. Row 1 puts × here; row 2
+            puts the second action button (Edit on library; empty on
+            kit). Same alignment story for the right column.
+          Items below use explicit `gridColumn` / `gridRow` so a
+          missing Swap doesn't shove × into col 2 by mistake. */}
+      <div className="clip-card-header-left">
         <button
           className={`clip-card-play ${playing ? 'playing' : ''} ${playDisabled ? 'disabled' : ''}`}
           onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); if (!playDisabled) onTogglePlay() }}
           title={playDisabled ? 'No audio to preview' : (playing ? 'Stop' : 'Play')}
           aria-disabled={playDisabled}
         >{playing ? '■' : '▶'}</button>
-        {/* `title` already contains the note (caller injects it) so we let
-            the parent tooltip win — the name span gets no title of its own
-            and hovering the name reveals the note. */}
         {renaming && onRenameCommit ? (
           <input
             ref={inputRef}
             className="clip-card-name clip-card-name-input"
             value={draftName}
-            // Same sanitize as Kit name: clip.name feeds the event-id
-            // `name` part inside a kit, so the same character set
-            // constraint must apply — silently lowercase + drop bad
-            // chars rather than letting users type something that the
-            // kit will reject at Save time. We surface a (throttled)
-            // toast so the user understands why the character didn't
-            // appear, instead of "なぜか入らない" head-scratching.
             onChange={(e) => {
               const raw = e.target.value
               const cleaned = raw.toLowerCase().replace(/[^a-z0-9_-]/g, '')
@@ -223,11 +280,6 @@ export function ClipCard({
             {name}
           </span>
         )}
-        {/* Flexible spacer — eats remaining width so the event-id badge
-            stays right-aligned. The spacer carries no `title` of its
-            own, so hovering it falls back to the parent card's title
-            (which contains the note + meta summary). */}
-        <span className="clip-card-spacer" aria-hidden="true" />
         {eventId !== null && (
           <span
             className={`clip-card-event-id ${eventIdEmpty ? 'empty' : ''}`}
@@ -236,34 +288,89 @@ export function ClipCard({
         )}
       </div>
 
-      {/* Row 2 — controls: amp slider + action buttons */}
-      <div className="clip-card-controls">
+      {/* Row 1, col 2 — Swap. */}
+      {onSwap && !renaming && (
+        <button
+          type="button"
+          className="clip-card-swap-btn clip-card-col-primary"
+          disabled={swapping || swapDisabled}
+          title={swapTitle ?? 'Name ↔ Note を入れ替え (1-click でファイル名を切替)'}
+          aria-label="Swap name and note"
+          onMouseDown={(e) => { e.stopPropagation() }}
+          onClick={async (e) => {
+            e.stopPropagation()
+            if (swappingRef.current) return
+            swappingRef.current = true
+            setSwapping(true)
+            try {
+              await onSwap()
+            } finally {
+              swappingRef.current = false
+              setSwapping(false)
+            }
+          }}
+        >{swapping ? '…' : '⇅ Swap'}</button>
+      )}
+      {/* Row 1, col 3 — Close. */}
+      {onClose && (
+        <button
+          type="button"
+          className="clip-card-close-inline clip-card-col-secondary"
+          onMouseDown={(e) => { e.stopPropagation() }}
+          onClick={(e) => { e.stopPropagation(); onClose() }}
+          title={closeTitle ?? 'Archive (Studio から非表示)'}
+          aria-label={closeTitle ?? 'Archive'}
+        >×</button>
+      )}
+
+      {/* Row 2, col 1 — intensity slider. */}
+      <div className="clip-card-controls-left">
         {intensity !== null && onIntensityChange && (
           <IntensityControl value={intensity} onChange={onIntensityChange} />
         )}
-        {actions && actions.length > 0 && (
-          <div className="clip-card-actions">
-            {actions.map((a, i) => (
-              <button
-                key={i}
-                className={`clip-card-action-btn ${a.variant ?? ''}`}
-                onClick={(e) => { e.stopPropagation(); a.onClick() }}
-                title={a.title}
-                disabled={a.disabled}
-              >{a.label}</button>
-            ))}
-          </div>
-        )}
       </div>
+      {/* Row 2 cols 2 + 3 — action buttons. The first action goes
+          under Swap (primary track), the second under × (secondary).
+          Cards with only one action (e.g. kit-event rows that show
+          just `Edit`) leave the secondary cell empty — Edit ends
+          up vertically aligned with Swap, which reads as "primary
+          action under primary action" instead of being orphaned. */}
+      {actions && actions[0] && (
+        <button
+          key="action-primary"
+          className={`clip-card-action-btn clip-card-col-primary ${actions[0].variant ?? ''}`}
+          onClick={(e) => { e.stopPropagation(); actions[0]!.onClick() }}
+          title={actions[0].title}
+          disabled={actions[0].disabled}
+        >{actions[0].label}</button>
+      )}
+      {actions && actions[1] && (
+        <button
+          key="action-secondary"
+          className={`clip-card-action-btn clip-card-col-secondary ${actions[1].variant ?? ''}`}
+          onClick={(e) => { e.stopPropagation(); actions[1]!.onClick() }}
+          title={actions[1].title}
+          disabled={actions[1].disabled}
+        >{actions[1].label}</button>
+      )}
 
-      {/* Row 3 (optional) — details + Vol badge at the bottom */}
-      {showDetails && (details || (tags && tags.length > 0) || wiper !== null) && (
+      {/* Row 3 (optional) — details + Note + Vol badge at the bottom.
+          Note sits right-aligned (between tags and wiper) so users
+          can see the original filename / memo without hovering — the
+          earlier tooltip-only surfacing was too easy to miss. */}
+      {showDetails && (details || (tags && tags.length > 0) || (note && note.trim()) || wiper !== null) && (
         <div className="clip-card-details">
           {details && <span className="clip-card-details-meta">{details}</span>}
           {tags && tags.length > 0 && (
             <span className="clip-card-details-tags" title={tags.join(', ')}>
               {tags.map((t) => <span key={t} className="clip-card-tag" title={t}>{t}</span>)}
             </span>
+          )}
+          {note && note.trim() && (
+            // `margin-left: auto` (in CSS) pushes the note + wiper
+            // cluster to the right edge of the row. Title attribute
+            // shows the full text in case truncation cut it off.
+            <span className="clip-card-details-note" title={note}>{note}</span>
           )}
           <WiperBadge value={wiper} title={wiperTitle} />
         </div>

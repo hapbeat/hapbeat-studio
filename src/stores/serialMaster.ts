@@ -31,6 +31,8 @@ export interface SerialDeviceInfo {
   name?: string
   group?: number
   fw?: string
+  /** Firmware build commit short SHA (7 chars), firmware ≥ 0.1.2d*. */
+  build?: string
   mac?: string
   board?: string
   wifi_connected?: boolean
@@ -184,6 +186,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
           name: info.name as string | undefined,
           group: info.group as number | undefined,
           fw: info.fw as string | undefined,
+          build: info.build as string | undefined,
           mac: info.mac as string | undefined,
           board: info.board as string | undefined,
           wifi_connected: info.wifi_connected as boolean | undefined,
@@ -512,6 +515,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
             name: r.name as string | undefined,
             group: r.group as number | undefined,
             fw: r.fw as string | undefined,
+            build: r.build as string | undefined,
             mac: r.mac as string | undefined,
             board: r.board as string | undefined,
             wifi_connected: r.wifi_connected as boolean | undefined,

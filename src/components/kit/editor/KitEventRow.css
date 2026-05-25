@@ -82,34 +82,10 @@
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
 
-/* Delete (×) — floats in the top-right corner so it doesn't occupy a row
-   in the side rail. Subtle by default, brightens on hover. */
-.kit-event-delete-corner {
-  position: absolute;
-  top: 3px;
-  right: 3px;
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  color: var(--text-secondary);
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
-  padding: 0;
-  opacity: 0.55;
-  z-index: 2;
-  transition: background 0.12s, color 0.12s, opacity 0.12s;
-}
-.kit-event-delete-corner:hover {
-  background: rgba(244,67,54,0.25);
-  color: var(--error);
-  opacity: 1;
-}
+/* `.kit-event-delete-corner` removed — the Remove-from-kit button
+   now lives inside ClipCard (top row's secondary action slot) via
+   `onClose`, matching the library card's archive UX. The side rail
+   keeps only the mode-selector pills. */
 
 /* Mode selector group */
 .kit-event-side-mode-group {
@@ -160,4 +136,30 @@
   opacity: 0.9;
   background: rgba(255,255,255,0.06) !important;
 }
+
+/* BOTH choice — visually subordinate to FIRE / CLIP because both manifest
+ * entries (`.fire` + `.clip`) are produced from a single Studio event and
+ * the option is mainly an authoring aid (try both transports without
+ * duplicating the card). Smaller height, dimmer text, smaller symbol so
+ * users grok "this is a dev / convenience option" without reading the
+ * tooltip. Active state still uses the same accent so selection is clear. */
+.kit-event-side-mode.kit-event-side-mode--both {
+  height: 16px;
+  font-size: 10px !important;
+  opacity: 0.5;
+  margin-top: 1px;
+}
+.kit-event-side-mode.kit-event-side-mode--both .kit-event-side-mode-sym {
+  font-size: 11px;
+  letter-spacing: -1px;  /* the ">♪" digraph reads cleaner tightly kerned */
+}
+.kit-event-side-mode.kit-event-side-mode--both:hover:not(.active) {
+  opacity: 0.85;
+}
+.kit-event-side-mode.kit-event-side-mode--both.active {
+  /* Keep full opacity when active so selection is unambiguous, but the
+   * smaller height + tighter font still signal "secondary choice". */
+  opacity: 1;
+}
+
 

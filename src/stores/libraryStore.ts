@@ -1,11 +1,15 @@
 import { create } from 'zustand'
 import type { LibraryClip, KitDefinition, KitEvent, KitEventMode, LibraryFilter, BuiltinClipMeta, BuiltinLibraryIndex, LibraryViewMode, ClipAmpPreset } from '@/types/library'
+import { KIT_EVENT_MODE_SUFFIX } from '@/types/library'
 import {
   saveClip,
   listClips,
   deleteClip,
   updateClipMeta,
   loadClipAudio,
+  saveKitEventAudio,
+  loadKitEventAudio,
+  deleteKitEventAudio,
   saveKit,
   listKits,
   deleteKit,
@@ -29,9 +33,11 @@ import {
   scanKitOutputFolder,
   archiveKitFolder,
   writeKitFolder,
+  migrateLegacyArchiveFolders,
+  isHiddenStudioDir,
   type DiscoveredKit,
 } from '@/utils/localDirectory'
-import { exportKitAsPack, toPackId } from '@/utils/kitExporter'
+import { exportKitAsPack, manifestFileName, toPackId } from '@/utils/kitExporter'
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -156,6 +162,15 @@ interface LibraryState {
    */
   flushKitFolderNow: (kitId: string) => Promise<{ blob: Blob; packId: string } | null>
   /**
+   * Same as flushKitFolderNow but seeds an `opMsg` first so the
+   * footer status pill announces `saving → saved` (or `error`) to the
+   * user. Use this for *explicit* save actions (e.g. the "Save Folder"
+   * button) where we want UI feedback. Direct `flushKitFolderNow`
+   * stays silent on success so background-build callers (Deploy
+   * pre-flight) don't spam the pill.
+   */
+  requestKitFolderSave: (kitId: string, opMsg: string) => Promise<{ blob: Blob; packId: string } | null>
+  /**
    * Debounced wrapper around flushKitFolderNow. Replaces any pending
    * timer for the same kit. Pass delayMs=0 to flush on the next
    * microtask without awaiting (used by createKit to make the folder
@@ -173,6 +188,20 @@ interface LibraryState {
    *  either the Clips panel itself or from a Kit event row's Edit action so
    *  the user lands in the same editor regardless of entry point. */
   editingClipId: string | null
+
+  /**
+   * Page-wide single-card selection. Lives in the store so the Clips
+   * panel and the Kit Editor share one source of truth — clicking a
+   * card in either panel deselects whatever the other panel had
+   * highlighted. This is what determines which card the keyboard's
+   * Space / ↑↓ / ←→ shortcuts target, and the visual "currently
+   * selected" highlight is also driven by it.
+   *
+   * `panel` identifies which list the id belongs to; `id` is the
+   * LibraryClip.id for `'library'` and the KitEvent.id for `'kit'`.
+   * `null` = no selection.
+   */
+  activeSelection: { panel: 'library' | 'kit'; id: string } | null
 
   /** Whether clip cards show the details row (duration / sample rate /
    *  channels / file size / tags). Global toggle so library and kit stay
@@ -221,6 +250,9 @@ interface LibraryState {
   deleteAmpPreset: (name: string) => Promise<void>
 
   getClipAudio: (id: string) => Promise<Blob | undefined>
+  /** Resolve audio for a KitEvent (independent of library — see
+   *  `saveKitEventAudio` / `KitEvent.id` IDB key). */
+  getKitEventAudio: (kitEventId: string) => Promise<Blob | undefined>
 
   // Work directory actions
   pickWorkDir: () => Promise<boolean>
@@ -244,6 +276,8 @@ interface LibraryState {
   removeKit: (id: string) => Promise<void>
   setActiveKit: (id: string | null) => void
   setEditingClipId: (id: string | null) => void
+  /** Page-wide single-card selection setter. Pass null to clear. */
+  setActiveSelection: (selection: { panel: 'library' | 'kit'; id: string } | null) => void
   setShowClipDetails: (show: boolean) => void
   /**
    * Adds an event to a kit. The caller passes an event *without* the stable
@@ -253,7 +287,13 @@ interface LibraryState {
    * Duplicate eventIds are now allowed (e.g. the same clip added with two
    * different amps as two distinct events).
    */
-  addEventToKit: (kitId: string, event: Omit<KitEvent, 'id'>) => Promise<string | null>
+  /**
+   * Add a kit event. The caller must pass the audio blob — the store
+   * saves it into the kit-event-owned IDB slot under the new event's
+   * generated id. Pass `null` only when the event genuinely has no
+   * audio (legacy stream_source-without-clip case).
+   */
+  addEventToKit: (kitId: string, event: Omit<KitEvent, 'id'>, audioBlob: Blob | null) => Promise<string | null>
   /** Remove an event by its per-kit id (not eventId — duplicates are allowed). */
   removeEventFromKit: (kitId: string, kitEventId: string) => Promise<void>
   updateKitEvent: (kitId: string, kitEventId: string, updates: Partial<KitEvent>) => Promise<void>
@@ -278,28 +318,168 @@ const DEFAULT_FILTER: LibraryFilter = {
   searchQuery: '',
   selectedTags: [],
   selectedGroup: null,
-  sortBy: 'date',
-  sortOrder: 'desc',
+  // Default to alphabetical by name — users find clips by reading
+  // labels far more often than by recency. The `kitSort` UI on the
+  // Kit panel already defaults the same way, so the two panels read
+  // consistently on first open.
+  sortBy: 'name',
+  sortOrder: 'asc',
 }
 
 const CLIPS_META_FILE = 'clips-meta.json'
 const KITS_META_FILE = 'kits-meta.json'
 const AMP_PRESETS_FILE = 'amp-presets.json'
 
+// localStorage key for the sort preference. We persist ONLY the sort
+// fields (not the whole filter): search / tag / group selections are
+// session-transient — bringing back the same search query across
+// reloads would surprise users. The sort, in contrast, is a stable
+// "how I like my list" preference that should survive.
+const LIBRARY_SORT_KEY = 'hapbeat-studio-library-sort'
+
+function loadPersistedSort(): Pick<LibraryFilter, 'sortBy' | 'sortOrder'> | null {
+  try {
+    const raw = localStorage.getItem(LIBRARY_SORT_KEY)
+    if (!raw) return null
+    const v = JSON.parse(raw) as Partial<LibraryFilter>
+    // Validate before adopting — a corrupted entry shouldn't break
+    // the whole page on load.
+    const validBy = v.sortBy === 'name' || v.sortBy === 'date' || v.sortBy === 'duration'
+    const validOrder = v.sortOrder === 'asc' || v.sortOrder === 'desc'
+    if (!validBy || !validOrder) return null
+    return { sortBy: v.sortBy as LibraryFilter['sortBy'], sortOrder: v.sortOrder as LibraryFilter['sortOrder'] }
+  } catch { return null }
+}
+
+function savePersistedSort(filter: LibraryFilter): void {
+  try {
+    localStorage.setItem(LIBRARY_SORT_KEY, JSON.stringify({
+      sortBy: filter.sortBy, sortOrder: filter.sortOrder,
+    }))
+  } catch { /* ignore — quota or disabled storage */ }
+}
+
 /** Save clips metadata to the local work directory */
 async function saveClipsMetaToDir(handle: FileSystemDirectoryHandle, clips: LibraryClip[]) {
   await writeMetadataJson(handle, CLIPS_META_FILE, clips)
 }
 
-/** Upgrade legacy KitDefinitions whose events lack a stable `id` field. */
-function migrateKit(kit: KitDefinition): KitDefinition {
+/**
+ * Upgrade legacy KitDefinitions to the current shape. Currently handles:
+ *  - missing stable `id` per event
+ *  - legacy single-mode field (`mode?`) → multi-mode array (`modes: [mode]`).
+ *    Default is `['command']` when neither field is present.
+ *  - legacy `clipId` / `localName` references → snapshot fields
+ *    (`clipName`, `clipSourceFilename`, clip*) copied off the current
+ *    LibraryClip list. This is the structural migration that turned
+ *    KitEvents into independent owners of their clip data.
+ *
+ * Pass the current library `clips` list so the migrator can resolve a
+ * legacy event's `clipId` back to a snapshot. When the library entry is
+ * missing (e.g. user already archived it before this code shipped) the
+ * event keeps a placeholder name and the on-disk WAV in the kit folder
+ * stays the source of truth.
+ *
+ * Idempotent: re-running on an already-migrated kit is a no-op.
+ *
+ * Note: audio blob migration (copying `STORE_AUDIO[clipId]` to
+ * `STORE_AUDIO[event.id]`) lives in `migrateKitAudioAsync` below — sync
+ * vs async paths are split so this function can stay pure / cheap to
+ * call from render-adjacent code paths.
+ */
+function migrateKit(kit: KitDefinition, libraryClips: LibraryClip[]): KitDefinition {
   let changed = false
   const events = kit.events.map((e) => {
-    if (e.id) return e
-    changed = true
-    return { ...e, id: generateId() }
+    let next = e
+    if (!next.id) {
+      next = { ...next, id: generateId() }
+      changed = true
+    }
+    if (!Array.isArray(next.modes) || next.modes.length === 0) {
+      const legacy = (next as unknown as { mode?: KitEventMode }).mode
+      const seed: KitEventMode[] = [legacy ?? 'command']
+      const { mode: _drop, ...rest } = next as unknown as KitEvent & { mode?: KitEventMode }
+      void _drop
+      next = { ...rest, modes: seed }
+      changed = true
+    }
+    // clipName missing → this is a legacy event that referenced its
+    // clip indirectly via `clipId`. Snapshot the relevant fields off
+    // the library clip + drop the now-stale clipId / localName keys.
+    // When the library entry is gone we fall back to localName (kit-
+    // side rename, if any) or a placeholder so the event stays valid.
+    const legacyRef = next as unknown as KitEvent & {
+      clipId?: string; localName?: string
+    }
+    if (next.clipName === undefined) {
+      const libClip = legacyRef.clipId
+        ? libraryClips.find((c) => c.id === legacyRef.clipId)
+        : undefined
+      const fallbackName = legacyRef.localName ?? libClip?.name ?? '(missing clip)'
+      const seed: Partial<KitEvent> = {
+        clipName: fallbackName,
+        clipSourceFilename: libClip?.sourceFilename ?? `${fallbackName}.wav`,
+        clipDuration: libClip?.duration ?? 0,
+        clipChannels: libClip?.channels ?? 1,
+        clipSampleRate: libClip?.sampleRate ?? 16000,
+        clipFileSize: libClip?.fileSize ?? 0,
+      }
+      const {
+        clipId: _id, localName: _ln, ...rest
+      } = legacyRef
+      void _id; void _ln
+      next = { ...rest, ...seed } as KitEvent
+      changed = true
+    }
+    return next
   })
   return changed ? { ...kit, events } : kit
+}
+
+/**
+ * Walk a list of (pre-migration) kits and collect the `event.id →
+ * legacy clipId` map so `migrateKitAudioAsync` can copy the right blob
+ * AFTER `migrateKit` has already stripped the clipId from the in-memory
+ * shape. Skips entries that aren't legacy (= already migrated) so it's
+ * safe to call on a mixed-state list.
+ */
+function collectLegacyClipAudioMap(kits: KitDefinition[]): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const k of kits) {
+    for (const e of k.events) {
+      const legacy = e as unknown as { clipId?: string; clipName?: string; id?: string }
+      if (legacy.clipName === undefined && legacy.clipId && legacy.id) {
+        out.set(legacy.id, legacy.clipId)
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * Best-effort async companion to `migrateKit` that copies the legacy
+ * library audio blob into the kit event's own IDB slot. Called once
+ * per legacy event during `loadLibrary` so previewing a migrated kit
+ * works without needing to re-import the WAV from the kit folder.
+ *
+ * Silent / idempotent: if the destination already has a blob or the
+ * source is missing, nothing happens. Failures are logged and swallowed
+ * — the on-disk WAV inside the kit folder is the ultimate fallback.
+ */
+async function migrateKitAudioAsync(
+  legacyClipIdByEventId: Map<string, string>,
+): Promise<void> {
+  for (const [eventId, legacyClipId] of legacyClipIdByEventId) {
+    try {
+      const existing = await loadKitEventAudio(eventId)
+      if (existing) continue
+      const sourceBlob = await loadClipAudio(legacyClipId)
+      if (!sourceBlob) continue
+      await saveKitEventAudio(eventId, sourceBlob)
+    } catch (err) {
+      console.warn('[migrateKitAudio] failed for event', eventId, err)
+    }
+  }
 }
 
 /** Save kits metadata to the local work directory */
@@ -390,8 +570,12 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   kits: [],
   activeKitId: null,
   editingClipId: null,
+  activeSelection: null,
   showClipDetails: true,
-  filter: { ...DEFAULT_FILTER },
+  // Initial filter = defaults overlaid with the persisted sort (if
+  // any) so the user's preferred sort survives reload but session-
+  // local fields (search / tags / group) start fresh.
+  filter: { ...DEFAULT_FILTER, ...(loadPersistedSort() ?? {}) },
   builtinCategoryFilter: null,
   ampPresets: [],
   localFsStatus: 'idle',
@@ -437,7 +621,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // problems are never silent.
     const opMsg = lastOpMessage.get(kit.id)
     try {
-      const result = await exportKitAsPack(kit, state.clips)
+      const result = await exportKitAsPack(kit)
 
       // Race-condition guard: kit may have been removed (× clicked)
       // while exportKitAsPack was running. Bail before any disk write.
@@ -469,29 +653,73 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
       // Version-bump history: snapshot the existing manifest under
       // history/manifest-<oldVersion>.json before overwriting. WAVs
-      // aren't kept (size cost) — just the small manifest.
+      // aren't kept (size cost) — just the small manifest. The
+      // preferred filename is `<packId>-manifest.json`; we fall back
+      // to legacy `manifest.json` so kits saved before the rename
+      // (2026-05-17) still produce a history entry on first re-save.
       try {
         const thisKitDir = await outRoot.getDirectoryHandle(packId, { create: false })
-        const oldHandle = await thisKitDir.getFileHandle('manifest.json', { create: false })
-        const oldText = await (await oldHandle.getFile()).text()
-        const oldVersion = String((JSON.parse(oldText) as { version?: unknown }).version ?? '')
-        if (oldVersion && oldVersion !== (kit.version || '1.0.0')) {
-          const histDir = await thisKitDir.getDirectoryHandle('history', { create: true })
-          const safeVer = oldVersion.replace(/[^a-zA-Z0-9_.-]/g, '_')
-          const archHandle = await histDir.getFileHandle(`manifest-${safeVer}.json`, { create: true })
-          const w = await archHandle.createWritable()
-          await w.write(oldText)
-          await w.close()
+        const preferredName = manifestFileName(packId)
+        let oldHandle: FileSystemFileHandle | null = null
+        try {
+          oldHandle = await thisKitDir.getFileHandle(preferredName, { create: false })
+        } catch {
+          try {
+            oldHandle = await thisKitDir.getFileHandle('manifest.json', { create: false })
+          } catch { /* no prior manifest */ }
+        }
+        if (oldHandle) {
+          const oldText = await (await oldHandle.getFile()).text()
+          const oldVersion = String((JSON.parse(oldText) as { version?: unknown }).version ?? '')
+          if (oldVersion && oldVersion !== (kit.version || '1.0.0')) {
+            const histDir = await thisKitDir.getDirectoryHandle('history', { create: true })
+            const safeVer = oldVersion.replace(/[^a-zA-Z0-9_.-]/g, '_')
+            const archHandle = await histDir.getFileHandle(`manifest-${safeVer}.json`, { create: true })
+            const w = await archHandle.createWritable()
+            await w.write(oldText)
+            await w.close()
+          }
         }
       } catch { /* no existing manifest — first save */ }
 
       await writeKitFolder(outRoot, packId, files)
 
-      // Prune stale WAVs in install-clips/ and stream-clips/. The
-      // folder is the on-disk projection of the latest manifest, so
-      // anything not in the freshly written `files` set is leftover
-      // from a previous version (rename, removed event, mode swap).
-      const keep = new Set(files.map((f) => f.path))
+      // One-shot migration: the manifest is now `<packId>-manifest.json`
+      // (kitExporter writes it under that name from 2026-05-17). If a
+      // legacy `manifest.json` is still sitting in this kit folder
+      // (e.g. the kit was first exported under the old name), drop it
+      // now so SDK / Helper discovery doesn't have to pick between two
+      // copies. No backwards compat — pre-release project.
+      try {
+        const kitDirForClean = await outRoot.getDirectoryHandle(packId, { create: false })
+        const newName = manifestFileName(packId)
+        if (newName !== 'manifest.json') {
+          try { await kitDirForClean.removeEntry('manifest.json') } catch { /* no legacy file */ }
+        }
+      } catch { /* kit dir vanished */ }
+
+      // Prune stale WAVs in install-clips/ and stream-clips/. Kept
+      // narrow by intent: we only delete files whose basename doesn't
+      // match ANY current event of this kit — i.e. true orphans from
+      // a rename or a removed event. Files that match a current event
+      // but live in the "wrong" subfolder (e.g. left over after a
+      // FIRE → CLIP mode toggle) are LEFT IN PLACE. That stops the
+      // file churn the user would otherwise see whenever they flip a
+      // mode pill: the WAV stays put even when the manifest no longer
+      // references it.
+      //
+      // Trade-off (intentional): a mode toggle that's been bounced
+      // both ways will leave the WAV in both subfolders, ~doubling
+      // disk for that event. The device firmware still only plays
+      // what the manifest says, so the extra file just sits unused
+      // on LittleFS until the next clean kit re-export.
+      const ownedBasenames = new Set<string>()
+      for (const ev of kit.events) {
+        const candidate = (ev.clipName || ev.clipSourceFilename || '').trim()
+        if (!candidate) continue
+        const stem = candidate.replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]/g, '_')
+        if (stem) ownedBasenames.add(`${stem}.wav`)
+      }
       try {
         const kitDir = await outRoot.getDirectoryHandle(packId)
         for (const subName of ['install-clips', 'stream-clips'] as const) {
@@ -502,7 +730,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           const stale: string[] = []
           for await (const entry of sub.values()) {
             if (entry.kind !== 'file') continue
-            if (!keep.has(`${subName}/${entry.name}`)) stale.push(entry.name)
+            if (!ownedBasenames.has(entry.name)) stale.push(entry.name)
           }
           for (const n of stale) {
             try { await sub.removeEntry(n) } catch { /* ignore */ }
@@ -579,6 +807,17 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     }
   },
 
+  requestKitFolderSave: async (kitId, opMsg) => {
+    // Seed the module-private op message so `flushKitFolderNow` knows
+    // to surface a "saved" pill on success (silent on background
+    // Deploy builds). Also flips the pill to `saving` immediately so
+    // the user gets feedback even before flush completes.
+    const kit = get().kits.find((k) => k.id === kitId)
+    if (!kit) return null
+    setOp(kit.id, opMsg)
+    return get().flushKitFolderNow(kitId)
+  },
+
   scheduleKitFlush: (kitId, delayMs = 400) => {
     // Note: we deliberately do NOT touch retry timers / counters
     // here. If a retry was pending, letting it fire on its original
@@ -631,7 +870,20 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       } else {
         // Fallback to IndexedDB
         const [clips, kits] = await Promise.all([listClips(), listKits()])
-        set({ clips, kits: kits.map(migrateKit) })
+        // Capture legacy clipId references BEFORE migrateKit strips them
+        // so we can copy audio blobs into the kit-event-owned IDB slots
+        // (see `migrateKitAudioAsync`).
+        const legacyAudio = collectLegacyClipAudioMap(kits)
+        const migratedKits = kits.map((k) => migrateKit(k, clips))
+        // Persist the migrated shape back to IDB so a subsequent reload
+        // doesn't re-run migration. Without this, legacy `clipId` /
+        // `localName` keep living in IDB and the next `saveKit` call
+        // (from a user edit) could mix new + old shapes on the same kit.
+        if (legacyAudio.size > 0) {
+          for (const k of migratedKits) await saveKit(k)
+        }
+        set({ clips, kits: migratedKits })
+        if (legacyAudio.size > 0) void migrateKitAudioAsync(legacyAudio)
       }
       // Load the built-in index so subsequent auto-import can consult it.
       await get().loadBuiltinIndex()
@@ -698,13 +950,21 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const existing = clips.find((c) => c.builtinId === builtinId)
     if (existing) return existing.id
 
+    get().setLocalFsStatus('saving', `built-in "${meta.name}" を import 中…`)
     const blob = await fetchBuiltinClipAudio(builtinId)
-    if (!blob) return undefined
+    if (!blob) {
+      get().setLocalFsStatus('error', `built-in "${meta.name}" の audio 取得失敗`)
+      return undefined
+    }
 
     const now = new Date().toISOString()
     const clip: LibraryClip = {
       id: generateId(),
       name: meta.name,
+      // Preserve the source filename in `note` (same rule as
+      // `addClipFromFile`) so user-side rename doesn't lose the
+      // waveform-descriptive label.
+      note: meta.filename,
       tags: [...meta.tags],
       group: meta.category,
       duration: meta.duration_ms / 1000,
@@ -725,6 +985,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       await writeClipFile(wdh, meta.filename, blob)
       await saveClipsMetaToDir(wdh, newClips)
     }
+    get().setLocalFsStatus('saved', `built-in "${meta.name}" を追加`)
     return clip.id
   },
 
@@ -734,16 +995,18 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const { builtinIndex, fetchBuiltinClipAudio, workDirHandle } = get()
     if (!builtinIndex || builtinIndex.length === 0) return 0
 
+    get().setLocalFsStatus('saving', `built-in library を import 中 (${builtinIndex.length} 件)…`)
     const now = new Date().toISOString()
     const toAdd: LibraryClip[] = []
     const existingBuiltinIds = new Set(
       get().clips.map((c) => c.builtinId).filter((x): x is string => !!x)
     )
 
+    let failed = 0
     for (const meta of builtinIndex) {
       if (existingBuiltinIds.has(meta.id)) continue
       const blob = await fetchBuiltinClipAudio(meta.id)
-      if (!blob) continue
+      if (!blob) { failed++; continue }
       // Built-ins land in clips/template/<filename>. The user can freely
       // move them out, edit them or delete them — nothing else depends on
       // the subfolder location, it's purely for organisation.
@@ -751,6 +1014,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       const clip: LibraryClip = {
         id: generateId(),
         name: meta.name,
+        // Preserve the source filename in `note` for later reference
+        // (see `addClipFromFile` comment) — survives any user rename.
+        note: meta.filename,
         tags: [...meta.tags],
         group: meta.category || 'template',
         duration: meta.duration_ms / 1000,
@@ -767,10 +1033,17 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       toAdd.push(clip)
     }
 
-    if (toAdd.length === 0) return 0
+    if (toAdd.length === 0) {
+      // Nothing imported — could be "all already present" or "all failed".
+      if (failed > 0) get().setLocalFsStatus('error', `built-in import 失敗: ${failed} 件取得不可`)
+      else get().setLocalFsStatus('saved', 'built-in は全て import 済み')
+      return 0
+    }
     const newClips = [...toAdd, ...get().clips]
     set({ clips: newClips })
     if (workDirHandle) await saveClipsMetaToDir(workDirHandle, newClips)
+    const tailMsg = failed > 0 ? ` (${failed} 件取得失敗)` : ''
+    get().setLocalFsStatus('saved', `built-in ${toAdd.length} 件を追加${tailMsg}`)
     return toAdd.length
   },
 
@@ -781,6 +1054,12 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const handle = await pickWorkDirectory()
     if (!handle) return false
     set({ workDirHandle: handle, workDirName: handle.name })
+
+    // One-shot rename of the pre-tilde archive folders before any
+    // scan/listing runs — keeps the workdir tidy and avoids two
+    // co-existing archive directories.
+    try { await migrateLegacyArchiveFolders(handle) }
+    catch (err) { console.warn('[pickWorkDir] archive migration failed:', err) }
 
     // If the new directory already has clips, just adopt them.
     // Otherwise auto-seed it with the full built-in library so the user
@@ -805,6 +1084,11 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const granted = await verifyPermission(handle, true)
     if (!granted) return false
     set({ workDirHandle: handle, workDirName: handle.name })
+    // Run the legacy → tilde-suffixed rename before syncClipsFromDir
+    // / importKitsFromOutputDir kick in; they read the new folder
+    // names directly and would otherwise expose stale legacy state.
+    try { await migrateLegacyArchiveFolders(handle) }
+    catch (err) { console.warn('[restoreWorkDir] archive migration failed:', err) }
     await get().loadAmpPresets()
     return true
   },
@@ -869,49 +1153,52 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (!outRoot) return 0
 
     const discovered = await scanKitOutputFolder(outRoot)
-    if (discovered.length === 0) return 0
+    // Diagnostic — surfaces in DevTools so users can tell *why* a kit
+    // disappeared (folder missing / manifest filename mismatch / parse
+    // failure). Skip when discovered is non-empty AND every kit has a
+    // valid manifest, to keep the console quiet on the happy path.
+    if (discovered.length === 0) {
+      console.warn(
+        '[libraryStore] importKitsFromOutputDir: no kit folders found in',
+        outRoot.name,
+        '— directories present must contain either `<folder>-manifest.json`',
+        'or any `*manifest*.json` file to be picked up.',
+      )
+      return 0
+    }
+    const malformed = discovered.filter((d) => !d.manifestJson || typeof d.manifestJson !== 'object')
+    if (malformed.length > 0) {
+      console.warn(
+        '[libraryStore] importKitsFromOutputDir: ignoring',
+        malformed.length,
+        'kit folder(s) with unreadable manifest:',
+        malformed.map((d) => d.folderName),
+      )
+    }
 
     const ctx = new AudioContext()
     const now = new Date().toISOString()
     const updatedClips = [...get().clips]
     const updatedKits = [...get().kits]
 
-    /** basename match (先頭のフォルダ部分を無視) でライブラリ clip を探す。
-     *  無ければ file を decode してライブラリに登録する。 */
-    const ensureClip = async (filename: string, file: File): Promise<string | null> => {
-      const base = (filename.split('/').pop() || filename)
-      const existing = updatedClips.find((c) => {
-        const b = (c.sourceFilename || '').split('/').pop() || c.sourceFilename
-        return b === base
-      })
-      if (existing) return existing.id
-      try {
-        const arrayBuffer = await file.arrayBuffer()
-        const buffer = await ctx.decodeAudioData(arrayBuffer.slice(0))
-        const id = generateId()
-        const clip: LibraryClip = {
-          id,
-          name: filenameToDisplayName(base),
-          tags: [],
-          group: '',
-          duration: buffer.duration,
-          channels: buffer.numberOfChannels,
-          sampleRate: buffer.sampleRate,
-          fileSize: file.size,
-          sourceFilename: base,
-          createdAt: now,
-          updatedAt: now,
-        }
-        updatedClips.push(clip)
-        const blob = new Blob([arrayBuffer], { type: 'audio/wav' })
-        await saveClip(clip, blob)
-        if (workDirHandle) await writeClipFile(workDirHandle, base, blob)
-        return id
-      } catch (err) {
-        console.error(`Failed to decode kit clip "${filename}":`, err)
-        return null
-      }
-    }
+    // NOTE — `ensureClip` (library auto-import from kit folder) was
+    // intentionally removed. The library and kits are independent now:
+    //
+    //   - Adding library → kit = copy (kit owns its own snapshot + blob)
+    //   - Archive / rename library = no effect on kits
+    //   - Kit scan = no effect on library
+    //
+    // The previous implementation re-imported any kit WAV that didn't
+    // basename-match a current library entry, then **wrote it back to
+    // clips/ on disk**. That fought the user's library curation in two
+    // ways: archived clips resurrected themselves on the next reload
+    // (kit folder still had the WAV → import re-created it), and a
+    // library rename produced a phantom duplicate (kit had the old
+    // name, basename match failed, library got a new clip + new file).
+    //
+    // Kit-event audio is still saved (`saveKitEventAudio(eventId, blob)`
+    // below), so previews / exports / deploys keep working without
+    // touching the library at all.
 
     let importedCount = 0
     for (const { folderName, manifestJson, clipFiles } of discovered as DiscoveredKit[]) {
@@ -938,45 +1225,180 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       const packId = folderName.trim()
       if (!packId) continue
 
-      const events: KitEvent[] = []
-      for (const [eventId, rawEv] of Object.entries(m.events ?? {})) {
+      // ---- Parse + group manifest entries into KitEvents -----------------
+      //
+      // Studio kitExporter writes one manifest entry per mode. When a single
+      // KitEvent had `modes: ['command', 'stream_clip']`, it landed on disk
+      // as `<base>.fire` + `<base>.clip` — two entries that share the same
+      // base eventId. To make the in-Studio round-trip lossless we detect
+      // these pairs here and re-group them into one KitEvent with `modes`
+      // populated. Pairs that disagree on clip / intensity / loop /
+      // deviceWiper / localName stay as separate KitEvents (safer than
+      // silently picking one side's value).
+      type RawEv = {
+        manifestKey: string
+        baseEventId: string
+        suffixMode: KitEventMode | null
+        mode: KitEventMode
+        clipFilename: string  // basename only — on-disk filename inside install-clips/ or stream-clips/
+        clipName: string      // display-friendly name derived from filename
+        clipDuration: number
+        clipChannels: number
+        clipSampleRate: number
+        clipFileSize: number
+        clipBlob?: Blob       // raw bytes for kit-event audio store
+        intensity: number
+        loop: boolean
+        deviceWiper: number | null
+      }
+
+      const stripModeSuffix = (key: string): { base: string; mode: KitEventMode | null } => {
+        for (const m of ['command', 'stream_clip', 'stream_source'] as const) {
+          const tail = `.${KIT_EVENT_MODE_SUFFIX[m]}`
+          if (key.endsWith(tail)) return { base: key.slice(0, -tail.length), mode: m }
+        }
+        return { base: key, mode: null }
+      }
+
+      const raws: RawEv[] = []
+      for (const [manifestKey, rawEv] of Object.entries(m.events ?? {})) {
         if (!rawEv || typeof rawEv !== 'object') continue
         const ev = rawEv as {
           mode?: string; clip?: string; parameters?: Record<string, unknown>
         }
-        const mode = (ev.mode ?? 'command') as KitEventMode
-        let clipId = ''
+        const explicitMode = ev.mode as KitEventMode | undefined
+        const { base, mode: suffixMode } = stripModeSuffix(manifestKey)
+        const mode: KitEventMode = explicitMode ?? suffixMode ?? 'command'
+
+        // Locate the on-disk WAV. Path may be `<file>.wav` (command,
+        // implicit install-clips/) or `stream-clips/<file>.wav` etc.
+        let clipFile: File | undefined
+        let clipFilename = ''
         if (ev.clip) {
-          // clipPath は "stream-clips/foo.wav" または "foo.wav" (command の場合 install-clips/ 相対, DEC-027)
           const relKey = ev.clip.includes('/') ? ev.clip : `install-clips/${ev.clip}`
-          const file = clipFiles.get(relKey) ?? clipFiles.get(ev.clip)
-          if (file) {
-            const id = await ensureClip(ev.clip, file)
-            if (id) clipId = id
+          clipFile = clipFiles.get(relKey) ?? clipFiles.get(ev.clip)
+          clipFilename = (ev.clip.split('/').pop() || ev.clip)
+        }
+
+        // Decode for metadata + cache the blob for kit-event audio
+        // store. We do NOT push the WAV back into the library — the
+        // library is user-curated (drag from disk, archive with the
+        // × button) and shouldn't be auto-populated from kits. The
+        // long comment near the top of this function spells out why.
+        let clipDuration = 0, clipChannels = 1, clipSampleRate = 16000, clipFileSize = 0
+        let clipBlob: Blob | undefined
+        if (clipFile) {
+          try {
+            const arrayBuffer = await clipFile.arrayBuffer()
+            const decoded = await ctx.decodeAudioData(arrayBuffer.slice(0))
+            clipDuration = decoded.duration
+            clipChannels = decoded.numberOfChannels
+            clipSampleRate = decoded.sampleRate
+            clipFileSize = clipFile.size
+            clipBlob = new Blob([arrayBuffer], { type: clipFile.type || 'audio/wav' })
+          } catch (err) {
+            console.warn(`[importKitsFromOutputDir] decode failed for ${clipFilename}:`, err)
+          }
+          // Independence: kit events own their own snapshot + blob.
+          // We DO NOT push the WAV back into the library here — see
+          // the long comment near the top of this function.
+        }
+
+        const params = (ev.parameters ?? {}) as { intensity?: number; loop?: boolean; device_wiper?: number }
+        const clipName = clipFilename.replace(/\.wav$/i, '') || base
+
+        raws.push({
+          manifestKey,
+          baseEventId: base,
+          suffixMode,
+          mode,
+          clipFilename,
+          clipName,
+          clipDuration,
+          clipChannels,
+          clipSampleRate,
+          clipFileSize,
+          clipBlob,
+          intensity: typeof params.intensity === 'number' ? params.intensity : 0.5,
+          loop: params.loop ?? false,
+          deviceWiper: typeof params.device_wiper === 'number' ? params.device_wiper : null,
+        })
+      }
+
+      // Bucket by baseEventId so a `.fire` + `.clip` pair lands together.
+      const buckets = new Map<string, RawEv[]>()
+      for (const r of raws) {
+        const arr = buckets.get(r.baseEventId)
+        if (arr) arr.push(r)
+        else buckets.set(r.baseEventId, [r])
+      }
+
+      const events: KitEvent[] = []
+      // Queue of (eventId, blob) pairs to write into STORE_AUDIO once
+      // the kit list is committed to state. Defer writes until after
+      // the loop so a mid-loop failure doesn't leave half-saved blobs.
+      const eventAudioToSave: Array<{ eventId: string; blob: Blob }> = []
+
+      for (const [baseEventId, group] of buckets) {
+        const allSuffixed = group.every((r) => r.suffixMode !== null)
+        const mergeable =
+          group.length > 1 &&
+          allSuffixed &&
+          group.every((r) =>
+            r.clipFilename === group[0].clipFilename &&
+            Math.abs(r.intensity - group[0].intensity) < 1e-6 &&
+            r.loop === group[0].loop &&
+            r.deviceWiper === group[0].deviceWiper
+          )
+
+        if (mergeable) {
+          const order: Record<KitEventMode, number> = { command: 0, stream_clip: 1, stream_source: 2 }
+          const modes = group.map((r) => r.mode).sort((a, b) => order[a] - order[b])
+          const seed = group[0]
+          const newId = generateId()
+          events.push({
+            id: newId,
+            eventId: baseEventId,
+            clipName: seed.clipName,
+            clipSourceFilename: seed.clipFilename,
+            clipDuration: seed.clipDuration,
+            clipChannels: seed.clipChannels,
+            clipSampleRate: seed.clipSampleRate,
+            clipFileSize: seed.clipFileSize,
+            modes,
+            loop: seed.loop,
+            intensity: seed.intensity,
+            deviceWiper: seed.deviceWiper,
+          })
+          if (seed.clipBlob) eventAudioToSave.push({ eventId: newId, blob: seed.clipBlob })
+        } else {
+          for (const r of group) {
+            const newId = generateId()
+            events.push({
+              id: newId,
+              eventId: r.manifestKey,
+              clipName: r.clipName,
+              clipSourceFilename: r.clipFilename,
+              clipDuration: r.clipDuration,
+              clipChannels: r.clipChannels,
+              clipSampleRate: r.clipSampleRate,
+              clipFileSize: r.clipFileSize,
+              modes: [r.mode],
+              loop: r.loop,
+              intensity: r.intensity,
+              deviceWiper: r.deviceWiper,
+            })
+            if (r.clipBlob) eventAudioToSave.push({ eventId: newId, blob: r.clipBlob })
           }
         }
-        const params = (ev.parameters ?? {}) as { intensity?: number; loop?: boolean; device_wiper?: number }
-        // Recover the kit-local name from the on-disk filename. The
-        // file under install-clips/ / stream-clips/ is the source of
-        // truth — if its stem differs from the library clip's name,
-        // a kit-side rename is implied and we restore localName so
-        // the next flush keeps writing under the renamed filename.
-        let localName: string | undefined = undefined
-        if (clipId && ev.clip) {
-          const stem = (ev.clip.split('/').pop() || ev.clip).replace(/\.wav$/i, '')
-          const libClip = updatedClips.find((c) => c.id === clipId)
-          if (libClip && stem && stem !== libClip.name) localName = stem
-        }
-        events.push({
-          id: generateId(),
-          eventId,
-          clipId,
-          mode,
-          loop: params.loop ?? false,
-          intensity: typeof params.intensity === 'number' ? params.intensity : 0.5,
-          deviceWiper: typeof params.device_wiper === 'number' ? params.device_wiper : null,
-          ...(localName !== undefined ? { localName } : {}),
-        })
+      }
+
+      // Persist kit-event audio. Failures are non-fatal — the kit
+      // folder on disk still has the WAVs so a follow-up scan or
+      // manual re-import recovers them.
+      for (const { eventId, blob } of eventAudioToSave) {
+        try { await saveKitEventAudio(eventId, blob) }
+        catch (err) { console.warn('[importKitsFromOutputDir] saveKitEventAudio failed:', err) }
       }
 
       const existingIdx = updatedKits.findIndex((k) => k.name === packId)
@@ -1072,6 +1494,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           const clip: LibraryClip = {
             id: generateId(),
             name: filenameToDisplayName(filename),
+            // Preserve the discovered filename in `note` so a later
+            // rename doesn't erase the waveform-descriptive label
+            // (matches `addClipFromFile`).
+            note: filename.split('/').pop() ?? filename,
             tags: [],
             group: '',
             duration: buffer.duration,
@@ -1094,15 +1520,17 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ clips })
     await saveClipsMetaToDir(workDirHandle, clips)
 
-    // Kits: the real master is each `<packId>/manifest.json` file on
-    // disk, NOT the cached kitsMeta.json. We do a live folder scan so
-    // that kits added/edited/removed via OS Explorer (or by another
-    // tool) are picked up on next load.
+    // Kits: the real master is each `<packId>/<packId>-manifest.json`
+    // file on disk, NOT the cached kitsMeta.json. We do a live folder
+    // scan so that kits added/edited/removed via OS Explorer (or by
+    // another tool) are picked up on next load.
     //
     // `importKitsFromOutputDir` falls back to `workDirHandle` when no
     // dedicated `kitDirHandle` is set, so it covers both layouts:
-    //   - workdir/<packId>/manifest.json   (default — kits inside library)
-    //   - kitDir/<packId>/manifest.json    (dedicated kit-out folder)
+    //   - workdir/<packId>/<packId>-manifest.json   (default — kits inside library)
+    //   - kitDir/<packId>/<packId>-manifest.json    (dedicated kit-out folder)
+    // Discovery falls back to any `*manifest*.json` so kits authored
+    // under the legacy `manifest.json` name still load.
     //
     // If the scan finds nothing (brand-new workdir, kits never deployed),
     // fall back to the kitsMeta.json snapshot or IDB cache so the user
@@ -1112,13 +1540,25 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       return 0
     })
     if (importedKitCount === 0) {
+      const currentClips = get().clips
       if (savedKits) {
-        const migrated = savedKits.map(migrateKit)
+        const legacyAudio = collectLegacyClipAudioMap(savedKits)
+        const migrated = savedKits.map((k) => migrateKit(k, currentClips))
         for (const kit of migrated) await saveKit(kit)
         set({ kits: migrated })
+        if (legacyAudio.size > 0) void migrateKitAudioAsync(legacyAudio)
       } else {
         const kits = await listKits()
-        set({ kits: kits.map(migrateKit) })
+        const legacyAudio = collectLegacyClipAudioMap(kits)
+        const migrated = kits.map((k) => migrateKit(k, currentClips))
+        // Persist migrated shape so the next reload doesn't re-run
+        // migration (and so a follow-up `saveKit` from a normal user
+        // edit can't write a half-old / half-new shape to IDB).
+        if (legacyAudio.size > 0) {
+          for (const k of migrated) await saveKit(k)
+        }
+        set({ kits: migrated })
+        if (legacyAudio.size > 0) void migrateKitAudioAsync(legacyAudio)
       }
     }
   },
@@ -1161,6 +1601,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
             const clip: LibraryClip = {
               id: generateId(),
               name: filenameToDisplayName(filename),
+              // Preserve original filename in note (matches other
+              // import paths). See `addClipFromFile`.
+              note: filename.split('/').pop() ?? filename,
               tags: [],
               group: '',
               duration: buffer.duration,
@@ -1217,72 +1660,131 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 
   addClipFromFile: async (file) => {
-    const arrayBuffer = await file.arrayBuffer()
-    const ctx = new AudioContext()
-    const buffer = await ctx.decodeAudioData(arrayBuffer)
-    const blob = new Blob([arrayBuffer], { type: file.type || 'audio/wav' })
-    const now = new Date().toISOString()
-    const clip: LibraryClip = {
-      id: generateId(),
-      name: filenameToDisplayName(file.name),
-      tags: [],
-      group: '',
-      duration: buffer.duration,
-      channels: buffer.numberOfChannels,
-      sampleRate: buffer.sampleRate,
-      fileSize: file.size,
-      sourceFilename: file.name,
-      createdAt: now,
-      updatedAt: now,
+    get().setLocalFsStatus('saving', `clip "${file.name}" を import 中…`)
+    try {
+      const arrayBuffer = await file.arrayBuffer()
+      const ctx = new AudioContext()
+      const buffer = await ctx.decodeAudioData(arrayBuffer)
+      const blob = new Blob([arrayBuffer], { type: file.type || 'audio/wav' })
+      const now = new Date().toISOString()
+      const clip: LibraryClip = {
+        id: generateId(),
+        name: filenameToDisplayName(file.name),
+        // Seed `note` with the *original* file name so the
+        // waveform-descriptive label (e.g. `sin_100hz.wav`) is
+        // preserved even after the user renames the clip to an
+        // action-style label (e.g. `z1_pin_hit`). The Edit modal's
+        // Swap button toggles the two strings; on hover the card
+        // tooltip shows whichever string is currently in `note`.
+        // Users who don't care can edit / clear it any time.
+        note: file.name,
+        tags: [],
+        group: '',
+        duration: buffer.duration,
+        channels: buffer.numberOfChannels,
+        sampleRate: buffer.sampleRate,
+        fileSize: file.size,
+        sourceFilename: file.name,
+        createdAt: now,
+        updatedAt: now,
+      }
+      await saveClip(clip, blob)
+      const newClips = [clip, ...get().clips]
+      set({ clips: newClips })
+      // Mirror to work directory
+      const { workDirHandle } = get()
+      if (workDirHandle) {
+        await writeClipFile(workDirHandle, file.name, blob)
+        await saveClipsMetaToDir(workDirHandle, newClips)
+      }
+      get().setLocalFsStatus('saved', `clip "${clip.name}" を追加`)
+      return clip.id
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      get().setLocalFsStatus('error', `clip "${file.name}" の追加失敗: ${msg}`)
+      throw err
     }
-    await saveClip(clip, blob)
-    const newClips = [clip, ...get().clips]
-    set({ clips: newClips })
-    // Mirror to work directory
-    const { workDirHandle } = get()
-    if (workDirHandle) {
-      await writeClipFile(workDirHandle, file.name, blob)
-      await saveClipsMetaToDir(workDirHandle, newClips)
-    }
-    return clip.id
   },
 
   removeClip: async (id) => {
     const { clips, workDirHandle } = get()
     const clip = clips.find((c) => c.id === id)
+    const clipLabel = clip?.name || clip?.sourceFilename || id
+    get().setLocalFsStatus('saving', `clip "${clipLabel}" を削除中…`)
     await deleteClip(id)
     const newClips = clips.filter((c) => c.id !== id)
     set({ clips: newClips })
     // Remove from work directory
+    let diskErr: unknown = null
     if (workDirHandle && clip?.sourceFilename) {
-      try { await deleteClipFile(workDirHandle, clip.sourceFilename) } catch { /* ignore */ }
+      try { await deleteClipFile(workDirHandle, clip.sourceFilename) }
+      catch (err) { diskErr = err }
       await saveClipsMetaToDir(workDirHandle, newClips)
+    }
+    if (diskErr) {
+      const msg = diskErr instanceof Error ? diskErr.message : String(diskErr)
+      get().setLocalFsStatus('error', `clip "${clipLabel}" の disk 削除失敗: ${msg}`)
+    } else {
+      get().setLocalFsStatus('saved', `clip "${clipLabel}" を削除`)
     }
   },
 
   archiveClip: async (id) => {
     const { clips, workDirHandle } = get()
     const clip = clips.find((c) => c.id === id)
+    console.info('[archiveClip] called', {
+      id,
+      foundClip: !!clip,
+      hasWorkDir: !!workDirHandle,
+      sourceFilename: clip?.sourceFilename,
+    })
     if (!clip) return false
+    const clipLabel = clip.name || clip.sourceFilename || id
+    get().setLocalFsStatus('saving', `clip "${clipLabel}" を archive 移動中…`)
 
-    // Move the file into clips/archive/. If there's no work dir, just
+    // Move the file into clips/_archive/. If there's no work dir, just
     // drop the entry from the list (IndexedDB path) — there's no on-disk
     // file to move in that case.
+    let moveErr: unknown = null
+    let movedPath: string | null = null
     if (workDirHandle && clip.sourceFilename) {
       try {
-        await archiveClipFile(workDirHandle, clip.sourceFilename)
+        movedPath = await archiveClipFile(workDirHandle, clip.sourceFilename)
+        console.info('[archiveClip] archiveClipFile result:', movedPath ?? '(null — source not found?)')
       } catch (err) {
-        console.error('Failed to archive clip file:', err)
+        moveErr = err
+        console.error('[archiveClip] archiveClipFile threw:', err)
       }
+    } else if (!workDirHandle) {
+      console.warn('[archiveClip] skipping disk move — workDirHandle is null')
+    } else if (!clip.sourceFilename) {
+      console.warn('[archiveClip] skipping disk move — clip.sourceFilename is empty', clip)
     }
 
     // Drop from the in-memory list and IndexedDB cache. The file lives on
-    // in clips/archive/ — the user can move it back to recover it, which
-    // our next dir refresh will pick up as a regular clip again.
+    // in clips/_archive/ — the user can move it back to recover it,
+    // which our next dir refresh will pick up as a regular clip again.
     await deleteClip(id)
     const newClips = clips.filter((c) => c.id !== id)
     set({ clips: newClips })
     if (workDirHandle) await saveClipsMetaToDir(workDirHandle, newClips)
+    // Surface the result. Status messages distinguish "moved on disk",
+    // "list-only drop (no workdir)" and "tried to move but failed" so
+    // a user staring at the footer pill can act if needed.
+    if (moveErr) {
+      const msg = moveErr instanceof Error ? moveErr.message : String(moveErr)
+      get().setLocalFsStatus('error', `clip "${clipLabel}" の archive 失敗: ${msg}`)
+    } else if (movedPath) {
+      // Don't surface the literal `_archive` folder name — it's an
+      // internal Studio-managed location the user isn't meant to
+      // think about. Just say "archived".
+      get().setLocalFsStatus('saved', `clip "${clipLabel}" を archive`)
+    } else if (workDirHandle && clip.sourceFilename) {
+      // archiveClipFile returned null = source not found on disk
+      get().setLocalFsStatus('saved', `clip "${clipLabel}" を list から削除 (disk file 不在)`)
+    } else {
+      get().setLocalFsStatus('saved', `clip "${clipLabel}" を list から削除`)
+    }
     return true
   },
 
@@ -1295,48 +1797,20 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     )
     set({ clips: newClips })
 
-    // If the clip's display name changed, every kit-event referencing
-    // this clip needs its eventId recomposed (`<kitName>.<clipName>`).
+    // Kit events used to mirror clip renames here (cascade-update eventId
+    // when the library clip's name changed). That coupling was removed
+    // when KitEvent became an independent snapshot owner (clipName lives
+    // on the event itself). Library renames now stay in the library —
+    // kits keep whatever name they were authored with. Rename a kit
+    // event by editing the card name inside the kit instead.
     const nameChanged =
       updates.name !== undefined && prev !== undefined && updates.name !== prev.name
-    if (nameChanged) {
-      const newName = updates.name as string
-      const { kits } = get()
-      // Kit-local renames (event.localName !== undefined) are
-      // independent of the library — leave them alone. Only events
-      // that still derive their name from the library clip get their
-      // eventId recomposed.
-      const refreshedKits = kits.map((k) => {
-        const touched = k.events.some((e) => e.clipId === id && e.localName === undefined)
-        if (!touched) return k
-        return {
-          ...k,
-          events: k.events.map((e) =>
-            e.clipId === id && e.localName === undefined
-              ? { ...e, eventId: composeKitEventId(k.name, newName) }
-              : e
-          ),
-          updatedAt: new Date().toISOString(),
-        }
-      })
-      set({ kits: refreshedKits })
-      // Persist every touched kit
-      for (const k of refreshedKits) {
-        if (k.events.some((e) => e.clipId === id && e.localName === undefined)) {
-          await saveKit(k)
-          // The clip rename changes the WAV filename inside install-clips/
-          // and the eventId in manifest.json — re-flush every affected
-          // kit so the on-disk folder stays consistent.
-          get().scheduleKitFlush(k.id)
-        }
-      }
-    }
+    void nameChanged
 
     // Update metadata in work directory
     const { workDirHandle } = get()
     if (workDirHandle) {
       await saveClipsMetaToDir(workDirHandle, newClips)
-      if (nameChanged) await saveKitsMetaToDir(workDirHandle, get().kits)
     }
     get().setLocalFsStatus('saved', `clip "${updates.name ?? prev?.name ?? ''}" を保存`)
   },
@@ -1349,9 +1823,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const oldBase = clip.sourceFilename.split('/').pop()?.replace(/\.(wav|mp3|ogg|flac|aac|m4a)$/i, '') ?? ''
     const desired = clip.name.trim().replace(/[\\/:*?"<>|]/g, '_')
     if (!desired || desired === oldBase) return
+    get().setLocalFsStatus('saving', `clip file rename "${oldBase}" → "${desired}"…`)
     try {
       const newPath = await renameClipFile(workDirHandle, clip.sourceFilename, desired)
-      if (!newPath) return
+      if (!newPath) {
+        get().setLocalFsStatus('error', `clip file rename 失敗: "${oldBase}" の disk 上のファイルが見つかりません`)
+        return
+      }
       // 新 filename を反映。name は拡張子を除いた実ベース名に再同期する。
       const newBase = newPath.split('/').pop()?.replace(/\.(wav|mp3|ogg|flac|aac|m4a)$/i, '') ?? clip.name
       const patch = { sourceFilename: newPath, name: newBase }
@@ -1361,8 +1839,11 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       )
       set({ clips: updated })
       await saveClipsMetaToDir(workDirHandle, updated)
+      get().setLocalFsStatus('saved', `clip file "${oldBase}" → "${newBase}" rename`)
     } catch (err) {
       console.error('renameClipFile failed:', err)
+      const msg = err instanceof Error ? err.message : String(err)
+      get().setLocalFsStatus('error', `clip file rename 失敗: ${msg}`)
     }
   },
 
@@ -1433,6 +1914,17 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     return loadClipAudio(id)
   },
 
+  getKitEventAudio: async (kitEventId) => {
+    // Kit-event audio lives under its own IDB key (`saveKitEventAudio`
+    // wrote it on add / migration). IDB-first because the kit folder
+    // on disk holds the *resampled* (16 kHz) version — the original
+    // bytes the user dropped are what we cached, and what previews
+    // should sound like. Fall back to scanning kit folder install-clips
+    // would be possible but isn't currently needed (events all carry
+    // their own blob post-migration).
+    return loadKitEventAudio(kitEventId)
+  },
+
   // Kit actions
   createKit: async (name) => {
     const now = new Date().toISOString()
@@ -1473,9 +1965,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const { workDirHandle, kitDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
 
-    // Move the on-disk folder into `_archive/` instead of deleting it
-    // outright — the user can recover by hand from their OS file
-    // explorer. `scanKitOutputFolder` skips `_archive/`, so the kit
+    // Move the on-disk folder into `_archive/` instead of deleting
+    // it outright — the user can recover by hand from their OS file
+    // explorer. `scanKitOutputFolder` skips that folder so the kit
     // stops appearing in the UI on the next refresh.
     if (kit) {
       // Archive whatever packId we last wrote (covers the rename case
@@ -1488,7 +1980,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       lastWrittenPackId.delete(kit.id)
       lastBuiltKit.delete(kit.id)
     }
-    get().setLocalFsStatus('saved', `kit "${kit?.name ?? id}" を _archive/ に移動`)
+    get().setLocalFsStatus('saved', `kit "${kit?.name ?? id}" を archive`)
   },
 
   setActiveKit: (id) => {
@@ -1499,60 +1991,78 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ editingClipId: id })
   },
 
+  setActiveSelection: (selection) => {
+    set({ activeSelection: selection })
+  },
+
   setShowClipDetails: (show) => {
     set({ showClipDetails: show })
   },
 
-  addEventToKit: async (kitId, event) => {
-    const { kits, clips } = get()
+  addEventToKit: async (kitId, event, audioBlob) => {
+    const { kits } = get()
     const kit = kits.find((k) => k.id === kitId)
     if (!kit) return null
 
-    // Always derive eventId from `<kitName>.<clipName>` — callers are
-    // expected NOT to set event.eventId themselves anymore. Even if they
-    // do, kit-name overrides so all events in a kit share the same
-    // category and stay in sync.
-    const clip = clips.find((c) => c.id === event.clipId)
-    const composedId = clip
-      ? composeKitEventId(kit.name, clip.name)
-      : event.eventId  // last resort (no matching clip — keep what caller passed)
+    // Independence: the new KitEvent already carries its own clipName /
+    // clipDuration / clipSourceFilename / etc (copied from the source
+    // library clip by the caller). We save the audio blob under the
+    // generated event id so future preview / export / deploy can find
+    // it WITHOUT having to look up the library entry — even if that
+    // library entry is later archived or deleted.
+    const composedId = event.clipName
+      ? composeKitEventId(kit.name, event.clipName)
+      : event.eventId  // last resort (caller didn't set a clipName)
 
     const newEvent: KitEvent = { id: generateId(), ...event, eventId: composedId }
+    if (audioBlob) {
+      try { await saveKitEventAudio(newEvent.id, audioBlob) }
+      catch (err) { console.error('saveKitEventAudio failed:', err) }
+    }
     const updated = { ...kit, events: [...kit.events, newEvent], updatedAt: new Date().toISOString() }
     await saveKit(updated)
     const newKits = kits.map((k) => (k.id === kitId ? updated : k))
     set({ kits: newKits })
     const { workDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
-    const clipName = clip?.name ?? '?'
-    setOp(kitId, `kit "${kit.name}" に "${clipName}" を追加`)
-    get().scheduleKitFlush(kitId)
+    // Kit folder Pack rebuild (resample + install-clips/ + manifest)
+    // is deferred to the Deploy button — it was the dominant cause
+    // of UI lag while editing. Metadata is still flushed eagerly to
+    // kits-meta.json above so the kit list survives a reload.
     return newEvent.id
   },
 
   removeEventFromKit: async (kitId, kitEventId) => {
-    const { kits, clips } = get()
+    const { kits } = get()
     const kit = kits.find((k) => k.id === kitId)
     if (!kit) return
     const ev = kit.events.find((e) => e.id === kitEventId)
-    const clipName = ev?.localName ?? clips.find((c) => c.id === ev?.clipId)?.name ?? '?'
+    const clipName = ev?.clipName ?? '?'
 
     const updated = { ...kit, events: kit.events.filter((e) => e.id !== kitEventId), updatedAt: new Date().toISOString() }
     await saveKit(updated)
     const newKits = kits.map((k) => (k.id === kitId ? updated : k))
     set({ kits: newKits })
+    // Drop the kit-owned audio blob so removed events don't leak into
+    // IDB indefinitely. Best-effort; a missing blob is fine (e.g. for
+    // events whose audio failed to import).
+    try { await deleteKitEventAudio(kitEventId) } catch { /* ignore */ }
     const { workDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
-    setOp(kitId, `kit "${kit.name}" から "${clipName}" を削除`)
-    get().scheduleKitFlush(kitId)
+    // Pack rebuild deferred to Deploy (see addEventToKit comment).
+    // The removed event will disappear from install-clips/ /
+    // stream-clips/ only on the next deploy — until then the kit
+    // folder retains the WAV. Harmless: nothing in the kit's manifest
+    // references it any more.
+    void clipName
   },
 
   updateKitEvent: async (kitId, kitEventId, updates) => {
-    const { kits, clips } = get()
+    const { kits } = get()
     const kit = kits.find((k) => k.id === kitId)
     if (!kit) return
     const prev = kit.events.find((e) => e.id === kitEventId)
-    const prevName = prev?.localName ?? clips.find((c) => c.id === prev?.clipId)?.name ?? '?'
+    const prevName = prev?.clipName ?? '?'
 
     const updated = {
       ...kit,
@@ -1564,28 +2074,16 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ kits: newKits })
     const { workDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
-
-    // Build a context-specific op message based on what changed.
-    let opMsg: string
-    if (updates.localName !== undefined && updates.localName !== prev?.localName) {
-      opMsg = `kit "${kit.name}" の "${prevName}" → "${updates.localName}" rename`
-    } else if (updates.mode !== undefined && updates.mode !== prev?.mode) {
-      opMsg = `kit "${kit.name}" の "${prevName}" mode → ${updates.mode}`
-    } else if (updates.intensity !== undefined && updates.intensity !== prev?.intensity) {
-      opMsg = `kit "${kit.name}" の "${prevName}" intensity → ${updates.intensity.toFixed(2)}`
-    } else if (updates.deviceWiper !== undefined && updates.deviceWiper !== prev?.deviceWiper) {
-      opMsg = `kit "${kit.name}" の "${prevName}" wiper → ${updates.deviceWiper}`
-    } else if (updates.loop !== undefined && updates.loop !== prev?.loop) {
-      opMsg = `kit "${kit.name}" の "${prevName}" loop ${updates.loop ? 'on' : 'off'}`
-    } else {
-      opMsg = `kit "${kit.name}" の "${prevName}" を更新`
-    }
-    setOp(kitId, opMsg)
-    get().scheduleKitFlush(kitId)
+    // Metadata-only update — no Pack rebuild. Mode toggle / intensity
+    // drag / rename used to trigger a 400 ms-debounced full kit
+    // re-emit (resample + write every WAV) and that was the dominant
+    // source of UI lag while editing. The kit folder picks up these
+    // changes on the next Deploy.
+    void prevName
   },
 
   updateKit: async (id, updates) => {
-    const { kits, clips } = get()
+    const { kits } = get()
     const kit = kits.find((k) => k.id === id)
     if (!kit) return
 
@@ -1597,10 +2095,12 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (renamed) {
       const newName = updates.name as string
       updated.events = updated.events.map((e) => {
-        // localName overrides the library clip name for this event.
-        const namePart = e.localName ?? clips.find((c) => c.id === e.clipId)?.name
-        const newEventId = namePart
-          ? composeKitEventId(newName, namePart)
+        // Independence: each event owns its own clipName snapshot, so
+        // the recomposed eventId comes straight off the event. No more
+        // library lookup; kit rename never has to chase a now-missing
+        // library entry.
+        const newEventId = e.clipName
+          ? composeKitEventId(newName, e.clipName)
           : e.eventId
         return { ...e, eventId: newEventId }
       })
@@ -1610,11 +2110,11 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ kits: newKits })
     const { workDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
-    const opMsg = renamed
-      ? `kit "${kit.name}" → "${updates.name}" rename`
-      : `kit "${kit.name}" を更新`
-    setOp(id, opMsg)
-    get().scheduleKitFlush(id)
+    // Kit-level rename / metadata change — no Pack rebuild. Deploy
+    // is the explicit "publish kit to disk + device" action. The
+    // previous folder (under the old packId) is also left alone here;
+    // it'll be archived on the next Deploy by the packId-rename code
+    // path in flushKitFolderNow.
   },
 
   // Tab / filter
@@ -1635,11 +2135,25 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 
   setFilter: (partial) => {
-    set((state) => ({ filter: { ...state.filter, ...partial } }))
+    set((state) => {
+      const next = { ...state.filter, ...partial }
+      // Persist sort changes (and only sort) on every update.
+      // Cheap to do unconditionally — savePersistedSort no-ops when
+      // the fields didn't change at the JSON level since the string
+      // matches whatever's already in localStorage.
+      if (partial.sortBy !== undefined || partial.sortOrder !== undefined) {
+        savePersistedSort(next)
+      }
+      return { filter: next }
+    })
   },
 
   resetFilter: () => {
-    set({ filter: { ...DEFAULT_FILTER } })
+    // Keep the persisted sort even when the user clears filters —
+    // "reset" is about wiping the search/tag selection, not undoing
+    // their long-standing list ordering preference.
+    const persisted = loadPersistedSort()
+    set({ filter: { ...DEFAULT_FILTER, ...(persisted ?? {}) } })
   },
 
   // Computed
@@ -1670,7 +2184,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
   filteredClips: () => {
     const { clips, filter } = get()
-    let result = [...clips]
+    // Strip clips whose on-disk location is a Studio-managed folder
+    // (`_archive/`, `_archive~/`, legacy `archive/`). These shouldn't
+    // appear in the library tree even if they're still in IDB / the
+    // saved `kits-meta.json` from earlier Studio versions — the
+    // archive is invisible by convention.
+    let result = clips.filter((c) => {
+      const top = (c.sourceFilename || '').split('/').filter(Boolean)[0] ?? ''
+      return !isHiddenStudioDir(top)
+    })
 
     // Search
     if (filter.searchQuery) {

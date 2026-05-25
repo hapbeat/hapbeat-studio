@@ -12,6 +12,7 @@ import { HelperManageModal } from '@/components/common/HelperManageModal'
 import { ExternalLinkIcon } from '@/components/common/ExternalLinkIcon'
 import { HelperToastBridge } from '@/components/common/HelperToastBridge'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
+import { MIN_HELPER_VERSION } from '@/config/helperCompat'
 import './App.css'
 
 type Tab = 'kit' | 'display' | 'devices'
@@ -90,9 +91,13 @@ export function App() {
       return next
     })
   }, [activeTab])
-  const { isConnected, helperVersion, send } = useHelperConnection()
+  const { isConnected, helperVersion, helperCompat, send } = useHelperConnection()
   const [helperModalOpen, setHelperModalOpen] = useState(false)
   const [helperManageOpen, setHelperManageOpen] = useState(false)
+  // Top-of-app banner suppressing — opt-in per session only. We deliberately
+  // do NOT persist this to localStorage: an outdated Helper is a fix-it-now
+  // problem that should remind the user every fresh Studio load.
+  const [helperOutdatedDismissed, setHelperOutdatedDismissed] = useState(false)
 
   // Auto-close modal when Helper connects
   useEffect(() => {
@@ -134,12 +139,16 @@ export function App() {
           {isConnected ? (
             <button
               type="button"
-              className="connection-status connection-status--clickable connection-status--with-tip"
+              className={`connection-status connection-status--clickable connection-status--with-tip ${helperCompat === 'outdated' ? 'connection-status--outdated' : ''}`}
               onClick={() => setHelperManageOpen(true)}
-              data-tip={helperVersion ? `hapbeat-helper v${helperVersion} (クリックで管理)` : 'helper version 不明 (クリックで管理)'}
+              data-tip={
+                helperCompat === 'outdated'
+                  ? `hapbeat-helper v${helperVersion} は古い版です — クリックして upgrade 手順を表示`
+                  : (helperVersion ? `hapbeat-helper v${helperVersion} (クリックで管理)` : 'helper version 不明 (クリックで管理)')
+              }
             >
-              <span className="status-dot connected" />
-              Helper 接続中
+              <span className={`status-dot ${helperCompat === 'outdated' ? 'outdated' : 'connected'}`} />
+              {helperCompat === 'outdated' ? 'Helper 要更新' : 'Helper 接続中'}
             </button>
           ) : (
             <button
@@ -154,6 +163,37 @@ export function App() {
           )}
         </div>
       </header>
+      {/* Outdated-Helper banner: shown when a Helper is connected but its
+          version is below MIN_HELPER_VERSION. Dismissible per session, with a
+          one-click jump into HelperManageModal where the upgrade commands
+          live. Render BELOW the header so it doesn't push the tab bar around
+          but ABOVE the modals so it isn't visually trapped behind them. */}
+      {isConnected && helperCompat === 'outdated' && !helperOutdatedDismissed && (
+        <div className="helper-outdated-banner" role="alert">
+          <span className="helper-outdated-banner-icon" aria-hidden>⚠</span>
+          <div className="helper-outdated-banner-body">
+            <strong>hapbeat-helper の更新が必要です</strong>
+            <span className="helper-outdated-banner-detail">
+              {' '}
+              現在 v{helperVersion ?? '?'} / 必要 v{MIN_HELPER_VERSION} 以上 — 一部の Kit deploy / device 操作が失敗する可能性があります。
+            </span>
+          </div>
+          <button
+            type="button"
+            className="helper-outdated-banner-action"
+            onClick={() => setHelperManageOpen(true)}
+          >
+            更新手順を表示
+          </button>
+          <button
+            type="button"
+            className="helper-outdated-banner-close"
+            aria-label="このセッション中は非表示"
+            title="このセッション中は非表示"
+            onClick={() => setHelperOutdatedDismissed(true)}
+          >×</button>
+        </div>
+      )}
       <HelperOnboardingModal
         open={helperModalOpen}
         onClose={() => setHelperModalOpen(false)}
@@ -163,6 +203,7 @@ export function App() {
         open={helperManageOpen}
         onClose={() => setHelperManageOpen(false)}
         helperVersion={helperVersion}
+        helperCompat={helperCompat}
       />
       <main className="tab-content">
         <PersistentTab active={activeTab === 'kit'} visited={visitedTabs.has('kit')}>

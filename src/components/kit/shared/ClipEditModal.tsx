@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { LibraryClip } from '@/types/library'
 import './ClipEditModal.css'
 
@@ -21,6 +21,17 @@ export interface ClipEditModalProps {
  */
 export function ClipEditModal({ clip, onClose, onUpdate, onArchive, onCommitRename }: ClipEditModalProps) {
   const [tagInput, setTagInput] = useState('')
+
+  // Lock for the Name ↔ Note swap. The swap reads the current
+  // `clip.name` / `clip.note` props, awaits a store mutation, then
+  // awaits a possible on-disk file rename. Rapid clicking before the
+  // second async step landed would re-read STALE props and apply a
+  // second swap on top of the partial first one, ending up with
+  // `name === note`. Gate every swap behind a ref-based lock that's
+  // synchronous (instant to check, no React render needed) so the
+  // disable flag doesn't race with the click.
+  const swappingRef = useRef(false)
+  const [swapping, setSwapping] = useState(false)
 
   const commitRename = useCallback(() => {
     if (onCommitRename) void onCommitRename(clip.id)
@@ -65,7 +76,50 @@ export function ClipEditModal({ clip, onClose, onUpdate, onArchive, onCommitRena
           </label>
 
           <label className="clip-edit-field">
-            <span>Note <span className="field-hint">(optional — shown on hover)</span></span>
+            <span>
+              Note <span className="field-hint">(optional — hover で表示。Import 時は原ファイル名が自動セット)</span>
+              <button
+                type="button"
+                className="clip-edit-swap-btn"
+                title="Name ↔ Note を入れ替え (Name 側は拡張子除去 + 英数字に sanitize)"
+                disabled={swapping || !clip.note?.trim()}
+                onClick={async () => {
+                  // Swap the two strings. `name` side sanitises to the
+                  // event-id charset and drops the extension since
+                  // eventId / on-disk filename can't carry it; `note`
+                  // side gets whatever was in `name` verbatim.
+                  //
+                  // The ref check is the *real* re-entry guard — the
+                  // `swapping` state visual disable doesn't kick in
+                  // until React re-renders, so a fast double-click
+                  // would still slip a second swap through if we only
+                  // gated on it. We snapshot the inputs synchronously
+                  // here so subsequent reads of `clip.*` don't latch
+                  // a half-updated value.
+                  if (swappingRef.current) return
+                  swappingRef.current = true
+                  setSwapping(true)
+                  try {
+                    const prevName = clip.name
+                    const prevNote = (clip.note ?? '').trim()
+                    if (!prevNote) return
+                    const stripped = prevNote.replace(/\.(wav|mp3|ogg|flac|aac|m4a)$/i, '')
+                    const newName = stripped.toLowerCase().replace(/[^a-z0-9_-]/g, '_').replace(/^_+|_+$/g, '')
+                    if (!newName) return
+                    await onUpdate(clip.id, { name: newName, note: prevName })
+                    // Wait for the on-disk WAV rename + the follow-up
+                    // state patch (sourceFilename + re-derived name)
+                    // BEFORE releasing the lock. Otherwise a quick
+                    // second click would read pre-rename `clip.name`
+                    // and undo our work.
+                    if (onCommitRename) await onCommitRename(clip.id)
+                  } finally {
+                    swappingRef.current = false
+                    setSwapping(false)
+                  }
+                }}
+              >{swapping ? '⇅ …' : '⇅ Swap'}</button>
+            </span>
             <textarea
               rows={3}
               value={clip.note ?? ''}
@@ -115,9 +169,9 @@ export function ClipEditModal({ clip, onClose, onUpdate, onArchive, onCommitRena
         <div className="clip-edit-modal-footer">
           <button
             className="library-btn danger"
-            title="Move this clip to clips/archive/. Your file stays on disk so you can recover it later by moving it back."
+            title="Hide this clip from Studio. The file is moved to a managed archive directory on disk so you can recover it later."
             onClick={async () => {
-              if (!confirm(`Archive "${clip.name}"?\n\nThe file will be moved to clips/archive/ and hidden from Studio.\nYou can recover it by moving the file back into clips/.`)) return
+              if (!confirm(`Archive "${clip.name}"?\n\nStudio から非表示になります (元ファイルは管理ディレクトリに退避され、戻すことで復活できます)。`)) return
               await onArchive(clip.id)
               onClose()
             }}

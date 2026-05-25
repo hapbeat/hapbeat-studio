@@ -139,20 +139,69 @@ export interface KitDefinition {
  */
 export type KitEventMode = 'command' | 'stream_clip' | 'stream_source'
 
+/**
+ * Suffix appended to `eventId` in the on-disk manifest when a single Studio
+ * KitEvent emits more than one mode entry. Studio keeps the user-authored
+ * eventId pristine in-memory; the suffix only appears in manifest output and
+ * in re-import grouping. JSON object keys must be unique, so the suffix is
+ * what lets `mykit.foo` exist as both FIRE and CLIP entries side-by-side.
+ *
+ * `stream_source` is hidden from the UI but still maps to a suffix for the
+ * sake of any legacy kit that round-trips through Studio.
+ */
+export const KIT_EVENT_MODE_SUFFIX: Record<KitEventMode, string> = {
+  command: 'fire',
+  stream_clip: 'clip',
+  stream_source: 'source',
+}
+
 export interface KitEvent {
-  /** Stable per-kit id, generated on add. Used as the React key and as the
-   *  handle for update/remove — NOT the same as eventId, which can repeat
+  /** Stable per-kit id, generated on add. Used as the React key, the handle
+   *  for update/remove, AND the IDB key for this event's owned audio blob
+   *  (`STORE_AUDIO[event.id]`). NOT the same as eventId, which can repeat
    *  across events within a kit (e.g. same clip added with different amps). */
   id: string
-  /** Event ID (hapbeat-contracts format). May repeat within a kit. */
-  eventId: string
-  /** Reference to LibraryClip.id */
-  clipId: string
   /**
-   * Playback mode. Defaults to "command" if absent (backward-compatible
-   * with kits that predate the mode field).
+   * Event ID (hapbeat-contracts format). May repeat within a kit. This is
+   * the *base* eventId — when `modes.length > 1` the kit exporter appends a
+   * `.fire` / `.clip` suffix per emitted manifest entry so JSON keys stay
+   * unique. The base value here never carries the suffix.
    */
-  mode?: KitEventMode
+  eventId: string
+  /**
+   * Display name of this kit event's clip. **Owned by the kit event** —
+   * copied from the source LibraryClip at add-time and never updated when
+   * the library renames the original. Kit-side renames mutate this field
+   * directly. Used for the card title and for composing `eventId`
+   * (`<kitName>.<clipName>`).
+   */
+  clipName: string
+  /**
+   * Original filename of the WAV the user dropped on the kit (e.g.
+   * `impact/gunshot_01.wav`). Used as the on-disk filename inside
+   * `install-clips/` / `stream-clips/` when exporting. Owned by the kit
+   * event; library renames don't propagate.
+   */
+  clipSourceFilename: string
+  /** Clip duration in seconds. Snapshot at add-time; not refreshed. */
+  clipDuration: number
+  /** Clip channel count (1 or 2). Snapshot at add-time. */
+  clipChannels: number
+  /** Clip sample rate (Hz) of the SOURCE audio. The exporter resamples
+   *  to 16 kHz for device playback, but we keep the original so the
+   *  card can show meaningful metadata. */
+  clipSampleRate: number
+  /** Clip file size in bytes of the source blob (pre-resample). */
+  clipFileSize: number
+  /**
+   * Selected playback modes. Length ≥ 1 (UI enforces). When length === 1 the
+   * kit exporter emits a single manifest entry under `eventId`. When length
+   * > 1 it emits one entry per mode with `<eventId>.<mode-suffix>` as the
+   * JSON key (see `KIT_EVENT_MODE_SUFFIX`).
+   *
+   * intensity / loop / deviceWiper are shared across modes.
+   */
+  modes: KitEventMode[]
   /** Loop playback */
   loop: boolean
   /**
@@ -168,16 +217,12 @@ export interface KitEvent {
    */
   deviceWiper: number | null
   /**
-   * Kit-local clip name. When set, overrides the library clip's name
-   * for this event's display, eventId composition, and on-disk
-   * `install-clips/<localName>.wav` filename. Kit-side renames write
-   * here so the library and any other kit referencing the same clip
-   * are not affected.
-   *
-   * Audio data still comes from the library clip referenced by clipId
-   * (kits don't currently own audio bytes).
+   * Author-only free-form note shown on hover (card tooltip). Mirrors
+   * `LibraryClip.note`, but kit-side notes are independent of the
+   * source library clip — they describe the event's role inside *this*
+   * kit (e.g. "softer pre-roll for the chorus"). Optional.
    */
-  localName?: string
+  note?: string
 }
 
 /** Library view layout mode */

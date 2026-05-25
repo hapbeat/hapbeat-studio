@@ -17,6 +17,7 @@ import {
   pickWorkDirectory,
   saveDirectoryHandle,
   verifyPermission,
+  isHiddenStudioDir,
 } from '@/utils/localDirectory'
 
 interface Props {
@@ -141,6 +142,11 @@ export function StreamingTestSection({
       try {
         for await (const handle of cur.values()) {
           if (handle.kind === 'directory') {
+            // Skip Studio-internal folders (_archive, etc.) so users
+            // can't accidentally browse into the archive recycle bin
+            // — those are managed by Studio and shouldn't appear in
+            // any user-facing list.
+            if (isHiddenStudioDir(handle.name)) continue
             dirs.push({
               label: `📁 ${handle.name}`,
               id: `dir:${handle.name}`,

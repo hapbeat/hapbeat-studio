@@ -132,6 +132,8 @@ export interface GetInfoResult {
   name?: string
   mac?: string
   fw?: string
+  /** Firmware build commit short SHA (7 chars). Present on firmware ≥ 0.1.2d* (auto-generated FIRMWARE_VERSION). */
+  build?: string
   group?: number
   wifi_connected?: boolean
   error?: string
