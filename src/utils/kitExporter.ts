@@ -115,9 +115,31 @@ function eventFileName(event: KitEvent): string {
   return `${stem || 'clip'}.wav`
 }
 
-export interface ExportResult {
+/**
+ * One file emitted by `exportKitAsPack`. The `path` is relative to
+ * `<outRoot>/<packId>/` (e.g. `install-clips/foo.wav`, `<packId>-manifest.json`).
+ *
+ * `sourceHash` is the SHA-1 hex of the *source audio blob* that
+ * produced this WAV (for the encoded-WAV IDB cache key). For files
+ * that aren't WAVs (manifest.json), `sourceHash` is `null` and the
+ * file is always rewritten. For WAVs, `flushKitFolderNow` compares
+ * `sourceHash` against its `lastWrittenWavs` ledger + a file-exists
+ * check to decide whether the disk write can be skipped.
+ *
+ * `cached` is `true` when `encodedBlob` came from IDB cache (no fresh
+ * decode + encode this turn) — used by the skip-write heuristic and
+ * for telemetry / future "skipped N WAVs" toast.
+ */
+export interface ExportFile {
+  path: string
   blob: Blob
-  filename: string
+  sourceHash: string | null
+  cached: boolean
+}
+
+export interface ExportResult {
+  files: ExportFile[]
+  packId: string
   warnings: string[]
 }
 
@@ -129,7 +151,7 @@ function resolveModes(ev: KitEvent): KitEventMode[] {
 }
 
 /**
- * Kit を Pack 形式の ZIP にエクスポートする (schema 2.0.0)。
+ * Kit を Pack 形式の **ファイル配列** に展開する (schema 2.0.0)。
  *
  * 各 KitEvent は `modes: KitEventMode[]` で複数 mode を選択可。
  *   - command     → install-clips/ に WAV 配置、`events` に bare filename で記録
@@ -138,22 +160,33 @@ function resolveModes(ev: KitEvent): KitEventMode[] {
  * BOTH モード (modes=['command','stream_clip']) は同じ base eventId を両 bucket に
  * emit する。JSON dict 重複キー問題は bucket 分離で解消したため suffix 不要。
  *
+ * **ZIP 不使用**: 旧版はここで JSZip を組み上げて Blob を返していたが、
+ * Save Folder ごとに全 WAV を zip → unzip → write する round-trip が
+ * 大きなオーバーヘッドになっていた。zip 化が必要な経路 (Deploy) は
+ * `buildKitZip(files, packId)` を経由する遅延生成に切り替えた。
+ *
  * @param kit - Kit 定義 (events は KitEvent[]、各 event が自前の clip data を保持)
- * @returns ZIP の Blob とファイル名
+ * @returns 書き出すファイル列 + packId + warnings
  */
 export async function exportKitAsPack(
   kit: KitDefinition
 ): Promise<ExportResult> {
   const warnings: string[] = []
   const packId = toPackId(kit.name)
-  const zip = new JSZip()
-  const root = zip.folder(packId)!
+  const files: ExportFile[] = []
 
   // manifest に書き込む 2 bucket + install-clips metadata
   // 注: `events` bucket は command-mode 専用 (schema 2.0.0)
   const events: Record<string, unknown> = {}
   const streamEvents: Record<string, unknown> = {}
   const clipsMeta: Record<string, unknown> = {}
+
+  // Per-event SHA-1 source hash — recorded as we encode so we can stamp
+  // each ExportFile with the same hash later. Keys are `${ev.id}|${mode}`
+  // to mirror the encoded-WAV cache layout, even though command and
+  // stream of the same event share the underlying source hash (the
+  // *source* audio is identical; what differs is the encoded output).
+  const fileHashByPath = new Map<string, string>()
 
   // ファイル名の重複回避（install-clips / stream-clips それぞれ独立した namespace）
   const usedCommandNames = new Set<string>()
@@ -318,7 +351,9 @@ export async function exportKitAsPack(
           fname = `${base}_${n}.wav`
         }
         usedCommandNames.add(fname)
-        root.file(`install-clips/${fname}`, encodedBlob)
+        const filePath = `install-clips/${fname}`
+        files.push({ path: filePath, blob: encodedBlob, sourceHash, cached: !!cached })
+        fileHashByPath.set(filePath, sourceHash)
 
         events[ev.eventId] = {
           clip: fname,
@@ -345,7 +380,9 @@ export async function exportKitAsPack(
           fname = `${base}_${n}.wav`
         }
         usedStreamNames.add(fname)
-        root.file(`stream-clips/${fname}`, encodedBlob)
+        const filePath = `stream-clips/${fname}`
+        files.push({ path: filePath, blob: encodedBlob, sourceHash, cached: !!cached })
+        fileHashByPath.set(filePath, sourceHash)
 
         // stream_events の parameters は SDK 側のみが参照する。device_wiper
         // は stream モードでは無意味なので含めない (schema 2.0.0 仕様)。
@@ -362,6 +399,9 @@ export async function exportKitAsPack(
       // 他 mode (旧 stream_source 等) は schema 2.0.0 で削除済。
     }
   }
+  // fileHashByPath は今は ExportFile.sourceHash で持っているので未使用。
+  // 将来 path-base de-dup ロジックを足す場合に流用するため残置。
+  void fileHashByPath
 
   // Author tuning context. We always emit firmware_version_min (the
   // schema requires it) but only keep extra hardware fields when the
@@ -396,12 +436,42 @@ export async function exportKitAsPack(
     install_clips: clipsMeta,
   }
 
-  root.file(manifestFileName(packId), JSON.stringify(manifest, null, 2))
+  // manifest.json is always emitted as a fresh blob — it's tiny (<= a
+  // few KB) and its content (parameters / intensity / target_device)
+  // can change on any kit edit, so flushKitFolderNow writes it on
+  // every save regardless of WAV-skip logic.
+  const manifestJson = JSON.stringify(manifest, null, 2)
+  files.push({
+    path: manifestFileName(packId),
+    blob: new Blob([manifestJson], { type: 'application/json' }),
+    sourceHash: null,
+    cached: false,
+  })
 
+  return { files, packId, warnings }
+}
+
+/**
+ * Build a Pack-format ZIP blob from `exportKitAsPack` output.
+ *
+ * Save Folder doesn't need this — it writes the files directly to the
+ * kit folder. Deploy *does* need a single ZIP blob to ship to Helper
+ * over the WebSocket, so we keep the ZIP path but make it lazy.
+ *
+ * Layout inside the ZIP: `<packId>/<file.path>` (mirrors the on-disk
+ * folder under `<outRoot>/<packId>/`).
+ */
+export async function buildKitZip(
+  files: ExportFile[],
+  packId: string,
+): Promise<{ blob: Blob; filename: string }> {
+  const zip = new JSZip()
+  const root = zip.folder(packId)!
+  for (const f of files) {
+    root.file(f.path, f.blob)
+  }
   const blob = await zip.generateAsync({ type: 'blob' })
-  const filename = `${packId}.hapbeat-kit`
-
-  return { blob, filename, warnings }
+  return { blob, filename: `${packId}.hapbeat-kit` }
 }
 
 /** Blob をダウンロードさせるヘルパー */

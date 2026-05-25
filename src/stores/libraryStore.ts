@@ -37,7 +37,12 @@ import {
   isHiddenStudioDir,
   type DiscoveredKit,
 } from '@/utils/localDirectory'
-import { exportKitAsPack, manifestFileName, toPackId } from '@/utils/kitExporter'
+import {
+  exportKitAsPack,
+  manifestFileName,
+  toPackId,
+  type ExportFile,
+} from '@/utils/kitExporter'
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -160,7 +165,7 @@ interface LibraryState {
    * Validates silently — invalid kits / missing outRoot return null.
    * Updates the per-kit ZIP cache used by Deploy.
    */
-  flushKitFolderNow: (kitId: string) => Promise<{ blob: Blob; packId: string } | null>
+  flushKitFolderNow: (kitId: string) => Promise<{ files: ExportFile[]; packId: string } | null>
   /**
    * Same as flushKitFolderNow but seeds an `opMsg` first so the
    * footer status pill announces `saving → saved` (or `error`) to the
@@ -170,7 +175,7 @@ interface LibraryState {
    * stays silent on success so background-build callers (Deploy
    * pre-flight) don't spam the pill.
    */
-  requestKitFolderSave: (kitId: string, opMsg: string) => Promise<{ blob: Blob; packId: string } | null>
+  requestKitFolderSave: (kitId: string, opMsg: string) => Promise<{ files: ExportFile[]; packId: string } | null>
   /**
    * Debounced wrapper around flushKitFolderNow. Replaces any pending
    * timer for the same kit. Pass delayMs=0 to flush on the next
@@ -181,9 +186,10 @@ interface LibraryState {
   /** Cancel any pending flush for kitId (called from removeKit so the
    *  archived folder is not recreated by a stale debounce timer). */
   cancelKitFlush: (kitId: string) => void
-  /** Latest ZIP build for a kit, populated by flushKitFolderNow. Deploy
-   *  reads from here to avoid rebuilding on click. */
-  getLastBuiltKit: (kitId: string) => { blob: Blob; packId: string } | undefined
+  /** Latest Save Folder output for a kit (file list, no ZIP). Deploy
+   *  builds the ZIP on demand from this via `buildKitZip` — Save Folder
+   *  never needs a ZIP, so we skip the encode/decode round trip. */
+  getLastBuiltKit: (kitId: string) => { files: ExportFile[]; packId: string } | undefined
 
   /** Clip id currently open in the inline editor (Clips panel). Set from
    *  either the Clips panel itself or from a Kit event row's Edit action so
@@ -498,7 +504,31 @@ async function saveKitsMetaToDir(handle: FileSystemDirectoryHandle, kits: KitDef
 
 const kitFlushTimers = new Map<string, number>()
 const lastWrittenPackId = new Map<string, string>()
-const lastBuiltKit = new Map<string, { blob: Blob; packId: string }>()
+/**
+ * Last successful Save Folder output per kit. The `files` array is the
+ * ExportFile[] produced by `exportKitAsPack` (no zip generation
+ * involved); Deploy builds the ZIP on demand from this array via
+ * `buildKitZip`. Cleared on archive / kit folder change / kit
+ * removal so a stale build can't end up on the wire.
+ */
+const lastBuiltKit = new Map<string, { files: ExportFile[]; packId: string }>()
+/**
+ * Per-kit "WAV write ledger" used by `flushKitFolderNow` to skip disk
+ * writes for unchanged WAVs.
+ *   key   = `${kit.id}`
+ *   value = {
+ *     packId,                 // packId at the time of the last write
+ *     pathHash: Map<path,sha1>// sourceHash that was written to <packId>/<path>
+ *   }
+ * `flushKitFolderNow` only writes a WAV when its current `sourceHash`
+ * differs from the ledger entry for the same path — or when the
+ * packId changed (kit rename), or when the on-disk file disappeared
+ * (user manually deleted it).
+ */
+const lastWrittenWavs = new Map<
+  string,
+  { packId: string; pathHash: Map<string, string> }
+>()
 
 /**
  * Per-kit flush mutex. Prevents two `flushKitFolderNow` calls for the
@@ -553,7 +583,33 @@ function resetKitMemory() {
   kitFlushChain.clear()
   lastWrittenPackId.clear()
   lastBuiltKit.clear()
+  lastWrittenWavs.clear()
   lastOpMessage.clear()
+}
+
+/**
+ * Check whether `<root>/<packId>/<relPath>` exists. Used by the
+ * skip-write heuristic so a manually-deleted WAV on disk is detected
+ * and re-emitted instead of left missing. Returns `false` on any
+ * lookup error (kit dir missing, sub-folder missing, file not
+ * found) — caller should write the file in that case.
+ */
+async function kitFileExists(
+  root: FileSystemDirectoryHandle,
+  packId: string,
+  relPath: string,
+): Promise<boolean> {
+  try {
+    const parts = relPath.split('/')
+    let dir = await root.getDirectoryHandle(packId, { create: false })
+    for (let i = 0; i < parts.length - 1; i++) {
+      dir = await dir.getDirectoryHandle(parts[i], { create: false })
+    }
+    await dir.getFileHandle(parts[parts.length - 1], { create: false })
+    return true
+  } catch {
+    return false
+  }
 }
 
 export const useLibraryStore = create<LibraryState>((set, get) => ({
@@ -597,7 +653,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // Serialize concurrent flushes for the same kit. The actual work
     // runs in `doFlush`; if a flush is already in flight, we await it
     // first then run our own (so the latest store state hits disk last).
-    const doFlush = async (): Promise<{ blob: Blob; packId: string } | null> => {
+    const doFlush = async (): Promise<{ files: ExportFile[]; packId: string } | null> => {
     const state = get()
     const kit = state.kits.find((k) => k.id === kitId)
     if (!kit) return null
@@ -623,6 +679,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // problems are never silent.
     const opMsg = lastOpMessage.get(kit.id)
     try {
+      // exportKitAsPack returns ExportFile[] directly (no ZIP encode
+      // / decode round-trip). For unchanged audio the IDB encoded-WAV
+      // cache also skips decode + re-encode. The remaining disk writes
+      // are pruned below by lastWrittenWavs.
       const result = await exportKitAsPack(kit)
 
       // Race-condition guard: kit may have been removed (× clicked)
@@ -631,26 +691,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         return null
       }
 
-      const zip = (await import('jszip')).default
-      const zipData = await zip.loadAsync(result.blob)
-      const files: { path: string; blob: Blob }[] = []
-      for (const [path, entry] of Object.entries(zipData.files)) {
-        if (!entry.dir) {
-          const blob = await entry.async('blob')
-          // exportKitAsPack puts everything under `<packId>/` — strip
-          // that prefix so writeKitFolder rebuilds the same layout.
-          const relPath = path.includes('/') ? path.substring(path.indexOf('/') + 1) : path
-          if (relPath) files.push({ path: relPath, blob })
-        }
-      }
-      const packId = toPackId(kit.name)
+      const packId = result.packId
 
       // Rename: if this kit was previously written under a different
       // packId, archive the stale folder so it stops appearing in OS
       // Explorer. The new folder is written below.
       const prevPackId = lastWrittenPackId.get(kit.id)
-      if (prevPackId && prevPackId !== packId) {
-        try { await archiveKitFolder(outRoot, prevPackId) } catch { /* ignore */ }
+      const packIdChanged = !!prevPackId && prevPackId !== packId
+      if (packIdChanged) {
+        try { await archiveKitFolder(outRoot, prevPackId!) } catch { /* ignore */ }
       }
 
       // Version-bump history: snapshot the existing manifest under
@@ -684,7 +733,40 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         }
       } catch { /* no existing manifest — first save */ }
 
-      await writeKitFolder(outRoot, packId, files)
+      // ---- Skip-write heuristic ----
+      // For each WAV, write it only when its sourceHash differs from
+      // what we last wrote to the same path under the same packId, OR
+      // the on-disk file is missing (user deleted it / first save).
+      // manifest.json is always written (small, may differ on every
+      // edit). When packId changed (rename → archive), the previous
+      // ledger is invalid — fall back to "write everything".
+      const prevLedger = lastWrittenWavs.get(kit.id)
+      const ledgerValid = !packIdChanged && !!prevLedger && prevLedger.packId === packId
+      const filesToWrite: ExportFile[] = []
+      for (const f of result.files) {
+        if (f.sourceHash === null) {
+          // manifest.json — always write
+          filesToWrite.push(f)
+          continue
+        }
+        if (!ledgerValid) {
+          filesToWrite.push(f)
+          continue
+        }
+        const prevHash = prevLedger!.pathHash.get(f.path)
+        if (prevHash !== f.sourceHash) {
+          filesToWrite.push(f)
+          continue
+        }
+        // Cache says hash matches — verify the on-disk file still
+        // exists (catches the "user deleted the WAV manually" case).
+        const exists = await kitFileExists(outRoot, packId, f.path)
+        if (!exists) {
+          filesToWrite.push(f)
+        }
+        // else: skip the write — file on disk already matches cache.
+      }
+      await writeKitFolder(outRoot, packId, filesToWrite)
 
       // One-shot migration: the manifest is now `<packId>-manifest.json`
       // (kitExporter writes it under that name from 2026-05-17). If a
@@ -741,7 +823,16 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       } catch { /* kit dir vanished — caller will see no folder */ }
 
       lastWrittenPackId.set(kit.id, packId)
-      lastBuiltKit.set(kit.id, { blob: result.blob, packId })
+      lastBuiltKit.set(kit.id, { files: result.files, packId })
+
+      // Update the WAV write ledger: now-on-disk hash per path. Build
+      // a fresh Map every flush (cheap; map is small) so deleted /
+      // renamed paths fall out automatically.
+      const newPathHash = new Map<string, string>()
+      for (const f of result.files) {
+        if (f.sourceHash) newPathHash.set(f.path, f.sourceHash)
+      }
+      lastWrittenWavs.set(kit.id, { packId, pathHash: newPathHash })
 
       // Success: reset retry bookkeeping for this kit.
       retryAttempts.delete(kit.id)
@@ -755,7 +846,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // Only surface a "saved" pill when there's an actual operation
       // to report. Silent flushes (Deploy build) shouldn't broadcast.
       if (opMsg) state.setLocalFsStatus('saved', opMsg)
-      return { blob: result.blob, packId }
+      return { files: result.files, packId }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       console.error('flushKitFolderNow failed:', err)
@@ -2040,6 +2131,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       }
       lastWrittenPackId.delete(kit.id)
       lastBuiltKit.delete(kit.id)
+      lastWrittenWavs.delete(kit.id)
     }
     get().setLocalFsStatus('saved', `kit "${kit?.name ?? id}" を archive`)
   },

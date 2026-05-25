@@ -1989,20 +1989,24 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
       Object.fromEntries(devices.map((d) => [d.ipAddress, { pct: 0, msg: 'queued…' }])),
     )
     try {
-      // Prefer the cached ZIP from the most recent auto-save. If none
-      // exists (e.g. user just changed something and the debounce
-      // hasn't fired yet), force a synchronous flush to get a fresh
-      // blob aligned with the on-disk folder.
+      // Save Folder doesn't build a ZIP any more (decode/encode are
+      // skipped for unchanged audio; we write files directly). For
+      // Deploy we still need a single ZIP blob to ship over the
+      // Helper WebSocket, so build it on demand from the cached
+      // ExportFile[]. If nothing has been built yet, force a synchronous
+      // flush first so we have an aligned file set.
       const store = useLibraryStore.getState()
-      const out = store.getLastBuiltKit(kit.id) ?? await store.flushKitFolderNow(kit.id)
-      if (!out) { toast('Build failed', 'error'); return }
-      const ab = await out.blob.arrayBuffer(); const bytes = new Uint8Array(ab)
+      const built = store.getLastBuiltKit(kit.id) ?? await store.flushKitFolderNow(kit.id)
+      if (!built) { toast('Build failed', 'error'); return }
+      const { buildKitZip } = await import('@/utils/kitExporter')
+      const { blob } = await buildKitZip(built.files, built.packId)
+      const ab = await blob.arrayBuffer(); const bytes = new Uint8Array(ab)
       let bin = ''; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
-      send({ type: 'deploy_kit_data', payload: { kit_id: out.packId, zip_base64: btoa(bin), targets: devices.map((d) => d.ipAddress) }})
+      send({ type: 'deploy_kit_data', payload: { kit_id: built.packId, zip_base64: btoa(bin), targets: devices.map((d) => d.ipAddress) }})
       // Don't claim "sent" success here — the helper hasn't reached the
       // device yet. Per-device deploy_result will toast either
       // success or failure once the TCP write actually settles.
-      toast(`Sending "${out.packId}" to ${devices.length} device(s)…`, 'info')
+      toast(`Sending "${built.packId}" to ${devices.length} device(s)…`, 'info')
     } catch (err) { toast(`Deploy failed: ${err instanceof Error ? err.message : err}`, 'error') }
     finally { setIsExporting(false) }
   }, [kit, devices, send, preflightKit, setIsExporting, toast])
