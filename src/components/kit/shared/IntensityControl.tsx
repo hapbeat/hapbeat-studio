@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { useElementSize } from '../hooks/useElementSize'
 import './IntensityControl.css'
 
@@ -52,7 +53,7 @@ function IntensityInlineSlider({ value, onChange, label }: { value: number; onCh
       draggable={false}
       onMouseDown={(e) => e.stopPropagation()}
       onDragStart={(e) => { e.preventDefault(); e.stopPropagation() }}
-      title="クリックしてフォーカス、矢印キーで微調整"
+      title="スライダで 5% step / 数字をクリックで直接入力"
     >
       <span className="intensity-inline-label">{label}</span>
       <input
@@ -65,7 +66,11 @@ function IntensityInlineSlider({ value, onChange, label }: { value: number; onCh
         onBlur={() => setFocused(false)}
         onMouseDown={(e) => e.stopPropagation()}
       />
-      <span className="intensity-inline-val">{Math.round(value * 100)}%</span>
+      <IntensityValueEditor
+        value={value}
+        onChange={onChange}
+        className="intensity-inline-val"
+      />
     </label>
   )
 }
@@ -91,7 +96,11 @@ function IntensityPopoverButton({ value, onChange, label }: { value: number; onC
         onClick={() => setOpen(!open)}
         title={`${label} — click to edit`}>
         <span className="intensity-popover-label">{label}</span>
-        <span className="intensity-popover-val">{Math.round(value * 100)}%</span>
+        <IntensityValueEditor
+          value={value}
+          onChange={onChange}
+          className="intensity-popover-val"
+        />
       </button>
       {open && (
         <div className="intensity-popover-panel">
@@ -101,9 +110,109 @@ function IntensityPopoverButton({ value, onChange, label }: { value: number; onC
             draggable={false}
             onChange={(e) => onChange(Number(e.target.value))}
             onMouseDown={(e) => e.stopPropagation()} />
-          <span className="intensity-inline-val">{Math.round(value * 100)}%</span>
+          <IntensityValueEditor
+            value={value}
+            onChange={onChange}
+            className="intensity-inline-val"
+          />
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * Click-to-edit value badge for amp / intensity displays.
+ *
+ * Default render is a plain `<span>` showing `NN%` (rounded to integer).
+ * Clicking the span turns it into an inline `<input type="number">`
+ * with focus + select-all so the user can type a new percentage
+ * directly (e.g. `12` for 12%). Enter / blur commits, Escape cancels.
+ *
+ * Used in both the inline slider and the popover variants of
+ * IntensityControl — the 5%-step slider stays exactly the same, this
+ * just adds a "direct typing" path next to it.
+ *
+ * Commit rules:
+ *   - Input is clamped to 0..100 and rounded to integer
+ *   - Empty / NaN cancels (preserves previous value)
+ *   - onChange receives 0..1 (matches the rest of the API)
+ *
+ * Event handling:
+ *   - `e.stopPropagation()` on click/mousedown so the click doesn't
+ *     toggle the parent popover button or move keyboard selection
+ *   - `e.stopPropagation()` on keydown so global keyboard shortcuts
+ *     (Space play / ↑↓←→ navigation) don't fire while typing
+ */
+function IntensityValueEditor({
+  value, onChange, className, style,
+}: {
+  value: number
+  onChange: (v: number) => void
+  className?: string
+  style?: CSSProperties
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus()
+      inputRef.current.select()
+    }
+  }, [editing])
+
+  const startEdit = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
+    setDraft(String(Math.round(value * 100)))
+    setEditing(true)
+  }
+
+  const commit = () => {
+    const trimmed = draft.trim()
+    if (trimmed !== '') {
+      const n = Number(trimmed)
+      if (!Number.isNaN(n)) {
+        const clamped = Math.max(0, Math.min(100, Math.round(n)))
+        onChange(clamped / 100)
+      }
+    }
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        type="number"
+        min={0} max={100} step={1}
+        className={`${className ?? ''} intensity-value-input`}
+        style={style}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          e.stopPropagation()
+          if (e.key === 'Enter') { e.preventDefault(); commit() }
+          else if (e.key === 'Escape') { e.preventDefault(); setEditing(false) }
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
+      />
+    )
+  }
+
+  return (
+    <span
+      className={className}
+      style={{ cursor: 'text', ...style }}
+      title="クリックで直接入力 (0-100)"
+      onMouseDown={(e) => { e.stopPropagation(); e.preventDefault() }}
+      onClick={startEdit}
+    >
+      {Math.round(value * 100)}%
+    </span>
   )
 }

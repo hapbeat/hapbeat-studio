@@ -107,6 +107,33 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* ---- Click-to-edit value badge ----
+   Replaces the .intensity-inline-val / .intensity-popover-val <span>
+   while the user is typing a custom percentage. Sized to match the
+   span footprint so the surrounding flex layout doesn't shift. */
+.intensity-value-input {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--text-primary);
+  background: rgba(124, 92, 191, 0.18);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 0 4px;
+  width: 44px;
+  min-width: 44px;
+  height: 18px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  box-sizing: border-box;
+  outline: none;
+  -moz-appearance: textfield; /* Firefox: hide spinner */
+}
+.intensity-value-input::-webkit-outer-spin-button,
+.intensity-value-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 /* ---- Popover panel ---- */
 .intensity-popover-panel {
   position: absolute;
