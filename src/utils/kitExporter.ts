@@ -119,21 +119,25 @@ function eventFileName(event: KitEvent): string {
  * One file emitted by `exportKitAsPack`. The `path` is relative to
  * `<outRoot>/<packId>/` (e.g. `install-clips/foo.wav`, `<packId>-manifest.json`).
  *
- * `sourceHash` is the SHA-1 hex of the *source audio blob* that
- * produced this WAV (for the encoded-WAV IDB cache key). For files
- * that aren't WAVs (manifest.json), `sourceHash` is `null` and the
- * file is always rewritten. For WAVs, `flushKitFolderNow` compares
- * `sourceHash` against its `lastWrittenWavs` ledger + a file-exists
- * check to decide whether the disk write can be skipped.
+ * `outputHash` is the SHA-1 hex of `blob` bytes — the hash the
+ * on-disk file *would have* after writing this entry. The
+ * skip-write decision compares this against the on-disk file's
+ * recorded hash (from `<packId>/.studio-cache.json`); match → disk
+ * is already what we'd write → skip the createWritable call.
  *
- * `cached` is `true` when `encodedBlob` came from IDB cache (no fresh
- * decode + encode this turn) — used by the skip-write heuristic and
- * for telemetry / future "skipped N WAVs" toast.
+ * For files that aren't WAVs (manifest.json), `outputHash` is `null`
+ * and the file is always rewritten — manifests are tiny and their
+ * parameters change on every edit.
+ *
+ * `cached` is `true` when `blob` came from the IDB encoded-wavs cache
+ * (no fresh decode + encode this turn) — telemetry only; the
+ * skip-write decision uses `outputHash` against the disk cache file,
+ * not this flag.
  */
 export interface ExportFile {
   path: string
   blob: Blob
-  sourceHash: string | null
+  outputHash: string | null
   cached: boolean
 }
 
@@ -290,11 +294,27 @@ export async function exportKitAsPack(
       let encodedBlob: Blob
       let encodedChannels: number
       let encodedDuration: number
+      // SHA-1 of `encodedBlob` bytes — see ExportFile.outputHash for
+      // why we surface this up to the file-write decision.
+      let outputHash: string
 
       if (cached) {
         encodedBlob = cached.encodedBlob
         encodedChannels = cached.channels
         encodedDuration = cached.duration
+        // Older cache entries may pre-date the outputHash field. Hash
+        // the cached blob lazily and write the value back so the next
+        // save can skip the hash compute too.
+        if (cached.outputHash) {
+          outputHash = cached.outputHash
+        } else {
+          outputHash = await sha1Hex(encodedBlob)
+          try {
+            await saveEncodedWav(ev.id, cacheMode, { ...cached, outputHash })
+          } catch (err) {
+            console.warn('[kitExporter] backfill outputHash failed', err)
+          }
+        }
       } else {
         // Miss — decode (lazy, shared across modes) + encode for this
         // mode, then persist for the next save.
@@ -320,6 +340,8 @@ export async function exportKitAsPack(
           encodedDuration = dec.duration
         }
 
+        outputHash = await sha1Hex(encodedBlob)
+
         // Only cache successful decodes. Fallback bytes (= raw source
         // blob passed through unchanged) aren't worth caching because
         // they'd reduce to a copy of the audio store entry, doubling
@@ -328,6 +350,7 @@ export async function exportKitAsPack(
           const entry: EncodedWavEntry = {
             sourceHash,
             encodedBlob,
+            outputHash,
             sampleRate: PACK_TARGET_SAMPLE_RATE,
             channels: encodedChannels,
             duration: encodedDuration,
@@ -352,8 +375,8 @@ export async function exportKitAsPack(
         }
         usedCommandNames.add(fname)
         const filePath = `install-clips/${fname}`
-        files.push({ path: filePath, blob: encodedBlob, sourceHash, cached: !!cached })
-        fileHashByPath.set(filePath, sourceHash)
+        files.push({ path: filePath, blob: encodedBlob, outputHash, cached: !!cached })
+        fileHashByPath.set(filePath, outputHash)
 
         events[ev.eventId] = {
           clip: fname,
@@ -381,8 +404,8 @@ export async function exportKitAsPack(
         }
         usedStreamNames.add(fname)
         const filePath = `stream-clips/${fname}`
-        files.push({ path: filePath, blob: encodedBlob, sourceHash, cached: !!cached })
-        fileHashByPath.set(filePath, sourceHash)
+        files.push({ path: filePath, blob: encodedBlob, outputHash, cached: !!cached })
+        fileHashByPath.set(filePath, outputHash)
 
         // stream_events の parameters は SDK 側のみが参照する。device_wiper
         // は stream モードでは無意味なので含めない (schema 2.0.0 仕様)。
@@ -444,7 +467,7 @@ export async function exportKitAsPack(
   files.push({
     path: manifestFileName(packId),
     blob: new Blob([manifestJson], { type: 'application/json' }),
-    sourceHash: null,
+    outputHash: null,
     cached: false,
   })
 

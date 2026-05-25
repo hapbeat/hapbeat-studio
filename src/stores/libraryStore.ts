@@ -727,32 +727,38 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
       // ---- Skip-write heuristic ----
       //
-      // Source of truth: `<packId>/.studio-cache.json` (KitDiskCache).
-      // It records the source-blob SHA-1 we last wrote to each path
-      // inside this kit folder. The cache file lives ON DISK with the
-      // kit, so the skip survives:
+      // Source of truth: `<packId>/.studio-cache.json` (KitDiskCache v2).
+      // It records the SHA-1 of the on-disk WAV bytes from the last
+      // flush. We compare against the prospective output's hash — if
+      // they match (and the file is still present), the bytes we'd
+      // write are bit-exact what's already on disk, so skip the write.
+      //
+      // Living on disk with the kit, the cache survives:
       //   - browser data clears,
       //   - switching browsers (Chrome ↔ Edge),
-      //   - moving the kit folder between machines (e.g. cloud sync).
+      //   - moving the kit folder between machines (e.g. cloud sync),
+      //   - hard reload + folder re-pick (the previous design's blind
+      //     spot — re-import gave each event a new id and a different
+      //     "source" blob, so a sourceHash-keyed ledger always missed).
       //
       // Decision per ExportFile:
-      //   - `sourceHash === null` (manifest.json)  → write (always)
-      //   - packId just changed (kit rename)       → write (new folder)
-      //   - disk cache lacks an entry for this path → write (first save)
-      //   - disk cache hash differs from current   → write (source changed)
-      //   - on-disk file is missing                → write (user deleted)
-      //   - otherwise                              → skip
+      //   - `outputHash === null` (manifest.json)   → write (always)
+      //   - packId just changed (kit rename)         → write (new folder)
+      //   - disk cache lacks an entry for this path  → write (first save)
+      //   - disk cache hash differs from current     → write (audio changed)
+      //   - on-disk file is missing                  → write (user deleted)
+      //   - otherwise                                → skip
       //
       // The IDB encoded-wavs cache still helps separately — it lets
       // exportKitAsPack skip decode + re-encode when source audio is
       // unchanged. The disk cache governs disk writes; the IDB cache
       // governs CPU work. They're independent.
       const diskCache = await loadKitDiskCache(outRoot, packId)
-      const prevWavHash: Record<string, string> = diskCache?.wavs ?? {}
+      const prevOutputHash: Record<string, string> = diskCache?.wavs ?? {}
       const filesToWrite: ExportFile[] = []
       let skippedCount = 0
       for (const f of result.files) {
-        if (f.sourceHash === null) {
+        if (f.outputHash === null) {
           filesToWrite.push(f) // manifest — always write
           continue
         }
@@ -760,7 +766,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           filesToWrite.push(f)
           continue
         }
-        if (prevWavHash[f.path] !== f.sourceHash) {
+        if (prevOutputHash[f.path] !== f.outputHash) {
           filesToWrite.push(f)
           continue
         }
@@ -778,19 +784,19 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       }
       await writeKitFolder(outRoot, packId, filesToWrite)
 
-      // Update the on-disk cache file with the CURRENT hashes. This
-      // happens every flush — even when no WAVs were written — so the
-      // cache always reflects the actual state on disk (manifest may
-      // have just been refreshed). Failure is non-fatal (the next
-      // flush will rebuild it).
+      // Update the on-disk cache file with the CURRENT output hashes.
+      // This happens every flush — even when no WAVs were written —
+      // so the cache always reflects the actual state on disk (manifest
+      // may have just been refreshed, or a v1 cache may have been
+      // present and been ignored). Failure is non-fatal.
       const newCache: KitDiskCache = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         wavs: {},
         writtenAt: new Date().toISOString(),
         writtenByKitName: kit.name,
       }
       for (const f of result.files) {
-        if (f.sourceHash !== null) newCache.wavs[f.path] = f.sourceHash
+        if (f.outputHash !== null) newCache.wavs[f.path] = f.outputHash
       }
       await saveKitDiskCache(outRoot, packId, newCache)
 

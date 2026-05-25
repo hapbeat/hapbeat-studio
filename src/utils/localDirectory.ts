@@ -452,15 +452,30 @@ export const STUDIO_CACHE_FILENAME = '.studio-cache.json'
  * Per-kit skip-write ledger persisted as `<packId>/.studio-cache.json`.
  *
  * `wavs` maps **kit-relative path** (e.g. `install-clips/foo.wav`) to
- * the SHA-1 hex of the *source audio blob* whose encoding produced
- * that WAV. `flushKitFolderNow` compares the current source hash
- * against this on every save; matching hash + matching path + the
- * on-disk file still existing means the disk write can be skipped.
+ * the SHA-1 hex of the **on-disk WAV bytes** that were last written
+ * to that path. `flushKitFolderNow` compares the prospective output's
+ * hash against this — if they match, the file currently on disk is
+ * already bit-exact what we'd write, so the disk write can be skipped.
+ *
+ * Why outputHash, not sourceHash:
+ *   schema v1 keyed by the *source* audio's hash. That broke after a
+ *   hard reload + folder re-pick, because `importKitsFromOutputDir`
+ *   re-imports each event's audio from the on-disk WAV — so the
+ *   "source" in IDB is the **previous save's encoded output**, not
+ *   the original drop. The source hash changes between sessions even
+ *   when the audio bytes on disk are unchanged. outputHash sidesteps
+ *   this by comparing the encoded blob's hash against the on-disk
+ *   file's hash — both are deterministic functions of the same
+ *   source audio, so they match across import boundaries (provided
+ *   the encoder is deterministic, which `encodeWavBlob` /
+ *   `encodeStereoWavBlob` are for PCM16 inputs).
  */
 export interface KitDiskCache {
-  /** Schema version. Bump on incompatible format changes. */
-  schemaVersion: 1
-  /** Per-WAV: relative path → source-blob SHA-1 hex. */
+  /** Schema version. v1 stored sourceHash; v2 stores outputHash.
+   *  Loaders treat any non-v2 file as missing (= write everything,
+   *  rebuild cache as v2). */
+  schemaVersion: 2
+  /** Per-WAV: relative path → SHA-1 hex of the on-disk file bytes. */
   wavs: Record<string, string>
   /** ISO timestamp of the last successful flush (debug only). */
   writtenAt?: string
@@ -480,11 +495,14 @@ export async function loadKitDiskCache(
     const parsed = JSON.parse(text) as Partial<KitDiskCache>
     if (
       parsed && typeof parsed === 'object'
-      && parsed.schemaVersion === 1
+      && parsed.schemaVersion === 2
       && parsed.wavs && typeof parsed.wavs === 'object'
     ) {
       return parsed as KitDiskCache
     }
+    // v1 files: previous design used sourceHash, which doesn't survive
+    // a hard-reload re-import. Treat as missing — caller writes
+    // everything once + saves a fresh v2 cache. One-time cost.
     return null
   } catch {
     // File not found / unreadable / malformed JSON — caller falls back

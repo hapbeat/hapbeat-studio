@@ -127,6 +127,12 @@ export interface EncodedWavEntry {
    *  (stream_clip). Ready to drop straight into install-clips/ or
    *  stream-clips/. */
   encodedBlob: Blob
+  /** SHA-1 hex of `encodedBlob` bytes — the hash the on-disk file
+   *  *would have* after writing this blob. Stored here so the disk
+   *  skip-write decision (in flushKitFolderNow) can read it without
+   *  re-hashing on cache hit. Older entries (pre-2026-05-26) may not
+   *  have this field; the loader fills it in lazily on next hit. */
+  outputHash?: string
   /** Output sample rate of `encodedBlob`. Always 16 kHz today but kept
    *  in the entry so install_clips metadata can be reconstructed
    *  without decoding the blob. */
