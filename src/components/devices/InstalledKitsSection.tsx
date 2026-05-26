@@ -9,7 +9,7 @@ import type { DeviceInfo, ManagerMessage } from '@/types/manager'
  * way to display the manifest-side amp value without falling back
  * to a Studio-local lookup (which doesn't survive browser restart).
  *
- * New firmware (≥ v0.2.0, see
+ * New firmware (≥ v0.1.3, see
  * `hapbeat-device-firmware/instructions/instructions-kit-list-include-intensity-…`)
  * embeds the manifest's `parameters.*` directly in each event row,
  * so the UI can render amp / loop / device_wiper without any
@@ -52,7 +52,7 @@ interface NormalizedEvent {
   display: string
   mode: string
   /** Manifest-side amp (0.0–1.0). `null` when the firmware response
-   *  didn't include the field (i.e. fw < v0.2.0). */
+   *  didn't include the field (i.e. fw < v0.1.3). */
   intensity: number | null
 }
 
@@ -76,7 +76,7 @@ const STREAM_MODES = new Set(['stream_clip'])
 /** Minimum firmware version that emits `parameters.intensity` (and
  *  friends) in `kit_list_result` event rows. Bumped here when the
  *  firmware spec for the response shape changes. */
-const KIT_LIST_PARAMS_MIN_FW = '0.2.0'
+const KIT_LIST_PARAMS_MIN_FW = '0.1.3'
 
 /**
  * Mirrors the Manager's "インストール済み Kit" tree: per-kit list of
@@ -95,7 +95,7 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
   // response carried an `intensity` field. If the firmware returns
   // only `{name, mode}` for every event, the panel can't show amp
   // values from device data alone — surface a one-line banner so
-  // the user knows to update firmware (≥ v0.2.0).
+  // the user knows to update firmware (≥ v0.1.3).
   //
   // We treat "kits present but all events lack intensity" as the
   // signal — an empty kits array doesn't tell us anything about
