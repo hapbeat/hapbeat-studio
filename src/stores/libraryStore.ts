@@ -13,6 +13,7 @@ import {
   listKits,
   deleteKit,
 } from '@/utils/libraryStorage'
+import { useLogStore } from '@/stores/logStore'
 import { encodeWavBlob } from '@/utils/wavIO'
 import type { SampleRate } from '@/types/waveform'
 import {
@@ -603,6 +604,31 @@ async function kitFileExists(
   }
 }
 
+/**
+ * Read the text content of a file at `<root>/<packId>/<relPath>`.
+ * Returns `null` on any lookup failure (file missing, sub-folder
+ * missing, permission, etc). Used by the manifest-unchanged detector
+ * so a kit save with identical on-disk manifest reports "変更なし".
+ */
+async function readKitFileText(
+  root: FileSystemDirectoryHandle,
+  packId: string,
+  relPath: string,
+): Promise<string | null> {
+  try {
+    const parts = relPath.split('/')
+    let dir = await root.getDirectoryHandle(packId, { create: false })
+    for (let i = 0; i < parts.length - 1; i++) {
+      dir = await dir.getDirectoryHandle(parts[i], { create: false })
+    }
+    const handle = await dir.getFileHandle(parts[parts.length - 1], { create: false })
+    const file = await handle.getFile()
+    return await file.text()
+  } catch {
+    return null
+  }
+}
+
 export const useLibraryStore = create<LibraryState>((set, get) => ({
   clips: [],
   isLoading: false,
@@ -756,9 +782,22 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       const prevOutputHash: Record<string, string> = diskCache?.wavs ?? {}
       const filesToWrite: ExportFile[] = []
       let skippedCount = 0
+      let manifestSkipped = false
       for (const f of result.files) {
         if (f.outputHash === null) {
-          filesToWrite.push(f) // manifest — always write
+          // manifest.json — compare bytes against the on-disk copy.
+          // If identical, skip the write so amp-only-with-no-change
+          // saves can report "変更なし". Comparison is cheap (the
+          // manifest is small + we already have the proposed bytes).
+          if (!packIdChanged) {
+            const onDisk = await readKitFileText(outRoot, packId, f.path)
+            const proposed = await f.blob.text()
+            if (onDisk !== null && onDisk === proposed) {
+              manifestSkipped = true
+              continue
+            }
+          }
+          filesToWrite.push(f)
           continue
         }
         if (packIdChanged) {
@@ -869,26 +908,45 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // to report. Silent flushes (Deploy build) shouldn't broadcast.
       // Append a per-flush summary so the user sees *what* changed:
       // "WAV 3 件更新 / 12 件 skip" beats a generic "保存しました".
+      // Also push the same summary to the bottom log drawer so the
+      // user has a scrollable history of save outcomes.
+      const wavsWritten = filesToWrite.filter((f) => f.outputHash !== null).length
+      const wavsSkipped = skippedCount
+      const summary = (() => {
+        if (wavsWritten === 0 && wavsSkipped === 0 && manifestSkipped) {
+          // Truly identical to what's on disk.
+          return '変更なし'
+        }
+        if (wavsWritten === 0 && wavsSkipped === 0) {
+          // Kit with no events — manifest landed but no audio at all.
+          return '設定のみ保存 (events 0 件)'
+        }
+        if (wavsWritten === 0 && manifestSkipped) {
+          // Edge case: all WAVs skipped AND manifest identical. Treat
+          // as no-op (manifest write was avoided too).
+          return `変更なし (WAV ${wavsSkipped} 件 skip)`
+        }
+        if (wavsWritten === 0) {
+          // Manifest changed (amp / wiper / loop / target_device 等)
+          // — all WAVs were bit-exact to disk.
+          return `設定のみ更新 (WAV ${wavsSkipped} 件は skip)`
+        }
+        if (wavsSkipped === 0) {
+          return `WAV ${wavsWritten} 件書き込み`
+        }
+        return `WAV ${wavsWritten} 件更新 / ${wavsSkipped} 件 skip`
+      })()
       if (opMsg) {
-        const wavsWritten = filesToWrite.filter((f) => f.outputHash !== null).length
-        const wavsSkipped = skippedCount
-        const summary = (() => {
-          if (wavsWritten === 0 && wavsSkipped === 0) {
-            // Kit with no events — just the manifest landed.
-            return '設定のみ保存 (events 0 件)'
-          }
-          if (wavsWritten === 0) {
-            // Manifest changed (amp / wiper / loop / target_device 等)
-            // — all WAVs were bit-exact to disk.
-            return `設定のみ更新 (WAV ${wavsSkipped} 件は skip)`
-          }
-          if (wavsSkipped === 0) {
-            return `WAV ${wavsWritten} 件書き込み`
-          }
-          return `WAV ${wavsWritten} 件更新 / ${wavsSkipped} 件 skip`
-        })()
         state.setLocalFsStatus('saved', `${opMsg} — ${summary}`)
       }
+      // Mirror the save outcome into the bottom log drawer. Use a
+      // stable `source` so users can filter / spot it among device
+      // chatter. We push for both explicit (opMsg present) and
+      // silent flushes — the log is meant to be a scrollable history
+      // even when the pill doesn't surface anything.
+      try {
+        useLogStore.getState().push('kit', `${kit.name}: ${summary}`)
+      } catch { /* logStore unavailable shouldn't break the flush */ }
       return { files: result.files, packId }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)

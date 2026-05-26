@@ -492,7 +492,11 @@ export async function exportKitAsPack(
     name: packId,
     description: kit.description,
     author: '',
-    created_at: new Date().toISOString(),
+    // `created_at` is the kit's own creation timestamp (stable across
+    // saves) — NOT `Date.now()` at flush time. Stamping with the
+    // current time would change the manifest bytes on every save and
+    // defeat the "no actual change" detection in flushKitFolderNow.
+    created_at: kit.createdAt,
     target_device: targetDevice,
     events,
     ...(Object.keys(streamEvents).length > 0 ? { stream_events: streamEvents } : {}),
