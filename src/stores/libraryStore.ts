@@ -370,6 +370,48 @@ function savePersistedSort(filter: LibraryFilter): void {
   } catch { /* ignore — quota or disabled storage */ }
 }
 
+/**
+ * localStorage backup of `kits` state — used to hydrate the UI on
+ * browser restart **before** the user has re-granted File System
+ * Access permission for the workdir.
+ *
+ * The disk file `<workdir>/kits-meta.json` is the source of truth,
+ * but reading it after a browser restart requires a user gesture
+ * (FS-Access permissions reset to `prompt` on browser exit). Without
+ * this cache, the Devices → Kit panel renders "amp ?" for every
+ * event until the user clicks "Pick folder" — even though the same
+ * kit metadata sat on disk all along.
+ *
+ * Stored:  the full `KitDefinition[]` array, JSON-stringified.
+ *          Metadata only — no audio blobs.
+ * Cleared: on workdir / kitDir disconnect, so a fresh session under
+ *          a different folder doesn't surface stale rows from the
+ *          previous folder.
+ */
+const KITS_CACHE_KEY = 'hapbeat-studio-kits-cache'
+
+function loadCachedKits(): KitDefinition[] {
+  try {
+    const raw = localStorage.getItem(KITS_CACHE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed as KitDefinition[]
+  } catch { return [] }
+}
+
+function saveCachedKits(kits: KitDefinition[]): void {
+  try {
+    localStorage.setItem(KITS_CACHE_KEY, JSON.stringify(kits))
+  } catch (err) {
+    // Quota exceeded / disabled storage / etc. Non-fatal — the UI
+    // will show "amp ?" on next browser restart but the disk copy
+    // remains authoritative.
+    console.warn('[libraryStore] kits localStorage cache save failed:', err)
+  }
+}
+
+
 /** Save clips metadata to the local work directory */
 async function saveClipsMetaToDir(handle: FileSystemDirectoryHandle, clips: LibraryClip[]) {
   await writeMetadataJson(handle, CLIPS_META_FILE, clips)
@@ -1069,18 +1111,25 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         // stale rows from a pre-fix bug that called saveKit() with a
         // fresh `generateId()` on every reload. Reading from it now
         // would surface hundreds of phantom kits in the UI even though
-        // the user only has two on disk. Leave `kits: []` so the UI
-        // prompts the user to pick a folder; once they do,
-        // `importKitsFromOutputDir` populates state from disk.
+        // the user only has two on disk.
         //
-        // We still load library `clips` from IDB here because clip
-        // metadata IS authoritative there when there's no workdir
-        // (users can drop clips into the library without picking a
-        // folder, and that flow lives entirely in IDB until a workdir
-        // is chosen). If the kit-listing-from-IDB cleanup proves the
-        // direction useful, we can do the same for clips next.
+        // We still HYDRATE from `localStorage`-cached kit metadata so
+        // the UI shows intensity / event names immediately after a
+        // browser restart — File System Access permissions reset to
+        // `prompt` on browser restart and need a user gesture to
+        // re-grant, so the disk isn't reachable until the user picks
+        // the workdir again. The localStorage copy is metadata only
+        // (no audio blobs); it's purely a UX cache to avoid "amp ?"
+        // flicker in the Devices → Kit installed-kits view. The next
+        // successful folder pick re-reads from disk and overwrites
+        // the cache.
+        //
+        // Library `clips` are still loaded from IDB here — same
+        // pre-workdir story (drop a clip, it lives in IDB until you
+        // pick a folder).
         const clips = await listClips()
-        set({ clips, kits: [] })
+        const cachedKits = loadCachedKits()
+        set({ clips, kits: cachedKits })
       }
       // Load the built-in index so subsequent auto-import can consult it.
       await get().loadBuiltinIndex()
@@ -2636,3 +2685,24 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     return Array.from(catSet).sort()
   },
 }))
+
+// ---- Persistent kit cache (browser-restart UX) ----------------------
+//
+// Mirror `state.kits` into localStorage on every change so the UI
+// can rehydrate immediately on browser restart, before File System
+// Access permission is re-granted. Debounced so a rapid slider drag
+// (each tick produces a fresh `state.kits` array via map/spread)
+// doesn't blow up the main thread with sync localStorage writes.
+//
+// The 250 ms tail ensures the final value of any burst is captured;
+// faster than the typical click-elsewhere → unload sequence on
+// browser close.
+let kitsCachePersistTimer: number | null = null
+useLibraryStore.subscribe((state, prev) => {
+  if (state.kits === prev.kits) return
+  if (kitsCachePersistTimer !== null) window.clearTimeout(kitsCachePersistTimer)
+  kitsCachePersistTimer = window.setTimeout(() => {
+    kitsCachePersistTimer = null
+    saveCachedKits(useLibraryStore.getState().kits)
+  }, 250)
+})
