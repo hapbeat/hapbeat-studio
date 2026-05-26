@@ -2025,7 +2025,15 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
     // fsLastMsg references the last touched kit name — show the
     // current kit's status only when the message refers to it, so
     // editing kit B doesn't flash kit A's "saved" label.
-    const refersToThisKit = fsLastMsg.includes(`"${kit.name}"`)
+    //
+    // We match against both the **modern** opMsg format (`kit/<name>`
+    // — used by Save Folder / createKit) and the **error-path fallback**
+    // that still emits `kit "<name>" の自動保存` (libraryStore.ts retry
+    // label). Keeping both keeps the inline indicator working across
+    // success / retry / error states.
+    const refersToThisKit =
+      fsLastMsg.includes(`kit/${kit.name}`) ||
+      fsLastMsg.includes(`"${kit.name}"`)
     if (!refersToThisKit) return ''
     switch (fsStatus) {
       case 'saving': return '保存中…'

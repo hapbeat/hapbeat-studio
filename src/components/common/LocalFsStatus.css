@@ -12,12 +12,14 @@
   font-size: 13px;
   font-family: var(--font-ui);
   white-space: nowrap;
-  /* No max-width / ellipsis — the LogDrawer header has room to spare
-     horizontally, and truncating "変更なし" to "変更..." costs more
-     than it saves. If the pill ever grows past its container we can
-     revisit, but for the current set of summary strings
-     ("変更なし" / "WAV N 件更新 / M 件 skip" / etc.) the full text
-     comfortably fits. */
+  /* Soft cap so happy-path summaries ("変更なし" / "WAV N 件更新 /
+     M 件 skip" 等) display in full, but pathological strings (long
+     error messages with retry suggestions) can't push the "クリア"
+     button out of the 28px header. Ellipsis is applied to
+     `.localfs-status-msg` only — the leading dot + label stay
+     visible even when the message truncates. */
+  max-width: clamp(240px, 50vw, 720px);
+  overflow: hidden;
   pointer-events: auto;
   transition: opacity 600ms ease;
 }
