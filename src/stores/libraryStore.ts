@@ -984,22 +984,25 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         // Load from local directory
         await get().syncClipsFromDir()
       } else {
-        // Fallback to IndexedDB
-        const [clips, kits] = await Promise.all([listClips(), listKits()])
-        // Capture legacy clipId references BEFORE migrateKit strips them
-        // so we can copy audio blobs into the kit-event-owned IDB slots
-        // (see `migrateKitAudioAsync`).
-        const legacyAudio = collectLegacyClipAudioMap(kits)
-        const migratedKits = kits.map((k) => migrateKit(k, clips))
-        // Persist the migrated shape back to IDB so a subsequent reload
-        // doesn't re-run migration. Without this, legacy `clipId` /
-        // `localName` keep living in IDB and the next `saveKit` call
-        // (from a user edit) could mix new + old shapes on the same kit.
-        if (legacyAudio.size > 0) {
-          for (const k of migratedKits) await saveKit(k)
-        }
-        set({ clips, kits: migratedKits })
-        if (legacyAudio.size > 0) void migrateKitAudioAsync(legacyAudio)
+        // No workdir picked → don't try to hydrate `kits` from the
+        // IDB `kits` store. **Disk is the source of truth for kits**
+        // (workdir's `kits-meta.json` + per-kit `manifest.json`); the
+        // IDB store is a leftover from an earlier design and accumulated
+        // stale rows from a pre-fix bug that called saveKit() with a
+        // fresh `generateId()` on every reload. Reading from it now
+        // would surface hundreds of phantom kits in the UI even though
+        // the user only has two on disk. Leave `kits: []` so the UI
+        // prompts the user to pick a folder; once they do,
+        // `importKitsFromOutputDir` populates state from disk.
+        //
+        // We still load library `clips` from IDB here because clip
+        // metadata IS authoritative there when there's no workdir
+        // (users can drop clips into the library without picking a
+        // folder, and that flow lives entirely in IDB until a workdir
+        // is chosen). If the kit-listing-from-IDB cleanup proves the
+        // direction useful, we can do the same for clips next.
+        const clips = await listClips()
+        set({ clips, kits: [] })
       }
       // Load the built-in index so subsequent auto-import can consult it.
       await get().loadBuiltinIndex()
@@ -1804,33 +1807,24 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // under the legacy `manifest.json` name still load.
     //
     // If the scan finds nothing (brand-new workdir, kits never deployed),
-    // fall back to the kitsMeta.json snapshot or IDB cache so the user
-    // still sees what they had before.
+    // fall back to the kits-meta.json snapshot we just read. We do
+    // NOT consult the IDB `kits` store any more: it accumulated stale
+    // rows from a pre-2026-05-26 bug and is no longer trusted. Disk
+    // is the source of truth for kits (workdir's kits-meta.json + each
+    // <packId>/<packId>-manifest.json). If both the disk scan and the
+    // metadata snapshot return empty, the kit list stays empty — the
+    // user picks up where they left off when they next deploy / save a kit.
     const importedKitCount = await get().importKitsFromOutputDir().catch((err) => {
       console.warn('Kit folder scan failed, falling back to metadata:', err)
       return 0
     })
-    if (importedKitCount === 0) {
+    if (importedKitCount === 0 && savedKits) {
       const currentClips = get().clips
-      if (savedKits) {
-        const legacyAudio = collectLegacyClipAudioMap(savedKits)
-        const migrated = savedKits.map((k) => migrateKit(k, currentClips))
-        for (const kit of migrated) await saveKit(kit)
-        set({ kits: migrated })
-        if (legacyAudio.size > 0) void migrateKitAudioAsync(legacyAudio)
-      } else {
-        const kits = await listKits()
-        const legacyAudio = collectLegacyClipAudioMap(kits)
-        const migrated = kits.map((k) => migrateKit(k, currentClips))
-        // Persist migrated shape so the next reload doesn't re-run
-        // migration (and so a follow-up `saveKit` from a normal user
-        // edit can't write a half-old / half-new shape to IDB).
-        if (legacyAudio.size > 0) {
-          for (const k of migrated) await saveKit(k)
-        }
-        set({ kits: migrated })
-        if (legacyAudio.size > 0) void migrateKitAudioAsync(legacyAudio)
-      }
+      const legacyAudio = collectLegacyClipAudioMap(savedKits)
+      const migrated = savedKits.map((k) => migrateKit(k, currentClips))
+      for (const kit of migrated) await saveKit(kit)
+      set({ kits: migrated })
+      if (legacyAudio.size > 0) void migrateKitAudioAsync(legacyAudio)
     }
   },
 
