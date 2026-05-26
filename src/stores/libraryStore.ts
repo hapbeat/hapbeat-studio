@@ -10,7 +10,6 @@ import {
   loadKitEventAudio,
   deleteKitEventAudio,
   deleteEncodedWavsForEvent,
-  saveKit,
   listKits,
   deleteKit,
 } from '@/utils/libraryStorage'
@@ -1298,23 +1297,36 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const ctx = new AudioContext()
     const now = new Date().toISOString()
     const updatedClips = [...get().clips]
-    // We need the existing kits (from IDB) for ev.id / audio preservation
-    // matching below. At init time, restoreKitDir runs us BEFORE
-    // loadLibrary has populated zustand state, so `get().kits` may be
-    // empty even though IDB has kits saved from a previous session.
-    // Fall back to a direct IDB load in that case, and run them through
-    // migrateKit so the rest of this function sees the modern shape.
+    // We need the existing kits for ev.id / audio preservation matching
+    // below. At init time, restoreKitDir runs us BEFORE loadLibrary has
+    // populated zustand state, so `get().kits` may be empty even though
+    // the user has kits from a previous session.
     //
-    // ALSO: dedupe by kit.name. Before the IDB-preload fix, every
-    // reload that hit the empty-zustand path generated a fresh kit.id
-    // via generateId() for each on-disk kit and called saveKit() →
-    // IDB accumulated one stale row per kit per reload, growing
-    // without bound. Users who used Studio before this fix can have
-    // hundreds of duplicates (we've seen 454 = ~227 reloads × 2 kits).
-    // Detect duplicates here, keep the most recently updated one, and
-    // delete the rest from IDB so the UI / state always sees the real
-    // 2 kits rather than 454 phantom ones.
+    // Source of truth (priority order):
+    //   1. zustand state — if already populated by an earlier call
+    //   2. workdir's `kits-meta.json` — disk-side persisted kit list,
+    //      written on every save. Preserves ev.id across browsers / reloads
+    //      / data clears. This is the new primary path; it removes the
+    //      need to write kits into the IDB `kits` store at all.
+    //   3. IDB `listKits()` + dedupe — legacy fallback for first-time
+    //      load after the disk-only refactor. Cleans up duplicates
+    //      accumulated by an earlier bug (saveKit called with fresh
+    //      generateId on every reload → hundreds of stale rows seen in
+    //      the wild). After one successful disk save, kits-meta.json
+    //      covers everything and this branch never runs again.
     let updatedKits = [...get().kits]
+    if (updatedKits.length === 0 && workDirHandle) {
+      try {
+        const savedKits = await readMetadataJson<KitDefinition[]>(
+          workDirHandle, KITS_META_FILE,
+        )
+        if (savedKits && savedKits.length > 0) {
+          updatedKits = savedKits.map((k) => migrateKit(k, updatedClips))
+        }
+      } catch (err) {
+        console.warn('[importKitsFromOutputDir] kits-meta.json read failed:', err)
+      }
+    }
     if (updatedKits.length === 0) {
       try {
         const idbKits = await listKits()
@@ -1351,7 +1363,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           updatedKits = survivors.map((k) => migrateKit(k, updatedClips))
         }
       } catch (err) {
-        console.warn('[importKitsFromOutputDir] preload from IDB failed:', err)
+        console.warn('[importKitsFromOutputDir] legacy IDB preload failed:', err)
       }
     }
 
@@ -1699,7 +1711,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       }
       if (existingIdx >= 0) updatedKits[existingIdx] = kit
       else updatedKits.push(kit)
-      await saveKit(kit)
+      // (Disk-as-truth) Persistence happens via saveKitsMetaToDir at the
+      // end of this function — we no longer mirror to the IDB `kits`
+      // store. See top of function for rationale.
       // Track the packId we just imported so a subsequent kit rename
       // archives this folder rather than orphaning it on disk.
       lastWrittenPackId.set(kit.id, packId)
@@ -1822,7 +1836,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       const currentClips = get().clips
       const legacyAudio = collectLegacyClipAudioMap(savedKits)
       const migrated = savedKits.map((k) => migrateKit(k, currentClips))
-      for (const kit of migrated) await saveKit(kit)
+      // (Disk-as-truth) Don't mirror to IDB. State + saveKitsMetaToDir
+      // (already done via syncClipsFromDir) are the persistence.
       set({ kits: migrated })
       if (legacyAudio.size > 0) void migrateKitAudioAsync(legacyAudio)
     }
@@ -2202,7 +2217,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       createdAt: now,
       updatedAt: now,
     }
-    await saveKit(kit)
+    // (Disk-as-truth) Persistence: zustand state + kits-meta.json on
+    // disk (via saveKitsMetaToDir). No mirror to IDB.
     const newKits = [...get().kits, kit]
     set({ kits: newKits, activeKitId: kit.id })
     const { workDirHandle } = get()
@@ -2295,7 +2311,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       catch (err) { console.error('saveKitEventAudio failed:', err) }
     }
     const updated = { ...kit, events: [...kit.events, newEvent], updatedAt: new Date().toISOString() }
-    await saveKit(updated)
+    // (Disk-as-truth) State + kits-meta.json on disk. No IDB kit mirror.
     const newKits = kits.map((k) => (k.id === kitId ? updated : k))
     set({ kits: newKits })
     const { workDirHandle } = get()
@@ -2315,7 +2331,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const clipName = ev?.clipName ?? '?'
 
     const updated = { ...kit, events: kit.events.filter((e) => e.id !== kitEventId), updatedAt: new Date().toISOString() }
-    await saveKit(updated)
+    // (Disk-as-truth) State + kits-meta.json. No IDB kit mirror.
     const newKits = kits.map((k) => (k.id === kitId ? updated : k))
     set({ kits: newKits })
     // Drop the kit-owned audio blob so removed events don't leak into
@@ -2347,7 +2363,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       events: kit.events.map((e) => e.id === kitEventId ? { ...e, ...updates } : e),
       updatedAt: new Date().toISOString(),
     }
-    await saveKit(updated)
+    // (Disk-as-truth) State + kits-meta.json. No IDB kit mirror.
     const newKits = kits.map((k) => (k.id === kitId ? updated : k))
     set({ kits: newKits })
     const { workDirHandle } = get()
@@ -2383,7 +2399,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         return { ...e, eventId: newEventId }
       })
     }
-    await saveKit(updated)
+    // (Disk-as-truth) State + kits-meta.json. No IDB kit mirror.
     const newKits = kits.map((k) => (k.id === id ? updated : k))
     set({ kits: newKits })
     const { workDirHandle } = get()
