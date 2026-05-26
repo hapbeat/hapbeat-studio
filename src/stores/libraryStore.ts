@@ -937,7 +937,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         return `WAV ${wavsWritten} 件更新 / ${wavsSkipped} 件 skip`
       })()
       if (opMsg) {
-        state.setLocalFsStatus('saved', `${opMsg} — ${summary}`)
+        state.setLocalFsStatus('saved', `${opMsg}: ${summary}`)
       }
       // Mirror the save outcome into the bottom log drawer. Use a
       // stable `source` so users can filter / spot it among device
@@ -2305,7 +2305,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // Materialize the kit folder immediately so the user sees it pop
     // up in their OS file explorer right after "+ Kit". 0-delay path
     // skips the debounce and runs on the next microtask.
-    setOp(kit.id, `kit "${kit.name}" を新規作成`)
+    setOp(kit.id, `kit/${kit.name} (new)`)
     get().scheduleKitFlush(kit.id, 0)
     return kit.id
   },

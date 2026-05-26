@@ -1965,7 +1965,10 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
     try {
       const out = await useLibraryStore.getState().requestKitFolderSave(
         kit.id,
-        `kit "${kit.name}" をフォルダに保存`,
+        // Compact format — the pill is width-constrained next to the
+        // device list. The summary appended by flushKitFolderNow
+        // (e.g. "変更なし" / "WAV 3 件更新") carries the actual signal.
+        `kit/${kit.name}`,
       )
       if (out) {
         toast(`Saved "${out.packId}" to kit folder`, 'success')

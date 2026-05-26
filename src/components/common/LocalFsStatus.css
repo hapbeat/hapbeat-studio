@@ -12,9 +12,12 @@
   font-size: 13px;
   font-family: var(--font-ui);
   white-space: nowrap;
-  max-width: 360px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* No max-width / ellipsis — the LogDrawer header has room to spare
+     horizontally, and truncating "変更なし" to "変更..." costs more
+     than it saves. If the pill ever grows past its container we can
+     revisit, but for the current set of summary strings
+     ("変更なし" / "WAV N 件更新 / M 件 skip" / etc.) the full text
+     comfortably fits. */
   pointer-events: auto;
   transition: opacity 600ms ease;
 }
