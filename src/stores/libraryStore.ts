@@ -1301,12 +1301,51 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // empty even though IDB has kits saved from a previous session.
     // Fall back to a direct IDB load in that case, and run them through
     // migrateKit so the rest of this function sees the modern shape.
+    //
+    // ALSO: dedupe by kit.name. Before the IDB-preload fix, every
+    // reload that hit the empty-zustand path generated a fresh kit.id
+    // via generateId() for each on-disk kit and called saveKit() →
+    // IDB accumulated one stale row per kit per reload, growing
+    // without bound. Users who used Studio before this fix can have
+    // hundreds of duplicates (we've seen 454 = ~227 reloads × 2 kits).
+    // Detect duplicates here, keep the most recently updated one, and
+    // delete the rest from IDB so the UI / state always sees the real
+    // 2 kits rather than 454 phantom ones.
     let updatedKits = [...get().kits]
     if (updatedKits.length === 0) {
       try {
         const idbKits = await listKits()
         if (idbKits.length > 0) {
-          updatedKits = idbKits.map((k) => migrateKit(k, updatedClips))
+          // Group by name. Within each group, sort by updatedAt desc
+          // (fallback createdAt) and keep the first. The rest are
+          // deleted from IDB so they don't reappear next time.
+          const byName = new Map<string, KitDefinition[]>()
+          for (const k of idbKits) {
+            const arr = byName.get(k.name)
+            if (arr) arr.push(k)
+            else byName.set(k.name, [k])
+          }
+          const survivors: KitDefinition[] = []
+          let dropped = 0
+          for (const group of byName.values()) {
+            group.sort((a, b) => {
+              const ta = a.updatedAt || a.createdAt || ''
+              const tb = b.updatedAt || b.createdAt || ''
+              return tb.localeCompare(ta)
+            })
+            survivors.push(group[0])
+            for (const stale of group.slice(1)) {
+              try { await deleteKit(stale.id) } catch { /* ignore */ }
+              dropped++
+            }
+          }
+          if (dropped > 0) {
+            console.info(
+              `[importKitsFromOutputDir] removed ${dropped} duplicate IDB kit row(s)`,
+              `(survivors: ${survivors.map((k) => k.name).join(', ')})`,
+            )
+          }
+          updatedKits = survivors.map((k) => migrateKit(k, updatedClips))
         }
       } catch (err) {
         console.warn('[importKitsFromOutputDir] preload from IDB failed:', err)
