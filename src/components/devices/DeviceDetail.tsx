@@ -262,39 +262,45 @@ export function DeviceDetail() {
    * if a useCallback is conditionally skipped, even when the early
    * return is "obviously" the no-device branch.
    */
-  const playEvent = useCallback((eventId: string) => {
+  const playEvent = useCallback((eventId: string, fromKitList: number | null = null) => {
     if (!selectedIp) return
-    const kits = useLibraryStore.getState().kits
+
+    // Gain resolution priority:
+    //   1. `fromKitList` — intensity reported by the device's own
+    //      `kit_list_result` payload (fw ≥ v0.2.0). This is the
+    //      authoritative source because it reads the manifest that's
+    //      *actually installed on the device*.
+    //   2. libraryStore fallback — local Studio kit metadata, used
+    //      when fromKitList is null (old firmware, or any caller
+    //      that doesn't have a kit_list row in hand).
+    //   3. Hard-coded 1.0 — last resort if neither source has data.
     let intensity = 1.0
-    let kitId: string | null = null
-    let mode: string | null = null
-    // schema 2.0.0: `events` (command-only) のキーが wire eventId と一致するので
-    // exact match のみで KitEvent を解決すれば十分。BOTH モードでも
-    // command 側 entry の intensity を使う (PLAY コマンド経路なので)。
-    const tryFind = (matchId: string): { ev: KitEvent; k: KitDefinition } | null => {
-      for (const k of kits) {
-        const ev = k.events.find((e) => e.eventId === matchId)
-        if (ev && typeof ev.intensity === 'number') return { ev, k }
+    let source = 'fallback 1.0'
+    if (fromKitList != null) {
+      intensity = fromKitList
+      source = `device kit_list (amp ${(intensity * 100).toFixed(0)}%)`
+    } else {
+      const kits = useLibraryStore.getState().kits
+      const tryFind = (matchId: string): { ev: KitEvent; k: KitDefinition } | null => {
+        for (const k of kits) {
+          const ev = k.events.find((e) => e.eventId === matchId)
+          if (ev && typeof ev.intensity === 'number') return { ev, k }
+        }
+        return null
       }
-      return null
+      const hit = tryFind(eventId)
+      if (hit) {
+        intensity = hit.ev.intensity
+        const mode = hit.ev.modes?.[0] ?? 'command'
+        source = `libraryStore (kit=${hit.k.id}, mode=${mode}, amp ${(intensity * 100).toFixed(0)}%)`
+      }
     }
-    const hit = tryFind(eventId)
-    if (hit) {
-      intensity = hit.ev.intensity
-      kitId = hit.k.id
-      mode = hit.ev.modes?.[0] ?? 'command'
-    }
+
     const payload = { event_id: eventId, target: '', gain: intensity }
     send({ type: 'preview_event', payload })
-    // Verbose log so the user can verify the manifest amp actually
-    // landed on the wire — the previous "play sent" line gave no
-    // information at all when intensity wasn't reflected.
-    const ampLabel = kitId
-      ? `gain=${intensity.toFixed(2)} (manifest amp ${(intensity * 100).toFixed(0)}%, kit=${kitId}${mode ? `, mode=${mode}` : ''})`
-      : `gain=${intensity.toFixed(2)} (manifest 未取得 — fallback to 1.0)`
     pushLog(
       'preview',
-      `→ ${selectedIp}: preview_event event_id=${eventId} ${ampLabel}`,
+      `→ ${selectedIp}: preview_event event_id=${eventId} gain=${intensity.toFixed(2)} (${source})`,
     )
   }, [selectedIp, send, pushLog])
 
