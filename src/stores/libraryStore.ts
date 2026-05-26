@@ -867,7 +867,28 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
       // Only surface a "saved" pill when there's an actual operation
       // to report. Silent flushes (Deploy build) shouldn't broadcast.
-      if (opMsg) state.setLocalFsStatus('saved', opMsg)
+      // Append a per-flush summary so the user sees *what* changed:
+      // "WAV 3 件更新 / 12 件 skip" beats a generic "保存しました".
+      if (opMsg) {
+        const wavsWritten = filesToWrite.filter((f) => f.outputHash !== null).length
+        const wavsSkipped = skippedCount
+        const summary = (() => {
+          if (wavsWritten === 0 && wavsSkipped === 0) {
+            // Kit with no events — just the manifest landed.
+            return '設定のみ保存 (events 0 件)'
+          }
+          if (wavsWritten === 0) {
+            // Manifest changed (amp / wiper / loop / target_device 等)
+            // — all WAVs were bit-exact to disk.
+            return `設定のみ更新 (WAV ${wavsSkipped} 件は skip)`
+          }
+          if (wavsSkipped === 0) {
+            return `WAV ${wavsWritten} 件書き込み`
+          }
+          return `WAV ${wavsWritten} 件更新 / ${wavsSkipped} 件 skip`
+        })()
+        state.setLocalFsStatus('saved', `${opMsg} — ${summary}`)
+      }
       return { files: result.files, packId }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
