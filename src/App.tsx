@@ -39,7 +39,7 @@ const TAB_LABELS: Record<Tab, { main: string; sub: string }> = {
 
 const DEFAULT_TAB: Tab = 'kit'
 
-const DOCS_URL = 'https://devtools.hapbeat.com/docs/studio/getting-started/'
+const DOCS_URL = 'https://devtools.hapbeat.com/docs/tools/studio/initial-setup/'
 
 /**
  * Render a tab pane that mounts on first visit and stays mounted on
