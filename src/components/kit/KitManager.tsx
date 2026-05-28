@@ -1448,7 +1448,7 @@ function KitEditor() {
             onPick={pickKitDir}
             onClear={disconnectKitDir}
             label="Kit"
-            emptyTitle="Kit の書き出し先フォルダ。未指定なら Library フォルダ直下に <packId>/ を作る。Unity Assets 等を選ぶと直接そこに書き出せる。"
+            emptyTitle="Kit の書き出し先フォルダ。未指定なら Library フォルダ直下に <kitId>/ を作る。Unity Assets 等を選ぶと直接そこに書き出せる。"
             setLabel="+ Kit"
           />
         )}
@@ -1885,13 +1885,13 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
   }, [lastMessage, toast])
   const kitDirHandle = useLibraryStore((s) => s.kitDirHandle)
   // kit-out dir が設定されていればそちらを、無ければ library workDir を root にする。
-  // どちらの場合も root 直下に `<packId>/` フォルダを作る (kits/ 階層は挟まない)。
+  // どちらの場合も root 直下に `<kitId>/` フォルダを作る (kits/ 階層は挟まない)。
   const outRoot = kitDirHandle ?? workDirHandle
 
   // Persistence is owned by libraryStore: every kit-mutating action
   // (createKit / updateKit / addEventToKit / updateKitEvent /
   //  removeEventFromKit) calls scheduleKitFlush on its own, so the
-  // <outRoot>/<packId>/ folder stays in lockstep with the store
+  // <outRoot>/<kitId>/ folder stays in lockstep with the store
   // regardless of which kit is "active" or whether KitExportSection
   // is even mounted. This component only owns Deploy + status display.
 
@@ -1971,7 +1971,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
         `kit/${kit.name}`,
       )
       if (out) {
-        toast(`Saved "${out.packId}" to kit folder`, 'success')
+        toast(`Saved "${out.kitId}" to kit folder`, 'success')
       } else {
         // requestKitFolderSave's underlying flushKitFolderNow already
         // pushed an error / retrying pill — toast a top-level summary
@@ -2002,14 +2002,14 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
       const built = store.getLastBuiltKit(kit.id) ?? await store.flushKitFolderNow(kit.id)
       if (!built) { toast('Build failed', 'error'); return }
       const { buildKitZip } = await import('@/utils/kitExporter')
-      const { blob } = await buildKitZip(built.files, built.packId)
+      const { blob } = await buildKitZip(built.files, built.kitId)
       const ab = await blob.arrayBuffer(); const bytes = new Uint8Array(ab)
       let bin = ''; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
-      send({ type: 'deploy_kit_data', payload: { kit_id: built.packId, zip_base64: btoa(bin), targets: devices.map((d) => d.ipAddress) }})
+      send({ type: 'deploy_kit_data', payload: { kit_id: built.kitId, zip_base64: btoa(bin), targets: devices.map((d) => d.ipAddress) }})
       // Don't claim "sent" success here — the helper hasn't reached the
       // device yet. Per-device deploy_result will toast either
       // success or failure once the TCP write actually settles.
-      toast(`Sending "${built.packId}" to ${devices.length} device(s)…`, 'info')
+      toast(`Sending "${built.kitId}" to ${devices.length} device(s)…`, 'info')
     } catch (err) { toast(`Deploy failed: ${err instanceof Error ? err.message : err}`, 'error') }
     finally { setIsExporting(false) }
   }, [kit, devices, send, preflightKit, setIsExporting, toast])

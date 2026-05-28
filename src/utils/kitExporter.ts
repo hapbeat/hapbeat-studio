@@ -64,12 +64,12 @@ function round2(v: number): number {
  * code follow the same convention with fallback to any
  * `*manifest*.json` for legacy kits.
  */
-export function manifestFileName(packId: string): string {
-  return `${packId}-manifest.json`
+export function manifestFileName(kitId: string): string {
+  return `${kitId}-manifest.json`
 }
 
 /** Kit 名 → kit_id (kebab-case, [a-z][a-z0-9-]*) */
-export function toPackId(name: string): string {
+export function toKitId(name: string): string {
   return name
     .toLowerCase()
     .replace(/\s+/g, '-')
@@ -117,12 +117,12 @@ function eventFileName(event: KitEvent): string {
 
 /**
  * One file emitted by `exportKitAsPack`. The `path` is relative to
- * `<outRoot>/<packId>/` (e.g. `install-clips/foo.wav`, `<packId>-manifest.json`).
+ * `<outRoot>/<kitId>/` (e.g. `install-clips/foo.wav`, `<kitId>-manifest.json`).
  *
  * `outputHash` is the SHA-1 hex of `blob` bytes — the hash the
  * on-disk file *would have* after writing this entry. The
  * skip-write decision compares this against the on-disk file's
- * recorded hash (from `<packId>/.studio-cache.json`); match → disk
+ * recorded hash (from `<kitId>/.studio-cache.json`); match → disk
  * is already what we'd write → skip the createWritable call.
  *
  * For files that aren't WAVs (manifest.json), `outputHash` is `null`
@@ -143,7 +143,7 @@ export interface ExportFile {
 
 export interface ExportResult {
   files: ExportFile[]
-  packId: string
+  kitId: string
   warnings: string[]
 }
 
@@ -167,16 +167,16 @@ function resolveModes(ev: KitEvent): KitEventMode[] {
  * **ZIP 不使用**: 旧版はここで JSZip を組み上げて Blob を返していたが、
  * Save Folder ごとに全 WAV を zip → unzip → write する round-trip が
  * 大きなオーバーヘッドになっていた。zip 化が必要な経路 (Deploy) は
- * `buildKitZip(files, packId)` を経由する遅延生成に切り替えた。
+ * `buildKitZip(files, kitId)` を経由する遅延生成に切り替えた。
  *
  * @param kit - Kit 定義 (events は KitEvent[]、各 event が自前の clip data を保持)
- * @returns 書き出すファイル列 + packId + warnings
+ * @returns 書き出すファイル列 + kitId + warnings
  */
 export async function exportKitAsPack(
   kit: KitDefinition
 ): Promise<ExportResult> {
   const warnings: string[] = []
-  const packId = toPackId(kit.name)
+  const kitId = toKitId(kit.name)
   const files: ExportFile[] = []
 
   // manifest に書き込む 2 bucket + install-clips metadata
@@ -489,7 +489,7 @@ export async function exportKitAsPack(
   const manifest = {
     schema_version: '2.0.0',
     version: kit.version || '1.0.0',
-    name: packId,
+    name: kitId,
     description: kit.description,
     author: '',
     // `created_at` is the kit's own creation timestamp (stable across
@@ -509,13 +509,13 @@ export async function exportKitAsPack(
   // every save regardless of WAV-skip logic.
   const manifestJson = JSON.stringify(manifest, null, 2)
   files.push({
-    path: manifestFileName(packId),
+    path: manifestFileName(kitId),
     blob: new Blob([manifestJson], { type: 'application/json' }),
     outputHash: null,
     cached: false,
   })
 
-  return { files, packId, warnings }
+  return { files, kitId, warnings }
 }
 
 /**
@@ -525,20 +525,20 @@ export async function exportKitAsPack(
  * kit folder. Deploy *does* need a single ZIP blob to ship to Helper
  * over the WebSocket, so we keep the ZIP path but make it lazy.
  *
- * Layout inside the ZIP: `<packId>/<file.path>` (mirrors the on-disk
- * folder under `<outRoot>/<packId>/`).
+ * Layout inside the ZIP: `<kitId>/<file.path>` (mirrors the on-disk
+ * folder under `<outRoot>/<kitId>/`).
  */
 export async function buildKitZip(
   files: ExportFile[],
-  packId: string,
+  kitId: string,
 ): Promise<{ blob: Blob; filename: string }> {
   const zip = new JSZip()
-  const root = zip.folder(packId)!
+  const root = zip.folder(kitId)!
   for (const f of files) {
     root.file(f.path, f.blob)
   }
   const blob = await zip.generateAsync({ type: 'blob' })
-  return { blob, filename: `${packId}.hapbeat-kit` }
+  return { blob, filename: `${kitId}.hapbeat-kit` }
 }
 
 /** Blob をダウンロードさせるヘルパー */

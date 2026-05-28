@@ -426,10 +426,10 @@ export async function archiveClipFile(
 // ---- Kit folder operations ----
 
 /**
- * Filename Studio uses inside each `<packId>/` folder to record the
+ * Filename Studio uses inside each `<kitId>/` folder to record the
  * per-WAV source-blob hashes that were last written to that folder.
  *
- * Lives **on disk**, next to the kit's `<packId>-manifest.json`, so
+ * Lives **on disk**, next to the kit's `<kitId>-manifest.json`, so
  * the skip-write ledger survives:
  *   - browser data clears (was a problem with the previous IDB-based
  *     ledger),
@@ -449,7 +449,7 @@ export async function archiveClipFile(
 export const STUDIO_CACHE_FILENAME = '.studio-cache.json'
 
 /**
- * Per-kit skip-write ledger persisted as `<packId>/.studio-cache.json`.
+ * Per-kit skip-write ledger persisted as `<kitId>/.studio-cache.json`.
  *
  * `wavs` maps **kit-relative path** (e.g. `install-clips/foo.wav`) to
  * the SHA-1 hex of the **on-disk WAV bytes** that were last written
@@ -486,10 +486,10 @@ export interface KitDiskCache {
 
 export async function loadKitDiskCache(
   root: FileSystemDirectoryHandle,
-  packId: string,
+  kitId: string,
 ): Promise<KitDiskCache | null> {
   try {
-    const kitDir = await root.getDirectoryHandle(packId, { create: false })
+    const kitDir = await root.getDirectoryHandle(kitId, { create: false })
     const fileHandle = await kitDir.getFileHandle(STUDIO_CACHE_FILENAME, { create: false })
     const text = await (await fileHandle.getFile()).text()
     const parsed = JSON.parse(text) as Partial<KitDiskCache>
@@ -514,11 +514,11 @@ export async function loadKitDiskCache(
 
 export async function saveKitDiskCache(
   root: FileSystemDirectoryHandle,
-  packId: string,
+  kitId: string,
   cache: KitDiskCache,
 ): Promise<void> {
   try {
-    const kitDir = await root.getDirectoryHandle(packId, { create: true })
+    const kitDir = await root.getDirectoryHandle(kitId, { create: true })
     const fileHandle = await kitDir.getFileHandle(STUDIO_CACHE_FILENAME, { create: true })
     const writable = await fileHandle.createWritable()
     await writable.write(JSON.stringify(cache, null, 2))

@@ -43,7 +43,7 @@ import {
 import {
   exportKitAsPack,
   manifestFileName,
-  toPackId,
+  toKitId,
   type ExportFile,
 } from '@/utils/kitExporter'
 
@@ -164,11 +164,11 @@ interface LibraryState {
   ) => void
 
   /**
-   * Build the kit ZIP and write `<outRoot>/<packId>/` to disk *now*.
+   * Build the kit ZIP and write `<outRoot>/<kitId>/` to disk *now*.
    * Validates silently — invalid kits / missing outRoot return null.
    * Updates the per-kit ZIP cache used by Deploy.
    */
-  flushKitFolderNow: (kitId: string) => Promise<{ files: ExportFile[]; packId: string } | null>
+  flushKitFolderNow: (kitId: string) => Promise<{ files: ExportFile[]; kitId: string } | null>
   /**
    * Same as flushKitFolderNow but seeds an `opMsg` first so the
    * footer status pill announces `saving → saved` (or `error`) to the
@@ -178,7 +178,7 @@ interface LibraryState {
    * stays silent on success so background-build callers (Deploy
    * pre-flight) don't spam the pill.
    */
-  requestKitFolderSave: (kitId: string, opMsg: string) => Promise<{ files: ExportFile[]; packId: string } | null>
+  requestKitFolderSave: (kitId: string, opMsg: string) => Promise<{ files: ExportFile[]; kitId: string } | null>
   /**
    * Debounced wrapper around flushKitFolderNow. Replaces any pending
    * timer for the same kit. Pass delayMs=0 to flush on the next
@@ -192,7 +192,7 @@ interface LibraryState {
   /** Latest Save Folder output for a kit (file list, no ZIP). Deploy
    *  builds the ZIP on demand from this via `buildKitZip` — Save Folder
    *  never needs a ZIP, so we skip the encode/decode round trip. */
-  getLastBuiltKit: (kitId: string) => { files: ExportFile[]; packId: string } | undefined
+  getLastBuiltKit: (kitId: string) => { files: ExportFile[]; kitId: string } | undefined
 
   /** Clip id currently open in the inline editor (Clips panel). Set from
    *  either the Clips panel itself or from a Kit event row's Edit action so
@@ -501,13 +501,13 @@ async function saveKitsMetaToDir(handle: FileSystemDirectoryHandle, kits: KitDef
 
 // ---- Kit folder persistence (module-level state) ------------------------
 //
-// Per-kit debounce timers, last-written packId (for rename → archive
+// Per-kit debounce timers, last-written kitId (for rename → archive
 // old folder) and last-built ZIP cache (for Deploy). These live outside
 // zustand state because they're internal bookkeeping that should not
 // trigger React re-renders.
 
 const kitFlushTimers = new Map<string, number>()
-const lastWrittenPackId = new Map<string, string>()
+const lastWrittenKitId = new Map<string, string>()
 /**
  * Last successful Save Folder output per kit. The `files` array is the
  * ExportFile[] produced by `exportKitAsPack` (no zip generation
@@ -515,7 +515,7 @@ const lastWrittenPackId = new Map<string, string>()
  * `buildKitZip`. Cleared on archive / kit folder change / kit
  * removal so a stale build can't end up on the wire.
  */
-const lastBuiltKit = new Map<string, { files: ExportFile[]; packId: string }>()
+const lastBuiltKit = new Map<string, { files: ExportFile[]; kitId: string }>()
 // Skip-write ledger is no longer in-memory: the IDB encoded-wavs cache
 // already records (sourceHash → encodedBlob) per (eventId, mode), so
 // `flushKitFolderNow` reads `ExportFile.cached` (set by exportKitAsPack
@@ -575,13 +575,13 @@ function resetKitMemory() {
   retryTimers.clear()
   retryAttempts.clear()
   kitFlushChain.clear()
-  lastWrittenPackId.clear()
+  lastWrittenKitId.clear()
   lastBuiltKit.clear()
   lastOpMessage.clear()
 }
 
 /**
- * Check whether `<root>/<packId>/<relPath>` exists. Used by the
+ * Check whether `<root>/<kitId>/<relPath>` exists. Used by the
  * skip-write heuristic so a manually-deleted WAV on disk is detected
  * and re-emitted instead of left missing. Returns `false` on any
  * lookup error (kit dir missing, sub-folder missing, file not
@@ -589,12 +589,12 @@ function resetKitMemory() {
  */
 async function kitFileExists(
   root: FileSystemDirectoryHandle,
-  packId: string,
+  kitId: string,
   relPath: string,
 ): Promise<boolean> {
   try {
     const parts = relPath.split('/')
-    let dir = await root.getDirectoryHandle(packId, { create: false })
+    let dir = await root.getDirectoryHandle(kitId, { create: false })
     for (let i = 0; i < parts.length - 1; i++) {
       dir = await dir.getDirectoryHandle(parts[i], { create: false })
     }
@@ -606,19 +606,19 @@ async function kitFileExists(
 }
 
 /**
- * Read the text content of a file at `<root>/<packId>/<relPath>`.
+ * Read the text content of a file at `<root>/<kitId>/<relPath>`.
  * Returns `null` on any lookup failure (file missing, sub-folder
  * missing, permission, etc). Used by the manifest-unchanged detector
  * so a kit save with identical on-disk manifest reports "変更なし".
  */
 async function readKitFileText(
   root: FileSystemDirectoryHandle,
-  packId: string,
+  kitId: string,
   relPath: string,
 ): Promise<string | null> {
   try {
     const parts = relPath.split('/')
-    let dir = await root.getDirectoryHandle(packId, { create: false })
+    let dir = await root.getDirectoryHandle(kitId, { create: false })
     for (let i = 0; i < parts.length - 1; i++) {
       dir = await dir.getDirectoryHandle(parts[i], { create: false })
     }
@@ -671,7 +671,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // Serialize concurrent flushes for the same kit. The actual work
     // runs in `doFlush`; if a flush is already in flight, we await it
     // first then run our own (so the latest store state hits disk last).
-    const doFlush = async (): Promise<{ files: ExportFile[]; packId: string } | null> => {
+    const doFlush = async (): Promise<{ files: ExportFile[]; kitId: string } | null> => {
     const state = get()
     const kit = state.kits.find((k) => k.id === kitId)
     if (!kit) return null
@@ -709,26 +709,26 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         return null
       }
 
-      const packId = result.packId
+      const kitId = result.kitId
 
       // Rename: if this kit was previously written under a different
-      // packId, archive the stale folder so it stops appearing in OS
+      // kitId, archive the stale folder so it stops appearing in OS
       // Explorer. The new folder is written below.
-      const prevPackId = lastWrittenPackId.get(kit.id)
-      const packIdChanged = !!prevPackId && prevPackId !== packId
-      if (packIdChanged) {
-        try { await archiveKitFolder(outRoot, prevPackId!) } catch { /* ignore */ }
+      const prevKitId = lastWrittenKitId.get(kit.id)
+      const kitIdChanged = !!prevKitId && prevKitId !== kitId
+      if (kitIdChanged) {
+        try { await archiveKitFolder(outRoot, prevKitId!) } catch { /* ignore */ }
       }
 
       // Version-bump history: snapshot the existing manifest under
       // history/manifest-<oldVersion>.json before overwriting. WAVs
       // aren't kept (size cost) — just the small manifest. The
-      // preferred filename is `<packId>-manifest.json`; we fall back
+      // preferred filename is `<kitId>-manifest.json`; we fall back
       // to legacy `manifest.json` so kits saved before the rename
       // (2026-05-17) still produce a history entry on first re-save.
       try {
-        const thisKitDir = await outRoot.getDirectoryHandle(packId, { create: false })
-        const preferredName = manifestFileName(packId)
+        const thisKitDir = await outRoot.getDirectoryHandle(kitId, { create: false })
+        const preferredName = manifestFileName(kitId)
         let oldHandle: FileSystemFileHandle | null = null
         try {
           oldHandle = await thisKitDir.getFileHandle(preferredName, { create: false })
@@ -753,7 +753,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
       // ---- Skip-write heuristic ----
       //
-      // Source of truth: `<packId>/.studio-cache.json` (KitDiskCache v2).
+      // Source of truth: `<kitId>/.studio-cache.json` (KitDiskCache v2).
       // It records the SHA-1 of the on-disk WAV bytes from the last
       // flush. We compare against the prospective output's hash — if
       // they match (and the file is still present), the bytes we'd
@@ -769,7 +769,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       //
       // Decision per ExportFile:
       //   - `outputHash === null` (manifest.json)   → write (always)
-      //   - packId just changed (kit rename)         → write (new folder)
+      //   - kitId just changed (kit rename)         → write (new folder)
       //   - disk cache lacks an entry for this path  → write (first save)
       //   - disk cache hash differs from current     → write (audio changed)
       //   - on-disk file is missing                  → write (user deleted)
@@ -779,7 +779,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // exportKitAsPack skip decode + re-encode when source audio is
       // unchanged. The disk cache governs disk writes; the IDB cache
       // governs CPU work. They're independent.
-      const diskCache = await loadKitDiskCache(outRoot, packId)
+      const diskCache = await loadKitDiskCache(outRoot, kitId)
       const prevOutputHash: Record<string, string> = diskCache?.wavs ?? {}
       const filesToWrite: ExportFile[] = []
       let skippedCount = 0
@@ -790,8 +790,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           // If identical, skip the write so amp-only-with-no-change
           // saves can report "変更なし". Comparison is cheap (the
           // manifest is small + we already have the proposed bytes).
-          if (!packIdChanged) {
-            const onDisk = await readKitFileText(outRoot, packId, f.path)
+          if (!kitIdChanged) {
+            const onDisk = await readKitFileText(outRoot, kitId, f.path)
             const proposed = await f.blob.text()
             if (onDisk !== null && onDisk === proposed) {
               manifestSkipped = true
@@ -801,7 +801,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           filesToWrite.push(f)
           continue
         }
-        if (packIdChanged) {
+        if (kitIdChanged) {
           filesToWrite.push(f)
           continue
         }
@@ -809,7 +809,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           filesToWrite.push(f)
           continue
         }
-        const exists = await kitFileExists(outRoot, packId, f.path)
+        const exists = await kitFileExists(outRoot, kitId, f.path)
         if (!exists) {
           filesToWrite.push(f)
           continue
@@ -821,7 +821,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           `[kit] flush "${kit.name}": ${skippedCount} WAV(s) unchanged, skipped write`,
         )
       }
-      await writeKitFolder(outRoot, packId, filesToWrite)
+      await writeKitFolder(outRoot, kitId, filesToWrite)
 
       // Update the on-disk cache file with the CURRENT output hashes.
       // This happens every flush — even when no WAVs were written —
@@ -837,17 +837,17 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       for (const f of result.files) {
         if (f.outputHash !== null) newCache.wavs[f.path] = f.outputHash
       }
-      await saveKitDiskCache(outRoot, packId, newCache)
+      await saveKitDiskCache(outRoot, kitId, newCache)
 
-      // One-shot migration: the manifest is now `<packId>-manifest.json`
+      // One-shot migration: the manifest is now `<kitId>-manifest.json`
       // (kitExporter writes it under that name from 2026-05-17). If a
       // legacy `manifest.json` is still sitting in this kit folder
       // (e.g. the kit was first exported under the old name), drop it
       // now so SDK / Helper discovery doesn't have to pick between two
       // copies. No backwards compat — pre-release project.
       try {
-        const kitDirForClean = await outRoot.getDirectoryHandle(packId, { create: false })
-        const newName = manifestFileName(packId)
+        const kitDirForClean = await outRoot.getDirectoryHandle(kitId, { create: false })
+        const newName = manifestFileName(kitId)
         if (newName !== 'manifest.json') {
           try { await kitDirForClean.removeEntry('manifest.json') } catch { /* no legacy file */ }
         }
@@ -876,7 +876,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         if (stem) ownedBasenames.add(`${stem}.wav`)
       }
       try {
-        const kitDir = await outRoot.getDirectoryHandle(packId)
+        const kitDir = await outRoot.getDirectoryHandle(kitId)
         for (const subName of ['install-clips', 'stream-clips'] as const) {
           let sub: FileSystemDirectoryHandle
           try {
@@ -893,8 +893,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         }
       } catch { /* kit dir vanished — caller will see no folder */ }
 
-      lastWrittenPackId.set(kit.id, packId)
-      lastBuiltKit.set(kit.id, { files: result.files, packId })
+      lastWrittenKitId.set(kit.id, kitId)
+      lastBuiltKit.set(kit.id, { files: result.files, kitId })
 
       // Success: reset retry bookkeeping for this kit.
       retryAttempts.delete(kit.id)
@@ -948,7 +948,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       try {
         useLogStore.getState().push('kit', `${kit.name}: ${summary}`)
       } catch { /* logStore unavailable shouldn't break the flush */ }
-      return { files: result.files, packId }
+      return { files: result.files, kitId }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       console.error('flushKitFolderNow failed:', err)
@@ -1493,8 +1493,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // What the user sees in OS Explorer must match what they see in
       // Studio. manifest.name (or any legacy kit_id) is ignored — if
       // the user renames the folder externally, Studio follows.
-      const packId = folderName.trim()
-      if (!packId) continue
+      const kitId = folderName.trim()
+      if (!kitId) continue
 
       // ---- Parse + group manifest entries into KitEvents -----------------
       //
@@ -1654,7 +1654,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
       // ---- Match-and-preserve against existing IDB kit ----
       //
-      // If the user already has a kit in IDB with this packId, we want
+      // If the user already has a kit in IDB with this kitId, we want
       // to **preserve the existing ev.id** for any event whose wire
       // `eventId` is the same — and crucially, **keep the existing
       // audio blob in IDB** rather than overwriting it with whatever
@@ -1676,7 +1676,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // we keep the ORIGINAL source bytes across reloads. sourceHash
       // stays stable, encoded-wavs cache hits, outputHash stays stable,
       // and the disk skip-write check matches.
-      const existingKitForMatch = updatedKits.find((k) => k.name === packId)
+      const existingKitForMatch = updatedKits.find((k) => k.name === kitId)
       const existingEventByWireId = new Map<string, KitEvent>()
       if (existingKitForMatch) {
         for (const ev of existingKitForMatch.events) {
@@ -1767,7 +1767,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         catch (err) { console.warn('[importKitsFromOutputDir] saveKitEventAudio failed:', err) }
       }
 
-      const existingIdx = updatedKits.findIndex((k) => k.name === packId)
+      const existingIdx = updatedKits.findIndex((k) => k.name === kitId)
       // Author tuning context — read every supported field, drop the
       // ones that are absent so we don't leave stale numeric defaults.
       const td = m.target_device ?? {}
@@ -1781,7 +1781,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       const kit: KitDefinition = {
         id: existingIdx >= 0 ? updatedKits[existingIdx].id : generateId(),
         // Folder name = display name. Lossless round-trip with disk.
-        name: packId,
+        name: kitId,
         version: String(m.version ?? '1.0.0'),
         description: String(m.description ?? ''),
         events,
@@ -1794,9 +1794,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // (Disk-as-truth) Persistence happens via saveKitsMetaToDir at the
       // end of this function — we no longer mirror to the IDB `kits`
       // store. See top of function for rationale.
-      // Track the packId we just imported so a subsequent kit rename
+      // Track the kitId we just imported so a subsequent kit rename
       // archives this folder rather than orphaning it on disk.
-      lastWrittenPackId.set(kit.id, packId)
+      lastWrittenKitId.set(kit.id, kitId)
       importedCount++
     }
 
@@ -1888,15 +1888,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ clips })
     await saveClipsMetaToDir(workDirHandle, clips)
 
-    // Kits: the real master is each `<packId>/<packId>-manifest.json`
+    // Kits: the real master is each `<kitId>/<kitId>-manifest.json`
     // file on disk, NOT the cached kitsMeta.json. We do a live folder
     // scan so that kits added/edited/removed via OS Explorer (or by
     // another tool) are picked up on next load.
     //
     // `importKitsFromOutputDir` falls back to `workDirHandle` when no
     // dedicated `kitDirHandle` is set, so it covers both layouts:
-    //   - workdir/<packId>/<packId>-manifest.json   (default — kits inside library)
-    //   - kitDir/<packId>/<packId>-manifest.json    (dedicated kit-out folder)
+    //   - workdir/<kitId>/<kitId>-manifest.json   (default — kits inside library)
+    //   - kitDir/<kitId>/<kitId>-manifest.json    (dedicated kit-out folder)
     // Discovery falls back to any `*manifest*.json` so kits authored
     // under the legacy `manifest.json` name still load.
     //
@@ -1905,7 +1905,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // NOT consult the IDB `kits` store any more: it accumulated stale
     // rows from a pre-2026-05-26 bug and is no longer trusted. Disk
     // is the source of truth for kits (workdir's kits-meta.json + each
-    // <packId>/<packId>-manifest.json). If both the disk scan and the
+    // <kitId>/<kitId>-manifest.json). If both the disk scan and the
     // metadata snapshot return empty, the kit list stays empty — the
     // user picks up where they left off when they next deploy / save a kit.
     const importedKitCount = await get().importKitsFromOutputDir().catch((err) => {
@@ -2341,14 +2341,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // explorer. `scanKitOutputFolder` skips that folder so the kit
     // stops appearing in the UI on the next refresh.
     if (kit) {
-      // Archive whatever packId we last wrote (covers the rename case
+      // Archive whatever kitId we last wrote (covers the rename case
       // where in-memory kit.name no longer matches the folder on disk).
-      const packId = lastWrittenPackId.get(kit.id) ?? toPackId(kit.name)
+      const kitId = lastWrittenKitId.get(kit.id) ?? toKitId(kit.name)
       const outRoot = kitDirHandle ?? workDirHandle
       if (outRoot) {
-        await archiveKitFolder(outRoot, packId)
+        await archiveKitFolder(outRoot, kitId)
       }
-      lastWrittenPackId.delete(kit.id)
+      lastWrittenKitId.delete(kit.id)
       lastBuiltKit.delete(kit.id)
     }
     get().setLocalFsStatus('saved', `kit "${kit?.name ?? id}" を archive`)
@@ -2486,8 +2486,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
     // Kit-level rename / metadata change — no Pack rebuild. Deploy
     // is the explicit "publish kit to disk + device" action. The
-    // previous folder (under the old packId) is also left alone here;
-    // it'll be archived on the next Deploy by the packId-rename code
+    // previous folder (under the old kitId) is also left alone here;
+    // it'll be archived on the next Deploy by the kitId-rename code
     // path in flushKitFolderNow.
   },
 
