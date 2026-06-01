@@ -134,7 +134,10 @@ export function ClipCard({
   eventId,
   eventIdEmpty,
   details,
-  tags,
+  // `tags` prop accepted but intentionally unused — see the details
+  // row comment below. Kept on the API for forward compat if we
+  // decide to surface user-authored labels again.
+  tags: _tags,
   showDetails,
   note,
   intensity,
@@ -355,17 +358,20 @@ export function ClipCard({
       )}
 
       {/* Row 3 (optional) — details + Note + Vol badge at the bottom.
-          Note sits right-aligned (between tags and wiper) so users
-          can see the original filename / memo without hovering — the
-          earlier tooltip-only surfacing was too easy to miss. */}
-      {showDetails && (details || (tags && tags.length > 0) || (note && note.trim()) || wiper !== null) && (
+          Note sits right-aligned (next to wiper) so users can see the
+          original filename / memo without hovering — the earlier
+          tooltip-only surfacing was too easy to miss.
+          Tags are intentionally NOT rendered here: the Library panel
+          already groups clips by folder (= `clip.group`), which
+          carries the same classification a tag badge would convey.
+          The redundant badge was squeezing meta / note into ellipsis.
+          `clip.tags` is still consumed by libraryStore search /
+          filter, so users can search by tag — just not via the card.
+          `tags` prop is kept for forward compat (re-enable display
+          later if we want user-authored labels). */}
+      {showDetails && (details || (note && note.trim()) || wiper !== null) && (
         <div className="clip-card-details">
           {details && <span className="clip-card-details-meta">{details}</span>}
-          {tags && tags.length > 0 && (
-            <span className="clip-card-details-tags" title={tags.join(', ')}>
-              {tags.map((t) => <span key={t} className="clip-card-tag" title={t}>{t}</span>)}
-            </span>
-          )}
           {note && note.trim() && (
             // `margin-left: auto` (in CSS) pushes the note + wiper
             // cluster to the right edge of the row. Title attribute
