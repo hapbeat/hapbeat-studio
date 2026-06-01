@@ -1,14 +1,12 @@
 {
   "schema_version": "1.0.0",
-  "generated_at": "2026-06-01T16:58:51.418Z",
+  "generated_at": "2026-06-01T18:14:58.820Z",
   "clips": [
     {
       "id": "builtin/fps-sample.booster",
       "name": "Booster",
       "category": "fps-sample",
-      "tags": [
-        "fps-sample"
-      ],
+      "tags": [],
       "event_id": "fps-sample.booster",
       "description": "",
       "filename": "fps-sample/booster.wav",
@@ -21,9 +19,7 @@
       "id": "builtin/fps-sample.charge",
       "name": "Charge",
       "category": "fps-sample",
-      "tags": [
-        "fps-sample"
-      ],
+      "tags": [],
       "event_id": "fps-sample.charge",
       "description": "",
       "filename": "fps-sample/charge.wav",
@@ -36,9 +32,7 @@
       "id": "builtin/fps-sample.damage",
       "name": "Damage",
       "category": "fps-sample",
-      "tags": [
-        "fps-sample"
-      ],
+      "tags": [],
       "event_id": "fps-sample.damage",
       "description": "",
       "filename": "fps-sample/damage.wav",
@@ -51,9 +45,7 @@
       "id": "builtin/fps-sample.footstep_1",
       "name": "Footstep 1",
       "category": "fps-sample",
-      "tags": [
-        "fps-sample"
-      ],
+      "tags": [],
       "event_id": "fps-sample.footstep_1",
       "description": "",
       "filename": "fps-sample/footstep_1.wav",
@@ -66,9 +58,7 @@
       "id": "builtin/fps-sample.footstep_2",
       "name": "Footstep 2",
       "category": "fps-sample",
-      "tags": [
-        "fps-sample"
-      ],
+      "tags": [],
       "event_id": "fps-sample.footstep_2",
       "description": "",
       "filename": "fps-sample/footstep_2.wav",
@@ -81,9 +71,7 @@
       "id": "builtin/fps-sample.gunshot_1",
       "name": "Gunshot 1",
       "category": "fps-sample",
-      "tags": [
-        "fps-sample"
-      ],
+      "tags": [],
       "event_id": "fps-sample.gunshot_1",
       "description": "",
       "filename": "fps-sample/gunshot_1.wav",
@@ -96,9 +84,7 @@
       "id": "builtin/fps-sample.gunshot_2",
       "name": "Gunshot 2",
       "category": "fps-sample",
-      "tags": [
-        "fps-sample"
-      ],
+      "tags": [],
       "event_id": "fps-sample.gunshot_2",
       "description": "",
       "filename": "fps-sample/gunshot_2.wav",
@@ -111,9 +97,7 @@
       "id": "builtin/fps-sample.gunshot_3",
       "name": "Gunshot 3",
       "category": "fps-sample",
-      "tags": [
-        "fps-sample"
-      ],
+      "tags": [],
       "event_id": "fps-sample.gunshot_3",
       "description": "",
       "filename": "fps-sample/gunshot_3.wav",
@@ -126,9 +110,7 @@
       "id": "builtin/fps-sample.gunshot_4",
       "name": "Gunshot 4",
       "category": "fps-sample",
-      "tags": [
-        "fps-sample"
-      ],
+      "tags": [],
       "event_id": "fps-sample.gunshot_4",
       "description": "",
       "filename": "fps-sample/gunshot_4.wav",
@@ -141,9 +123,7 @@
       "id": "builtin/fps-sample.gunshot_5",
       "name": "Gunshot 5",
       "category": "fps-sample",
-      "tags": [
-        "fps-sample"
-      ],
+      "tags": [],
       "event_id": "fps-sample.gunshot_5",
       "description": "",
       "filename": "fps-sample/gunshot_5.wav",
@@ -156,9 +136,7 @@
       "id": "builtin/fps-sample.gunshot_6",
       "name": "Gunshot 6",
       "category": "fps-sample",
-      "tags": [
-        "fps-sample"
-      ],
+      "tags": [],
       "event_id": "fps-sample.gunshot_6",
       "description": "",
       "filename": "fps-sample/gunshot_6.wav",
@@ -171,9 +149,7 @@
       "id": "builtin/fps-sample.landing",
       "name": "Landing",
       "category": "fps-sample",
-      "tags": [
-        "fps-sample"
-      ],
+      "tags": [],
       "event_id": "fps-sample.landing",
       "description": "",
       "filename": "fps-sample/landing.wav",
@@ -186,9 +162,7 @@
       "id": "builtin/fps-sample.launcherexp",
       "name": "LauncherExp",
       "category": "fps-sample",
-      "tags": [
-        "fps-sample"
-      ],
+      "tags": [],
       "event_id": "fps-sample.launcherexp",
       "description": "",
       "filename": "fps-sample/launcherExp.wav",
@@ -201,9 +175,7 @@
       "id": "builtin/fps-sample.launchershot",
       "name": "LauncherShot",
       "category": "fps-sample",
-      "tags": [
-        "fps-sample"
-      ],
+      "tags": [],
       "event_id": "fps-sample.launchershot",
       "description": "",
       "filename": "fps-sample/launcherShot.wav",
@@ -216,9 +188,7 @@
       "id": "builtin/fps-sample.shotgun",
       "name": "Shotgun",
       "category": "fps-sample",
-      "tags": [
-        "fps-sample"
-      ],
+      "tags": [],
       "event_id": "fps-sample.shotgun",
       "description": "",
       "filename": "fps-sample/shotgun.wav",
@@ -231,9 +201,7 @@
       "id": "builtin/showcase-kit.z1_pin_hit",
       "name": "Z1 Pin Hit",
       "category": "showcase-kit",
-      "tags": [
-        "showcase-kit"
-      ],
+      "tags": [],
       "event_id": "showcase-kit.z1_pin_hit",
       "description": "",
       "filename": "showcase-kit/z1_pin_hit.wav",
@@ -246,9 +214,7 @@
       "id": "builtin/showcase-kit.z2_door_close",
       "name": "Z2 Door Close",
       "category": "showcase-kit",
-      "tags": [
-        "showcase-kit"
-      ],
+      "tags": [],
       "event_id": "showcase-kit.z2_door_close",
       "description": "",
       "filename": "showcase-kit/z2_door_close.wav",
@@ -261,9 +227,7 @@
       "id": "builtin/showcase-kit.z2_door_lock",
       "name": "Z2 Door Lock",
       "category": "showcase-kit",
-      "tags": [
-        "showcase-kit"
-      ],
+      "tags": [],
       "event_id": "showcase-kit.z2_door_lock",
       "description": "",
       "filename": "showcase-kit/z2_door_lock.wav",
@@ -276,9 +240,7 @@
       "id": "builtin/showcase-kit.z2_door_open",
       "name": "Z2 Door Open",
       "category": "showcase-kit",
-      "tags": [
-        "showcase-kit"
-      ],
+      "tags": [],
       "event_id": "showcase-kit.z2_door_open",
       "description": "",
       "filename": "showcase-kit/z2_door_open.wav",
@@ -291,9 +253,7 @@
       "id": "builtin/showcase-kit.z2_door_rattle",
       "name": "Z2 Door Rattle",
       "category": "showcase-kit",
-      "tags": [
-        "showcase-kit"
-      ],
+      "tags": [],
       "event_id": "showcase-kit.z2_door_rattle",
       "description": "",
       "filename": "showcase-kit/z2_door_rattle.wav",
@@ -306,9 +266,7 @@
       "id": "builtin/showcase-kit.z2_door_slam",
       "name": "Z2 Door Slam",
       "category": "showcase-kit",
-      "tags": [
-        "showcase-kit"
-      ],
+      "tags": [],
       "event_id": "showcase-kit.z2_door_slam",
       "description": "",
       "filename": "showcase-kit/z2_door_slam.wav",
@@ -321,9 +279,7 @@
       "id": "builtin/showcase-kit.z2_door_unlock",
       "name": "Z2 Door Unlock",
       "category": "showcase-kit",
-      "tags": [
-        "showcase-kit"
-      ],
+      "tags": [],
       "event_id": "showcase-kit.z2_door_unlock",
       "description": "",
       "filename": "showcase-kit/z2_door_unlock.wav",
@@ -336,9 +292,7 @@
       "id": "builtin/showcase-kit.z3_hook_loop",
       "name": "Z3 Hook Loop",
       "category": "showcase-kit",
-      "tags": [
-        "showcase-kit"
-      ],
+      "tags": [],
       "event_id": "showcase-kit.z3_hook_loop",
       "description": "",
       "filename": "showcase-kit/z3_hook_loop.wav",
@@ -351,9 +305,7 @@
       "id": "builtin/showcase-kit.z3_hook_release",
       "name": "Z3 Hook Release",
       "category": "showcase-kit",
-      "tags": [
-        "showcase-kit"
-      ],
+      "tags": [],
       "event_id": "showcase-kit.z3_hook_release",
       "description": "",
       "filename": "showcase-kit/z3_hook_release.wav",
@@ -366,9 +318,7 @@
       "id": "builtin/showcase-kit.z3_hook_start",
       "name": "Z3 Hook Start",
       "category": "showcase-kit",
-      "tags": [
-        "showcase-kit"
-      ],
+      "tags": [],
       "event_id": "showcase-kit.z3_hook_start",
       "description": "",
       "filename": "showcase-kit/z3_hook_start.wav",
@@ -381,9 +331,7 @@
       "id": "builtin/showcase-kit.z4_slider_tick",
       "name": "Z4 Slider Tick",
       "category": "showcase-kit",
-      "tags": [
-        "showcase-kit"
-      ],
+      "tags": [],
       "event_id": "showcase-kit.z4_slider_tick",
       "description": "",
       "filename": "showcase-kit/z4_slider_tick.wav",
@@ -396,9 +344,7 @@
       "id": "builtin/showcase-kit.z4_stream_loop",
       "name": "Z4 Stream Loop",
       "category": "showcase-kit",
-      "tags": [
-        "showcase-kit"
-      ],
+      "tags": [],
       "event_id": "showcase-kit.z4_stream_loop",
       "description": "",
       "filename": "showcase-kit/z4_stream_loop.wav",
@@ -411,9 +357,7 @@
       "id": "builtin/showcase-kit.z5_charge_loop",
       "name": "Z5 Charge Loop",
       "category": "showcase-kit",
-      "tags": [
-        "showcase-kit"
-      ],
+      "tags": [],
       "event_id": "showcase-kit.z5_charge_loop",
       "description": "",
       "filename": "showcase-kit/z5_charge_loop.wav",
@@ -426,9 +370,7 @@
       "id": "builtin/showcase-kit.z5_charge_thd",
       "name": "Z5 Charge Thd",
       "category": "showcase-kit",
-      "tags": [
-        "showcase-kit"
-      ],
+      "tags": [],
       "event_id": "showcase-kit.z5_charge_thd",
       "description": "",
       "filename": "showcase-kit/z5_charge_thd.wav",
@@ -441,9 +383,7 @@
       "id": "builtin/showcase-kit.z5_shot_heavy",
       "name": "Z5 Shot Heavy",
       "category": "showcase-kit",
-      "tags": [
-        "showcase-kit"
-      ],
+      "tags": [],
       "event_id": "showcase-kit.z5_shot_heavy",
       "description": "",
       "filename": "showcase-kit/z5_shot_heavy.wav",
@@ -456,9 +396,7 @@
       "id": "builtin/showcase-kit.z5_shot_light",
       "name": "Z5 Shot Light",
       "category": "showcase-kit",
-      "tags": [
-        "showcase-kit"
-      ],
+      "tags": [],
       "event_id": "showcase-kit.z5_shot_light",
       "description": "",
       "filename": "showcase-kit/z5_shot_light.wav",
@@ -471,9 +409,7 @@
       "id": "builtin/showcase-kit.z5_tar_hit_heavy",
       "name": "Z5 Tar Hit Heavy",
       "category": "showcase-kit",
-      "tags": [
-        "showcase-kit"
-      ],
+      "tags": [],
       "event_id": "showcase-kit.z5_tar_hit_heavy",
       "description": "",
       "filename": "showcase-kit/z5_tar_hit_heavy.wav",
@@ -486,9 +422,7 @@
       "id": "builtin/showcase-kit.z5_tar_hit_light",
       "name": "Z5 Tar Hit Light",
       "category": "showcase-kit",
-      "tags": [
-        "showcase-kit"
-      ],
+      "tags": [],
       "event_id": "showcase-kit.z5_tar_hit_light",
       "description": "",
       "filename": "showcase-kit/z5_tar_hit_light.wav",

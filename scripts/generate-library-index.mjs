@@ -164,7 +164,12 @@ async function main() {
         id: `builtin/${filenameToEventId(relPath)}`,
         name: metaOverride.name || filenameToDisplayName(relPath),
         category,
-        tags: metaOverride.tags || [category],
+        // Empty by default — the previous `tags: [category]` fallback
+        // produced a redundant badge in the Library card (same string
+        // as the surrounding folder header) and squeezed meta / note
+        // into ellipsis. Tags should reflect actual user labels;
+        // metadata.tsv can still supply explicit ones via --meta.
+        tags: metaOverride.tags || [],
         event_id: metaOverride.event_id || filenameToEventId(relPath),
         description: metaOverride.description || '',
         filename: relPath,

@@ -1050,6 +1050,13 @@ function ClipRow({
   onSwap,
 }: ClipRowProps) {
   const metaSummary = `${Math.round(clip.duration * 1000)}ms | ${clip.channels === 1 ? 'Mono' : 'Stereo'} | ${clip.sampleRate / 1000}kHz | ${formatFileSize(clip.fileSize)}`
+  // Drop tags that just re-state the clip's group (= category folder).
+  // Built-ins auto-generated `tags: [category]` to fill in something
+  // default, but the tree view already shows the same info via the
+  // surrounding folder header. Leaving the badge in there only squeezes
+  // the details row (meta / note get truncated) for zero new signal.
+  // User-added tags that DON'T match the group are kept untouched.
+  const visibleTags = clip.tags?.filter((t) => t !== clip.group) ?? []
   return (
     <ClipCard
       name={clip.name}
@@ -1057,7 +1064,7 @@ function ClipRow({
       eventId={null}
       eventIdEmpty={false}
       details={metaSummary}
-      tags={clip.tags}
+      tags={visibleTags}
       showDetails={showDetails}
       note={clip.note}
       intensity={intensity}
