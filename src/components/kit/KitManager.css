@@ -467,13 +467,29 @@
 .tree-group.is-open > .tree-group-header .tree-arrow {
   color: hsla(var(--tree-hue, 260), 70%, 80%, 1);
 }
-/* Cards inside an open folder: vivid border in the folder's hue so the
-   grouping is obvious at a glance. Background stays default (dark). */
+/* Children block — indent + vertical guide line in the folder's hue.
+   Recurses naturally: each nested .tree-group-children adds another
+   level of padding-left, so deep hierarchies show staircase indents
+   without per-level JS bookkeeping. The guide line uses the folder's
+   --tree-hue (set inline on the immediate parent .tree-group) so
+   each level visually "belongs" to its container. */
+.tree-group-children {
+  padding-left: 8px;
+  margin-left: 8px;
+  border-left: 2px solid hsla(var(--tree-hue, 260), 50%, 40%, 0.25);
+}
+
+/* Cards inside an open folder: vivid border + faint hue-tinted
+   background in the folder's hue so the grouping is obvious at a
+   glance. Background tint applies on both normal and hover so the
+   "card belongs to this folder" cue doesn't disappear on hover. */
 .tree-group.is-open > .tree-group-children > .clip-card {
   border-color: hsla(var(--tree-hue, 260), 70%, 55%, 0.7);
+  background: hsla(var(--tree-hue, 260), 30%, 25%, 0.10);
 }
 .tree-group.is-open > .tree-group-children > .clip-card:hover {
   border-color: hsla(var(--tree-hue, 260), 80%, 65%, 0.9);
+  background: hsla(var(--tree-hue, 260), 40%, 30%, 0.14);
 }
 
 
