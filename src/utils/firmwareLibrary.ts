@@ -9,42 +9,63 @@
  *   is picked up on the very next click.
  *
  * Production (deployed devtools.hapbeat.com):
- *   Firmware artifacts are hosted on GitHub Releases for
- *   `hapbeat/hapbeat-device-firmware`. A `manifest.json` at the release
- *   root lists available envs and artifact filenames. Artifact files use
- *   the naming convention `<env>_<stem>.bin` to avoid name collisions
- *   across environments in the same release.
+ *   Firmware artifacts are aggregated across multiple firmware repos
+ *   into a single `manifest.json` (schema_version 2 — see contracts
+ *   `firmware-distribution.md`, DEC-034). Each variant carries
+ *   role/transport/board/label so Studio can present the right firmware
+ *   for the node being flashed. The manifest's explicit artifact
+ *   filenames are repo-prefixed to avoid collisions.
+ *
+ *   Back-compat: a legacy `{ envs: [...] }` manifest (or the dev
+ *   plugin) is mapped to receiver/udp variants, with role/transport
+ *   inferred from the env name as a best-effort fallback.
  */
 
-/** Per-artifact metadata returned by the dev plugin's `/list`. */
+import type { NodeRole, NodeTransport } from '@/types/manager'
+
+/** Per-artifact metadata. */
 export interface FirmwareArtifact {
-  /** Bytes on disk. */
+  /** Bytes on disk / in the release. */
   size: number
-  /** Last-modified time (ms since epoch). */
+  /** Last-modified time (ms since epoch). 0 when unknown (GH releases). */
   mtime: number
-  /** Absolute filesystem path on the dev host (display only). */
+  /** Fetch URL (prod) or display path (dev host). */
   path: string
 }
 
 export interface FirmwareLibraryEntry {
-  /** PlatformIO environment name, e.g. `necklace_v3_claude`. */
+  /** PlatformIO environment name, e.g. `band_v3` / `DuoWL_V3_STREAM_ESPNOW`. */
   env: string
   /** App-only image for **Wi-Fi OTA** (firmware_app_ota.bin). The
    *  ESP32 OTA mechanism (`Update.write` → ota_X partition) accepts
    *  this and only this — sending a merged image instead writes
    *  bootloader bytes into the OTA app slot and the device rolls back
-   *  on next boot. */
+   *  on next boot. Absent for serial-only nodes (transmitter /
+   *  espnow_stream receiver) which never join Wi-Fi. */
   appOta?: FirmwareArtifact
   /** Merged image for **USB Serial download mode**
    *  (firmware_full_serial.bin) — bootloader 0x0 + partitions 0x8000
-   *  + app 0x10000. Esptool-js writes each region to its own offset.
-   *  Unused for OTA. */
+   *  + app 0x10000. Esptool-js writes each region to its own offset. */
   fullSerial?: FirmwareArtifact
-  /** FIRMWARE_VERSION baked into the binary at build time (the semver
-   *  string defined in `src/hapbeat_config.h`). Sole source of truth
-   *  for "which firmware is this" — same value the OLED shows and the
-   *  device returns in `get_info`'s `fw` field. */
+  /** FIRMWARE_VERSION baked into the binary at build time. */
   fwVersion?: string
+  // --- manifest v2 (node-roles, DEC-034) ---
+  /** Unique id within the manifest (`<repo-short>/<env>`). */
+  id?: string
+  /** Source firmware repo. */
+  repo?: string
+  /** Node role this firmware implements. */
+  role?: NodeRole
+  /** Primary transport. */
+  transport?: NodeTransport
+  /** All supported transports (receiver may be udp+mqtt). */
+  transports?: NodeTransport[]
+  /** Hardware board id (for board-mismatch pre-flight). */
+  board?: string
+  /** Human-facing display label. */
+  label?: string
+  /** Optional one-line description. */
+  description?: string
 }
 
 /** A single region to write during a multi-file flash. */
@@ -61,18 +82,65 @@ export interface FirmwareRegion {
 const PROD_FIRMWARE_BASE = `${import.meta.env.BASE_URL}firmware`
 
 /**
- * In development (Vite dev server) the `firmwareDevPlugin` serves
- * `/firmware-builds/…` locally. In production, firmware artifacts are
- * downloaded from the private hapbeat-device-firmware GitHub Release at
- * CI build time and bundled under public/firmware/ → dist/firmware/.
+ * Best-effort role/transport/board inference from a PlatformIO env name.
+ * Used as a fallback when a manifest variant (or the dev plugin) does
+ * not carry explicit role/transport — so multi-role firmware is still
+ * grouped sensibly in dev and against legacy manifests. Explicit
+ * manifest values always win over this.
  */
+export function inferVariantFromEnv(env: string): {
+  role: NodeRole
+  transport: NodeTransport
+  board?: string
+} {
+  const e = env.toLowerCase()
+  let role: NodeRole = 'receiver'
+  let transport: NodeTransport = 'udp'
+  if (/broker/.test(e)) {
+    role = 'broker'
+    transport = 'mqtt'
+  } else if (/sensor/.test(e)) {
+    role = 'sensor'
+    transport = 'mqtt'
+  } else if (/(transmitter|sender|audio.*(tx|stream)|_tx\b)/.test(e)) {
+    role = 'transmitter'
+    transport = 'espnow_stream'
+  } else if (/stream/.test(e) && /espnow/.test(e)) {
+    role = 'receiver'
+    transport = 'espnow_stream'
+  } else if (/mqtt/.test(e)) {
+    role = 'receiver'
+    transport = 'mqtt'
+  }
+  // Board inference for the receiver necklace/band naming scheme.
+  let board: string | undefined
+  const m = e.match(/(necklace|duo|band)[_-]?(v\d+)/)
+  if (m) {
+    const family = m[1] === 'necklace' || m[1] === 'duo' ? 'duo' : 'band'
+    board = `${family}_wl_${m[2]}`
+  }
+  return { role, transport, board }
+}
+
+/** Fill role/transport/board on an entry from explicit values, else infer. */
+function withInferredRole(e: FirmwareLibraryEntry): FirmwareLibraryEntry {
+  if (e.role && e.transport) return e
+  const inferred = inferVariantFromEnv(e.env)
+  return {
+    ...e,
+    role: e.role ?? inferred.role,
+    transport: e.transport ?? inferred.transport,
+    board: e.board ?? inferred.board,
+  }
+}
+
 function isProdMode(): boolean {
   return import.meta.env.PROD
 }
 
 export async function listFirmwareBuilds(): Promise<FirmwareLibraryEntry[]> {
   if (isProdMode()) {
-    return listFirmwareBuildsFromGitHubReleases()
+    return (await listFirmwareBuildsFromManifest()).map(withInferredRole)
   }
   // Dev: use Vite middleware
   const r = await fetch('/firmware-builds/list', { cache: 'no-store' })
@@ -80,80 +148,103 @@ export async function listFirmwareBuilds(): Promise<FirmwareLibraryEntry[]> {
     throw new Error(`firmware list failed (${r.status} ${r.statusText})`)
   }
   const json = (await r.json()) as { envs: FirmwareLibraryEntry[] }
-  return json.envs ?? []
+  return (json.envs ?? []).map(withInferredRole)
+}
+
+interface ManifestArtifact {
+  filename: string
+  size: number
+  mtime?: number
+}
+
+interface ManifestVariantV2 {
+  id?: string
+  repo?: string
+  env: string
+  role?: NodeRole
+  transport?: NodeTransport
+  transports?: NodeTransport[]
+  board?: string
+  label?: string
+  description?: string
+  fwVersion?: string
+  appOta?: ManifestArtifact
+  fullSerial?: ManifestArtifact
+}
+
+/** Legacy v1 env entry. */
+interface ManifestEnvV1 {
+  env: string
+  fwVersion?: string
+  appOta?: ManifestArtifact
+  fullSerial?: ManifestArtifact
 }
 
 /**
- * Fetch the `manifest.json` from the latest GitHub Release and parse it
- * into the same `FirmwareLibraryEntry[]` shape the dev plugin returns.
- *
- * Expected manifest shape:
- * ```json
- * {
- *   "envs": [
- *     {
- *       "env": "necklace_v3_claude",
- *       "fwVersion": "v0.5.1",
- *       "appOta":     { "filename": "necklace_v3_claude_firmware_app_ota.bin",     "size": 1234567, "mtime": 1714723200000 },
- *       "fullSerial": { "filename": "necklace_v3_claude_firmware_full_serial.bin", "size": 1556789, "mtime": 1714723200000 }
- *     }
- *   ]
- * }
- * ```
+ * Fetch `manifest.json` and parse v2 (`variants`) or legacy v1
+ * (`envs`) into `FirmwareLibraryEntry[]`. v2 carries role/transport/
+ * board/label per variant; v1 entries are mapped to receiver/udp with
+ * role inferred from the env name.
  */
-async function listFirmwareBuildsFromGitHubReleases(): Promise<FirmwareLibraryEntry[]> {
+async function listFirmwareBuildsFromManifest(): Promise<FirmwareLibraryEntry[]> {
   const manifestUrl = `${PROD_FIRMWARE_BASE}/manifest.json`
   const r = await fetch(manifestUrl, { cache: 'no-store' })
   if (!r.ok) {
     throw new Error(
       `firmware manifest fetch failed (${r.status} ${r.statusText}) — `
-      + `are firmware artifacts published to GitHub Releases?`,
+      + `are firmware artifacts published?`,
     )
   }
-
-  interface ManifestEnv {
-    env: string
-    fwVersion?: string
-    appOta?: { filename: string; size: number; mtime: number }
-    fullSerial?: { filename: string; size: number; mtime: number }
+  const json = (await r.json()) as {
+    schema_version?: number
+    variants?: ManifestVariantV2[]
+    envs?: ManifestEnvV1[]
   }
-  const json = (await r.json()) as { envs: ManifestEnv[] }
 
+  const toArtifact = (a?: ManifestArtifact): FirmwareArtifact | undefined =>
+    a
+      ? {
+          size: a.size,
+          mtime: a.mtime ?? 0,
+          path: `${PROD_FIRMWARE_BASE}/${a.filename}`,
+        }
+      : undefined
+
+  if (Array.isArray(json.variants)) {
+    return json.variants.map((v) => ({
+      env: v.env,
+      id: v.id,
+      repo: v.repo,
+      role: v.role,
+      transport: v.transport,
+      transports: v.transports,
+      board: v.board,
+      label: v.label,
+      description: v.description,
+      fwVersion: v.fwVersion,
+      appOta: toArtifact(v.appOta),
+      fullSerial: toArtifact(v.fullSerial),
+    }))
+  }
+
+  // Legacy v1 fallback.
   return (json.envs ?? []).map((e) => ({
     env: e.env,
     fwVersion: e.fwVersion,
-    appOta: e.appOta
-      ? {
-          size: e.appOta.size,
-          mtime: e.appOta.mtime,
-          // Expose the GH release download URL as `path` so display components
-          // can show it (they currently show `path` as a tooltip / label).
-          path: `${PROD_FIRMWARE_BASE}/${e.appOta.filename}`,
-        }
-      : undefined,
-    fullSerial: e.fullSerial
-      ? {
-          size: e.fullSerial.size,
-          mtime: e.fullSerial.mtime,
-          path: `${PROD_FIRMWARE_BASE}/${e.fullSerial.filename}`,
-        }
-      : undefined,
+    appOta: toArtifact(e.appOta),
+    fullSerial: toArtifact(e.fullSerial),
   }))
 }
 
 /**
  * Fetch the **app-only** binary (firmware_app_ota.bin) for Wi-Fi OTA.
- *
- * The ESP32 OTA mechanism (`Update.write` in firmware) writes the
- * supplied bytes into the next OTA app partition starting from
- * offset 0. It cannot update bootloader (lives at 0x0) or partition
- * table (0x8000) — those need USB Serial download mode. So OTA must
- * receive an app-only image, not the merged blob.
+ * Pass the resolved library entry so the explicit manifest URL is used
+ * in prod (repo-prefixed filenames) and the dev plugin path in dev.
  */
 export async function fetchFirmwareAppOta(
-  env: string,
+  entry: FirmwareLibraryEntry,
 ): Promise<{ bytes: Uint8Array; mtime: number; size: number; path: string }> {
-  return fetchArtifact(env, 'firmware_app_ota')
+  return fetchArtifact(entry, 'firmware_app_ota')
 }
 
 const NVS_GAP_START = 0x9000
@@ -176,21 +267,13 @@ const OTADATA_SIZE = APP_START - OTADATA_START  // 8 KB
  *   [0xE000 , 0x10000) → otadata                                        ← erase (write 0xFF)
  *   [0x10000, end    ) → app (ota_0)                                    ← write
  *
- * Why otadata is reset (2026-05-09 fix):
- *   After a successful OTA, otadata points at ota_1. If we serial-flash
- *   only ota_0 and skip otadata, the bootloader still picks ota_1 and
- *   boots the OLD firmware — symptom: OLED shows old version, get_info.fw
- *   mismatches the bin we just flashed. Writing 0xFF to otadata makes
- *   the bootloader treat OTA selection as uninitialized → boot ota_0
- *   (the slot we just wrote).
- *
  * Bootloader / partitions / app start markers are validated up front
  * so a non-merged image is rejected before any flash bytes are sent.
  */
 export async function fetchFirmwareSerialRegions(
   entry: FirmwareLibraryEntry,
 ): Promise<FirmwareRegion[]> {
-  const fw = await fetchArtifact(entry.env, 'firmware_full_serial')
+  const fw = await fetchArtifact(entry, 'firmware_full_serial')
   const b = fw.bytes
   const isMerged =
     b.length >= APP_START + 1
@@ -225,18 +308,18 @@ export async function fetchFirmwareSerialRegions(
 }
 
 async function fetchArtifact(
-  env: string,
-  stem: 'firmware_app_ota' | 'firmware_full_serial' | 'firmware',
+  entry: FirmwareLibraryEntry,
+  stem: 'firmware_app_ota' | 'firmware_full_serial',
 ): Promise<{ bytes: Uint8Array; mtime: number; size: number; path: string }> {
   if (isProdMode()) {
-    return fetchArtifactFromGitHubReleases(env, stem)
+    return fetchArtifactFromManifest(entry, stem)
   }
-  return fetchArtifactFromDevPlugin(env, stem)
+  return fetchArtifactFromDevPlugin(entry.env, stem)
 }
 
 async function fetchArtifactFromDevPlugin(
   env: string,
-  stem: 'firmware_app_ota' | 'firmware_full_serial' | 'firmware',
+  stem: 'firmware_app_ota' | 'firmware_full_serial',
 ): Promise<{ bytes: Uint8Array; mtime: number; size: number; path: string }> {
   const tryStems = stem === 'firmware_full_serial'
     // Back-compat: older builds emit the merged image as `firmware.bin`
@@ -269,39 +352,42 @@ async function fetchArtifactFromDevPlugin(
 }
 
 /**
- * Fetch a firmware artifact from GitHub Releases.
- * Artifact naming: `<env>_<stem>.bin` (e.g. `necklace_v3_claude_firmware_app_ota.bin`).
- * Falls back to `<env>_firmware.bin` for full_serial (legacy back-compat).
+ * Fetch a firmware artifact in production using the explicit manifest
+ * URL (`entry.appOta.path` / `entry.fullSerial.path`). Falls back to
+ * the legacy reconstructed `<env>_<stem>.bin` name when the entry has
+ * no explicit artifact path (e.g. a hand-rolled v1 manifest).
  */
-async function fetchArtifactFromGitHubReleases(
-  env: string,
-  stem: 'firmware_app_ota' | 'firmware_full_serial' | 'firmware',
+async function fetchArtifactFromManifest(
+  entry: FirmwareLibraryEntry,
+  stem: 'firmware_app_ota' | 'firmware_full_serial',
 ): Promise<{ bytes: Uint8Array; mtime: number; size: number; path: string }> {
-  const tryFilenames =
-    stem === 'firmware_full_serial'
-      ? [`${env}_firmware_full_serial.bin`, `${env}_firmware.bin`]
-      : [`${env}_${stem}.bin`]
+  const artifact = stem === 'firmware_app_ota' ? entry.appOta : entry.fullSerial
+  const tryUrls: string[] = []
+  if (artifact?.path) tryUrls.push(artifact.path)
+  // Legacy fallbacks (reconstructed names).
+  if (stem === 'firmware_full_serial') {
+    tryUrls.push(`${PROD_FIRMWARE_BASE}/${entry.env}_firmware_full_serial.bin`)
+    tryUrls.push(`${PROD_FIRMWARE_BASE}/${entry.env}_firmware.bin`)
+  } else {
+    tryUrls.push(`${PROD_FIRMWARE_BASE}/${entry.env}_${stem}.bin`)
+  }
 
   let lastErr: Error | null = null
-  for (const filename of tryFilenames) {
-    const url = `${PROD_FIRMWARE_BASE}/${filename}`
+  for (const url of tryUrls) {
     const r = await fetch(url, { cache: 'no-store' })
     if (r.ok) {
       const buf = await r.arrayBuffer()
       const bytes = new Uint8Array(buf)
       if (bytes.length === 0) {
-        lastErr = new Error(`${filename} is empty for env="${env}"`)
+        lastErr = new Error(`${url} is empty for env="${entry.env}"`)
         continue
       }
-      // GitHub Releases does not return custom headers; use Content-Length
       const size = Number(r.headers.get('content-length') ?? bytes.length)
-      return { bytes, mtime: 0, size, path: url }
+      return { bytes, mtime: artifact?.mtime ?? 0, size, path: url }
     }
-    lastErr = new Error(
-      `${filename} fetch failed (${r.status} ${r.statusText})`,
-    )
+    lastErr = new Error(`${url} fetch failed (${r.status} ${r.statusText})`)
   }
-  throw lastErr ?? new Error(`GitHub Releases fetch failed for env="${env}"`)
+  throw lastErr ?? new Error(`manifest artifact fetch failed for env="${entry.env}"`)
 }
 
 export function formatMtime(ms: number): string {
@@ -315,11 +401,6 @@ export function formatMtime(ms: number): string {
 }
 
 export function formatBytes(n: number): string {
-  // Match Windows Explorer / macOS Finder list views: KB for small
-  // files, MB / GB only when crossing those thresholds. Two-decimal
-  // MB matched our previous output but reads as more precision than
-  // OS file managers actually offer (Explorer uses no decimals on
-  // KB, one on MB). One decimal everywhere.
   if (n >= 1024 * 1024 * 1024) return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`
   if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`
   if (n >= 1024) return `${Math.round(n / 1024).toLocaleString()} KB`

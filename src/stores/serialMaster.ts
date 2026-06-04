@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { useLogStore } from '@/stores/logStore'
+import type { NodeRole, NodeTransport } from '@/types/manager'
 import {
   isWebSerialSupported,
   openConfigConnection,
@@ -38,6 +39,45 @@ export interface SerialDeviceInfo {
   wifi_connected?: boolean
   wifi_ssid?: string
   wifi_ip?: string
+  // --- node-roles (DEC-034) ---
+  role?: NodeRole
+  transport?: NodeTransport
+  transports?: NodeTransport[]
+  espnow_channel?: number
+  gain?: number
+  input_level?: number
+  broker_host?: string
+  static_octet?: number
+  mqtt_port?: number
+  mqtt_running?: boolean
+  mappings_count?: number
+}
+
+/** Parse a firmware get_info JSON into a SerialDeviceInfo (shared by
+ *  the probe and refreshAll paths so new fields stay in one place). */
+function parseSerialInfo(r: Record<string, unknown>): SerialDeviceInfo {
+  return {
+    name: r.name as string | undefined,
+    group: r.group as number | undefined,
+    fw: r.fw as string | undefined,
+    build: r.build as string | undefined,
+    mac: r.mac as string | undefined,
+    board: r.board as string | undefined,
+    wifi_connected: r.wifi_connected as boolean | undefined,
+    wifi_ssid: r.wifi_ssid as string | undefined,
+    wifi_ip: r.wifi_ip as string | undefined,
+    role: r.role as NodeRole | undefined,
+    transport: r.transport as NodeTransport | undefined,
+    transports: r.transports as NodeTransport[] | undefined,
+    espnow_channel: r.espnow_channel as number | undefined,
+    gain: r.gain as number | undefined,
+    input_level: r.input_level as number | undefined,
+    broker_host: r.broker_host as string | undefined,
+    static_octet: r.static_octet as number | undefined,
+    mqtt_port: r.mqtt_port as number | undefined,
+    mqtt_running: r.mqtt_running as boolean | undefined,
+    mappings_count: r.mappings_count as number | undefined,
+  }
 }
 
 export interface SerialWifiStatus {
@@ -182,17 +222,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       set({
         conn: c,
         mode: 'config',
-        info: {
-          name: info.name as string | undefined,
-          group: info.group as number | undefined,
-          fw: info.fw as string | undefined,
-          build: info.build as string | undefined,
-          mac: info.mac as string | undefined,
-          board: info.board as string | undefined,
-          wifi_connected: info.wifi_connected as boolean | undefined,
-          wifi_ssid: info.wifi_ssid as string | undefined,
-          wifi_ip: info.wifi_ip as string | undefined,
-        },
+        info: parseSerialInfo(info),
       })
       // Best-effort Wi-Fi state — old firmware may lack these.
       try {
@@ -510,19 +540,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       if (!conn) return
       try {
         const r = await conn.send({ cmd: 'get_info' })
-        set({
-          info: {
-            name: r.name as string | undefined,
-            group: r.group as number | undefined,
-            fw: r.fw as string | undefined,
-            build: r.build as string | undefined,
-            mac: r.mac as string | undefined,
-            board: r.board as string | undefined,
-            wifi_connected: r.wifi_connected as boolean | undefined,
-            wifi_ssid: r.wifi_ssid as string | undefined,
-            wifi_ip: r.wifi_ip as string | undefined,
-          },
-        })
+        set({ info: parseSerialInfo(r) })
       } catch { /* skip */ }
       try {
         const r = await conn.send({ cmd: 'get_wifi_status' })

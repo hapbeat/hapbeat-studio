@@ -2,10 +2,21 @@ import { useEffect, useState } from 'react'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useSerialMaster } from '@/stores/serialMaster'
 import { isWebSerialSupported } from '@/utils/serialConfig'
+import type { NodeRole } from '@/types/manager'
 import { FirmwareSubTab } from './FirmwareSubTab'
 import './OnboardingWizard.css'
 
 const SERIAL_DEVICE_PREFIX = 'serial:'
+
+/** Node-type choices shown in the flash step (DEC-034). The common
+ *  case (装着デバイス = receiver) is the default so a plain Wi-Fi-UDP
+ *  user just clicks through without thinking about modes. */
+const NODE_ROLE_CHOICES: { role: NodeRole; label: string; hint: string }[] = [
+  { role: 'receiver', label: '装着デバイス', hint: 'Unity 連携 / センサ通知 / ライブ受信' },
+  { role: 'sensor', label: 'センサ送信機', hint: 'センサ値で触覚を発火 (MQTT)' },
+  { role: 'broker', label: 'ブローカー', hint: 'MQTT 中継 (組み込み)' },
+  { role: 'transmitter', label: 'ライブ送信機', hint: 'PA 音声を ESP-NOW 同報' },
+]
 
 type Step = 'probe' | 'flash' | 'configure'
 
@@ -30,6 +41,9 @@ export function OnboardingWizard() {
   const flashLastResult = useSerialMaster((s) => s.flashLastResult)
 
   const [step, setStep] = useState<Step>('probe')
+  // Which node type the user is setting up (drives which firmware the
+  // flash step offers). Defaults to the common receiver case.
+  const [role, setRole] = useState<NodeRole>('receiver')
 
   // Auto-route based on probe outcome.
   //
@@ -111,7 +125,7 @@ export function OnboardingWizard() {
       )}
 
       {step === 'flash' && (
-        <FlashStep onBack={goProbe} />
+        <FlashStep onBack={goProbe} role={role} setRole={setRole} />
       )}
 
       {step === 'configure' && (
@@ -194,7 +208,15 @@ function ProbeStep({
   )
 }
 
-function FlashStep({ onBack }: { onBack: () => void }) {
+function FlashStep({
+  onBack,
+  role,
+  setRole,
+}: {
+  onBack: () => void
+  role: NodeRole
+  setRole: (r: NodeRole) => void
+}) {
   return (
     <>
       <div className="form-section onboarding-step">
@@ -204,6 +226,30 @@ function FlashStep({ onBack }: { onBack: () => void }) {
             Hapbeat 用のファームウェアを USB Serial 経由で書き込みます。
             「Serial 書き込み」ボタンを押して完了するまで待ってください。
           </p>
+
+          {/* Node-type chooser — the common 装着デバイス case is pre-selected
+            * so a plain Wi-Fi-UDP user doesn't have to think about modes. */}
+          <div className="form-row" style={{ marginTop: 4 }}>
+            <label>ノードの種類</label>
+            <div className="form-row-multi" style={{ flexWrap: 'wrap', gap: 6 }}>
+              {NODE_ROLE_CHOICES.map((c) => (
+                <button
+                  key={c.role}
+                  type="button"
+                  className={`form-button${role === c.role ? '' : '-secondary'}`}
+                  onClick={() => setRole(c.role)}
+                  title={c.hint}
+                >
+                  {c.label}
+                </button>
+              ))}
+            </div>
+            <span />
+          </div>
+          <div className="form-status muted">
+            {NODE_ROLE_CHOICES.find((c) => c.role === role)?.hint}
+          </div>
+
           <div className="form-status muted">
             👉 書き込み完了後、自動で Step 3 (Wi-Fi 設定) に進みます。
             その後デバイスの<strong> 電源を一度 OFF→ON </strong>してから「USB Serial で再接続」を押してください。
@@ -216,7 +262,7 @@ function FlashStep({ onBack }: { onBack: () => void }) {
         </div>
       </div>
 
-      <FirmwareSubTab serialOnly postFlashReprobeMs={0} />
+      <FirmwareSubTab serialOnly postFlashReprobeMs={0} roleFilter={role} />
     </>
   )
 }

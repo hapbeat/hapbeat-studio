@@ -24,6 +24,7 @@ const SERIAL_GET_CMD_TO_RESULT: Record<string, string> = {
   list_wifi_profiles: 'wifi_profiles_result',
   get_ap_status: 'ap_status_result',
   kit_list: 'kit_list_result',
+  get_sensor_mapping: 'sensor_mapping_result',
 }
 
 /**

@@ -9,6 +9,41 @@ export interface ManagerMessage {
   payload: Record<string, unknown>
 }
 
+/**
+ * Node role / transport taxonomy (contracts: node-roles.md, DEC-034).
+ * A node declares these in get_info; Studio gates UI on them. A node
+ * that doesn't report a role is treated as a `receiver` on `udp` —
+ * so plain Wi-Fi-UDP devices look exactly as before (zero UX change).
+ */
+export type NodeRole = 'receiver' | 'sensor' | 'broker' | 'transmitter'
+export type NodeTransport = 'udp' | 'mqtt' | 'espnow_stream'
+
+/** A sensor color-match box (RGB thresholds). See mqtt-transport.md §5. */
+export interface SensorColorMatch {
+  r_min?: number
+  r_max?: number
+  g_min?: number
+  g_max?: number
+  b_min?: number
+  b_max?: number
+}
+
+/** One sensor → event mapping row (the "color → event" editor model). */
+export interface SensorMapping {
+  /** classification label, e.g. a color name */
+  key: string
+  /** sensor-type-specific match condition (color sensor: RGB box) */
+  match: SensorColorMatch
+  /** event to fire (Kit manifest `events` key) */
+  event_id: string
+  /** target address ("" = all) */
+  target: string
+  /** 0.0..1.0 */
+  gain: number
+  /** optional min interval between repeated fires of the same key */
+  debounce_ms?: number
+}
+
 export interface DeviceInfo {
   name: string
   ipAddress: string
@@ -25,6 +60,12 @@ export interface DeviceInfo {
   volumeLevel: number | null
   /** Volume steps count (null if not yet queried) */
   volumeSteps: number | null
+  /** Node role (DEC-034). Absent → treat as `receiver`. */
+  role?: NodeRole
+  /** Primary transport (DEC-034). Absent → treat as `udp`. */
+  transport?: NodeTransport
+  /** All transports a receiver supports (e.g. ["udp","mqtt"]). */
+  transports?: NodeTransport[]
 }
 
 // Studio -> Helper messages
@@ -68,6 +109,15 @@ export interface StudioToManagerMessage {
     | 'set_oled_brightness'
     | 'get_oled_brightness'
     | 'ping'
+    | 'rescan'
+    // --- node-roles config (DEC-034) ---
+    | 'set_broker_host'      // receiver(mqtt) / sensor
+    | 'set_espnow_channel'   // receiver(espnow_stream) / transmitter
+    | 'set_gain'             // receiver(espnow_stream)
+    | 'set_input_level'      // transmitter
+    | 'set_broker_config'    // broker (static_octet / port)
+    | 'set_sensor_mapping'   // sensor
+    | 'get_sensor_mapping'   // sensor
   payload: Record<string, unknown>
 }
 
@@ -96,6 +146,7 @@ export interface ManagerToStudioMessage {
     | 'scan_wifi_result'
     | 'ap_status_result'
     | 'oled_brightness_result'
+    | 'sensor_mapping_result'
     | 'error'
     | 'pong'
   payload: Record<string, unknown>
@@ -136,6 +187,29 @@ export interface GetInfoResult {
   build?: string
   group?: number
   wifi_connected?: boolean
+  /** Hardware board id (e.g. band_wl_v3, atom_lite, atom_s3, xiao_c6). */
+  board?: string
+  /** Node role / transport (DEC-034). */
+  role?: NodeRole
+  transport?: NodeTransport
+  transports?: NodeTransport[]
+  // --- role-specific fields (present only for the relevant role) ---
+  /** ESP-NOW channel (espnow_stream receiver / transmitter). */
+  espnow_channel?: number
+  /** Default streaming gain 0..1 (espnow_stream receiver). */
+  gain?: number
+  /** Line input level 0..100 (transmitter). */
+  input_level?: number
+  /** MQTT broker host ("auto" or host/IP) (receiver(mqtt) / sensor). */
+  broker_host?: string
+  /** Broker static host octet (broker). */
+  static_octet?: number
+  /** Broker MQTT port (broker). */
+  mqtt_port?: number
+  /** Whether the embedded broker is currently running (broker). */
+  mqtt_running?: boolean
+  /** Number of sensor→event mappings configured (sensor). */
+  mappings_count?: number
   error?: string
 }
 

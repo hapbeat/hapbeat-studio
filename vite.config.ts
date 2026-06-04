@@ -26,22 +26,52 @@ function buildMeta(): { sha: string; date: string } {
 }
 
 /**
- * Dev-server proxy for hapbeat-device-firmware build artifacts.
+ * Dev-server proxy for firmware build artifacts across the workspace
+ * firmware repos (multi-repo, DEC-034).
  *
- * Maps GET /firmware-builds/list                         → JSON {envs:[{env,size,mtime,path}]}
- *      GET /firmware-builds/<env>/firmware.bin    → raw bytes (no-store)
+ * Maps GET /firmware-builds/list             → JSON {envs:[{env,role,transport,…}]}
+ *      GET /firmware-builds/<env>/<stem>.bin  → raw bytes (no-store)
  *
- * Reads `../hapbeat-device-firmware/.pio/build/<env>/firmware.bin`
- * directly off disk on every request, so a PlatformIO rebuild becomes
- * visible to Studio on the next fetch — no cache, no Vite asset
- * pipeline involved.
+ * Reads each repo's `<repo>/.pio/build/<env>/<stem>.bin` directly off
+ * disk on every request, so a PlatformIO rebuild becomes visible to
+ * Studio on the next fetch — no cache.
  *
- * Production note: only registers in dev (`apply: 'serve'`). For
- * deployed devtools.hapbeat.com, replace with a CDN URL once CI
- * publishes builds; the Studio code only needs `firmwareBaseUrl()`
- * swapped to point at it.
+ * Each env folder may carry an optional `variant.json`
+ * ({role,transport,transports,board,label,description}) which the
+ * plugin surfaces so Studio groups the build under the right node
+ * role. When absent, Studio infers role/transport from the env name.
+ *
+ * Production note: only registers in dev (`apply: 'serve'`). Deployed
+ * Studio reads an aggregated `public/firmware/manifest.json` (v2,
+ * produced by scripts/aggregate-firmware-manifest.mjs at CI time).
  */
-function firmwareDevPlugin(firmwareBuildRoot: string): Plugin {
+interface FirmwareBuildRepo {
+  /** Short repo tag used in logs / collision tie-breaks. */
+  repo: string
+  /** Absolute path to the repo's `.pio/build`. */
+  root: string
+}
+
+interface DevVariantMeta {
+  role?: string
+  transport?: string
+  transports?: string[]
+  board?: string
+  label?: string
+  description?: string
+}
+
+async function readVariantMeta(root: string, env: string): Promise<DevVariantMeta> {
+  try {
+    const raw = await fs.readFile(join(root, env, 'variant.json'), 'utf-8')
+    const j = JSON.parse(raw) as DevVariantMeta
+    return j ?? {}
+  } catch {
+    return {}
+  }
+}
+
+function firmwareDevPlugin(buildRepos: FirmwareBuildRepo[]): Plugin {
   return {
     name: 'hapbeat-firmware-dev',
     apply: 'serve',
@@ -49,56 +79,52 @@ function firmwareDevPlugin(firmwareBuildRoot: string): Plugin {
       server.middlewares.use('/firmware-builds', async (req, res, next) => {
         try {
           const url = req.url ?? ''
-          // /firmware-builds/list — enumerate every <env>/firmware.bin and
-          // also report whether a sibling bootloader.bin / partitions.bin
-          // exists. PlatformIO emits all three for ESP32 builds; Studio
-          // mirrors PlatformIO's flash layout so iterative app updates AND
-          // first-time provisioning (post chip-erase) both work.
           if (url === '/list' || url === '/list/') {
-            const envs = await safeReaddir(firmwareBuildRoot)
-            // Each env may emit two artifacts (DEC 2026-05-02):
-            //   - firmware_app_ota.bin    : app-only, for Wi-Fi OTA
-            //   - firmware_full_serial.bin: bootloader+partitions+app
-            //                                merged image, for USB
-            //                                Serial download mode
-            // We also accept the legacy `firmware.bin` filename as
-            // full_serial (back-compat for builds that haven't yet
-            // adopted the dual-output convention).
             const items: Array<{
               env: string
+              repo?: string
+              role?: string
+              transport?: string
+              transports?: string[]
+              board?: string
+              label?: string
+              description?: string
               fwVersion?: string
               appOta?: { size: number; mtime: number; path: string }
               fullSerial?: { size: number; mtime: number; path: string }
             }> = []
-            for (const env of envs) {
-              const fwVersion = await readFirmwareVersion(firmwareBuildRoot)
-              const appOta = await statArtifact(
-                firmwareBuildRoot, env, 'firmware_app_ota.bin',
-              )
-              let fullSerial = await statArtifact(
-                firmwareBuildRoot, env, 'firmware_full_serial.bin',
-              )
-              if (!fullSerial) {
-                // Back-compat: older builds emit just `firmware.bin`
-                // (the merged image) without the `_full_serial` suffix.
-                fullSerial = await statArtifact(
-                  firmwareBuildRoot, env, 'firmware.bin',
-                )
-              }
-              if (appOta || fullSerial) {
-                items.push({ env, fwVersion, appOta, fullSerial })
+            const seenEnv = new Set<string>()
+            for (const { repo, root } of buildRepos) {
+              const envs = await safeReaddir(root)
+              for (const env of envs) {
+                const appOta = await statArtifact(root, env, 'firmware_app_ota.bin')
+                let fullSerial = await statArtifact(root, env, 'firmware_full_serial.bin')
+                if (!fullSerial) {
+                  // Back-compat: merged image as `firmware.bin`.
+                  fullSerial = await statArtifact(root, env, 'firmware.bin')
+                }
+                if (!appOta && !fullSerial) continue
+                // First repo to own an env name wins (env names rarely
+                // collide across repos; warn if they do).
+                if (seenEnv.has(env)) {
+                  // eslint-disable-next-line no-console
+                  console.warn(`[firmware-dev] env "${env}" exists in multiple repos; keeping first`)
+                  continue
+                }
+                seenEnv.add(env)
+                const fwVersion = await readFirmwareVersion(root)
+                const variant = await readVariantMeta(root, env)
+                items.push({ env, repo, fwVersion, appOta, fullSerial, ...variant })
               }
             }
             items.sort((a, b) => a.env.localeCompare(b.env))
             res.setHeader('content-type', 'application/json')
             res.setHeader('cache-control', 'no-store')
-            res.end(JSON.stringify({ envs: items, root: firmwareBuildRoot }))
+            res.end(JSON.stringify({ envs: items }))
             return
           }
 
-          // /firmware-builds/<env>/<filename>.bin
-          // Allow firmware_app_ota.bin / firmware_full_serial.bin /
-          // firmware.bin (legacy alias for full_serial).
+          // /firmware-builds/<env>/<stem>.bin — search every repo root.
           const m = url.match(/^\/([^/]+)\/(firmware_app_ota|firmware_full_serial|firmware)\.bin$/)
           if (m) {
             const env = m[1]
@@ -108,27 +134,29 @@ function firmwareDevPlugin(firmwareBuildRoot: string): Plugin {
               res.end('bad env name')
               return
             }
-            const binPath = join(firmwareBuildRoot, env, `${stem}.bin`)
-            try {
-              const data = await fs.readFile(binPath)
-              const st = await fs.stat(binPath)
-              res.setHeader('content-type', 'application/octet-stream')
-              res.setHeader('cache-control', 'no-store, max-age=0')
-              res.setHeader('x-firmware-mtime', String(st.mtimeMs))
-              res.setHeader('x-firmware-size', String(st.size))
-              res.setHeader('x-firmware-path', binPath)
-              res.end(data)
-              return
-            } catch {
-              res.statusCode = 404
-              res.end(`${stem}.bin not found for env="${env}"`)
-              return
+            for (const { root } of buildRepos) {
+              const binPath = join(root, env, `${stem}.bin`)
+              try {
+                const data = await fs.readFile(binPath)
+                const st = await fs.stat(binPath)
+                res.setHeader('content-type', 'application/octet-stream')
+                res.setHeader('cache-control', 'no-store, max-age=0')
+                res.setHeader('x-firmware-mtime', String(st.mtimeMs))
+                res.setHeader('x-firmware-size', String(st.size))
+                res.setHeader('x-firmware-path', binPath)
+                res.end(data)
+                return
+              } catch {
+                /* try next repo root */
+              }
             }
+            res.statusCode = 404
+            res.end(`${stem}.bin not found for env="${env}"`)
+            return
           }
 
           next()
         } catch (err) {
-          // Surface fs errors so devs can spot misconfigured paths.
           // eslint-disable-next-line no-console
           console.error('[firmware-dev plugin]', err)
           res.statusCode = 500
@@ -203,10 +231,21 @@ async function readFirmwareVersion(buildRoot: string): Promise<string | undefine
 }
 
 
-const FIRMWARE_BUILD_ROOT = resolve(
-  __dirname,
-  '../hapbeat-device-firmware/.pio/build',
-)
+/**
+ * Workspace firmware repos whose `.pio/build` dirs are served in dev.
+ * Non-existent roots are simply skipped (safeReaddir → []), so a
+ * checkout without every firmware repo still works.
+ *
+ * Per DEC-033/034 the workspace homes for node firmware are:
+ *   - hapbeat-device-firmware     → receiver (udp/mqtt) + broker + sensor envs
+ *   - hapbeat-transmitter-firmware → transmitter (ESP-NOW audio source) env
+ * (External hapbeat-wireless-firmware / wireless-sender-firmware are
+ *  reference/port-source only.)
+ */
+const FIRMWARE_BUILD_REPOS = [
+  { repo: 'dev', root: resolve(__dirname, '../hapbeat-device-firmware/.pio/build') },
+  { repo: 'tx', root: resolve(__dirname, '../hapbeat-transmitter-firmware/.pio/build') },
+]
 
 export default defineConfig(({ command }) => {
   const meta = buildMeta()
@@ -216,7 +255,7 @@ export default defineConfig(({ command }) => {
   process.env.VITE_BUILD_DATE = meta.date
   return {
     base: command === 'build' ? '/studio/' : '/',
-    plugins: [react(), firmwareDevPlugin(FIRMWARE_BUILD_ROOT)],
+    plugins: [react(), firmwareDevPlugin(FIRMWARE_BUILD_REPOS)],
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src'),

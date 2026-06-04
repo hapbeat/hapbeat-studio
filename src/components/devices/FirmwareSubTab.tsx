@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useLogStore } from '@/stores/logStore'
 import { useDeviceStore } from '@/stores/deviceStore'
-import type { DeviceInfo, ManagerMessage } from '@/types/manager'
+import type { DeviceInfo, ManagerMessage, NodeRole, NodeTransport } from '@/types/manager'
 import { useConfirm } from '@/components/common/useConfirm'
 import { useSerialMaster } from '@/stores/serialMaster'
 import {
@@ -20,66 +20,39 @@ import {
   fetchFirmwareSerialRegions,
   formatBytes,
   formatMtime,
+  inferVariantFromEnv,
   listFirmwareBuilds,
   type FirmwareLibraryEntry,
   type FirmwareRegion,
 } from '@/utils/firmwareLibrary'
 import { validateOtaImage } from '@/utils/otaImageValidation'
 
-type EnvFamily = 'necklace' | 'band' | 'other'
-
-interface ParsedEnv {
-  family: EnvFamily
-  version: string  // "v3", "v4", or env name fallback for "other"
-  flavor: string | null  // e.g. "claude" for `band_v3_claude`
+const ROLE_ORDER: NodeRole[] = ['receiver', 'sensor', 'broker', 'transmitter']
+const ROLE_LABEL: Record<NodeRole, string> = {
+  receiver: '装着デバイス',
+  sensor: 'センサ送信機',
+  broker: 'ブローカー',
+  transmitter: 'ライブ送信機',
+}
+const TRANSPORT_LABEL: Record<NodeTransport, string> = {
+  udp: 'Wi-Fi UDP',
+  mqtt: 'MQTT',
+  espnow_stream: 'ESP-NOW',
 }
 
-/**
- * Parse a PlatformIO env name into {family, version, flavor}.
- *
- * Patterns:
- *   `necklace_v3`       → { family: necklace, version: v3, flavor: null }
- *   `band_v4_claude`    → { family: band, version: v4, flavor: claude }
- *   `something_else`    → { family: other, version: <env>, flavor: null }
- */
-function parseEnv(env: string): ParsedEnv {
-  const m = env.match(/^(necklace|band)_(v\d+)(?:_(.+))?$/)
-  if (!m) return { family: 'other', version: env, flavor: null }
-  return { family: m[1] as EnvFamily, version: m[2], flavor: m[3] ?? null }
+/** The role a library entry implements (explicit, else inferred). */
+function entryRole(e: FirmwareLibraryEntry): NodeRole {
+  return e.role ?? inferVariantFromEnv(e.env).role
 }
 
-/**
- * Map a PlatformIO env to the BOARD_ID the firmware will report once
- * flashed. Used to pre-flight check the user's selection against the
- * actual hardware reported via cmdGetInfo, so flashing a `band_v3`
- * build onto a `band_v4` board (or vice-versa) prompts a confirm
- * instead of silently bricking the OLED.
- *
- * Mapping mirrors `hapbeat-device-firmware/src/hapbeat_config.h`:
- *   NECKLACE_V3 → duo_wl_v3
- *   BAND_V3     → band_wl_v3
- *   BAND_V4     → band_wl_v4
- *
- * Returns null when the env doesn't follow the necklace/band scheme
- * (unknown family — skip the check rather than block the user).
- */
-function envExpectsBoard(env: string): string | null {
-  const m = env.match(/^(necklace|band)_(v\d+)/)
-  if (!m) return null
-  const family = m[1] === 'necklace' ? 'duo' : 'band'
-  return `${family}_wl_${m[2]}`
+/** The board a library entry expects (explicit manifest board, else inferred). */
+function entryBoard(e: FirmwareLibraryEntry): string | null {
+  return e.board ?? inferVariantFromEnv(e.env).board ?? null
 }
 
-const FAMILY_RANK: Record<EnvFamily, number> = {
-  necklace: 0,
-  band: 1,
-  other: 2,
-}
-
-const FAMILY_LABEL: Record<EnvFamily, string> = {
-  necklace: 'NECKLACE',
-  band: 'BAND',
-  other: 'OTHER',
+/** Human label for a variant button (manifest label, else env name). */
+function entryLabel(e: FirmwareLibraryEntry): string {
+  return e.label ?? e.env
 }
 
 interface OtaProgress {
@@ -105,23 +78,25 @@ interface Props {
    * skip the auto re-probe (the device is already an LAN peer).
    */
   postFlashReprobeMs?: number
+  /**
+   * Pre-filter the firmware library to a single node role. Set by the
+   * onboarding wizard once the user picks a scenario, so they only see
+   * the firmware relevant to the node they're building. When omitted,
+   * a role chip row is shown and defaults to the connected device's
+   * role (or `receiver`).
+   */
+  roleFilter?: NodeRole
 }
 
 /**
  * Per-device ファームウェア pane.
  *
- * Two firmware sources:
- *   1. Library (top): merged binaries that the Vite dev plugin relays
- *      from `hapbeat-device-firmware/.pio/build/<env>/firmware.bin`.
- *      Re-running PlatformIO is reflected on the next "更新" or flash
- *      because the plugin reads the file fresh and the response is
- *      sent with `Cache-Control: no-store`.
- *   2. Local file (below): user-picked .bin via the File System Access
- *      API. Stored as a `FileSystemFileHandle`, re-read with
- *      `handle.getFile()` immediately before every flash, so a
- *      rebuild on disk is picked up automatically — no stale browser
- *      cache the way `<input type=file>` could go silent on
- *      same-path re-pick.
+ * Firmware sources:
+ *   1. Library (top): builds discovered via the dev plugin (dev) or the
+ *      aggregated manifest.json (prod). Variants are grouped by node
+ *      role (装着デバイス / センサ / ブローカー / ライブ送信機) so the
+ *      right firmware for each ESP32 node type is one click away.
+ *   2. Local file (below): user-picked .bin via the File System Access API.
  *
  * Wi-Fi OTA and USB Serial both consume whichever source is selected.
  */
@@ -130,30 +105,24 @@ export function FirmwareSubTab({
   sendTo,
   serialOnly = false,
   postFlashReprobeMs = 0,
+  roleFilter,
 }: Props) {
-  // Show the OTA section only when we actually have a target device
-  // and the caller hasn't asked for serial-only mode.
   const showOta = !serialOnly && !!device && !!sendTo
   const { lastMessage, send: helperSend, devices } = useHelperConnection()
   const pushLog = useLogStore((s) => s.push)
-  // Multi-target OTA reads selectedIps to fan out to every multi-selected
-  // online LAN device.  When only one IP is selected, falls back to the
-  // legacy single-target flow via `sendTo`.  `devices` (online list)
-  // comes from useHelperConnection — the deviceStore only owns selection
-  // and per-IP caches, not the live LAN inventory.
   const selectedIps = useDeviceStore((s) => s.selectedIps)
+
+  // Role reported by the connected device (drives the default role chip).
+  const deviceRole = useDeviceStore((s) =>
+    device ? s.infoCache[device.ipAddress]?.role : undefined,
+  )
 
   // ---- Source selection ------------------------------------------------
   type Source = 'library' | 'local'
   const [source, setSource] = useState<Source>('library')
 
-  // Library state — selection is persisted in localStorage so the user
-  // doesn't have to re-pick their preferred env (e.g. necklace_v3) every
-  // time they open the Firmware tab. Without this, the default falls back
-  // to the most-recently-built env (often band_v4 in the office where the
-  // workshop machine builds Band by default), which is rarely what the
-  // user actually wants.
   const LIB_SELECTED_KEY = 'hapbeat-studio-firmware-lib-selected'
+  const ROLE_SELECTED_KEY = 'hapbeat-studio-firmware-role-selected'
   const [libEntries, setLibEntries] = useState<FirmwareLibraryEntry[]>([])
   const [libLoading, setLibLoading] = useState(false)
   const [libError, setLibError] = useState<string | null>(null)
@@ -162,18 +131,25 @@ export function FirmwareSubTab({
       return localStorage.getItem(LIB_SELECTED_KEY)
     } catch { return null }
   })
-  const [selectedFamily, setSelectedFamily] = useState<EnvFamily | null>(null)
+  const [selectedRole, setSelectedRole] = useState<NodeRole | null>(() => {
+    try {
+      const v = localStorage.getItem(ROLE_SELECTED_KEY)
+      return v && (ROLE_ORDER as string[]).includes(v) ? (v as NodeRole) : null
+    } catch { return null }
+  })
 
-  // Persist selection on every change so the next mount restores it.
   useEffect(() => {
     try {
-      if (libSelected) {
-        localStorage.setItem(LIB_SELECTED_KEY, libSelected)
-      } else {
-        localStorage.removeItem(LIB_SELECTED_KEY)
-      }
+      if (libSelected) localStorage.setItem(LIB_SELECTED_KEY, libSelected)
+      else localStorage.removeItem(LIB_SELECTED_KEY)
     } catch { /* localStorage unavailable */ }
   }, [libSelected])
+
+  useEffect(() => {
+    try {
+      if (selectedRole) localStorage.setItem(ROLE_SELECTED_KEY, selectedRole)
+    } catch { /* localStorage unavailable */ }
+  }, [selectedRole])
 
   // Local file state — handle is the source of truth, bytes is read on demand
   const [localHandle, setLocalHandle] = useState<FileSystemFileHandle | null>(null)
@@ -188,15 +164,10 @@ export function FirmwareSubTab({
   const [progress, setProgress] = useState<OtaProgress | null>(null)
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
-  // OTA stuck-detection — 進捗が途絶えたら 3 秒で警告を出す。
-  // (deploy 中に WiFi が切れたケース等で 'ぐるぐる回ったまま無反応'
-  //  になるのを早期に教える)
   const [otaStuck, setOtaStuck] = useState(false)
   const lastOtaProgressAtRef = useRef<number>(0)
 
-  // USB Serial state lives in the SerialMaster so the wizard, the
-  // per-device 設定 sub-tab, and any future entry point all see the
-  // same progress/result without re-implementing the plumbing.
+  // USB Serial state lives in the SerialMaster.
   const serialRunning = useSerialMaster((s) => s.flashRunning)
   const serialProgress = useSerialMaster((s) => s.flashProgress)
   const serialResult = useSerialMaster((s) => s.flashLastResult)
@@ -206,44 +177,32 @@ export function FirmwareSubTab({
   const serialMasterBoard = useSerialMaster((s) => s.info?.board)
   const [eraseAll, setEraseAll] = useState(false)
   const { ask, dialog: confirmDialog } = useConfirm()
-  // Pull the device's reported BOARD_ID from the get_info cache (LAN)
-  // or, when flashing a Serial-attached device pre-onboarding, from
-  // the SerialMaster's last config probe. Either way, we only have a
-  // value if the device has spoken to us at least once.
   const lanBoard = useDeviceStore((s) =>
     device ? s.infoCache[device.ipAddress]?.board : undefined,
   )
   const lastFlashedBoardForIp = useDeviceStore((s) => {
-    // ipAddress が確定していないとき (= Step 2 で初めて書き込む新品 / 別個体)
-    // にグローバル fallback キー 'serial:current' を使うと、直前にこの
-    // ブラウザセッションで書いた A の board が B の判定に流入してしまう
-    // (User report 2026-05-09: 「Duo→Band で書き込もうとすると警告が出る」)。
-    // 個体特定できないときは判定対象なしとして扱う。
     const key = device?.ipAddress
     return key ? s.lastFlashedBoard[key] : undefined
   })
   const invalidateBoard = useDeviceStore((s) => s.invalidateBoard)
   const setLastFlashedBoard = useDeviceStore((s) => s.setLastFlashedBoard)
-  // Resolution order: live get_info > Serial probe > last-flashed
-  // record. The fallback to lastFlashedBoard makes the warning
-  // symmetric across consecutive flashes — the very first flash on
-  // a fresh device is still skipped (we have nothing to compare to)
-  // but every subsequent one has a stable reference point.
   const knownBoard = lanBoard ?? serialMasterBoard ?? lastFlashedBoardForIp ?? null
 
+  // The currently-selected library entry (resolved once for reuse).
+  const selectedEntry = useMemo(
+    () => libEntries.find((e) => e.env === libSelected) ?? null,
+    [libEntries, libSelected],
+  )
+
   /**
-   * Pre-flight: warn when the selected library env targets a board
-   * different from what the connected device reports. Returns true if
-   * it's OK to proceed (no mismatch, or the user chose to override).
-   * Returns false to abort. When source = 'local' or env / board is
-   * unknown, skips silently because we can't infer the binary's
-   * intent from a user-picked file.
+   * Pre-flight: warn when the selected library variant targets a board
+   * different from what the connected device reports.
    */
   const checkBoardMatch = useCallback(async (
     via: 'OTA' | 'Serial',
   ): Promise<boolean> => {
-    if (source !== 'library' || !libSelected) return true
-    const expected = envExpectsBoard(libSelected)
+    if (source !== 'library' || !selectedEntry) return true
+    const expected = entryBoard(selectedEntry)
     if (!expected) return true
     if (!knownBoard || knownBoard === 'unknown') return true
     if (expected === knownBoard) return true
@@ -254,10 +213,6 @@ export function FirmwareSubTab({
         + `デバイスは ${knownBoard} を報告しています。\n`
         + `異なるバージョン用のビルドを書き込むと OLED が表示されない等の `
         + `不具合が起きます。書き込みを続行しますか？\n\n`
-        + `※ デバイスが報告する board は現在書き込まれている firmware の `
-        + `ビルド設定で決まります (物理基板を直接識別する機構は無し)。\n`
-        + `過去に誤った firmware を書いてしまった場合、デバイスは間違った `
-        + `バージョンを報告します — band 本体のラベルと突き合わせて確認してください。\n\n`
         + `(${via} で書き込もうとしている)`
       ),
       confirmLabel: '不一致のまま書き込む',
@@ -266,13 +221,11 @@ export function FirmwareSubTab({
     if (!ok) {
       pushLog(
         'firmware',
-        `flash aborted — board mismatch (env=${libSelected} expects ${expected}, device=${knownBoard})`,
+        `flash aborted — board mismatch (env=${selectedEntry.env} expects ${expected}, device=${knownBoard})`,
       )
     }
     return ok
-  }, [source, libSelected, knownBoard, ask, pushLog])
-  // Local-only error for "before-flash" issues (file read, etc.) —
-  // these never reach the master. Cleared when a real flash starts.
+  }, [source, selectedEntry, knownBoard, ask, pushLog])
   const [localError, setLocalError] = useState<string | null>(null)
 
   // ---- Library: refresh on mount + on demand --------------------------
@@ -282,33 +235,21 @@ export function FirmwareSubTab({
     setLibError(null)
     try {
       const raw = await listFirmwareBuilds()
-      // Stable display order: necklace → band → anything else, alpha
-      // within each group. Mtime-based ordering moved which device was
-      // first depending on which one was rebuilt last, which made the
-      // toggle feel disorientating. The visual prominence should
-      // match the physical product line, not the build timestamp.
+      // Stable display order: by role, then env name.
       const entries = [...raw].sort((a, b) => {
-        const ra = FAMILY_RANK[parseEnv(a.env).family]
-        const rb = FAMILY_RANK[parseEnv(b.env).family]
+        const ra = ROLE_ORDER.indexOf(entryRole(a))
+        const rb = ROLE_ORDER.indexOf(entryRole(b))
         if (ra !== rb) return ra - rb
         return a.env.localeCompare(b.env)
       })
       setLibEntries(entries)
-      // Verbose diagnostics — each refresh dumps every env's exact
-      // bytes and mtime to the log drawer so the user can prove the
-      // fetch actually returned new data even when the displayed
-      // formatted size happens to be unchanged (formatBytes rounds
-      // to 0.01 MB, masking small deltas).
-      pushLog('firmware', `library refreshed: ${entries.length} env(s) at ${new Date().toLocaleTimeString()}`)
+      pushLog('firmware', `library refreshed: ${entries.length} variant(s) at ${new Date().toLocaleTimeString()}`)
       for (const e of entries) {
         const tag = e.fwVersion ? ` fw=${e.fwVersion}` : ''
         const ota = e.appOta ? `${e.appOta.size.toLocaleString()} B` : 'n/a'
         const ser = e.fullSerial ? `${e.fullSerial.size.toLocaleString()} B` : 'n/a'
-        pushLog('firmware', `  · ${e.env}:${tag} app_ota=${ota} full_serial=${ser}`)
+        pushLog('firmware', `  · [${entryRole(e)}/${e.transport ?? '?'}] ${e.env}:${tag} app_ota=${ota} full_serial=${ser}`)
       }
-      // Default-select the most-recently-built env on first load —
-      // ranked by whichever artifact was rebuilt last (mtime). Preserve
-      // a manual selection across refreshes if it still exists.
       const entryMtime = (e: FirmwareLibraryEntry): number =>
         Math.max(e.appOta?.mtime ?? 0, e.fullSerial?.mtime ?? 0)
       setLibSelected((prev) => {
@@ -330,58 +271,46 @@ export function FirmwareSubTab({
     void refreshLibrary()
   }, [refreshLibrary])
 
-  // ---- Family / version selection ------------------------------------
+  // ---- Role / variant selection --------------------------------------
 
-  /** Available env families (in display order), only those with entries. */
-  const families = useMemo<EnvFamily[]>(() => {
-    const seen = new Set<EnvFamily>()
-    for (const e of libEntries) seen.add(parseEnv(e.env).family)
-    return (['necklace', 'band', 'other'] as EnvFamily[]).filter((f) => seen.has(f))
+  /** Roles present in the library, in canonical order. */
+  const rolesPresent = useMemo<NodeRole[]>(() => {
+    const seen = new Set<NodeRole>()
+    for (const e of libEntries) seen.add(entryRole(e))
+    return ROLE_ORDER.filter((r) => seen.has(r))
   }, [libEntries])
 
-  /** Entries belonging to the currently-selected family. */
-  const entriesInFamily = useMemo(() => {
-    if (!selectedFamily) return []
-    return libEntries.filter((e) => parseEnv(e.env).family === selectedFamily)
-  }, [libEntries, selectedFamily])
+  /** Effective role filter: forced prop > device role > user pick. */
+  const effectiveRole = useMemo<NodeRole | null>(() => {
+    if (roleFilter) return roleFilter
+    if (selectedRole && rolesPresent.includes(selectedRole)) return selectedRole
+    if (deviceRole && rolesPresent.includes(deviceRole)) return deviceRole
+    return rolesPresent[0] ?? null
+  }, [roleFilter, selectedRole, deviceRole, rolesPresent])
 
-  // Auto-default selectedFamily — sync with whatever env libSelected
-  // points at (so a fresh load lands on the family of the most-recent
-  // build). Falls back to families[0] if no env is selected yet.
+  /** Entries in the effective role. */
+  const entriesInRole = useMemo(() => {
+    if (!effectiveRole) return []
+    return libEntries.filter((e) => entryRole(e) === effectiveRole)
+  }, [libEntries, effectiveRole])
+
+  // Keep libSelected inside the effective role: if the current selection
+  // belongs to a different role, jump to the first variant of this role.
   useEffect(() => {
-    if (libEntries.length === 0) {
-      setSelectedFamily(null)
-      return
-    }
-    const curFamily = libSelected
-      ? parseEnv(libSelected).family
-      : null
-    if (curFamily && families.includes(curFamily)) {
-      setSelectedFamily((prev) => prev ?? curFamily)
-      return
-    }
-    setSelectedFamily((prev) =>
-      prev && families.includes(prev) ? prev : families[0] ?? null,
-    )
-  }, [libEntries, libSelected, families])
+    if (entriesInRole.length === 0) return
+    if (libSelected && entriesInRole.some((e) => e.env === libSelected)) return
+    setLibSelected(entriesInRole[0].env)
+    setSource('library')
+  }, [entriesInRole, libSelected])
 
-  // When the user switches families, jump libSelected to the first env
-  // of the new family if the current selection is in a different one.
-  const selectFamily = useCallback(
-    (family: EnvFamily) => {
-      setSelectedFamily(family)
-      const inFamily = libEntries.filter(
-        (e) => parseEnv(e.env).family === family,
-      )
-      if (inFamily.length === 0) return
-      const cur = libSelected ? parseEnv(libSelected) : null
-      if (!cur || cur.family !== family) {
-        setLibSelected(inFamily[0].env)
-        setSource('library')
-      }
-    },
-    [libEntries, libSelected],
-  )
+  const selectRole = useCallback((role: NodeRole) => {
+    setSelectedRole(role)
+    const inRole = libEntries.filter((e) => entryRole(e) === role)
+    if (inRole.length > 0) {
+      setLibSelected(inRole[0].env)
+      setSource('library')
+    }
+  }, [libEntries])
 
   // ---- Local file: restore handle from IDB on mount ------------------
 
@@ -390,8 +319,6 @@ export function FirmwareSubTab({
     ;(async () => {
       const handle = await loadFileHandle('firmwarefile').catch(() => null)
       if (cancelled || !handle) return
-      // Probe permission silently; if revoked, leave it for the user
-      // to re-grant via 「参照…」 — don't auto-prompt on mount.
       const ok = await verifyPermission(handle, false).catch(() => false)
       if (!ok || cancelled) {
         setLocalPermissionDenied(true)
@@ -414,13 +341,6 @@ export function FirmwareSubTab({
     }
   }, [])
 
-  // FIRMWARE_VERSION of the binary the user just sent — captured at
-  // submit time so the post-OTA verify can compare it against the
-  // device's get_info `fw` field. Old firmware behavior:
-  // `Update.end(true)` returns ok but the bootloader never flips
-  // otadata, so the chip boots the previous slot. The user reported
-  // (2026-04-30) that this happens "sometimes", which is exactly the
-  // kind of silent failure a mismatch check catches.
   const [expectedFwVersion, setExpectedFwVersion] = useState<string | null>(null)
 
   // ---- Wi-Fi OTA result drain ---------------------------------------
@@ -444,22 +364,10 @@ export function FirmwareSubTab({
       const ok = p.success === true
       setResult({ ok, message: String(p.message ?? '') })
       setTimeout(() => setProgress(null), 3000)
-      // Post-flight verify: device reboots ~1 s after Update.end
-      // returns. Wait long enough for it to come back on the LAN
-      // (~6 s for STA reconnect), then ask for `get_info` and compare
-      // BUILD_TAG. Mismatch implies otadata didn't flip — the
-      // "sometimes runs old version" symptom from the user report.
       if (ok && device) {
-        // Drop the cached `board` immediately. The new firmware may
-        // target a different BOARD_ID; until verify get_info comes
-        // back, the next pre-flight check should skip board comparison
-        // rather than flag a (now-stale) mismatch.
         invalidateBoard(device.ipAddress)
-        // Record what env we just flashed so the next pre-flight
-        // check has a stable reference even if get_info hasn't come
-        // back yet (verify is async, ~8 s post-reboot).
-        if (source === 'library' && libSelected) {
-          const flashed = envExpectsBoard(libSelected)
+        if (source === 'library' && selectedEntry) {
+          const flashed = entryBoard(selectedEntry)
           if (flashed) setLastFlashedBoard(device.ipAddress, flashed)
         }
       }
@@ -471,11 +379,6 @@ export function FirmwareSubTab({
         }, 8000)
       }
     } else if (t === 'get_info_result' && expectedFwVersion) {
-      // Compare against `fw` (FIRMWARE_VERSION baked into the binary).
-      // After the BUILD_TAG / FIRMWARE_VERSION unification (2026-05-01)
-      // there is exactly one version concept — the semver in
-      // hapbeat_config.h — so this single comparison covers OLED
-      // display, get_info response, and OTA verify all at once.
       const deviceFw = (p.fw as string | undefined) ?? ''
       if (!deviceFw) {
         pushLog('ota', 'verify skipped — device get_info did not include fw')
@@ -496,17 +399,14 @@ export function FirmwareSubTab({
       setExpectedFwVersion(null)
     }
   }, [lastMessage, expectedFwVersion, device, sendTo, pushLog,
-      source, libSelected, invalidateBoard, setLastFlashedBoard, otaStuck])
+      source, selectedEntry, invalidateBoard, setLastFlashedBoard, otaStuck])
 
-  // OTA 進捗が 3 秒以上途絶えたら 'stuck' フラグを立てて警告表示。
-  // running = true の間だけ走らせる。 ota_progress / ota_result が来たら
-  // 上で lastOtaProgressAtRef を更新 + setOtaStuck(false) で解除される。
   useEffect(() => {
     if (!running) {
       setOtaStuck(false)
       return
     }
-    lastOtaProgressAtRef.current = Date.now()  // arm at start
+    lastOtaProgressAtRef.current = Date.now()
     const tick = window.setInterval(() => {
       const elapsed = Date.now() - lastOtaProgressAtRef.current
       if (elapsed >= 3000) setOtaStuck(true)
@@ -514,18 +414,6 @@ export function FirmwareSubTab({
     return () => window.clearInterval(tick)
   }, [running])
 
-  /**
-   * Stuck 状態 (= 3秒以上進捗なし) でユーザーが「中止」を押した時の処理。
-   *
-   * Helper 側の TCP セッションは Studio から能動的に止められない (firmware が
-   * 応答するか TCP read timeout で落ちるまで継続) が、UI の running 状態だけ
-   * 解除すれば再試行ボタンが押せるようになる。helper から後で `ota_result`
-   * が遅れて返ってきても、`expectedFwVersion` を null にしてあるので
-   * post-flight verify が誤発火しない。
-   *
-   * 報告 2026-05-08: 「送信中で警告が出るタイミングで試行を止めて (またボタンが
-   * 押せるように) してほしい」。
-   */
   const cancelStuckOta = useCallback(() => {
     pushLog('ota', 'user cancelled stuck OTA — UI released, helper session may still drain')
     setRunning(false)
@@ -542,9 +430,6 @@ export function FirmwareSubTab({
 
   // ---- Reading freshly from disk ------------------------------------
 
-  /** Read the local-picked .bin verbatim (no slicing). Shared
-   *  between OTA and Serial paths; each path then interprets the
-   *  raw bytes per its own rules. */
   const readLocalRaw = useCallback(async (): Promise<{
     bytes: Uint8Array
     label: string
@@ -565,21 +450,10 @@ export function FirmwareSubTab({
       bytes: new Uint8Array(buf),
       label: f.name,
       mtime: f.lastModified,
-      path: f.name, // browser hides absolute path; show name only
+      path: f.name,
     }
   }, [localHandle])
 
-  /**
-   * Resolve the currently-selected source to fresh bytes for **Wi-Fi OTA**.
-   *
-   * Library: fetch `firmware_app_ota.bin` directly — it's already
-   * app-only, no slicing.
-   *
-   * Local: a user-supplied .bin may be app-only OR a legacy merged
-   * image. Detect the merged-layout markers and slice off
-   * `[0x10000, end)` so even an accidentally-merged file works for
-   * OTA. App-only files pass through unchanged.
-   */
   const readSelectedBin = useCallback(async (): Promise<{
     bytes: Uint8Array
     label: string
@@ -587,27 +461,24 @@ export function FirmwareSubTab({
     path: string
   }> => {
     if (source === 'library') {
-      if (!libSelected) throw new Error('ファームウェアを選んでください')
-      const entry = libEntries.find((x) => x.env === libSelected)
-      if (!entry?.appOta) {
+      if (!selectedEntry) throw new Error('ファームウェアを選んでください')
+      if (!selectedEntry.appOta) {
         throw new Error(
-          `firmware_app_ota.bin が ${libSelected} のビルド出力にありません — `
-          + `pio run の post-build で 2 ファイル (firmware_app_ota / firmware_full_serial) `
-          + `を出力する設定になっていない可能性があります。`,
+          `firmware_app_ota.bin が ${selectedEntry.env} のビルド出力にありません — `
+          + `この役割は USB Serial 書込のみ対応の可能性があります（Wi-Fi 非接続ノード）。`,
         )
       }
-      const r = await fetchFirmwareAppOta(libSelected)
+      const r = await fetchFirmwareAppOta(selectedEntry)
       if (r.bytes.length === 0) {
-        throw new Error(`ビルドファイルが空です (${libSelected}) — pio run の完了後に再試行してください`)
+        throw new Error(`ビルドファイルが空です (${selectedEntry.env}) — pio run の完了後に再試行してください`)
       }
       return {
         bytes: r.bytes,
-        label: `${libSelected} app-ota (built ${formatMtime(r.mtime)})`,
+        label: `${selectedEntry.env} app-ota (built ${formatMtime(r.mtime)})`,
         mtime: r.mtime,
         path: r.path,
       }
     }
-    // Local file: detect merged layout and slice if needed.
     const raw = await readLocalRaw()
     const APP_START = 0x10000
     const isMerged =
@@ -626,42 +497,26 @@ export function FirmwareSubTab({
       return { ...raw, bytes: sliced }
     }
     return raw
-  }, [source, libSelected, libEntries, readLocalRaw, pushLog])
+  }, [source, selectedEntry, readLocalRaw, pushLog])
 
-  /**
-   * Resolve the currently-selected source to **Serial flash regions**.
-   *
-   * Library: fetch `firmware_full_serial.bin` (the merged image) and
-   * split into 2 regions skipping the NVS+otadata gap.
-   *
-   * Local: validate that the picked file IS a merged image, then
-   * split it the same way. App-only local files are rejected because
-   * Serial flashing needs bootloader + partitions too.
-   */
   const readSelectedRegions = useCallback(async (): Promise<{
     regions: FirmwareRegion[]
     label: string
   }> => {
     if (source === 'library') {
-      if (!libSelected) throw new Error('ファームウェアを選んでください')
-      const entry = libEntries.find((e) => e.env === libSelected)
-      if (!entry) throw new Error('選択中のビルドが見つかりません')
-      if (!entry.fullSerial) {
+      if (!selectedEntry) throw new Error('ファームウェアを選んでください')
+      if (!selectedEntry.fullSerial) {
         throw new Error(
-          `firmware_full_serial.bin が ${entry.env} のビルド出力にありません — `
+          `firmware_full_serial.bin が ${selectedEntry.env} のビルド出力にありません — `
           + `pio run の post-build で merged image を出力する設定になっていない可能性があります。`,
         )
       }
-      const regions = await fetchFirmwareSerialRegions(entry)
+      const regions = await fetchFirmwareSerialRegions(selectedEntry)
       return {
         regions,
-        label: `${entry.env} full-serial (built ${formatMtime(entry.fullSerial.mtime)})`,
+        label: `${selectedEntry.env} full-serial (built ${formatMtime(selectedEntry.fullSerial.mtime)})`,
       }
     }
-    // Local file: validate it's a merged image then split with the
-    // same NVS-skipping + otadata-erase layout the library path uses.
-    // (See firmwareLibrary.fetchFirmwareSerialRegions for the rationale
-    // behind the otadata erase region.)
     const raw = await readLocalRaw()
     assertMergedImage(raw.bytes)
     const NVS_GAP_START = 0x9000
@@ -688,7 +543,7 @@ export function FirmwareSubTab({
       ],
       label: raw.label,
     }
-  }, [source, libSelected, libEntries, readLocalRaw])
+  }, [source, selectedEntry, readLocalRaw])
 
   // ---- UI handlers ---------------------------------------------------
 
@@ -698,8 +553,6 @@ export function FirmwareSubTab({
         types: [{ description: 'ESP32 firmware binary', accept: { 'application/octet-stream': ['.bin'] } }],
       })
       if (!handle) {
-        // showOpenFilePicker either cancelled or unavailable — fall
-        // back to the legacy <input type=file> for non-Chromium browsers.
         if (typeof (window as { showOpenFilePicker?: unknown }).showOpenFilePicker !== 'function') {
           await pickViaLegacyInput()
         }
@@ -716,10 +569,6 @@ export function FirmwareSubTab({
     }
   }, [pushLog])
 
-  /**
-   * Fallback for non-FSAPI browsers (Firefox, Safari). The user has to
-   * re-pick after every rebuild because there's no handle to retain.
-   */
   const pickViaLegacyInput = useCallback(async () => {
     const input = document.createElement('input')
     input.type = 'file'
@@ -729,21 +578,15 @@ export function FirmwareSubTab({
         const f = input.files?.[0]
         if (!f) { resolve(); return }
         const buf = await f.arrayBuffer()
-        // We have no handle to persist, but we can keep the in-memory
-        // bytes by faking a one-shot handle. For the common dev flow
-        // (Chromium), the FSAPI path runs and this is unused.
         const fakeHandle = {
           name: f.name,
           kind: 'file',
           getFile: async () => f,
-          // no permission API — verifyPermission will short-circuit
         } as unknown as FileSystemFileHandle
         setLocalHandle(fakeHandle)
         setLocalMeta({ name: f.name, size: f.size, mtime: f.lastModified })
         setLocalPermissionDenied(false)
         setSource('local')
-        // Keep bytes around so verifyPermission failures still flash:
-        // we cache via a closure on the fake getFile above.
         void buf
         resolve()
       }
@@ -754,11 +597,7 @@ export function FirmwareSubTab({
   // ---- Wi-Fi OTA submit ---------------------------------------------
 
   const submit = async () => {
-    if (!device || !sendTo) return  // OTA disabled in serial-only mode
-    // Pre-flight: device must be online (reachable via TCP 7701).
-    // If the device's Wi-Fi service is hanging (e.g. after a Wi-Fi
-    // profile switch), OTA will silently fail. Prompt the user to
-    // power-cycle rather than firing a blind OTA that's doomed to fail.
+    if (!device || !sendTo) return
     if (!device.online) {
       setResult({
         ok: false,
@@ -777,12 +616,6 @@ export function FirmwareSubTab({
       return
     }
 
-    // Pre-flight validation: check ESP32 image header before sending.
-    // 不正な .bin (空ファイル / merged image / 別チップ向け / 破損) を
-    // ここで弾けば、partition を汚染して bootloader rollback で旧版起動
-    // するという固有のバグを未然に防げる。
-    // Firmware 側にも同じ検証を入れているが、ここで先に止めれば 1MB を
-    // 無駄に送らずに済むしユーザー側の説明も分かりやすい。
     const validation = validateOtaImage(bin.bytes)
     if (!validation.ok) {
       pushLog('ota', `pre-flight FAILED: ${validation.reason}`)
@@ -802,28 +635,11 @@ export function FirmwareSubTab({
 
     setRunning(true)
     pushLog('ota', `flash → ${bin.label} (${formatBytes(bin.bytes.length)})`)
-    // Capture the firmware version so the post-OTA verify can compare
-    // it against the device's `fw` after reboot (see ota_result effect
-    // above). User-reported "old version remains" symptom (2026-04-30)
-    // = otadata didn't flip; this catches it explicitly instead of
-    // trusting `Update.end` ok status alone.
     if (source === 'library') {
-      const e = libEntries.find((x) => x.env === libSelected)
-      setExpectedFwVersion(e?.fwVersion ?? null)
+      setExpectedFwVersion(selectedEntry?.fwVersion ?? null)
     } else {
       setExpectedFwVersion(null)
     }
-    // Multi-device OTA: when the user has multi-selected several
-    // devices in the sidebar, fan out to **all** of them.  Helper runs
-    // them sequentially (one Wi-Fi can't reliably stream two 1.7 MB
-    // OTAs in parallel — the second would just queue behind the first
-    // anyway) and emits per-device ``ota_progress`` / ``ota_result``
-    // events so the existing UI handlers Just Work.
-    //
-    // Fallback to the focused device when only one IP is selected.
-    // Filter out Serial pseudo-IPs (prefix ``serial:``) and offline
-    // devices — Helper would just immediately fail the OTA on those
-    // and pollute the result toast queue.
     const lanCandidates = selectedIps.filter((ip) => !ip.startsWith('serial:'))
     const onlineLan = lanCandidates
       .map((ip) => devices.find((d) => d.ipAddress === ip))
@@ -846,8 +662,6 @@ export function FirmwareSubTab({
         : `OTA 開始要求… (${bin.label})`,
     })
     if (targets.length > 1) {
-      // Multi-target — bypass `sendTo` (which auto-stamps the focused
-      // ``ip``) and go straight to helperSend with a ``targets`` array.
       helperSend({
         type: 'ota_data',
         payload: {
@@ -875,19 +689,12 @@ export function FirmwareSubTab({
       setLocalError(String((err as Error).message ?? err))
       return
     }
-    // Hand the firmware bytes off to the master. It owns the port,
-    // closes any active config conn first, runs esptool-js, and
-    // (when postFlashReprobeMs > 0) auto re-probes for the wizard.
     await masterFlash(plan.regions, {
       eraseAll,
       postFlashReprobeMs,
     })
-    // Remember what we flashed so the next pre-flight has a stable
-    // reference. **個体特定できる ipAddress がある場合のみ** 記録する
-    // (旧実装のグローバル fallback キー 'serial:current' は別個体への
-    // 流入の元なので廃止 — 別個体の連続書き込みで誤警告が出ていた問題の対処)。
-    if (source === 'library' && libSelected && device?.ipAddress) {
-      const flashed = envExpectsBoard(libSelected)
+    if (source === 'library' && selectedEntry && device?.ipAddress) {
+      const flashed = entryBoard(selectedEntry)
       if (flashed) {
         setLastFlashedBoard(device.ipAddress, flashed)
       }
@@ -912,13 +719,13 @@ export function FirmwareSubTab({
   // ---- Computed bits for the toolbar / disable states ----------------
 
   const haveSelection = source === 'library'
-    ? Boolean(libSelected)
+    ? Boolean(selectedEntry)
     : Boolean(localHandle && !localPermissionDenied)
 
   return (
     <>
       {confirmDialog}
-      {/* --------- Source: Firmware Library (hosted by dev plugin) --------- */}
+      {/* --------- Source: Firmware Library --------- */}
       <div className="form-section">
         <div
           className="form-section-title"
@@ -934,7 +741,7 @@ export function FirmwareSubTab({
             />
             ファームウェア ライブラリ
             <span className="form-section-sub-inline">
-              {' '}— Studio 同梱のビルド済みファームから選ぶ
+              {' '}— ノードの役割ごとにビルド済みファームから選ぶ
             </span>
           </span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -961,54 +768,43 @@ export function FirmwareSubTab({
 
         {libEntries.length > 0 && (
           <>
-            {/* Outer tabs: device family (necklace / band / ...). */}
-            <div
-              className="firmware-lib-toggle"
-              role="tablist"
-              aria-label="ファームウェア種別"
-            >
-              {families.map((family) => {
-                const isSelected = selectedFamily === family
-                return (
-                  <button
-                    key={family}
-                    type="button"
-                    role="tab"
-                    aria-selected={isSelected}
-                    className={`firmware-lib-toggle-btn variant-${family}${isSelected ? ' selected' : ''}`}
-                    onClick={() => selectFamily(family)}
-                  >
-                    <span className="firmware-lib-toggle-icon" aria-hidden="true">
-                      {family === 'necklace' ? <NecklaceIcon /> : family === 'band' ? <BandIcon /> : '◇'}
-                    </span>
-                    <span className="firmware-lib-toggle-label">
-                      {FAMILY_LABEL[family]}
-                    </span>
-                  </button>
-                )
-              })}
-            </div>
+            {/* Role chips (hidden when a roleFilter is forced by the caller). */}
+            {!roleFilter && rolesPresent.length > 1 && (
+              <div
+                className="firmware-lib-toggle"
+                role="tablist"
+                aria-label="ノードの役割"
+              >
+                {rolesPresent.map((role) => {
+                  const isSelected = effectiveRole === role
+                  return (
+                    <button
+                      key={role}
+                      type="button"
+                      role="tab"
+                      aria-selected={isSelected}
+                      className={`firmware-lib-toggle-btn variant-${role}${isSelected ? ' selected' : ''}`}
+                      onClick={() => selectRole(role)}
+                    >
+                      <span className="firmware-lib-toggle-label">
+                        {ROLE_LABEL[role]}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
 
-            {/* Inner sub-tabs: version + flavor within the selected family. */}
-            {selectedFamily && entriesInFamily.length > 0 && (
+            {/* Variant list within the effective role. */}
+            {effectiveRole && entriesInRole.length > 0 && (
               <div
                 className="firmware-version-tabs"
                 role="tablist"
-                aria-label="バージョン"
+                aria-label="ファームウェア"
               >
-                {entriesInFamily.map((e) => {
-                  const parsed = parseEnv(e.env)
-                  const isSelected =
-                    source === 'library' && libSelected === e.env
-                  // For "other" family the version field IS the env name,
-                  // so trim a noisy fallback. For known families show
-                  // "v3" / "v3 (claude)".
-                  const label =
-                    parsed.family === 'other'
-                      ? e.env
-                      : parsed.flavor
-                        ? `${parsed.version} (${parsed.flavor})`
-                        : parsed.version
+                {entriesInRole.map((e) => {
+                  const isSelected = source === 'library' && libSelected === e.env
+                  const tp = e.transport ? TRANSPORT_LABEL[e.transport] : null
                   return (
                     <button
                       key={e.env}
@@ -1020,83 +816,77 @@ export function FirmwareSubTab({
                         setSource('library')
                         setLibSelected(e.env)
                       }}
-                      title={e.env}
+                      title={`${e.env}${e.repo ? ` (${e.repo})` : ''}`}
                     >
-                      {label}
+                      {entryLabel(e)}
+                      {tp && <span className="firmware-transport-badge"> {tp}</span>}
                     </button>
                   )
                 })}
               </div>
             )}
 
-            {(() => {
-              const e = libEntries.find((x) => x.env === libSelected)
-              if (!e) return null
-              return (
-                <div className="firmware-lib-detail" role="tabpanel">
-                  <div
-                    className="firmware-lib-detail-meta"
-                    style={{
-                      // Allow the meta row to wrap when the version +
-                      // size + date sequence overflows the card. Long
-                      // semver strings (`1.234.567` etc) used to clip
-                      // when the row was kept single-line.
-                      display: 'flex',
-                      flexWrap: 'wrap',
-                      alignItems: 'center',
-                      gap: 8,
-                    }}
-                  >
-                    {e.fwVersion && (
-                      <span
-                        style={{
-                          fontSize: 13,
-                          padding: '2px 8px',
-                          borderRadius: 3,
-                          background: 'var(--accent)',
-                          color: 'white',
-                          fontFamily: 'var(--font-mono)',
-                          whiteSpace: 'nowrap',
-                          flexShrink: 0,
-                        }}
-                        title="ファームウェアバージョン (hapbeat_config.h FIRMWARE_VERSION)。OTA 完了後の起動バージョン照合に使用。"
-                      >
-                        v{e.fwVersion}
-                      </span>
-                    )}
+            {selectedEntry && (
+              <div className="firmware-lib-detail" role="tabpanel">
+                <div
+                  className="firmware-lib-detail-meta"
+                  style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}
+                >
+                  {selectedEntry.fwVersion && (
+                    <span
+                      style={{
+                        fontSize: 13,
+                        padding: '2px 8px',
+                        borderRadius: 3,
+                        background: 'var(--accent)',
+                        color: 'white',
+                        fontFamily: 'var(--font-mono)',
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0,
+                      }}
+                      title="ファームウェアバージョン (FIRMWARE_VERSION)。OTA 完了後の起動バージョン照合に使用。"
+                    >
+                      v{selectedEntry.fwVersion}
+                    </span>
+                  )}
+                  <span className="form-section-sub-inline" style={{ fontSize: 12 }}>
+                    {ROLE_LABEL[entryRole(selectedEntry)]}
+                    {selectedEntry.transport && ` · ${TRANSPORT_LABEL[selectedEntry.transport]}`}
+                    {entryBoard(selectedEntry) && ` · ${entryBoard(selectedEntry)}`}
+                  </span>
+                </div>
+                {selectedEntry.description && (
+                  <div className="form-section-sub-inline" style={{ marginTop: 4, fontSize: 12 }}>
+                    {selectedEntry.description}
                   </div>
-                  {/* Per-artifact rows — each path (OTA / Serial)
-                   * resolves to its own .bin so the user can see at a
-                   * glance which file backs which operation, and
-                   * notice if one is missing. */}
-                  <div
-                    className="firmware-lib-detail-artifacts"
-                    style={{
-                      marginTop: 6,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 2,
-                      fontSize: 13,
-                      fontFamily: 'var(--font-mono)',
-                      color: 'var(--text-muted)',
-                    }}
-                  >
-                    <div title={e.appOta?.path ?? ''}>
-                      <span style={{ marginRight: 6 }}>OTA  app:</span>
-                      {e.appOta
-                        ? `${formatBytes(e.appOta.size)} · ${formatMtime(e.appOta.mtime)}`
-                        : '— firmware_app_ota.bin が未生成'}
-                    </div>
-                    <div title={e.fullSerial?.path ?? ''}>
-                      <span style={{ marginRight: 6 }}>SERIAL full:</span>
-                      {e.fullSerial
-                        ? `${formatBytes(e.fullSerial.size)} · ${formatMtime(e.fullSerial.mtime)}`
-                        : '— firmware_full_serial.bin が未生成'}
-                    </div>
+                )}
+                <div
+                  className="firmware-lib-detail-artifacts"
+                  style={{
+                    marginTop: 6,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 2,
+                    fontSize: 13,
+                    fontFamily: 'var(--font-mono)',
+                    color: 'var(--text-muted)',
+                  }}
+                >
+                  <div title={selectedEntry.appOta?.path ?? ''}>
+                    <span style={{ marginRight: 6 }}>OTA  app:</span>
+                    {selectedEntry.appOta
+                      ? `${formatBytes(selectedEntry.appOta.size)} · ${formatMtime(selectedEntry.appOta.mtime)}`
+                      : '— (Wi-Fi 非接続ノード / 未生成)'}
+                  </div>
+                  <div title={selectedEntry.fullSerial?.path ?? ''}>
+                    <span style={{ marginRight: 6 }}>SERIAL full:</span>
+                    {selectedEntry.fullSerial
+                      ? `${formatBytes(selectedEntry.fullSerial.size)} · ${formatMtime(selectedEntry.fullSerial.mtime)}`
+                      : '— firmware_full_serial.bin が未生成'}
                   </div>
                 </div>
-              )
-            })()}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -1164,11 +954,6 @@ export function FirmwareSubTab({
             {' '}— LAN 経由で選択中ファームを上書き (デバイスは自動再起動)
           </span>
         </div>
-        {/* Multi-target preview: surface how many devices the next OTA
-          *   will hit so the user doesn't accidentally trigger a 5-device
-          *   batch when they meant to flash the focused one. Counted with
-          *   the same filter as ``submit()`` so what the badge shows is
-          *   exactly what helper will receive. */}
         {(() => {
           const lan = selectedIps.filter((ip) => !ip.startsWith('serial:'))
           const onlineLan = lan
@@ -1184,8 +969,6 @@ export function FirmwareSubTab({
           return null
         })()}
         <div className="form-action-row">
-          {/* 通常時 / 進捗中: OTA 開始ボタン (stuck の間は disabled のまま)。
-            * stuck 時: 並んで「中止する」ボタンを出して UI を解放する。 */}
           <button
             className="form-button"
             onClick={submit}
@@ -1343,66 +1126,6 @@ export function FirmwareSubTab({
   )
 }
 
-/** Inline SVG icons for the firmware-type toggle. Drawn as flat
- *  monochrome glyphs with `currentColor` so they pick up the parent
- *  button's text color (variant tint when selected). */
-function NecklaceIcon() {
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      {/* chain — open at top, drooping curve */}
-      <path d="M5 4 C 5 12, 19 12, 19 4" />
-      {/* clasp / link circles along the chain */}
-      <circle cx="9" cy="9.4" r="0.7" fill="currentColor" stroke="none" />
-      <circle cx="15" cy="9.4" r="0.7" fill="currentColor" stroke="none" />
-      {/* pendant: small ring + diamond drop */}
-      <circle cx="12" cy="13" r="1.2" />
-      <path d="M12 14.2 L9.8 18 L12 21 L14.2 18 Z" fill="currentColor" stroke="none" />
-    </svg>
-  )
-}
-
-function BandIcon() {
-  // Top-down view of a wristband: a thick open ring with a small
-  // protruding unit. The ring shape reads more clearly as "wristband"
-  // than the previous flat-ellipse-with-pad icon, which several users
-  // mistook for a watch face.
-  return (
-    <svg
-      width="22"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      {/* Strap: thick C-shape (open at the right where the clasp is). */}
-      <path d="M 17.5 6.5 A 8 8 0 1 0 17.5 17.5" />
-      {/* Haptic unit / clasp on the open side — a small filled bump
-          that reads as the device module clipped onto the band. */}
-      <rect
-        x="14.6"
-        y="9"
-        width="5.4"
-        height="6"
-        rx="1"
-        fill="currentColor"
-        stroke="none"
-      />
-    </svg>
-  )
-}
-
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = ''
   const chunk = 0x8000
@@ -1413,4 +1136,3 @@ function bytesToBase64(bytes: Uint8Array): string {
   }
   return btoa(binary)
 }
-

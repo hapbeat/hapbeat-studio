@@ -394,6 +394,15 @@
   flex-shrink: 0;
 }
 
+/* Node-role pill (sensor / broker / transmitter) — neutral accent so
+ * it reads as a type label, distinct from SELECTED / AP MODE. */
+.role-pill {
+  background: rgba(76, 175, 230, 0.18);
+  color: #4cb6e6;
+  border: 1px solid rgba(76, 175, 230, 0.5);
+  font-weight: 700;
+}
+
 /* ---- Sub-tabs (per-device pages) ---- */
 .device-subtabs {
   display: flex;
@@ -983,6 +992,36 @@
   background: var(--bg-surface);
   color: var(--text-primary);
   border-color: var(--border-light);
+}
+
+/* Node-role chips (DEC-034): receiver / sensor / broker / transmitter. */
+.firmware-lib-toggle-btn.variant-receiver.selected {
+  background: rgba(124, 92, 191, 0.18);
+  color: var(--accent-light);
+  border-color: var(--accent);
+}
+.firmware-lib-toggle-btn.variant-sensor.selected {
+  background: rgba(76, 175, 230, 0.18);
+  color: #4cb6e6;
+  border-color: rgba(76, 175, 230, 0.65);
+}
+.firmware-lib-toggle-btn.variant-broker.selected {
+  background: rgba(230, 160, 76, 0.18);
+  color: #e6a04c;
+  border-color: rgba(230, 160, 76, 0.65);
+}
+.firmware-lib-toggle-btn.variant-transmitter.selected {
+  background: rgba(76, 230, 150, 0.16);
+  color: #4ce696;
+  border-color: rgba(76, 230, 150, 0.6);
+}
+
+/* Transport badge inside a variant tab (Wi-Fi UDP / MQTT / ESP-NOW). */
+.firmware-transport-badge {
+  font-size: 11px;
+  opacity: 0.7;
+  font-family: var(--font-ui);
+  margin-left: 4px;
 }
 
 /* Inner tabs: version + flavor within a family. */
