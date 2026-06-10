@@ -12,7 +12,7 @@ const SERIAL_DEVICE_PREFIX = 'serial:'
  *  case (装着デバイス = receiver) is the default so a plain Wi-Fi-UDP
  *  user just clicks through without thinking about modes. */
 const NODE_ROLE_CHOICES: { role: NodeRole; label: string; hint: string }[] = [
-  { role: 'receiver', label: '装着デバイス', hint: 'Unity 連携 / センサ通知 / ライブ受信' },
+  { role: 'receiver', label: 'Hapbeat', hint: 'Unity 連携 / センサ通知 / ライブ受信' },
   { role: 'sensor', label: 'センサ送信機', hint: 'センサ値で触覚を発火 (MQTT)' },
   { role: 'broker', label: 'ブローカー', hint: 'MQTT 中継 (組み込み)' },
   { role: 'transmitter', label: 'ライブ送信機', hint: 'PA 音声を ESP-NOW 同報' },

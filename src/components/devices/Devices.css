@@ -963,94 +963,65 @@
   background: var(--bg-hover);
 }
 
-.firmware-lib-toggle-icon {
-  display: inline-flex;
-  align-items: center;
-  font-size: 20px;
-  line-height: 1;
-}
-.firmware-lib-toggle-icon svg {
-  display: block;
-}
-
-/* Per-device-type accent so the user can tell at a glance which is
- * which without reading the label — necklace vs band are physically
- * different products, so we color-code them. */
-.firmware-lib-toggle-btn.variant-necklace.selected {
+/* Group tabs (DEC-034): Hapbeat is the common case and gets the brand
+ * accent; 周辺機器 (sensor / broker / transmitter) stays deliberately
+ * muted so rare node types don't compete for attention. */
+.firmware-lib-toggle-btn.variant-hapbeat.selected {
   background: rgba(124, 92, 191, 0.18);
   color: var(--accent-light);
   border-color: var(--accent);
 }
-
-.firmware-lib-toggle-btn.variant-band.selected {
-  background: rgba(76, 175, 230, 0.18);
-  color: #4cb6e6;
-  border-color: rgba(76, 175, 230, 0.65);
-}
-
-.firmware-lib-toggle-btn.variant-other.selected {
+.firmware-lib-toggle-btn.variant-peripheral.selected {
   background: var(--bg-surface);
   color: var(--text-primary);
   border-color: var(--border-light);
 }
 
-/* Node-role chips (DEC-034): receiver / sensor / broker / transmitter. */
-.firmware-lib-toggle-btn.variant-receiver.selected {
-  background: rgba(124, 92, 191, 0.18);
-  color: var(--accent-light);
-  border-color: var(--accent);
-}
-.firmware-lib-toggle-btn.variant-sensor.selected {
-  background: rgba(76, 175, 230, 0.18);
-  color: #4cb6e6;
-  border-color: rgba(76, 175, 230, 0.65);
-}
-.firmware-lib-toggle-btn.variant-broker.selected {
-  background: rgba(230, 160, 76, 0.18);
-  color: #e6a04c;
-  border-color: rgba(230, 160, 76, 0.65);
-}
-.firmware-lib-toggle-btn.variant-transmitter.selected {
-  background: rgba(76, 230, 150, 0.16);
-  color: #4ce696;
-  border-color: rgba(76, 230, 150, 0.6);
-}
-
-/* Transport badge inside a variant tab (Wi-Fi UDP / MQTT / ESP-NOW). */
-.firmware-transport-badge {
-  font-size: 11px;
-  opacity: 0.7;
-  font-family: var(--font-ui);
-  margin-left: 4px;
-}
-
-/* Inner tabs: version + flavor within a family. */
-.firmware-version-tabs {
-  display: flex;
-  flex-wrap: wrap;
+/* Variant list — uniform 2-column grid (equal width/height cells). */
+.firmware-variant-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
   margin: 6px 0 8px;
 }
-
-.firmware-version-tab {
+.firmware-variant-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 42px;
+  padding: 6px 12px;
   font-size: 14px;
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   background: transparent;
   color: var(--text-secondary);
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 3px 10px;
   cursor: pointer;
+  text-align: left;
+  overflow: hidden;
   transition: color 120ms, background 120ms, border-color 120ms;
 }
-.firmware-version-tab:hover {
+.firmware-variant-cell:hover {
   color: var(--text-primary);
   border-color: var(--border-light);
 }
-.firmware-version-tab.selected {
+.firmware-variant-cell.selected {
   background: var(--bg-surface);
   color: var(--text-primary);
   border-color: var(--accent);
+}
+.firmware-variant-cell-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.firmware-variant-cell-meta {
+  display: inline-flex;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
 
 .firmware-lib-detail {

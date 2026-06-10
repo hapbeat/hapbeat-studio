@@ -29,10 +29,25 @@ import { validateOtaImage } from '@/utils/otaImageValidation'
 
 const ROLE_ORDER: NodeRole[] = ['receiver', 'sensor', 'broker', 'transmitter']
 const ROLE_LABEL: Record<NodeRole, string> = {
-  receiver: '装着デバイス',
+  receiver: 'Hapbeat',
   sensor: 'センサ送信機',
   broker: 'ブローカー',
   transmitter: 'ライブ送信機',
+}
+
+/**
+ * Library groups: the wearable (Hapbeat) is the common case and gets top
+ * billing; every other node type (sensor / broker / transmitter) is rare
+ * and tucked under a single 周辺機器 tab so it doesn't crowd the UI.
+ */
+type FirmwareGroup = 'hapbeat' | 'peripheral'
+const GROUP_ORDER: FirmwareGroup[] = ['hapbeat', 'peripheral']
+const GROUP_LABEL: Record<FirmwareGroup, string> = {
+  hapbeat: 'Hapbeat',
+  peripheral: '周辺機器',
+}
+function entryGroup(e: FirmwareLibraryEntry): FirmwareGroup {
+  return entryRole(e) === 'receiver' ? 'hapbeat' : 'peripheral'
 }
 const TRANSPORT_LABEL: Record<NodeTransport, string> = {
   udp: 'Wi-Fi UDP',
@@ -122,7 +137,7 @@ export function FirmwareSubTab({
   const [source, setSource] = useState<Source>('library')
 
   const LIB_SELECTED_KEY = 'hapbeat-studio-firmware-lib-selected'
-  const ROLE_SELECTED_KEY = 'hapbeat-studio-firmware-role-selected'
+  const GROUP_SELECTED_KEY = 'hapbeat-studio-firmware-group-selected'
   const [libEntries, setLibEntries] = useState<FirmwareLibraryEntry[]>([])
   const [libLoading, setLibLoading] = useState(false)
   const [libError, setLibError] = useState<string | null>(null)
@@ -131,10 +146,10 @@ export function FirmwareSubTab({
       return localStorage.getItem(LIB_SELECTED_KEY)
     } catch { return null }
   })
-  const [selectedRole, setSelectedRole] = useState<NodeRole | null>(() => {
+  const [selectedGroup, setSelectedGroup] = useState<FirmwareGroup | null>(() => {
     try {
-      const v = localStorage.getItem(ROLE_SELECTED_KEY)
-      return v && (ROLE_ORDER as string[]).includes(v) ? (v as NodeRole) : null
+      const v = localStorage.getItem(GROUP_SELECTED_KEY)
+      return v === 'hapbeat' || v === 'peripheral' ? v : null
     } catch { return null }
   })
 
@@ -147,9 +162,9 @@ export function FirmwareSubTab({
 
   useEffect(() => {
     try {
-      if (selectedRole) localStorage.setItem(ROLE_SELECTED_KEY, selectedRole)
+      if (selectedGroup) localStorage.setItem(GROUP_SELECTED_KEY, selectedGroup)
     } catch { /* localStorage unavailable */ }
-  }, [selectedRole])
+  }, [selectedGroup])
 
   // Local file state — handle is the source of truth, bytes is read on demand
   const [localHandle, setLocalHandle] = useState<FileSystemFileHandle | null>(null)
@@ -271,43 +286,48 @@ export function FirmwareSubTab({
     void refreshLibrary()
   }, [refreshLibrary])
 
-  // ---- Role / variant selection --------------------------------------
+  // ---- Group / variant selection --------------------------------------
 
-  /** Roles present in the library, in canonical order. */
-  const rolesPresent = useMemo<NodeRole[]>(() => {
-    const seen = new Set<NodeRole>()
-    for (const e of libEntries) seen.add(entryRole(e))
-    return ROLE_ORDER.filter((r) => seen.has(r))
+  /** Groups present in the library, Hapbeat first. */
+  const groupsPresent = useMemo<FirmwareGroup[]>(() => {
+    const seen = new Set<FirmwareGroup>()
+    for (const e of libEntries) seen.add(entryGroup(e))
+    return GROUP_ORDER.filter((g) => seen.has(g))
   }, [libEntries])
 
-  /** Effective role filter: forced prop > device role > user pick. */
-  const effectiveRole = useMemo<NodeRole | null>(() => {
-    if (roleFilter) return roleFilter
-    if (selectedRole && rolesPresent.includes(selectedRole)) return selectedRole
-    if (deviceRole && rolesPresent.includes(deviceRole)) return deviceRole
-    return rolesPresent[0] ?? null
-  }, [roleFilter, selectedRole, deviceRole, rolesPresent])
+  /** Effective group: forced roleFilter > user pick > device role > Hapbeat. */
+  const effectiveGroup = useMemo<FirmwareGroup | null>(() => {
+    if (roleFilter) return roleFilter === 'receiver' ? 'hapbeat' : 'peripheral'
+    if (selectedGroup && groupsPresent.includes(selectedGroup)) return selectedGroup
+    if (deviceRole) {
+      const g: FirmwareGroup = deviceRole === 'receiver' ? 'hapbeat' : 'peripheral'
+      if (groupsPresent.includes(g)) return g
+    }
+    if (groupsPresent.includes('hapbeat')) return 'hapbeat'
+    return groupsPresent[0] ?? null
+  }, [roleFilter, selectedGroup, deviceRole, groupsPresent])
 
-  /** Entries in the effective role. */
-  const entriesInRole = useMemo(() => {
-    if (!effectiveRole) return []
-    return libEntries.filter((e) => entryRole(e) === effectiveRole)
-  }, [libEntries, effectiveRole])
+  /** Entries shown: exact role when forced (onboarding), else the group. */
+  const entriesShown = useMemo(() => {
+    if (roleFilter) return libEntries.filter((e) => entryRole(e) === roleFilter)
+    if (!effectiveGroup) return []
+    return libEntries.filter((e) => entryGroup(e) === effectiveGroup)
+  }, [libEntries, roleFilter, effectiveGroup])
 
-  // Keep libSelected inside the effective role: if the current selection
-  // belongs to a different role, jump to the first variant of this role.
+  // Keep libSelected inside the shown set: if the current selection
+  // belongs to a different group, jump to the first shown variant.
   useEffect(() => {
-    if (entriesInRole.length === 0) return
-    if (libSelected && entriesInRole.some((e) => e.env === libSelected)) return
-    setLibSelected(entriesInRole[0].env)
+    if (entriesShown.length === 0) return
+    if (libSelected && entriesShown.some((e) => e.env === libSelected)) return
+    setLibSelected(entriesShown[0].env)
     setSource('library')
-  }, [entriesInRole, libSelected])
+  }, [entriesShown, libSelected])
 
-  const selectRole = useCallback((role: NodeRole) => {
-    setSelectedRole(role)
-    const inRole = libEntries.filter((e) => entryRole(e) === role)
-    if (inRole.length > 0) {
-      setLibSelected(inRole[0].env)
+  const selectGroup = useCallback((group: FirmwareGroup) => {
+    setSelectedGroup(group)
+    const inGroup = libEntries.filter((e) => entryGroup(e) === group)
+    if (inGroup.length > 0) {
+      setLibSelected(inGroup[0].env)
       setSource('library')
     }
   }, [libEntries])
@@ -740,9 +760,6 @@ export function FirmwareSubTab({
               style={{ marginRight: 6, verticalAlign: 'middle' }}
             />
             ファームウェア ライブラリ
-            <span className="form-section-sub-inline">
-              {' '}— ノードの役割ごとにビルド済みファームから選ぶ
-            </span>
           </span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
             <button
@@ -768,26 +785,27 @@ export function FirmwareSubTab({
 
         {libEntries.length > 0 && (
           <>
-            {/* Role chips (hidden when a roleFilter is forced by the caller). */}
-            {!roleFilter && rolesPresent.length > 1 && (
+            {/* Group tabs: Hapbeat | 周辺機器 (hidden when a roleFilter is
+              * forced by the caller, or when only Hapbeat builds exist). */}
+            {!roleFilter && groupsPresent.length > 1 && (
               <div
                 className="firmware-lib-toggle"
                 role="tablist"
-                aria-label="ノードの役割"
+                aria-label="ファームウェア種別"
               >
-                {rolesPresent.map((role) => {
-                  const isSelected = effectiveRole === role
+                {groupsPresent.map((group) => {
+                  const isSelected = effectiveGroup === group
                   return (
                     <button
-                      key={role}
+                      key={group}
                       type="button"
                       role="tab"
                       aria-selected={isSelected}
-                      className={`firmware-lib-toggle-btn variant-${role}${isSelected ? ' selected' : ''}`}
-                      onClick={() => selectRole(role)}
+                      className={`firmware-lib-toggle-btn variant-${group}${isSelected ? ' selected' : ''}`}
+                      onClick={() => selectGroup(group)}
                     >
                       <span className="firmware-lib-toggle-label">
-                        {ROLE_LABEL[role]}
+                        {GROUP_LABEL[group]}
                       </span>
                     </button>
                   )
@@ -795,31 +813,35 @@ export function FirmwareSubTab({
               </div>
             )}
 
-            {/* Variant list within the effective role. */}
-            {effectiveRole && entriesInRole.length > 0 && (
+            {/* Variant list — uniform 2-column grid. */}
+            {entriesShown.length > 0 && (
               <div
-                className="firmware-version-tabs"
-                role="tablist"
+                className="firmware-variant-grid"
+                role="listbox"
                 aria-label="ファームウェア"
               >
-                {entriesInRole.map((e) => {
+                {entriesShown.map((e) => {
                   const isSelected = source === 'library' && libSelected === e.env
                   const tp = e.transport ? TRANSPORT_LABEL[e.transport] : null
+                  const role = entryRole(e)
                   return (
                     <button
                       key={e.env}
                       type="button"
-                      role="tab"
+                      role="option"
                       aria-selected={isSelected}
-                      className={`firmware-version-tab${isSelected ? ' selected' : ''}`}
+                      className={`firmware-variant-cell${isSelected ? ' selected' : ''}`}
                       onClick={() => {
                         setSource('library')
                         setLibSelected(e.env)
                       }}
                       title={`${e.env}${e.repo ? ` (${e.repo})` : ''}`}
                     >
-                      {entryLabel(e)}
-                      {tp && <span className="firmware-transport-badge"> {tp}</span>}
+                      <span className="firmware-variant-cell-label">{entryLabel(e)}</span>
+                      <span className="firmware-variant-cell-meta">
+                        {role !== 'receiver' && <span>{ROLE_LABEL[role]}</span>}
+                        {tp && <span>{tp}</span>}
+                      </span>
                     </button>
                   )
                 })}
