@@ -19,14 +19,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download firmware artifacts
+      # Download the latest + archive releases (newest 6) so Studio can offer
+      # older firmware versions for rollback (firmware-distribution.md,
+      # DEC-034). Each release lands in its own tag subdir; the aggregation
+      # script merges them into one manifest.json with per-variant versions[].
+      - name: Download firmware releases (latest + archive)
         run: |
-          gh release download \
-            --repo Hapbeat/hapbeat-device-firmware \
-            --dir public/firmware \
-            --pattern "*.bin" \
-            --pattern "manifest.json" \
-            --clobber
+          repo="Hapbeat/hapbeat-device-firmware"
+          mkdir -p fw-staging/hapbeat-device-firmware
+          tags=$(gh release list --repo "$repo" --limit 6 --json tagName --jq '.[].tagName')
+          for t in $tags; do
+            echo "downloading $t"
+            mkdir -p "fw-staging/hapbeat-device-firmware/$t"
+            gh release download "$t" \
+              --repo "$repo" \
+              --dir "fw-staging/hapbeat-device-firmware/$t" \
+              --pattern "*.bin" \
+              --pattern "manifest.json" \
+              --pattern "manifest.fragment.json" \
+              --clobber
+          done
         env:
           GH_TOKEN: ${{ secrets.FIRMWARE_REPO_PAT }}
 
@@ -38,6 +50,9 @@ jobs:
 
       - name: Install deps (ci)
         run: npm ci
+
+      - name: Aggregate firmware manifest (versions/archive)
+        run: node scripts/aggregate-firmware-manifest.mjs fw-staging public/firmware
 
       - name: Build
         run: npm run build

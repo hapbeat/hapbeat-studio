@@ -203,11 +203,33 @@ export function FirmwareSubTab({
   const setLastFlashedBoard = useDeviceStore((s) => s.setLastFlashedBoard)
   const knownBoard = lanBoard ?? serialMasterBoard ?? lastFlashedBoardForIp ?? null
 
-  // The currently-selected library entry (resolved once for reuse).
-  const selectedEntry = useMemo(
+  // The currently-selected library entry (before version resolution).
+  const baseEntry = useMemo(
     () => libEntries.find((e) => e.env === libSelected) ?? null,
     [libEntries, libSelected],
   )
+
+  // Archive support: the user can pick an older published version of the
+  // selected variant (null = latest). Reset when switching variants.
+  const [selectedVersionFw, setSelectedVersionFw] = useState<string | null>(null)
+  useEffect(() => {
+    setSelectedVersionFw(null)
+  }, [libSelected])
+
+  // Resolved entry: artifacts/fwVersion swapped to the chosen version so all
+  // downstream consumers (OTA / Serial / verify) need no version awareness.
+  const selectedEntry = useMemo(() => {
+    if (!baseEntry) return null
+    if (!selectedVersionFw || !baseEntry.versions) return baseEntry
+    const v = baseEntry.versions.find((x) => x.fwVersion === selectedVersionFw)
+    if (!v) return baseEntry
+    return {
+      ...baseEntry,
+      fwVersion: v.fwVersion,
+      appOta: v.appOta,
+      fullSerial: v.fullSerial,
+    }
+  }, [baseEntry, selectedVersionFw])
 
   /**
    * Pre-flight: warn when the selected library variant targets a board
@@ -840,7 +862,8 @@ export function FirmwareSubTab({
                       <span className="firmware-variant-cell-label">{entryLabel(e)}</span>
                       <span className="firmware-variant-cell-meta">
                         {role !== 'receiver' && <span>{ROLE_LABEL[role]}</span>}
-                        {tp && <span>{tp}</span>}
+                        {tp && <span className="firmware-variant-cell-tp">{tp}</span>}
+                        {e.fwVersion && <span className="firmware-variant-cell-ver">v{e.fwVersion}</span>}
                       </span>
                     </button>
                   )
@@ -877,6 +900,36 @@ export function FirmwareSubTab({
                     {entryBoard(selectedEntry) && ` · ${entryBoard(selectedEntry)}`}
                   </span>
                 </div>
+
+                {/* Version picker — latest + archive (older releases stay
+                  * downloadable so users can roll back anytime). */}
+                {baseEntry?.versions && baseEntry.versions.length > 1 && (
+                  <div className="firmware-version-row">
+                    <span className="firmware-version-row-label">バージョン</span>
+                    {baseEntry.versions.map((v, i) => {
+                      const activeFw = selectedVersionFw ?? baseEntry.versions![0].fwVersion
+                      const isActive = activeFw === v.fwVersion
+                      return (
+                        <button
+                          key={v.fwVersion}
+                          type="button"
+                          className={`firmware-version-chip${isActive ? ' selected' : ''}${i > 0 ? ' archive' : ''}`}
+                          onClick={() => setSelectedVersionFw(i === 0 ? null : v.fwVersion)}
+                          title={v.tag ?? `v${v.fwVersion}`}
+                        >
+                          v{v.fwVersion}
+                          {i === 0 && <span className="firmware-version-chip-latest"> 最新</span>}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+                {selectedVersionFw && (
+                  <div className="form-status warn" style={{ marginTop: 4 }}>
+                    アーカイブ版 v{selectedVersionFw} を選択中 — 最新版より古いファームを書き込みます。
+                  </div>
+                )}
+
                 {selectedEntry.description && (
                   <div className="form-section-sub-inline" style={{ marginTop: 4, fontSize: 12 }}>
                     {selectedEntry.description}

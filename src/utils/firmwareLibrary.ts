@@ -33,6 +33,15 @@ export interface FirmwareArtifact {
   path: string
 }
 
+/** One published version of a variant (latest or archive). */
+export interface FirmwareVersionInfo {
+  fwVersion: string
+  /** GitHub Release tag this version came from (e.g. "v0.1.3"). */
+  tag?: string
+  appOta?: FirmwareArtifact
+  fullSerial?: FirmwareArtifact
+}
+
 export interface FirmwareLibraryEntry {
   /** PlatformIO environment name, e.g. `band_v3` / `DuoWL_V3_STREAM_ESPNOW`. */
   env: string
@@ -66,6 +75,12 @@ export interface FirmwareLibraryEntry {
   label?: string
   /** Optional one-line description. */
   description?: string
+  /**
+   * All published versions, newest first (archive support — users can
+   * roll back to an older release). The top-level fwVersion/appOta/
+   * fullSerial mirror versions[0]. Absent in dev mode (single build).
+   */
+  versions?: FirmwareVersionInfo[]
 }
 
 /** A single region to write during a multi-file flash. */
@@ -157,6 +172,13 @@ interface ManifestArtifact {
   mtime?: number
 }
 
+interface ManifestVersionV2 {
+  fwVersion: string
+  tag?: string
+  appOta?: ManifestArtifact
+  fullSerial?: ManifestArtifact
+}
+
 interface ManifestVariantV2 {
   id?: string
   repo?: string
@@ -170,6 +192,7 @@ interface ManifestVariantV2 {
   fwVersion?: string
   appOta?: ManifestArtifact
   fullSerial?: ManifestArtifact
+  versions?: ManifestVersionV2[]
 }
 
 /** Legacy v1 env entry. */
@@ -224,6 +247,12 @@ async function listFirmwareBuildsFromManifest(): Promise<FirmwareLibraryEntry[]>
       fwVersion: v.fwVersion,
       appOta: toArtifact(v.appOta),
       fullSerial: toArtifact(v.fullSerial),
+      versions: v.versions?.map((ver) => ({
+        fwVersion: ver.fwVersion,
+        tag: ver.tag,
+        appOta: toArtifact(ver.appOta),
+        fullSerial: toArtifact(ver.fullSerial),
+      })),
     }))
   }
 

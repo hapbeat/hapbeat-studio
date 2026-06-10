@@ -1,30 +1,31 @@
 #!/usr/bin/env node
 /**
- * Aggregate firmware artifacts from multiple firmware repos into a
- * single v2 manifest for Studio (contracts: firmware-distribution.md,
- * DEC-034).
+ * Aggregate firmware artifacts from multiple firmware repos — and multiple
+ * releases per repo — into a single v2 manifest for Studio
+ * (contracts: firmware-distribution.md, DEC-034).
  *
  * Usage:
  *   node scripts/aggregate-firmware-manifest.mjs <stagingDir> <outDir>
  *
- * Layout expected under <stagingDir> (one subdir per firmware repo,
- * e.g. populated by `gh release download` in CI):
- *   <stagingDir>/<repo-name>/
- *       manifest.fragment.json   (v2: { variants: [...] })   — preferred
- *       manifest.json            (v1: { envs: [...] })        — legacy fallback
+ * Layout expected under <stagingDir> (one subdir per firmware repo):
+ *   <stagingDir>/<repo-name>/<tag>/        ← one subdir per GitHub Release
+ *       manifest.fragment.json | manifest.json
  *       <env>_firmware_app_ota.bin
  *       <env>_firmware_full_serial.bin
+ *   — or, flat (single version; dev / manual use):
+ *   <stagingDir>/<repo-name>/
+ *       manifest.fragment.json | manifest.json + bins
  *
  * Output:
- *   <outDir>/manifest.json       (schema_version 2)
- *   <outDir>/<repoShort>_<env>_<stem>.bin   (copied, collision-free names)
+ *   <outDir>/manifest.json    (schema_version 2, variants with `versions[]`
+ *                              newest-first; top-level artifact fields = latest)
+ *   <outDir>/<repoShort>_<env>_<fwVersion>_<stem>.bin
  *
- * A v1 fragment's envs are mapped to receiver/udp variants with
- * role/transport inferred from the env name. The same inference Studio
- * uses (firmwareLibrary.inferVariantFromEnv) is mirrored here.
+ * Old releases are kept as archive entries so Studio users can roll back
+ * (e.g. re-flash v0.1.3 after updating to v0.1.4).
  */
 import { promises as fs } from 'fs'
-import { join, basename } from 'path'
+import { join } from 'path'
 
 const REPO_SHORT = {
   'hapbeat-device-firmware': 'dev',
@@ -56,6 +57,17 @@ function inferVariantFromEnv(env) {
   return { role, transport, board }
 }
 
+/** Compare two version strings ("0.1.10" / "v0.1.3d2") — newest first. */
+function compareVersionsDesc(a, b) {
+  const parse = (s) => String(s ?? '').replace(/^v/, '').split(/[.d-]/).map((n) => parseInt(n, 10) || 0)
+  const pa = parse(a), pb = parse(b)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pb[i] ?? 0) - (pa[i] ?? 0)
+    if (d !== 0) return d
+  }
+  return 0
+}
+
 async function exists(p) {
   try { await fs.access(p); return true } catch { return false }
 }
@@ -69,9 +81,7 @@ async function copyBin(srcDir, srcName, outDir, outName) {
   return { filename: outName, size: st.size, mtime: Math.round(st.mtimeMs) }
 }
 
-/** Resolve a v1 env's bin source name (release artifacts are env-prefixed). */
 async function resolveV1Bin(srcDir, env, kind) {
-  // kind: 'firmware_app_ota' | 'firmware_full_serial'
   const candidates = kind === 'firmware_full_serial'
     ? [`${env}_firmware_full_serial.bin`, `${env}_firmware.bin`]
     : [`${env}_firmware_app_ota.bin`]
@@ -79,6 +89,60 @@ async function resolveV1Bin(srcDir, env, kind) {
     if (await exists(join(srcDir, c))) return c
   }
   return null
+}
+
+/** Sanitize a version string for use inside a filename. */
+function versionSlug(v) {
+  return String(v ?? 'unknown').replace(/^v/, '').replace(/[^a-zA-Z0-9.\-]+/g, '-')
+}
+
+/**
+ * Read one release dir (a manifest + bins) and return its variant rows:
+ * [{ id, repo, env, role, transport, transports?, board?, label, description?,
+ *    fwVersion, tag?, appOtaSrc?, fullSerialSrc? }]
+ */
+async function readReleaseDir(repoName, repoShort, srcDir, tag) {
+  let manifest = null
+  if (await exists(join(srcDir, 'manifest.fragment.json'))) {
+    manifest = JSON.parse(await fs.readFile(join(srcDir, 'manifest.fragment.json'), 'utf-8'))
+  } else if (await exists(join(srcDir, 'manifest.json'))) {
+    manifest = JSON.parse(await fs.readFile(join(srcDir, 'manifest.json'), 'utf-8'))
+  } else {
+    return []
+  }
+
+  const rows = []
+  if (Array.isArray(manifest.variants)) {
+    for (const v of manifest.variants) {
+      rows.push({
+        id: v.id ?? `${repoShort}/${v.env}`,
+        repo: repoName, env: v.env,
+        role: v.role, transport: v.transport, transports: v.transports,
+        board: v.board, label: v.label ?? v.env, description: v.description,
+        fwVersion: v.fwVersion ?? manifest.tag?.replace(/^v/, '') ?? 'unknown',
+        tag: tag ?? manifest.tag,
+        appOtaSrc: v.appOta?.filename ?? null,
+        fullSerialSrc: v.fullSerial?.filename ?? null,
+        srcDir,
+      })
+    }
+  } else if (Array.isArray(manifest.envs)) {
+    for (const e of manifest.envs) {
+      const inf = inferVariantFromEnv(e.env)
+      rows.push({
+        id: `${repoShort}/${e.env}`,
+        repo: repoName, env: e.env,
+        role: inf.role, transport: inf.transport, board: inf.board,
+        label: e.env, description: undefined,
+        fwVersion: e.fwVersion ?? manifest.tag?.replace(/^v/, '') ?? 'unknown',
+        tag: tag ?? manifest.tag,
+        appOtaSrc: await resolveV1Bin(srcDir, e.env, 'firmware_app_ota'),
+        fullSerialSrc: await resolveV1Bin(srcDir, e.env, 'firmware_full_serial'),
+        srcDir,
+      })
+    }
+  }
+  return rows
 }
 
 async function main() {
@@ -89,7 +153,6 @@ async function main() {
   }
   await fs.mkdir(outDir, { recursive: true })
 
-  const variants = []
   let repoDirs = []
   try {
     repoDirs = (await fs.readdir(stagingDir, { withFileTypes: true }))
@@ -100,74 +163,82 @@ async function main() {
     process.exit(1)
   }
 
+  // Collect all rows across repos + releases.
+  const allRows = []
   for (const repoName of repoDirs) {
     const repoShort = repoShortFor(repoName)
-    const srcDir = join(stagingDir, repoName)
+    const repoDir = join(stagingDir, repoName)
+    // Multi-release layout: tag subdirs. Flat layout: manifest at repo root.
+    const subdirs = (await fs.readdir(repoDir, { withFileTypes: true }))
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+    const hasFlatManifest =
+      (await exists(join(repoDir, 'manifest.fragment.json')))
+      || (await exists(join(repoDir, 'manifest.json')))
 
-    let fragment = null
-    if (await exists(join(srcDir, 'manifest.fragment.json'))) {
-      fragment = JSON.parse(await fs.readFile(join(srcDir, 'manifest.fragment.json'), 'utf-8'))
-    } else if (await exists(join(srcDir, 'manifest.json'))) {
-      fragment = JSON.parse(await fs.readFile(join(srcDir, 'manifest.json'), 'utf-8'))
-    } else {
+    if (hasFlatManifest) {
+      allRows.push(...await readReleaseDir(repoName, repoShort, repoDir, undefined))
+    }
+    for (const tag of subdirs) {
+      allRows.push(...await readReleaseDir(repoName, repoShort, join(repoDir, tag), tag))
+    }
+    if (!hasFlatManifest && subdirs.length === 0) {
       console.warn(`[aggregate] ${repoName}: no manifest found, skipping`)
+    }
+  }
+
+  // Group rows by variant id → versions[] (newest first), copy bins.
+  const byId = new Map()
+  for (const row of allRows) {
+    if (!byId.has(row.id)) byId.set(row.id, [])
+    byId.get(row.id).push(row)
+  }
+
+  const variants = []
+  for (const [id, rows] of byId) {
+    rows.sort((a, b) => compareVersionsDesc(a.fwVersion, b.fwVersion))
+    const repoShort = repoShortFor(rows[0].repo)
+    const versions = []
+    const seenVer = new Set()
+    for (const row of rows) {
+      const slug = versionSlug(row.fwVersion)
+      if (seenVer.has(slug)) continue   // same version from overlapping sources
+      seenVer.add(slug)
+      const appName = `${repoShort}_${row.env}_${slug}_firmware_app_ota.bin`
+      const serName = `${repoShort}_${row.env}_${slug}_firmware_full_serial.bin`
+      const appOta = row.appOtaSrc
+        ? await copyBin(row.srcDir, row.appOtaSrc, outDir, appName)
+        : null
+      const fullSerial = row.fullSerialSrc
+        ? await copyBin(row.srcDir, row.fullSerialSrc, outDir, serName)
+        : null
+      if (!appOta && !fullSerial) continue
+      versions.push({
+        fwVersion: row.fwVersion,
+        ...(row.tag ? { tag: row.tag } : {}),
+        ...(appOta ? { appOta } : {}),
+        ...(fullSerial ? { fullSerial } : {}),
+      })
+    }
+    if (versions.length === 0) {
+      console.warn(`[aggregate] ${id}: no bins copied, skipping`)
       continue
     }
-
-    if (Array.isArray(fragment.variants)) {
-      // v2 fragment — explicit role/transport/board/label/filenames.
-      for (const v of fragment.variants) {
-        const env = v.env
-        const id = v.id ?? `${repoShort}/${env}`
-        const appName = `${repoShort}_${env}_firmware_app_ota.bin`
-        const serName = `${repoShort}_${env}_firmware_full_serial.bin`
-        const appOta = v.appOta?.filename
-          ? await copyBin(srcDir, v.appOta.filename, outDir, appName)
-          : null
-        const fullSerial = v.fullSerial?.filename
-          ? await copyBin(srcDir, v.fullSerial.filename, outDir, serName)
-          : null
-        if (!fullSerial && !appOta) {
-          console.warn(`[aggregate] ${repoName}/${env}: no bins copied, skipping`)
-          continue
-        }
-        variants.push({
-          id, repo: repoName, env,
-          role: v.role, transport: v.transport, transports: v.transports,
-          board: v.board, label: v.label ?? env, description: v.description,
-          fwVersion: v.fwVersion,
-          ...(appOta ? { appOta } : {}),
-          ...(fullSerial ? { fullSerial } : {}),
-        })
-      }
-    } else if (Array.isArray(fragment.envs)) {
-      // v1 manifest — infer role/transport from env name.
-      for (const e of fragment.envs) {
-        const env = e.env
-        const inf = inferVariantFromEnv(env)
-        const appSrc = await resolveV1Bin(srcDir, env, 'firmware_app_ota')
-        const serSrc = await resolveV1Bin(srcDir, env, 'firmware_full_serial')
-        const appOta = appSrc
-          ? await copyBin(srcDir, appSrc, outDir, `${repoShort}_${env}_firmware_app_ota.bin`)
-          : null
-        const fullSerial = serSrc
-          ? await copyBin(srcDir, serSrc, outDir, `${repoShort}_${env}_firmware_full_serial.bin`)
-          : null
-        if (!fullSerial && !appOta) {
-          console.warn(`[aggregate] ${repoName}/${env}: no bins copied, skipping`)
-          continue
-        }
-        variants.push({
-          id: `${repoShort}/${env}`, repo: repoName, env,
-          role: inf.role, transport: inf.transport, board: inf.board,
-          label: env, fwVersion: e.fwVersion,
-          ...(appOta ? { appOta } : {}),
-          ...(fullSerial ? { fullSerial } : {}),
-        })
-      }
-    } else {
-      console.warn(`[aggregate] ${repoName}: manifest has neither variants nor envs`)
-    }
+    // Newest row wins the descriptive fields; top-level artifacts = latest.
+    const head = rows[0]
+    const latest = versions[0]
+    variants.push({
+      id, repo: head.repo, env: head.env,
+      role: head.role, transport: head.transport,
+      ...(head.transports ? { transports: head.transports } : {}),
+      ...(head.board ? { board: head.board } : {}),
+      label: head.label,
+      ...(head.description ? { description: head.description } : {}),
+      fwVersion: latest.fwVersion,
+      ...(latest.appOta ? { appOta: latest.appOta } : {}),
+      ...(latest.fullSerial ? { fullSerial: latest.fullSerial } : {}),
+      versions,
+    })
   }
 
   variants.sort((a, b) => (a.role + a.env).localeCompare(b.role + b.env))
@@ -177,9 +248,10 @@ async function main() {
     variants,
   }
   await fs.writeFile(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2))
-  console.log(`[aggregate] wrote ${variants.length} variant(s) from ${repoDirs.length} repo(s) → ${join(outDir, 'manifest.json')}`)
+  console.log(`[aggregate] wrote ${variants.length} variant(s) → ${join(outDir, 'manifest.json')}`)
   for (const v of variants) {
-    console.log(`  · [${v.role}/${v.transport}] ${v.id} ${basename(v.fullSerial?.filename ?? v.appOta?.filename ?? '?')}`)
+    const vers = v.versions.map((x) => x.fwVersion).join(', ')
+    console.log(`  · [${v.role}/${v.transport}] ${v.id} versions=[${vers}]`)
   }
 }
 

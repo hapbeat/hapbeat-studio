@@ -981,47 +981,105 @@
 .firmware-variant-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-  margin: 6px 0 8px;
+  gap: 8px;
+  margin: 8px 0 10px;
 }
 .firmware-variant-cell {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 42px;
-  padding: 6px 12px;
+  min-height: 48px;
+  padding: 8px 14px;
   font-size: 14px;
   font-family: var(--font-ui);
-  background: transparent;
+  background: var(--bg-surface);
   color: var(--text-secondary);
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
   cursor: pointer;
   text-align: left;
   overflow: hidden;
-  transition: color 120ms, background 120ms, border-color 120ms;
+  transition: color 120ms, background 120ms, border-color 120ms, box-shadow 120ms;
 }
 .firmware-variant-cell:hover {
   color: var(--text-primary);
-  border-color: var(--border-light);
+  border-color: var(--accent);
+  background: var(--bg-hover);
 }
 .firmware-variant-cell.selected {
-  background: var(--bg-surface);
+  background: rgba(124, 92, 191, 0.16);
   color: var(--text-primary);
   border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 .firmware-variant-cell-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 600;
 }
 .firmware-variant-cell-meta {
   display: inline-flex;
+  align-items: center;
   gap: 6px;
   font-size: 11px;
   color: var(--text-muted);
   flex-shrink: 0;
+}
+.firmware-variant-cell-tp {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.firmware-variant-cell.selected .firmware-variant-cell-tp {
+  border-color: var(--accent);
+  color: var(--accent-light);
+}
+.firmware-variant-cell-ver {
+  font-family: var(--font-mono);
+}
+
+/* Version picker (latest + archive) inside the variant detail panel. */
+.firmware-version-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.firmware-version-row-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-right: 2px;
+}
+.firmware-version-chip {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 10px;
+  cursor: pointer;
+  transition: color 120ms, background 120ms, border-color 120ms;
+}
+.firmware-version-chip:hover {
+  color: var(--text-primary);
+  border-color: var(--border-light);
+}
+.firmware-version-chip.selected {
+  background: rgba(124, 92, 191, 0.16);
+  color: var(--accent-light);
+  border-color: var(--accent);
+}
+.firmware-version-chip.archive {
+  opacity: 0.85;
+}
+.firmware-version-chip-latest {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  opacity: 0.8;
 }
 
 .firmware-lib-detail {
