@@ -41,8 +41,9 @@ const ROLE_LABEL: Record<NodeRole, string> = {
  * Library groups: the wearable (Hapbeat) is the common case and gets top
  * billing; every other node type (sensor / broker / transmitter) is rare
  * and tucked under a single 周辺機器 tab so it doesn't crowd the UI.
+ * (Exported — the onboarding wizard uses the same grouping.)
  */
-type FirmwareGroup = 'hapbeat' | 'peripheral'
+export type FirmwareGroup = 'hapbeat' | 'peripheral'
 const GROUP_ORDER: FirmwareGroup[] = ['hapbeat', 'peripheral']
 const GROUP_LABEL: Record<FirmwareGroup, string> = {
   hapbeat: 'Hapbeat',
@@ -96,13 +97,13 @@ interface Props {
    */
   postFlashReprobeMs?: number
   /**
-   * Pre-filter the firmware library to a single node role. Set by the
-   * onboarding wizard once the user picks a scenario, so they only see
-   * the firmware relevant to the node they're building. When omitted,
-   * a role chip row is shown and defaults to the connected device's
-   * role (or `receiver`).
+   * Pre-filter the firmware library to one group (Hapbeat | 周辺機器).
+   * Set by the onboarding wizard once the user picks a node type, so the
+   * group toggle is hidden and only that group's variants show. When
+   * omitted, the toggle row is shown and defaults to the connected
+   * device's group (or Hapbeat).
    */
-  roleFilter?: NodeRole
+  groupFilter?: FirmwareGroup
 }
 
 /**
@@ -122,7 +123,7 @@ export function FirmwareSubTab({
   sendTo,
   serialOnly = false,
   postFlashReprobeMs = 0,
-  roleFilter,
+  groupFilter,
 }: Props) {
   const showOta = !serialOnly && !!device && !!sendTo
   const { lastMessage, send: helperSend, devices } = useHelperConnection()
@@ -319,9 +320,9 @@ export function FirmwareSubTab({
     return GROUP_ORDER.filter((g) => seen.has(g))
   }, [libEntries])
 
-  /** Effective group: forced roleFilter > user pick > device role > Hapbeat. */
+  /** Effective group: forced groupFilter > user pick > device role > Hapbeat. */
   const effectiveGroup = useMemo<FirmwareGroup | null>(() => {
-    if (roleFilter) return roleFilter === 'receiver' ? 'hapbeat' : 'peripheral'
+    if (groupFilter) return groupFilter
     if (selectedGroup && groupsPresent.includes(selectedGroup)) return selectedGroup
     if (deviceRole) {
       const g: FirmwareGroup = deviceRole === 'receiver' ? 'hapbeat' : 'peripheral'
@@ -329,14 +330,13 @@ export function FirmwareSubTab({
     }
     if (groupsPresent.includes('hapbeat')) return 'hapbeat'
     return groupsPresent[0] ?? null
-  }, [roleFilter, selectedGroup, deviceRole, groupsPresent])
+  }, [groupFilter, selectedGroup, deviceRole, groupsPresent])
 
-  /** Entries shown: exact role when forced (onboarding), else the group. */
+  /** Entries shown: the effective group's variants. */
   const entriesShown = useMemo(() => {
-    if (roleFilter) return libEntries.filter((e) => entryRole(e) === roleFilter)
     if (!effectiveGroup) return []
     return libEntries.filter((e) => entryGroup(e) === effectiveGroup)
-  }, [libEntries, roleFilter, effectiveGroup])
+  }, [libEntries, effectiveGroup])
 
   // Keep libSelected inside the shown set: if the current selection
   // belongs to a different group, jump to the first shown variant.
@@ -803,9 +803,9 @@ export function FirmwareSubTab({
 
         {libEntries.length > 0 && (
           <>
-            {/* Group tabs: Hapbeat | 周辺機器 (hidden when a roleFilter is
+            {/* Group tabs: Hapbeat | 周辺機器 (hidden when a groupFilter is
               * forced by the caller, or when only Hapbeat builds exist). */}
-            {!roleFilter && groupsPresent.length > 1 && (
+            {!groupFilter && groupsPresent.length > 1 && (
               <div
                 className="firmware-lib-toggle"
                 role="tablist"

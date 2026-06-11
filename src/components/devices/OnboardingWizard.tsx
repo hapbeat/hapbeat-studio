@@ -2,20 +2,18 @@ import { useEffect, useState } from 'react'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useSerialMaster } from '@/stores/serialMaster'
 import { isWebSerialSupported } from '@/utils/serialConfig'
-import type { NodeRole } from '@/types/manager'
-import { FirmwareSubTab } from './FirmwareSubTab'
+import { FirmwareSubTab, type FirmwareGroup } from './FirmwareSubTab'
 import './OnboardingWizard.css'
 
 const SERIAL_DEVICE_PREFIX = 'serial:'
 
-/** Node-type choices shown in the flash step (DEC-034). The common
- *  case (装着デバイス = receiver) is the default so a plain Wi-Fi-UDP
- *  user just clicks through without thinking about modes. */
-const NODE_ROLE_CHOICES: { role: NodeRole; label: string; hint: string }[] = [
-  { role: 'receiver', label: 'Hapbeat', hint: 'Unity 連携 / センサ通知 / ライブ受信' },
-  { role: 'sensor', label: 'センサ送信機', hint: 'センサ値で触覚を発火 (MQTT)' },
-  { role: 'broker', label: 'ブローカー', hint: 'MQTT 中継 (組み込み)' },
-  { role: 'transmitter', label: 'ライブ送信機', hint: 'PA 音声を ESP-NOW 同報' },
+/** Node-type choices shown in the flash step — same Hapbeat | 周辺機器
+ *  grouping as the firmware library (DEC-034). Hapbeat is the default
+ *  so a plain Wi-Fi-UDP user just clicks through without thinking
+ *  about modes. */
+const NODE_GROUP_CHOICES: { group: FirmwareGroup; label: string; hint: string }[] = [
+  { group: 'hapbeat', label: 'Hapbeat', hint: '装着デバイス — Unity 連携 / センサ通知 / ライブ受信' },
+  { group: 'peripheral', label: '周辺機器', hint: 'センサ送信機 / ブローカー / ライブ送信機 (MQTT・ESP-NOW 構成用)' },
 ]
 
 type Step = 'probe' | 'flash' | 'configure'
@@ -41,9 +39,9 @@ export function OnboardingWizard() {
   const flashLastResult = useSerialMaster((s) => s.flashLastResult)
 
   const [step, setStep] = useState<Step>('probe')
-  // Which node type the user is setting up (drives which firmware the
-  // flash step offers). Defaults to the common receiver case.
-  const [role, setRole] = useState<NodeRole>('receiver')
+  // Which node group the user is setting up (drives which firmware the
+  // flash step offers). Defaults to the common Hapbeat (wearable) case.
+  const [group, setGroup] = useState<FirmwareGroup>('hapbeat')
 
   // Auto-route based on probe outcome.
   //
@@ -125,7 +123,7 @@ export function OnboardingWizard() {
       )}
 
       {step === 'flash' && (
-        <FlashStep onBack={goProbe} role={role} setRole={setRole} />
+        <FlashStep onBack={goProbe} group={group} setGroup={setGroup} />
       )}
 
       {step === 'configure' && (
@@ -210,12 +208,12 @@ function ProbeStep({
 
 function FlashStep({
   onBack,
-  role,
-  setRole,
+  group,
+  setGroup,
 }: {
   onBack: () => void
-  role: NodeRole
-  setRole: (r: NodeRole) => void
+  group: FirmwareGroup
+  setGroup: (g: FirmwareGroup) => void
 }) {
   return (
     <>
@@ -227,17 +225,18 @@ function FlashStep({
             「Serial 書き込み」ボタンを押して完了するまで待ってください。
           </p>
 
-          {/* Node-type chooser — the common 装着デバイス case is pre-selected
-            * so a plain Wi-Fi-UDP user doesn't have to think about modes. */}
+          {/* Node-type chooser — same Hapbeat | 周辺機器 grouping as the
+            * firmware library; Hapbeat is pre-selected so a plain
+            * Wi-Fi-UDP user doesn't have to think about modes. */}
           <div className="form-row" style={{ marginTop: 4 }}>
             <label>ノードの種類</label>
             <div className="form-row-multi" style={{ flexWrap: 'wrap', gap: 6 }}>
-              {NODE_ROLE_CHOICES.map((c) => (
+              {NODE_GROUP_CHOICES.map((c) => (
                 <button
-                  key={c.role}
+                  key={c.group}
                   type="button"
-                  className={`form-button${role === c.role ? '' : '-secondary'}`}
-                  onClick={() => setRole(c.role)}
+                  className={`form-button${group === c.group ? '' : '-secondary'}`}
+                  onClick={() => setGroup(c.group)}
                   title={c.hint}
                 >
                   {c.label}
@@ -247,7 +246,7 @@ function FlashStep({
             <span />
           </div>
           <div className="form-status muted">
-            {NODE_ROLE_CHOICES.find((c) => c.role === role)?.hint}
+            {NODE_GROUP_CHOICES.find((c) => c.group === group)?.hint}
           </div>
 
           <div className="form-status muted">
@@ -262,7 +261,7 @@ function FlashStep({
         </div>
       </div>
 
-      <FirmwareSubTab serialOnly postFlashReprobeMs={0} roleFilter={role} />
+      <FirmwareSubTab serialOnly postFlashReprobeMs={0} groupFilter={group} />
     </>
   )
 }
