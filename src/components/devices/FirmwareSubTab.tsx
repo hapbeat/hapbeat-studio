@@ -28,6 +28,7 @@ import {
   type FirmwareRegion,
 } from '@/utils/firmwareLibrary'
 import { validateOtaImage } from '@/utils/otaImageValidation'
+import { DriverHelpLinks } from './DriverHelpLinks'
 
 const ROLE_ORDER: NodeRole[] = ['receiver', 'sensor', 'broker', 'transmitter']
 const ROLE_LABEL: Record<NodeRole, string> = {
@@ -1192,6 +1193,8 @@ export function FirmwareSubTab({
             ⚠ 書き込み中はタブを切り替えないでください。
           </div>
         )}
+
+        <DriverHelpLinks />
       </div>
     </>
   )

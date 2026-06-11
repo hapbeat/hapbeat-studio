@@ -3,6 +3,7 @@ import { useDeviceStore } from '@/stores/deviceStore'
 import { useSerialMaster } from '@/stores/serialMaster'
 import { isWebSerialSupported } from '@/utils/serialConfig'
 import { FirmwareSubTab, type FirmwareGroup } from './FirmwareSubTab'
+import { DriverHelpLinks } from './DriverHelpLinks'
 import './OnboardingWizard.css'
 
 const SERIAL_DEVICE_PREFIX = 'serial:'
@@ -201,6 +202,7 @@ function ProbeStep({
             {probeMessage}
           </div>
         )}
+        <DriverHelpLinks />
       </div>
     </div>
   )

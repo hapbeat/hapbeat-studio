@@ -1040,6 +1040,36 @@
   font-family: var(--font-mono);
 }
 
+/* USB-serial driver help (onboarding Step 1 / firmware USB Serial section). */
+.driver-help {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.driver-help summary {
+  cursor: pointer;
+  user-select: none;
+}
+.driver-help summary:hover {
+  color: var(--text-primary);
+}
+.driver-help-body {
+  padding: 6px 2px 0 2px;
+}
+.driver-help-body ul {
+  margin: 6px 0;
+  padding-left: 18px;
+}
+.driver-help-body li {
+  margin: 3px 0;
+}
+.driver-help-body a {
+  color: var(--accent-light);
+}
+.driver-help-note {
+  opacity: 0.8;
+}
+
 /* Sensor live reading panel (mapping tab) — swatch + RGB + matched key. */
 .sensor-live {
   display: flex;
