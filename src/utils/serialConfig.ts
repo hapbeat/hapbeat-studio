@@ -104,11 +104,40 @@ async function openPortWithTimeout(
  * long as the port is open — `close()` cancels it and releases the
  * port lock.
  */
+/**
+ * Classic ESP32 (FTDI auto-reset, e.g. M5 ATOM Lite) needs a clean reset
+ * into the **app** after the config port is opened — otherwise the chip
+ * can be left in the ROM bootloader (from a prior esptool session) or
+ * mid-reset by the open's default DTR/RTS state, so it never answers
+ * get_info. We pulse EN with IO0 held high (esptool's classic reset
+ * sequence). S3-class boards use native USB-CDC (no external auto-reset)
+ * and are left untouched so the working path doesn't regress.
+ */
+async function resetClassicEsp32IntoApp(
+  port: SerialPort,
+  onLog?: (line: string) => void,
+): Promise<void> {
+  let isFtdi = false
+  try { isFtdi = port.getInfo().usbVendorId === 0x0403 } catch { /* unknown */ }
+  if (!isFtdi) return
+  try {
+    onLog?.('classic ESP32 (FTDI) — resetting into app firmware')
+    // IO0 high (DTR false) throughout → run app, not bootloader.
+    await port.setSignals({ dataTerminalReady: false, requestToSend: true })   // EN low (reset)
+    await new Promise((r) => setTimeout(r, 120))
+    await port.setSignals({ dataTerminalReady: false, requestToSend: false })  // EN high → boot app
+    await new Promise((r) => setTimeout(r, 300))  // let the app reach its loop
+  } catch (e) {
+    onLog?.(`setSignals not supported (${(e as Error).message}) — skipping reset`)
+  }
+}
+
 export async function openConfigConnection(
   port: SerialPort,
   cb: SerialConfigCallbacks = {},
 ): Promise<SerialConfigConn> {
   await openPortWithTimeout(port, 921600, 5000)
+  await resetClassicEsp32IntoApp(port, cb.onLog)
 
   const decoder = new TextDecoder()
   let buf = ''

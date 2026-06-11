@@ -217,9 +217,20 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
     // to. See user report 2026-04-30: "勝手に wi-fi設定に移って".
     setProbe('connecting', 'デバイス情報を確認中…')
     try {
-      // 1s timeout: 正常ファームなら数十 ms で応答、新品/未書込なら無応答
-      // でこちらが先に切る → onboarding Step 2 (書き込み) に即遷移できる。
-      const info = await c.send({ cmd: 'get_info' }, { timeoutMs: 1000 })
+      // Probe get_info with a few retries. A just-flashed / just-reset
+      // classic ESP32 (ATOM Lite) reboots when the config port opens and
+      // needs ~1 s to reach its loop, so a single 1 s shot is too eager
+      // and mislabels a flashed device as "未書込". 3 × 1.2 s (~3.6 s)
+      // still fails fast enough for a genuinely blank chip → Step 2.
+      let info: Record<string, unknown> | null = null
+      for (let attempt = 0; attempt < 3 && info === null; attempt++) {
+        try {
+          info = await c.send({ cmd: 'get_info' }, { timeoutMs: 1200 })
+        } catch {
+          if (attempt < 2) await new Promise((r) => setTimeout(r, 200))
+        }
+      }
+      if (info === null) throw new Error('get_info no response after retries')
       // get_info answered → publish conn + mode atomically.
       set({
         conn: c,
