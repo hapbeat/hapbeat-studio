@@ -19,26 +19,37 @@
 
 import { ESPLoader, type FlashOptions, Transport } from 'esptool-js'
 
+const ROM_BAUD = 115200
+
 /**
  * Pick a safe flashing baudrate for the connected bridge.
  *
  * FTDI USB-serial bridges (VID 0x0403 — M5 ATOM Lite etc.) corrupt the
- * stream after the stub switches to 921600: esptool warns "consider
+ * stream whenever the stub switches the baud up: esptool warns "consider
  * using a lower baud rate" and the next command dies with "Serial data
- * stream stopped". 460800 is solid on FTDI. S3-class boards use native
- * USB-CDC (VID 0x303A) where the baud value is ignored entirely, and
- * CP210x bridges (M5Stack Basic) handle 921600 — so this only slows
- * down the bridges that genuinely can't keep up.
+ * stream stopped" — observed at both 921600 and 460800 on some cables.
+ * Staying at the ROM baud (115200) skips the baud-change step entirely,
+ * which is the most reliable. It's slower (~1 MB ≈ 90 s) but a peripheral
+ * is flashed rarely. S3-class boards use native USB-CDC (VID 0x303A)
+ * where the baud value is ignored, and CP210x bridges (M5Stack Basic)
+ * handle 921600 — so only FTDI is slowed down here. eraseFlash/flashRegions
+ * additionally retry at 115200 on a stream-corruption error.
  */
 function preferredBaudrate(port: SerialPort, onLog?: (line: string) => void): number {
   try {
     const info = port.getInfo()
     if (info.usbVendorId === 0x0403) {
-      onLog?.('FTDI bridge detected (VID 0x0403) — using 460800 baud (921600 corrupts on FTDI)')
-      return 460800
+      onLog?.('FTDI bridge detected (VID 0x0403) — using 115200 baud (higher rates corrupt on FTDI)')
+      return ROM_BAUD
     }
   } catch { /* getInfo unavailable — fall through to default */ }
   return 921600
+}
+
+/** Errors that indicate baud-related serial corruption — retry slower. */
+function isStreamCorruption(err: unknown): boolean {
+  const m = String((err as Error)?.message ?? err)
+  return /Serial data stream stopped|Possible serial noise|Unable to verify flash chip|packet content transfer stopped|Timeout|did not respond/i.test(m)
 }
 
 export interface FlashProgress {
@@ -137,7 +148,25 @@ export async function eraseFlash(
   port: SerialPort,
   opts: Pick<FlashOptionsExt, 'onLog' | 'baudrate' | 'onProgress'> = {},
 ): Promise<void> {
-  const baudrate = opts.baudrate ?? preferredBaudrate(port, opts.onLog)
+  const first = opts.baudrate ?? preferredBaudrate(port, opts.onLog)
+  try {
+    await eraseFlashAt(port, first, opts)
+  } catch (err) {
+    if (first !== ROM_BAUD && isStreamCorruption(err)) {
+      opts.onLog?.(`erase failed at ${first} baud (${(err as Error).message}). Retrying at ${ROM_BAUD}…`)
+      await new Promise((r) => setTimeout(r, 300))  // let the chip reset settle
+      await eraseFlashAt(port, ROM_BAUD, opts)
+    } else {
+      throw err
+    }
+  }
+}
+
+async function eraseFlashAt(
+  port: SerialPort,
+  baudrate: number,
+  opts: Pick<FlashOptionsExt, 'onLog' | 'onProgress'>,
+): Promise<void> {
   const transport = new Transport(port, false)
   try {
     const loader = new ESPLoader({
@@ -205,7 +234,26 @@ export async function flashRegions(
   if (regions.length === 0) {
     throw new Error('flashRegions: no regions to write')
   }
-  const baudrate = opts.baudrate ?? preferredBaudrate(port, opts.onLog)
+  const first = opts.baudrate ?? preferredBaudrate(port, opts.onLog)
+  try {
+    await flashRegionsAt(port, regions, first, opts)
+  } catch (err) {
+    if (first !== ROM_BAUD && isStreamCorruption(err)) {
+      opts.onLog?.(`flash failed at ${first} baud (${(err as Error).message}). Retrying at ${ROM_BAUD}…`)
+      await new Promise((r) => setTimeout(r, 300))  // let the chip reset settle
+      await flashRegionsAt(port, regions, ROM_BAUD, opts)
+    } else {
+      throw err
+    }
+  }
+}
+
+async function flashRegionsAt(
+  port: SerialPort,
+  regions: ReadonlyArray<{ address: number; bytes: Uint8Array; label: string }>,
+  baudrate: number,
+  opts: FlashOptionsExt,
+): Promise<void> {
   const transport = new Transport(port, false)
   try {
     const loader = new ESPLoader({
