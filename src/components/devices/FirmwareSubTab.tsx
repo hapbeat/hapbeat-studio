@@ -7,6 +7,7 @@ import { useConfirm } from '@/components/common/useConfirm'
 import { useSerialMaster } from '@/stores/serialMaster'
 import {
   assertMergedImage,
+  isMergedImage,
   isWebSerialSupported,
 } from '@/utils/serialFlasher'
 import {
@@ -16,6 +17,7 @@ import {
   verifyPermission,
 } from '@/utils/localDirectory'
 import {
+  boardLabel,
   fetchFirmwareAppOta,
   fetchFirmwareSerialRegions,
   formatBytes,
@@ -246,8 +248,8 @@ export function FirmwareSubTab({
     const ok = await ask({
       title: '基板バージョン不一致',
       message: (
-        `選択中のファームウェアは ${expected} 用ですが、`
-        + `デバイスは ${knownBoard} を報告しています。\n`
+        `選択中のファームウェアは ${boardLabel(expected)} 用ですが、`
+        + `デバイスは ${boardLabel(knownBoard)} を報告しています。\n`
         + `異なるバージョン用のビルドを書き込むと OLED が表示されない等の `
         + `不具合が起きます。書き込みを続行しますか？\n\n`
         + `(${via} で書き込もうとしている)`
@@ -523,13 +525,7 @@ export function FirmwareSubTab({
     }
     const raw = await readLocalRaw()
     const APP_START = 0x10000
-    const isMerged =
-      raw.bytes.length >= APP_START + 1
-      && raw.bytes[0] === 0xe9
-      && raw.bytes[0x8000] === 0xaa
-      && raw.bytes[0x8001] === 0x50
-      && raw.bytes[APP_START] === 0xe9
-    if (isMerged) {
+    if (isMergedImage(raw.bytes)) {
       const sliced = raw.bytes.slice(APP_START)
       pushLog(
         'ota',
@@ -897,7 +893,7 @@ export function FirmwareSubTab({
                   <span className="form-section-sub-inline" style={{ fontSize: 12 }}>
                     {ROLE_LABEL[entryRole(selectedEntry)]}
                     {selectedEntry.transport && ` · ${TRANSPORT_LABEL[selectedEntry.transport]}`}
-                    {entryBoard(selectedEntry) && ` · ${entryBoard(selectedEntry)}`}
+                    {entryBoard(selectedEntry) && ` · ${boardLabel(entryBoard(selectedEntry))}`}
                   </span>
                 </div>
 

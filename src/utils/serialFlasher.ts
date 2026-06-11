@@ -65,30 +65,43 @@ export function isWebSerialSupported(): boolean {
 // below take an already-opened-by-master port as their first argument.
 
 /**
- * Validate that the supplied `.bin` is the merged image layout this
- * project standardized on (PlatformIO post-build outputs `firmware.bin`
- * as bootloader 0x0 + partitions 0x8000 + app 0x10000 in one file).
- * Throws if the markers don't match — better than silently writing a
- * non-merged image to 0x0 and bricking the bootloader area.
+ * Is the supplied `.bin` the merged image layout this project
+ * standardized on? (PlatformIO post-build emits one file addressed from
+ * 0x0: bootloader + partitions@0x8000 + app@0x10000.)
  *
- * Required markers:
- *   - byte[0x0]      == 0xE9   (bootloader image header)
+ * The bootloader offset is chip-dependent:
+ *   - ESP32-S3 / C3 class: bootloader at 0x0          → byte[0x0]    == 0xE9
+ *   - classic ESP32 (M5 ATOM Lite / M5Stack Basic):
+ *     bootloader at 0x1000, first 4 KB = 0xFF padding → byte[0x1000] == 0xE9
+ *
+ * Common markers:
  *   - byte[0x8000]   == 0xAA   (partition table magic, low byte)
  *   - byte[0x8001]   == 0x50   (partition table magic, high byte)
  *   - byte[0x10000]  == 0xE9   (app image header inside the blob)
  */
+export function isMergedImage(bin: Uint8Array): boolean {
+  if (bin.length < 0x10001) return false
+  const bootAt0    = bin[0] === 0xe9
+  const bootAt1000 = bin[0] === 0xff && bin[0x1000] === 0xe9
+  return (
+    (bootAt0 || bootAt1000)
+    && bin[0x8000] === 0xaa
+    && bin[0x8001] === 0x50
+    && bin[0x10000] === 0xe9
+  )
+}
+
+/**
+ * Throws when the markers don't match `isMergedImage` — better than
+ * silently writing a non-merged image to 0x0 and bricking the
+ * bootloader area.
+ */
 export function assertMergedImage(bin: Uint8Array): void {
-  if (
-    bin.length < 0x10001
-    || bin[0] !== 0xe9
-    || bin[0x8000] !== 0xaa
-    || bin[0x8001] !== 0x50
-    || bin[0x10000] !== 0xe9
-  ) {
+  if (!isMergedImage(bin)) {
     throw new Error(
-      'firmware bin is not a merged image (expected bootloader@0x0 + '
-      + 'partitions@0x8000 + app@0x10000). Build the firmware so '
-      + 'PlatformIO emits the merged firmware.bin.',
+      'firmware bin is not a merged image (expected bootloader@0x0 or '
+      + '@0x1000 + partitions@0x8000 + app@0x10000). Build the firmware '
+      + 'so PlatformIO emits the merged firmware_full_serial.bin.',
     )
   }
 }

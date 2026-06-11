@@ -22,6 +22,31 @@
  */
 
 import type { NodeRole, NodeTransport } from '@/types/manager'
+import { isMergedImage } from '@/utils/serialFlasher'
+
+/**
+ * Human-facing board names — the device/module (M5Stack Basic, M5 ATOM
+ * Lite, ...), not the MCU. Kept coarse: variants that share a module
+ * share a label. Unknown ids fall through verbatim.
+ */
+const BOARD_LABELS: Record<string, string> = {
+  duo_wl_v3: 'DuoWL v3',
+  band_wl_v2: 'BandWL v2',
+  band_wl_v3: 'BandWL v3',
+  band_wl_v4: 'BandWL v4',
+  atom_s3: 'M5 ATOM S3',
+  atom_lite: 'M5 ATOM Lite',
+  m5stack_basic: 'M5Stack Basic',
+  // legacy ids emitted by older builds
+  m5stack_core: 'M5Stack Basic',
+  atom_s3_sensor: 'M5 ATOM S3',
+  xiao_c6: 'XIAO ESP32-C6',
+}
+
+export function boardLabel(id?: string | null): string | null {
+  if (!id) return null
+  return BOARD_LABELS[id] ?? id
+}
 
 /** Per-artifact metadata. */
 export interface FirmwareArtifact {
@@ -304,17 +329,13 @@ export async function fetchFirmwareSerialRegions(
 ): Promise<FirmwareRegion[]> {
   const fw = await fetchArtifact(entry, 'firmware_full_serial')
   const b = fw.bytes
-  const isMerged =
-    b.length >= APP_START + 1
-    && b[0] === 0xe9
-    && b[0x8000] === 0xaa
-    && b[0x8001] === 0x50
-    && b[APP_START] === 0xe9
-  if (!isMerged) {
+  // Accepts both bootloader layouts (S3-class @0x0, classic ESP32 @0x1000
+  // behind 0xFF padding) — see serialFlasher.isMergedImage.
+  if (!isMergedImage(b)) {
     throw new Error(
       `firmware_full_serial.bin for env="${entry.env}" is not a merged image. `
       + 'Hapbeat builds must emit a merged firmware_full_serial.bin '
-      + '(bootloader 0x0 + partitions 0x8000 + app 0x10000).',
+      + '(bootloader + partitions 0x8000 + app 0x10000).',
     )
   }
   return [
