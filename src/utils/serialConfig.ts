@@ -104,24 +104,34 @@ async function openPortWithTimeout(
  * long as the port is open — `close()` cancels it and releases the
  * port lock.
  */
+/** Native USB-CDC VID (ESP32-S3 / C3 USB-JTAG-Serial, Espressif). */
+const NATIVE_USB_VID = 0x303a
+
 /**
- * Classic ESP32 (FTDI auto-reset, e.g. M5 ATOM Lite) needs a clean reset
- * into the **app** after the config port is opened — otherwise the chip
- * can be left in the ROM bootloader (from a prior esptool session) or
- * mid-reset by the open's default DTR/RTS state, so it never answers
- * get_info. We pulse EN with IO0 held high (esptool's classic reset
- * sequence). S3-class boards use native USB-CDC (no external auto-reset)
- * and are left untouched so the working path doesn't regress.
+ * Classic ESP32 boards need a clean reset into the **app** after the
+ * config port is opened — otherwise the chip can be left in the ROM
+ * bootloader (from a prior esptool session) or mid-reset by the open's
+ * default DTR/RTS state, so it never answers get_info. We pulse EN with
+ * IO0 held high (esptool's classic reset sequence).
+ *
+ * Scope by USB VID: native USB-CDC (S3 / C3, 0x303A) has no external
+ * auto-reset circuit and is left untouched so the working wearable path
+ * doesn't regress. Everything else with a known VID is a classic ESP32
+ * behind a USB-serial bridge — FTDI (0x0403, M5 ATOM Lite), CP210x
+ * (0x10C4, M5Stack Basic/Core), CH340 (0x1A86) — all using the standard
+ * DTR=IO0 / RTS=EN auto-reset circuit, so the same sequence applies.
  */
 async function resetClassicEsp32IntoApp(
   port: SerialPort,
   onLog?: (line: string) => void,
 ): Promise<void> {
-  let isFtdi = false
-  try { isFtdi = port.getInfo().usbVendorId === 0x0403 } catch { /* unknown */ }
-  if (!isFtdi) return
+  let vid: number | undefined
+  try { vid = port.getInfo().usbVendorId } catch { /* getInfo unavailable */ }
+  // Unknown VID → leave alone (can't tell if it's native USB). Native
+  // USB-CDC → no external reset circuit, skip.
+  if (vid === undefined || vid === NATIVE_USB_VID) return
   try {
-    onLog?.('classic ESP32 (FTDI) — resetting into app firmware')
+    onLog?.(`classic ESP32 (bridge VID 0x${vid.toString(16)}) — resetting into app firmware`)
     // IO0 high (DTR false) throughout → run app, not bootloader.
     await port.setSignals({ dataTerminalReady: false, requestToSend: true })   // EN low (reset)
     await new Promise((r) => setTimeout(r, 120))
