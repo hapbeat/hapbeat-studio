@@ -841,8 +841,9 @@ export function FirmwareSubTab({
               >
                 {entriesShown.map((e) => {
                   const isSelected = source === 'library' && libSelected === e.env
-                  const tp = e.transport ? TRANSPORT_LABEL[e.transport] : null
-                  const role = entryRole(e)
+                  // The label already reads "用途 (デバイス名)" — keep the
+                  // card minimal; role/transport/version live in the detail
+                  // panel below the grid, not on every card.
                   return (
                     <button
                       key={e.env}
@@ -854,14 +855,9 @@ export function FirmwareSubTab({
                         setSource('library')
                         setLibSelected(e.env)
                       }}
-                      title={`${e.env}${e.repo ? ` (${e.repo})` : ''}`}
+                      title={`${entryLabel(e)} — ${e.env}${e.fwVersion ? ` · v${e.fwVersion}` : ''}`}
                     >
                       <span className="firmware-variant-cell-label">{entryLabel(e)}</span>
-                      <span className="firmware-variant-cell-meta">
-                        {role !== 'receiver' && <span>{ROLE_LABEL[role]}</span>}
-                        {tp && <span className="firmware-variant-cell-tp">{tp}</span>}
-                        {e.fwVersion && <span className="firmware-variant-cell-ver">v{e.fwVersion}</span>}
-                      </span>
                     </button>
                   )
                 })}

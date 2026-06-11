@@ -1014,30 +1014,11 @@
   box-shadow: inset 0 0 0 1px var(--accent);
 }
 .firmware-variant-cell-label {
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 600;
-}
-.firmware-variant-cell-meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-.firmware-variant-cell-tp {
-  padding: 1px 6px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-}
-.firmware-variant-cell.selected .firmware-variant-cell-tp {
-  border-color: var(--accent);
-  color: var(--accent-light);
-}
-.firmware-variant-cell-ver {
-  font-family: var(--font-mono);
 }
 
 /* USB-serial driver help (onboarding Step 1 / firmware USB Serial section). */
