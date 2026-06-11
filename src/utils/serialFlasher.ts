@@ -19,6 +19,28 @@
 
 import { ESPLoader, type FlashOptions, Transport } from 'esptool-js'
 
+/**
+ * Pick a safe flashing baudrate for the connected bridge.
+ *
+ * FTDI USB-serial bridges (VID 0x0403 — M5 ATOM Lite etc.) corrupt the
+ * stream after the stub switches to 921600: esptool warns "consider
+ * using a lower baud rate" and the next command dies with "Serial data
+ * stream stopped". 460800 is solid on FTDI. S3-class boards use native
+ * USB-CDC (VID 0x303A) where the baud value is ignored entirely, and
+ * CP210x bridges (M5Stack Basic) handle 921600 — so this only slows
+ * down the bridges that genuinely can't keep up.
+ */
+function preferredBaudrate(port: SerialPort, onLog?: (line: string) => void): number {
+  try {
+    const info = port.getInfo()
+    if (info.usbVendorId === 0x0403) {
+      onLog?.('FTDI bridge detected (VID 0x0403) — using 460800 baud (921600 corrupts on FTDI)')
+      return 460800
+    }
+  } catch { /* getInfo unavailable — fall through to default */ }
+  return 921600
+}
+
 export interface FlashProgress {
   /** 0..100 */
   percent: number
@@ -115,7 +137,7 @@ export async function eraseFlash(
   port: SerialPort,
   opts: Pick<FlashOptionsExt, 'onLog' | 'baudrate' | 'onProgress'> = {},
 ): Promise<void> {
-  const baudrate = opts.baudrate ?? 921600
+  const baudrate = opts.baudrate ?? preferredBaudrate(port, opts.onLog)
   const transport = new Transport(port, false)
   try {
     const loader = new ESPLoader({
@@ -183,7 +205,7 @@ export async function flashRegions(
   if (regions.length === 0) {
     throw new Error('flashRegions: no regions to write')
   }
-  const baudrate = opts.baudrate ?? 921600
+  const baudrate = opts.baudrate ?? preferredBaudrate(port, opts.onLog)
   const transport = new Transport(port, false)
   try {
     const loader = new ESPLoader({
