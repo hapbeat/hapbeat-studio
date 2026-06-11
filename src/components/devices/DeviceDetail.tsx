@@ -84,12 +84,14 @@ export function DeviceDetail() {
   const setDebugDump = useDeviceStore((s) => s.setDebugDump)
   const setKitList = useDeviceStore((s) => s.setKitList)
   const setSensorMapping = useDeviceStore((s) => s.setSensorMapping)
+  const setSensorReading = useDeviceStore((s) => s.setSensorReading)
   const infoCache = useDeviceStore((s) => s.infoCache)
   const wifiStatusCache = useDeviceStore((s) => s.wifiStatusCache)
   const wifiProfilesCache = useDeviceStore((s) => s.wifiProfilesCache)
   const debugDumpCache = useDeviceStore((s) => s.debugDumpCache)
   const kitListCache = useDeviceStore((s) => s.kitListCache)
   const sensorMappingCache = useDeviceStore((s) => s.sensorMappingCache)
+  const sensorReadingCache = useDeviceStore((s) => s.sensorReadingCache)
 
   const masterMode = useSerialMaster((s) => s.mode)
   const masterInfo = useSerialMaster((s) => s.info)
@@ -182,6 +184,7 @@ export function DeviceDetail() {
         mqtt_port: p.mqtt_port as number | undefined,
         mqtt_running: p.mqtt_running as boolean | undefined,
         mappings_count: p.mappings_count as number | undefined,
+        sensor_type: p.sensor_type as string | undefined,
         // SoftAP extension fields (firmware ≥ v0.1.0)
         mode: p.mode as 'sta' | 'ap' | undefined,
         ap_ssid: p.ap_ssid as string | undefined,
@@ -221,6 +224,22 @@ export function DeviceDetail() {
         ?? ((p.data as { mappings?: SensorMapping[] } | undefined)?.mappings)
         ?? []
       setSensorMapping(p.device, maps)
+    } else if (t === 'sensor_reading_result' && typeof p.device === 'string') {
+      // Live tuning view: accept `data.{r,g,b,...}` (firmware shape) or
+      // top-level fields. Error responses (sensor not ready) are skipped —
+      // the UI keeps showing the last good sample with its age.
+      const d = (p.data as Record<string, unknown> | undefined) ?? p
+      if (typeof d.r === 'number' && typeof d.g === 'number' && typeof d.b === 'number') {
+        setSensorReading(p.device, {
+          sensor: d.sensor as string | undefined,
+          r: d.r as number,
+          g: d.g as number,
+          b: d.b as number,
+          clear: d.clear as number | undefined,
+          key: d.key as string | undefined,
+          age_ms: d.age_ms as number | undefined,
+        })
+      }
     } else if (t === 'kit_list_result' && typeof p.device === 'string') {
       const kits = (p.kits as Array<{
         kit_id: string
@@ -268,6 +287,7 @@ export function DeviceDetail() {
     setDebugDump,
     setKitList,
     setSensorMapping,
+    setSensorReading,
   ])
 
   useEffect(() => {
@@ -360,6 +380,7 @@ export function DeviceDetail() {
         mqtt_port: masterInfo.mqtt_port,
         mqtt_running: masterInfo.mqtt_running,
         mappings_count: masterInfo.mappings_count,
+        sensor_type: masterInfo.sensor_type,
       } : undefined)
     : infoCache[selectedIp]
   const wifiStatus = transport.isSerial
@@ -371,6 +392,7 @@ export function DeviceDetail() {
   const debugDump = debugDumpCache[selectedIp]
   const kitList = kitListCache[selectedIp]
   const sensorMapping = sensorMappingCache[selectedIp]
+  const sensorReading = sensorReadingCache[selectedIp]
   const apInfo = {
     mode: cachedInfo?.mode,
     ap_ssid: cachedInfo?.ap_ssid,
@@ -517,6 +539,8 @@ export function DeviceDetail() {
           <SensorMappingSection
             device={device}
             mappings={sensorMapping}
+            reading={sensorReading}
+            sensorType={cachedInfo?.sensor_type}
             sendTo={sendTo}
             onRefresh={() => sendTo({ type: 'get_sensor_mapping', payload: {} })}
           />

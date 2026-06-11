@@ -1040,6 +1040,45 @@
   font-family: var(--font-mono);
 }
 
+/* Sensor live reading panel (mapping tab) — swatch + RGB + matched key. */
+.sensor-live {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 12px;
+  margin: 4px 0 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  min-height: 40px;
+}
+.sensor-live-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  border: 1px solid var(--border-light);
+  background: transparent;
+  flex-shrink: 0;
+}
+.sensor-live-val {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+.sensor-live-clear {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.sensor-live-key {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+.sensor-live-key.match {
+  color: var(--accent-light);
+  font-weight: 700;
+}
+
 /* Version picker (latest + archive) inside the variant detail panel. */
 .firmware-version-row {
   display: flex;

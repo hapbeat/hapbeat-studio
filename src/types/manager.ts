@@ -28,6 +28,22 @@ export interface SensorColorMatch {
   b_max?: number
 }
 
+/** Live sensor reading (get_sensor_reading) — Studio's threshold-tuning view.
+ *  r/g/b are clear-normalized 0-255, the same scale as SensorColorMatch. */
+export interface SensorReading {
+  /** Sensor hardware type, e.g. "tcs34725". */
+  sensor?: string
+  r: number
+  g: number
+  b: number
+  /** Raw clear (brightness) value, informational. */
+  clear?: number
+  /** Mapping key currently matching this reading ("" = none). */
+  key?: string
+  /** Milliseconds since the sample was taken. */
+  age_ms?: number
+}
+
 /** One sensor → event mapping row (the "color → event" editor model). */
 export interface SensorMapping {
   /** classification label, e.g. a color name */
@@ -118,6 +134,7 @@ export interface StudioToManagerMessage {
     | 'set_broker_config'    // broker (static_octet / port)
     | 'set_sensor_mapping'   // sensor
     | 'get_sensor_mapping'   // sensor
+    | 'get_sensor_reading'   // sensor (live tuning view)
   payload: Record<string, unknown>
 }
 
@@ -147,6 +164,7 @@ export interface ManagerToStudioMessage {
     | 'ap_status_result'
     | 'oled_brightness_result'
     | 'sensor_mapping_result'
+    | 'sensor_reading_result'
     | 'error'
     | 'pong'
   payload: Record<string, unknown>
@@ -210,6 +228,8 @@ export interface GetInfoResult {
   mqtt_running?: boolean
   /** Number of sensor→event mappings configured (sensor). */
   mappings_count?: number
+  /** Sensor hardware type, e.g. "tcs34725" (sensor). */
+  sensor_type?: string
   error?: string
 }
 

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { NodeRole, NodeTransport, SensorMapping } from '@/types/manager'
+import type { NodeRole, NodeTransport, SensorMapping, SensorReading } from '@/types/manager'
 
 const STORAGE_KEY_SELECTED = 'hapbeat-studio-selected-device'
 const STORAGE_KEY_SELECTED_SET = 'hapbeat-studio-selected-devices'
@@ -78,6 +78,7 @@ interface DeviceState {
     mqtt_port?: number
     mqtt_running?: boolean
     mappings_count?: number
+    sensor_type?: string
   }>
 
   /** Per-IP cache of the most recent get_wifi_status response. */
@@ -112,6 +113,10 @@ interface DeviceState {
   /** Per-IP cache of the most recent get_sensor_mapping response
    *  (role = sensor). The "color → event" editor reads/writes this. */
   sensorMappingCache: Record<string, SensorMapping[]>
+
+  /** Per-IP latest live sensor reading (get_sensor_reading, polled ~1 Hz
+   *  while the mapping tab is open). Ephemeral — never persisted. */
+  sensorReadingCache: Record<string, SensorReading>
 
   selectDevice: (ip: string | null) => void
   toggleSelect: (ip: string) => void
@@ -158,6 +163,7 @@ interface DeviceState {
   setDebugDump: (ip: string, dump: Record<string, unknown>) => void
   setKitList: (ip: string, kits: DeviceState['kitListCache'][string]) => void
   setSensorMapping: (ip: string, mappings: SensorMapping[]) => void
+  setSensorReading: (ip: string, reading: SensorReading) => void
   clearCachesFor: (ip: string) => void
 }
 
@@ -242,6 +248,7 @@ export const useDeviceStore = create<DeviceState>((set) => ({
   debugDumpCache: {},
   kitListCache: {},
   sensorMappingCache: {},
+  sensorReadingCache: {},
   lastFlashedBoard: initialLastFlashedBoard,
 
   selectDevice: (ip) => {
@@ -387,6 +394,9 @@ export const useDeviceStore = create<DeviceState>((set) => ({
   setSensorMapping: (ip, mappings) =>
     set((s) => ({ sensorMappingCache: { ...s.sensorMappingCache, [ip]: mappings } })),
 
+  setSensorReading: (ip, reading) =>
+    set((s) => ({ sensorReadingCache: { ...s.sensorReadingCache, [ip]: reading } })),
+
   clearCachesFor: (ip) =>
     set((s) => {
       const info = { ...s.infoCache }
@@ -395,12 +405,14 @@ export const useDeviceStore = create<DeviceState>((set) => ({
       const dump = { ...s.debugDumpCache }
       const kits = { ...s.kitListCache }
       const maps = { ...s.sensorMappingCache }
+      const readings = { ...s.sensorReadingCache }
       delete info[ip]
       delete wifi[ip]
       delete profiles[ip]
       delete dump[ip]
       delete kits[ip]
       delete maps[ip]
+      delete readings[ip]
       return {
         infoCache: info,
         wifiStatusCache: wifi,
@@ -408,6 +420,7 @@ export const useDeviceStore = create<DeviceState>((set) => ({
         debugDumpCache: dump,
         kitListCache: kits,
         sensorMappingCache: maps,
+        sensorReadingCache: readings,
       }
     }),
 }))

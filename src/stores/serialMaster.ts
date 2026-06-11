@@ -51,6 +51,7 @@ export interface SerialDeviceInfo {
   mqtt_port?: number
   mqtt_running?: boolean
   mappings_count?: number
+  sensor_type?: string
 }
 
 /** Parse a firmware get_info JSON into a SerialDeviceInfo (shared by
@@ -77,6 +78,7 @@ function parseSerialInfo(r: Record<string, unknown>): SerialDeviceInfo {
     mqtt_port: r.mqtt_port as number | undefined,
     mqtt_running: r.mqtt_running as boolean | undefined,
     mappings_count: r.mappings_count as number | undefined,
+    sensor_type: r.sensor_type as string | undefined,
   }
 }
 

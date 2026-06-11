@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { DeviceInfo, ManagerMessage, SensorMapping } from '@/types/manager'
+import type { DeviceInfo, ManagerMessage, SensorColorMatch, SensorMapping, SensorReading } from '@/types/manager'
 import { useLibraryStore } from '@/stores/libraryStore'
 
 /**
@@ -311,15 +311,39 @@ function emptyMapping(): SensorMapping {
   return { key: '', match: {}, event_id: '', target: '', gain: 1.0 }
 }
 
+/** Capture tolerance: 現在値を取り込む sets min/max = reading ± this. */
+const CAPTURE_TOLERANCE = 20
+
+/** Does a reading fall inside a row's RGB threshold box? */
+function readingMatches(m: SensorColorMatch, rd: SensorReading): boolean {
+  if (m.r_min != null && rd.r < m.r_min) return false
+  if (m.r_max != null && rd.r > m.r_max) return false
+  if (m.g_min != null && rd.g < m.g_min) return false
+  if (m.g_max != null && rd.g > m.g_max) return false
+  if (m.b_min != null && rd.b < m.b_min) return false
+  if (m.b_max != null && rd.b > m.b_max) return false
+  return true
+}
+
+const SENSOR_TYPE_LABEL: Record<string, string> = {
+  tcs34725: 'TCS34725 (カラー)',
+}
+
 export function SensorMappingSection({
   device,
   mappings,
+  reading,
+  sensorType,
   sendTo,
   onRefresh,
 }: {
   device: DeviceInfo
   /** Loaded mappings from the device (get_sensor_mapping result). */
   mappings?: SensorMapping[]
+  /** Latest live reading (polled while this tab is open). */
+  reading?: SensorReading
+  /** Sensor hardware type from get_info (e.g. "tcs34725"). */
+  sensorType?: string
   sendTo: (msg: ManagerMessage) => void
   onRefresh: () => void
 }) {
@@ -342,6 +366,36 @@ export function SensorMappingSection({
     // onRefresh identity is unstable (inline arrow); guarded by the ref.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [device.ipAddress, device.online])
+
+  // Live reading poll (~1 Hz) while this tab is open and the device online.
+  // sendTo identity changes per render — keep the latest in a ref so the
+  // interval isn't torn down and re-created every second.
+  const sendToRef = useRef(sendTo)
+  sendToRef.current = sendTo
+  useEffect(() => {
+    if (!device.online) return
+    const tick = () => sendToRef.current({ type: 'get_sensor_reading', payload: {} })
+    tick()
+    const id = window.setInterval(tick, 1000)
+    return () => window.clearInterval(id)
+  }, [device.ipAddress, device.online])
+
+  // Fill a row's thresholds from the current live reading (± tolerance).
+  const captureFromReading = (i: number) => {
+    if (!reading) return
+    const c = (v: number) => Math.max(0, Math.min(255, v))
+    setRows((rs) =>
+      rs.map((r, idx) => idx === i ? {
+        ...r,
+        match: {
+          r_min: c(reading.r - CAPTURE_TOLERANCE), r_max: c(reading.r + CAPTURE_TOLERANCE),
+          g_min: c(reading.g - CAPTURE_TOLERANCE), g_max: c(reading.g + CAPTURE_TOLERANCE),
+          b_min: c(reading.b - CAPTURE_TOLERANCE), b_max: c(reading.b + CAPTURE_TOLERANCE),
+        },
+      } : r),
+    )
+    setDirty(true)
+  }
 
   // Available event ids from the local Kit library (datalist suggestions).
   const eventIds = useLibraryStore((s) => s.kits)
@@ -398,7 +452,7 @@ export function SensorMappingSection({
         <span>
           センサ → イベント マッピング
           <span className="form-section-sub-inline">
-            {' '}— 検出値ごとに発火するイベントを割り当てる
+            {' '}— {sensorType ? (SENSOR_TYPE_LABEL[sensorType] ?? sensorType) : 'センサ'} の検出値ごとに発火するイベントを割り当てる
           </span>
         </span>
         <button
@@ -411,6 +465,34 @@ export function SensorMappingSection({
         </button>
       </div>
 
+      {/* Live reading — tune thresholds while watching the actual value. */}
+      <div className="sensor-live">
+        <span
+          className="sensor-live-swatch"
+          style={reading ? { background: `rgb(${reading.r}, ${reading.g}, ${reading.b})` } : undefined}
+          title="現在の検出色 (clear 正規化)"
+        />
+        {reading ? (
+          <>
+            <span className="sensor-live-val mono">R {reading.r}</span>
+            <span className="sensor-live-val mono">G {reading.g}</span>
+            <span className="sensor-live-val mono">B {reading.b}</span>
+            {reading.clear != null && (
+              <span className="sensor-live-clear">明るさ {reading.clear}</span>
+            )}
+            {reading.key
+              ? <span className="sensor-live-key match">▶ {reading.key}</span>
+              : <span className="sensor-live-key">一致なし</span>}
+          </>
+        ) : (
+          <span className="form-status muted" style={{ margin: 0 }}>
+            {device.online
+              ? 'センサ値を取得中… (センサ未接続 / 暗すぎる場合は表示されません)'
+              : 'デバイスがオフラインです'}
+          </span>
+        )}
+      </div>
+
       <datalist id="sensor-mapping-event-ids">
         {eventIdOptions.map((id) => <option key={id} value={id} />)}
       </datalist>
@@ -421,11 +503,19 @@ export function SensorMappingSection({
         </div>
       )}
 
-      {rows.map((r, i) => (
+      {rows.map((r, i) => {
+        const isLive = !!reading && readingMatches(r.match, reading)
+        return (
         <div
           key={i}
           className="form-section"
-          style={{ padding: 10, marginTop: 8, border: '1px solid var(--border)', borderRadius: 4 }}
+          style={{
+            padding: 10,
+            marginTop: 8,
+            border: `1px solid ${isLive ? 'var(--accent)' : 'var(--border)'}`,
+            borderRadius: 4,
+            ...(isLive ? { boxShadow: 'inset 0 0 0 1px var(--accent)' } : {}),
+          }}
         >
           <div className="form-row">
             <label>キー</label>
@@ -478,6 +568,15 @@ export function SensorMappingSection({
                   />
                 </span>
               ))}
+              <button
+                className="form-button-secondary"
+                onClick={() => captureFromReading(i)}
+                disabled={!device.online || !reading}
+                title={`現在の検出値 ±${CAPTURE_TOLERANCE} をしきい値にセット`}
+                style={{ fontSize: 12, padding: '3px 8px' }}
+              >
+                現在値を取り込む
+              </button>
             </div>
             <span />
           </div>
@@ -527,7 +626,8 @@ export function SensorMappingSection({
             <span />
           </div>
         </div>
-      ))}
+        )
+      })}
 
       <div className="form-action-row" style={{ marginTop: 10 }}>
         <button className="form-button-secondary" onClick={addRow} disabled={!device.online}>

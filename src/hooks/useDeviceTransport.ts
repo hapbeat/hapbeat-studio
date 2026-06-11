@@ -25,6 +25,7 @@ const SERIAL_GET_CMD_TO_RESULT: Record<string, string> = {
   get_ap_status: 'ap_status_result',
   kit_list: 'kit_list_result',
   get_sensor_mapping: 'sensor_mapping_result',
+  get_sensor_reading: 'sensor_reading_result',
 }
 
 /**
