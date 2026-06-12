@@ -101,6 +101,14 @@ export interface FirmwareLibraryEntry {
   /** Optional one-line description. */
   description?: string
   /**
+   * Dev-server source: "live" = present in .pio/build now; "cache" = a
+   * snapshot of a previously-built env that .pio has since pruned (still
+   * flashable, but possibly older). Absent in prod (always live release).
+   */
+  source?: 'live' | 'cache'
+  /** Epoch ms the cache snapshot was taken (dev `source:"cache"` only). */
+  cachedAt?: number
+  /**
    * All published versions, newest first (archive support — users can
    * roll back to an older release). The top-level fwVersion/appOta/
    * fullSerial mirror versions[0]. Absent in dev mode (single build).

@@ -71,6 +71,78 @@ async function readVariantMeta(root: string, env: string): Promise<DevVariantMet
   }
 }
 
+// ---- dev snapshot cache ---------------------------------------------------
+// `.pio/build/<env>/` is volatile: building one env (or editing platformio.ini,
+// or a parallel session sharing `.pio`) prunes the other envs' subdirs, so the
+// firmware list "loses" everything except the last-built env. We snapshot each
+// live env's bins to a persistent cache outside `.pio` and serve the union
+// (live preferred) so previously-seen envs stay flashable. See
+// instructions-firmware-dev-list-disappears.
+const CACHE_ROOT = resolve(__dirname, 'node_modules/.cache/hapbeat-firmware-dev')
+const BIN_STEMS = ['firmware_app_ota', 'firmware_full_serial', 'firmware'] as const
+
+interface CachedMeta {
+  repo?: string
+  fwVersion?: string
+  cachedAt: number
+  variant?: DevVariantMeta
+}
+
+/** Copy a live env's non-empty bins + meta into the cache (best-effort). */
+async function snapshotEnvToCache(
+  env: string, repo: string, root: string,
+  fwVersion: string | undefined, variant: DevVariantMeta,
+): Promise<void> {
+  try {
+    const cacheDir = join(CACHE_ROOT, env)
+    let copied = false
+    for (const stem of BIN_STEMS) {
+      const src = join(root, env, `${stem}.bin`)
+      try {
+        const st = await fs.stat(src)
+        if (!st.isFile() || st.size === 0) continue
+        await fs.mkdir(cacheDir, { recursive: true })
+        await fs.copyFile(src, join(cacheDir, `${stem}.bin`))
+        copied = true
+      } catch { /* missing stem */ }
+    }
+    if (copied) {
+      const meta: CachedMeta = { repo, fwVersion, cachedAt: Date.now(), variant }
+      await fs.writeFile(join(cacheDir, 'meta.json'), JSON.stringify(meta))
+    }
+  } catch { /* cache write is best-effort */ }
+}
+
+interface CacheEntry {
+  meta: CachedMeta
+  appOta?: { size: number; mtime: number; path: string }
+  fullSerial?: { size: number; mtime: number; path: string }
+}
+
+/** Read all cached envs that still have at least one bin. */
+async function readCachedEnvs(): Promise<Map<string, CacheEntry>> {
+  const out = new Map<string, CacheEntry>()
+  let envs: string[]
+  try {
+    envs = (await fs.readdir(CACHE_ROOT, { withFileTypes: true }))
+      .filter((e) => e.isDirectory()).map((e) => e.name)
+  } catch {
+    return out
+  }
+  for (const env of envs) {
+    let meta: CachedMeta
+    try {
+      meta = JSON.parse(await fs.readFile(join(CACHE_ROOT, env, 'meta.json'), 'utf-8'))
+    } catch { continue }
+    const appOta = await statArtifact(CACHE_ROOT, env, 'firmware_app_ota.bin')
+    let fullSerial = await statArtifact(CACHE_ROOT, env, 'firmware_full_serial.bin')
+    if (!fullSerial) fullSerial = await statArtifact(CACHE_ROOT, env, 'firmware.bin')
+    if (!appOta && !fullSerial) continue
+    out.set(env, { meta, appOta, fullSerial })
+  }
+  return out
+}
+
 function firmwareDevPlugin(buildRepos: FirmwareBuildRepo[]): Plugin {
   return {
     name: 'hapbeat-firmware-dev',
@@ -80,7 +152,7 @@ function firmwareDevPlugin(buildRepos: FirmwareBuildRepo[]): Plugin {
         try {
           const url = req.url ?? ''
           if (url === '/list' || url === '/list/') {
-            const items: Array<{
+            interface ListItem {
               env: string
               repo?: string
               role?: string
@@ -92,8 +164,15 @@ function firmwareDevPlugin(buildRepos: FirmwareBuildRepo[]): Plugin {
               fwVersion?: string
               appOta?: { size: number; mtime: number; path: string }
               fullSerial?: { size: number; mtime: number; path: string }
-            }> = []
+              /** "live" = present in .pio/build now; "cache" = snapshot of a
+               *  previously-built env that .pio has since pruned. */
+              source?: 'live' | 'cache'
+              /** Epoch ms when a cache entry was snapshotted (cache only). */
+              cachedAt?: number
+            }
+            const items: ListItem[] = []
             const seenEnv = new Set<string>()
+            // 1) Live envs — snapshot each into the cache as we go.
             for (const { repo, root } of buildRepos) {
               const envs = await safeReaddir(root)
               for (const env of envs) {
@@ -104,8 +183,6 @@ function firmwareDevPlugin(buildRepos: FirmwareBuildRepo[]): Plugin {
                   fullSerial = await statArtifact(root, env, 'firmware.bin')
                 }
                 if (!appOta && !fullSerial) continue
-                // First repo to own an env name wins (env names rarely
-                // collide across repos; warn if they do).
                 if (seenEnv.has(env)) {
                   // eslint-disable-next-line no-console
                   console.warn(`[firmware-dev] env "${env}" exists in multiple repos; keeping first`)
@@ -114,8 +191,19 @@ function firmwareDevPlugin(buildRepos: FirmwareBuildRepo[]): Plugin {
                 seenEnv.add(env)
                 const fwVersion = await readFirmwareVersion(root)
                 const variant = await readVariantMeta(root, env)
-                items.push({ env, repo, fwVersion, appOta, fullSerial, ...variant })
+                await snapshotEnvToCache(env, repo, root, fwVersion, variant)
+                items.push({ env, repo, fwVersion, appOta, fullSerial, ...variant, source: 'live' })
               }
+            }
+            // 2) Cache-only envs — previously seen but pruned from .pio now.
+            const cached = await readCachedEnvs()
+            for (const [env, { meta, appOta, fullSerial }] of cached) {
+              if (seenEnv.has(env)) continue   // live wins
+              items.push({
+                env, repo: meta.repo, fwVersion: meta.fwVersion,
+                appOta, fullSerial, ...(meta.variant ?? {}),
+                source: 'cache', cachedAt: meta.cachedAt,
+              })
             }
             items.sort((a, b) => a.env.localeCompare(b.env))
             res.setHeader('content-type', 'application/json')
@@ -134,11 +222,17 @@ function firmwareDevPlugin(buildRepos: FirmwareBuildRepo[]): Plugin {
               res.end('bad env name')
               return
             }
-            for (const { root } of buildRepos) {
-              const binPath = join(root, env, `${stem}.bin`)
+            // Live roots first (always newest), then the snapshot cache so a
+            // previously-built env stays flashable after .pio pruned it.
+            const candidates = [
+              ...buildRepos.map(({ root }) => join(root, env, `${stem}.bin`)),
+              join(CACHE_ROOT, env, `${stem}.bin`),
+            ]
+            for (const binPath of candidates) {
               try {
                 const data = await fs.readFile(binPath)
                 const st = await fs.stat(binPath)
+                if (st.size === 0) continue   // skip a half-written / empty bin
                 res.setHeader('content-type', 'application/octet-stream')
                 res.setHeader('cache-control', 'no-store, max-age=0')
                 res.setHeader('x-firmware-mtime', String(st.mtimeMs))
@@ -147,7 +241,7 @@ function firmwareDevPlugin(buildRepos: FirmwareBuildRepo[]): Plugin {
                 res.end(data)
                 return
               } catch {
-                /* try next repo root */
+                /* try next candidate */
               }
             }
             res.statusCode = 404

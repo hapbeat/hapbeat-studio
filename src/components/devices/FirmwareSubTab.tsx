@@ -894,6 +894,17 @@ export function FirmwareSubTab({
                   </span>
                 </div>
 
+                {/* Cache-sourced (dev): .pio pruned this env, so we're
+                  * serving the last snapshot — flag that it may be stale. */}
+                {selectedEntry.source === 'cache' && (
+                  <div className="form-status warn" style={{ marginTop: 4 }}>
+                    キャッシュ版を表示中
+                    {selectedEntry.cachedAt ? `（${formatMtime(selectedEntry.cachedAt)} 時点）` : ''}
+                    {' '}— このビルド成果物は現在 .pio/build に無いため、最後に
+                    ビルドしたスナップショットを提示しています。再ビルドすると最新に戻ります。
+                  </div>
+                )}
+
                 {/* Version picker — latest + archive (older releases stay
                   * downloadable so users can roll back anytime). */}
                 {baseEntry?.versions && baseEntry.versions.length > 1 && (
