@@ -143,17 +143,24 @@ async function resetClassicEsp32IntoApp(
 }
 
 /**
- * Config baud must match the firmware's `Serial.begin()`:
+ * Config baud must match the firmware's `Serial.begin()`, keyed on the USB
+ * bridge (not the MCU — the ESP32 UART itself is fine at 921600):
  *   - native USB-CDC (S3 / C3, VID 0x303A): 921600 (baud ignored anyway)
- *   - classic ESP32 behind a USB bridge (FTDI / CP210x / CH340): 115200,
- *     because 921600 over a real UART is unreliable on some cables — the
- *     firmware drops to 115200 on these boards, so Studio must too.
+ *   - CP210x (0x10C4, M5Stack Basic/Core): 921600 — reliable, its standard
+ *     flash baud, so that firmware keeps 921600.
+ *   - FTDI (0x0403, M5 ATOM Lite) / CH340 (0x1A86) / unknown: 230400 — 921600
+ *     is unreliable on these bridges/cables, so those firmwares standardize on
+ *     230400 (reliable on FTDI; config messages are tiny so speed is moot).
  */
+const BAUD_921600_VIDS = new Set([
+  NATIVE_USB_VID, // 0x303A native USB-CDC (S3 / C3)
+  0x10c4,         // CP210x (M5Stack Basic/Core)
+])
 function configBaudForPort(port: SerialPort): number {
   try {
-    if (port.getInfo().usbVendorId === NATIVE_USB_VID) return 921600
-  } catch { /* unknown — assume classic bridge */ }
-  return 115200
+    if (BAUD_921600_VIDS.has(port.getInfo().usbVendorId ?? -1)) return 921600
+  } catch { /* unknown — assume a flaky bridge */ }
+  return 230400
 }
 
 export async function openConfigConnection(
