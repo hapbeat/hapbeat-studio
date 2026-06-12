@@ -261,7 +261,8 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       await c.close().catch(() => { /* already closed */ })
       setProbe(
         'failed',
-        'ファームウェア未書込のようです。Step 2 で書き込みます…',
+        'デバイスから応答がありません。ファームウェア未書込の場合は Step 2 で書き込んでください。'
+        + '書込済みの場合はデバイスの電源を OFF→ON して再接続してください。',
       )
       return null
     }

@@ -142,11 +142,25 @@ async function resetClassicEsp32IntoApp(
   }
 }
 
+/**
+ * Config baud must match the firmware's `Serial.begin()`:
+ *   - native USB-CDC (S3 / C3, VID 0x303A): 921600 (baud ignored anyway)
+ *   - classic ESP32 behind a USB bridge (FTDI / CP210x / CH340): 115200,
+ *     because 921600 over a real UART is unreliable on some cables — the
+ *     firmware drops to 115200 on these boards, so Studio must too.
+ */
+function configBaudForPort(port: SerialPort): number {
+  try {
+    if (port.getInfo().usbVendorId === NATIVE_USB_VID) return 921600
+  } catch { /* unknown — assume classic bridge */ }
+  return 115200
+}
+
 export async function openConfigConnection(
   port: SerialPort,
   cb: SerialConfigCallbacks = {},
 ): Promise<SerialConfigConn> {
-  await openPortWithTimeout(port, 921600, 5000)
+  await openPortWithTimeout(port, configBaudForPort(port), 5000)
   await resetClassicEsp32IntoApp(port, cb.onLog)
 
   const decoder = new TextDecoder()
