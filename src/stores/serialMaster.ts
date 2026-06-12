@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { useLogStore } from '@/stores/logStore'
+import { useDeviceStore } from '@/stores/deviceStore'
 import type { NodeRole, NodeTransport } from '@/types/manager'
 import {
   isWebSerialSupported,
@@ -27,6 +28,79 @@ import { eraseFlash as eraseFlashImpl, flashRegions, type FlashProgress } from '
 
 export type SerialMasterMode = 'idle' | 'config' | 'flashing'
 export type ProbeKind = 'idle' | 'connecting' | 'success' | 'failed'
+
+// ---------------------------------------------------------------------
+// Port registry — every Web-Serial port this origin has been granted.
+//
+// Web Serial allows MULTIPLE ports to be open simultaneously (the
+// single-master invariant above is about one *consumer per port*, not
+// one port per browser). The registry tracks every granted & currently
+// connected port so the Devices sidebar can show them as cards — even
+// before any firmware is flashed (`requestPort` works on a blank chip;
+// only `getInfo()`'s VID/PID is known until a probe succeeds) — and so
+// the firmware tab can flash several boards sequentially in one click.
+//
+// Identity note: Web Serial does NOT expose COM port names/paths. The
+// stable identity within a session is the SerialPort object itself; we
+// assign incremental ids and label cards by bridge chip (VID) + probe
+// results.
+// ---------------------------------------------------------------------
+
+export type PortFlashState = 'idle' | 'waiting' | 'flashing' | 'done' | 'error'
+
+export interface SerialPortEntry {
+  id: string
+  vid?: number
+  pid?: number
+  /** Human bridge-chip label derived from VID (FTDI / CP210x / …). */
+  bridge: string
+  probe: ProbeKind
+  /** Last successful get_info for this port (manual probe / config). */
+  info: SerialDeviceInfo | null
+  flash: {
+    state: PortFlashState
+    progress: FlashProgress | null
+    message?: string
+  }
+}
+
+const portIdByPort = new WeakMap<SerialPort, string>()
+const portById = new Map<string, SerialPort>()
+let portIdCounter = 0
+
+function ensurePortId(port: SerialPort): string {
+  let id = portIdByPort.get(port)
+  if (!id) {
+    id = `usb-${++portIdCounter}`
+    portIdByPort.set(port, id)
+  }
+  portById.set(id, port)
+  return id
+}
+
+/** SerialPort handle for a registry id (undefined once unplugged). */
+export function serialPortForId(id: string): SerialPort | undefined {
+  return portById.get(id)
+}
+
+function bridgeLabelForVid(vid?: number): string {
+  switch (vid) {
+    case 0x303a: return 'USB-CDC (ESP32-S3/C3)'
+    case 0x0403: return 'FTDI'
+    case 0x10c4: return 'CP210x'
+    case 0x1a86: return 'CH340'
+    default: return vid !== undefined ? `VID 0x${vid.toString(16)}` : 'Serial'
+  }
+}
+
+/** Card display label: probed device name > bridge chip + VID:PID. */
+export function serialEntryLabel(e: SerialPortEntry): string {
+  if (e.info?.name) return e.info.name
+  const ids = e.vid !== undefined
+    ? ` (${e.vid.toString(16).padStart(4, '0')}:${(e.pid ?? 0).toString(16).padStart(4, '0')})`
+    : ''
+  return `${e.bridge}${ids}`
+}
 
 export interface SerialDeviceInfo {
   name?: string
@@ -127,6 +201,15 @@ interface SerialMasterState {
    *  watch this to trigger reactive updates beyond the named fields. */
   refreshTick: number
 
+  // ── port registry (multi-device) ────────────────────────
+  /** Every granted + currently-connected Web Serial port. */
+  knownPorts: SerialPortEntry[]
+  /** Registry id of the port the single-master flow holds (config /
+   *  flash). Lets the sidebar mark the active card. */
+  activePortId: string | null
+  /** Multi-select for the sequential flash (registry ids). */
+  selectedPortIds: string[]
+
   // ── actions ─────────────────────────────────────────────
   /**
    * Acquire a port via the COM picker (or reuse one we already hold).
@@ -157,6 +240,27 @@ interface SerialMasterState {
   /** Force a port re-selection (user wants to switch to a different
    *  Hapbeat). Releases the current state first. */
   rePick: () => Promise<SerialPort | null>
+
+  // ── port registry actions ───────────────────────────────
+  /** Re-sync `knownPorts` from `navigator.serial.getPorts()`. */
+  syncPorts: () => Promise<void>
+  /** Show the picker to grant one more port, then sync. */
+  addPort: () => Promise<void>
+  /** One-shot identity probe (open → get_info → close) for a card.
+   *  Refused while the master is busy (config conn open / flashing). */
+  probePort: (id: string) => Promise<void>
+  toggleSelectPort: (id: string) => void
+  /** Open the config conn on a specific registry port (sidebar card
+   *  "接続" button). Closes any other active conn first. */
+  openConfigFor: (id: string) => Promise<SerialConfigConn | null>
+  /** Sequentially flash the same regions onto several registry ports.
+   *  Per-port progress lands in each entry's `flash` slot; the overall
+   *  summary in `flashLastResult`. */
+  flashSelected: (
+    ids: string[],
+    regions: ReadonlyArray<{ address: number; bytes: Uint8Array; label: string }>,
+    opts?: { eraseAll?: boolean; compress?: boolean },
+  ) => Promise<void>
 }
 
 export const useSerialMaster = create<SerialMasterState>((set, get) => {
@@ -164,6 +268,16 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
 
   const setProbe = (kind: ProbeKind, message: string | null) =>
     set({ probeStatus: kind, probeMessage: message })
+
+  /** Stamp `port` + `activePortId` together so the sidebar card that
+   *  corresponds to the held port can render an "active" marker. */
+  const setHeldPort = (port: SerialPort | null) =>
+    set({ port, activePortId: port ? ensurePortId(port) : null })
+
+  const patchEntry = (id: string, patch: Partial<SerialPortEntry>) =>
+    set((s) => ({
+      knownPorts: s.knownPorts.map((e) => (e.id === id ? { ...e, ...patch } : e)),
+    }))
 
   /**
    * Internal — open `port` as a config conn, hook up disconnect
@@ -232,10 +346,15 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       }
       if (info === null) throw new Error('get_info no response after retries')
       // get_info answered → publish conn + mode atomically.
+      const parsed = parseSerialInfo(info)
+      // Role visibility diagnostic: when a node shows up with the wrong
+      // sub-tabs, this line tells us whether the firmware reported a
+      // role at all (old build) or the UI dropped it.
+      log(`get_info ok: role=${parsed.role ?? '(none)'} transport=${parsed.transport ?? '(none)'} fw=${parsed.fw ?? '?'} board=${parsed.board ?? '?'}`)
       set({
         conn: c,
         mode: 'config',
-        info: parseSerialInfo(info),
+        info: parsed,
       })
       // Best-effort Wi-Fi state — old firmware may lack these.
       try {
@@ -282,6 +401,9 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
     flashRunning: false,
     flashLastResult: null,
     refreshTick: 0,
+    knownPorts: [],
+    activePortId: null,
+    selectedPortIds: [],
 
     openConfig: async ({ forcePicker = false } = {}) => {
       const cur = get()
@@ -323,7 +445,8 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       const promptForPort = async (): Promise<SerialPort | null> => {
         try {
           const p = await pickConfigPort({ forcePicker: true })
-          set({ port: p })
+          setHeldPort(p)
+          void get().syncPorts()
           return p
         } catch (err) {
           const msg = (err as Error).message ?? String(err)
@@ -343,7 +466,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
             ? await promptForPort()
             : (await pickConfigPort({}).catch(() => null))
           if (!port) return null
-          set({ port })
+          setHeldPort(port)
         }
         // Defensive close: if the port was previously opened (e.g. by
         // an earlier session that didn't tear down cleanly), we'd hit
@@ -369,7 +492,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
         // 残してユーザー自身に判断させる方が UX が良い。
         if (/Failed to open serial port|InvalidStateError|already open|Failed to execute 'open'/.test(lastMsg)) {
           log(`stale port handle, re-prompting: ${lastMsg}`)
-          set({ port: null })
+          setHeldPort(null)
           const fresh = await promptForPort()
           if (!fresh) return null
           try { await fresh.close() } catch { /* ignore */ }
@@ -422,7 +545,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       if (!port) {
         try {
           port = await pickConfigPort()
-          set({ port })
+          setHeldPort(port)
         } catch (err) {
           if ((err as Error).name === 'AbortError') return
           set({ flashLastResult: { ok: false, message: `COM ポート選択失敗: ${(err as Error).message}` } })
@@ -480,7 +603,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
         // the Web Serial port object remembers the previous baud and
         // streams) and the next `port.open()` either fails or reads
         // garbage — symptom: "再接続できない without page reload".
-        set({ port: null })
+        setHeldPort(null)
         // Optional auto re-probe (kept for callers that explicitly
         // want it). Default is now 0 because USB-to-serial chips in
         // download mode require a manual power cycle to actually
@@ -523,7 +646,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       if (!port) {
         try {
           port = await pickConfigPort()
-          set({ port })
+          setHeldPort(port)
         } catch (err) {
           if ((err as Error).name === 'AbortError') return
           set({ flashLastResult: { ok: false, message: `COM ポート選択失敗: ${(err as Error).message}` } })
@@ -590,6 +713,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       }
       set({
         port: null,
+        activePortId: null,
         mode: 'idle',
         conn: null,
         info: null,
@@ -604,7 +728,8 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       await get().release()
       try {
         const port = await pickConfigPort({ forcePicker: true })
-        set({ port })
+        setHeldPort(port)
+        void get().syncPorts()
         return port
       } catch (err) {
         if ((err as Error).name !== 'AbortError') {
@@ -613,5 +738,236 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
         return null
       }
     },
+
+    // ── port registry actions ───────────────────────────────
+
+    syncPorts: async () => {
+      if (!isWebSerialSupported()) return
+      let ports: SerialPort[]
+      try {
+        ports = await navigator.serial.getPorts()
+      } catch (err) {
+        log(`syncPorts failed: ${(err as Error).message}`)
+        return
+      }
+      const prev = get().knownPorts
+      const entries: SerialPortEntry[] = ports.map((p) => {
+        const id = ensurePortId(p)
+        let vid: number | undefined
+        let pid: number | undefined
+        try {
+          const gi = p.getInfo()
+          vid = gi.usbVendorId
+          pid = gi.usbProductId
+        } catch { /* getInfo unavailable */ }
+        const old = prev.find((e) => e.id === id)
+        return {
+          id,
+          vid,
+          pid,
+          bridge: bridgeLabelForVid(vid),
+          probe: old?.probe ?? 'idle',
+          info: old?.info ?? null,
+          flash: old?.flash ?? { state: 'idle', progress: null },
+        }
+      })
+      const liveIds = new Set(entries.map((e) => e.id))
+      // Unplugged ports drop out of getPorts() — prune their handles
+      // and any selection so flashSelected can't target a ghost.
+      for (const id of [...portById.keys()]) {
+        if (!liveIds.has(id)) portById.delete(id)
+      }
+      set((s) => ({
+        knownPorts: entries,
+        selectedPortIds: s.selectedPortIds.filter((id) => liveIds.has(id)),
+      }))
+    },
+
+    addPort: async () => {
+      if (!isWebSerialSupported()) return
+      try {
+        const p = await navigator.serial.requestPort({})
+        ensurePortId(p)
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') {
+          log(`addPort failed: ${(err as Error).message}`)
+        }
+      }
+      await get().syncPorts()
+    },
+
+    probePort: async (id) => {
+      const { mode, flashRunning, activePortId, info } = get()
+      // Active config port: identity already known — just mirror it.
+      if (id === activePortId && mode === 'config' && info) {
+        patchEntry(id, { probe: 'success', info })
+        return
+      }
+      if (mode !== 'idle' || flashRunning) {
+        log(`probePort(${id}) refused: master busy (mode=${mode})`)
+        return
+      }
+      const port = portById.get(id)
+      if (!port) return
+      // A manual probe also acknowledges/clears the last flash outcome
+      // shown on the card (「書き込み完了」が消えない — 2026-06-13).
+      patchEntry(id, { probe: 'connecting', flash: { state: 'idle', progress: null } })
+      let c: SerialConfigConn | null = null
+      try {
+        try { await port.close() } catch { /* not open */ }
+        c = await openConfigConnection(port, {
+          onLog: (line) => useLogStore.getState().push('serial-cfg', `[probe:${id}] ${line}`),
+        })
+        let r: Record<string, unknown> | null = null
+        for (let attempt = 0; attempt < 3 && r === null; attempt++) {
+          try {
+            r = await c.send({ cmd: 'get_info' }, { timeoutMs: 1200 })
+          } catch {
+            if (attempt < 2) await new Promise((res) => setTimeout(res, 200))
+          }
+        }
+        if (r === null) throw new Error('get_info no response')
+        patchEntry(id, { probe: 'success', info: parseSerialInfo(r) })
+      } catch (err) {
+        log(`probePort(${id}) failed: ${(err as Error).message}`)
+        patchEntry(id, { probe: 'failed' })
+      } finally {
+        if (c) await c.close().catch(() => { /* already closed */ })
+      }
+    },
+
+    toggleSelectPort: (id) => {
+      set((s) => ({
+        selectedPortIds: s.selectedPortIds.includes(id)
+          ? s.selectedPortIds.filter((x) => x !== id)
+          : [...s.selectedPortIds, id],
+      }))
+    },
+
+    openConfigFor: async (id) => {
+      const port = portById.get(id)
+      if (!port) return null
+      if (get().flashRunning) return null
+      const { conn } = get()
+      if (conn) await get().closeConfig()
+      // Same acknowledgement as probePort — connecting supersedes the
+      // card's stale flash-done/error banner.
+      patchEntry(id, { flash: { state: 'idle', progress: null } })
+      setHeldPort(port)
+      const result = await get().openConfig()
+      if (result) {
+        // Mirror the conn's identity onto the registry card and make the
+        // pseudo-device the primary selection so the detail pane opens on
+        // it right away (the card itself is the only sidebar entry now —
+        // no separate serial pseudo-card in the LAN section).
+        const info = get().info
+        if (info) patchEntry(id, { probe: 'success', info })
+        useDeviceStore.getState().selectDevice(`serial:${info?.mac ?? 'active'}`)
+      }
+      return result
+    },
+
+    flashSelected: async (ids, regions, { eraseAll = false, compress = true } = {}) => {
+      if (get().flashRunning) {
+        log('flashSelected: refused — flash already running')
+        return
+      }
+      await get().syncPorts()
+      const targets = get().knownPorts.filter((e) => ids.includes(e.id))
+      if (targets.length === 0) {
+        set({ flashLastResult: { ok: false, message: '書き込み対象の USB デバイスが見つかりません (抜かれた可能性)' } })
+        return
+      }
+      // The config conn (if any) must be closed: one of the targets may
+      // be the active port, and esptool-js needs exclusive access.
+      const { conn } = get()
+      if (conn) {
+        log('flashSelected: closing active config conn')
+        await conn.close().catch(() => { /* already closed */ })
+        set({ conn: null, info: null, wifiStatus: null, wifiProfiles: [] })
+      }
+      set({ mode: 'flashing', flashRunning: true, flashLastResult: null })
+      const pushLog = useLogStore.getState().push
+      const totalBytes = regions.reduce((s, r) => s + r.bytes.length, 0)
+      pushLog('serial', `multi-flash → ${targets.length} 台 (${totalBytes.toLocaleString()} bytes each)`)
+      for (const e of targets) {
+        patchEntry(e.id, { flash: { state: 'waiting', progress: null } })
+      }
+      let okCount = 0
+      const failures: string[] = []
+      for (const e of targets) {
+        const label = serialEntryLabel(e)
+        const port = portById.get(e.id)
+        if (!port) {
+          failures.push(`${label}: ポートが見つかりません (抜かれた?)`)
+          patchEntry(e.id, { flash: { state: 'error', progress: null, message: 'port lost' } })
+          continue
+        }
+        patchEntry(e.id, { flash: { state: 'flashing', progress: { phase: 'connect', percent: 0 } } })
+        pushLog('serial', `[${label}] flash start`)
+        try {
+          try { await port.close() } catch { /* not open */ }
+          await flashRegions(port, regions, {
+            eraseAll,
+            compress,
+            onLog: (line) => pushLog('serial', `[${label}] ${line}`),
+            onProgress: (p) => patchEntry(e.id, { flash: { state: 'flashing', progress: p } }),
+          })
+          // Old probe identity is stale after a flash (board/role/fw may
+          // all change) — clear it so the card shows the bridge label
+          // until the next probe.
+          patchEntry(e.id, {
+            flash: { state: 'done', progress: { phase: 'done', percent: 100 } },
+            probe: 'idle',
+            info: null,
+          })
+          pushLog('serial', `[${label}] flash done`)
+          okCount++
+        } catch (err) {
+          const msg = (err as Error).message ?? String(err)
+          patchEntry(e.id, { flash: { state: 'error', progress: null, message: msg } })
+          pushLog('serial', `[${label}] flash FAILED: ${msg}`)
+          failures.push(`${label}: ${msg}`)
+        }
+      }
+      const ok = failures.length === 0
+      set({
+        mode: 'idle',
+        flashRunning: false,
+        flashLastResult: {
+          ok,
+          message: `複数台 Serial 書き込み: 成功 ${okCount} / 失敗 ${failures.length}`
+            + (failures.length > 0 ? `\n${failures.join('\n')}` : '')
+            + '\n👉 各デバイスの電源を OFF→ON してから接続してください。',
+        },
+      })
+      // Drop the held single-master port handle — it may be one of the
+      // just-flashed ports and is now in the half-closed post-esptool
+      // state (same rationale as the single flash path).
+      setHeldPort(null)
+      // Clear per-card progress after a beat (mirror single-flash UX).
+      setTimeout(() => {
+        for (const e of targets) {
+          const cur = get().knownPorts.find((x) => x.id === e.id)
+          if (cur && (cur.flash.state === 'done' || cur.flash.state === 'error')) {
+            patchEntry(e.id, { flash: { ...cur.flash, progress: null } })
+          }
+        }
+      }, 5000)
+    },
   }
 })
+
+// Keep the registry in sync with physical plug/unplug events. The
+// listener is registered once at module load; syncPorts is cheap
+// (getPorts + map) so firing on every connect/disconnect is fine.
+if (isWebSerialSupported()) {
+  navigator.serial.addEventListener('connect', () => {
+    void useSerialMaster.getState().syncPorts()
+  })
+  navigator.serial.addEventListener('disconnect', () => {
+    void useSerialMaster.getState().syncPorts()
+  })
+  // Initial fill (page load with previously-granted ports plugged in).
+  void useSerialMaster.getState().syncPorts()
+}

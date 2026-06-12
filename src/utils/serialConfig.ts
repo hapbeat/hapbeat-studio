@@ -148,9 +148,12 @@ async function resetClassicEsp32IntoApp(
  *   - native USB-CDC (S3 / C3, VID 0x303A): 921600 (baud ignored anyway)
  *   - CP210x (0x10C4, M5Stack Basic/Core): 921600 — reliable, its standard
  *     flash baud, so that firmware keeps 921600.
- *   - FTDI (0x0403, M5 ATOM Lite) / CH340 (0x1A86) / unknown: 230400 — 921600
- *     is unreliable on these bridges/cables, so those firmwares standardize on
- *     230400 (reliable on FTDI; config messages are tiny so speed is moot).
+ *   - FTDI (0x0403, M5 ATOM Lite) / CH340 (0x1A86) / unknown: 115200 — both
+ *     921600 and 230400 produce bit-corrupted RX on the FT232R cable shipped
+ *     with ATOM Lite (high-bit set on alternating characters; classic signal-
+ *     integrity failure on long unshielded USB-serial runs). 115200 reads
+ *     clean. Config messages are tiny so speed is moot, and the flash path
+ *     uses its own 460800/115200 fallback ladder.
  */
 const BAUD_921600_VIDS = new Set([
   NATIVE_USB_VID, // 0x303A native USB-CDC (S3 / C3)
@@ -160,7 +163,7 @@ function configBaudForPort(port: SerialPort): number {
   try {
     if (BAUD_921600_VIDS.has(port.getInfo().usbVendorId ?? -1)) return 921600
   } catch { /* unknown — assume a flaky bridge */ }
-  return 230400
+  return 115200
 }
 
 export async function openConfigConnection(

@@ -4,7 +4,7 @@ import { useLogStore } from '@/stores/logStore'
 import { useDeviceStore } from '@/stores/deviceStore'
 import type { DeviceInfo, ManagerMessage, NodeRole, NodeTransport } from '@/types/manager'
 import { useConfirm } from '@/components/common/useConfirm'
-import { useSerialMaster } from '@/stores/serialMaster'
+import { serialEntryLabel, useSerialMaster } from '@/stores/serialMaster'
 import {
   assertMergedImage,
   isMergedImage,
@@ -191,9 +191,17 @@ export function FirmwareSubTab({
   const serialProgress = useSerialMaster((s) => s.flashProgress)
   const serialResult = useSerialMaster((s) => s.flashLastResult)
   const masterFlash = useSerialMaster((s) => s.flash)
+  const masterFlashSelected = useSerialMaster((s) => s.flashSelected)
   const masterEraseFlash = useSerialMaster((s) => s.eraseFlash)
   const masterRePick = useSerialMaster((s) => s.rePick)
   const serialMasterBoard = useSerialMaster((s) => s.info?.board)
+  // Multi-target flash: USB cards checked in the sidebar registry.
+  const knownPorts = useSerialMaster((s) => s.knownPorts)
+  const selectedPortIds = useSerialMaster((s) => s.selectedPortIds)
+  const serialTargets = useMemo(
+    () => knownPorts.filter((e) => selectedPortIds.includes(e.id)),
+    [knownPorts, selectedPortIds],
+  )
   const [eraseAll, setEraseAll] = useState(false)
   const { ask, dialog: confirmDialog } = useConfirm()
   const lanBoard = useDeviceStore((s) =>
@@ -720,6 +728,51 @@ export function FirmwareSubTab({
 
   async function onSerialFlash() {
     setLocalError(null)
+
+    // ── Multi-target path: USB cards checked in the sidebar ──
+    // Single-target pre-flight (checkBoardMatch) compares against the
+    // active conn's board; for multi we check each probed target.
+    if (serialTargets.length > 0) {
+      if (source === 'library' && selectedEntry) {
+        const expected = entryBoard(selectedEntry)
+        const mismatched = expected
+          ? serialTargets.filter(
+              (e) => e.info?.board && e.info.board !== 'unknown' && e.info.board !== expected,
+            )
+          : []
+        if (mismatched.length > 0) {
+          const ok = await ask({
+            title: '基板バージョン不一致',
+            message: (
+              `選択中のファームウェアは ${boardLabel(expected!)} 用ですが、`
+              + `以下のデバイスは別の基板を報告しています:\n`
+              + mismatched
+                  .map((e) => `・${serialEntryLabel(e)} → ${boardLabel(e.info!.board!)}`)
+                  .join('\n')
+              + '\n\nこのまま全台に書き込みますか？'
+            ),
+            confirmLabel: '不一致のまま書き込む',
+            danger: true,
+          })
+          if (!ok) return
+        }
+      }
+      let plan: Awaited<ReturnType<typeof readSelectedRegions>>
+      try {
+        plan = await readSelectedRegions()
+      } catch (err) {
+        setLocalError(String((err as Error).message ?? err))
+        return
+      }
+      await masterFlashSelected(
+        serialTargets.map((e) => e.id),
+        plan.regions,
+        { eraseAll },
+      )
+      return
+    }
+
+    // ── Single-target path (従来) ──
     if (!(await checkBoardMatch('Serial'))) return
     let plan: Awaited<ReturnType<typeof readSelectedRegions>>
     try {
@@ -1118,13 +1171,23 @@ export function FirmwareSubTab({
             このブラウザは Web Serial API 非対応です (Chrome / Edge を使用してください)。
           </div>
         )}
+        {serialTargets.length > 0 && (
+          <div className="form-section-sub-inline" style={{ opacity: 0.85 }}>
+            サイドバーの USB Serial で {serialTargets.length} 台選択中 — 順番に書き込みます:
+            {' '}{serialTargets.map((e) => serialEntryLabel(e)).join(' / ')}
+          </div>
+        )}
         <div className="form-action-row">
           <button
             className="form-button"
             onClick={onSerialFlash}
             disabled={!haveSelection || serialRunning || !isWebSerialSupported()}
           >
-            {serialRunning ? '送信中…' : 'Serial 書き込み'}
+            {serialRunning
+              ? '送信中…'
+              : serialTargets.length > 0
+                ? `Serial 書き込み (${serialTargets.length} 台)`
+                : 'Serial 書き込み'}
           </button>
           <button
             className="form-button-secondary"
@@ -1178,6 +1241,37 @@ export function FirmwareSubTab({
               {serialProgress.message ? ` — ${serialProgress.message}` : ''}
             </div>
           </>
+        )}
+
+        {/* Per-target rows during a multi-flash (the single-port
+          * flashProgress above stays null on this path). */}
+        {serialTargets.some((e) => e.flash.state !== 'idle') && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+            {serialTargets.map((e) => {
+              const f = e.flash
+              if (f.state === 'idle') return null
+              return (
+                <div key={e.id}>
+                  <div className="form-status muted" style={{ marginBottom: 2 }}>
+                    {serialEntryLabel(e)} — {
+                      f.state === 'waiting' ? '⏳ 待機中'
+                      : f.state === 'flashing' ? `⚡ [${f.progress?.phase ?? '…'}] ${f.progress?.percent ?? 0}%`
+                      : f.state === 'done' ? '✓ 完了'
+                      : `✗ ${f.message ?? '失敗'}`
+                    }
+                  </div>
+                  {f.state === 'flashing' && (
+                    <div className="firmware-progress">
+                      <div
+                        className="firmware-progress-fill"
+                        style={{ width: `${f.progress?.percent ?? 0}%` }}
+                      />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         )}
 
         {localError && (

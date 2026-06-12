@@ -48,8 +48,11 @@ function buildMeta(): { sha: string; date: string } {
 interface FirmwareBuildRepo {
   /** Short repo tag used in logs / collision tie-breaks. */
   repo: string
-  /** Absolute path to the repo's `.pio/build`. */
+  /** Absolute path to an artifact root (`dist` or `.pio/build`). */
   root: string
+  /** Absolute path to the repo's `src/` (for the build_version.h
+   *  fallback when variant.json carries no fwVersion). */
+  srcDir?: string
 }
 
 interface DevVariantMeta {
@@ -59,6 +62,10 @@ interface DevVariantMeta {
   board?: string
   label?: string
   description?: string
+  /** Per-env firmware version (device-firmware variant.json ≥ 2026-06).
+   *  Preferred over the repo-global build_version.h, which only reflects
+   *  the LAST build and mislabels other envs after a partial rebuild. */
+  fwVersion?: string
 }
 
 async function readVariantMeta(root: string, env: string): Promise<DevVariantMeta> {
@@ -170,10 +177,14 @@ function firmwareDevPlugin(buildRepos: FirmwareBuildRepo[]): Plugin {
               /** Epoch ms when a cache entry was snapshotted (cache only). */
               cachedAt?: number
             }
-            const items: ListItem[] = []
-            const seenEnv = new Set<string>()
-            // 1) Live envs — snapshot each into the cache as we go.
-            for (const { repo, root } of buildRepos) {
+            // 1) Live envs from every root (dist/ + .pio/build per repo).
+            //    The same env can exist in both — keep the NEWEST artifacts
+            //    (they're normally identical: the post-build copies into
+            //    dist; mtime comparison guards against a stale leftover).
+            const live = new Map<string, ListItem>()
+            const itemMtime = (i: ListItem): number =>
+              Math.max(i.appOta?.mtime ?? 0, i.fullSerial?.mtime ?? 0)
+            for (const { repo, root, srcDir } of buildRepos) {
               const envs = await safeReaddir(root)
               for (const env of envs) {
                 const appOta = await statArtifact(root, env, 'firmware_app_ota.bin')
@@ -183,22 +194,34 @@ function firmwareDevPlugin(buildRepos: FirmwareBuildRepo[]): Plugin {
                   fullSerial = await statArtifact(root, env, 'firmware.bin')
                 }
                 if (!appOta && !fullSerial) continue
-                if (seenEnv.has(env)) {
-                  // eslint-disable-next-line no-console
-                  console.warn(`[firmware-dev] env "${env}" exists in multiple repos; keeping first`)
-                  continue
-                }
-                seenEnv.add(env)
-                const fwVersion = await readFirmwareVersion(root)
                 const variant = await readVariantMeta(root, env)
-                await snapshotEnvToCache(env, repo, root, fwVersion, variant)
-                items.push({ env, repo, fwVersion, appOta, fullSerial, ...variant, source: 'live' })
+                // Per-env fwVersion from variant.json beats the repo-global
+                // build_version.h (which only reflects the LAST build).
+                const fwVersion = variant.fwVersion
+                  ?? await readFirmwareVersion(srcDir)
+                const item: ListItem = {
+                  env, repo, fwVersion, appOta, fullSerial, ...variant, source: 'live',
+                }
+                const prev = live.get(env)
+                if (!prev || itemMtime(item) > itemMtime(prev)) {
+                  live.set(env, item)
+                }
               }
             }
-            // 2) Cache-only envs — previously seen but pruned from .pio now.
+            const items: ListItem[] = [...live.values()]
+            for (const item of items) {
+              await snapshotEnvToCache(
+                item.env, item.repo ?? '?',
+                // snapshot reads bins by path — reuse the artifact's own dir.
+                resolve((item.fullSerial?.path ?? item.appOta?.path ?? '.'), '../..'),
+                item.fwVersion,
+                item as DevVariantMeta,
+              )
+            }
+            // 2) Cache-only envs — previously seen but pruned everywhere.
             const cached = await readCachedEnvs()
             for (const [env, { meta, appOta, fullSerial }] of cached) {
-              if (seenEnv.has(env)) continue   // live wins
+              if (live.has(env)) continue   // live wins
               items.push({
                 env, repo: meta.repo, fwVersion: meta.fwVersion,
                 appOta, fullSerial, ...(meta.variant ?? {}),
@@ -296,13 +319,15 @@ async function statArtifact(
  *  build_version.h only exists after at least one PlatformIO build.
  *  On a fresh checkout pre-build, fall through to undefined.
  */
-async function readFirmwareVersion(buildRoot: string): Promise<string | undefined> {
-  const firmwareSrc = resolve(buildRoot, '../../src')
+async function readFirmwareVersion(srcDir: string | undefined): Promise<string | undefined> {
+  if (!srcDir) return undefined
   // 1. Primary: build_version.h (auto-generated, contains dev suffix
-  //    like "0.1.2d1" for non-tagged commits).
+  //    like "0.1.2d1" for non-tagged commits). NOTE: repo-global — only
+  //    reflects the LAST pio run; per-env variant.json fwVersion is
+  //    preferred upstream and this is just the legacy fallback.
   try {
     const header = await fs.readFile(
-      resolve(firmwareSrc, 'build_version.h'),
+      resolve(srcDir, 'build_version.h'),
       'utf-8',
     )
     const m = header.match(/#define\s+FIRMWARE_VERSION\s+"([^"]+)"/)
@@ -314,7 +339,7 @@ async function readFirmwareVersion(buildRoot: string): Promise<string | undefine
   //    branches may still define FIRMWARE_VERSION here.
   try {
     const header = await fs.readFile(
-      resolve(firmwareSrc, 'hapbeat_config.h'),
+      resolve(srcDir, 'hapbeat_config.h'),
       'utf-8',
     )
     const m = header.match(/#define\s+FIRMWARE_VERSION\s+"([^"]+)"/)
@@ -337,8 +362,29 @@ async function readFirmwareVersion(buildRoot: string): Promise<string | undefine
  *  reference/port-source only.)
  */
 const FIRMWARE_BUILD_REPOS = [
-  { repo: 'dev', root: resolve(__dirname, '../hapbeat-device-firmware/.pio/build') },
-  { repo: 'tx', root: resolve(__dirname, '../hapbeat-transmitter-firmware/.pio/build') },
+  // dist/ first: the post-build scripts copy distributables there and pio
+  // never prunes it, so it's the stable primary. `.pio/build` stays as a
+  // fallback for older checkouts whose post-build predates the dist copy.
+  {
+    repo: 'dev',
+    root: resolve(__dirname, '../hapbeat-device-firmware/dist'),
+    srcDir: resolve(__dirname, '../hapbeat-device-firmware/src'),
+  },
+  {
+    repo: 'dev',
+    root: resolve(__dirname, '../hapbeat-device-firmware/.pio/build'),
+    srcDir: resolve(__dirname, '../hapbeat-device-firmware/src'),
+  },
+  {
+    repo: 'tx',
+    root: resolve(__dirname, '../hapbeat-transmitter-firmware/dist'),
+    srcDir: resolve(__dirname, '../hapbeat-transmitter-firmware/src'),
+  },
+  {
+    repo: 'tx',
+    root: resolve(__dirname, '../hapbeat-transmitter-firmware/.pio/build'),
+    srcDir: resolve(__dirname, '../hapbeat-transmitter-firmware/src'),
+  },
 ]
 
 export default defineConfig(({ command }) => {

@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore } from '@/stores/deviceStore'
-import { useSerialMaster } from '@/stores/serialMaster'
-import type { DeviceInfo, ManagerMessage } from '@/types/manager'
+import {
+  serialEntryLabel,
+  useSerialMaster,
+  type SerialPortEntry,
+} from '@/stores/serialMaster'
+import { isWebSerialSupported } from '@/utils/serialConfig'
+import type { ManagerMessage } from '@/types/manager'
 
 /**
  * `serial:<mac-or-rand>` is the convention for a pseudo-device entry
@@ -42,6 +47,170 @@ function RefreshButton({ send }: { send: (msg: ManagerMessage) => void }) {
 }
 
 /**
+ * USB serial port cards — every granted Web Serial port, flashed or
+ * blank. Identity is bridge chip + VID:PID until a probe (or config
+ * conn) fills in name/fw/role. Checkbox feeds the multi-flash target
+ * set (`selectedPortIds`); 接続 opens the config conn on that port.
+ * Independent of Helper — renders even when the daemon is down.
+ */
+function UsbPortCard({ entry }: { entry: SerialPortEntry }) {
+  const activePortId = useSerialMaster((s) => s.activePortId)
+  const mode = useSerialMaster((s) => s.mode)
+  const flashRunning = useSerialMaster((s) => s.flashRunning)
+  const selectedPortIds = useSerialMaster((s) => s.selectedPortIds)
+  const toggleSelectPort = useSerialMaster((s) => s.toggleSelectPort)
+  const probePort = useSerialMaster((s) => s.probePort)
+  const openConfigFor = useSerialMaster((s) => s.openConfigFor)
+  const selectedIp = useDeviceStore((s) => s.selectedIp)
+  const selectDevice = useDeviceStore((s) => s.selectDevice)
+
+  const checked = selectedPortIds.includes(entry.id)
+  const isActive = entry.id === activePortId && mode === 'config'
+  // The active card doubles as the sidebar entry for the serial
+  // pseudo-device (`serial:<mac>`) — there's no separate card in the
+  // LAN section anymore.
+  const pseudoId = `${SERIAL_DEVICE_PREFIX}${entry.info?.mac ?? 'active'}`
+  const isPrimary = isActive && selectedIp === pseudoId
+  const probing = entry.probe === 'connecting'
+  const f = entry.flash
+
+  return (
+    <div
+      className={`device-row usb${checked ? ' checked' : ''}${isPrimary ? ' primary' : ''}`}
+      onClick={(e) => {
+        const target = e.target as HTMLElement
+        if (target.closest('button')) return
+        if (target.closest('.device-row-checkbox-input')) return
+        // Active (config-connected) card click opens the detail pane on
+        // the serial pseudo-device; otherwise the click is the flash-
+        // target checkbox toggle, mirroring the LAN cards.
+        if (isActive) selectDevice(pseudoId)
+        else toggleSelectPort(entry.id)
+      }}
+    >
+      <div className="device-row-top">
+        <label
+          className="device-row-checkbox"
+          title={checked ? '書き込み対象から外す' : '書き込み対象に選択'}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <input
+            type="checkbox"
+            className="device-row-checkbox-input"
+            checked={checked}
+            onChange={() => toggleSelectPort(entry.id)}
+            aria-label={`${serialEntryLabel(entry)} を書き込み対象に選択`}
+          />
+        </label>
+        <span className="device-row-name">{serialEntryLabel(entry)}</span>
+        {entry.info?.role && entry.info.role !== 'receiver' && (
+          <span
+            className="device-detail-pill role-pill"
+            title={`ノード役割: ${entry.info.role}`}
+          >
+            {entry.info.role.toUpperCase()}
+          </span>
+        )}
+        <span
+          className="device-row-status online"
+          title={isActive ? '設定接続中の USB ポート' : 'USB Serial ポート'}
+        >
+          <span style={{ fontSize: 13 }}>🔌</span>
+          <span>{isActive ? '接続中' : 'USB'}</span>
+        </span>
+      </div>
+      <div className="device-row-meta">
+        <span>{entry.bridge}</span>
+        {entry.vid !== undefined && (
+          <span className="device-row-meta-ip">
+            {entry.vid.toString(16).padStart(4, '0')}:{(entry.pid ?? 0).toString(16).padStart(4, '0')}
+          </span>
+        )}
+        {entry.info?.fw && <span>fw {entry.info.fw}</span>}
+        {entry.probe === 'failed' && <span title="get_info 無応答 — ファーム未書込の可能性">未書込?</span>}
+      </div>
+      {f.state !== 'idle' && (
+        <div className="device-row-meta" style={{ marginTop: 2 }}>
+          {f.state === 'waiting' && <span>⏳ 書き込み待機中…</span>}
+          {f.state === 'flashing' && (
+            <span>⚡ {f.progress ? `[${f.progress.phase}] ${f.progress.percent}%` : '書き込み中…'}</span>
+          )}
+          {f.state === 'done' && <span>✓ 書き込み完了 — 電源 OFF→ON してください</span>}
+          {f.state === 'error' && <span title={f.message}>✗ 失敗: {f.message?.slice(0, 40)}</span>}
+        </div>
+      )}
+      {!flashRunning && f.state !== 'flashing' && f.state !== 'waiting' && (
+        <div
+          className="device-row-meta"
+          style={{ marginTop: 2, gap: 8, display: 'flex', justifyContent: 'flex-end' }}
+        >
+          {!isActive && (
+            <button
+              type="button"
+              className="form-link-button"
+              style={{ fontSize: 12, padding: '1px 6px' }}
+              onClick={(e) => { e.stopPropagation(); void openConfigFor(entry.id) }}
+              title="このポートに設定接続する"
+            >
+              接続
+            </button>
+          )}
+          <button
+            type="button"
+            className="form-link-button"
+            style={{ fontSize: 12, padding: '1px 6px' }}
+            onClick={(e) => { e.stopPropagation(); void probePort(entry.id) }}
+            disabled={probing}
+            title="get_info でデバイス情報を取得 (ファーム入りなら名前/fw が出ます)。書き込み完了表示もクリアされます"
+          >
+            {probing ? '識別中…' : '↻ 識別'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function UsbPortsSection() {
+  const knownPorts = useSerialMaster((s) => s.knownPorts)
+  const selectedPortIds = useSerialMaster((s) => s.selectedPortIds)
+  const addPort = useSerialMaster((s) => s.addPort)
+  if (!isWebSerialSupported()) return null
+  return (
+    <div className="devices-usb-section">
+      <div className="devices-sidebar-header" style={{ borderTop: '1px solid var(--border, #333)' }}>
+        <span className="devices-sidebar-title" style={{ fontSize: 12 }}>USB Serial</span>
+        <span className="devices-sidebar-count">
+          {knownPorts.length}
+          {selectedPortIds.length > 0 && (
+            <>
+              {' '}
+              <span className="devices-sidebar-checked">({selectedPortIds.length}選択)</span>
+            </>
+          )}
+        </span>
+        <button
+          type="button"
+          className="devices-sidebar-refresh"
+          onClick={() => void addPort()}
+          title="USB Serial デバイスを追加 (COM ポート選択ダイアログが開きます)"
+          aria-label="USB デバイス追加"
+        >
+          ＋
+        </button>
+      </div>
+      {knownPorts.length === 0 ? (
+        <div className="devices-empty" style={{ padding: '6px 10px', fontSize: 12 }}>
+          ＋ で USB デバイスを追加
+        </div>
+      ) : (
+        knownPorts.map((e) => <UsbPortCard key={e.id} entry={e} />)
+      )}
+    </div>
+  )
+}
+
+/**
  * Sidebar listing every Helper-discovered device.
  *
  * Card UX (Manager parity):
@@ -65,33 +234,20 @@ export function DeviceList() {
   const dismissDevice = useDeviceStore((s) => s.dismissDevice)
   const syncOnlineDevices = useDeviceStore((s) => s.syncOnlineDevices)
 
-  // Promote the active SerialMaster connection (if any) to a
-  // synthetic device entry so an unconfigured Hapbeat — visible only
-  // through USB Serial — still appears in the same Devices list.
-  // The detail pane keys off the `serial:` prefix to render the
-  // Serial-config forms instead of the LAN tabs.
-  const serialMode = useSerialMaster((s) => s.mode)
-  const serialInfo = useSerialMaster((s) => s.info)
-  const serialDevice = useMemo<DeviceInfo | null>(() => {
-    if (serialMode !== 'config' || !serialInfo) return null
-    const id = `${SERIAL_DEVICE_PREFIX}${serialInfo.mac ?? 'active'}`
-    return {
-      ipAddress: id,
-      name: serialInfo.name ?? '(unnamed)',
-      address: 'USB Serial',
-      firmwareVersion: serialInfo.fw,
-      online: true,
-    } as DeviceInfo
-  }, [serialMode, serialInfo])
+  // NOTE: the serial-connected device is NOT promoted into this (LAN)
+  // list anymore — it lives in the USB Serial section below, and the
+  // active USB card doubles as the selectable entry for the detail
+  // pane. Having it in both sections confused users (2026-06-13:
+  // 「wifi のところと usb serial に同時にカードが出る」).
 
   // Filter out dismissed offline devices. (A previously-dismissed IP
   // that comes back online drops out of dismissedIps automatically via
   // `syncOnlineDevices`, so it'll re-appear without user action.)
   const dismissedSet = useMemo(() => new Set(dismissedIps), [dismissedIps])
-  const visibleDevices = useMemo(() => {
-    const lan = devices.filter((d) => d.online || !dismissedSet.has(d.ipAddress))
-    return serialDevice ? [serialDevice, ...lan] : lan
-  }, [devices, dismissedSet, serialDevice])
+  const visibleDevices = useMemo(
+    () => devices.filter((d) => d.online || !dismissedSet.has(d.ipAddress)),
+    [devices, dismissedSet],
+  )
 
   // Push every online IP through dismissedIps so users don't get
   // stuck with a permanently-hidden card after a reboot.
@@ -140,6 +296,8 @@ export function DeviceList() {
           Helper 未接続<br />
           <code>hapbeat-helper start</code>
         </div>
+        {/* USB Serial は Helper 不要 — daemon が落ちていても焼ける */}
+        <UsbPortsSection />
       </aside>
     )
   }
@@ -203,6 +361,14 @@ export function DeviceList() {
                     />
                   </label>
                   <span className="device-row-name">{dev.name || '(unnamed)'}</span>
+                  {dev.role && dev.role !== 'receiver' && (
+                    <span
+                      className="device-detail-pill role-pill"
+                      title={`ノード役割: ${dev.role}`}
+                    >
+                      {dev.role.toUpperCase()}
+                    </span>
+                  )}
                   {isApMode && (
                     <span className="ap-mode-badge ap-mode-badge-sm" title="SoftAP モードで動作中">
                       AP
@@ -262,6 +428,7 @@ export function DeviceList() {
             )
           })
         )}
+        <UsbPortsSection />
       </div>
     </aside>
   )

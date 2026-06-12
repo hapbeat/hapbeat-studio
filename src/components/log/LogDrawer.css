@@ -125,14 +125,19 @@ body.log-drawer-resizing * {
   word-break: break-word;
 }
 
+/* time / source columns are metadata — exclude them from text selection
+ * so drag-copying log lines yields only the message content (user ask:
+ * 「内容だけを簡単に選択コピペできるように」2026-06-13). */
 .log-time {
   color: var(--text-muted);
+  user-select: none;
 }
 .log-source {
   color: var(--accent-light);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  user-select: none;
 }
 .log-msg {
   color: var(--text-primary);
