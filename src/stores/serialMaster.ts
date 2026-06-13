@@ -140,6 +140,7 @@ export interface SerialDeviceInfo {
   mappings_count?: number
   sensor_types?: string[]
   alert_loop?: boolean
+  recv_topics?: string[]
 }
 
 /** Parse a firmware get_info JSON into a SerialDeviceInfo (shared by
@@ -176,6 +177,7 @@ function parseSerialInfo(r: Record<string, unknown>): SerialDeviceInfo {
     mappings_count: r.mappings_count as number | undefined,
     sensor_types: r.sensor_types as string[] | undefined,
     alert_loop: r.alert_loop as boolean | undefined,
+    recv_topics: r.recv_topics as string[] | undefined,
   }
 }
 

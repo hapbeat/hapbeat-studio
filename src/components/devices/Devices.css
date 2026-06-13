@@ -305,6 +305,13 @@
   color: #84aaff;
   border-color: rgba(120, 170, 255, 0.5);
 }
+/* RECEIVER = the wearable Hapbeat (the common node) — a calm green so it
+   reads as "the thing that vibrates", distinct from sender/broker. */
+.device-row-roletag.receiver {
+  background: rgba(102, 187, 106, 0.14);
+  color: #66bb6a;
+  border-color: rgba(102, 187, 106, 0.45);
+}
 
 /* Connection indicator dot. The Wi-Fi vs USB-Serial distinction is already
    obvious from which section the card is in, so the cards drop the

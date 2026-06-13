@@ -90,6 +90,8 @@ interface DeviceState {
     sensor_types?: string[]
     /** Alert-loop mode (MQTT receiver, item 10): loop until any button press. */
     alert_loop?: boolean
+    /** MQTT receiver subscribe topic roots (item 8). Empty = default-topic. */
+    recv_topics?: string[]
   }>
 
   /** Per-IP cache of the most recent get_wifi_status response. */

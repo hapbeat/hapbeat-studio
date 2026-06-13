@@ -223,6 +223,7 @@ export function DeviceDetail() {
         mappings_count: p.mappings_count as number | undefined,
         sensor_types: p.sensor_types as string[] | undefined,
         alert_loop: p.alert_loop as boolean | undefined,
+        recv_topics: p.recv_topics as string[] | undefined,
         // SoftAP extension fields (firmware ≥ v0.1.0)
         mode: p.mode as 'sta' | 'ap' | undefined,
         ap_ssid: p.ap_ssid as string | undefined,
@@ -431,6 +432,7 @@ export function DeviceDetail() {
         mappings_count: masterInfo.mappings_count,
         sensor_types: masterInfo.sensor_types,
         alert_loop: masterInfo.alert_loop,
+        recv_topics: masterInfo.recv_topics,
       } : undefined)
     : infoCache[selectedIp]
   const wifiStatus = transport.isSerial

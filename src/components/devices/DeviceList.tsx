@@ -142,11 +142,14 @@ function UsbPortCard({ entry }: { entry: SerialPortEntry }) {
         <ConnIndicator online={isActive} title={isActive ? '接続中 (USB Serial)' : '未接続（✔ で接続）'} />
       </div>
       <div className="device-row-meta">
-        {entry.info?.role && entry.info.role !== 'receiver' && (
-          <span className={`device-row-roletag ${entry.info.role}`} title={`ノード役割: ${entry.info.role}`}>
-            {roleBadge(entry.info.role)}
-          </span>
-        )}
+        {entry.info && (() => {
+          const role = entry.info.role ?? 'receiver'
+          return (
+            <span className={`device-row-roletag ${role}`} title={`ノード役割: ${role}`}>
+              {roleBadge(role)}
+            </span>
+          )
+        })()}
         <span>{entry.bridge}</span>
         {entry.vid !== undefined && (
           <span className="device-row-meta-ip">
@@ -426,11 +429,14 @@ export function DeviceList() {
                   )}
                 </div>
                 <div className="device-row-meta">
-                  {dev.role && dev.role !== 'receiver' && (
-                    <span className={`device-row-roletag ${dev.role}`} title={`ノード役割: ${dev.role}`}>
-                      {roleBadge(dev.role)}
-                    </span>
-                  )}
+                  {(() => {
+                    const role = dev.role ?? 'receiver'
+                    return (
+                      <span className={`device-row-roletag ${role}`} title={`ノード役割: ${role}`}>
+                        {roleBadge(role)}
+                      </span>
+                    )
+                  })()}
                   {isApMode && (
                     <span className="device-row-roletag ap" title="SoftAP モードで動作中">AP</span>
                   )}

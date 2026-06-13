@@ -31,6 +31,8 @@ export interface NodeConfigInfo {
   mappings_count?: number
   /** Alert-loop mode (MQTT receiver, item 10). */
   alert_loop?: boolean
+  /** MQTT receiver subscribe topic roots (item 8). */
+  recv_topics?: string[]
 }
 
 const ESPNOW_CHANNELS = [1, 6, 11]
@@ -261,11 +263,16 @@ export function MqttConfigSection({
   const [auto, setAuto] = useState<boolean>(initialHost === 'auto')
   const [host, setHost] = useState<string>(initialHost === 'auto' ? '' : initialHost)
   const [port, setPort] = useState<number>(cachedInfo?.broker_port ?? 1883)
-  const [root, setRoot] = useState<string>(cachedInfo?.topic_root ?? 'hapbeat')
   const [qos, setQos] = useState<number>(cachedInfo?.mqtt_qos ?? 1)
   const [status, setStatus] = useState<string | null>(null)
   // Alert-loop mode (receiver, item 10): default ON (loop until any button).
   const [alertLoop, setAlertLoop] = useState<boolean>(cachedInfo?.alert_loop ?? true)
+  // Receive topics (receiver, item 8): the topic roots this node subscribes to.
+  // Picked from the registered topic list (mqttTopicsStore) + manual entry.
+  // Empty = the default channel only.
+  const registeredTopics = useMqttTopicsStore((s) => s.topics)
+  const [recvTopics, setRecvTopics] = useState<string[]>(cachedInfo?.recv_topics ?? [])
+  const [recvManual, setRecvManual] = useState('')
 
   useEffect(() => {
     const h = cachedInfo?.broker_host
@@ -279,20 +286,27 @@ export function MqttConfigSection({
       }
     }
     if (cachedInfo?.broker_port != null) setPort(cachedInfo.broker_port)
-    if (cachedInfo?.topic_root != null) setRoot(cachedInfo.topic_root)
     if (cachedInfo?.mqtt_qos != null) setQos(cachedInfo.mqtt_qos)
     if (cachedInfo?.alert_loop != null) setAlertLoop(cachedInfo.alert_loop)
-  }, [device.ipAddress, cachedInfo?.broker_host, cachedInfo?.broker_port, cachedInfo?.topic_root, cachedInfo?.mqtt_qos, cachedInfo?.alert_loop])
+    if (cachedInfo?.recv_topics != null) setRecvTopics(cachedInfo.recv_topics)
+  }, [device.ipAddress, cachedInfo?.broker_host, cachedInfo?.broker_port, cachedInfo?.mqtt_qos, cachedInfo?.alert_loop, cachedInfo?.recv_topics])
 
   const connected = cachedInfo?.mqtt_connected
-  const rootClean = root.trim().replace(/\//g, '')
   const apply = () => {
     const value = auto ? 'auto' : host.trim()
     if (!auto && !value) return
+    // topic_root is no longer user-editable here (broker connection doesn't
+    // need a topic). It's pinned to the default channel; the sender's send
+    // topic lives in the mapping tab, the receiver's receive topics below.
     sendTo({
       type: 'set_broker_host',
-      payload: { host: value, port, topic_root: rootClean || 'hapbeat', qos },
+      payload: { host: value, port, topic_root: 'default-topic', qos },
     })
+    // Receiver subscribe list (item 8). Sent with the broker settings so one
+    // 適用 applies both; takes effect on the receiver's reconnect/reboot.
+    if (role === 'receiver') {
+      sendTo({ type: 'set_recv_topics', payload: { topics: recvTopics } })
+    }
     setStatus('適用しました — センサは即時再接続、Hapbeat (受信機) は再起動後に反映されます')
     setTimeout(() => setStatus(null), 5000)
   }
@@ -345,54 +359,38 @@ export function MqttConfigSection({
         ブローカー自動検出 (mDNS で同一 LAN 上の Hapbeat ブローカーを探す)
       </label>
 
-      {!auto && (
-        <>
-          <div className="form-row" style={{ marginTop: 6 }}>
-            <label>ホスト/IP</label>
-            <input
-              className="form-input mono"
-              value={host}
-              onChange={(e) => setHost(e.target.value)}
-              placeholder="192.168.1.10 または hapbeat-broker.local"
-              disabled={!device.online}
-            />
-            <span />
-          </div>
-          <div className="form-row">
-            <label>ポート</label>
-            <input
-              className="form-input short"
-              type="number"
-              min={1}
-              max={65535}
-              value={port}
-              onChange={(e) => setPort(Math.max(1, Math.min(65535, Number(e.target.value) || 1883)))}
-              disabled={!device.online}
-            />
-            <span />
-          </div>
-          <div className="form-status muted">
-            自動検出時はブローカーが mDNS で広告するポートを使うため、ポート指定は手動ホスト時のみ有効です。
-          </div>
-        </>
-      )}
-
+      {/* Host/IP + port are ALWAYS shown (disabled while auto-detect is on) so
+          the user can see what they'd be setting without first toggling — and
+          can see the resolved broker isn't editable in auto mode (user
+          2026-06-14). topic は broker 接続には不要なのでこの設定からは外した
+          (sender は「センサー」タブの送信 topic、receiver は下の受信 topic)。 */}
       <div className="form-row" style={{ marginTop: 6 }}>
-        <label>topic</label>
+        <label>ホスト/IP</label>
         <input
           className="form-input mono"
-          value={root}
-          onChange={(e) => setRoot(e.target.value)}
-          placeholder="default-topic"
-          maxLength={32}
-          disabled={!device.online}
-          style={{ flex: '0 0 160px' }}
+          value={auto ? '' : host}
+          onChange={(e) => setHost(e.target.value)}
+          placeholder={auto ? '自動検出 (mDNS)' : '192.168.1.10 または hapbeat-broker.local'}
+          disabled={!device.online || auto}
+        />
+        <span />
+      </div>
+      <div className="form-row">
+        <label>ポート</label>
+        <input
+          className="form-input short"
+          type="number"
+          min={1}
+          max={65535}
+          value={port}
+          onChange={(e) => setPort(Math.max(1, Math.min(65535, Number(e.target.value) || 1883)))}
+          disabled={!device.online || auto}
         />
         <span />
       </div>
       <div className="form-status muted">
-        {role === 'sensor' ? 'このセンサーが送信する topic。' : 'このノードが購読する topic。'}
-        送信側と受信側で同じ topic にそろえたものだけが届きます（空欄 = default-topic）。
+        自動検出 ON の間はブローカーを mDNS で探し、広告されたホスト/ポートを使います（手動入力は無効）。
+        OFF にすると上のホスト/ポートを直接指定できます。
       </div>
 
       <div className="form-row" style={{ marginTop: 6 }}>
@@ -425,6 +423,68 @@ export function MqttConfigSection({
           ? '加えて「センサー」タブの再送間隔で色が続く間は再送し続けます (取りこぼしのバックストップ)。'
           : '送信側がアラート継続中は再送も併用するため、接続断があっても次で届きます。'}
       </div>
+
+      {/* Receive topics — receiver only (item 8). Multi-select from the
+          registered topics + manual entry. Empty = default-topic only. */}
+      {role === 'receiver' && (() => {
+        const opts = Array.from(new Set(['default-topic', ...registeredTopics, ...recvTopics]))
+        const toggle = (t: string) =>
+          setRecvTopics((s) => (s.includes(t) ? s.filter((x) => x !== t) : [...s, t]))
+        const addManual = () => {
+          const t = sanitizeTopic(recvManual)
+          if (t && !recvTopics.includes(t)) setRecvTopics((s) => [...s, t])
+          setRecvManual('')
+        }
+        return (
+          <>
+            <div className="form-row" style={{ marginTop: 10, alignItems: 'flex-start' }}>
+              <label>受信 topic</label>
+              <div className="form-row-multi" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+                {opts.map((t) => (
+                  <label key={t} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <input
+                      type="checkbox"
+                      checked={recvTopics.includes(t)}
+                      onChange={() => toggle(t)}
+                      disabled={!device.online}
+                    />
+                    <span className="mono">{t}</span>
+                    {t === 'default-topic' && <span className="form-status muted" style={{ margin: 0 }}>（既定）</span>}
+                    {!registeredTopics.includes(t) && t !== 'default-topic' && (
+                      <span className="form-status muted" style={{ margin: 0 }}>（手動）</span>
+                    )}
+                  </label>
+                ))}
+                <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                  <input
+                    className="form-input mono"
+                    value={recvManual}
+                    onChange={(e) => setRecvManual(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') addManual() }}
+                    placeholder="手動で topic を追加"
+                    maxLength={32}
+                    disabled={!device.online}
+                    style={{ flex: 1, minWidth: 0 }}
+                  />
+                  <button
+                    className="form-button-secondary"
+                    onClick={addManual}
+                    disabled={!device.online || !recvManual.trim()}
+                    style={{ flexShrink: 0, padding: '0 16px' }}
+                  >
+                    ＋
+                  </button>
+                </div>
+              </div>
+              <span />
+            </div>
+            <div className="form-status muted">
+              この受信機が購読する topic。センサー側で送信している topic と一致させてください（複数選択可）。
+              何もチェックしなければ default-topic のみを受信します。topic 名は「センサー」側で登録したものが候補に出ます。
+            </div>
+          </>
+        )
+      })()}
 
       {/* Alert-loop mode — receiver only (item 10). */}
       {role === 'receiver' && (

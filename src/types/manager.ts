@@ -151,6 +151,7 @@ export interface StudioToManagerMessage {
     | 'get_sensor_mapping'   // sensor
     | 'get_sensor_reading'   // sensor (live tuning view)
     | 'set_alert_mode'       // receiver(mqtt) — alert-loop on/off (item 10)
+    | 'set_recv_topics'      // receiver(mqtt) — subscribe topic list (item 8)
   payload: Record<string, unknown>
 }
 
@@ -266,6 +267,9 @@ export interface GetInfoResult {
   /** Alert-loop mode (MQTT receiver, item 10): true = loop an incoming alert
    *  until any button is pressed; false = one-shot. */
   alert_loop?: boolean
+  /** Receive topic roots the MQTT receiver subscribes to (item 8). Empty =
+   *  the default channel ("default-topic"). */
+  recv_topics?: string[]
   error?: string
 }
 
