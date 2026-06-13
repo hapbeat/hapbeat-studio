@@ -285,9 +285,9 @@ export function MqttConfigSection({
       </div>
 
       <div className="form-status muted">
-        QoS は 0 (wire) です。{role === 'sensor'
-          ? 'アラートの確実な配信は「センサー」タブの再送間隔で担保します (色が続く間、その間隔で再送)。'
-          : '送信側がアラート継続中は一定間隔で再送するため、1 回落ちても次で届きます。'}
+        QoS は 1 (at-least-once) です。送信→ブローカーは PUBACK 確認付きで確実に届き、{role === 'sensor'
+          ? '加えて「センサー」タブの再送間隔で色が続く間は再送し続けます (取りこぼしのバックストップ)。'
+          : '送信側がアラート継続中は再送も併用するため、接続断があっても次で届きます。'}
       </div>
 
       <div className="form-action-row" style={{ marginTop: 8 }}>
@@ -578,7 +578,7 @@ export function BrokerConfigSection({
         </div>
 
         <div className="form-status muted" style={{ marginTop: 6 }}>
-          QoS は 0 固定・認証なし (隔離 LAN 内前提) です。トピック root は各クライアント側の
+          QoS 1 (at-least-once)・認証なし (隔離 LAN 内前提) です。トピック root は各クライアント側の
           「MQTT」タブで設定します (ブローカーは全トピックを中継するため設定不要)。
         </div>
       </div>
@@ -1069,9 +1069,9 @@ export function SensorMappingSection({
             <span />
           </div>
           <div className="form-status muted">
-            この色が続いている間、この間隔で同じイベントを再送します。MQTT は QoS 0 のため、
-            1 回落ちても次の再送で確実に届けるための信頼性ノブです (アラート用途では短め、
-            既定 4000ms)。
+            この色が続いている間、この間隔で同じイベントを再送します。MQTT は QoS 1 で送信→
+            ブローカーは確実に届きますが、接続断などの取りこぼしに対するバックストップとして
+            アプリ層でも再送します (アラート用途では短め、既定 4000ms)。
           </div>
           </>
           )}
