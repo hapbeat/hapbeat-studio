@@ -47,6 +47,14 @@ export interface MqttFlowData {
   pubCount?: number
   lastTopic?: string
   lastPayload?: string
+  // --- last event detail (for the "information exchange" panel) ---
+  lastFrom?: string       // publishing client (送信元)
+  lastEventId?: string    // parsed from the play payload
+  lastTarget?: string     // parsed from the play payload
+  lastAt?: number         // epoch ms Studio observed the event
+  /** Connected receivers right now. 0 → a publish reaches no one (QoS 1
+   *  guarantees sender→broker only; absent receivers are NOT queued). */
+  receiverCount: number
   /** True when there's no broker on the network at all. */
   noBroker: boolean
 }
@@ -102,6 +110,18 @@ export function useMqttFlowData(): MqttFlowData {
       })),
     ]
 
+    // Parse the last play/stop payload (the sensor sends
+    // {event_id,target,gain}) for the info panel.
+    let lastEventId: string | undefined
+    let lastTarget: string | undefined
+    if (info?.mqtt_last_payload) {
+      try {
+        const o = JSON.parse(info.mqtt_last_payload) as Record<string, unknown>
+        if (typeof o.event_id === 'string') lastEventId = o.event_id
+        if (typeof o.target === 'string') lastTarget = o.target
+      } catch { /* truncated / non-JSON preview — leave undefined */ }
+    }
+
     return {
       broker,
       brokerName: broker?.name || 'BROKER',
@@ -112,6 +132,11 @@ export function useMqttFlowData(): MqttFlowData {
       pubCount: info?.mqtt_pub_count,
       lastTopic: info?.mqtt_last_topic,
       lastPayload: info?.mqtt_last_payload,
+      lastFrom: info?.mqtt_last_from,
+      lastEventId,
+      lastTarget,
+      lastAt: info?.lastEventAt,
+      receiverCount: receivers.length,
       noBroker: !broker,
     }
   }, [devices, telemetry])
@@ -120,7 +145,10 @@ export function useMqttFlowData(): MqttFlowData {
 // --- pure SVG --------------------------------------------------------------
 
 function MqttFlowChartSvg(props: MqttFlowData) {
-  const { brokerName, port, running, left, right, pubCount, lastTopic, lastPayload } = props
+  const {
+    brokerName, port, running, left, right, pubCount,
+    lastTopic, lastFrom, lastEventId, lastTarget, lastAt, receiverCount,
+  } = props
 
   // Pulse the edges briefly whenever the publish counter advances.
   const prevCountRef = useRef<number | undefined>(undefined)
@@ -185,7 +213,11 @@ function MqttFlowChartSvg(props: MqttFlowData) {
     <div style={{ overflowX: 'auto' }}>
       <svg
         viewBox={`0 0 ${W} ${height}`}
-        style={{ width: '100%', maxWidth: 660, display: 'block' }}
+        // Fluid: fill the container (inline panel OR pop-out window). The
+        // viewBox scales, so a wide pop-out no longer leaves big margins
+        // (user feedback 2026-06-13). preserveAspectRatio keeps it centered.
+        style={{ width: '100%', display: 'block' }}
+        preserveAspectRatio="xMidYMid meet"
         role="img"
         aria-label="MQTT 通信フロー図"
       >
@@ -246,9 +278,37 @@ function MqttFlowChartSvg(props: MqttFlowData) {
             fill="var(--text-muted, #777)">(なし)</text>
         )}
       </svg>
-      {lastTopic && (
-        <div className="form-status muted mono" style={{ marginTop: 2 }}>
-          最終 publish: <code>{lastTopic}</code>{lastPayload ? <> — <code>{lastPayload}</code></> : null}
+
+      {/* Last-event info — what actually moved across the wire (時刻 / 送信元 /
+          イベント / トピック / ターゲット). Surfacing this is the whole point of
+          the chart (user feedback 2026-06-13). */}
+      {(lastTopic || pubCount != null) && (
+        <div className="mqtt-flow-info">
+          <div className="mqtt-flow-info-title">
+            最終イベント{pubCount != null ? `（broker 受信 ${pubCount} 件）` : ''}
+          </div>
+          {lastTopic ? (
+            <div className="mqtt-flow-info-grid">
+              {lastAt != null && (<><span>時刻</span><span className="mono">{new Date(lastAt).toLocaleTimeString()}</span></>)}
+              {lastFrom && (<><span>送信元</span><span className="mono">{lastFrom}</span></>)}
+              {lastEventId && (<><span>イベント</span><span className="mono">{lastEventId}</span></>)}
+              <><span>トピック</span><span className="mono">{lastTopic}</span></>
+              <><span>ターゲット</span><span className="mono">{lastTarget || '（全台）'}</span></>
+            </div>
+          ) : (
+            <div className="form-status muted" style={{ margin: 0 }}>まだイベントは届いていません。</div>
+          )}
+        </div>
+      )}
+
+      {/* QoS-1 reality check: with no connected receiver, a publish reaches
+          the broker (PUBACK = QoS-1 guarantee) but is NOT queued for an
+          absent receiver — so it goes nowhere. Make that explicit instead of
+          implying a "待機" queue that MQTT doesn't provide. */}
+      {running && receiverCount === 0 && (
+        <div className="form-status warn" style={{ marginTop: 4 }}>
+          受信機 (Hapbeat) が接続していません。QoS 1 が保証するのは「送信元 → ブローカー」の到達までで、
+          受信機が居ない間のイベントはブローカーに保持されず届きません。受信機を MQTT で接続してください。
         </div>
       )}
     </div>
@@ -374,6 +434,7 @@ export function MqttFlowController() {
       mqtt_pub_count: p.mqtt_pub_count as number | undefined,
       mqtt_last_topic: p.mqtt_last_topic as string | undefined,
       mqtt_last_payload: p.mqtt_last_payload as string | undefined,
+      mqtt_last_from: p.mqtt_last_from as string | undefined,
     })
   }, [lastMessage, brokerIp, setBrokerTelemetry])
 

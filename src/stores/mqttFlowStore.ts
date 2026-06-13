@@ -34,6 +34,12 @@ export interface BrokerTelemetry {
   mqtt_pub_count?: number
   mqtt_last_topic?: string
   mqtt_last_payload?: string
+  /** Name/sid of the client that published the last play/stop. */
+  mqtt_last_from?: string
+  /** Wall-clock time (epoch ms) Studio first observed the latest pub_count
+   *  increment — the broker only reports device-millis, so this is the
+   *  closest "時刻" the chart can show for the last event. */
+  lastEventAt?: number
 }
 
 interface MqttFlowState {
@@ -83,7 +89,12 @@ export const useMqttFlowStore = create<MqttFlowState>((set, get) => ({
       const defined = Object.fromEntries(
         Object.entries(t).filter(([, v]) => v !== undefined),
       )
-      return { brokerTelemetry: { ...prev, ...defined } }
+      const merged: BrokerTelemetry = { ...prev, ...defined }
+      // Stamp the time we observed a new publish (pub_count advanced).
+      if (t.mqtt_pub_count != null && (prev.mqtt_pub_count ?? 0) < t.mqtt_pub_count) {
+        merged.lastEventAt = Date.now()
+      }
+      return { brokerTelemetry: merged }
     }),
 
   openPopout: () => {
