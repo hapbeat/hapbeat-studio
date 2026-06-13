@@ -172,12 +172,19 @@ export function DeviceDetail() {
     }
     prevSelectedRef.current = selectedIp
     if (!device?.online) return
-    send({ type: 'list_wifi_profiles', payload: { ip: selectedIp } })
+    // Helper opens one TCP connection per command, so each query is a
+    // "[TCP] Client connected" line on the device. AP mode + OLED
+    // brightness only exist on wearable receivers — skip those 2 for
+    // sensor/broker/transmitter so a slow classic-ESP32 node only sees a
+    // 3-command burst on selection, not 5 (user report 2026-06-13).
     send({ type: 'get_info', payload: { ip: selectedIp } })
     send({ type: 'get_wifi_status', payload: { ip: selectedIp } })
-    send({ type: 'get_ap_status', payload: { ip: selectedIp } })
-    send({ type: 'get_oled_brightness', payload: { ip: selectedIp } })
-  }, [selectedIp, device?.online, send, clearCachesFor])
+    send({ type: 'list_wifi_profiles', payload: { ip: selectedIp } })
+    if ((device?.role ?? 'receiver') === 'receiver') {
+      send({ type: 'get_ap_status', payload: { ip: selectedIp } })
+      send({ type: 'get_oled_brightness', payload: { ip: selectedIp } })
+    }
+  }, [selectedIp, device?.online, device?.role, send, clearCachesFor])
 
   // Drain helper push messages.
   useEffect(() => {
@@ -373,8 +380,11 @@ export function DeviceDetail() {
     send({ type: 'get_info', payload: { ip: selectedIp } })
     send({ type: 'get_wifi_status', payload: { ip: selectedIp } })
     send({ type: 'list_wifi_profiles', payload: { ip: selectedIp } })
-    send({ type: 'get_ap_status', payload: { ip: selectedIp } })
-    send({ type: 'get_oled_brightness', payload: { ip: selectedIp } })
+    // AP/OLED are receiver-only — skip for sensor/broker/transmitter.
+    if ((device?.role ?? 'receiver') === 'receiver') {
+      send({ type: 'get_ap_status', payload: { ip: selectedIp } })
+      send({ type: 'get_oled_brightness', payload: { ip: selectedIp } })
+    }
   }
 
   const refreshApStatus = () => {
