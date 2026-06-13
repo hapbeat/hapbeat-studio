@@ -818,9 +818,18 @@ export function SensorMappingSection({
       .filter((r) => r.key.trim() && r.event_id.trim())
       .map((r) => ({ ...r, key: r.key.trim(), event_id: r.event_id.trim(), target: r.target.trim() }))
     sendTo({ type: 'set_sensor_mapping', payload: { mappings: clean } })
-    setStatus(`${clean.length} 件を保存しました`)
+    // Rows with a key but no event assigned are NOT saved (the device only
+    // stores rows that fire something). Warn so prefilled colors don't
+    // silently vanish on the next reload — this is what made "red/blue
+    // disappeared, only yellow stayed" (user report 2026-06-13).
+    const dropped = rows.filter(
+      (r) => (r.key.trim() || r.event_id.trim()) && !(r.key.trim() && r.event_id.trim()),
+    ).length
+    setStatus(dropped > 0
+      ? `${clean.length} 件を保存（イベント未割当の ${dropped} 行は保存されません）`
+      : `${clean.length} 件を保存しました`)
     setDirty(false)
-    setTimeout(() => setStatus(null), 3000)
+    setTimeout(() => setStatus(null), 5000)
   }
 
   const reload = () => {
