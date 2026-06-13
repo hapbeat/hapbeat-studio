@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
+import { useToast } from '@/components/common/Toast'
 
 /**
  * Event entry shape inside a `kit_list_result` payload.
@@ -90,6 +91,14 @@ const KIT_LIST_PARAMS_MIN_FW = '0.1.3'
  */
 export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Props) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const { toast } = useToast()
+
+  // Copy the full event id (e.g. "basic-exam-kit.sine_200hz_1s") so it can
+  // be pasted into a sensor mapping's event field (user workflow 2026-06-13).
+  const copyId = (id: string) => {
+    void navigator.clipboard?.writeText(id)
+    toast(`コピー: ${id}`, 'info')
+  }
 
   // Detect "old firmware" by checking whether ANY event in the
   // response carried an `intensity` field. If the firmware returns
@@ -218,9 +227,10 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
                               : null
                             const ampLabel = ampPct != null ? `amp ${ampPct}%` : 'amp ?'
                             return (
-                              <li key={ev.id}>
+                              <li key={ev.id} style={{ display: 'flex', gap: 4 }}>
                                 <button
                                   className="installed-kit-event-btn"
+                                  style={{ flex: 1 }}
                                   onClick={() => onPlayEvent(ev.id, ev.intensity)}
                                   title={ampPct != null
                                     ? `クリックで PLAY: event_id=${ev.id}, gain=${(ev.intensity ?? 1).toFixed(2)} (device manifest amp ${ampPct}%)`
@@ -232,6 +242,15 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
                                   >
                                     {ampLabel}
                                   </span>
+                                </button>
+                                <button
+                                  className="installed-kit-event-btn"
+                                  style={{ flex: '0 0 auto', padding: '0 9px' }}
+                                  onClick={() => copyId(ev.id)}
+                                  title={`イベント ID をコピー: ${ev.id}`}
+                                  aria-label="イベント ID をコピー"
+                                >
+                                  ⎘
                                 </button>
                               </li>
                             )
@@ -256,9 +275,10 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
                               : null
                             const ampLabel = ampPct != null ? `amp ${ampPct}%` : 'amp ?'
                             return (
-                              <li key={ev.id}>
+                              <li key={ev.id} style={{ display: 'flex', gap: 4 }}>
                                 <button
                                   className="installed-kit-event-btn disabled"
+                                  style={{ flex: 1 }}
                                   disabled
                                   title={`${ev.id} は CLIP モード（SDK ストリーム経由で再生）${ampPct != null ? ` · device manifest amp ${ampPct}%` : ''}`}
                                 >
@@ -268,6 +288,15 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
                                   >
                                     {ampLabel}
                                   </span>
+                                </button>
+                                <button
+                                  className="installed-kit-event-btn"
+                                  style={{ flex: '0 0 auto', padding: '0 9px' }}
+                                  onClick={() => copyId(ev.id)}
+                                  title={`イベント ID をコピー: ${ev.id}`}
+                                  aria-label="イベント ID をコピー"
+                                >
+                                  ⎘
                                 </button>
                               </li>
                             )

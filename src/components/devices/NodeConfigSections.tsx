@@ -215,15 +215,21 @@ function TopicRegistryEditor() {
           placeholder="topic 名 (例: ward-a)"
           maxLength={32}
           onKeyDown={(e) => { if (e.key === 'Enter') add() }}
+          style={{ flex: 1 }}
         />
-        <button className="form-button-secondary" onClick={add} disabled={!name.trim()}>
-          ＋ 追加
+        <button
+          className="form-button-secondary"
+          onClick={add}
+          disabled={!name.trim()}
+          style={{ flexShrink: 0, padding: '4px 10px' }}
+        >
+          ＋
         </button>
       </div>
 
       <div className="form-status muted">
-        topic = 送り先のチャンネル名（ケーブル 1 本）です。受信側 Hapbeat は「MQTT」タブで同じ topic を
-        設定したものだけがそのイベントを受け取ります。複数の機材やグループを分けたい時だけ追加してください
+        topic = 送り先のチャンネル名です。受信側 Hapbeat は「MQTT」タブで同じ topic を設定したものだけが
+        そのイベントを受け取ります。複数の機材やグループを分けたい時だけ追加してください
         （何も設定しなければ default-topic で全てやり取りされます）。
       </div>
     </div>

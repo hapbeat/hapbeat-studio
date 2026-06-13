@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useMemo, useState, useRef, type MouseEvent as ReactMouseEvent } from 'react'
 import { useLibraryStore, validateKitName, composeKitEventId } from '@/stores/libraryStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
+import { useDeviceStore } from '@/stores/deviceStore'
 import { useToast } from '@/components/common/Toast'
 import { formatFileSize } from '@/utils/wavIO'
 import { validateEventIds } from '@/utils/kitExporter'
@@ -1843,7 +1844,22 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
 }) {
   const { toast } = useToast()
   const { lastMessage } = useHelperConnection()
+  const selectedIps = useDeviceStore((s) => s.selectedIps)
   const workDirHandle = useLibraryStore((s) => s.workDirHandle)
+
+  // Kits only go to PLAYBACK devices (receivers / no-role legacy). A
+  // sensor / broker / transmitter must never receive a kit — that's how a
+  // kit got wrongly written to the ATOM Lite sensor (user report 2026-06-13).
+  const isPlaybackDevice = (d: import('@/types/manager').DeviceInfo) =>
+    !d.role || d.role === 'receiver'
+  // Deploy targets: online playback devices, restricted to the current
+  // sidebar selection when there is one (else all online playback devices).
+  const deployTargets = (() => {
+    const playback = devices.filter((d) => d.online && isPlaybackDevice(d))
+    if (selectedIps.length === 0) return playback
+    const sel = new Set(selectedIps)
+    return playback.filter((d) => sel.has(d.ipAddress))
+  })()
 
   // Per-IP deploy progress sourced from Helper's `deploy_progress` push.
   // Cleared on a new deploy (`deploy started`) and on completion.
@@ -1987,9 +2003,20 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
   const handleDeploy = useCallback(async () => {
     if (!preflightKit(true)) return
 
+    const targetIps = deployTargets.map((d) => d.ipAddress)
+    if (targetIps.length === 0) {
+      toast(
+        selectedIps.length > 0
+          ? '選択中に再生デバイス (Hapbeat) がありません。センサ / ブローカーには Kit を配信しません'
+          : 'オンラインの再生デバイス (Hapbeat) がありません',
+        'error',
+      )
+      return
+    }
+
     setIsExporting(true)
     setProgressByIp(
-      Object.fromEntries(devices.map((d) => [d.ipAddress, { pct: 0, msg: 'queued…' }])),
+      Object.fromEntries(targetIps.map((ip) => [ip, { pct: 0, msg: 'queued…' }])),
     )
     try {
       // Save Folder doesn't build a ZIP any more (decode/encode are
@@ -2005,14 +2032,14 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
       const { blob } = await buildKitZip(built.files, built.kitId)
       const ab = await blob.arrayBuffer(); const bytes = new Uint8Array(ab)
       let bin = ''; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
-      send({ type: 'deploy_kit_data', payload: { kit_id: built.kitId, zip_base64: btoa(bin), targets: devices.map((d) => d.ipAddress) }})
+      send({ type: 'deploy_kit_data', payload: { kit_id: built.kitId, zip_base64: btoa(bin), targets: targetIps }})
       // Don't claim "sent" success here — the helper hasn't reached the
       // device yet. Per-device deploy_result will toast either
       // success or failure once the TCP write actually settles.
-      toast(`Sending "${built.kitId}" to ${devices.length} device(s)…`, 'info')
+      toast(`Sending "${built.kitId}" to ${targetIps.length} device(s)…`, 'info')
     } catch (err) { toast(`Deploy failed: ${err instanceof Error ? err.message : err}`, 'error') }
     finally { setIsExporting(false) }
-  }, [kit, devices, send, preflightKit, setIsExporting, toast])
+  }, [kit, deployTargets, selectedIps, send, preflightKit, setIsExporting, toast])
 
   // Status copy shown beside the Deploy button. Save Folder / Deploy
   // both push their `saving → saved` transition through the store's

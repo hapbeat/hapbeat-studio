@@ -325,21 +325,6 @@
   box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.22);
 }
 
-/* Dot + short state label ("接続"/"未接続") — the dot alone wasn't clear
-   enough about what it meant (user feedback 2026-06-13). */
-.device-conn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-.device-conn.online {
-  color: var(--success);
-}
-
 /* Muted delete ✕ — red semantics (it removes a row) but a dark, blends-in
    tint + rounded-rect so it doesn't grab attention like the bright offline
    dismiss button does (user feedback 2026-06-13). */

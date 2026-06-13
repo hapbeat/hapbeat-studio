@@ -11,24 +11,11 @@ import { roleBadge } from '@/utils/roleLabels'
 import type { ManagerMessage } from '@/types/manager'
 
 /**
- * Connection indicator: a chain-link icon + a state dot (green=linked,
- * grey=not). No text — the link icon conveys "connection" and the dot the
- * state (user feedback 2026-06-13). Color (icon + dot) follows `online`.
+ * Connection indicator: a single state dot (green=linked, grey=not). No icon,
+ * no text — the dot alone is enough (user feedback 2026-06-13).
  */
 function ConnIndicator({ online, title }: { online: boolean; title?: string }) {
-  return (
-    <span className={`device-conn${online ? ' online' : ''}`} title={title}>
-      <svg
-        className="device-conn-link" viewBox="0 0 24 24" width="12" height="12"
-        fill="none" stroke="currentColor" strokeWidth="2.4"
-        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
-      >
-        <path d="M9.5 14.5a3.5 3.5 0 0 0 5 0l3-3a3.5 3.5 0 1 0-5-5l-1.2 1.2" />
-        <path d="M14.5 9.5a3.5 3.5 0 0 0-5 0l-3 3a3.5 3.5 0 1 0 5 5l1.2-1.2" />
-      </svg>
-      <span className={`device-conn-dot${online ? ' online' : ''}`} />
-    </span>
-  )
+  return <span className={`device-conn-dot${online ? ' online' : ''}`} title={title} />
 }
 
 /**
