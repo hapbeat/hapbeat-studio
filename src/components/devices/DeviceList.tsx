@@ -129,13 +129,15 @@ function UsbPortCard({ entry }: { entry: SerialPortEntry }) {
           #{entry.id.replace('usb-', '')}
         </span>
         <span className="device-row-name">{serialEntryLabel(entry)}</span>
-        {/* No "USB" tag — the section header says USB Serial. Dot shows the
-            connection state: green = config-connected, grey = not. */}
+        {/* No "USB" transport tag — the section header says it. Dot + label
+            shows the connection state. */}
         <span
-          className={`device-conn-dot${isActive ? ' online' : ''}`}
+          className={`device-conn${isActive ? ' online' : ''}`}
           title={isActive ? '接続中 (USB Serial)' : '未接続（✔ で接続）'}
-          aria-label={isActive ? '接続中' : '未接続'}
-        />
+        >
+          <span className={`device-conn-dot${isActive ? ' online' : ''}`} />
+          {isActive ? '接続' : '未接続'}
+        </span>
       </div>
       <div className="device-row-meta">
         {entry.info?.role && entry.info.role !== 'receiver' && (
@@ -401,15 +403,14 @@ export function DeviceList() {
                     />
                   </label>
                   <span className="device-row-name">{dev.name || '(unnamed)'}</span>
-                  {/* No "Wi-Fi" text/emoji tag — the section header already
-                      says Wi-Fi. Online = green dot; offline = red ✕ dismiss
-                      (user feedback 2026-06-13). */}
+                  {/* No "Wi-Fi" transport tag (the section header says it) —
+                      just a dot + 接続/未接続 state label. Offline = red ✕
+                      dismiss (user feedback 2026-06-13). */}
                   {dev.online ? (
-                    <span
-                      className="device-conn-dot online"
-                      title="接続中 (Wi-Fi)"
-                      aria-label="接続中"
-                    />
+                    <span className="device-conn online" title="Wi-Fi 接続中">
+                      <span className="device-conn-dot online" />
+                      接続
+                    </span>
                   ) : (
                     <button
                       type="button"

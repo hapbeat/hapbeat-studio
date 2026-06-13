@@ -161,7 +161,7 @@ export function EspNowConfigSection({
  * color in the センサー tab. Each topic = a topic root; receivers
  * subscribe to their own root, so a topic selects a receiver group.
  */
-function TopicRegistryEditor() {
+function TopicRegistryEditor({ topicRoot }: { topicRoot: string }) {
   const topics = useMqttTopicsStore((s) => s.topics)
   const upsertTopic = useMqttTopicsStore((s) => s.upsertTopic)
   const removeTopic = useMqttTopicsStore((s) => s.removeTopic)
@@ -179,36 +179,46 @@ function TopicRegistryEditor() {
   return (
     <div className="form-section">
       <div className="form-section-title">
-        トピック (送り先) 登録
+        Topic
         <span className="form-section-sub-inline">
-          {' '}— 「センサー」タブの送信トピックで選べる送り先の一覧
+          {' '}— 送り先トピックの一覧（「センサー」タブの送信トピックで選択）
         </span>
       </div>
-      {topics.length === 0 ? (
-        <div className="form-status muted">
-          既定の「default-topic」（このセンサーの topic root）に送られます。複数の機材やグループを混在させる場合は、
-          ここに送り先 (トピック) を登録すると、「センサー」タブの送信トピックで選べるようになります
-          （カード全体の既定として、必要なら色ごとに個別指定も可）。
+
+      <div className="topic-table">
+        <div className="topic-table-head">
+          <span>名前</span>
+          <span>topic root</span>
+          <span />
         </div>
-      ) : (
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {topics.map((t) => (
-            <li key={t.root} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontWeight: 600, minWidth: 90 }}>{t.name}</span>
-              <code className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t.root}/play</code>
-              <button
-                type="button"
-                className="device-row-dismiss"
-                style={{ marginLeft: 'auto' }}
-                onClick={() => removeTopic(t.root)}
-                title="この送り先を削除"
-              >
-                ✕
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+        {/* Built-in: default-topic always exists and maps to this sensor's
+            own MQTT topic_root. Not removable. */}
+        <div className="topic-table-row">
+          <span className="topic-name">default-topic</span>
+          <span className="mono topic-root">
+            {topicRoot || 'hapbeat'}<span className="topic-suffix">/play</span>
+          </span>
+          <span className="topic-builtin">= 下の topic root（既定）</span>
+        </div>
+        {topics.map((t) => (
+          <div className="topic-table-row" key={t.root}>
+            <span className="topic-name">{t.name}</span>
+            <span className="mono topic-root">
+              {t.root}<span className="topic-suffix">/play</span>
+            </span>
+            <button
+              type="button"
+              className="btn-x-muted"
+              style={{ marginLeft: 'auto' }}
+              onClick={() => removeTopic(t.root)}
+              title="この送り先を削除"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+      </div>
+
       <div className="form-row" style={{ marginTop: 8, gap: 6 }}>
         <input
           className="form-input"
@@ -229,9 +239,13 @@ function TopicRegistryEditor() {
           ＋ 追加
         </button>
       </div>
+
       <div className="form-status muted">
-        受信側 (Hapbeat) は自分の「MQTT」タブの topic root でこのトピックを購読します。
-        送り先トピックと受信機の root を合わせると、その色だけ特定グループに届きます。
+        「名前」は表示用ラベル、「topic root」が実際の MQTT トピックの先頭です（実トピック =
+        {' '}<code>root/play</code>。<code>/play</code> は再生イベント用に自動で付きます）。
+        <b> default-topic</b> はこのセンサーの「MQTT」タブの <b>topic root</b>（現在
+        {' '}<code>{topicRoot || 'hapbeat'}</code>）を使うので、その root を変えると default-topic の送信先も変わります。
+        受信側 Hapbeat は自分の topic root で購読するため、送り先と受信機の root をそろえると、そのトピックのイベントだけが届きます。
       </div>
     </div>
   )
@@ -436,7 +450,7 @@ export function MqttConfigSection({
     </div>
     {/* Topic registry — only on the sender (sensor) side; receivers just
         subscribe to their own root. (item 6) */}
-    {role === 'sensor' && <TopicRegistryEditor />}
+    {role === 'sensor' && <TopicRegistryEditor topicRoot={rootClean || 'hapbeat'} />}
     </>
   )
 }
@@ -1001,7 +1015,7 @@ export function SensorMappingSection({
                 2026-06-13). stopPropagation so it doesn't toggle expand. */}
             <button
               type="button"
-              className="device-row-dismiss"
+              className="btn-x-muted"
               onClick={(e) => { e.stopPropagation(); removeRow(i) }}
               disabled={!device.online}
               title="この検知色を削除"

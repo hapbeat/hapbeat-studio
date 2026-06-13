@@ -303,6 +303,95 @@
   box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.22);
 }
 
+/* Dot + short state label ("接続"/"未接続") — the dot alone wasn't clear
+   enough about what it meant (user feedback 2026-06-13). */
+.device-conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.device-conn.online {
+  color: var(--success);
+}
+
+/* Muted delete ✕ — red semantics (it removes a row) but a dark, blends-in
+   tint + rounded-rect so it doesn't grab attention like the bright offline
+   dismiss button does (user feedback 2026-06-13). */
+.btn-x-muted {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  line-height: 1;
+  border-radius: 5px;
+  background: rgba(229, 115, 115, 0.13);
+  color: #c98178;
+  border: 1px solid rgba(229, 115, 115, 0.26);
+  cursor: pointer;
+  font-size: 12px;
+  transition: background var(--transition);
+}
+.btn-x-muted:hover:not(:disabled) {
+  background: rgba(229, 115, 115, 0.22);
+}
+.btn-x-muted:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Topic (送り先) registry list — a tidy 3-column table so the registered
+   destinations read as a proper list (user feedback 2026-06-13). */
+.topic-table {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.topic-table-head,
+.topic-table-row {
+  display: grid;
+  grid-template-columns: 130px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+}
+.topic-table-head {
+  background: var(--bg-hover);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.topic-table-row {
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  min-height: 30px;
+}
+.topic-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topic-root {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.topic-suffix {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+.topic-builtin {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 /* ---- Detail pane ---- */
 .devices-detail {
   overflow-y: auto;
