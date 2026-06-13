@@ -29,6 +29,8 @@ export interface NodeConfigInfo {
   mqtt_last_topic?: string
   mqtt_last_payload?: string
   mappings_count?: number
+  /** Alert-loop mode (MQTT receiver, item 10). */
+  alert_loop?: boolean
 }
 
 const ESPNOW_CHANNELS = [1, 6, 11]
@@ -262,6 +264,8 @@ export function MqttConfigSection({
   const [root, setRoot] = useState<string>(cachedInfo?.topic_root ?? 'hapbeat')
   const [qos, setQos] = useState<number>(cachedInfo?.mqtt_qos ?? 1)
   const [status, setStatus] = useState<string | null>(null)
+  // Alert-loop mode (receiver, item 10): default ON (loop until any button).
+  const [alertLoop, setAlertLoop] = useState<boolean>(cachedInfo?.alert_loop ?? true)
 
   useEffect(() => {
     const h = cachedInfo?.broker_host
@@ -277,7 +281,8 @@ export function MqttConfigSection({
     if (cachedInfo?.broker_port != null) setPort(cachedInfo.broker_port)
     if (cachedInfo?.topic_root != null) setRoot(cachedInfo.topic_root)
     if (cachedInfo?.mqtt_qos != null) setQos(cachedInfo.mqtt_qos)
-  }, [device.ipAddress, cachedInfo?.broker_host, cachedInfo?.broker_port, cachedInfo?.topic_root, cachedInfo?.mqtt_qos])
+    if (cachedInfo?.alert_loop != null) setAlertLoop(cachedInfo.alert_loop)
+  }, [device.ipAddress, cachedInfo?.broker_host, cachedInfo?.broker_port, cachedInfo?.topic_root, cachedInfo?.mqtt_qos, cachedInfo?.alert_loop])
 
   const connected = cachedInfo?.mqtt_connected
   const rootClean = root.trim().replace(/\//g, '')
@@ -289,6 +294,15 @@ export function MqttConfigSection({
       payload: { host: value, port, topic_root: rootClean || 'hapbeat', qos },
     })
     setStatus('適用しました — センサは即時再接続、Hapbeat (受信機) は再起動後に反映されます')
+    setTimeout(() => setStatus(null), 5000)
+  }
+
+  // Alert-loop toggle (receiver, item 10) — persisted immediately and applied
+  // on the next incoming alert (firmware reads the flag fresh; no reboot).
+  const applyAlertLoop = (next: boolean) => {
+    setAlertLoop(next)
+    sendTo({ type: 'set_alert_mode', payload: { loop: next } })
+    setStatus(`アラートを${next ? 'ループ (ボタンで停止)' : '単発'}に設定しました`)
     setTimeout(() => setStatus(null), 5000)
   }
 
@@ -411,6 +425,41 @@ export function MqttConfigSection({
           ? '加えて「センサー」タブの再送間隔で色が続く間は再送し続けます (取りこぼしのバックストップ)。'
           : '送信側がアラート継続中は再送も併用するため、接続断があっても次で届きます。'}
       </div>
+
+      {/* Alert-loop mode — receiver only (item 10). */}
+      {role === 'receiver' && (
+        <>
+          <div className="form-row" style={{ marginTop: 10 }}>
+            <label>アラート動作</label>
+            <div className="form-row-multi" style={{ gap: 6 }}>
+              <button
+                type="button"
+                className={`form-button${alertLoop ? '' : '-secondary'}`}
+                onClick={() => applyAlertLoop(true)}
+                disabled={!device.online}
+                title="アラートを受信したら、いずれかのボタンを押すまで振動を繰り返す"
+              >
+                ループ (ボタンで停止)
+              </button>
+              <button
+                type="button"
+                className={`form-button${!alertLoop ? '' : '-secondary'}`}
+                onClick={() => applyAlertLoop(false)}
+                disabled={!device.online}
+                title="アラートを受信したら 1 回だけ振動する"
+              >
+                単発
+              </button>
+            </div>
+            <span />
+          </div>
+          <div className="form-status muted">
+            「ループ」: アラート振動を、本体のいずれかのボタンを押すまで繰り返します
+            (病院アラートのように「気づいて止める」運用)。「単発」: 1 回だけ振動します。
+            既定はループ。変更は次のアラートから即時反映されます。
+          </div>
+        </>
+      )}
 
       <div className="form-action-row" style={{ marginTop: 8 }}>
         <button className="form-button" onClick={apply} disabled={!device.online}>
@@ -662,6 +711,11 @@ export function SensorMappingSection({
   // bleed into the next one.
   const deviceRef = useRef(device.ipAddress)
   const prefilledRef = useRef(false)
+  // The mappings prop reference last applied to the editor. Used so a `dirty`
+  // toggle (e.g. save() flipping it false) does NOT re-run the sync below and
+  // revert the editor to the stale prop — the user must see exactly what they
+  // saved (user 2026-06-13). Only a genuinely NEW prop (reload) re-syncs.
+  const syncedMappingsRef = useRef<SensorMapping[] | undefined>(undefined)
   useEffect(() => {
     if (deviceRef.current === device.ipAddress) return
     deviceRef.current = device.ipAddress
@@ -671,17 +725,23 @@ export function SensorMappingSection({
     setCardTopic('')
     setOverrideRows(new Set())
     prefilledRef.current = false
+    syncedMappingsRef.current = undefined
   }, [device.ipAddress])
 
   // Sync from device-loaded mappings unless the user has local edits.
   // A factory-fresh device (loaded, zero rows) gets the proven 3-color
-  // defaults prefilled — but ONLY ONCE per device. Without the once-guard,
-  // saving (which sets dirty=false) would re-run this effect while the
-  // device still reports zero mappings (the write round-trips through the
-  // firmware asynchronously), clobbering the rows the user just saved with
-  // the blank defaults again.
+  // defaults prefilled — but ONLY ONCE per device.
+  //
+  // The `mappings === syncedMappingsRef.current` short-circuit is what stops
+  // save() from reverting the editor: save() flips dirty→false (no new prop is
+  // fetched), which re-runs this effect with the SAME prop reference. Without
+  // the guard, setRows(mappings) would overwrite the just-saved rows with the
+  // stale prop. We only (re)apply when a genuinely new prop arrives (reload).
   useEffect(() => {
-    if (dirty || !mappings) return
+    if (!mappings) return
+    if (mappings === syncedMappingsRef.current) return  // same prop already applied — don't revert local edits
+    if (dirty) return                                   // a new load arrived mid-edit — keep the user's edits
+    syncedMappingsRef.current = mappings
     if (mappings.length === 0) {
       if (prefilledRef.current) return
       prefilledRef.current = true
@@ -1071,6 +1131,21 @@ export function SensorMappingSection({
               onChange={(e) => update(i, { event_id: e.target.value })}
               placeholder="kit-name.clip-name"
               list="sensor-mapping-event-ids"
+              disabled={!device.online}
+            />
+            <span />
+          </div>
+
+          {/* Per-color OLED text shown on the receiver when this color fires
+              (item 9, e.g. "Red alert occured"). Empty → no message. */}
+          <div className="form-row">
+            <label>受信機の表示</label>
+            <input
+              className="form-input"
+              value={r.oled ?? ''}
+              onChange={(e) => update(i, { oled: e.target.value || undefined })}
+              placeholder="例: Red alert occured（空欄 = 表示なし）"
+              maxLength={32}
               disabled={!device.online}
             />
             <span />

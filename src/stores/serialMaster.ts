@@ -138,7 +138,8 @@ export interface SerialDeviceInfo {
   mqtt_last_topic?: string
   mqtt_last_payload?: string
   mappings_count?: number
-  sensor_type?: string
+  sensor_types?: string[]
+  alert_loop?: boolean
 }
 
 /** Parse a firmware get_info JSON into a SerialDeviceInfo (shared by
@@ -173,7 +174,8 @@ function parseSerialInfo(r: Record<string, unknown>): SerialDeviceInfo {
     mqtt_last_topic: r.mqtt_last_topic as string | undefined,
     mqtt_last_payload: r.mqtt_last_payload as string | undefined,
     mappings_count: r.mappings_count as number | undefined,
-    sensor_type: r.sensor_type as string | undefined,
+    sensor_types: r.sensor_types as string[] | undefined,
+    alert_loop: r.alert_loop as boolean | undefined,
   }
 }
 

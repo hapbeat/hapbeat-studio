@@ -221,7 +221,8 @@ export function DeviceDetail() {
         mqtt_last_topic: p.mqtt_last_topic as string | undefined,
         mqtt_last_payload: p.mqtt_last_payload as string | undefined,
         mappings_count: p.mappings_count as number | undefined,
-        sensor_type: p.sensor_type as string | undefined,
+        sensor_types: p.sensor_types as string[] | undefined,
+        alert_loop: p.alert_loop as boolean | undefined,
         // SoftAP extension fields (firmware ≥ v0.1.0)
         mode: p.mode as 'sta' | 'ap' | undefined,
         ap_ssid: p.ap_ssid as string | undefined,
@@ -428,7 +429,8 @@ export function DeviceDetail() {
         mqtt_last_topic: masterInfo.mqtt_last_topic,
         mqtt_last_payload: masterInfo.mqtt_last_payload,
         mappings_count: masterInfo.mappings_count,
-        sensor_type: masterInfo.sensor_type,
+        sensor_types: masterInfo.sensor_types,
+        alert_loop: masterInfo.alert_loop,
       } : undefined)
     : infoCache[selectedIp]
   const wifiStatus = transport.isSerial
@@ -593,7 +595,7 @@ export function DeviceDetail() {
             device={device}
             mappings={sensorMapping}
             reading={sensorReading}
-            sensorType={cachedInfo?.sensor_type}
+            sensorType={cachedInfo?.sensor_types?.[0]}
             sendTo={sendTo}
             onRefresh={() => sendTo({ type: 'get_sensor_mapping', payload: {} })}
           />

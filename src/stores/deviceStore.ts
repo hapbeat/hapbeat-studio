@@ -86,7 +86,10 @@ interface DeviceState {
     mqtt_last_topic?: string
     mqtt_last_payload?: string
     mappings_count?: number
-    sensor_type?: string
+    /** Sensor hardware type(s) — array so one sender can host several (item 3). */
+    sensor_types?: string[]
+    /** Alert-loop mode (MQTT receiver, item 10): loop until any button press. */
+    alert_loop?: boolean
   }>
 
   /** Per-IP cache of the most recent get_wifi_status response. */

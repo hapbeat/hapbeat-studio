@@ -67,6 +67,12 @@ export interface SensorMapping {
    * registered topic list (mqttTopicsStore).
    */
   topic?: string
+  /**
+   * Optional per-color text shown on the receiver's OLED when this color
+   * fires (item 9, e.g. "Red alert occured"). Sent in the play payload's
+   * `oled` field; empty/undefined → no message. (mqtt-transport.md §4.1)
+   */
+  oled?: string
 }
 
 export interface DeviceInfo {
@@ -144,6 +150,7 @@ export interface StudioToManagerMessage {
     | 'set_sensor_mapping'   // sensor
     | 'get_sensor_mapping'   // sensor
     | 'get_sensor_reading'   // sensor (live tuning view)
+    | 'set_alert_mode'       // receiver(mqtt) — alert-loop on/off (item 10)
   payload: Record<string, unknown>
 }
 
@@ -253,8 +260,12 @@ export interface GetInfoResult {
   mqtt_last_payload?: string
   /** Number of sensor→event mappings configured (sensor). */
   mappings_count?: number
-  /** Sensor hardware type, e.g. "tcs34725" (sensor). */
-  sensor_type?: string
+  /** Sensor hardware type(s), e.g. ["tcs34725"] — an array so one sender can
+   *  expose several sensors (item 3). Single-sensor builds report one element. */
+  sensor_types?: string[]
+  /** Alert-loop mode (MQTT receiver, item 10): true = loop an incoming alert
+   *  until any button is pressed; false = one-shot. */
+  alert_loop?: boolean
   error?: string
 }
 
