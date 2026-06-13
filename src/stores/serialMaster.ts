@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { useLogStore } from '@/stores/logStore'
 import { useDeviceStore } from '@/stores/deviceStore'
-import type { NodeRole, NodeTransport } from '@/types/manager'
+import type { MqttClientEntry, NodeRole, NodeTransport } from '@/types/manager'
 import {
   isWebSerialSupported,
   openConfigConnection,
@@ -121,9 +121,15 @@ export interface SerialDeviceInfo {
   gain?: number
   input_level?: number
   broker_host?: string
+  broker_port?: number
+  topic_root?: string
   static_octet?: number
   mqtt_port?: number
   mqtt_running?: boolean
+  mqtt_clients?: MqttClientEntry[]
+  mqtt_pub_count?: number
+  mqtt_last_topic?: string
+  mqtt_last_payload?: string
   mappings_count?: number
   sensor_type?: string
 }
@@ -148,9 +154,15 @@ function parseSerialInfo(r: Record<string, unknown>): SerialDeviceInfo {
     gain: r.gain as number | undefined,
     input_level: r.input_level as number | undefined,
     broker_host: r.broker_host as string | undefined,
+    broker_port: r.broker_port as number | undefined,
+    topic_root: r.topic_root as string | undefined,
     static_octet: r.static_octet as number | undefined,
     mqtt_port: r.mqtt_port as number | undefined,
     mqtt_running: r.mqtt_running as boolean | undefined,
+    mqtt_clients: r.mqtt_clients as MqttClientEntry[] | undefined,
+    mqtt_pub_count: r.mqtt_pub_count as number | undefined,
+    mqtt_last_topic: r.mqtt_last_topic as string | undefined,
+    mqtt_last_payload: r.mqtt_last_payload as string | undefined,
     mappings_count: r.mappings_count as number | undefined,
     sensor_type: r.sensor_type as string | undefined,
   }
@@ -889,19 +901,26 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       set({ mode: 'flashing', flashRunning: true, flashLastResult: null })
       const pushLog = useLogStore.getState().push
       const totalBytes = regions.reduce((s, r) => s + r.bytes.length, 0)
-      pushLog('serial', `multi-flash → ${targets.length} 台 (${totalBytes.toLocaleString()} bytes each)`)
+      pushLog('serial', `multi-flash → ${targets.length} 台 並列 (${totalBytes.toLocaleString()} bytes each)`)
       for (const e of targets) {
         patchEntry(e.id, { flash: { state: 'waiting', progress: null } })
       }
-      let okCount = 0
-      const failures: string[] = []
-      for (const e of targets) {
+      // Flash every target CONCURRENTLY. Each Web Serial port is an
+      // independent stream and each esptool-js Transport binds to its own
+      // port, so the per-port flows never interact; the per-entry
+      // progress/log already key on entry id. USB bus bandwidth is the
+      // only shared resource — at ≤460800 baud per device that's a few
+      // hundred kB/s total, nowhere near a USB2 hub's budget. State
+      // outside the entries (mode/flashRunning/flashLastResult) is only
+      // touched before the fan-out and after Promise.all, so the
+      // single-flash path and the rest of the UI see the same lifecycle
+      // as the previous sequential version.
+      const flashOne = async (e: SerialPortEntry): Promise<string | null> => {
         const label = serialEntryLabel(e)
         const port = portById.get(e.id)
         if (!port) {
-          failures.push(`${label}: ポートが見つかりません (抜かれた?)`)
           patchEntry(e.id, { flash: { state: 'error', progress: null, message: 'port lost' } })
-          continue
+          return `${label}: ポートが見つかりません (抜かれた?)`
         }
         patchEntry(e.id, { flash: { state: 'flashing', progress: { phase: 'connect', percent: 0 } } })
         pushLog('serial', `[${label}] flash start`)
@@ -922,14 +941,17 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
             info: null,
           })
           pushLog('serial', `[${label}] flash done`)
-          okCount++
+          return null
         } catch (err) {
           const msg = (err as Error).message ?? String(err)
           patchEntry(e.id, { flash: { state: 'error', progress: null, message: msg } })
           pushLog('serial', `[${label}] flash FAILED: ${msg}`)
-          failures.push(`${label}: ${msg}`)
+          return `${label}: ${msg}`
         }
       }
+      const outcomes = await Promise.all(targets.map(flashOne))
+      const failures = outcomes.filter((x): x is string => x !== null)
+      const okCount = targets.length - failures.length
       const ok = failures.length === 0
       set({
         mode: 'idle',

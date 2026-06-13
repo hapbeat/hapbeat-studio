@@ -7,6 +7,7 @@ import {
   type SerialPortEntry,
 } from '@/stores/serialMaster'
 import { isWebSerialSupported } from '@/utils/serialConfig'
+import { roleBadge } from '@/utils/roleLabels'
 import type { ManagerMessage } from '@/types/manager'
 
 /**
@@ -108,7 +109,7 @@ function UsbPortCard({ entry }: { entry: SerialPortEntry }) {
             className="device-detail-pill role-pill"
             title={`ノード役割: ${entry.info.role}`}
           >
-            {entry.info.role.toUpperCase()}
+            {roleBadge(entry.info.role)}
           </span>
         )}
         <span
@@ -231,6 +232,8 @@ export function DeviceList() {
   const infoCache = useDeviceStore((s) => s.infoCache)
   const selectDevice = useDeviceStore((s) => s.selectDevice)
   const toggleSelect = useDeviceStore((s) => s.toggleSelect)
+  const selectExclusive = useDeviceStore((s) => s.selectExclusive)
+  const selectRange = useDeviceStore((s) => s.selectRange)
   const dismissDevice = useDeviceStore((s) => s.dismissDevice)
   const syncOnlineDevices = useDeviceStore((s) => s.syncOnlineDevices)
 
@@ -336,7 +339,17 @@ export function DeviceList() {
               const target = e.target as HTMLElement
               if (target.closest('.device-row-dismiss')) return
               if (target.closest('.device-row-checkbox-input')) return
-              toggleSelect(dev.ipAddress)
+              // Explorer-style selection (user feedback 2026-06-13):
+              //   plain click        → exclusive single select
+              //   Ctrl/Cmd + click   → additive toggle
+              //   Shift + click      → contiguous range from the primary
+              if (e.shiftKey) {
+                selectRange(dev.ipAddress, visibleDevices.map((d) => d.ipAddress))
+              } else if (e.ctrlKey || e.metaKey) {
+                toggleSelect(dev.ipAddress)
+              } else {
+                selectExclusive(dev.ipAddress)
+              }
             }
             const isApMode = infoCache[dev.ipAddress]?.mode === 'ap'
             return (
@@ -366,7 +379,7 @@ export function DeviceList() {
                       className="device-detail-pill role-pill"
                       title={`ノード役割: ${dev.role}`}
                     >
-                      {dev.role.toUpperCase()}
+                      {roleBadge(dev.role)}
                     </span>
                   )}
                   {isApMode && (
@@ -385,24 +398,12 @@ export function DeviceList() {
                   ) : dev.online ? (
                     <span
                       className="device-row-status online"
-                      title="接続中"
+                      title="Wi-Fi (LAN) で接続中"
                     >
-                      <svg
-                        width="12"
-                        height="12"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.4"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                      >
-                        <path d="M9 7H6a4 4 0 1 0 0 8h3" />
-                        <path d="M15 17h3a4 4 0 1 0 0-8h-3" />
-                        <line x1="8" y1="12" x2="16" y2="12" />
-                      </svg>
-                      <span>接続中</span>
+                      <span style={{ fontSize: 13 }}>📶</span>
+                      {/* override the pill's uppercase so it reads "Wi-Fi"
+                          not "WI-FI" */}
+                      <span style={{ textTransform: 'none' }}>Wi-Fi</span>
                     </span>
                   ) : (
                     <button

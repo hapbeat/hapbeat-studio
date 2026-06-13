@@ -16,7 +16,34 @@
  */
 
 export const ESP_IMAGE_MAGIC = 0xe9
+export const ESP_CHIP_ID_ESP32 = 0x00
 export const ESP_CHIP_ID_ESP32_S3 = 0x09
+
+/** Every chip id we ship firmware for (sanity allowlist when the target
+ *  device's board is unknown). */
+const KNOWN_CHIP_IDS = new Set([0x00, 0x02, 0x05, 0x09, 0x0c, 0x0d, 0x10])
+
+/**
+ * Hapbeat board id → ESP image chip id. Sources: platformio.ini `board=`
+ * of hapbeat-device-firmware (esp32-s3-devkitc-1 / m5stack-atom) and
+ * hapbeat-transmitter-firmware (m5stack-core-esp32 class).
+ * `null` = board unknown → caller skips the exact-match assertion.
+ */
+export function chipIdForBoard(board: string | null | undefined): number | null {
+  switch (board) {
+    case 'atom_lite':       // M5 ATOM Lite (classic ESP32, PICO-D4)
+    case 'm5stack_basic':   // M5Stack Basic (classic ESP32)
+      return ESP_CHIP_ID_ESP32
+    case 'atom_s3':
+    case 'duo_wl_v3':
+    case 'band_wl_v2':
+    case 'band_wl_v3':
+    case 'band_wl_v4':
+      return ESP_CHIP_ID_ESP32_S3
+    default:
+      return null
+  }
+}
 
 /** App パーティションの実用最小値。bootloader / partition table を除く本体だけで
  *  100 KB 未満なら明らかに不正 (空ファイル / 切れ端) と見なす。 */
@@ -59,16 +86,20 @@ function chipIdToName(chipId: number): string {
  * 検証項目:
  * 1. 最低限のサイズ (空ファイル / 短すぎる切れ端を弾く)
  * 2. Magic byte (0xE9) — ESP32 image でない場合は即停止
- * 3. Chip ID — Hapbeat は ESP32-S3 固定なので 0x09 以外は警告
+ * 3. Chip ID — `expectedChipId` 指定時は完全一致を要求。未指定 (target
+ *    の board 不明) のときは既知 chip id の allowlist チェックのみ。
+ *    ※以前は無条件で ESP32-S3 固定だったため classic ESP32 ノード
+ *    (ATOM Lite 等) への OTA が常に弾かれていた (user report 2026-06-13)。
  * 4. ファイル先頭が "merged image" (= bootloader を含む完全 image) でないか確認
  *    (merged を OTA で送ると bootloader 領域も書き込むことになり deadly)
  *
  * @param bytes 送信予定の生バイト
- * @param expectedChipId target デバイスの chip ID (default: ESP32-S3)
+ * @param expectedChipId target デバイスの chip ID (`chipIdForBoard()` から。
+ *                       null/undefined = board 不明 → 完全一致チェックを skip)
  */
 export function validateOtaImage(
   bytes: Uint8Array,
-  expectedChipId: number = ESP_CHIP_ID_ESP32_S3,
+  expectedChipId?: number | null,
 ): OtaValidationResult {
   // 1) サイズ
   if (bytes.length < MIN_APP_BYTES) {
@@ -121,13 +152,24 @@ export function validateOtaImage(
   const chipId = bytes[12]
   const hashAppended = (bytes[23] & 0x01) === 0x01
   const chipName = chipIdToName(chipId)
-  if (chipId !== expectedChipId) {
+  if (expectedChipId !== null && expectedChipId !== undefined) {
+    if (chipId !== expectedChipId) {
+      return {
+        ok: false,
+        reason:
+          `Chip ID が一致しません: image=${chipName} (0x${chipId.toString(16)}), `
+          + `device 期待値=${chipIdToName(expectedChipId)} (0x${expectedChipId.toString(16)})。`
+          + ` 別チップ向けにビルドされた .bin を選択している可能性があります。`,
+      }
+    }
+  } else if (!KNOWN_CHIP_IDS.has(chipId)) {
+    // Target board unknown — at least require a chip id we recognize so
+    // corrupt headers still get caught.
     return {
       ok: false,
       reason:
-        `Chip ID が一致しません: image=${chipName} (0x${chipId.toString(16)}), `
-        + `device 期待値=${chipIdToName(expectedChipId)} (0x${expectedChipId.toString(16)})。`
-        + ` 別チップ向けにビルドされた .bin を選択している可能性があります。`,
+        `image の Chip ID が不明な値です (0x${chipId.toString(16)})。`
+        + ` ファイルが破損しているか、ESP32 系でないバイナリの可能性があります。`,
     }
   }
   if (segments === 0 || segments > 16) {

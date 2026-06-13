@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { NodeRole, NodeTransport, SensorMapping, SensorReading } from '@/types/manager'
+import type { MqttClientEntry, NodeRole, NodeTransport, SensorMapping, SensorReading } from '@/types/manager'
 
 const STORAGE_KEY_SELECTED = 'hapbeat-studio-selected-device'
 const STORAGE_KEY_SELECTED_SET = 'hapbeat-studio-selected-devices'
@@ -74,9 +74,15 @@ interface DeviceState {
     gain?: number
     input_level?: number
     broker_host?: string
+    broker_port?: number
+    topic_root?: string
     static_octet?: number
     mqtt_port?: number
     mqtt_running?: boolean
+    mqtt_clients?: MqttClientEntry[]
+    mqtt_pub_count?: number
+    mqtt_last_topic?: string
+    mqtt_last_payload?: string
     mappings_count?: number
     sensor_type?: string
   }>
@@ -120,6 +126,10 @@ interface DeviceState {
 
   selectDevice: (ip: string | null) => void
   toggleSelect: (ip: string) => void
+  /** Plain click — exclusive single selection (Explorer-style). */
+  selectExclusive: (ip: string) => void
+  /** Shift+click — contiguous range from the primary, in display order. */
+  selectRange: (ip: string, orderedIps: string[]) => void
   dismissDevice: (ip: string) => void
   /** Helper-driven housekeeping: every push of the device list calls
    *  this so dismissed-but-now-online IPs un-dismiss themselves. Idempotent. */
@@ -263,8 +273,8 @@ export const useDeviceStore = create<DeviceState>((set) => ({
   },
 
   /**
-   * Toggle one IP in the selected set. Manager-style: clicking a card
-   * inverts its checkbox state. The detail-pane "primary" (`selectedIp`)
+   * Toggle one IP in the selected set (Explorer-style Ctrl+click /
+   * the checkbox itself). The detail-pane "primary" (`selectedIp`)
    * auto-syncs to whichever IP was just toggled on, or to the first
    * remaining one when the toggle was a removal.
    */
@@ -287,6 +297,41 @@ export const useDeviceStore = create<DeviceState>((set) => ({
       persist(STORAGE_KEY_SELECTED_SET, arr)
       persist(STORAGE_KEY_SELECTED, primary)
       return { selectedIps: arr, selectedIp: primary }
+    }),
+
+  /**
+   * Explorer-style plain click: make this IP the ONLY selection.
+   * Config flows are 1-device-at-a-time, so an exclusive select is the
+   * least-surprise default; batch selection moves to Ctrl/Shift+click
+   * (user feedback 2026-06-13).
+   */
+  selectExclusive: (ip) =>
+    set(() => {
+      persist(STORAGE_KEY_SELECTED_SET, [ip])
+      persist(STORAGE_KEY_SELECTED, ip)
+      return { selectedIps: [ip], selectedIp: ip }
+    }),
+
+  /**
+   * Explorer-style Shift+click: select the contiguous range between the
+   * current primary and `ip`, in the caller-provided display order.
+   * Falls back to exclusive select when there's no anchor.
+   */
+  selectRange: (ip, orderedIps) =>
+    set((s) => {
+      const anchor = s.selectedIp
+      const ai = anchor ? orderedIps.indexOf(anchor) : -1
+      const bi = orderedIps.indexOf(ip)
+      if (ai < 0 || bi < 0) {
+        persist(STORAGE_KEY_SELECTED_SET, [ip])
+        persist(STORAGE_KEY_SELECTED, ip)
+        return { selectedIps: [ip], selectedIp: ip }
+      }
+      const [lo, hi] = ai <= bi ? [ai, bi] : [bi, ai]
+      const arr = orderedIps.slice(lo, hi + 1)
+      persist(STORAGE_KEY_SELECTED_SET, arr)
+      persist(STORAGE_KEY_SELECTED, ip)
+      return { selectedIps: arr, selectedIp: ip }
     }),
 
   /** Hide an offline card. Persisted; cleared when the IP comes back online. */

@@ -27,7 +27,7 @@ import {
   type FirmwareLibraryEntry,
   type FirmwareRegion,
 } from '@/utils/firmwareLibrary'
-import { validateOtaImage } from '@/utils/otaImageValidation'
+import { chipIdForBoard, validateOtaImage } from '@/utils/otaImageValidation'
 import { DriverHelpLinks } from './DriverHelpLinks'
 
 const ROLE_ORDER: NodeRole[] = ['receiver', 'sensor', 'broker', 'transmitter']
@@ -663,7 +663,11 @@ export function FirmwareSubTab({
       return
     }
 
-    const validation = validateOtaImage(bin.bytes)
+    // Expected chip: derived from the target device's reported board
+    // (atom_lite → classic ESP32, wearables/AtomS3 → ESP32-S3). Unknown
+    // board → chip-allowlist check only, so classic-ESP32 nodes are no
+    // longer rejected by the old hardcoded S3 expectation.
+    const validation = validateOtaImage(bin.bytes, chipIdForBoard(knownBoard))
     if (!validation.ok) {
       pushLog('ota', `pre-flight FAILED: ${validation.reason}`)
       setResult({
@@ -1173,7 +1177,7 @@ export function FirmwareSubTab({
         )}
         {serialTargets.length > 0 && (
           <div className="form-section-sub-inline" style={{ opacity: 0.85 }}>
-            サイドバーの USB Serial で {serialTargets.length} 台選択中 — 順番に書き込みます:
+            サイドバーの USB Serial で {serialTargets.length} 台選択中 — 並列で書き込みます:
             {' '}{serialTargets.map((e) => serialEntryLabel(e)).join(' / ')}
           </div>
         )}

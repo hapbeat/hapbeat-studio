@@ -220,17 +220,37 @@ export interface GetInfoResult {
   input_level?: number
   /** MQTT broker host ("auto" or host/IP) (receiver(mqtt) / sensor). */
   broker_host?: string
+  /** MQTT connect port for manual hosts (receiver(mqtt) / sensor). */
+  broker_port?: number
+  /** MQTT topic root, default "hapbeat" (receiver(mqtt) / sensor). */
+  topic_root?: string
   /** Broker static host octet (broker). */
   static_octet?: number
   /** Broker MQTT port (broker). */
   mqtt_port?: number
   /** Whether the embedded broker is currently running (broker). */
   mqtt_running?: boolean
+  /** Connected MQTT clients (broker; presence-sourced names). */
+  mqtt_clients?: MqttClientEntry[]
+  /** play/stop publish count since boot (broker). */
+  mqtt_pub_count?: number
+  /** Topic of the most recent publish (broker). */
+  mqtt_last_topic?: string
+  /** Payload preview of the most recent publish (broker). */
+  mqtt_last_payload?: string
   /** Number of sensor→event mappings configured (sensor). */
   mappings_count?: number
   /** Sensor hardware type, e.g. "tcs34725" (sensor). */
   sensor_type?: string
   error?: string
+}
+
+/** One connected client on the embedded broker (mqtt-transport.md §8). */
+export interface MqttClientEntry {
+  id: string
+  /** Studio-assigned device name (presence message); absent on old firmware. */
+  name?: string
+  role: 'sensor' | 'receiver' | 'unknown'
 }
 
 export interface WifiStatusResult {

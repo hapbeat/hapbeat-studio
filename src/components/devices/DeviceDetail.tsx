@@ -5,7 +5,7 @@ import { ApModeSection } from './ApModeSection'
 import { useLibraryStore } from '@/stores/libraryStore'
 import type { KitDefinition, KitEvent } from '@/types/library'
 import { useLogStore } from '@/stores/logStore'
-import type { DeviceInfo, ManagerMessage, NodeRole, NodeTransport, SensorMapping } from '@/types/manager'
+import type { DeviceInfo, ManagerMessage, MqttClientEntry, NodeRole, NodeTransport, SensorMapping } from '@/types/manager'
 import { IdentityForm } from './IdentityForm'
 import { WifiProfilesForm } from './WifiProfilesForm'
 import { UiConfigForm } from './UiConfigForm'
@@ -23,8 +23,13 @@ import {
 } from './NodeConfigSections'
 import { useDeviceTransport } from '@/hooks/useDeviceTransport'
 import { useSerialMaster } from '@/stores/serialMaster'
+import { roleBadge } from '@/utils/roleLabels'
 
-type SubTab = 'wifi' | 'config' | 'kit' | 'test' | 'firmware' | 'espnow' | 'broker' | 'mapping'
+type SubTab =
+  | 'wifi' | 'config' | 'kit' | 'test' | 'firmware' | 'espnow'
+  | 'mqtt'      // MQTT client settings (sensor / receiver(mqtt))
+  | 'broker'    // MQTT broker panel (flow chart + broker config)
+  | 'mapping'   // sensor live value + mapping editor
 
 const SUB_TAB_LABEL: Record<SubTab, string> = {
   wifi: 'Wi-Fi',
@@ -33,8 +38,9 @@ const SUB_TAB_LABEL: Record<SubTab, string> = {
   test: '再生テスト',
   firmware: 'ファームウェア',
   espnow: 'ESP-NOW',
-  broker: 'ブローカー',
-  mapping: 'マッピング',
+  mqtt: 'MQTT',
+  broker: 'MQTT',     // broker 側は「MQTT」一枚にブローカー設定+フロー図を集約
+  mapping: 'センサー',
 }
 
 /**
@@ -49,7 +55,9 @@ function computeSubTabs(
 ): SubTab[] {
   switch (role) {
     case 'sensor':
-      return ['wifi', 'config', 'mapping', 'firmware']
+      // MQTT クライアント設定は専用タブ、センサー (ライブ値 + マッピング)
+      // も専用タブ (user feedback 2026-06-13)。
+      return ['wifi', 'config', 'mqtt', 'mapping', 'firmware']
     case 'broker':
       return ['wifi', 'config', 'broker', 'firmware']
     case 'transmitter':
@@ -62,7 +70,10 @@ function computeSubTabs(
         && !transports.includes('udp')
         && !transports.includes('mqtt')
       if (pureStream) return ['espnow', 'firmware']
-      // udp / mqtt receiver (mqtt host appears inside 設定).
+      // mqtt receiver gets the MQTT client tab; plain udp doesn't.
+      if (transports.includes('mqtt')) {
+        return ['wifi', 'config', 'mqtt', 'kit', 'test', 'firmware']
+      }
       return ['wifi', 'config', 'kit', 'test', 'firmware']
     }
   }
@@ -180,9 +191,15 @@ export function DeviceDetail() {
         gain: p.gain as number | undefined,
         input_level: p.input_level as number | undefined,
         broker_host: p.broker_host as string | undefined,
+        broker_port: p.broker_port as number | undefined,
+        topic_root: p.topic_root as string | undefined,
         static_octet: p.static_octet as number | undefined,
         mqtt_port: p.mqtt_port as number | undefined,
         mqtt_running: p.mqtt_running as boolean | undefined,
+        mqtt_clients: p.mqtt_clients as MqttClientEntry[] | undefined,
+        mqtt_pub_count: p.mqtt_pub_count as number | undefined,
+        mqtt_last_topic: p.mqtt_last_topic as string | undefined,
+        mqtt_last_payload: p.mqtt_last_payload as string | undefined,
         mappings_count: p.mappings_count as number | undefined,
         sensor_type: p.sensor_type as string | undefined,
         // SoftAP extension fields (firmware ≥ v0.1.0)
@@ -376,9 +393,15 @@ export function DeviceDetail() {
         gain: masterInfo.gain,
         input_level: masterInfo.input_level,
         broker_host: masterInfo.broker_host,
+        broker_port: masterInfo.broker_port,
+        topic_root: masterInfo.topic_root,
         static_octet: masterInfo.static_octet,
         mqtt_port: masterInfo.mqtt_port,
         mqtt_running: masterInfo.mqtt_running,
+        mqtt_clients: masterInfo.mqtt_clients,
+        mqtt_pub_count: masterInfo.mqtt_pub_count,
+        mqtt_last_topic: masterInfo.mqtt_last_topic,
+        mqtt_last_payload: masterInfo.mqtt_last_payload,
         mappings_count: masterInfo.mappings_count,
         sensor_type: masterInfo.sensor_type,
       } : undefined)
@@ -424,7 +447,7 @@ export function DeviceDetail() {
         <div className="devices-detail-sub">
           <span className="device-detail-pill selected-pill">SELECTED</span>
           {nodeRole !== 'receiver' && (
-            <span className="device-detail-pill role-pill">{nodeRole.toUpperCase()}</span>
+            <span className="device-detail-pill role-pill">{roleBadge(nodeRole)}</span>
           )}
           {apInfo.mode === 'ap' && (
             <span className="device-detail-pill ap-mode-badge">AP MODE</span>
@@ -506,10 +529,6 @@ export function DeviceDetail() {
               cachedInfo={cachedInfo}
               sendTo={sendTo}
             />
-            {(nodeRole === 'sensor'
-              || (nodeRole === 'receiver' && nodeTransports.includes('mqtt'))) && (
-              <MqttConfigSection device={device} cachedInfo={cachedInfo} sendTo={sendTo} />
-            )}
             {nodeRole === 'receiver' && (
               <UiConfigForm device={device} sendTo={sendTo} />
             )}
@@ -520,6 +539,10 @@ export function DeviceDetail() {
             />
             <SerialConfigSection compact />
           </>
+        )}
+
+        {activeSubTab === 'mqtt' && (
+          <MqttConfigSection device={device} cachedInfo={cachedInfo} sendTo={sendTo} />
         )}
 
         {activeSubTab === 'espnow' && (

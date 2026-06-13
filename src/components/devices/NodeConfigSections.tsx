@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { DeviceInfo, ManagerMessage, SensorColorMatch, SensorMapping, SensorReading } from '@/types/manager'
+import type { DeviceInfo, ManagerMessage, MqttClientEntry, SensorColorMatch, SensorMapping, SensorReading } from '@/types/manager'
 import { useLibraryStore } from '@/stores/libraryStore'
 
 /**
@@ -15,9 +15,15 @@ export interface NodeConfigInfo {
   gain?: number
   input_level?: number
   broker_host?: string
+  broker_port?: number
+  topic_root?: string
   static_octet?: number
   mqtt_port?: number
   mqtt_running?: boolean
+  mqtt_clients?: MqttClientEntry[]
+  mqtt_pub_count?: number
+  mqtt_last_topic?: string
+  mqtt_last_payload?: string
   mappings_count?: number
 }
 
@@ -140,7 +146,7 @@ export function EspNowConfigSection({
 }
 
 // ---------------------------------------------------------------------
-// MQTT broker host (receiver(mqtt) / sensor)
+// MQTT client settings (receiver(mqtt) / sensor) — the MQTT クライアント tab
 // ---------------------------------------------------------------------
 
 export function MqttConfigSection({
@@ -155,31 +161,43 @@ export function MqttConfigSection({
   const initialHost = cachedInfo?.broker_host ?? 'auto'
   const [auto, setAuto] = useState<boolean>(initialHost === 'auto')
   const [host, setHost] = useState<string>(initialHost === 'auto' ? '' : initialHost)
+  const [port, setPort] = useState<number>(cachedInfo?.broker_port ?? 1883)
+  const [root, setRoot] = useState<string>(cachedInfo?.topic_root ?? 'hapbeat')
+  const [status, setStatus] = useState<string | null>(null)
 
   useEffect(() => {
     const h = cachedInfo?.broker_host
-    if (h == null) return
-    if (h === 'auto') {
-      setAuto(true)
-      setHost('')
-    } else {
-      setAuto(false)
-      setHost(h)
+    if (h != null) {
+      if (h === 'auto') {
+        setAuto(true)
+        setHost('')
+      } else {
+        setAuto(false)
+        setHost(h)
+      }
     }
-  }, [device.ipAddress, cachedInfo?.broker_host])
+    if (cachedInfo?.broker_port != null) setPort(cachedInfo.broker_port)
+    if (cachedInfo?.topic_root != null) setRoot(cachedInfo.topic_root)
+  }, [device.ipAddress, cachedInfo?.broker_host, cachedInfo?.broker_port, cachedInfo?.topic_root])
 
+  const rootClean = root.trim().replace(/\//g, '')
   const apply = () => {
     const value = auto ? 'auto' : host.trim()
     if (!auto && !value) return
-    sendTo({ type: 'set_broker_host', payload: { host: value } })
+    sendTo({
+      type: 'set_broker_host',
+      payload: { host: value, port, topic_root: rootClean || 'hapbeat' },
+    })
+    setStatus('適用しました — センサは即時再接続、Hapbeat (受信機) は再起動後に反映されます')
+    setTimeout(() => setStatus(null), 5000)
   }
 
   return (
     <div className="form-section">
       <div className="form-section-title">
-        MQTT ブローカー
+        MQTT クライアント設定
         <span className="form-section-sub-inline">
-          {' '}— センサ通知の中継先
+          {' '}— どのブローカー・トピックに接続するか
         </span>
       </div>
 
@@ -193,34 +211,228 @@ export function MqttConfigSection({
           onChange={(e) => setAuto(e.target.checked)}
           disabled={!device.online}
         />
-        自動検出 (mDNS で hapbeat-broker を探す)
+        ブローカー自動検出 (mDNS で同一 LAN 上の Hapbeat ブローカーを探す)
       </label>
 
       {!auto && (
-        <div className="form-row" style={{ marginTop: 6 }}>
-          <label>ホスト/IP</label>
-          <input
-            className="form-input mono"
-            value={host}
-            onChange={(e) => setHost(e.target.value)}
-            placeholder="192.168.1.10 または hapbeat-broker.local"
-            disabled={!device.online}
-          />
-          <span />
-        </div>
+        <>
+          <div className="form-row" style={{ marginTop: 6 }}>
+            <label>ホスト/IP</label>
+            <input
+              className="form-input mono"
+              value={host}
+              onChange={(e) => setHost(e.target.value)}
+              placeholder="192.168.1.10 または hapbeat-broker.local"
+              disabled={!device.online}
+            />
+            <span />
+          </div>
+          <div className="form-row">
+            <label>ポート</label>
+            <input
+              className="form-input short"
+              type="number"
+              min={1}
+              max={65535}
+              value={port}
+              onChange={(e) => setPort(Math.max(1, Math.min(65535, Number(e.target.value) || 1883)))}
+              disabled={!device.online}
+            />
+            <span />
+          </div>
+          <div className="form-status muted">
+            自動検出時はブローカーが mDNS で広告するポートを使うため、ポート指定は手動ホスト時のみ有効です。
+          </div>
+        </>
       )}
+
+      <div className="form-row" style={{ marginTop: 6 }}>
+        <label>トピック root</label>
+        <input
+          className="form-input mono"
+          value={root}
+          onChange={(e) => setRoot(e.target.value)}
+          placeholder="hapbeat"
+          maxLength={32}
+          disabled={!device.online}
+          style={{ flex: '0 0 160px' }}
+        />
+        <span />
+      </div>
+      <div className="form-status muted">
+        実際のトピックは <code>{rootClean || 'hapbeat'}/play</code> ・ <code>{rootClean || 'hapbeat'}/stop</code> になります。
+        送信側 (SENDER) と受信側 (Hapbeat) で同じ root にそろえてください。
+        QoS は 0 固定です (触覚イベントは遅延再送より取りこぼしの方が体験を壊さないため)。
+      </div>
 
       <div className="form-action-row" style={{ marginTop: 8 }}>
         <button className="form-button" onClick={apply} disabled={!device.online}>
           適用
         </button>
+        {status && <span className="form-status ok" style={{ alignSelf: 'center' }}>{status}</span>}
       </div>
     </div>
   )
 }
 
 // ---------------------------------------------------------------------
-// Embedded broker config (role = broker)
+// MQTT flow chart — sensors → broker → receivers, with live publish
+// stats. Fed by the broker's get_info (mqtt_clients / mqtt_pub_count /
+// mqtt_last_*, polled every 2 s while the MQTT tab is open).
+// ---------------------------------------------------------------------
+
+function clientLabel(c: MqttClientEntry): string {
+  if (c.name) return c.name
+  // Fallback: clientId tail (old firmware without presence).
+  return c.id.length > 14 ? `…${c.id.slice(-12)}` : c.id
+}
+
+function MqttFlowChart({
+  brokerName,
+  port,
+  running,
+  clients,
+  pubCount,
+  lastTopic,
+  lastPayload,
+}: {
+  brokerName: string
+  port: number
+  running: boolean
+  clients: MqttClientEntry[]
+  pubCount?: number
+  lastTopic?: string
+  lastPayload?: string
+}) {
+  const senders = clients.filter((c) => c.role === 'sensor')
+  const receivers = clients.filter((c) => c.role === 'receiver')
+  const others = clients.filter((c) => c.role !== 'sensor' && c.role !== 'receiver')
+
+  // Pulse the edges briefly whenever the publish counter advances.
+  const prevCountRef = useRef<number | undefined>(undefined)
+  const [pulse, setPulse] = useState(false)
+  useEffect(() => {
+    if (pubCount == null) return
+    const prev = prevCountRef.current
+    prevCountRef.current = pubCount
+    if (prev != null && pubCount > prev) {
+      setPulse(true)
+      const t = setTimeout(() => setPulse(false), 600)
+      return () => clearTimeout(t)
+    }
+  }, [pubCount])
+
+  const rows = Math.max(senders.length + others.length, receivers.length, 1)
+  const ROW_H = 34
+  const height = 60 + rows * ROW_H
+  const W = 560
+  const brokerY = height / 2
+
+  const nodeBox = (
+    x: number, y: number, label: string, kind: 'sender' | 'receiver' | 'other',
+  ) => (
+    <g key={`${kind}-${x}-${y}-${label}`}>
+      <rect
+        x={x} y={y - 13} width={150} height={26} rx={5}
+        fill={kind === 'sender' ? 'rgba(255,165,0,0.12)' : kind === 'receiver' ? 'rgba(76,175,80,0.12)' : 'rgba(128,128,128,0.12)'}
+        stroke={kind === 'sender' ? '#e8a33d' : kind === 'receiver' ? '#4caf50' : '#888'}
+        strokeWidth={1}
+      />
+      <text x={x + 75} y={y + 4} textAnchor="middle" fontSize={11}
+        fill="var(--text-primary, #ddd)" style={{ fontFamily: 'var(--font-mono)' }}>
+        {label.length > 18 ? `${label.slice(0, 17)}…` : label}
+      </text>
+    </g>
+  )
+
+  const edge = (x1: number, y1: number, x2: number, y2: number, key: string) => (
+    <line
+      key={key}
+      x1={x1} y1={y1} x2={x2} y2={y2}
+      stroke={pulse ? 'var(--accent, #7b6cff)' : 'rgba(150,150,150,0.45)'}
+      strokeWidth={pulse ? 2.5 : 1.2}
+      markerEnd="url(#mqtt-arrow)"
+    />
+  )
+
+  const leftNodes = [...senders, ...others]
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <svg
+        viewBox={`0 0 ${W} ${height}`}
+        style={{ width: '100%', maxWidth: 640, display: 'block' }}
+        role="img"
+        aria-label="MQTT 通信フロー図"
+      >
+        <defs>
+          <marker id="mqtt-arrow" viewBox="0 0 8 8" refX="7" refY="4"
+            markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L8,4 L0,8 z" fill={pulse ? 'var(--accent, #7b6cff)' : 'rgba(150,150,150,0.6)'} />
+          </marker>
+        </defs>
+
+        {/* column headers */}
+        <text x={85} y={16} textAnchor="middle" fontSize={11} fill="var(--text-muted, #888)">SENDER</text>
+        <text x={W / 2} y={16} textAnchor="middle" fontSize={11} fill="var(--text-muted, #888)">BROKER</text>
+        <text x={W - 85} y={16} textAnchor="middle" fontSize={11} fill="var(--text-muted, #888)">RECEIVER</text>
+
+        {/* broker box */}
+        <rect
+          x={W / 2 - 80} y={brokerY - 24} width={160} height={48} rx={7}
+          fill={running ? 'rgba(123,108,255,0.14)' : 'rgba(244,67,54,0.12)'}
+          stroke={running ? 'var(--accent, #7b6cff)' : '#f44336'} strokeWidth={1.4}
+        />
+        <text x={W / 2} y={brokerY - 5} textAnchor="middle" fontSize={12} fontWeight={600}
+          fill="var(--text-primary, #ddd)">
+          {brokerName.length > 20 ? `${brokerName.slice(0, 19)}…` : brokerName}
+        </text>
+        <text x={W / 2} y={brokerY + 13} textAnchor="middle" fontSize={10.5}
+          fill="var(--text-muted, #999)" style={{ fontFamily: 'var(--font-mono)' }}>
+          {running ? `:${port} 稼働中` : '停止中'}{pubCount != null ? ` · pub ${pubCount}` : ''}
+        </text>
+
+        {/* sender (+unknown) nodes & edges into the broker */}
+        {leftNodes.map((c, i) => {
+          const y = 40 + i * ROW_H + 13
+          return (
+            <g key={c.id}>
+              {nodeBox(10, y, clientLabel(c), c.role === 'sensor' ? 'sender' : 'other')}
+              {edge(162, y, W / 2 - 82, brokerY, `e-l-${c.id}`)}
+            </g>
+          )
+        })}
+        {leftNodes.length === 0 && (
+          <text x={85} y={brokerY + 4} textAnchor="middle" fontSize={11}
+            fill="var(--text-muted, #777)">(未接続)</text>
+        )}
+
+        {/* receiver nodes & edges out of the broker */}
+        {receivers.map((c, i) => {
+          const y = 40 + i * ROW_H + 13
+          return (
+            <g key={c.id}>
+              {nodeBox(W - 160, y, clientLabel(c), 'receiver')}
+              {edge(W / 2 + 82, brokerY, W - 162, y, `e-r-${c.id}`)}
+            </g>
+          )
+        })}
+        {receivers.length === 0 && (
+          <text x={W - 85} y={brokerY + 4} textAnchor="middle" fontSize={11}
+            fill="var(--text-muted, #777)">(未接続)</text>
+        )}
+      </svg>
+      {lastTopic && (
+        <div className="form-status muted mono" style={{ marginTop: 2 }}>
+          最終 publish: <code>{lastTopic}</code>{lastPayload ? <> — <code>{lastPayload}</code></> : null}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------
+// Embedded broker panel (role = broker) — MQTT tab: flow chart + config
 // ---------------------------------------------------------------------
 
 export function BrokerConfigSection({
@@ -240,62 +452,112 @@ export function BrokerConfigSection({
     if (cachedInfo?.mqtt_port != null) setPort(cachedInfo.mqtt_port)
   }, [device.ipAddress, cachedInfo?.static_octet, cachedInfo?.mqtt_port])
 
+  // Refresh the broker stats (clients / pub count) every 2 s while this
+  // panel is visible — drives the flow chart's live pulse.
+  const sendToRef = useRef(sendTo)
+  sendToRef.current = sendTo
+  useEffect(() => {
+    if (!device.online) return
+    const tick = () => sendToRef.current({ type: 'get_info', payload: {} })
+    const id = window.setInterval(tick, 2000)
+    return () => window.clearInterval(id)
+  }, [device.ipAddress, device.online])
+
   const apply = () => {
     sendTo({ type: 'set_broker_config', payload: { static_octet: octet, port } })
   }
 
   return (
-    <div className="form-section">
-      <div className="form-section-title">
-        ブローカー設定
-        <span className="form-section-sub-inline">
-          {' '}— 組み込み MQTT ブローカー (PC 不要)
-        </span>
-      </div>
-
-      {cachedInfo?.mqtt_running != null && (
-        <div className={`form-status ${cachedInfo.mqtt_running ? 'ok' : 'warn'}`}>
-          ブローカー: {cachedInfo.mqtt_running ? '稼働中' : '停止中'}
+    <>
+      <div className="form-section">
+        <div className="form-section-title">
+          通信フロー
+          <span className="form-section-sub-inline">
+            {' '}— 各クライアントがこのブローカーにどう繋がっているか (2 秒ごとに更新)
+          </span>
         </div>
-      )}
-
-      <div className="form-row">
-        <label>固定ホストオクテット</label>
-        <input
-          className="form-input short"
-          type="number"
-          min={2}
-          max={254}
-          value={octet}
-          onChange={(e) => setOctet(Math.max(2, Math.min(254, Number(e.target.value) || 10)))}
-          disabled={!device.online}
+        <MqttFlowChart
+          brokerName={device.name || 'BROKER'}
+          port={cachedInfo?.mqtt_port ?? 1883}
+          running={cachedInfo?.mqtt_running ?? false}
+          clients={cachedInfo?.mqtt_clients ?? []}
+          pubCount={cachedInfo?.mqtt_pub_count}
+          lastTopic={cachedInfo?.mqtt_last_topic}
+          lastPayload={cachedInfo?.mqtt_last_payload}
         />
-        <span />
-      </div>
-      <div className="form-status muted">
-        ゲートウェイのサブネット上で broker が名乗る固定ホスト番号 (2〜254)。
-      </div>
-
-      <div className="form-row">
-        <label>ポート</label>
-        <input
-          className="form-input short"
-          type="number"
-          min={1}
-          max={65535}
-          value={port}
-          onChange={(e) => setPort(Math.max(1, Math.min(65535, Number(e.target.value) || 1883)))}
-          disabled={!device.online}
-        />
-        <span />
+        <div className="form-status muted">
+          クライアント名は各ノードが接続時に publish する presence 情報 (デバイス名) です。
+          名前が出ない場合は当該ノードのファームが古いか、デバイス名が未設定です。
+        </div>
       </div>
 
-      <div className="form-action-row" style={{ marginTop: 8 }}>
-        <button className="form-button" onClick={apply} disabled={!device.online}>
-          適用
-        </button>
+      <div className="form-section">
+        <div className="form-section-title">
+          ブローカー設定
+          <span className="form-section-sub-inline">
+            {' '}— 組み込み MQTT ブローカー (PC 不要)
+          </span>
+        </div>
+
+        {cachedInfo?.mqtt_running != null && (
+          <div className={`form-status ${cachedInfo.mqtt_running ? 'ok' : 'warn'}`}>
+            ブローカー: {cachedInfo.mqtt_running ? '稼働中' : '停止中'}
+            {cachedInfo.mqtt_clients != null && cachedInfo.mqtt_running && (
+              <> · クライアント {cachedInfo.mqtt_clients.length} 台</>
+            )}
+          </div>
+        )}
+
+        <div className="form-row">
+          <label>ポート</label>
+          <input
+            className="form-input short"
+            type="number"
+            min={1}
+            max={65535}
+            value={port}
+            onChange={(e) => setPort(Math.max(1, Math.min(65535, Number(e.target.value) || 1883)))}
+            disabled={!device.online}
+          />
+          <span />
+        </div>
+        <div className="form-status muted">
+          MQTT の待ち受けポート (既定 1883)。変更は再起動後に反映され、mDNS で自動検出する
+          クライアントには自動で伝わります。
+        </div>
+
+        <div className="form-row">
+          <label>固定ホストオクテット</label>
+          <input
+            className="form-input short"
+            type="number"
+            min={2}
+            max={254}
+            value={octet}
+            onChange={(e) => setOctet(Math.max(2, Math.min(254, Number(e.target.value) || 10)))}
+            disabled={!device.online}
+          />
+          <span />
+        </div>
+        <div className="form-status muted">
+          IP アドレスの末尾番号を固定するための設定です (例: ゲートウェイが 192.168.1.1 で
+          オクテット 10 → ブローカーは 192.168.1.10 を名乗る)。mDNS の自動検出が使えない
+          ネットワークで、クライアントに固定 IP を手動設定したい場合の保険です。
+          通常 (自動検出が機能する環境) は変更不要です。
+        </div>
+
+        <div className="form-action-row" style={{ marginTop: 8 }}>
+          <button className="form-button" onClick={apply} disabled={!device.online}>
+            適用
+          </button>
+        </div>
+
+        <div className="form-status muted" style={{ marginTop: 6 }}>
+          QoS は 0 固定・認証なし (隔離 LAN 内前提) です。トピック root は各クライアント側の
+          「MQTT」タブで設定します (ブローカーは全トピックを中継するため設定不要)。
+        </div>
       </div>
-    </div>
+    </>
   )
 }
 
@@ -311,8 +573,23 @@ function emptyMapping(): SensorMapping {
   return { key: '', match: {}, event_id: '', target: '', gain: 1.0 }
 }
 
-/** Capture tolerance: 現在値を取り込む sets min/max = reading ± this. */
-const CAPTURE_TOLERANCE = 20
+/**
+ * Default 3-color thresholds — carried over from the proven deployment
+ * (HospitalColorSensor apps/sender/include/adjustParams.h). Same value
+ * space: clear-normalized chromaticity 0-255, so they port directly.
+ * Used to prefill the editor when the device has no mappings yet; the
+ * user still picks the event_id per row before saving.
+ */
+const DEFAULT_COLOR_MAPPINGS: SensorMapping[] = [
+  { key: 'red',    match: { r_min: 140, r_max: 255, g_min: 0,  g_max: 70,  b_min: 0,   b_max: 70  }, event_id: '', target: '', gain: 1.0 },
+  { key: 'blue',   match: { r_min: 30,  r_max: 70,  g_min: 0,  g_max: 90,  b_min: 120, b_max: 255 }, event_id: '', target: '', gain: 1.0 },
+  { key: 'yellow', match: { r_min: 100, r_max: 159, g_min: 50, g_max: 100, b_min: 0,   b_max: 60  }, event_id: '', target: '', gain: 1.0 },
+]
+
+/** Capture tolerance default: 現在値を取り込む sets min/max = reading ± this.
+ *  chromaticity は環境光・距離で ±10〜15 程度揺れるため、その揺れを包含しつつ
+ *  隣の色と重なりにくい幅として 20 を既定にしている (UI で調整可)。 */
+const DEFAULT_CAPTURE_TOLERANCE = 20
 
 /** Does a reading fall inside a row's RGB threshold box? */
 function readingMatches(m: SensorColorMatch, rd: SensorReading): boolean {
@@ -350,10 +627,40 @@ export function SensorMappingSection({
   const [rows, setRows] = useState<SensorMapping[]>(mappings ?? [])
   const [dirty, setDirty] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
+  const [tolerance, setTolerance] = useState<number>(DEFAULT_CAPTURE_TOLERANCE)
+
+  // Editor state (rows / dirty / prefill) is per-device. Reset it when
+  // the selected device changes so the previous device's edits don't
+  // bleed into the next one.
+  const deviceRef = useRef(device.ipAddress)
+  const prefilledRef = useRef(false)
+  useEffect(() => {
+    if (deviceRef.current === device.ipAddress) return
+    deviceRef.current = device.ipAddress
+    setRows([])
+    setDirty(false)
+    setStatus(null)
+    prefilledRef.current = false
+  }, [device.ipAddress])
 
   // Sync from device-loaded mappings unless the user has local edits.
+  // A factory-fresh device (loaded, zero rows) gets the proven 3-color
+  // defaults prefilled — but ONLY ONCE per device. Without the once-guard,
+  // saving (which sets dirty=false) would re-run this effect while the
+  // device still reports zero mappings (the write round-trips through the
+  // firmware asynchronously), clobbering the rows the user just saved with
+  // the blank defaults again.
   useEffect(() => {
-    if (!dirty && mappings) setRows(mappings)
+    if (dirty || !mappings) return
+    if (mappings.length === 0) {
+      if (prefilledRef.current) return
+      prefilledRef.current = true
+      setRows(DEFAULT_COLOR_MAPPINGS.map((m) => ({ ...m, match: { ...m.match } })))
+      setDirty(true)
+      setStatus('デフォルトの 3 色しきい値を入れました — イベントを割り当てて保存してください')
+      return
+    }
+    setRows(mappings)
   }, [mappings, dirty])
 
   // Auto-load the device's current mappings once per device when the
@@ -388,9 +695,9 @@ export function SensorMappingSection({
       rs.map((r, idx) => idx === i ? {
         ...r,
         match: {
-          r_min: c(reading.r - CAPTURE_TOLERANCE), r_max: c(reading.r + CAPTURE_TOLERANCE),
-          g_min: c(reading.g - CAPTURE_TOLERANCE), g_max: c(reading.g + CAPTURE_TOLERANCE),
-          b_min: c(reading.b - CAPTURE_TOLERANCE), b_max: c(reading.b + CAPTURE_TOLERANCE),
+          r_min: c(reading.r - tolerance), r_max: c(reading.r + tolerance),
+          g_min: c(reading.g - tolerance), g_max: c(reading.g + tolerance),
+          b_min: c(reading.b - tolerance), b_max: c(reading.b + tolerance),
         },
       } : r),
     )
@@ -483,11 +790,27 @@ export function SensorMappingSection({
             {reading.key
               ? <span className="sensor-live-key match">▶ {reading.key}</span>
               : <span className="sensor-live-key">一致なし</span>}
+            <span
+              className="form-status muted"
+              style={{ margin: 0, marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+              title="「現在値を取り込む」が min/max にセットする幅 (現在値 ± この値)"
+            >
+              取込幅 ±
+              <input
+                className="form-input short"
+                type="number"
+                min={1}
+                max={100}
+                value={tolerance}
+                onChange={(e) => setTolerance(Math.max(1, Math.min(100, Number(e.target.value) || DEFAULT_CAPTURE_TOLERANCE)))}
+                style={{ width: 52 }}
+              />
+            </span>
           </>
         ) : (
           <span className="form-status muted" style={{ margin: 0 }}>
             {device.online
-              ? 'センサ値を取得中… (センサ未接続 / 暗すぎる場合は表示されません)'
+              ? 'センサ値を取得中… (1 秒ごとに更新。表示されない場合: センサ未接続 / 真っ暗 / ファームが古い)'
               : 'デバイスがオフラインです'}
           </span>
         )}
@@ -572,7 +895,7 @@ export function SensorMappingSection({
                 className="form-button-secondary"
                 onClick={() => captureFromReading(i)}
                 disabled={!device.online || !reading}
-                title={`現在の検出値 ±${CAPTURE_TOLERANCE} をしきい値にセット`}
+                title={`現在の検出値 ±${tolerance} をしきい値にセット`}
                 style={{ fontSize: 12, padding: '3px 8px' }}
               >
                 現在値を取り込む
