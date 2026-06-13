@@ -207,7 +207,10 @@ function TopicRegistryEditor() {
         ))}
       </div>
 
-      <div className="form-row" style={{ marginTop: 8, gap: 6 }}>
+      {/* NOT .form-row — that's a 90px|1fr|auto grid, which forced the input
+          into the narrow label column. A plain flex row lets the input take
+          the width. */}
+      <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
         <input
           className="form-input mono"
           value={name}
@@ -215,13 +218,13 @@ function TopicRegistryEditor() {
           placeholder="topic 名 (例: ward-a)"
           maxLength={32}
           onKeyDown={(e) => { if (e.key === 'Enter') add() }}
-          style={{ flex: 1 }}
+          style={{ flex: 1, minWidth: 0 }}
         />
         <button
           className="form-button-secondary"
           onClick={add}
           disabled={!name.trim()}
-          style={{ flexShrink: 0, padding: '4px 10px' }}
+          style={{ flexShrink: 0, padding: '0 16px' }}
         >
           ＋
         </button>
@@ -811,29 +814,28 @@ export function SensorMappingSection({
   }
 
   const save = () => {
+    // Save EXACTLY what the user sees — every keyed row, INCLUDING ones with
+    // no event assigned yet. Dropping unassigned rows silently deleted colors
+    // the user had set up (worst UX — user report 2026-06-13). Only fully
+    // blank rows (no key) are skipped. The firmware just doesn't fire a row
+    // whose event_id is empty. A non-destructive warning still nudges the
+    // user to assign the missing events.
     const clean = rows
-      // Flatten card-default + override into the flat per-row topic the
-      // firmware stores (compute by index BEFORE filtering shifts them).
       .map((r, i) => ({ ...r, topic: (overrideRows.has(i) ? r.topic : cardTopic) || undefined }))
-      .filter((r) => r.key.trim() && r.event_id.trim())
+      .filter((r) => r.key.trim())
       .map((r) => ({ ...r, key: r.key.trim(), event_id: r.event_id.trim(), target: r.target.trim() }))
     sendTo({ type: 'set_sensor_mapping', payload: { mappings: clean } })
-    // Rows with a key but no event assigned are NOT saved (the device only
-    // stores rows that fire something). Warn so prefilled colors don't
-    // silently vanish on the next reload — this is what made "red/blue
-    // disappeared, only yellow stayed" (user report 2026-06-13).
-    const dropped = rows.filter(
-      (r) => (r.key.trim() || r.event_id.trim()) && !(r.key.trim() && r.event_id.trim()),
-    ).length
-    setStatus(dropped > 0
-      ? `${clean.length} 件を保存（イベント未割当の ${dropped} 行は保存されません）`
+    const noEvent = clean.filter((r) => !r.event_id).length
+    setStatus(noEvent > 0
+      ? `${clean.length} 件を保存（うち ${noEvent} 件はイベント未割当 — 検知しても発火しません）`
       : `${clean.length} 件を保存しました`)
     setDirty(false)
     setTimeout(() => setStatus(null), 5000)
   }
 
   const reload = () => {
-    onRefresh()
+    onRefresh()                                                   // get_sensor_mapping (keys + thresholds + events)
+    sendToRef.current({ type: 'get_sensor_reading', payload: {} }) // + live RGB value, immediately
     setDirty(false)
   }
 

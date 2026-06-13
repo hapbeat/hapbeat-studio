@@ -227,10 +227,9 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
                               : null
                             const ampLabel = ampPct != null ? `amp ${ampPct}%` : 'amp ?'
                             return (
-                              <li key={ev.id} style={{ display: 'flex', gap: 4 }}>
+                              <li key={ev.id} style={{ display: 'flex', gap: 4, alignItems: 'stretch' }}>
                                 <button
                                   className="installed-kit-event-btn"
-                                  style={{ flex: 1 }}
                                   onClick={() => onPlayEvent(ev.id, ev.intensity)}
                                   title={ampPct != null
                                     ? `クリックで PLAY: event_id=${ev.id}, gain=${(ev.intensity ?? 1).toFixed(2)} (device manifest amp ${ampPct}%)`
@@ -244,8 +243,7 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
                                   </span>
                                 </button>
                                 <button
-                                  className="installed-kit-event-btn"
-                                  style={{ flex: '0 0 auto', padding: '0 9px' }}
+                                  className="installed-kit-event-copy"
                                   onClick={() => copyId(ev.id)}
                                   title={`イベント ID をコピー: ${ev.id}`}
                                   aria-label="イベント ID をコピー"
@@ -275,10 +273,9 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
                               : null
                             const ampLabel = ampPct != null ? `amp ${ampPct}%` : 'amp ?'
                             return (
-                              <li key={ev.id} style={{ display: 'flex', gap: 4 }}>
+                              <li key={ev.id} style={{ display: 'flex', gap: 4, alignItems: 'stretch' }}>
                                 <button
                                   className="installed-kit-event-btn disabled"
-                                  style={{ flex: 1 }}
                                   disabled
                                   title={`${ev.id} は CLIP モード（SDK ストリーム経由で再生）${ampPct != null ? ` · device manifest amp ${ampPct}%` : ''}`}
                                 >
@@ -290,8 +287,7 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
                                   </span>
                                 </button>
                                 <button
-                                  className="installed-kit-event-btn"
-                                  style={{ flex: '0 0 auto', padding: '0 9px' }}
+                                  className="installed-kit-event-copy"
                                   onClick={() => copyId(ev.id)}
                                   title={`イベント ID をコピー: ${ev.id}`}
                                   aria-label="イベント ID をコピー"

@@ -1059,6 +1059,30 @@
   cursor: not-allowed;
 }
 
+/* Compact copy-id button beside each event. Square-ish, stretches to the
+   event button's height (align-self), centered glyph — NOT the event-btn
+   style (which is a baseline-aligned 16px row button). */
+.installed-kit-event-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  width: 32px;
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+.installed-kit-event-copy:hover {
+  background: var(--bg-hover);
+  color: var(--accent-light);
+  border-color: var(--accent);
+}
+
 /* ---- Mode-name prefix on form-section titles (matches Kit editor) ---- */
 .mode-prefix {
   display: inline-block;
