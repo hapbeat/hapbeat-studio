@@ -258,6 +258,14 @@ export function MqttFlowPanel() {
   const data = useMqttFlowData()
   const popout = useMqttFlowStore((s) => s.popout)
   const openPopout = useMqttFlowStore((s) => s.openPopout)
+  const addViewer = useMqttFlowStore((s) => s.addViewer)
+  const removeViewer = useMqttFlowStore((s) => s.removeViewer)
+  // Tell the controller a flow chart is on screen so it polls the broker
+  // only while one is actually being viewed.
+  useEffect(() => {
+    addViewer()
+    return () => removeViewer()
+  }, [addViewer, removeViewer])
   const hasGhost = data.left.some((n) => !n.connected) || data.right.some((n) => !n.connected)
 
   return (
@@ -318,22 +326,27 @@ export function MqttFlowController() {
   const { devices, send } = useHelperConnection()
   const data = useMqttFlowData()
   const popout = useMqttFlowStore((s) => s.popout)
+  const viewers = useMqttFlowStore((s) => s.viewers)
   const notePopoutClosed = useMqttFlowStore((s) => s.notePopoutClosed)
 
   const broker = devices.find((d) => d.role === 'broker')
   const brokerIp = broker?.ipAddress
   const brokerOnline = !!broker?.online
+  // Only poll while the chart is actually on screen (an MQTT tab open or the
+  // pop-out open). An always-on 2 s poll needlessly displaces the broker's
+  // log-tail on its single TCP slot (user report 2026-06-13).
+  const shouldPoll = brokerOnline && (viewers > 0 || !!popout)
 
-  // Poll the broker for fresh telemetry while a broker exists and is online.
+  // Poll the broker for fresh telemetry while a broker exists and is viewed.
   const sendRef = useRef(send)
   sendRef.current = send
   useEffect(() => {
-    if (!brokerIp || !brokerOnline) return
+    if (!brokerIp || !shouldPoll) return
     const tick = () => sendRef.current({ type: 'get_info', payload: { ip: brokerIp } })
     tick()
     const id = window.setInterval(tick, 2000)
     return () => window.clearInterval(id)
-  }, [brokerIp, brokerOnline])
+  }, [brokerIp, shouldPoll])
 
   // Watchdog: detect when the user closed the pop-out via its own chrome.
   // (A closed `window` can't notify React; `popout.closed` flipping is

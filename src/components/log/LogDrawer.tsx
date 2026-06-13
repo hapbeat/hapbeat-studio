@@ -154,13 +154,20 @@ export function LogDrawer() {
   // Subscribe / unsubscribe to firmware log stream as drawer + device change.
   useEffect(() => {
     if (!isConnected) return
-    if (visible && selectedIp) {
-      if (subscribedIp !== selectedIp) {
+    // Serial pseudo-devices ("serial:<mac>") stream logs over the USB serial
+    // conn (surfaced as 'serial-cfg' entries), not TCP — never TCP-subscribe
+    // them or the helper NXDOMAINs "serial:<mac>" in a retry loop
+    // (user report 2026-06-13).
+    const tcpTarget = visible && selectedIp && !selectedIp.startsWith('serial:')
+      ? selectedIp
+      : null
+    if (tcpTarget) {
+      if (subscribedIp !== tcpTarget) {
         if (subscribedIp) {
           send({ type: 'unsubscribe_logs', payload: { ip: subscribedIp } })
         }
-        send({ type: 'subscribe_logs', payload: { ip: selectedIp } })
-        setSubscribedIp(selectedIp)
+        send({ type: 'subscribe_logs', payload: { ip: tcpTarget } })
+        setSubscribedIp(tcpTarget)
       }
     } else if (subscribedIp) {
       send({ type: 'unsubscribe_logs', payload: { ip: subscribedIp } })

@@ -15,6 +15,17 @@ import { create } from 'zustand'
 interface MqttFlowState {
   /** The detached flow-chart window, or null when shown inline. */
   popout: Window | null
+  /**
+   * How many inline flow panels are currently mounted (i.e. an MQTT tab is
+   * open). The controller polls the broker ONLY while this is > 0 or the
+   * pop-out is open — otherwise an always-on 2 s broker poll keeps displacing
+   * the broker's log-tail on its single TCP slot for no reason
+   * (user report 2026-06-13). Ref-counted so it survives broker↔sensor tab
+   * switches where one panel mounts as the other unmounts.
+   */
+  viewers: number
+  addViewer: () => void
+  removeViewer: () => void
   /** Open (or focus) the pop-out window. No-op if already open. */
   openPopout: () => void
   /** Close the pop-out (chart returns inline). */
@@ -25,6 +36,10 @@ interface MqttFlowState {
 
 export const useMqttFlowStore = create<MqttFlowState>((set, get) => ({
   popout: null,
+  viewers: 0,
+
+  addViewer: () => set((s) => ({ viewers: s.viewers + 1 })),
+  removeViewer: () => set((s) => ({ viewers: Math.max(0, s.viewers - 1) })),
 
   openPopout: () => {
     const existing = get().popout
