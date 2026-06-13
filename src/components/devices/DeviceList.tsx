@@ -57,7 +57,6 @@ function RefreshButton({ send }: { send: (msg: ManagerMessage) => void }) {
 function UsbPortCard({ entry }: { entry: SerialPortEntry }) {
   const activePortId = useSerialMaster((s) => s.activePortId)
   const mode = useSerialMaster((s) => s.mode)
-  const flashRunning = useSerialMaster((s) => s.flashRunning)
   const selectedPortIds = useSerialMaster((s) => s.selectedPortIds)
   const toggleSelectPort = useSerialMaster((s) => s.toggleSelectPort)
   const probePort = useSerialMaster((s) => s.probePort)
@@ -103,6 +102,12 @@ function UsbPortCard({ entry }: { entry: SerialPortEntry }) {
             aria-label={`${serialEntryLabel(entry)} を書き込み対象に選択`}
           />
         </label>
+        {/* Stable per-session index (#1, #2…) — Web Serial does not expose
+            the COM port name, so this + the probe result are how the user
+            tells two identical FTDI cables apart. */}
+        <span className="mono" style={{ color: 'var(--text-muted)', fontSize: 11, flexShrink: 0 }}>
+          #{entry.id.replace('usb-', '')}
+        </span>
         <span className="device-row-name">{serialEntryLabel(entry)}</span>
         {entry.info?.role && entry.info.role !== 'receiver' && (
           <span
@@ -140,26 +145,26 @@ function UsbPortCard({ entry }: { entry: SerialPortEntry }) {
           {f.state === 'error' && <span title={f.message}>✗ 失敗: {f.message?.slice(0, 40)}</span>}
         </div>
       )}
-      {!flashRunning && f.state !== 'flashing' && f.state !== 'waiting' && (
+      {f.state !== 'flashing' && f.state !== 'waiting' && (
         <div
           className="device-row-meta"
-          style={{ marginTop: 2, gap: 8, display: 'flex', justifyContent: 'flex-end' }}
+          style={{ marginTop: 4, gap: 6, display: 'flex', justifyContent: 'flex-end' }}
         >
           {!isActive && (
             <button
               type="button"
-              className="form-link-button"
-              style={{ fontSize: 12, padding: '1px 6px' }}
+              className="form-button-secondary"
+              style={{ fontSize: 12, padding: '3px 10px' }}
               onClick={(e) => { e.stopPropagation(); void openConfigFor(entry.id) }}
-              title="このポートに設定接続する"
+              title="このポートに設定接続する (設定タブが開きます)"
             >
-              接続
+              🔌 接続
             </button>
           )}
           <button
             type="button"
-            className="form-link-button"
-            style={{ fontSize: 12, padding: '1px 6px' }}
+            className="form-button-secondary"
+            style={{ fontSize: 12, padding: '3px 10px' }}
             onClick={(e) => { e.stopPropagation(); void probePort(entry.id) }}
             disabled={probing}
             title="get_info でデバイス情報を取得 (ファーム入りなら名前/fw が出ます)。書き込み完了表示もクリアされます"
@@ -205,7 +210,13 @@ function UsbPortsSection() {
           ＋ で USB デバイスを追加
         </div>
       ) : (
-        knownPorts.map((e) => <UsbPortCard key={e.id} entry={e} />)
+        <>
+          {knownPorts.map((e) => <UsbPortCard key={e.id} entry={e} />)}
+          <div className="devices-empty" style={{ padding: '4px 10px', fontSize: 11, textAlign: 'left' }}>
+            ※ ブラウザ (Web Serial) は COM ポート名を取得できないため、#番号 と
+            「↻ 識別」結果 (デバイス名) で区別してください。
+          </div>
+        </>
       )}
     </div>
   )

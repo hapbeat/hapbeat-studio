@@ -27,8 +27,8 @@ import { roleBadge } from '@/utils/roleLabels'
 
 type SubTab =
   | 'wifi' | 'config' | 'kit' | 'test' | 'firmware' | 'espnow'
-  | 'mqtt'      // MQTT client settings (sensor / receiver(mqtt))
-  | 'broker'    // MQTT broker panel (flow chart + broker config)
+  | 'mqtt'      // single shared MQTT tab: broker panel OR client settings,
+                // + flow chart. Shared id so switching sensor↔broker keeps it.
   | 'mapping'   // sensor live value + mapping editor
 
 const SUB_TAB_LABEL: Record<SubTab, string> = {
@@ -39,7 +39,6 @@ const SUB_TAB_LABEL: Record<SubTab, string> = {
   firmware: 'ファームウェア',
   espnow: 'ESP-NOW',
   mqtt: 'MQTT',
-  broker: 'MQTT',     // broker 側は「MQTT」一枚にブローカー設定+フロー図を集約
   mapping: 'センサー',
 }
 
@@ -55,11 +54,13 @@ function computeSubTabs(
 ): SubTab[] {
   switch (role) {
     case 'sensor':
-      // MQTT クライアント設定は専用タブ、センサー (ライブ値 + マッピング)
-      // も専用タブ (user feedback 2026-06-13)。
+      // MQTT (client 設定 + 接続フロー) とセンサー (ライブ値 + マッピング)
+      // を専用タブに (user feedback 2026-06-13)。MQTT タブ id は broker と
+      // 共有 → sensor↔broker 切替でタブが維持される。
       return ['wifi', 'config', 'mqtt', 'mapping', 'firmware']
     case 'broker':
-      return ['wifi', 'config', 'broker', 'firmware']
+      // broker も同じ 'mqtt' タブ id (フロー図 + ブローカー設定)。
+      return ['wifi', 'config', 'mqtt', 'firmware']
     case 'transmitter':
       return ['espnow', 'firmware']
     case 'receiver':
@@ -204,6 +205,8 @@ export function DeviceDetail() {
         broker_host: p.broker_host as string | undefined,
         broker_port: p.broker_port as number | undefined,
         topic_root: p.topic_root as string | undefined,
+        mqtt_qos: p.mqtt_qos as number | undefined,
+        mqtt_connected: p.mqtt_connected as boolean | undefined,
         static_octet: p.static_octet as number | undefined,
         mqtt_port: p.mqtt_port as number | undefined,
         mqtt_running: p.mqtt_running as boolean | undefined,
@@ -406,6 +409,8 @@ export function DeviceDetail() {
         broker_host: masterInfo.broker_host,
         broker_port: masterInfo.broker_port,
         topic_root: masterInfo.topic_root,
+        mqtt_qos: masterInfo.mqtt_qos,
+        mqtt_connected: masterInfo.mqtt_connected,
         static_octet: masterInfo.static_octet,
         mqtt_port: masterInfo.mqtt_port,
         mqtt_running: masterInfo.mqtt_running,
@@ -553,12 +558,14 @@ export function DeviceDetail() {
         )}
 
         {activeSubTab === 'mqtt' && (
-          <MqttConfigSection
-            device={device}
-            cachedInfo={cachedInfo}
-            sendTo={sendTo}
-            role={nodeRole === 'sensor' ? 'sensor' : 'receiver'}
-          />
+          nodeRole === 'broker'
+            ? <BrokerConfigSection device={device} cachedInfo={cachedInfo} sendTo={sendTo} />
+            : <MqttConfigSection
+                device={device}
+                cachedInfo={cachedInfo}
+                sendTo={sendTo}
+                role={nodeRole === 'sensor' ? 'sensor' : 'receiver'}
+              />
         )}
 
         {activeSubTab === 'espnow' && (
@@ -568,10 +575,6 @@ export function DeviceDetail() {
             sendTo={sendTo}
             role={nodeRole === 'transmitter' ? 'transmitter' : 'receiver'}
           />
-        )}
-
-        {activeSubTab === 'broker' && (
-          <BrokerConfigSection device={device} cachedInfo={cachedInfo} sendTo={sendTo} />
         )}
 
         {activeSubTab === 'mapping' && (

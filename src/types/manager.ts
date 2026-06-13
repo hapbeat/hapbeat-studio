@@ -224,6 +224,10 @@ export interface GetInfoResult {
   broker_port?: number
   /** MQTT topic root, default "hapbeat" (receiver(mqtt) / sensor). */
   topic_root?: string
+  /** MQTT QoS 0|1, default 1 (receiver(mqtt) / sensor). */
+  mqtt_qos?: number
+  /** Whether this client is connected to the broker (receiver(mqtt) / sensor). */
+  mqtt_connected?: boolean
   /** Broker static host octet (broker). */
   static_octet?: number
   /** Broker MQTT port (broker). */

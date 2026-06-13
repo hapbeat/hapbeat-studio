@@ -68,6 +68,11 @@ const portIdByPort = new WeakMap<SerialPort, string>()
 const portById = new Map<string, SerialPort>()
 let portIdCounter = 0
 
+// Count of in-flight flashSelected batches. Lets concurrent independent
+// flashes (different firmware on different ports) coexist: the global
+// `flashRunning`/`mode` only clears when this returns to 0.
+let activeFlashCount = 0
+
 function ensurePortId(port: SerialPort): string {
   let id = portIdByPort.get(port)
   if (!id) {
@@ -123,6 +128,8 @@ export interface SerialDeviceInfo {
   broker_host?: string
   broker_port?: number
   topic_root?: string
+  mqtt_qos?: number
+  mqtt_connected?: boolean
   static_octet?: number
   mqtt_port?: number
   mqtt_running?: boolean
@@ -156,6 +163,8 @@ function parseSerialInfo(r: Record<string, unknown>): SerialDeviceInfo {
     broker_host: r.broker_host as string | undefined,
     broker_port: r.broker_port as number | undefined,
     topic_root: r.topic_root as string | undefined,
+    mqtt_qos: r.mqtt_qos as number | undefined,
+    mqtt_connected: r.mqtt_connected as boolean | undefined,
     static_octet: r.static_octet as number | undefined,
     mqtt_port: r.mqtt_port as number | undefined,
     mqtt_running: r.mqtt_running as boolean | undefined,
@@ -809,14 +818,22 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
     },
 
     probePort: async (id) => {
-      const { mode, flashRunning, activePortId, info } = get()
+      const { mode, activePortId, info } = get()
       // Active config port: identity already known — just mirror it.
       if (id === activePortId && mode === 'config' && info) {
         patchEntry(id, { probe: 'success', info })
         return
       }
-      if (mode !== 'idle' || flashRunning) {
-        log(`probePort(${id}) refused: master busy (mode=${mode})`)
+      // Per-port gate (not the global flashRunning): probing port B is fine
+      // while port A is flashing — they're independent Web Serial ports.
+      // Only refuse if THIS port is mid-flash or holds the active config conn.
+      const thisEntry = get().knownPorts.find((e) => e.id === id)
+      if (thisEntry && (thisEntry.flash.state === 'flashing' || thisEntry.flash.state === 'waiting')) {
+        log(`probePort(${id}) refused: this port is flashing`)
+        return
+      }
+      if (id === activePortId && get().mode === 'config') {
+        log(`probePort(${id}) refused: this port holds the active config conn`)
         return
       }
       const port = portById.get(id)
@@ -859,7 +876,12 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
     openConfigFor: async (id) => {
       const port = portById.get(id)
       if (!port) return null
-      if (get().flashRunning) return null
+      // Per-port gate: refuse only if THIS port is mid-flash (a flash on a
+      // different port doesn't block opening a config conn here).
+      const thisEntry = get().knownPorts.find((e) => e.id === id)
+      if (thisEntry && (thisEntry.flash.state === 'flashing' || thisEntry.flash.state === 'waiting')) {
+        return null
+      }
       const { conn } = get()
       if (conn) await get().closeConfig()
       // Same acknowledgement as probePort — connecting supersedes the
@@ -880,28 +902,35 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
     },
 
     flashSelected: async (ids, regions, { eraseAll = false, compress = true } = {}) => {
-      if (get().flashRunning) {
-        log('flashSelected: refused — flash already running')
-        return
-      }
       await get().syncPorts()
-      const targets = get().knownPorts.filter((e) => ids.includes(e.id))
+      // Independent per-port flashes: a port that's already flashing (or
+      // queued) is skipped so the user can start a SECOND flash with a
+      // DIFFERENT firmware on OTHER ports while the first runs (e.g. sensor
+      // fw → sensor while broker fw → broker, concurrently — user request
+      // 2026-06-13). Each esptool-js Transport binds its own Web Serial
+      // port, so concurrent flashes on distinct ports never interact.
+      const targets = get().knownPorts.filter(
+        (e) => ids.includes(e.id)
+          && e.flash.state !== 'flashing' && e.flash.state !== 'waiting',
+      )
       if (targets.length === 0) {
-        set({ flashLastResult: { ok: false, message: '書き込み対象の USB デバイスが見つかりません (抜かれた可能性)' } })
+        set({ flashLastResult: { ok: false, message: '書き込み対象の USB デバイスが見つかりません (抜かれた / 既に書込中)' } })
         return
       }
-      // The config conn (if any) must be closed: one of the targets may
-      // be the active port, and esptool-js needs exclusive access.
-      const { conn } = get()
-      if (conn) {
-        log('flashSelected: closing active config conn')
+      const targetIds = new Set(targets.map((e) => e.id))
+      // Close the active config conn only if one of THESE targets is the
+      // held port (esptool-js needs exclusive access to that port).
+      const { conn, activePortId } = get()
+      if (conn && activePortId && targetIds.has(activePortId)) {
+        log('flashSelected: closing active config conn (target is the held port)')
         await conn.close().catch(() => { /* already closed */ })
-        set({ conn: null, info: null, wifiStatus: null, wifiProfiles: [] })
+        set({ conn: null, info: null, wifiStatus: null, wifiProfiles: [], activePortId: null, port: null })
       }
+      activeFlashCount += 1
       set({ mode: 'flashing', flashRunning: true, flashLastResult: null })
       const pushLog = useLogStore.getState().push
       const totalBytes = regions.reduce((s, r) => s + r.bytes.length, 0)
-      pushLog('serial', `multi-flash → ${targets.length} 台 並列 (${totalBytes.toLocaleString()} bytes each)`)
+      pushLog('serial', `flash → ${targets.length} 台 並列 (${totalBytes.toLocaleString()} bytes each)`)
       for (const e of targets) {
         patchEntry(e.id, { flash: { state: 'waiting', progress: null } })
       }
@@ -953,20 +982,21 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       const failures = outcomes.filter((x): x is string => x !== null)
       const okCount = targets.length - failures.length
       const ok = failures.length === 0
+      activeFlashCount = Math.max(0, activeFlashCount - 1)
+      // Only clear the global flashing lifecycle when NO other flash batch
+      // is still running concurrently (a second different-firmware flash
+      // may have started while this one ran).
+      const stillFlashing = activeFlashCount > 0
       set({
-        mode: 'idle',
-        flashRunning: false,
+        mode: stillFlashing ? 'flashing' : 'idle',
+        flashRunning: stillFlashing,
         flashLastResult: {
           ok,
-          message: `複数台 Serial 書き込み: 成功 ${okCount} / 失敗 ${failures.length}`
+          message: `Serial 書き込み: 成功 ${okCount} / 失敗 ${failures.length}`
             + (failures.length > 0 ? `\n${failures.join('\n')}` : '')
             + '\n👉 各デバイスの電源を OFF→ON してから接続してください。',
         },
       })
-      // Drop the held single-master port handle — it may be one of the
-      // just-flashed ports and is now in the half-closed post-esptool
-      // state (same rationale as the single flash path).
-      setHeldPort(null)
       // Clear per-card progress after a beat (mirror single-flash UX).
       setTimeout(() => {
         for (const e of targets) {

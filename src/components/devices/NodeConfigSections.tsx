@@ -17,6 +17,8 @@ export interface NodeConfigInfo {
   broker_host?: string
   broker_port?: number
   topic_root?: string
+  mqtt_qos?: number
+  mqtt_connected?: boolean
   static_octet?: number
   mqtt_port?: number
   mqtt_running?: boolean
@@ -166,6 +168,7 @@ export function MqttConfigSection({
   const [host, setHost] = useState<string>(initialHost === 'auto' ? '' : initialHost)
   const [port, setPort] = useState<number>(cachedInfo?.broker_port ?? 1883)
   const [root, setRoot] = useState<string>(cachedInfo?.topic_root ?? 'hapbeat')
+  const [qos, setQos] = useState<number>(cachedInfo?.mqtt_qos ?? 1)
   const [status, setStatus] = useState<string | null>(null)
 
   useEffect(() => {
@@ -181,15 +184,17 @@ export function MqttConfigSection({
     }
     if (cachedInfo?.broker_port != null) setPort(cachedInfo.broker_port)
     if (cachedInfo?.topic_root != null) setRoot(cachedInfo.topic_root)
-  }, [device.ipAddress, cachedInfo?.broker_host, cachedInfo?.broker_port, cachedInfo?.topic_root])
+    if (cachedInfo?.mqtt_qos != null) setQos(cachedInfo.mqtt_qos)
+  }, [device.ipAddress, cachedInfo?.broker_host, cachedInfo?.broker_port, cachedInfo?.topic_root, cachedInfo?.mqtt_qos])
 
+  const connected = cachedInfo?.mqtt_connected
   const rootClean = root.trim().replace(/\//g, '')
   const apply = () => {
     const value = auto ? 'auto' : host.trim()
     if (!auto && !value) return
     sendTo({
       type: 'set_broker_host',
-      payload: { host: value, port, topic_root: rootClean || 'hapbeat' },
+      payload: { host: value, port, topic_root: rootClean || 'hapbeat', qos },
     })
     setStatus('適用しました — センサは即時再接続、Hapbeat (受信機) は再起動後に反映されます')
     setTimeout(() => setStatus(null), 5000)
@@ -197,11 +202,25 @@ export function MqttConfigSection({
 
   return (
     <div className="form-section">
-      <div className="form-section-title">
-        MQTT クライアント設定
-        <span className="form-section-sub-inline">
-          {' '}— どのブローカー・トピックに接続するか
+      <div
+        className="form-section-title"
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+      >
+        <span>
+          MQTT クライアント設定
+          <span className="form-section-sub-inline">
+            {' '}— どのブローカー・トピックに接続するか
+          </span>
         </span>
+        {/* This node's slice of the flow: connected to the broker or not. */}
+        {connected != null && (
+          <span className={`device-row-status ${connected ? 'online' : ''}`}
+            style={connected ? undefined : { background: 'rgba(244,67,54,0.15)', color: '#f44336', border: '1px solid rgba(244,67,54,0.4)' }}
+            title={connected ? 'ブローカーに接続中' : 'ブローカーに未接続 (検出中 / 設定確認)'}
+          >
+            <span style={{ textTransform: 'none' }}>{connected ? '● ブローカー接続中' : '○ 未接続'}</span>
+          </span>
+        )}
       </div>
 
       <label
@@ -264,6 +283,31 @@ export function MqttConfigSection({
       </div>
       <div className="form-status muted">
         送信側 (SENDER) と受信側 (Hapbeat) で同じ root にそろえてください。
+      </div>
+
+      <div className="form-row" style={{ marginTop: 6 }}>
+        <label>QoS</label>
+        <div className="form-row-multi" style={{ gap: 6 }}>
+          {[1, 0].map((q) => (
+            <button
+              key={q}
+              type="button"
+              className={`form-button${qos === q ? '' : '-secondary'}`}
+              onClick={() => setQos(q)}
+              disabled={!device.online}
+              title={q === 1
+                ? 'at-least-once: ブローカーが PUBACK を返す。アラート用途の既定'
+                : 'fire-and-forget: 再送なし。低遅延・低負荷'}
+            >
+              QoS {q}{q === 1 ? ' (確実)' : ' (高速)'}
+            </button>
+          ))}
+        </div>
+        <span />
+      </div>
+      <div className="form-status muted">
+        既定は QoS 1。確実なアラート配信が重要な MQTT 用途向け。低遅延を優先したい / 取りこぼしを
+        許容できる場合のみ QoS 0 に。
       </div>
 
       {/* Concrete topics this node uses (deterministic from the root). */}

@@ -76,6 +76,8 @@ interface DeviceState {
     broker_host?: string
     broker_port?: number
     topic_root?: string
+    mqtt_qos?: number
+    mqtt_connected?: boolean
     static_octet?: number
     mqtt_port?: number
     mqtt_running?: boolean
@@ -391,7 +393,20 @@ export const useDeviceStore = create<DeviceState>((set) => ({
     }),
 
   setInfo: (ip, info) =>
-    set((s) => ({ infoCache: { ...s.infoCache, [ip]: { ...s.infoCache[ip], ...info } } })),
+    set((s) => {
+      // Drop undefined keys before merging. A get_info_result that omits
+      // a field (partial response / a poll that raced another) parses that
+      // field as `undefined`; a naive spread would then OVERWRITE the
+      // cached value with undefined — which made the broker flicker to
+      // 停止中 (mqtt_running undefined → `?? false`) and the flow chart
+      // lose its client list every couple of seconds (root cause
+      // 2026-06-13). Merging only the defined keys keeps the last-known
+      // value for anything this particular response didn't carry.
+      const defined = Object.fromEntries(
+        Object.entries(info).filter(([, v]) => v !== undefined),
+      )
+      return { infoCache: { ...s.infoCache, [ip]: { ...s.infoCache[ip], ...defined } } }
+    }),
 
   setApStatus: (ip, status) =>
     set((s) => ({ infoCache: { ...s.infoCache, [ip]: { ...s.infoCache[ip], ...status } } })),

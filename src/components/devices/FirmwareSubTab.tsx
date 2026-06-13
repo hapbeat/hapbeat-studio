@@ -1179,6 +1179,9 @@ export function FirmwareSubTab({
           <div className="form-section-sub-inline" style={{ opacity: 0.85 }}>
             サイドバーの USB Serial で {serialTargets.length} 台選択中 — 並列で書き込みます:
             {' '}{serialTargets.map((e) => serialEntryLabel(e)).join(' / ')}
+            <br />
+            ※ 別のファームを別デバイスへ同時に書きたい場合は、片方を選んで書き込みを開始した後、
+            もう片方のファームを選び直して別デバイスを選択 → もう一度書き込めば並行して走ります。
           </div>
         )}
         <div className="form-action-row">
