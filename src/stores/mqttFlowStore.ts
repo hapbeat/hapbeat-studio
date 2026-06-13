@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { MqttClientEntry } from '@/types/manager'
 
 /**
  * Page-level state for the MQTT 通信フロー chart.
@@ -11,21 +12,50 @@ import { create } from 'zustand'
  * panel component that unmounts on navigation. `MqttFlowController`
  * (mounted once at the Devices page root) renders the live chart into this
  * window via createPortal and clears it when the user closes it.
+ *
+ * It ALSO owns the broker telemetry (mqtt_clients / pub stats). Previously the
+ * chart read this out of `deviceStore.infoCache[brokerIp]`, but DeviceDetail
+ * wipes that entry via `clearCachesFor` whenever the selected device changes
+ * — so after switching from the broker to a sensor's MQTT tab the broker's
+ * client list went empty and every connected sender rendered as a dashed
+ * "未接続" ghost (root cause of the persistent "sender doesn't show up", found
+ * 2026-06-13 by the sender-missing-trace workflow). Keeping the telemetry here,
+ * written by the controller straight from the broker's get_info_result,
+ * decouples the chart from the selection lifecycle entirely.
  */
+
+/** Live broker telemetry for the flow chart, owned by MqttFlowController. */
+export interface BrokerTelemetry {
+  /** IP the telemetry belongs to (guards against showing a stale broker). */
+  ip: string
+  mqtt_running?: boolean
+  mqtt_port?: number
+  mqtt_clients?: MqttClientEntry[]
+  mqtt_pub_count?: number
+  mqtt_last_topic?: string
+  mqtt_last_payload?: string
+}
+
 interface MqttFlowState {
   /** The detached flow-chart window, or null when shown inline. */
   popout: Window | null
   /**
-   * How many inline flow panels are currently mounted (i.e. an MQTT tab is
-   * open). The controller polls the broker ONLY while this is > 0 or the
-   * pop-out is open — otherwise an always-on 2 s broker poll keeps displacing
-   * the broker's log-tail on its single TCP slot for no reason
-   * (user report 2026-06-13). Ref-counted so it survives broker↔sensor tab
-   * switches where one panel mounts as the other unmounts.
+   * Stable ids of the inline flow panels currently mounted (an MQTT tab is
+   * open). The controller polls the broker ONLY while this is non-empty or
+   * the pop-out is open — otherwise an always-on 2 s broker poll needlessly
+   * displaces the broker's log-tail on its single TCP slot. A SET of ids
+   * (not a counter) so React 18 StrictMode's dev double-mount / fast tab
+   * remounts stay idempotent and can't desync the gate to a false 0.
    */
-  viewers: number
-  addViewer: () => void
-  removeViewer: () => void
+  viewerIds: string[]
+  registerViewer: (id: string) => void
+  unregisterViewer: (id: string) => void
+  /** Latest broker telemetry (mqtt_clients etc.), written by the controller. */
+  brokerTelemetry: BrokerTelemetry | null
+  /** Merge a fresh broker get_info into the telemetry (drops undefined keys
+   *  so a failed/partial poll never blanks a known-good client list; replaces
+   *  wholesale when the broker IP changes). */
+  setBrokerTelemetry: (t: BrokerTelemetry) => void
   /** Open (or focus) the pop-out window. No-op if already open. */
   openPopout: () => void
   /** Close the pop-out (chart returns inline). */
@@ -36,10 +66,25 @@ interface MqttFlowState {
 
 export const useMqttFlowStore = create<MqttFlowState>((set, get) => ({
   popout: null,
-  viewers: 0,
+  viewerIds: [],
+  brokerTelemetry: null,
 
-  addViewer: () => set((s) => ({ viewers: s.viewers + 1 })),
-  removeViewer: () => set((s) => ({ viewers: Math.max(0, s.viewers - 1) })),
+  registerViewer: (id) =>
+    set((s) => (s.viewerIds.includes(id) ? s : { viewerIds: [...s.viewerIds, id] })),
+  unregisterViewer: (id) =>
+    set((s) => ({ viewerIds: s.viewerIds.filter((x) => x !== id) })),
+
+  setBrokerTelemetry: (t) =>
+    set((s) => {
+      const prev = s.brokerTelemetry
+      if (!prev || prev.ip !== t.ip) return { brokerTelemetry: t }
+      // Same broker — merge only the defined keys so a poll that came back
+      // without (e.g.) mqtt_clients keeps the last good list.
+      const defined = Object.fromEntries(
+        Object.entries(t).filter(([, v]) => v !== undefined),
+      )
+      return { brokerTelemetry: { ...prev, ...defined } }
+    }),
 
   openPopout: () => {
     const existing = get().popout

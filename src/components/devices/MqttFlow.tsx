@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
-import { useDeviceStore } from '@/stores/deviceStore'
 import { useMqttFlowStore } from '@/stores/mqttFlowStore'
 import type { DeviceInfo, MqttClientEntry } from '@/types/manager'
 
@@ -63,11 +62,15 @@ function isMqttClientNode(d: DeviceInfo): boolean {
 
 export function useMqttFlowData(): MqttFlowData {
   const { devices } = useHelperConnection()
-  const infoCache = useDeviceStore((s) => s.infoCache)
+  // Broker telemetry comes from mqttFlowStore (written by MqttFlowController),
+  // NOT deviceStore.infoCache — the latter is wiped by DeviceDetail's
+  // clearCachesFor on device switch, which used to blank the client list and
+  // turn every connected sender into a 未接続 ghost (workflow root cause).
+  const telemetry = useMqttFlowStore((s) => s.brokerTelemetry)
 
   return useMemo(() => {
     const broker = devices.find((d) => d.role === 'broker')
-    const info = broker ? infoCache[broker.ipAddress] : undefined
+    const info = broker && telemetry && telemetry.ip === broker.ipAddress ? telemetry : undefined
     const clients = info?.mqtt_clients ?? []
 
     const senders = clients.filter((c) => c.role === 'sensor')
@@ -111,7 +114,7 @@ export function useMqttFlowData(): MqttFlowData {
       lastPayload: info?.mqtt_last_payload,
       noBroker: !broker,
     }
-  }, [devices, infoCache])
+  }, [devices, telemetry])
 }
 
 // --- pure SVG --------------------------------------------------------------
@@ -258,14 +261,16 @@ export function MqttFlowPanel() {
   const data = useMqttFlowData()
   const popout = useMqttFlowStore((s) => s.popout)
   const openPopout = useMqttFlowStore((s) => s.openPopout)
-  const addViewer = useMqttFlowStore((s) => s.addViewer)
-  const removeViewer = useMqttFlowStore((s) => s.removeViewer)
+  const registerViewer = useMqttFlowStore((s) => s.registerViewer)
+  const unregisterViewer = useMqttFlowStore((s) => s.unregisterViewer)
   // Tell the controller a flow chart is on screen so it polls the broker
-  // only while one is actually being viewed.
+  // only while one is actually being viewed. Keyed by a stable id (not a
+  // bare counter) so StrictMode's dev double-mount can't desync the gate.
+  const viewerId = useId()
   useEffect(() => {
-    addViewer()
-    return () => removeViewer()
-  }, [addViewer, removeViewer])
+    registerViewer(viewerId)
+    return () => unregisterViewer(viewerId)
+  }, [viewerId, registerViewer, unregisterViewer])
   const hasGhost = data.left.some((n) => !n.connected) || data.right.some((n) => !n.connected)
 
   return (
@@ -323,19 +328,22 @@ export function MqttFlowPanel() {
  * no visible DOM in the main document.
  */
 export function MqttFlowController() {
-  const { devices, send } = useHelperConnection()
+  const { devices, send, lastMessage } = useHelperConnection()
   const data = useMqttFlowData()
   const popout = useMqttFlowStore((s) => s.popout)
-  const viewers = useMqttFlowStore((s) => s.viewers)
+  const viewerCount = useMqttFlowStore((s) => s.viewerIds.length)
+  const setBrokerTelemetry = useMqttFlowStore((s) => s.setBrokerTelemetry)
   const notePopoutClosed = useMqttFlowStore((s) => s.notePopoutClosed)
 
   const broker = devices.find((d) => d.role === 'broker')
   const brokerIp = broker?.ipAddress
-  const brokerOnline = !!broker?.online
-  // Only poll while the chart is actually on screen (an MQTT tab open or the
-  // pop-out open). An always-on 2 s poll needlessly displaces the broker's
-  // log-tail on its single TCP slot (user report 2026-06-13).
-  const shouldPoll = brokerOnline && (viewers > 0 || !!popout)
+  // Poll while the chart is on screen (an MQTT tab open or the pop-out open)
+  // and a broker exists. NOT gated on the broker's helper-liveness flag: that
+  // can false-negative when the single-threaded broker is briefly busy and
+  // misses a PING, which would otherwise stop the only poll that refreshes
+  // the client list and freeze every sender as a 未接続 ghost (workflow
+  // cause #2). A poll to a truly-down broker just fails harmlessly.
+  const shouldPoll = !!brokerIp && (viewerCount > 0 || !!popout)
 
   // Poll the broker for fresh telemetry while a broker exists and is viewed.
   const sendRef = useRef(send)
@@ -347,6 +355,27 @@ export function MqttFlowController() {
     const id = window.setInterval(tick, 2000)
     return () => window.clearInterval(id)
   }, [brokerIp, shouldPoll])
+
+  // OWN the broker telemetry: write every broker get_info_result straight into
+  // mqttFlowStore, decoupled from deviceStore.infoCache (which DeviceDetail
+  // wipes via clearCachesFor on device switch — the root cause of the
+  // persistent "sender shows as 未接続 ghost", found 2026-06-13). The DeviceDetail
+  // handler still mirrors it into infoCache for other consumers; this is the
+  // chart's own authoritative copy.
+  useEffect(() => {
+    if (!brokerIp || !lastMessage || lastMessage.type !== 'get_info_result') return
+    const p = lastMessage.payload as Record<string, unknown>
+    if (p.device !== brokerIp) return
+    setBrokerTelemetry({
+      ip: brokerIp,
+      mqtt_running: p.mqtt_running as boolean | undefined,
+      mqtt_port: p.mqtt_port as number | undefined,
+      mqtt_clients: p.mqtt_clients as MqttClientEntry[] | undefined,
+      mqtt_pub_count: p.mqtt_pub_count as number | undefined,
+      mqtt_last_topic: p.mqtt_last_topic as string | undefined,
+      mqtt_last_payload: p.mqtt_last_payload as string | undefined,
+    })
+  }, [lastMessage, brokerIp, setBrokerTelemetry])
 
   // Watchdog: detect when the user closed the pop-out via its own chrome.
   // (A closed `window` can't notify React; `popout.closed` flipping is
