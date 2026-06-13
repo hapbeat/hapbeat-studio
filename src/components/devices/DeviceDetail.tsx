@@ -135,15 +135,26 @@ export function DeviceDetail() {
     localStorage.setItem(SUBTAB_KEY, subTab)
   }, [subTab])
 
-  const lastEvaluatedIpRef = useRef<string | null>(null)
+  // Auto-jump to the Wi-Fi tab ONLY when a device is confirmed to be
+  // Wi-Fi-disconnected (so it obviously needs setup), and only once per
+  // device. Previously this fired whenever the wifi status was merely
+  // *unknown* — which is the case right after every device switch
+  // (caches are cleared, get_wifi_status is still in flight) — so the
+  // tab reset to Wi-Fi on every switch. Keeping the current tab when the
+  // status is unknown lets the user stay on e.g. the MQTT tab while
+  // switching between sensor and broker (user feedback 2026-06-13). The
+  // activeSubTab fallback below still redirects if the tab isn't valid
+  // for the newly-selected device's role.
+  const autoJumpedIpRef = useRef<string | null>(null)
   useEffect(() => {
     if (!selectedIp) return
-    if (lastEvaluatedIpRef.current === selectedIp) return
-    lastEvaluatedIpRef.current = selectedIp
-    const wifiOk = selectedIp.startsWith('serial:')
-      ? !!useSerialMaster.getState().wifiStatus?.connected
-      : !!wifiStatusCache[selectedIp]?.connected
-    if (!wifiOk) setSubTab('wifi')
+    const wifiStatus = selectedIp.startsWith('serial:')
+      ? useSerialMaster.getState().wifiStatus
+      : wifiStatusCache[selectedIp]
+    if (wifiStatus?.connected === false && autoJumpedIpRef.current !== selectedIp) {
+      autoJumpedIpRef.current = selectedIp
+      setSubTab('wifi')
+    }
   }, [selectedIp, wifiStatusCache])
 
   const [globalStatus, setGlobalStatus] = useState<{ kind: 'ok' | 'err' | 'warn' | 'muted'; msg: string } | null>(null)
@@ -542,7 +553,12 @@ export function DeviceDetail() {
         )}
 
         {activeSubTab === 'mqtt' && (
-          <MqttConfigSection device={device} cachedInfo={cachedInfo} sendTo={sendTo} />
+          <MqttConfigSection
+            device={device}
+            cachedInfo={cachedInfo}
+            sendTo={sendTo}
+            role={nodeRole === 'sensor' ? 'sensor' : 'receiver'}
+          />
         )}
 
         {activeSubTab === 'espnow' && (

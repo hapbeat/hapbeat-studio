@@ -322,6 +322,14 @@ export function DeviceList() {
         </span>
         <RefreshButton send={send} />
       </div>
+      {/* Wi-Fi (LAN) group header — mirrors the "USB Serial" sub-header
+          below so the two transports read as parallel sections. */}
+      <div className="devices-sidebar-header devices-group-subheader">
+        <span className="devices-sidebar-title" style={{ fontSize: 12 }}>
+          <span style={{ fontSize: 13, marginRight: 4 }}>📶</span>Wi-Fi
+        </span>
+        <span className="devices-sidebar-count">{visibleDevices.length}</span>
+      </div>
       <div className="devices-sidebar-list">
         {visibleDevices.length === 0 ? (
           <div className="devices-empty">

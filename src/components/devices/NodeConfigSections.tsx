@@ -153,10 +153,13 @@ export function MqttConfigSection({
   device,
   cachedInfo,
   sendTo,
+  role,
 }: {
   device: DeviceInfo
   cachedInfo?: NodeConfigInfo
   sendTo: (msg: ManagerMessage) => void
+  /** 'sensor' publishes; 'receiver' subscribes. Drives the topic list. */
+  role: 'sensor' | 'receiver'
 }) {
   const initialHost = cachedInfo?.broker_host ?? 'auto'
   const [auto, setAuto] = useState<boolean>(initialHost === 'auto')
@@ -260,9 +263,31 @@ export function MqttConfigSection({
         <span />
       </div>
       <div className="form-status muted">
-        実際のトピックは <code>{rootClean || 'hapbeat'}/play</code> ・ <code>{rootClean || 'hapbeat'}/stop</code> になります。
         送信側 (SENDER) と受信側 (Hapbeat) で同じ root にそろえてください。
-        QoS は 0 固定です (触覚イベントは遅延再送より取りこぼしの方が体験を壊さないため)。
+      </div>
+
+      {/* Concrete topics this node uses (deterministic from the root). */}
+      <div className="form-section" style={{ padding: 8, marginTop: 6, background: 'rgba(123,108,255,0.06)', borderRadius: 4 }}>
+        <div className="form-status muted" style={{ margin: 0, marginBottom: 4 }}>
+          {role === 'sensor' ? 'このノードが送信するトピック' : 'このノードが購読するトピック'}
+        </div>
+        {role === 'sensor' ? (
+          <ul className="mono" style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.7 }}>
+            <li><code>{rootClean || 'hapbeat'}/play</code> — 検知 → 振動イベント (color は送らず event_id のみ)</li>
+            <li><code>{rootClean || 'hapbeat'}/presence/&lt;id&gt;</code> — 自己紹介 (デバイス名)</li>
+          </ul>
+        ) : (
+          <ul className="mono" style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.7 }}>
+            <li><code>{rootClean || 'hapbeat'}/play</code> — 振動イベント再生</li>
+            <li><code>{rootClean || 'hapbeat'}/stop</code> — 停止</li>
+          </ul>
+        )}
+      </div>
+
+      <div className="form-status muted">
+        QoS は 0 (wire) です。{role === 'sensor'
+          ? 'アラートの確実な配信は「センサー」タブの再送間隔で担保します (色が続く間、その間隔で再送)。'
+          : '送信側がアラート継続中は一定間隔で再送するため、1 回落ちても次で届きます。'}
       </div>
 
       <div className="form-action-row" style={{ marginTop: 8 }}>
@@ -628,6 +653,16 @@ export function SensorMappingSection({
   const [dirty, setDirty] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
   const [tolerance, setTolerance] = useState<number>(DEFAULT_CAPTURE_TOLERANCE)
+  // Accordion: which row indices are expanded for editing. Collapsed by
+  // default so the list stays scannable (user feedback 2026-06-13).
+  const [expanded, setExpanded] = useState<Set<number>>(new Set())
+  const toggleExpanded = (i: number) =>
+    setExpanded((s) => {
+      const next = new Set(s)
+      if (next.has(i)) next.delete(i)
+      else next.add(i)
+      return next
+    })
 
   // Editor state (rows / dirty / prefill) is per-device. Reset it when
   // the selected device changes so the previous device's edits don't
@@ -730,12 +765,37 @@ export function SensorMappingSection({
     setDirty(true)
   }
   const addRow = () => {
-    setRows((rs) => [...rs, emptyMapping()])
+    setRows((rs) => {
+      setExpanded((s) => new Set(s).add(rs.length))  // open the new row
+      return [...rs, emptyMapping()]
+    })
     setDirty(true)
   }
   const removeRow = (i: number) => {
     setRows((rs) => rs.filter((_, idx) => idx !== i))
+    setExpanded(new Set())  // indices shift on removal — simplest is collapse all
     setDirty(true)
+  }
+
+  // Client-side live match: which editor row would fire for the current
+  // reading (first match wins, mirroring the firmware). This updates
+  // immediately as the user edits thresholds — unlike `reading.key`,
+  // which reflects the mapping currently SAVED on the device and only
+  // changes after 保存. Surfacing the editor-side key is why "red を検知
+  // しても 一致なし のまま" happened: the device had no saved mapping yet.
+  const liveEditorKey = useMemo(() => {
+    if (!reading) return null
+    for (const r of rows) {
+      if (r.key.trim() && readingMatches(r.match, reading)) return r.key.trim()
+    }
+    return null
+  }, [rows, reading])
+
+  // Compact "R140-255 G0-70 B0-70" threshold summary for a collapsed row.
+  const matchSummary = (m: SensorColorMatch): string => {
+    const seg = (lo?: number, hi?: number) =>
+      lo == null && hi == null ? '*' : `${lo ?? 0}-${hi ?? 255}`
+    return `R${seg(m.r_min, m.r_max)} G${seg(m.g_min, m.g_max)} B${seg(m.b_min, m.b_max)}`
   }
 
   const save = () => {
@@ -787,9 +847,18 @@ export function SensorMappingSection({
             {reading.clear != null && (
               <span className="sensor-live-clear">明るさ {reading.clear}</span>
             )}
-            {reading.key
-              ? <span className="sensor-live-key match">▶ {reading.key}</span>
-              : <span className="sensor-live-key">一致なし</span>}
+            {/* Editor-side match (updates live as thresholds are edited). */}
+            {liveEditorKey
+              ? <span className="sensor-live-key match" title="編集中のしきい値に一致 (保存前でも判定)">▶ {liveEditorKey}</span>
+              : <span className="sensor-live-key" title="編集中のどのしきい値にも一致していません">一致なし</span>}
+            {/* Device-side match (what the SAVED mapping fires) — only show
+                when it differs, so the user can tell edits aren't saved yet. */}
+            {reading.key && reading.key !== liveEditorKey && (
+              <span className="sensor-live-key" style={{ opacity: 0.7 }}
+                title="デバイスに保存済みのマッピングによる判定 (保存後に反映)">
+                保存済: {reading.key}
+              </span>
+            )}
             <span
               className="form-status muted"
               style={{ margin: 0, marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4 }}
@@ -828,19 +897,51 @@ export function SensorMappingSection({
 
       {rows.map((r, i) => {
         const isLive = !!reading && readingMatches(r.match, reading)
+        const isOpen = expanded.has(i)
         return (
         <div
           key={i}
           className="form-section"
           style={{
-            padding: 10,
+            padding: isOpen ? 10 : 0,
             marginTop: 8,
             border: `1px solid ${isLive ? 'var(--accent)' : 'var(--border)'}`,
             borderRadius: 4,
             ...(isLive ? { boxShadow: 'inset 0 0 0 1px var(--accent)' } : {}),
           }}
         >
-          <div className="form-row">
+          {/* Collapsed header — always visible, click to expand/collapse. */}
+          <div
+            onClick={() => toggleExpanded(i)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+              padding: isOpen ? '0 0 6px' : '8px 10px',
+              borderBottom: isOpen ? '1px solid var(--border)' : 'none',
+            }}
+            title={isOpen ? '折りたたむ' : '展開して編集'}
+          >
+            <span style={{ color: 'var(--text-muted)', fontSize: 11, width: 12 }}>
+              {isOpen ? '▼' : '▶'}
+            </span>
+            {isLive && (
+              <span style={{ color: 'var(--accent)', fontSize: 11 }} title="現在の検出値に一致中">●</span>
+            )}
+            <span className="mono" style={{ fontWeight: 600, minWidth: 70 }}>
+              {r.key || '(キー未設定)'}
+            </span>
+            <span className="mono" style={{ color: 'var(--text-muted)', fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {r.event_id || '(イベント未割当)'}
+            </span>
+            {!isOpen && (
+              <span className="mono" style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+                {matchSummary(r.match)}
+              </span>
+            )}
+          </div>
+
+          {isOpen && (
+          <>
+          <div className="form-row" style={{ marginTop: 8 }}>
             <label>キー</label>
             <input
               className="form-input"
@@ -948,6 +1049,32 @@ export function SensorMappingSection({
             </div>
             <span />
           </div>
+
+          <div className="form-row">
+            <label>再送間隔</label>
+            <div className="form-row-multi" style={{ alignItems: 'center', gap: 6 }}>
+              <input
+                className="form-input short"
+                type="number"
+                min={200}
+                max={60000}
+                step={500}
+                value={r.debounce_ms ?? 4000}
+                onChange={(e) => update(i, { debounce_ms: Math.max(200, Math.min(60000, Number(e.target.value) || 4000)) })}
+                disabled={!device.online}
+                style={{ width: 80 }}
+              />
+              <span className="form-status muted" style={{ margin: 0 }}>ms</span>
+            </div>
+            <span />
+          </div>
+          <div className="form-status muted">
+            この色が続いている間、この間隔で同じイベントを再送します。MQTT は QoS 0 のため、
+            1 回落ちても次の再送で確実に届けるための信頼性ノブです (アラート用途では短め、
+            既定 4000ms)。
+          </div>
+          </>
+          )}
         </div>
         )
       })}
