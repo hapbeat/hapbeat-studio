@@ -24,21 +24,25 @@ const ROM_BAUD = 115200
 /**
  * Pick a safe flashing baudrate for the connected bridge.
  *
- * FTDI USB-serial bridges (VID 0x0403 — M5 ATOM Lite etc.) corrupt the
- * stream at high baud: esptool warns "consider using a lower baud rate"
- * and the next command dies with "Serial data stream stopped" — observed
- * at 921600 and 460800 on some cables. 230400 is reliable on FTDI while
- * still ~4× faster than the 115200 ROM baud; if even that corrupts,
- * eraseFlash/flashRegions retry once at 115200 (the safe floor). S3-class
- * boards use native USB-CDC (VID 0x303A, baud ignored) and CP210x bridges
- * (M5Stack) handle 921600, so only FTDI/CH340 are slowed here.
+ * FTDI / CH340 USB-serial bridges (VID 0x0403 — M5 ATOM Lite; 0x1A86 —
+ * CH340) corrupt the stream at high baud: esptool warns "consider using a
+ * lower baud rate" and the next command dies with "Serial data stream
+ * stopped". 921600 and 460800 fail outright; 230400 ALSO corrupts on at
+ * least one M5 ATOM Lite FTDI cable (user report 2026-06-13: every flash
+ * burned a failed 230400 attempt before falling back to 115200). So flash
+ * these bridges at the 115200 ROM baud directly — same as the classic-ESP32
+ * config-connection baud, reliable, and (the merged image is small and
+ * esptool-js deflates the wire) only modestly slower than 230400. The
+ * retry-at-115200 path below is now a no-op for these but stays as a
+ * backstop. S3-class boards use native USB-CDC (VID 0x303A, baud ignored)
+ * and CP210x bridges (M5Stack) handle 921600.
  */
 function preferredBaudrate(port: SerialPort, onLog?: (line: string) => void): number {
   try {
     const info = port.getInfo()
     if (info.usbVendorId === 0x0403 || info.usbVendorId === 0x1a86) {
-      onLog?.(`bridge VID 0x${info.usbVendorId.toString(16)} — using 230400 baud (921600 corrupts on FTDI/CH340; falls back to 115200 on error)`)
-      return 230400
+      onLog?.(`bridge VID 0x${info.usbVendorId.toString(16)} — flashing at 115200 baud (FTDI/CH340 corrupt the stream at higher rates on classic ESP32)`)
+      return ROM_BAUD
     }
   } catch { /* getInfo unavailable — fall through to default */ }
   return 921600
