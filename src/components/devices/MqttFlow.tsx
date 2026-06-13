@@ -1,0 +1,358 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useHelperConnection } from '@/hooks/useHelperConnection'
+import { useDeviceStore } from '@/stores/deviceStore'
+import { useMqttFlowStore } from '@/stores/mqttFlowStore'
+import type { DeviceInfo, MqttClientEntry } from '@/types/manager'
+
+/**
+ * MQTT 通信フロー — sensors → broker → receivers, with live publish stats.
+ *
+ * Page-level singleton (user feedback 2026-06-13): the chart is fed by the
+ * BROKER's get_info (mqtt_clients / mqtt_pub_count / mqtt_last_*) regardless
+ * of which device is currently selected, so it reads the same whether you're
+ * on a sensor's MQTT tab or the broker's. `MqttFlowController` (mounted once
+ * at the Devices root) drives the polling and the pop-out window; the inline
+ * `MqttFlowPanel` shown in each MQTT tab is just a view onto the same data.
+ *
+ * Diagnostic (item 5): a sensor that is *discovered on the network* (mDNS /
+ * helper device list) but is NOT in the broker's client list is drawn as a
+ * dashed "未接続" ghost node. That makes the common "sender doesn't show up"
+ * situation self-explanatory — the node IS there, it just hasn't connected
+ * to the broker (mDNS resolve / topic_root / network), which is a
+ * device-side link problem, not a Studio display gap.
+ */
+
+interface FlowNode {
+  key: string
+  label: string
+  /** true = present in the broker's client list; false = discovered-only. */
+  connected: boolean
+}
+
+function clientLabel(c: MqttClientEntry): string {
+  if (c.name) return c.name
+  // Fallback: clientId tail (firmware without a presence message yet).
+  return c.id.length > 14 ? `…${c.id.slice(-12)}` : c.id
+}
+
+// --- shared data hook ------------------------------------------------------
+
+export interface MqttFlowData {
+  broker: DeviceInfo | undefined
+  brokerName: string
+  port: number
+  running: boolean
+  left: FlowNode[]   // senders (+ unknown-role clients), connected first
+  right: FlowNode[]  // receivers
+  pubCount?: number
+  lastTopic?: string
+  lastPayload?: string
+  /** True when there's no broker on the network at all. */
+  noBroker: boolean
+}
+
+/** True if a device is *expected* to be an MQTT client of the broker. */
+function isMqttClientNode(d: DeviceInfo): boolean {
+  if (d.role === 'sensor') return true
+  if (d.role === 'broker') return false
+  // receivers: only those that actually speak mqtt
+  const transports = d.transports ?? (d.transport ? [d.transport] : [])
+  return transports.includes('mqtt')
+}
+
+export function useMqttFlowData(): MqttFlowData {
+  const { devices } = useHelperConnection()
+  const infoCache = useDeviceStore((s) => s.infoCache)
+
+  return useMemo(() => {
+    const broker = devices.find((d) => d.role === 'broker')
+    const info = broker ? infoCache[broker.ipAddress] : undefined
+    const clients = info?.mqtt_clients ?? []
+
+    const senders = clients.filter((c) => c.role === 'sensor')
+    const receivers = clients.filter((c) => c.role === 'receiver')
+    const others = clients.filter((c) => c.role !== 'sensor' && c.role !== 'receiver')
+
+    // Names the broker reports as connected (presence). Used to find
+    // discovered-but-not-connected nodes.
+    const connectedNames = new Set(
+      clients.map((c) => c.name).filter((n): n is string => !!n),
+    )
+    const discovered = devices.filter(
+      (d) => isMqttClientNode(d) && d.online && !connectedNames.has(d.name),
+    )
+    const discoveredSenders = discovered.filter((d) => d.role === 'sensor')
+    const discoveredReceivers = discovered.filter((d) => d.role !== 'sensor')
+
+    const left: FlowNode[] = [
+      ...senders.map((c) => ({ key: `c-${c.id}`, label: clientLabel(c), connected: true })),
+      ...others.map((c) => ({ key: `c-${c.id}`, label: clientLabel(c), connected: true })),
+      ...discoveredSenders.map((d) => ({
+        key: `d-${d.ipAddress}`, label: d.name || d.ipAddress, connected: false,
+      })),
+    ]
+    const right: FlowNode[] = [
+      ...receivers.map((c) => ({ key: `c-${c.id}`, label: clientLabel(c), connected: true })),
+      ...discoveredReceivers.map((d) => ({
+        key: `d-${d.ipAddress}`, label: d.name || d.ipAddress, connected: false,
+      })),
+    ]
+
+    return {
+      broker,
+      brokerName: broker?.name || 'BROKER',
+      port: info?.mqtt_port ?? 1883,
+      running: info?.mqtt_running ?? false,
+      left,
+      right,
+      pubCount: info?.mqtt_pub_count,
+      lastTopic: info?.mqtt_last_topic,
+      lastPayload: info?.mqtt_last_payload,
+      noBroker: !broker,
+    }
+  }, [devices, infoCache])
+}
+
+// --- pure SVG --------------------------------------------------------------
+
+function MqttFlowChartSvg(props: MqttFlowData) {
+  const { brokerName, port, running, left, right, pubCount, lastTopic, lastPayload } = props
+
+  // Pulse the edges briefly whenever the publish counter advances.
+  const prevCountRef = useRef<number | undefined>(undefined)
+  const [pulse, setPulse] = useState(false)
+  useEffect(() => {
+    if (pubCount == null) return
+    const prev = prevCountRef.current
+    prevCountRef.current = pubCount
+    if (prev != null && pubCount > prev) {
+      setPulse(true)
+      const t = setTimeout(() => setPulse(false), 600)
+      return () => clearTimeout(t)
+    }
+  }, [pubCount])
+
+  const rows = Math.max(left.length, right.length, 1)
+  const ROW_H = 34
+  const height = 60 + rows * ROW_H
+  const W = 560
+  const brokerY = height / 2
+
+  const nodeBox = (
+    x: number, y: number, node: FlowNode, kind: 'sender' | 'receiver',
+  ) => {
+    const stroke = !node.connected ? '#777'
+      : kind === 'sender' ? '#e8a33d' : '#4caf50'
+    const fill = !node.connected ? 'rgba(128,128,128,0.06)'
+      : kind === 'sender' ? 'rgba(255,165,0,0.12)' : 'rgba(76,175,80,0.12)'
+    const label = node.label.length > 16 ? `${node.label.slice(0, 15)}…` : node.label
+    return (
+      <g key={node.key}>
+        <rect
+          x={x} y={y - 13} width={150} height={26} rx={5}
+          fill={fill} stroke={stroke} strokeWidth={1}
+          strokeDasharray={node.connected ? undefined : '4 3'}
+        />
+        <text x={x + 75} y={node.connected ? y + 4 : y + 1} textAnchor="middle" fontSize={11}
+          fill={node.connected ? 'var(--text-primary, #ddd)' : 'var(--text-muted, #888)'}
+          style={{ fontFamily: 'var(--font-mono)' }}>
+          {label}
+        </text>
+        {!node.connected && (
+          <text x={x + 75} y={y + 11} textAnchor="middle" fontSize={8}
+            fill="#c9742e">未接続</text>
+        )}
+      </g>
+    )
+  }
+
+  const edge = (x1: number, y1: number, x2: number, y2: number, key: string, connected: boolean) => (
+    <line
+      key={key}
+      x1={x1} y1={y1} x2={x2} y2={y2}
+      stroke={!connected ? 'rgba(150,150,150,0.25)' : pulse ? 'var(--accent, #7b6cff)' : 'rgba(150,150,150,0.45)'}
+      strokeWidth={connected && pulse ? 2.5 : 1.2}
+      strokeDasharray={connected ? undefined : '4 3'}
+      markerEnd={connected ? 'url(#mqtt-arrow)' : undefined}
+    />
+  )
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <svg
+        viewBox={`0 0 ${W} ${height}`}
+        style={{ width: '100%', maxWidth: 660, display: 'block' }}
+        role="img"
+        aria-label="MQTT 通信フロー図"
+      >
+        <defs>
+          <marker id="mqtt-arrow" viewBox="0 0 8 8" refX="7" refY="4"
+            markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L8,4 L0,8 z" fill={pulse ? 'var(--accent, #7b6cff)' : 'rgba(150,150,150,0.6)'} />
+          </marker>
+        </defs>
+
+        {/* column headers */}
+        <text x={85} y={16} textAnchor="middle" fontSize={11} fill="var(--text-muted, #888)">SENDER</text>
+        <text x={W / 2} y={16} textAnchor="middle" fontSize={11} fill="var(--text-muted, #888)">BROKER</text>
+        <text x={W - 85} y={16} textAnchor="middle" fontSize={11} fill="var(--text-muted, #888)">RECEIVER</text>
+
+        {/* broker box */}
+        <rect
+          x={W / 2 - 80} y={brokerY - 24} width={160} height={48} rx={7}
+          fill={running ? 'rgba(123,108,255,0.14)' : 'rgba(244,67,54,0.12)'}
+          stroke={running ? 'var(--accent, #7b6cff)' : '#f44336'} strokeWidth={1.4}
+        />
+        <text x={W / 2} y={brokerY - 5} textAnchor="middle" fontSize={12} fontWeight={600}
+          fill="var(--text-primary, #ddd)">
+          {brokerName.length > 20 ? `${brokerName.slice(0, 19)}…` : brokerName}
+        </text>
+        <text x={W / 2} y={brokerY + 13} textAnchor="middle" fontSize={10.5}
+          fill="var(--text-muted, #999)" style={{ fontFamily: 'var(--font-mono)' }}>
+          {running ? `:${port} 稼働中` : '停止中'}{pubCount != null ? ` · pub ${pubCount}` : ''}
+        </text>
+
+        {/* sender (+unknown) nodes & edges into the broker */}
+        {left.map((node, i) => {
+          const y = 40 + i * ROW_H + 13
+          return (
+            <g key={node.key}>
+              {nodeBox(10, y, node, 'sender')}
+              {edge(162, y, W / 2 - 82, brokerY, `e-l-${node.key}`, node.connected)}
+            </g>
+          )
+        })}
+        {left.length === 0 && (
+          <text x={85} y={brokerY + 4} textAnchor="middle" fontSize={11}
+            fill="var(--text-muted, #777)">(なし)</text>
+        )}
+
+        {/* receiver nodes & edges out of the broker */}
+        {right.map((node, i) => {
+          const y = 40 + i * ROW_H + 13
+          return (
+            <g key={node.key}>
+              {nodeBox(W - 160, y, node, 'receiver')}
+              {edge(W / 2 + 82, brokerY, W - 162, y, `e-r-${node.key}`, node.connected)}
+            </g>
+          )
+        })}
+        {right.length === 0 && (
+          <text x={W - 85} y={brokerY + 4} textAnchor="middle" fontSize={11}
+            fill="var(--text-muted, #777)">(なし)</text>
+        )}
+      </svg>
+      {lastTopic && (
+        <div className="form-status muted mono" style={{ marginTop: 2 }}>
+          最終 publish: <code>{lastTopic}</code>{lastPayload ? <> — <code>{lastPayload}</code></> : null}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// --- inline panel (rendered in each MQTT tab) ------------------------------
+
+export function MqttFlowPanel() {
+  const data = useMqttFlowData()
+  const popout = useMqttFlowStore((s) => s.popout)
+  const openPopout = useMqttFlowStore((s) => s.openPopout)
+  const hasGhost = data.left.some((n) => !n.connected) || data.right.some((n) => !n.connected)
+
+  return (
+    <div className="form-section">
+      <div
+        className="form-section-title"
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+      >
+        <span>
+          通信フロー
+          <span className="form-section-sub-inline">
+            {' '}— 検知 → ブローカー → Hapbeat (2 秒ごとに更新・全デバイス共通)
+          </span>
+        </span>
+        <button
+          type="button"
+          className="form-button-secondary"
+          style={{ fontSize: 12, padding: '2px 10px' }}
+          onClick={openPopout}
+          title="通信フローを別ウィンドウで開く（デバイスを切り替えても保持されます）"
+        >
+          ⤢ {popout ? '別窓を前面に' : 'ポップアウト'}
+        </button>
+      </div>
+
+      {data.noBroker ? (
+        <div className="form-status muted">
+          ブローカー (role=broker) がネットワーク上に見つかりません。AtomS3 ブローカーの電源と Wi-Fi を確認してください。
+        </div>
+      ) : popout ? (
+        <div className="form-status muted">別ウィンドウで表示中（閉じるとここに戻ります）。</div>
+      ) : (
+        <MqttFlowChartSvg {...data} />
+      )}
+
+      {hasGhost && !data.noBroker && (
+        <div className="form-status warn" style={{ marginTop: 4 }}>
+          破線の「未接続」ノードは、ネットワーク上には居る（mDNS で検出済み）がブローカーに MQTT 接続できていない
+          デバイスです。センサ側の「MQTT」タブでブローカー自動検出 / topic root を確認してください。
+        </div>
+      )}
+      <div className="form-status muted" style={{ marginTop: 0 }}>
+        クライアント名は各ノードが接続時に publish する presence 情報 (デバイス名) です。
+      </div>
+    </div>
+  )
+}
+
+// --- page-level controller (mounted once at the Devices root) --------------
+
+/**
+ * Drives the page-level flow chart: polls the broker's get_info every 2 s
+ * (independent of the selected device) so the chart is live in any MQTT
+ * tab, and renders the live chart into the pop-out window when open. Renders
+ * no visible DOM in the main document.
+ */
+export function MqttFlowController() {
+  const { devices, send } = useHelperConnection()
+  const data = useMqttFlowData()
+  const popout = useMqttFlowStore((s) => s.popout)
+  const notePopoutClosed = useMqttFlowStore((s) => s.notePopoutClosed)
+
+  const broker = devices.find((d) => d.role === 'broker')
+  const brokerIp = broker?.ipAddress
+  const brokerOnline = !!broker?.online
+
+  // Poll the broker for fresh telemetry while a broker exists and is online.
+  const sendRef = useRef(send)
+  sendRef.current = send
+  useEffect(() => {
+    if (!brokerIp || !brokerOnline) return
+    const tick = () => sendRef.current({ type: 'get_info', payload: { ip: brokerIp } })
+    tick()
+    const id = window.setInterval(tick, 2000)
+    return () => window.clearInterval(id)
+  }, [brokerIp, brokerOnline])
+
+  // Watchdog: detect when the user closed the pop-out via its own chrome.
+  // (A closed `window` can't notify React; `popout.closed` flipping is
+  // invisible until this fires, so keep it brisk — the inline panel shows
+  // "別ウィンドウで表示中" until then.)
+  useEffect(() => {
+    if (!popout) return
+    const id = window.setInterval(() => {
+      if (popout.closed) notePopoutClosed()
+    }, 350)
+    return () => window.clearInterval(id)
+  }, [popout, notePopoutClosed])
+
+  if (!popout || popout.closed) return null
+  return createPortal(
+    <div>
+      <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600 }}>MQTT 通信フロー</h3>
+      <MqttFlowChartSvg {...data} />
+    </div>,
+    popout.document.body,
+  )
+}

@@ -61,6 +61,7 @@ function UsbPortCard({ entry }: { entry: SerialPortEntry }) {
   const toggleSelectPort = useSerialMaster((s) => s.toggleSelectPort)
   const probePort = useSerialMaster((s) => s.probePort)
   const openConfigFor = useSerialMaster((s) => s.openConfigFor)
+  const release = useSerialMaster((s) => s.release)
   const selectedIp = useDeviceStore((s) => s.selectedIp)
   const selectDevice = useDeviceStore((s) => s.selectDevice)
 
@@ -94,15 +95,31 @@ function UsbPortCard({ entry }: { entry: SerialPortEntry }) {
       <div className="device-row-top">
         <label
           className="device-row-checkbox"
-          title={checked ? '書き込み対象から外す' : '書き込み対象に選択'}
+          title={checked
+            ? 'チェックを外す（接続中なら切断 + 書き込み対象から除外）'
+            : '✔ で USB Serial 接続 + 書き込み対象に選択（ファーム未書込でも接続可）'}
           onClick={(e) => e.stopPropagation()}
         >
           <input
             type="checkbox"
             className="device-row-checkbox-input"
             checked={checked}
-            onChange={() => toggleSelectPort(entry.id)}
-            aria-label={`${serialEntryLabel(entry)} を書き込み対象に選択`}
+            onChange={() => {
+              if (checked) {
+                // Uncheck: drop from the flash set, and if this port holds
+                // the live config conn, disconnect it.
+                toggleSelectPort(entry.id)
+                if (isActive) void release()
+              } else {
+                // ✔ = connect. USB Serial opens even on a blank chip (only
+                // get_info fails), so the checkbox doubles as the connect
+                // switch — user feedback 2026-06-13: 「ファームが空でも USB
+                // 接続はできる → ✔ で接続」. Also marks it a flash target.
+                toggleSelectPort(entry.id)
+                void openConfigFor(entry.id)
+              }
+            }}
+            aria-label={`${serialEntryLabel(entry)} を接続 / 書き込み対象に選択`}
           />
         </label>
         {/* Stable per-session index (#1, #2…) — Web Serial does not expose
@@ -111,33 +128,22 @@ function UsbPortCard({ entry }: { entry: SerialPortEntry }) {
         <span className="mono" style={{ color: 'var(--text-muted)', fontSize: 11, flexShrink: 0 }}>
           #{entry.id.replace('usb-', '')}
         </span>
-        <span style={{ flex: 1 }} />
-        {entry.info?.role && entry.info.role !== 'receiver' && (
-          <span
-            className="device-detail-pill role-pill"
-            style={{ height: 18, lineHeight: '18px', display: 'inline-flex', alignItems: 'center' }}
-            title={`ノード役割: ${entry.info.role}`}
-          >
-            {roleBadge(entry.info.role)}
-          </span>
-        )}
-        {/* Use a text dot (not an emoji) so the pill height matches the
-            role badge — the 🔌 glyph stretched the line box taller. */}
+        <span className="device-row-name">{serialEntryLabel(entry)}</span>
+        {/* Text dot (not an emoji) so the pill height matches the others. */}
         <span
           className="device-row-status online"
           style={{ height: 18, lineHeight: '18px', paddingTop: 0, paddingBottom: 0 }}
-          title={isActive ? '設定接続中の USB ポート' : 'USB Serial ポート'}
+          title={isActive ? '設定接続中の USB ポート' : 'USB Serial ポート（✔ で接続）'}
         >
           <span style={{ textTransform: 'none' }}>{isActive ? '● 接続中' : 'USB'}</span>
         </span>
       </div>
-      {/* Title on its own line, left-aligned — was squeezed between the
-          index and the badges on the top row and got truncated to "se…"
-          (user feedback 2026-06-13). */}
-      <div className="device-row-name" style={{ marginTop: 2, fontWeight: 600 }}>
-        {serialEntryLabel(entry)}
-      </div>
       <div className="device-row-meta">
+        {entry.info?.role && entry.info.role !== 'receiver' && (
+          <span className="device-row-roletag" title={`ノード役割: ${entry.info.role}`}>
+            {roleBadge(entry.info.role)}
+          </span>
+        )}
         <span>{entry.bridge}</span>
         {entry.vid !== undefined && (
           <span className="device-row-meta-ip">
@@ -396,19 +402,6 @@ export function DeviceList() {
                     />
                   </label>
                   <span className="device-row-name">{dev.name || '(unnamed)'}</span>
-                  {dev.role && dev.role !== 'receiver' && (
-                    <span
-                      className="device-detail-pill role-pill"
-                      title={`ノード役割: ${dev.role}`}
-                    >
-                      {roleBadge(dev.role)}
-                    </span>
-                  )}
-                  {isApMode && (
-                    <span className="ap-mode-badge ap-mode-badge-sm" title="SoftAP モードで動作中">
-                      AP
-                    </span>
-                  )}
                   {dev.ipAddress.startsWith(SERIAL_DEVICE_PREFIX) ? (
                     <span
                       className="device-row-status online"
@@ -443,6 +436,14 @@ export function DeviceList() {
                   )}
                 </div>
                 <div className="device-row-meta">
+                  {dev.role && dev.role !== 'receiver' && (
+                    <span className="device-row-roletag" title={`ノード役割: ${dev.role}`}>
+                      {roleBadge(dev.role)}
+                    </span>
+                  )}
+                  {isApMode && (
+                    <span className="device-row-roletag ap" title="SoftAP モードで動作中">AP</span>
+                  )}
                   <span className="device-row-meta-ip">{dev.ipAddress || '—'}</span>
                   {dev.address && <span>{dev.address}</span>}
                   {dev.firmwareVersion && <span>fw {dev.firmwareVersion}</span>}

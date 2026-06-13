@@ -103,7 +103,10 @@
 .device-row {
   display: flex;
   flex-direction: column;
-  padding: 8px 10px;
+  /* Compact: the name moved to its own scannable row and the role/AP
+     tags moved down to the meta row (user feedback 2026-06-13: cards
+     too tall). Tight vertical padding keeps a 2-row card short. */
+  padding: 5px 10px;
   border-radius: var(--radius);
   cursor: pointer;
   transition: background var(--transition), border-color var(--transition);
@@ -187,7 +190,7 @@
   flex: 1;
   font-weight: 600;
   color: var(--text-primary);
-  font-size: 16px;
+  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -248,9 +251,10 @@
 
 .device-row-meta {
   margin-top: 2px;
-  font-size: 14px;
+  font-size: 12px;
   color: var(--text-muted);
   display: flex;
+  align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
@@ -259,9 +263,34 @@
   font-family: var(--font-mono);
 }
 
+/* Role tag at the bottom-left of a card (in the meta row), e.g.
+   "SENDER" / "BROKER". Moved here from the top row so the top row is
+   just [checkbox] [name] [status] and the card stays short
+   (user feedback 2026-06-13: タグを左下に / カードが高い). */
+.device-row-roletag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(123, 108, 255, 0.16);
+  color: var(--accent-light);
+  border: 1px solid rgba(123, 108, 255, 0.4);
+  flex-shrink: 0;
+}
+.device-row-roletag.ap {
+  background: rgba(255, 165, 0, 0.16);
+  color: #e8a33d;
+  border-color: rgba(232, 163, 61, 0.5);
+}
+
 /* ---- Detail pane ---- */
 .devices-detail {
   overflow-y: auto;
+  /* Always reserve the scrollbar gutter so expanding a sensor mapping row
+     (which grows the content past the viewport) doesn't shift the panel
+     width sideways (user feedback 2026-06-13: 開くと幅が変わる). */
+  scrollbar-gutter: stable;
   padding: 20px 24px;
   background: var(--bg-primary);
 }

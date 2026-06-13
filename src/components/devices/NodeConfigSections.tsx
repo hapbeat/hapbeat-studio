@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import type { DeviceInfo, ManagerMessage, MqttClientEntry, SensorColorMatch, SensorMapping, SensorReading } from '@/types/manager'
 import { useLibraryStore } from '@/stores/libraryStore'
+import { useMqttTopicsStore, sanitizeTopicRoot } from '@/stores/mqttTopicsStore'
+import { MqttFlowPanel } from './MqttFlow'
 
 /**
  * Per-node-role config panels (DEC-034). Each speaks the common
@@ -149,6 +150,94 @@ export function EspNowConfigSection({
 }
 
 // ---------------------------------------------------------------------
+// Topic registry — named "送り先" the sensor mapping can pick from (item 6)
+// ---------------------------------------------------------------------
+
+/**
+ * Studio-side registry of named MQTT topics. Hapbeat's default is
+ * single-topic payload routing (`<root>/play` + `target` in the payload);
+ * this is the OPTIONAL topic-based routing the user asked for
+ * (2026-06-13): register named send-destinations here, then pick one per
+ * color in the センサー tab. Each topic = a topic root; receivers
+ * subscribe to their own root, so a topic selects a receiver group.
+ */
+function TopicRegistryEditor() {
+  const topics = useMqttTopicsStore((s) => s.topics)
+  const upsertTopic = useMqttTopicsStore((s) => s.upsertTopic)
+  const removeTopic = useMqttTopicsStore((s) => s.removeTopic)
+  const [name, setName] = useState('')
+  const [root, setRoot] = useState('')
+
+  const add = () => {
+    const r = sanitizeTopicRoot(root)
+    if (!r) return
+    upsertTopic({ name: name.trim() || r, root: r })
+    setName('')
+    setRoot('')
+  }
+
+  return (
+    <div className="form-section">
+      <div className="form-section-title">
+        トピック (送り先) 登録
+        <span className="form-section-sub-inline">
+          {' '}— 「センサー」タブで色ごとに選べる送り先の一覧（任意）
+        </span>
+      </div>
+      {topics.length === 0 ? (
+        <div className="form-status muted">
+          未登録です。送り先 (トピック) を追加すると、センサーのマッピングで色ごとにプルダウン選択できます。
+          登録しない場合は全色がこのセンサーの既定 topic root に送られます（従来どおり）。
+          別のセンサーを足す / グループで分ける時に使います。
+        </div>
+      ) : (
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {topics.map((t) => (
+            <li key={t.root} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontWeight: 600, minWidth: 90 }}>{t.name}</span>
+              <code className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t.root}/play</code>
+              <button
+                type="button"
+                className="form-button-secondary"
+                style={{ fontSize: 11, padding: '2px 8px', marginLeft: 'auto' }}
+                onClick={() => removeTopic(t.root)}
+                title="この送り先を削除"
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="form-row" style={{ marginTop: 8, gap: 6 }}>
+        <input
+          className="form-input"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="名前 (例: 病棟A)"
+          style={{ flex: '0 0 140px' }}
+        />
+        <input
+          className="form-input mono"
+          value={root}
+          onChange={(e) => setRoot(e.target.value)}
+          placeholder="topic root (例: ward-a)"
+          maxLength={32}
+          onKeyDown={(e) => { if (e.key === 'Enter') add() }}
+        />
+        <button className="form-button-secondary" onClick={add} disabled={!root.trim()}>
+          ＋ 追加
+        </button>
+      </div>
+      <div className="form-status muted">
+        受信側 (Hapbeat) は自分の「MQTT」タブの topic root でこのトピックを購読します。
+        送り先トピックと受信機の root を合わせると、その色だけ特定グループに届きます。
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------
 // MQTT client settings (receiver(mqtt) / sensor) — the MQTT クライアント tab
 // ---------------------------------------------------------------------
 
@@ -202,7 +291,10 @@ export function MqttConfigSection({
   }
 
   return (
-    <div className="form-section">
+    <>
+      {/* Shared page-level flow chart (same instance the broker tab shows). */}
+      <MqttFlowPanel />
+      <div className="form-section">
       <div
         className="form-section-title"
         style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
@@ -342,203 +434,10 @@ export function MqttConfigSection({
         {status && <span className="form-status ok" style={{ alignSelf: 'center' }}>{status}</span>}
       </div>
     </div>
-  )
-}
-
-// ---------------------------------------------------------------------
-// MQTT flow chart — sensors → broker → receivers, with live publish
-// stats. Fed by the broker's get_info (mqtt_clients / mqtt_pub_count /
-// mqtt_last_*, polled every 2 s while the MQTT tab is open).
-// ---------------------------------------------------------------------
-
-function clientLabel(c: MqttClientEntry): string {
-  if (c.name) return c.name
-  // Fallback: clientId tail (old firmware without presence).
-  return c.id.length > 14 ? `…${c.id.slice(-12)}` : c.id
-}
-
-function MqttFlowChart({
-  brokerName,
-  port,
-  running,
-  clients,
-  pubCount,
-  lastTopic,
-  lastPayload,
-}: {
-  brokerName: string
-  port: number
-  running: boolean
-  clients: MqttClientEntry[]
-  pubCount?: number
-  lastTopic?: string
-  lastPayload?: string
-}) {
-  const senders = clients.filter((c) => c.role === 'sensor')
-  const receivers = clients.filter((c) => c.role === 'receiver')
-  const others = clients.filter((c) => c.role !== 'sensor' && c.role !== 'receiver')
-
-  // Pulse the edges briefly whenever the publish counter advances.
-  const prevCountRef = useRef<number | undefined>(undefined)
-  const [pulse, setPulse] = useState(false)
-  useEffect(() => {
-    if (pubCount == null) return
-    const prev = prevCountRef.current
-    prevCountRef.current = pubCount
-    if (prev != null && pubCount > prev) {
-      setPulse(true)
-      const t = setTimeout(() => setPulse(false), 600)
-      return () => clearTimeout(t)
-    }
-  }, [pubCount])
-
-  const rows = Math.max(senders.length + others.length, receivers.length, 1)
-  const ROW_H = 34
-  const height = 60 + rows * ROW_H
-  const W = 560
-  const brokerY = height / 2
-
-  const nodeBox = (
-    x: number, y: number, label: string, kind: 'sender' | 'receiver' | 'other',
-  ) => (
-    <g key={`${kind}-${x}-${y}-${label}`}>
-      <rect
-        x={x} y={y - 13} width={150} height={26} rx={5}
-        fill={kind === 'sender' ? 'rgba(255,165,0,0.12)' : kind === 'receiver' ? 'rgba(76,175,80,0.12)' : 'rgba(128,128,128,0.12)'}
-        stroke={kind === 'sender' ? '#e8a33d' : kind === 'receiver' ? '#4caf50' : '#888'}
-        strokeWidth={1}
-      />
-      <text x={x + 75} y={y + 4} textAnchor="middle" fontSize={11}
-        fill="var(--text-primary, #ddd)" style={{ fontFamily: 'var(--font-mono)' }}>
-        {label.length > 18 ? `${label.slice(0, 17)}…` : label}
-      </text>
-    </g>
-  )
-
-  const edge = (x1: number, y1: number, x2: number, y2: number, key: string) => (
-    <line
-      key={key}
-      x1={x1} y1={y1} x2={x2} y2={y2}
-      stroke={pulse ? 'var(--accent, #7b6cff)' : 'rgba(150,150,150,0.45)'}
-      strokeWidth={pulse ? 2.5 : 1.2}
-      markerEnd="url(#mqtt-arrow)"
-    />
-  )
-
-  const leftNodes = [...senders, ...others]
-
-  // Pop-out: render the live chart into a standalone window so the user
-  // can watch traffic while editing settings (user request 2026-06-13).
-  // createPortal keeps it reactive — the chart re-renders on every poll.
-  // The SVG colors use `var(--x, #fallback)` so they look right even
-  // without the app stylesheet in the popout.
-  const [popout, setPopout] = useState<Window | null>(null)
-  const openPopout = () => {
-    const w = window.open('', 'hapbeat-mqtt-flow', 'width=760,height=560')
-    if (!w) return
-    w.document.title = 'MQTT 通信フロー'
-    w.document.body.style.cssText =
-      'margin:0;padding:16px;background:#16161a;color:#ddd;font-family:system-ui,sans-serif'
-    setPopout(w)
-  }
-  useEffect(() => () => { popout?.close() }, [popout])
-  useEffect(() => {
-    if (!popout) return
-    const t = window.setInterval(() => { if (popout.closed) setPopout(null) }, 1000)
-    return () => window.clearInterval(t)
-  }, [popout])
-
-  const chart = (
-    <div style={{ overflowX: 'auto' }}>
-      <svg
-        viewBox={`0 0 ${W} ${height}`}
-        style={{ width: '100%', maxWidth: 640, display: 'block' }}
-        role="img"
-        aria-label="MQTT 通信フロー図"
-      >
-        <defs>
-          <marker id="mqtt-arrow" viewBox="0 0 8 8" refX="7" refY="4"
-            markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M0,0 L8,4 L0,8 z" fill={pulse ? 'var(--accent, #7b6cff)' : 'rgba(150,150,150,0.6)'} />
-          </marker>
-        </defs>
-
-        {/* column headers */}
-        <text x={85} y={16} textAnchor="middle" fontSize={11} fill="var(--text-muted, #888)">SENDER</text>
-        <text x={W / 2} y={16} textAnchor="middle" fontSize={11} fill="var(--text-muted, #888)">BROKER</text>
-        <text x={W - 85} y={16} textAnchor="middle" fontSize={11} fill="var(--text-muted, #888)">RECEIVER</text>
-
-        {/* broker box */}
-        <rect
-          x={W / 2 - 80} y={brokerY - 24} width={160} height={48} rx={7}
-          fill={running ? 'rgba(123,108,255,0.14)' : 'rgba(244,67,54,0.12)'}
-          stroke={running ? 'var(--accent, #7b6cff)' : '#f44336'} strokeWidth={1.4}
-        />
-        <text x={W / 2} y={brokerY - 5} textAnchor="middle" fontSize={12} fontWeight={600}
-          fill="var(--text-primary, #ddd)">
-          {brokerName.length > 20 ? `${brokerName.slice(0, 19)}…` : brokerName}
-        </text>
-        <text x={W / 2} y={brokerY + 13} textAnchor="middle" fontSize={10.5}
-          fill="var(--text-muted, #999)" style={{ fontFamily: 'var(--font-mono)' }}>
-          {running ? `:${port} 稼働中` : '停止中'}{pubCount != null ? ` · pub ${pubCount}` : ''}
-        </text>
-
-        {/* sender (+unknown) nodes & edges into the broker */}
-        {leftNodes.map((c, i) => {
-          const y = 40 + i * ROW_H + 13
-          return (
-            <g key={c.id}>
-              {nodeBox(10, y, clientLabel(c), c.role === 'sensor' ? 'sender' : 'other')}
-              {edge(162, y, W / 2 - 82, brokerY, `e-l-${c.id}`)}
-            </g>
-          )
-        })}
-        {leftNodes.length === 0 && (
-          <text x={85} y={brokerY + 4} textAnchor="middle" fontSize={11}
-            fill="var(--text-muted, #777)">(未接続)</text>
-        )}
-
-        {/* receiver nodes & edges out of the broker */}
-        {receivers.map((c, i) => {
-          const y = 40 + i * ROW_H + 13
-          return (
-            <g key={c.id}>
-              {nodeBox(W - 160, y, clientLabel(c), 'receiver')}
-              {edge(W / 2 + 82, brokerY, W - 162, y, `e-r-${c.id}`)}
-            </g>
-          )
-        })}
-        {receivers.length === 0 && (
-          <text x={W - 85} y={brokerY + 4} textAnchor="middle" fontSize={11}
-            fill="var(--text-muted, #777)">(未接続)</text>
-        )}
-      </svg>
-      {lastTopic && (
-        <div className="form-status muted mono" style={{ marginTop: 2 }}>
-          最終 publish: <code>{lastTopic}</code>{lastPayload ? <> — <code>{lastPayload}</code></> : null}
-        </div>
-      )}
-    </div>
-  )
-
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 2 }}>
-        <button
-          type="button"
-          className="form-button-secondary"
-          style={{ fontSize: 12, padding: '2px 10px' }}
-          onClick={() => (popout ? (popout.focus()) : openPopout())}
-          title="通信フローを別ウィンドウで開く (検出時のデータ送信をリアルタイムで見られます)"
-        >
-          ⤢ {popout ? '別窓を前面に' : 'ポップアウト'}
-        </button>
-      </div>
-      {popout
-        ? <div className="form-status muted">別ウィンドウで表示中（閉じるとここに戻ります）</div>
-        : chart}
-      {popout && createPortal(chart, popout.document.body)}
-    </div>
+    {/* Topic registry — only on the sender (sensor) side; receivers just
+        subscribe to their own root. (item 6) */}
+    {role === 'sensor' && <TopicRegistryEditor />}
+    </>
   )
 }
 
@@ -563,16 +462,9 @@ export function BrokerConfigSection({
     if (cachedInfo?.mqtt_port != null) setPort(cachedInfo.mqtt_port)
   }, [device.ipAddress, cachedInfo?.static_octet, cachedInfo?.mqtt_port])
 
-  // Refresh the broker stats (clients / pub count) every 2 s while this
-  // panel is visible — drives the flow chart's live pulse.
-  const sendToRef = useRef(sendTo)
-  sendToRef.current = sendTo
-  useEffect(() => {
-    if (!device.online) return
-    const tick = () => sendToRef.current({ type: 'get_info', payload: {} })
-    const id = window.setInterval(tick, 2000)
-    return () => window.clearInterval(id)
-  }, [device.ipAddress, device.online])
+  // NOTE: broker telemetry polling moved to the page-level MqttFlowController
+  // (mounted in Devices.tsx) so the flow chart is live on every device's MQTT
+  // tab, not just the broker's. This panel no longer polls.
 
   const apply = () => {
     sendTo({ type: 'set_broker_config', payload: { static_octet: octet, port } })
@@ -580,27 +472,8 @@ export function BrokerConfigSection({
 
   return (
     <>
-      <div className="form-section">
-        <div className="form-section-title">
-          通信フロー
-          <span className="form-section-sub-inline">
-            {' '}— 各クライアントがこのブローカーにどう繋がっているか (2 秒ごとに更新)
-          </span>
-        </div>
-        <MqttFlowChart
-          brokerName={device.name || 'BROKER'}
-          port={cachedInfo?.mqtt_port ?? 1883}
-          running={cachedInfo?.mqtt_running ?? false}
-          clients={cachedInfo?.mqtt_clients ?? []}
-          pubCount={cachedInfo?.mqtt_pub_count}
-          lastTopic={cachedInfo?.mqtt_last_topic}
-          lastPayload={cachedInfo?.mqtt_last_payload}
-        />
-        <div className="form-status muted">
-          クライアント名は各ノードが接続時に publish する presence 情報 (デバイス名) です。
-          名前が出ない場合は当該ノードのファームが古いか、デバイス名が未設定です。
-        </div>
-      </div>
+      {/* Shared page-level flow chart (same instance the sensor tabs show). */}
+      <MqttFlowPanel />
 
       <div className="form-section">
         <div className="form-section-title">
@@ -825,6 +698,9 @@ export function SensorMappingSection({
     setDirty(true)
   }
 
+  // Registered send-destinations (item 6) — per-color topic dropdown.
+  const topics = useMqttTopicsStore((s) => s.topics)
+
   // Available event ids from the local Kit library (datalist suggestions).
   const eventIds = useLibraryStore((s) => s.kits)
   const eventIdOptions = useMemo(() => {
@@ -977,7 +853,7 @@ export function SensorMappingSection({
 
       {rows.length === 0 && (
         <div className="form-status muted">
-          マッピング未設定です。「＋ 行を追加」で割り当てを作成してください。
+          マッピング未設定です。「＋ 検知色を追加」で割り当てを作成してください。
         </div>
       )}
 
@@ -1023,6 +899,19 @@ export function SensorMappingSection({
                 {matchSummary(r.match)}
               </span>
             )}
+            {/* Delete is on the (always-visible) header row so a color can
+                be removed without expanding it first (user feedback
+                2026-06-13). stopPropagation so it doesn't toggle expand. */}
+            <button
+              type="button"
+              className="form-button-secondary"
+              onClick={(e) => { e.stopPropagation(); removeRow(i) }}
+              disabled={!device.online}
+              title="この検知色を削除"
+              style={{ fontSize: 11, padding: '2px 8px', flexShrink: 0, marginLeft: 'auto' }}
+            >
+              ✕
+            </button>
           </div>
 
           {isOpen && (
@@ -1037,14 +926,7 @@ export function SensorMappingSection({
               disabled={!device.online}
               style={{ flex: '0 0 120px' }}
             />
-            <button
-              className="form-button-secondary"
-              onClick={() => removeRow(i)}
-              disabled={!device.online}
-              title="この行を削除"
-            >
-              削除
-            </button>
+            <span />
           </div>
 
           <div className="form-row">
@@ -1103,6 +985,31 @@ export function SensorMappingSection({
             />
             <span />
           </div>
+
+          {/* Send-destination topic (item 6) — only shown once the user has
+              registered topics in the MQTT tab. Empty = the sensor's default
+              root; otherwise this color publishes to <topic>/play. */}
+          {topics.length > 0 && (
+            <div className="form-row">
+              <label>送り先トピック</label>
+              <select
+                className="form-input"
+                value={r.topic ?? ''}
+                onChange={(e) => update(i, { topic: e.target.value || undefined })}
+                disabled={!device.online}
+                style={{ flex: '0 0 240px' }}
+              >
+                <option value="">（センサー既定の topic root）</option>
+                {topics.map((t) => (
+                  <option key={t.root} value={t.root}>{t.name}（{t.root}）</option>
+                ))}
+                {r.topic && !topics.some((t) => t.root === r.topic) && (
+                  <option value={r.topic}>{r.topic}（未登録）</option>
+                )}
+              </select>
+              <span />
+            </div>
+          )}
 
           <div className="form-row">
             <label>ターゲット</label>
@@ -1167,7 +1074,7 @@ export function SensorMappingSection({
 
       <div className="form-action-row" style={{ marginTop: 10 }}>
         <button className="form-button-secondary" onClick={addRow} disabled={!device.online}>
-          ＋ 行を追加
+          ＋ 検知色を追加
         </button>
         <button className="form-button" onClick={save} disabled={!device.online || !dirty}>
           保存

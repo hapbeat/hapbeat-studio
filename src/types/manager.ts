@@ -58,6 +58,15 @@ export interface SensorMapping {
   gain: number
   /** optional min interval between repeated fires of the same key */
   debounce_ms?: number
+  /**
+   * Optional per-mapping publish topic ROOT (no slashes), e.g. "ward-a".
+   * When set the sensor publishes this color to "<topic>/play" instead of
+   * its default "<topic_root>/play", so colors (or whole sensors) can be
+   * routed to different receiver groups by topic (mqtt-transport.md §5).
+   * Empty/undefined → the sensor's default root. Studio picks it from the
+   * registered topic list (mqttTopicsStore).
+   */
+  topic?: string
 }
 
 export interface DeviceInfo {

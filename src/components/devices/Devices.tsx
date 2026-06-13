@@ -1,5 +1,6 @@
 import { DeviceList } from './DeviceList'
 import { DeviceDetail } from './DeviceDetail'
+import { MqttFlowController } from './MqttFlow'
 import './Devices.css'
 
 /**
@@ -14,6 +15,10 @@ export function Devices() {
     <div className="devices-page">
       <DeviceList />
       <DeviceDetail />
+      {/* Page-level singleton: polls the broker + owns the flow-chart
+          pop-out so it survives switching the selected device. Renders
+          nothing inline. */}
+      <MqttFlowController />
     </div>
   )
 }
