@@ -321,6 +321,24 @@ async function flashRegionsAt(
 
     opts.onProgress?.({ phase: 'reset', percent: 96 })
     await loader.after('hard_reset')
+
+    // Native-USB boards (ESP32-S3/C3 USB-Serial-JTAG, VID 0x303A — e.g.
+    // AtomS3) often don't actually reboot from esptool-js's RTS hard_reset:
+    // the user had to press the physical reset button (2026-06-13). Follow
+    // up with an explicit EN pulse via the USB-Serial-JTAG's DTR/RTS lines.
+    // Gated on the native-USB VID so the classic-ESP32 path (FTDI/CP210x,
+    // which already auto-resets fine) is untouched. Best-effort — wrapped
+    // so a setSignals failure never fails the flash.
+    if (isNativeUsbPort(port)) {
+      try {
+        await port.setSignals({ dataTerminalReady: false, requestToSend: true })  // EN low
+        await new Promise((r) => setTimeout(r, 120))
+        await port.setSignals({ dataTerminalReady: false, requestToSend: false }) // EN high → boot app
+        opts.onLog?.('native-USB board: pulsed EN to reboot into app')
+      } catch (e) {
+        opts.onLog?.(`native-USB reset pulse skipped (${(e as Error).message})`)
+      }
+    }
     opts.onProgress?.({ phase: 'done', percent: 100 })
   } finally {
     await safeDisconnect(transport)
@@ -354,4 +372,15 @@ function makeTerminal(onLog?: (line: string) => void) {
 
 async function safeDisconnect(transport: Transport): Promise<void> {
   try { await transport.disconnect() } catch { /* ignore */ }
+}
+
+/** True for native-USB ESP32 boards (S3/C3 USB-Serial-JTAG, Espressif VID
+ *  0x303A). These don't have an external FTDI/CP210x auto-reset circuit, so
+ *  they need the explicit post-flash EN pulse. */
+function isNativeUsbPort(port: SerialPort): boolean {
+  try {
+    return port.getInfo().usbVendorId === 0x303a
+  } catch {
+    return false
+  }
 }

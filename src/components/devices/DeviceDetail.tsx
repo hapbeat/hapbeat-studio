@@ -11,7 +11,6 @@ import { WifiProfilesForm } from './WifiProfilesForm'
 import { UiConfigForm } from './UiConfigForm'
 import { DebugDumpSection } from './DebugDumpSection'
 import { InstalledKitsSection } from './InstalledKitsSection'
-import { SerialConfigSection } from './SerialConfigSection'
 import { TestSubTab } from './TestSubTab'
 import { FirmwareSubTab } from './FirmwareSubTab'
 import { OnboardingWizard } from './OnboardingWizard'
@@ -553,7 +552,9 @@ export function DeviceDetail() {
               dump={debugDump}
               sendTo={sendTo}
             />
-            <SerialConfigSection compact />
+            {/* The compact Serial-connect link was removed here — USB
+                connection now happens by clicking the card in the left
+                Devices panel (user feedback 2026-06-13). */}
           </>
         )}
 

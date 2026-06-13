@@ -77,15 +77,18 @@ function UsbPortCard({ entry }: { entry: SerialPortEntry }) {
   return (
     <div
       className={`device-row usb${checked ? ' checked' : ''}${isPrimary ? ' primary' : ''}`}
+      title={isActive ? '設定接続中 — クリックで設定タブを開く' : 'クリックで USB Serial 接続'}
       onClick={(e) => {
         const target = e.target as HTMLElement
         if (target.closest('button')) return
         if (target.closest('.device-row-checkbox-input')) return
-        // Active (config-connected) card click opens the detail pane on
-        // the serial pseudo-device; otherwise the click is the flash-
-        // target checkbox toggle, mirroring the LAN cards.
+        // Card click connects (or focuses if already connected). The
+        // separate 接続 button is gone — clicking the card body IS the
+        // connect action now (user feedback 2026-06-13). The checkbox
+        // stays a flash-target selector (it must work on blank chips that
+        // can't connect, so it can't double as a "connected" indicator).
         if (isActive) selectDevice(pseudoId)
-        else toggleSelectPort(entry.id)
+        else void openConfigFor(entry.id)
       }}
     >
       <div className="device-row-top">
@@ -108,22 +111,31 @@ function UsbPortCard({ entry }: { entry: SerialPortEntry }) {
         <span className="mono" style={{ color: 'var(--text-muted)', fontSize: 11, flexShrink: 0 }}>
           #{entry.id.replace('usb-', '')}
         </span>
-        <span className="device-row-name">{serialEntryLabel(entry)}</span>
+        <span style={{ flex: 1 }} />
         {entry.info?.role && entry.info.role !== 'receiver' && (
           <span
             className="device-detail-pill role-pill"
+            style={{ height: 18, lineHeight: '18px', display: 'inline-flex', alignItems: 'center' }}
             title={`ノード役割: ${entry.info.role}`}
           >
             {roleBadge(entry.info.role)}
           </span>
         )}
+        {/* Use a text dot (not an emoji) so the pill height matches the
+            role badge — the 🔌 glyph stretched the line box taller. */}
         <span
           className="device-row-status online"
+          style={{ height: 18, lineHeight: '18px', paddingTop: 0, paddingBottom: 0 }}
           title={isActive ? '設定接続中の USB ポート' : 'USB Serial ポート'}
         >
-          <span style={{ fontSize: 13 }}>🔌</span>
-          <span>{isActive ? '接続中' : 'USB'}</span>
+          <span style={{ textTransform: 'none' }}>{isActive ? '● 接続中' : 'USB'}</span>
         </span>
+      </div>
+      {/* Title on its own line, left-aligned — was squeezed between the
+          index and the badges on the top row and got truncated to "se…"
+          (user feedback 2026-06-13). */}
+      <div className="device-row-name" style={{ marginTop: 2, fontWeight: 600 }}>
+        {serialEntryLabel(entry)}
       </div>
       <div className="device-row-meta">
         <span>{entry.bridge}</span>
@@ -150,17 +162,8 @@ function UsbPortCard({ entry }: { entry: SerialPortEntry }) {
           className="device-row-meta"
           style={{ marginTop: 4, gap: 6, display: 'flex', justifyContent: 'flex-end' }}
         >
-          {!isActive && (
-            <button
-              type="button"
-              className="form-button-secondary"
-              style={{ fontSize: 12, padding: '3px 10px' }}
-              onClick={(e) => { e.stopPropagation(); void openConfigFor(entry.id) }}
-              title="このポートに設定接続する (設定タブが開きます)"
-            >
-              🔌 接続
-            </button>
-          )}
+          {/* 接続 button removed — clicking the card body connects. Only
+              識別 (probe without taking over the config conn) remains. */}
           <button
             type="button"
             className="form-button-secondary"

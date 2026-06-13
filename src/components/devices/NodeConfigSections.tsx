@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { DeviceInfo, ManagerMessage, MqttClientEntry, SensorColorMatch, SensorMapping, SensorReading } from '@/types/manager'
 import { useLibraryStore } from '@/stores/libraryStore'
 
@@ -426,7 +427,28 @@ function MqttFlowChart({
 
   const leftNodes = [...senders, ...others]
 
-  return (
+  // Pop-out: render the live chart into a standalone window so the user
+  // can watch traffic while editing settings (user request 2026-06-13).
+  // createPortal keeps it reactive — the chart re-renders on every poll.
+  // The SVG colors use `var(--x, #fallback)` so they look right even
+  // without the app stylesheet in the popout.
+  const [popout, setPopout] = useState<Window | null>(null)
+  const openPopout = () => {
+    const w = window.open('', 'hapbeat-mqtt-flow', 'width=760,height=560')
+    if (!w) return
+    w.document.title = 'MQTT 通信フロー'
+    w.document.body.style.cssText =
+      'margin:0;padding:16px;background:#16161a;color:#ddd;font-family:system-ui,sans-serif'
+    setPopout(w)
+  }
+  useEffect(() => () => { popout?.close() }, [popout])
+  useEffect(() => {
+    if (!popout) return
+    const t = window.setInterval(() => { if (popout.closed) setPopout(null) }, 1000)
+    return () => window.clearInterval(t)
+  }, [popout])
+
+  const chart = (
     <div style={{ overflowX: 'auto' }}>
       <svg
         viewBox={`0 0 ${W} ${height}`}
@@ -496,6 +518,26 @@ function MqttFlowChart({
           最終 publish: <code>{lastTopic}</code>{lastPayload ? <> — <code>{lastPayload}</code></> : null}
         </div>
       )}
+    </div>
+  )
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 2 }}>
+        <button
+          type="button"
+          className="form-button-secondary"
+          style={{ fontSize: 12, padding: '2px 10px' }}
+          onClick={() => (popout ? (popout.focus()) : openPopout())}
+          title="通信フローを別ウィンドウで開く (検出時のデータ送信をリアルタイムで見られます)"
+        >
+          ⤢ {popout ? '別窓を前面に' : 'ポップアウト'}
+        </button>
+      </div>
+      {popout
+        ? <div className="form-status muted">別ウィンドウで表示中（閉じるとここに戻ります）</div>
+        : chart}
+      {popout && createPortal(chart, popout.document.body)}
     </div>
   )
 }
