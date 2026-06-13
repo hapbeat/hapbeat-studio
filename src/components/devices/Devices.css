@@ -284,6 +284,25 @@
   border-color: rgba(232, 163, 61, 0.5);
 }
 
+/* Connection indicator dot. The Wi-Fi vs USB-Serial distinction is already
+   obvious from which section the card is in, so the cards drop the
+   "Wi-Fi"/"USB" text tag + emoji and just show a small dot: green = linked,
+   grey = not linked (user feedback 2026-06-13). Offline Wi-Fi cards show the
+   red ✕ dismiss button instead. */
+.device-conn-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-muted);
+  opacity: 0.45;
+}
+.device-conn-dot.online {
+  background: var(--success);
+  opacity: 1;
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.22);
+}
+
 /* ---- Detail pane ---- */
 .devices-detail {
   overflow-y: auto;

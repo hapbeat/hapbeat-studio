@@ -129,14 +129,13 @@ function UsbPortCard({ entry }: { entry: SerialPortEntry }) {
           #{entry.id.replace('usb-', '')}
         </span>
         <span className="device-row-name">{serialEntryLabel(entry)}</span>
-        {/* Text dot (not an emoji) so the pill height matches the others. */}
+        {/* No "USB" tag — the section header says USB Serial. Dot shows the
+            connection state: green = config-connected, grey = not. */}
         <span
-          className="device-row-status online"
-          style={{ height: 18, lineHeight: '18px', paddingTop: 0, paddingBottom: 0 }}
-          title={isActive ? '設定接続中の USB ポート' : 'USB Serial ポート（✔ で接続）'}
-        >
-          <span style={{ textTransform: 'none' }}>{isActive ? '● 接続中' : 'USB'}</span>
-        </span>
+          className={`device-conn-dot${isActive ? ' online' : ''}`}
+          title={isActive ? '接続中 (USB Serial)' : '未接続（✔ で接続）'}
+          aria-label={isActive ? '接続中' : '未接続'}
+        />
       </div>
       <div className="device-row-meta">
         {entry.info?.role && entry.info.role !== 'receiver' && (
@@ -402,24 +401,15 @@ export function DeviceList() {
                     />
                   </label>
                   <span className="device-row-name">{dev.name || '(unnamed)'}</span>
-                  {dev.ipAddress.startsWith(SERIAL_DEVICE_PREFIX) ? (
+                  {/* No "Wi-Fi" text/emoji tag — the section header already
+                      says Wi-Fi. Online = green dot; offline = red ✕ dismiss
+                      (user feedback 2026-06-13). */}
+                  {dev.online ? (
                     <span
-                      className="device-row-status online"
-                      title="USB Serial 経由で接続中 (Wi-Fi 未設定)"
-                    >
-                      <span style={{ fontSize: 13 }}>🔌</span>
-                      <span>Serial</span>
-                    </span>
-                  ) : dev.online ? (
-                    <span
-                      className="device-row-status online"
-                      title="Wi-Fi (LAN) で接続中"
-                    >
-                      <span style={{ fontSize: 13 }}>📶</span>
-                      {/* override the pill's uppercase so it reads "Wi-Fi"
-                          not "WI-FI" */}
-                      <span style={{ textTransform: 'none' }}>Wi-Fi</span>
-                    </span>
+                      className="device-conn-dot online"
+                      title="接続中 (Wi-Fi)"
+                      aria-label="接続中"
+                    />
                   ) : (
                     <button
                       type="button"

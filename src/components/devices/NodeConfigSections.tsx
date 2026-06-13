@@ -181,14 +181,14 @@ function TopicRegistryEditor() {
       <div className="form-section-title">
         トピック (送り先) 登録
         <span className="form-section-sub-inline">
-          {' '}— 「センサー」タブで色ごとに選べる送り先の一覧（任意）
+          {' '}— 「センサー」タブの送信トピックで選べる送り先の一覧
         </span>
       </div>
       {topics.length === 0 ? (
         <div className="form-status muted">
-          未登録です。送り先 (トピック) を追加すると、センサーのマッピングで色ごとにプルダウン選択できます。
-          登録しない場合は全色がこのセンサーの既定 topic root に送られます（従来どおり）。
-          別のセンサーを足す / グループで分ける時に使います。
+          既定の「default-topic」（このセンサーの topic root）に送られます。複数の機材やグループを混在させる場合は、
+          ここに送り先 (トピック) を登録すると、「センサー」タブの送信トピックで選べるようになります
+          （カード全体の既定として、必要なら色ごとに個別指定も可）。
         </div>
       ) : (
         <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -198,8 +198,8 @@ function TopicRegistryEditor() {
               <code className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t.root}/play</code>
               <button
                 type="button"
-                className="form-button-secondary"
-                style={{ fontSize: 11, padding: '2px 8px', marginLeft: 'auto' }}
+                className="device-row-dismiss"
+                style={{ marginLeft: 'auto' }}
                 onClick={() => removeTopic(t.root)}
                 title="この送り先を削除"
               >
@@ -586,8 +586,28 @@ function readingMatches(m: SensorColorMatch, rd: SensorReading): boolean {
   return true
 }
 
+// Module + sensor-type label, used as the mapping card TITLE so the panel
+// generalizes as more sensor types are added (user feedback 2026-06-13).
 const SENSOR_TYPE_LABEL: Record<string, string> = {
-  tcs34725: 'TCS34725 (カラー)',
+  tcs34725: 'TCS34725（カラーセンサ）',
+}
+
+/** The card-level default topic = the topic shared by the most rows
+ *  ('' = default-topic / the sensor's own root). Used to reconstruct the
+ *  "card default + per-row override" model from the flat per-row `topic`
+ *  the device stores. */
+function inferCardTopic(ms: SensorMapping[]): string {
+  const counts = new Map<string, number>()
+  for (const m of ms) {
+    const t = m.topic ?? ''
+    counts.set(t, (counts.get(t) ?? 0) + 1)
+  }
+  let best = ''
+  let bestN = -1
+  for (const [t, n] of counts) {
+    if (n > bestN) { best = t; bestN = n }
+  }
+  return best
 }
 
 export function SensorMappingSection({
@@ -623,6 +643,35 @@ export function SensorMappingSection({
       return next
     })
 
+  // ── send-destination topic (item 6) ─────────────────────────────────
+  // The whole sensor publishes to ONE card-level topic by default
+  // ('' = "default-topic" = the sensor's own topic_root). A row can opt into
+  // an individual topic via its checkbox (overrideRows); otherwise it follows
+  // the card topic. The firmware only stores a flat per-row `topic`, so this
+  // model is reconstructed on load (inferCardTopic) and flattened on save.
+  const [cardTopic, setCardTopic] = useState<string>('')
+  const [overrideRows, setOverrideRows] = useState<Set<number>>(new Set())
+
+  // Change the card-level topic and pull every non-override row with it.
+  const setCardTopicAndSync = (v: string) => {
+    setCardTopic(v)
+    setRows((rs) => rs.map((r, i) => (overrideRows.has(i) ? r : { ...r, topic: v || undefined })))
+    setDirty(true)
+  }
+  // Toggle a row between "follow card default" and "individual topic".
+  const toggleOverride = (i: number) =>
+    setOverrideRows((s) => {
+      const next = new Set(s)
+      if (next.has(i)) {
+        next.delete(i)
+        setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, topic: cardTopic || undefined } : r)))
+      } else {
+        next.add(i)
+      }
+      setDirty(true)
+      return next
+    })
+
   // Editor state (rows / dirty / prefill) is per-device. Reset it when
   // the selected device changes so the previous device's edits don't
   // bleed into the next one.
@@ -634,6 +683,8 @@ export function SensorMappingSection({
     setRows([])
     setDirty(false)
     setStatus(null)
+    setCardTopic('')
+    setOverrideRows(new Set())
     prefilledRef.current = false
   }, [device.ipAddress])
 
@@ -650,11 +701,18 @@ export function SensorMappingSection({
       if (prefilledRef.current) return
       prefilledRef.current = true
       setRows(DEFAULT_COLOR_MAPPINGS.map((m) => ({ ...m, match: { ...m.match } })))
+      setCardTopic('')
+      setOverrideRows(new Set())
       setDirty(true)
       setStatus('デフォルトの 3 色しきい値を入れました — イベントを割り当てて保存してください')
       return
     }
     setRows(mappings)
+    // Reconstruct the card-default + per-row-override model from the flat
+    // per-row topics the device returned.
+    const ct = inferCardTopic(mappings)
+    setCardTopic(ct)
+    setOverrideRows(new Set(mappings.flatMap((m, i) => ((m.topic ?? '') !== ct ? [i] : []))))
   }, [mappings, dirty])
 
   // Auto-load the device's current mappings once per device when the
@@ -729,13 +787,23 @@ export function SensorMappingSection({
   const addRow = () => {
     setRows((rs) => {
       setExpanded((s) => new Set(s).add(rs.length))  // open the new row
-      return [...rs, emptyMapping()]
+      // New colors follow the card-level topic by default.
+      return [...rs, { ...emptyMapping(), topic: cardTopic || undefined }]
     })
     setDirty(true)
   }
   const removeRow = (i: number) => {
     setRows((rs) => rs.filter((_, idx) => idx !== i))
     setExpanded(new Set())  // indices shift on removal — simplest is collapse all
+    // Shift override indices past the removed row down by one.
+    setOverrideRows((s) => {
+      const next = new Set<number>()
+      for (const idx of s) {
+        if (idx < i) next.add(idx)
+        else if (idx > i) next.add(idx - 1)
+      }
+      return next
+    })
     setDirty(true)
   }
 
@@ -762,6 +830,9 @@ export function SensorMappingSection({
 
   const save = () => {
     const clean = rows
+      // Flatten card-default + override into the flat per-row topic the
+      // firmware stores (compute by index BEFORE filtering shifts them).
+      .map((r, i) => ({ ...r, topic: (overrideRows.has(i) ? r.topic : cardTopic) || undefined }))
       .filter((r) => r.key.trim() && r.event_id.trim())
       .map((r) => ({ ...r, key: r.key.trim(), event_id: r.event_id.trim(), target: r.target.trim() }))
     sendTo({ type: 'set_sensor_mapping', payload: { mappings: clean } })
@@ -779,9 +850,9 @@ export function SensorMappingSection({
     <div className="form-section">
       <div className="form-section-title" style={{ display: 'flex', justifyContent: 'space-between' }}>
         <span>
-          センサ → イベント マッピング
+          {sensorType ? (SENSOR_TYPE_LABEL[sensorType] ?? sensorType) : 'センサ'}
           <span className="form-section-sub-inline">
-            {' '}— {sensorType ? (SENSOR_TYPE_LABEL[sensorType] ?? sensorType) : 'センサ'} の検出値ごとに発火するイベントを割り当てる
+            {' '}— 検出値ごとに発火するイベントを割り当てる
           </span>
         </span>
         <button
@@ -847,6 +918,32 @@ export function SensorMappingSection({
         )}
       </div>
 
+      {/* Card-level send topic — the whole sensor publishes here by default.
+          Colors can opt into an individual topic in their row (item 6). */}
+      <div className="form-row" style={{ marginTop: 8 }}>
+        <label>送信トピック</label>
+        <select
+          className="form-input"
+          value={cardTopic}
+          onChange={(e) => setCardTopicAndSync(e.target.value)}
+          disabled={!device.online}
+          style={{ flex: '0 0 260px' }}
+        >
+          <option value="">default-topic（センサー既定 root）</option>
+          {topics.map((t) => (
+            <option key={t.root} value={t.root}>{t.name}（{t.root}）</option>
+          ))}
+          {cardTopic && !topics.some((t) => t.root === cardTopic) && (
+            <option value={cardTopic}>{cardTopic}（未登録）</option>
+          )}
+        </select>
+        <span />
+      </div>
+      <div className="form-status muted">
+        このセンサ全体の送り先です。送り先は「MQTT」タブで登録できます。色ごとに変えたい場合は、各色を開いて
+        「個別の Topic に送信する」をチェックしてください（チェックしない色はこの設定に追従します）。
+      </div>
+
       <datalist id="sensor-mapping-event-ids">
         {eventIdOptions.map((id) => <option key={id} value={id} />)}
       </datalist>
@@ -904,11 +1001,11 @@ export function SensorMappingSection({
                 2026-06-13). stopPropagation so it doesn't toggle expand. */}
             <button
               type="button"
-              className="form-button-secondary"
+              className="device-row-dismiss"
               onClick={(e) => { e.stopPropagation(); removeRow(i) }}
               disabled={!device.online}
               title="この検知色を削除"
-              style={{ fontSize: 11, padding: '2px 8px', flexShrink: 0, marginLeft: 'auto' }}
+              style={{ flexShrink: 0, marginLeft: 'auto' }}
             >
               ✕
             </button>
@@ -986,30 +1083,48 @@ export function SensorMappingSection({
             <span />
           </div>
 
-          {/* Send-destination topic (item 6) — only shown once the user has
-              registered topics in the MQTT tab. Empty = the sensor's default
-              root; otherwise this color publishes to <topic>/play. */}
-          {topics.length > 0 && (
-            <div className="form-row">
-              <label>送り先トピック</label>
-              <select
-                className="form-input"
-                value={r.topic ?? ''}
-                onChange={(e) => update(i, { topic: e.target.value || undefined })}
-                disabled={!device.online}
-                style={{ flex: '0 0 240px' }}
+          {/* Send-destination topic (item 6). By default the color follows the
+              card-level 送信トピック; tick "個別の Topic に送信する" to send this
+              one color somewhere else. */}
+          <div className="form-row">
+            <label>送り先</label>
+            <div className="form-row-multi" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <label
+                className="form-status muted"
+                style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}
               >
-                <option value="">（センサー既定の topic root）</option>
-                {topics.map((t) => (
-                  <option key={t.root} value={t.root}>{t.name}（{t.root}）</option>
-                ))}
-                {r.topic && !topics.some((t) => t.root === r.topic) && (
-                  <option value={r.topic}>{r.topic}（未登録）</option>
-                )}
-              </select>
-              <span />
+                <input
+                  type="checkbox"
+                  checked={overrideRows.has(i)}
+                  onChange={() => toggleOverride(i)}
+                  disabled={!device.online}
+                />
+                個別の Topic に送信する
+              </label>
+              {overrideRows.has(i) ? (
+                <select
+                  className="form-input"
+                  value={r.topic ?? ''}
+                  onChange={(e) => update(i, { topic: e.target.value || undefined })}
+                  disabled={!device.online}
+                  style={{ flex: '0 0 220px' }}
+                >
+                  <option value="">default-topic（センサー既定 root）</option>
+                  {topics.map((t) => (
+                    <option key={t.root} value={t.root}>{t.name}（{t.root}）</option>
+                  ))}
+                  {r.topic && !topics.some((t) => t.root === r.topic) && (
+                    <option value={r.topic}>{r.topic}（未登録）</option>
+                  )}
+                </select>
+              ) : (
+                <span className="form-status muted" style={{ margin: 0 }}>
+                  カード全体（{cardTopic ? (topics.find((t) => t.root === cardTopic)?.name ?? cardTopic) : 'default-topic'}）に追従
+                </span>
+              )}
             </div>
-          )}
+            <span />
+          </div>
 
           <div className="form-row">
             <label>ターゲット</label>
