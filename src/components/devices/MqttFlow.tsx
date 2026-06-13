@@ -292,7 +292,7 @@ function MqttFlowChartSvg(props: MqttFlowData) {
               {lastAt != null && (<><span>時刻</span><span className="mono">{new Date(lastAt).toLocaleTimeString()}</span></>)}
               {lastFrom && (<><span>送信元</span><span className="mono">{lastFrom}</span></>)}
               {lastEventId && (<><span>イベント</span><span className="mono">{lastEventId}</span></>)}
-              <><span>トピック</span><span className="mono">{lastTopic}</span></>
+              <><span>topic</span><span className="mono">{lastTopic.replace(/\/(play|stop)$/, '')}</span></>
               <><span>ターゲット</span><span className="mono">{lastTarget || '（全台）'}</span></>
             </div>
           ) : (

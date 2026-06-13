@@ -11,6 +11,27 @@ import { roleBadge } from '@/utils/roleLabels'
 import type { ManagerMessage } from '@/types/manager'
 
 /**
+ * Connection indicator: a chain-link icon + a state dot (green=linked,
+ * grey=not). No text — the link icon conveys "connection" and the dot the
+ * state (user feedback 2026-06-13). Color (icon + dot) follows `online`.
+ */
+function ConnIndicator({ online, title }: { online: boolean; title?: string }) {
+  return (
+    <span className={`device-conn${online ? ' online' : ''}`} title={title}>
+      <svg
+        className="device-conn-link" viewBox="0 0 24 24" width="12" height="12"
+        fill="none" stroke="currentColor" strokeWidth="2.4"
+        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+      >
+        <path d="M9.5 14.5a3.5 3.5 0 0 0 5 0l3-3a3.5 3.5 0 1 0-5-5l-1.2 1.2" />
+        <path d="M14.5 9.5a3.5 3.5 0 0 0-5 0l-3 3a3.5 3.5 0 1 0 5 5l1.2-1.2" />
+      </svg>
+      <span className={`device-conn-dot${online ? ' online' : ''}`} />
+    </span>
+  )
+}
+
+/**
  * `serial:<mac-or-rand>` is the convention for a pseudo-device entry
  * in the sidebar that's connected via USB Serial only (i.e. before
  * Wi-Fi setup). The detail pane recognizes the prefix and renders the
@@ -129,19 +150,13 @@ function UsbPortCard({ entry }: { entry: SerialPortEntry }) {
           #{entry.id.replace('usb-', '')}
         </span>
         <span className="device-row-name">{serialEntryLabel(entry)}</span>
-        {/* No "USB" transport tag — the section header says it. Dot + label
-            shows the connection state. */}
-        <span
-          className={`device-conn${isActive ? ' online' : ''}`}
-          title={isActive ? '接続中 (USB Serial)' : '未接続（✔ で接続）'}
-        >
-          <span className={`device-conn-dot${isActive ? ' online' : ''}`} />
-          {isActive ? '接続' : '未接続'}
-        </span>
+        {/* No "USB" transport tag — the section header says it. Link icon +
+            dot shows the connection state. */}
+        <ConnIndicator online={isActive} title={isActive ? '接続中 (USB Serial)' : '未接続（✔ で接続）'} />
       </div>
       <div className="device-row-meta">
         {entry.info?.role && entry.info.role !== 'receiver' && (
-          <span className="device-row-roletag" title={`ノード役割: ${entry.info.role}`}>
+          <span className={`device-row-roletag ${entry.info.role}`} title={`ノード役割: ${entry.info.role}`}>
             {roleBadge(entry.info.role)}
           </span>
         )}
@@ -407,10 +422,7 @@ export function DeviceList() {
                       just a dot + 接続/未接続 state label. Offline = red ✕
                       dismiss (user feedback 2026-06-13). */}
                   {dev.online ? (
-                    <span className="device-conn online" title="Wi-Fi 接続中">
-                      <span className="device-conn-dot online" />
-                      接続
-                    </span>
+                    <ConnIndicator online title="Wi-Fi 接続中" />
                   ) : (
                     <button
                       type="button"
@@ -428,7 +440,7 @@ export function DeviceList() {
                 </div>
                 <div className="device-row-meta">
                   {dev.role && dev.role !== 'receiver' && (
-                    <span className="device-row-roletag" title={`ノード役割: ${dev.role}`}>
+                    <span className={`device-row-roletag ${dev.role}`} title={`ノード役割: ${dev.role}`}>
                       {roleBadge(dev.role)}
                     </span>
                   )}

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DeviceInfo, ManagerMessage, MqttClientEntry, SensorColorMatch, SensorMapping, SensorReading } from '@/types/manager'
 import { useLibraryStore } from '@/stores/libraryStore'
-import { useMqttTopicsStore, sanitizeTopicRoot } from '@/stores/mqttTopicsStore'
+import { useMqttTopicsStore, sanitizeTopic } from '@/stores/mqttTopicsStore'
 import { MqttFlowPanel } from './MqttFlow'
 
 /**
@@ -154,26 +154,22 @@ export function EspNowConfigSection({
 // ---------------------------------------------------------------------
 
 /**
- * Studio-side registry of named MQTT topics. Hapbeat's default is
- * single-topic payload routing (`<root>/play` + `target` in the payload);
- * this is the OPTIONAL topic-based routing the user asked for
- * (2026-06-13): register named send-destinations here, then pick one per
- * color in the センサー tab. Each topic = a topic root; receivers
- * subscribe to their own root, so a topic selects a receiver group.
+ * Studio-side registry of MQTT topic names. A topic = one channel (a single
+ * name, like one cable) — no friendly-label, no root/subtopic in the user's
+ * model (user 2026-06-13). "default-topic" (the empty selection) always
+ * exists; add a topic only when you want to split machines / groups.
  */
-function TopicRegistryEditor({ topicRoot }: { topicRoot: string }) {
+function TopicRegistryEditor() {
   const topics = useMqttTopicsStore((s) => s.topics)
-  const upsertTopic = useMqttTopicsStore((s) => s.upsertTopic)
+  const addTopic = useMqttTopicsStore((s) => s.addTopic)
   const removeTopic = useMqttTopicsStore((s) => s.removeTopic)
   const [name, setName] = useState('')
-  const [root, setRoot] = useState('')
 
   const add = () => {
-    const r = sanitizeTopicRoot(root)
-    if (!r) return
-    upsertTopic({ name: name.trim() || r, root: r })
+    const t = sanitizeTopic(name)
+    if (!t) return
+    addTopic(t)
     setName('')
-    setRoot('')
   }
 
   return (
@@ -181,37 +177,29 @@ function TopicRegistryEditor({ topicRoot }: { topicRoot: string }) {
       <div className="form-section-title">
         Topic
         <span className="form-section-sub-inline">
-          {' '}— 送り先トピックの一覧（「センサー」タブの送信トピックで選択）
+          {' '}— 送り先 topic の一覧（「センサー」タブで選択）
         </span>
       </div>
 
       <div className="topic-table">
         <div className="topic-table-head">
-          <span>名前</span>
-          <span>topic root</span>
+          <span>topic</span>
           <span />
         </div>
-        {/* Built-in: default-topic always exists and maps to this sensor's
-            own MQTT topic_root. Not removable. */}
+        {/* default-topic always exists (the empty selection); not removable. */}
         <div className="topic-table-row">
-          <span className="topic-name">default-topic</span>
-          <span className="mono topic-root">
-            {topicRoot || 'hapbeat'}<span className="topic-suffix">/play</span>
-          </span>
-          <span className="topic-builtin">= 下の topic root（既定）</span>
+          <span className="topic-name mono">default-topic</span>
+          <span className="topic-builtin">既定（何も設定しない時の送り先）</span>
         </div>
         {topics.map((t) => (
-          <div className="topic-table-row" key={t.root}>
-            <span className="topic-name">{t.name}</span>
-            <span className="mono topic-root">
-              {t.root}<span className="topic-suffix">/play</span>
-            </span>
+          <div className="topic-table-row" key={t}>
+            <span className="topic-name mono">{t}</span>
             <button
               type="button"
               className="btn-x-muted"
               style={{ marginLeft: 'auto' }}
-              onClick={() => removeTopic(t.root)}
-              title="この送り先を削除"
+              onClick={() => removeTopic(t)}
+              title="この topic を削除"
             >
               ✕
             </button>
@@ -221,31 +209,22 @@ function TopicRegistryEditor({ topicRoot }: { topicRoot: string }) {
 
       <div className="form-row" style={{ marginTop: 8, gap: 6 }}>
         <input
-          className="form-input"
+          className="form-input mono"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="名前 (例: 病棟A)"
-          style={{ flex: '0 0 140px' }}
-        />
-        <input
-          className="form-input mono"
-          value={root}
-          onChange={(e) => setRoot(e.target.value)}
-          placeholder="topic root (例: ward-a)"
+          placeholder="topic 名 (例: ward-a)"
           maxLength={32}
           onKeyDown={(e) => { if (e.key === 'Enter') add() }}
         />
-        <button className="form-button-secondary" onClick={add} disabled={!root.trim()}>
+        <button className="form-button-secondary" onClick={add} disabled={!name.trim()}>
           ＋ 追加
         </button>
       </div>
 
       <div className="form-status muted">
-        「名前」は表示用ラベル、「topic root」が実際の MQTT トピックの先頭です（実トピック =
-        {' '}<code>root/play</code>。<code>/play</code> は再生イベント用に自動で付きます）。
-        <b> default-topic</b> はこのセンサーの「MQTT」タブの <b>topic root</b>（現在
-        {' '}<code>{topicRoot || 'hapbeat'}</code>）を使うので、その root を変えると default-topic の送信先も変わります。
-        受信側 Hapbeat は自分の topic root で購読するため、送り先と受信機の root をそろえると、そのトピックのイベントだけが届きます。
+        topic = 送り先のチャンネル名（ケーブル 1 本）です。受信側 Hapbeat は「MQTT」タブで同じ topic を
+        設定したものだけがそのイベントを受け取ります。複数の機材やグループを分けたい時だけ追加してください
+        （何も設定しなければ default-topic で全てやり取りされます）。
       </div>
     </div>
   )
@@ -316,7 +295,7 @@ export function MqttConfigSection({
         <span>
           MQTT クライアント設定
           <span className="form-section-sub-inline">
-            {' '}— どのブローカー・トピックに接続するか
+            {' '}— どのブローカー・topic に接続するか
           </span>
         </span>
         {/* This node's slice of the flow: connected to the broker or not. */}
@@ -376,12 +355,12 @@ export function MqttConfigSection({
       )}
 
       <div className="form-row" style={{ marginTop: 6 }}>
-        <label>トピック root</label>
+        <label>topic</label>
         <input
           className="form-input mono"
           value={root}
           onChange={(e) => setRoot(e.target.value)}
-          placeholder="hapbeat"
+          placeholder="default-topic"
           maxLength={32}
           disabled={!device.online}
           style={{ flex: '0 0 160px' }}
@@ -389,7 +368,8 @@ export function MqttConfigSection({
         <span />
       </div>
       <div className="form-status muted">
-        送信側 (SENDER) と受信側 (Hapbeat) で同じ root にそろえてください。
+        {role === 'sensor' ? 'このセンサーが送信する topic。' : 'このノードが購読する topic。'}
+        送信側と受信側で同じ topic にそろえたものだけが届きます（空欄 = default-topic）。
       </div>
 
       <div className="form-row" style={{ marginTop: 6 }}>
@@ -417,24 +397,6 @@ export function MqttConfigSection({
         許容できる場合のみ QoS 0 に。
       </div>
 
-      {/* Concrete topics this node uses (deterministic from the root). */}
-      <div className="form-section" style={{ padding: 8, marginTop: 6, background: 'rgba(123,108,255,0.06)', borderRadius: 4 }}>
-        <div className="form-status muted" style={{ margin: 0, marginBottom: 4 }}>
-          {role === 'sensor' ? 'このノードが送信するトピック' : 'このノードが購読するトピック'}
-        </div>
-        {role === 'sensor' ? (
-          <ul className="mono" style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.7 }}>
-            <li><code>{rootClean || 'hapbeat'}/play</code> — 検知 → 振動イベント (color は送らず event_id のみ)</li>
-            <li><code>{rootClean || 'hapbeat'}/presence/&lt;id&gt;</code> — 自己紹介 (デバイス名)</li>
-          </ul>
-        ) : (
-          <ul className="mono" style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.7 }}>
-            <li><code>{rootClean || 'hapbeat'}/play</code> — 振動イベント再生</li>
-            <li><code>{rootClean || 'hapbeat'}/stop</code> — 停止</li>
-          </ul>
-        )}
-      </div>
-
       <div className="form-status muted">
         QoS は 1 (at-least-once) です。送信→ブローカーは PUBACK 確認付きで確実に届き、{role === 'sensor'
           ? '加えて「センサー」タブの再送間隔で色が続く間は再送し続けます (取りこぼしのバックストップ)。'
@@ -450,7 +412,7 @@ export function MqttConfigSection({
     </div>
     {/* Topic registry — only on the sender (sensor) side; receivers just
         subscribe to their own root. (item 6) */}
-    {role === 'sensor' && <TopicRegistryEditor topicRoot={rootClean || 'hapbeat'} />}
+    {role === 'sensor' && <TopicRegistryEditor />}
     </>
   )
 }
@@ -551,8 +513,8 @@ export function BrokerConfigSection({
         </div>
 
         <div className="form-status muted" style={{ marginTop: 6 }}>
-          QoS 1 (at-least-once)・認証なし (隔離 LAN 内前提) です。トピック root は各クライアント側の
-          「MQTT」タブで設定します (ブローカーは全トピックを中継するため設定不要)。
+          QoS 1 (at-least-once)・認証なし (隔離 LAN 内前提) です。topic は各クライアント側の
+          「MQTT」タブで設定します (ブローカーは全 topic を中継するため設定不要)。
         </div>
       </div>
     </>
@@ -935,7 +897,7 @@ export function SensorMappingSection({
       {/* Card-level send topic — the whole sensor publishes here by default.
           Colors can opt into an individual topic in their row (item 6). */}
       <div className="form-row" style={{ marginTop: 8 }}>
-        <label>送信トピック</label>
+        <label>送信 topic</label>
         <select
           className="form-input"
           value={cardTopic}
@@ -943,11 +905,11 @@ export function SensorMappingSection({
           disabled={!device.online}
           style={{ flex: '0 0 260px' }}
         >
-          <option value="">default-topic（センサー既定 root）</option>
+          <option value="">default-topic（既定）</option>
           {topics.map((t) => (
-            <option key={t.root} value={t.root}>{t.name}（{t.root}）</option>
+            <option key={t} value={t}>{t}</option>
           ))}
-          {cardTopic && !topics.some((t) => t.root === cardTopic) && (
+          {cardTopic && !topics.includes(cardTopic) && (
             <option value={cardTopic}>{cardTopic}（未登録）</option>
           )}
         </select>
@@ -1123,17 +1085,17 @@ export function SensorMappingSection({
                   disabled={!device.online}
                   style={{ flex: '0 0 220px' }}
                 >
-                  <option value="">default-topic（センサー既定 root）</option>
+                  <option value="">default-topic（既定）</option>
                   {topics.map((t) => (
-                    <option key={t.root} value={t.root}>{t.name}（{t.root}）</option>
+                    <option key={t} value={t}>{t}</option>
                   ))}
-                  {r.topic && !topics.some((t) => t.root === r.topic) && (
+                  {r.topic && !topics.includes(r.topic) && (
                     <option value={r.topic}>{r.topic}（未登録）</option>
                   )}
                 </select>
               ) : (
                 <span className="form-status muted" style={{ margin: 0 }}>
-                  カード全体（{cardTopic ? (topics.find((t) => t.root === cardTopic)?.name ?? cardTopic) : 'default-topic'}）に追従
+                  カード全体（{cardTopic || 'default-topic'}）に追従
                 </span>
               )}
             </div>

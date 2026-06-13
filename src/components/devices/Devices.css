@@ -288,6 +288,23 @@
   color: #e8a33d;
   border-color: rgba(232, 163, 61, 0.5);
 }
+/* Per-role tag colors — distinct from the purple name/accent so the SENDER /
+   BROKER tags don't blend with the device name (user feedback 2026-06-13). */
+.device-row-roletag.sensor {
+  background: rgba(232, 163, 61, 0.16);
+  color: #e8a33d;
+  border-color: rgba(232, 163, 61, 0.5);
+}
+.device-row-roletag.broker {
+  background: rgba(38, 198, 218, 0.15);
+  color: #2ad0e0;
+  border-color: rgba(38, 198, 218, 0.5);
+}
+.device-row-roletag.transmitter {
+  background: rgba(120, 170, 255, 0.15);
+  color: #84aaff;
+  border-color: rgba(120, 170, 255, 0.5);
+}
 
 /* Connection indicator dot. The Wi-Fi vs USB-Serial distinction is already
    obvious from which section the card is in, so the cards drop the
@@ -362,7 +379,7 @@
 .topic-table-head,
 .topic-table-row {
   display: grid;
-  grid-template-columns: 130px 1fr auto;
+  grid-template-columns: 1fr auto;
   align-items: center;
   gap: 8px;
   padding: 5px 10px;

@@ -1,48 +1,41 @@
 import { create } from 'zustand'
 
 /**
- * Registry of named MQTT topics ("送り先") the user can pick from when
- * configuring a sensor (item 6, user request 2026-06-13).
+ * Registry of MQTT topics the user can pick from when configuring a sensor.
  *
- * Hapbeat's default routing is single-topic payload routing: a sensor
- * publishes every color to `<root>/play` and the `target` field in the
- * payload selects which Hapbeats react. That stays the default. This
- * registry adds the *option* to route by TOPIC instead — register named
- * topics here (each = a topic root), then per sensor / per color pick one
- * from a dropdown. Receivers subscribe to their own configured root, so
- * choosing a topic = choosing which receiver group hears that color.
- * Useful when you add more sensors or split deployments into groups.
+ * A "topic" is just a single name = one channel ("有線ケーブル 1 本", user
+ * 2026-06-13). No separate friendly-label, no root/subtopic in the user's
+ * model: you register a topic name, and it appears in the sensor's 送信 topic
+ * dropdown. The special "default-topic" (the empty selection) always exists
+ * and needs no registration — if you set nothing, everything goes there.
  *
- * This list is a Studio-side convenience only (it never goes to a device);
- * the chosen root is written into each mapping's `topic` field. Persisted
- * in localStorage so it survives reloads and is shared across every
- * sensor's MQTT tab.
+ * Studio-side only (never sent verbatim to a device); the chosen topic name is
+ * written into the sensor mapping's `topic` field. Persisted in localStorage.
  */
-export interface MqttTopic {
-  /** Friendly label shown in dropdowns, e.g. "病棟A". */
-  name: string
-  /** Topic root published to (no slashes), e.g. "ward-a". */
-  root: string
-}
-
 const STORAGE_KEY = 'hapbeat-studio-mqtt-topics'
 
-function load(): MqttTopic[] {
+/** Topic name rule: 1–32 chars, no slashes (mirrors the firmware mq_root). */
+export function sanitizeTopic(s: string): string {
+  return s.trim().replace(/\//g, '').slice(0, 32)
+}
+
+function load(): string[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return []
     const arr = JSON.parse(raw)
     if (!Array.isArray(arr)) return []
+    // Accept the legacy {name, root} shape (migrate to the root string).
     return arr
-      .filter((t): t is MqttTopic =>
-        t && typeof t.name === 'string' && typeof t.root === 'string')
-      .map((t) => ({ name: t.name, root: t.root }))
+      .map((t) => (typeof t === 'string' ? t : (t && typeof t.root === 'string' ? t.root : '')))
+      .map((s) => sanitizeTopic(s))
+      .filter((s) => s.length > 0)
   } catch {
     return []
   }
 }
 
-function persist(topics: MqttTopic[]) {
+function persist(topics: string[]) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(topics))
   } catch {
@@ -50,37 +43,28 @@ function persist(topics: MqttTopic[]) {
   }
 }
 
-/** Topic root rule: 1–32 chars, no slashes (mirrors firmware mq_root). */
-export function sanitizeTopicRoot(s: string): string {
-  return s.trim().replace(/\//g, '').slice(0, 32)
-}
-
 interface MqttTopicsState {
-  topics: MqttTopic[]
-  /** Add (or update by root) a topic. No-op on empty root. */
-  upsertTopic: (t: MqttTopic) => void
-  removeTopic: (root: string) => void
+  /** Registered topic names (default-topic is implicit, not in this list). */
+  topics: string[]
+  /** Add a topic name. No-op on empty / duplicate. */
+  addTopic: (topic: string) => void
+  removeTopic: (topic: string) => void
 }
 
 export const useMqttTopicsStore = create<MqttTopicsState>((set, get) => ({
   topics: load(),
 
-  upsertTopic: (t) => {
-    const root = sanitizeTopicRoot(t.root)
-    if (!root) return
-    const name = t.name.trim() || root
-    const existing = get().topics
-    const idx = existing.findIndex((x) => x.root === root)
-    const next = idx >= 0
-      ? existing.map((x, i) => (i === idx ? { name, root } : x))
-      : [...existing, { name, root }]
+  addTopic: (topic) => {
+    const t = sanitizeTopic(topic)
+    if (!t || get().topics.includes(t)) return
+    const next = [...get().topics, t]
     persist(next)
     set({ topics: next })
   },
 
-  removeTopic: (root) =>
+  removeTopic: (topic) =>
     set((s) => {
-      const next = s.topics.filter((t) => t.root !== root)
+      const next = s.topics.filter((t) => t !== topic)
       persist(next)
       return { topics: next }
     }),
