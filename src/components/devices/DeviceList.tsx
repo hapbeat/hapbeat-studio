@@ -8,6 +8,7 @@ import {
 } from '@/stores/serialMaster'
 import { isWebSerialSupported } from '@/utils/serialConfig'
 import { roleBadge } from '@/utils/roleLabels'
+import { isHapbeatBoard, isKnownNonHapbeatBoard } from '@/utils/hapbeatBoard'
 import { useOtaStore, OTA_DEFAULT } from '@/stores/otaStore'
 import type { ManagerMessage } from '@/types/manager'
 
@@ -318,17 +319,11 @@ export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = 
   // badge and, in `hapbeatOnly` mode (UI/Display tab picker), to disable
   // selecting non-Hapbeat nodes — the display config only applies to Hapbeat.
   const boardOf = (ip: string): string | undefined => infoCache[ip]?.board
-  const isHapbeat = (ip: string): boolean => {
-    const b = boardOf(ip)
-    return !!b && (b.startsWith('duo_wl') || b.startsWith('band_wl'))
-  }
+  const isHapbeat = (ip: string): boolean => isHapbeatBoard(boardOf(ip))
   // Only block devices KNOWN to be non-Hapbeat (board present and not a
   // wearable); an un-probed device stays selectable so we never wrongly block.
-  const isBlocked = (ip: string): boolean => {
-    if (!hapbeatOnly) return false
-    const b = boardOf(ip)
-    return !!b && b !== 'unknown' && !(b.startsWith('duo_wl') || b.startsWith('band_wl'))
-  }
+  const isBlocked = (ip: string): boolean =>
+    hapbeatOnly && isKnownNonHapbeatBoard(boardOf(ip))
 
   // NOTE: the serial-connected device is NOT promoted into this (LAN)
   // list anymore — it lives in the USB Serial section below, and the

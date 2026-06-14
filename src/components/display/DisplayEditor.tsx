@@ -16,6 +16,7 @@ import type { DeviceModel, DeviceHardwareSpec } from '@/types/device'
 import { DEVICE_SPECS } from '@/types/device'
 import { ElementPalette, getElementMeta, PALETTE_SECTIONS } from '@/components/common/ElementPalette'
 import { getElementPreviewText, DEFAULT_SIM_STATE, charCells } from '@/utils/displayPreview'
+import { isKnownNonHapbeatBoard } from '@/utils/hapbeatBoard'
 import type { SimState } from '@/utils/displayPreview'
 import {
   getPagePresetsFor, duoStandardTemplate, bandStandardTemplate,
@@ -981,11 +982,8 @@ export function DisplayEditor() {
     // only KNOWN non-Hapbeat (board present and not duo_wl_*/band_wl_*); an
     // un-probed device (board unknown) is kept so we never wrongly block a
     // Hapbeat (user 2026-06-15).
-    const isKnownNonHapbeat = (ip: string) => {
-      const board = infoCache[ip]?.board   // from get_info; absent until probed
-      return !!board && board !== 'unknown' && !(board.startsWith('duo_wl') || board.startsWith('band_wl'))
-    }
-    const hapbeatTargets = targets.filter((ip) => !isKnownNonHapbeat(ip))
+    // board は get_info（infoCache）由来。未取得は安全側で対象に残す。
+    const hapbeatTargets = targets.filter((ip) => !isKnownNonHapbeatBoard(infoCache[ip]?.board))
     if (hapbeatTargets.length === 0) {
       toast('UI 設定は Hapbeat 本体のみ対象です（選択中に Hapbeat 機器がありません）', 'error')
       return

@@ -47,10 +47,20 @@ export function TestSubTab({ device, sendTo }: Props) {
   const [target, setTarget] = useState<string>(
     () => localStorage.getItem(TARGET_KEY) ?? '',
   )
-  // True while a PING is in flight (between click and PONG/timeout). Lets
-  // the async ping_result effect and the watchdog reuse the same anchored
-  // toast surface without re-rendering an inline status that shifts the row.
-  const pingPendingRef = useRef(false)
+  // PING tracking. `ping_result` carries no correlation token, so we tag
+  // each click with a generation number: only the latest outstanding ping
+  // resolves, and a stale watchdog from an earlier click can't fire a false
+  // timeout or swallow a real PONG (rapid re-ping). `pingBtnRef` lets the
+  // async PONG/timeout toast re-anchor to the PING button even if another
+  // control set the shared toast anchor meanwhile.
+  const pingGenRef = useRef(0)       // generation of the most recent ping
+  const pingDoneRef = useRef(0)      // highest generation already resolved
+  const pingBtnRef = useRef<HTMLButtonElement | null>(null)
+  const pingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Clear the watchdog if the component unmounts mid-ping (tab/device switch)
+  // so it can't toast a stray timeout after navigating away.
+  useEffect(() => () => { if (pingTimerRef.current) clearTimeout(pingTimerRef.current) }, [])
 
   // Intensity slider — scoped to the streaming test only. CLIP stream
   // multiplies PCM samples by this value per chunk (live). FIRE
@@ -72,15 +82,18 @@ export function TestSubTab({ device, sendTo }: Props) {
 
   useEffect(() => {
     if (!lastMessage || lastMessage.type !== 'ping_result') return
-    if (!pingPendingRef.current) return
-    pingPendingRef.current = false
+    // Resolve only if a ping is still outstanding (latest gen unresolved).
+    if (pingDoneRef.current >= pingGenRef.current) return
+    pingDoneRef.current = pingGenRef.current
+    if (pingTimerRef.current) { clearTimeout(pingTimerRef.current); pingTimerRef.current = null }
+    if (pingBtnRef.current) setAnchor(pingBtnRef.current)
     const p = lastMessage.payload as Record<string, unknown>
     if (p.error) {
       toast(`PING failed: ${p.error}`, 'error')
     } else if (typeof p.rtt_ms === 'number') {
       toast(`PONG ${p.rtt_ms.toFixed(2)} ms`, 'success')
     }
-  }, [lastMessage, toast])
+  }, [lastMessage, toast, setAnchor])
 
   const recordEvent = (id: string) => {
     if (!id) return
@@ -117,16 +130,21 @@ export function TestSubTab({ device, sendTo }: Props) {
   }
 
   const ping = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const gen = ++pingGenRef.current
+    pingBtnRef.current = e.currentTarget
     setAnchor(e.currentTarget)
     sendTo({ type: 'ping_device', payload: {} })
-    pingPendingRef.current = true
     toast('Ping 送信…', 'info')
     // Local watchdog: helper waits up to 2 s for the PONG, plus tiny
     // round-trip overhead. If nothing arrives in 3 s, it's a helper-or-
-    // network problem the user should know about.
-    setTimeout(() => {
-      if (pingPendingRef.current) {
-        pingPendingRef.current = false
+    // network problem the user should know about. Replace any prior
+    // pending watchdog; only fire if *this* gen is still unresolved.
+    if (pingTimerRef.current) clearTimeout(pingTimerRef.current)
+    pingTimerRef.current = setTimeout(() => {
+      pingTimerRef.current = null
+      if (pingDoneRef.current < gen) {
+        pingDoneRef.current = gen
+        if (pingBtnRef.current) setAnchor(pingBtnRef.current)
         toast('no response (timeout)', 'error')
       }
     }, 3000)
