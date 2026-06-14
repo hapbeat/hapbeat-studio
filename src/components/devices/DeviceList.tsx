@@ -8,7 +8,43 @@ import {
 } from '@/stores/serialMaster'
 import { isWebSerialSupported } from '@/utils/serialConfig'
 import { roleBadge } from '@/utils/roleLabels'
+import { useOtaStore, OTA_DEFAULT } from '@/stores/otaStore'
 import type { ManagerMessage } from '@/types/manager'
+
+/**
+ * Wi-Fi OTA progress for a LAN device card. Mirrors the USB serial card's
+ * flash readout but with an actual progress bar (user 2026-06-14: 「wifi ota の
+ * プログレスバーを各カードにも」). The per-IP OTA state is drained into otaStore
+ * by OtaController regardless of which device is selected, so the bar shows on
+ * the sidebar card even while the user is looking at another device.
+ */
+function OtaCardProgress({ ip }: { ip: string }) {
+  const st = useOtaStore((s) => s.byIp[ip] ?? OTA_DEFAULT)
+  const { progress, running, result, stuck } = st
+  if (!running && !result) return null
+  const pct = Math.max(0, Math.min(100, progress?.percent ?? 0))
+  return (
+    <div className="device-row-ota" onClick={(e) => e.stopPropagation()}>
+      {running && (
+        <>
+          <div className="device-row-ota-label">
+            <span>⚡ OTA{progress?.phase ? ` ${progress.phase}` : ''}</span>
+            <span className="mono">{pct}%</span>
+          </div>
+          <div className="device-row-ota-bar">
+            <div className={`device-row-ota-fill${stuck ? ' stuck' : ''}`} style={{ width: `${pct}%` }} />
+          </div>
+          {stuck && <div className="device-row-ota-note warn">⚠ 3 秒進捗なし — Helper 再起動を検討</div>}
+        </>
+      )}
+      {!running && result && (
+        <div className={`device-row-ota-note ${result.ok ? 'ok' : 'err'}`}>
+          {result.ok ? '✓ OTA 完了 — 再起動中…' : `✗ OTA 失敗: ${(result.message || '').slice(0, 40)}`}
+        </div>
+      )}
+    </div>
+  )
+}
 
 /**
  * Connection indicator: a single state dot (green=linked, grey=not). No icon,
@@ -444,6 +480,7 @@ export function DeviceList() {
                   {dev.address && <span>{dev.address}</span>}
                   {dev.firmwareVersion && <span>fw {dev.firmwareVersion}</span>}
                 </div>
+                <OtaCardProgress ip={dev.ipAddress} />
               </div>
             )
           })

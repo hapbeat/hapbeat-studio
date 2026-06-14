@@ -268,6 +268,41 @@
   font-family: var(--font-mono);
 }
 
+/* ---- Wi-Fi OTA progress on a device card (item 2026-06-14) ---- */
+.device-row-ota {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.device-row-ota-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.device-row-ota-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-2, rgba(255, 255, 255, 0.08));
+  overflow: hidden;
+}
+.device-row-ota-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent, #7b6cff);
+  transition: width 0.2s ease;
+}
+.device-row-ota-fill.stuck {
+  background: var(--warning, #e0a93b);
+}
+.device-row-ota-note {
+  font-size: 11px;
+}
+.device-row-ota-note.ok { color: var(--success, #4caf50); }
+.device-row-ota-note.err { color: var(--error, #f44336); }
+.device-row-ota-note.warn { color: var(--warning, #e0a93b); }
+
 /* Role tag at the bottom-left of a card (in the meta row), e.g.
    "SENDER" / "BROKER". Moved here from the top row so the top row is
    just [checkbox] [name] [status] and the card stays short
@@ -708,7 +743,9 @@
 
 .form-row > label {
   font-size: 15px;
-  color: var(--text-secondary);
+  /* Primary (not secondary) so setting labels read clearly distinct from the
+     muted supplementary explanation text (.form-status.muted) below them. */
+  color: var(--text-primary);
 }
 
 .form-row-multi {
