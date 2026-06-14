@@ -141,6 +141,7 @@ export interface SerialDeviceInfo {
   sensor_types?: string[]
   alert_loop?: boolean
   alert_limit?: boolean
+  ack_hold_ms?: number
   recv_topics?: string[]
 }
 
@@ -179,6 +180,7 @@ function parseSerialInfo(r: Record<string, unknown>): SerialDeviceInfo {
     sensor_types: r.sensor_types as string[] | undefined,
     alert_loop: r.alert_loop as boolean | undefined,
     alert_limit: r.alert_limit as boolean | undefined,
+    ack_hold_ms: r.ack_hold_ms as number | undefined,
     recv_topics: r.recv_topics as string[] | undefined,
   }
 }

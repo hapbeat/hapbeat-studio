@@ -68,6 +68,14 @@ export interface SensorMapping {
    */
   topic?: string
   /**
+   * Optional per-mapping publish topic ROOTS (multi). When set (length ≥ 1)
+   * this color is published to EACH "<root>/play", so one color can reach
+   * several receiver groups (mqtt-transport.md §5). Takes precedence over the
+   * single `topic`; empty/undefined → fall back to `topic` then the sensor's
+   * default root. Studio's per-row "送り先" multi-select writes this.
+   */
+  topics?: string[]
+  /**
    * Optional per-color text shown on the receiver's OLED when this color
    * fires (item 9, e.g. "Red alert occured"). Sent in the play payload's
    * `oled` field; empty/undefined → no message. (mqtt-transport.md §4.1)
@@ -277,6 +285,9 @@ export interface GetInfoResult {
    *  `critical` alerts; false (default) = play all. Read-only here — toggled on
    *  the device via the `limit_toggle` button action (no serial set command). */
   alert_limit?: boolean
+  /** Deliberate-hold time (ms) to acknowledge/stop an alert (MQTT receiver,
+   *  §6.1). Set via set_alert_mode ack_hold_ms; default 1000. */
+  ack_hold_ms?: number
   /** Receive topic roots the MQTT receiver subscribes to (item 8). Empty =
    *  the default channel ("default-topic"). */
   recv_topics?: string[]

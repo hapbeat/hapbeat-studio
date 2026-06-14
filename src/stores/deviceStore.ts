@@ -94,6 +94,8 @@ interface DeviceState {
     /** Restricted mode (MQTT receiver, §6.3): true = play critical-only.
      *  Read-only; toggled on-device via the limit_toggle button action. */
     alert_limit?: boolean
+    /** Deliberate-hold ack duration (MQTT receiver, §6.1), ms. */
+    ack_hold_ms?: number
     /** MQTT receiver subscribe topic roots (item 8). Empty = default-topic. */
     recv_topics?: string[]
   }>

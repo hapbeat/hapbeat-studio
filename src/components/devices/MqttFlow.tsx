@@ -264,21 +264,21 @@ function MqttFlowChartSvg(props: MqttFlowData) {
 
   // A plain connection LINE by default — no direction, no arrowhead (a line
   // just means "connected", user 2026-06-14). Only when data actually flowed
-  // on it (`flowing`) does it get an arrowhead (pointing x1→x2 = the flow
-  // direction) + accent emphasis, then it fades back. The topic rides UNDER
-  // the line with NO arrow glyph (the line's geometry is the direction).
+  // on it (`flowing`) does the LINE get an arrowhead (pointing x1→x2 = the flow
+  // direction) + accent emphasis, then it fades back. The topic NAME rides
+  // beside the line with NO arrow glyph and a CONSTANT color (sender orange /
+  // receiver green) — the label is an identifier, only the line animates
+  // (user 2026-06-15). labelSide places it above or below the line.
   const connectionLine = (
     x1: number, y1: number, x2: number, y2: number,
     key: string, connected: boolean, flowing: boolean,
     topic: string | undefined, kind: 'sender' | 'receiver',
-    labelAnchor: 'middle' | 'end' = 'middle',
+    labelSide: 'above' | 'below' = 'below',
   ) => {
     const stroke = !connected ? 'rgba(150,150,150,0.25)'
       : flowing ? 'var(--accent, #7b6cff)' : 'rgba(150,150,150,0.5)'
-    // Multi-line receivers stack labels near the receiver end (end-anchored)
-    // so several topic labels don't pile up at the shared broker endpoint.
-    const lx = labelAnchor === 'end' ? x2 - 6 : (x1 + x2) / 2
-    const ly = labelAnchor === 'end' ? y2 - 4 : (y1 + y2) / 2 + 12
+    const lx = (x1 + x2) / 2
+    const ly = (y1 + y2) / 2 + (labelSide === 'above' ? -4 : 12)
     return (
       <g key={key}>
         <line x1={x1} y1={y1} x2={x2} y2={y2}
@@ -287,10 +287,10 @@ function MqttFlowChartSvg(props: MqttFlowData) {
           strokeDasharray={connected ? undefined : '4 3'}
           markerEnd={flowing ? 'url(#mqtt-arrow)' : undefined} />
         {topic && (
-          <text x={lx} y={ly} textAnchor={labelAnchor} fontSize={9}
-            fill={flowing ? 'var(--accent, #7b6cff)' : (kind === 'sender' ? '#c9742e' : '#3f9c42')}
+          <text x={lx} y={ly} textAnchor="middle" fontSize={9}
+            fill={kind === 'sender' ? '#c9742e' : '#3f9c42'}
             style={{ fontFamily: 'var(--font-mono)' }}>
-            {trunc(topic, labelAnchor === 'end' ? 13 : 18)}
+            {trunc(topic, 16)}
           </text>
         )}
       </g>
@@ -354,26 +354,31 @@ function MqttFlowChartSvg(props: MqttFlowData) {
         )}
 
         {/* receivers: ONE connection line per subscribed topic (1 line = 1
-            topic). Each line gets an arrowhead toward the receiver only while
-            data flows on THAT topic. Lines fan to distinct y points on the box
-            left edge so multiple topics don't overlap. */}
+            topic). Multiple topics draw as PARALLEL lines offset vertically by
+            ~one text height (not fanned/diagonal), each labeled ABOVE its line
+            (user 2026-06-15). A line gets an arrowhead toward the receiver only
+            while data flows on THAT topic. */}
         {right.map((node, i) => {
           const y = colY(i, right.length)
           // [] = unknown subscriptions → a single unlabeled line.
           const topics = node.topics && node.topics.length ? node.topics : [undefined]
           const n = topics.length
-          const pad = 8
+          // ~text height, but shrink the gap for many topics so the total span
+          // (n-1)*GAP stays inside the broker box (≤ BH-12) and below the row
+          // pitch — otherwise lines for 5+ topics emanate from outside the box
+          // and adjacent receivers' bands collide (review 2026-06-15).
+          const LINE_GAP = n > 1 ? Math.min(12, (BH - 12) / (n - 1)) : 12
           return (
             <g key={node.key}>
               {topics.map((t, ti) => {
-                // distribute entry points across the box's left edge
-                const entryY = n === 1 ? y
-                  : (y - BH / 2 + pad) + (ti + 0.5) * ((BH - 2 * pad) / n)
+                // Offset BOTH endpoints equally → the lines stay parallel
+                // (same slope) instead of fanning out from the broker.
+                const off = (ti - (n - 1) / 2) * LINE_GAP
                 const flowing = !!pulse && !!pulse.topic && !!t && node.connected && t === pulse.topic
                 return connectionLine(
-                  brokerX + BW, centerY, rightX, entryY,
+                  brokerX + BW, centerY + off, rightX, y + off,
                   `e-r-${node.key}-${ti}`, node.connected, flowing, t, 'receiver',
-                  n > 1 ? 'end' : 'middle',
+                  'above',
                 )
               })}
               {deviceBox(rightX, y, node, 'receiver')}

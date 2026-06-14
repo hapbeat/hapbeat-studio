@@ -224,6 +224,7 @@ export function DeviceDetail() {
         sensor_types: p.sensor_types as string[] | undefined,
         alert_loop: p.alert_loop as boolean | undefined,
         alert_limit: p.alert_limit as boolean | undefined,
+        ack_hold_ms: p.ack_hold_ms as number | undefined,
         recv_topics: p.recv_topics as string[] | undefined,
         // SoftAP extension fields (firmware ≥ v0.1.0)
         mode: p.mode as 'sta' | 'ap' | undefined,
@@ -434,6 +435,7 @@ export function DeviceDetail() {
         sensor_types: masterInfo.sensor_types,
         alert_loop: masterInfo.alert_loop,
         alert_limit: masterInfo.alert_limit,
+        ack_hold_ms: masterInfo.ack_hold_ms,
         recv_topics: masterInfo.recv_topics,
       } : undefined)
     : infoCache[selectedIp]
@@ -600,6 +602,7 @@ export function DeviceDetail() {
             mappings={sensorMapping}
             reading={sensorReading}
             sensorType={cachedInfo?.sensor_types?.[0]}
+            deviceTopicRoot={cachedInfo?.topic_root}
             sendTo={sendTo}
             onRefresh={() => sendTo({ type: 'get_sensor_mapping', payload: {} })}
           />

@@ -71,7 +71,7 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
       const sample = 'MyHapbeat-Neck01'
       if (variant === 'compact') return sample.padEnd(4, ' ').slice(0, 4)
       if (variant === 'wide')    return sample.padEnd(16, ' ').slice(0, 16)
-      return sample.padEnd(5, ' ').slice(0, 5)
+      return sample.padEnd(8, ' ').slice(0, 8)
     }
     case 'app_name':
       // CONNECT_STATUS payload の app_name (Unity SDK 等が送信)。

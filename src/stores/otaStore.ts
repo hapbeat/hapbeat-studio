@@ -58,6 +58,9 @@ interface OtaStore {
   setProgress: (ip: string, p: OtaProgress) => void
   setResult: (ip: string, r: OtaResult) => void
   clearResult: (ip: string) => void
+  /** Clear the finished-OTA result on every device that isn't mid-OTA — used
+   *  by the sidebar refresh so stale "✓ 完了" lines don't linger. */
+  clearAllResults: () => void
   clearProgress: (ip: string) => void
   setStuck: (ip: string, stuck: boolean) => void
   /** Arm the post-reboot fw verify (called on a successful ota_result). */
@@ -96,6 +99,11 @@ export const useOtaStore = create<OtaStore>((set) => ({
   setResult: (ip, r) =>
     set((s) => ({ byIp: patch(s.byIp, ip, { result: r, running: false, stuck: false }) })),
   clearResult: (ip) => set((s) => ({ byIp: patch(s.byIp, ip, { result: null }) })),
+  clearAllResults: () => set((s) => ({
+    byIp: Object.fromEntries(
+      Object.entries(s.byIp).map(([ip, st]) => [ip, st.running ? st : { ...st, result: null }]),
+    ),
+  })),
   clearProgress: (ip) => set((s) => ({ byIp: patch(s.byIp, ip, { progress: null }) })),
   setStuck: (ip, stuck) => set((s) => ({ byIp: patch(s.byIp, ip, { stuck }) })),
   armVerify: (ip) => set((s) => ({ byIp: patch(s.byIp, ip, { verifyArmed: true }) })),

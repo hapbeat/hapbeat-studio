@@ -96,6 +96,11 @@ export interface FirmwareLibraryEntry {
   transports?: NodeTransport[]
   /** Hardware board id (for board-mismatch pre-flight). */
   board?: string
+  /** True = a Hapbeat wearable (duo_wl_* / band_wl_*); false = ecosystem
+   *  peripheral (broker / sensor / transmitter). Studio groups + filters the
+   *  library by THIS flag, not by role — a 3rd-party node can also be
+   *  role=receiver, so role is not a reliable "is Hapbeat" signal. */
+  hapbeat?: boolean
   /** Human-facing display label. */
   label?: string
   /** Optional one-line description. */
@@ -170,15 +175,22 @@ export function inferVariantFromEnv(env: string): {
   return { role, transport, board }
 }
 
-/** Fill role/transport/board on an entry from explicit values, else infer. */
+/** True if a board id names a Hapbeat wearable (vs an ecosystem peripheral). */
+function boardIsHapbeat(board?: string): boolean {
+  return !!board && (board.startsWith('duo_wl') || board.startsWith('band_wl'))
+}
+
+/** Fill role/transport/board/hapbeat on an entry from explicit values, else
+ *  infer. hapbeat is always resolved (explicit flag wins, else board prefix). */
 function withInferredRole(e: FirmwareLibraryEntry): FirmwareLibraryEntry {
-  if (e.role && e.transport) return e
   const inferred = inferVariantFromEnv(e.env)
+  const board = e.board ?? inferred.board
   return {
     ...e,
     role: e.role ?? inferred.role,
     transport: e.transport ?? inferred.transport,
-    board: e.board ?? inferred.board,
+    board,
+    hapbeat: e.hapbeat ?? boardIsHapbeat(board),
   }
 }
 
@@ -220,6 +232,7 @@ interface ManifestVariantV2 {
   transport?: NodeTransport
   transports?: NodeTransport[]
   board?: string
+  hapbeat?: boolean
   label?: string
   description?: string
   fwVersion?: string
@@ -275,6 +288,7 @@ async function listFirmwareBuildsFromManifest(): Promise<FirmwareLibraryEntry[]>
       transport: v.transport,
       transports: v.transports,
       board: v.board,
+      hapbeat: v.hapbeat,
       label: v.label,
       description: v.description,
       fwVersion: v.fwVersion,

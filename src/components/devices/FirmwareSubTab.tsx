@@ -52,7 +52,14 @@ const GROUP_LABEL: Record<FirmwareGroup, string> = {
   peripheral: '周辺機器',
 }
 function entryGroup(e: FirmwareLibraryEntry): FirmwareGroup {
-  return entryRole(e) === 'receiver' ? 'hapbeat' : 'peripheral'
+  // Group by the explicit `hapbeat` flag (variant.json), NOT role: a 3rd-party
+  // MQTT node can also be role=receiver, so role isn't a reliable "is Hapbeat"
+  // signal (user 2026-06-15). Fall back to board prefix when the flag is absent.
+  const hb = e.hapbeat ?? (() => {
+    const b = entryBoard(e)
+    return !!b && (b.startsWith('duo_wl') || b.startsWith('band_wl'))
+  })()
+  return hb ? 'hapbeat' : 'peripheral'
 }
 const TRANSPORT_LABEL: Record<NodeTransport, string> = {
   udp: 'Wi-Fi UDP',
@@ -332,13 +339,20 @@ export function FirmwareSubTab({
   const effectiveGroup = useMemo<FirmwareGroup | null>(() => {
     if (groupFilter) return groupFilter
     if (selectedGroup && groupsPresent.includes(selectedGroup)) return selectedGroup
-    if (deviceRole) {
+    // Prefer the device's BOARD to classify (duo_wl_* / band_wl_* = Hapbeat),
+    // since a non-Hapbeat node can also be role=receiver. Fall back to the role
+    // heuristic only when the board is unknown.
+    if (knownBoard && knownBoard !== 'unknown') {
+      const g: FirmwareGroup = (knownBoard.startsWith('duo_wl') || knownBoard.startsWith('band_wl'))
+        ? 'hapbeat' : 'peripheral'
+      if (groupsPresent.includes(g)) return g
+    } else if (deviceRole) {
       const g: FirmwareGroup = deviceRole === 'receiver' ? 'hapbeat' : 'peripheral'
       if (groupsPresent.includes(g)) return g
     }
     if (groupsPresent.includes('hapbeat')) return 'hapbeat'
     return groupsPresent[0] ?? null
-  }, [groupFilter, selectedGroup, deviceRole, groupsPresent])
+  }, [groupFilter, selectedGroup, deviceRole, knownBoard, groupsPresent])
 
   /** Entries shown: the effective group's variants. */
   const entriesShown = useMemo(() => {

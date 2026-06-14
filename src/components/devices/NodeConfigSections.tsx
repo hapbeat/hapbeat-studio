@@ -34,6 +34,8 @@ export interface NodeConfigInfo {
   /** Restricted mode (MQTT receiver, §6.3): true = critical-only. Read-only;
    *  toggled on-device via the limit_toggle button action. */
   alert_limit?: boolean
+  /** Deliberate-hold ack duration (MQTT receiver, §6.1), ms. */
+  ack_hold_ms?: number
   /** MQTT receiver subscribe topic roots (item 8). */
   recv_topics?: string[]
 }
@@ -274,6 +276,8 @@ export function MqttConfigSection({
   const [alertStatus, setAlertStatus] = useState<string | null>(null)  // アラート動作
   // Alert-loop mode (receiver, item 10): default ON (loop until any button).
   const [alertLoop, setAlertLoop] = useState<boolean>(cachedInfo?.alert_loop ?? true)
+  // Deliberate-hold time to acknowledge/stop an alert (receiver, §6.1).
+  const [ackHoldMs, setAckHoldMs] = useState<number>(cachedInfo?.ack_hold_ms ?? 1000)
   // Receive topics (receiver, item 8): the topic roots this node subscribes to.
   // Picked from the registered topic list (mqttTopicsStore) + manual entry.
   // Empty = the default channel only.
@@ -295,10 +299,18 @@ export function MqttConfigSection({
     if (cachedInfo?.broker_port != null) setPort(cachedInfo.broker_port)
     if (cachedInfo?.mqtt_qos != null) setQos(cachedInfo.mqtt_qos)
     if (cachedInfo?.alert_loop != null) setAlertLoop(cachedInfo.alert_loop)
+    if (cachedInfo?.ack_hold_ms != null) setAckHoldMs(cachedInfo.ack_hold_ms)
     if (cachedInfo?.recv_topics != null) setRecvTopics(cachedInfo.recv_topics)
-  }, [device.ipAddress, cachedInfo?.broker_host, cachedInfo?.broker_port, cachedInfo?.mqtt_qos, cachedInfo?.alert_loop, cachedInfo?.recv_topics])
+  }, [device.ipAddress, cachedInfo?.broker_host, cachedInfo?.broker_port, cachedInfo?.mqtt_qos, cachedInfo?.alert_loop, cachedInfo?.ack_hold_ms, cachedInfo?.recv_topics])
 
   const connected = cachedInfo?.mqtt_connected
+  // Settings that only take effect after a reboot (receiver broker re-subscribe
+  // / topic list) are auto-rebooted from Studio so the user doesn't have to do
+  // it manually (user 2026-06-15). Small delay lets the set_* command land
+  // first. Sensors apply broker settings live, so they are NOT rebooted.
+  const rebootAfter = (ms = 700) => {
+    window.setTimeout(() => sendTo({ type: 'reboot', payload: {} }), ms)
+  }
   // ブローカー設定だけを適用（topic は別グループ）。topic_root は default-topic
   // に固定（broker 接続に topic は不要）。
   const applyBroker = () => {
@@ -308,14 +320,21 @@ export function MqttConfigSection({
       type: 'set_broker_host',
       payload: { host: value, port, topic_root: 'default-topic', qos },
     })
-    setStatus('ブローカー設定を適用しました（センサは即時再接続 / 受信機は再起動後に反映）')
+    if (role === 'receiver') {
+      setStatus('ブローカー設定を適用しました（受信機を自動再起動して反映します）')
+      rebootAfter()
+    } else {
+      setStatus('ブローカー設定を適用しました（即時再接続）')
+    }
     setTimeout(() => setStatus(null), 5000)
   }
-  // 受信 topic（receiver）だけを適用（item 8）。
+  // 受信 topic（receiver）だけを適用（item 8）。購読の張り直しに再起動が要るので
+  // 適用後に自動で再起動する。
   const applyRecvTopics = () => {
     sendTo({ type: 'set_recv_topics', payload: { topics: recvTopics } })
-    setTopicStatus('受信 topic を適用しました（受信機は再起動後に反映）')
-    setTimeout(() => setTopicStatus(null), 5000)
+    setTopicStatus('受信 topic を適用しました（受信機を自動再起動して反映します）')
+    rebootAfter()
+    setTimeout(() => setTopicStatus(null), 6000)
   }
 
   // Alert-loop toggle (receiver, item 10) — persisted immediately and applied
@@ -324,6 +343,16 @@ export function MqttConfigSection({
     setAlertLoop(next)
     sendTo({ type: 'set_alert_mode', payload: { loop: next } })
     setAlertStatus(`アラートを${next ? 'ループ (ボタンで停止)' : '単発'}に設定しました`)
+    setTimeout(() => setAlertStatus(null), 5000)
+  }
+
+  // Deliberate-hold acknowledge time (receiver, §6.1). Persisted in NVS on the
+  // device and applied immediately (no reboot — read fresh per press).
+  const applyAckHold = () => {
+    const ms = Math.max(200, Math.min(10000, Math.round(ackHoldMs)))
+    setAckHoldMs(ms)
+    sendTo({ type: 'set_alert_mode', payload: { ack_hold_ms: ms } })
+    setAlertStatus(`停止の長押し時間を ${ms} ms に設定しました`)
     setTimeout(() => setAlertStatus(null), 5000)
   }
 
@@ -529,6 +558,32 @@ export function MqttConfigSection({
             「ループ」: アラート振動を、本体ボタンの長押しで止めるまで繰り返します
             (病院アラートのように「気づいて止める」運用)。「単発」: 1 回だけ振動。
             既定はループ。変更は次のアラートから即時反映されます。
+          </div>
+
+          {/* 停止の長押し時間 (§6.1) — 誤操作防止のため一度離して長押しで停止。
+              既定 1000ms。即時反映 (受信ごとに参照)。 */}
+          <div className="form-row" style={{ marginTop: 10 }}>
+            <label>停止の長押し</label>
+            <div className="form-row-multi" style={{ gap: 6 }}>
+              <input
+                className="form-input short"
+                type="number"
+                min={200}
+                max={10000}
+                step={100}
+                value={ackHoldMs}
+                onChange={(e) => setAckHoldMs(Number(e.target.value) || 1000)}
+                disabled={!device.online}
+              />
+              <span className="form-status muted" style={{ margin: 0 }}>ms</span>
+              <button className="form-button-secondary" onClick={applyAckHold} disabled={!device.online}>
+                適用
+              </button>
+            </div>
+            <span />
+          </div>
+          <div className="form-status muted">
+            アラートを止めるには、ボタンを一度離してからこの時間だけ長押しします（誤操作・押しっぱなし対策）。既定 1000 ms。
           </div>
           {alertStatus && <div className="form-status ok" style={{ marginTop: 4 }}>{alertStatus}</div>}
 
@@ -739,11 +794,28 @@ function inferCardTopic(ms: SensorMapping[]): string {
   return best
 }
 
+/** Migrate the device's flat topic fields to the editor's override model: an
+ *  override row (has topics[] OR a single topic ≠ card default) always carries
+ *  `topics[]` — a legacy single `topic` is seeded into [topic] so the per-row
+ *  multi-select shows it checked and save() doesn't silently drop it. Follow
+ *  rows (topic === card default, no topics) are left untouched. */
+function normalizeRowTopics(ms: SensorMapping[], ct: string): SensorMapping[] {
+  return ms.map((m) => {
+    const hasTopics = !!(m.topics && m.topics.length)
+    const isOverride = hasTopics || (m.topic ?? '') !== ct
+    if (isOverride && !hasTopics && m.topic) {
+      return { ...m, topics: [m.topic], topic: undefined }
+    }
+    return m
+  })
+}
+
 export function SensorMappingSection({
   device,
   mappings,
   reading,
   sensorType,
+  deviceTopicRoot,
   sendTo,
   onRefresh,
 }: {
@@ -754,6 +826,11 @@ export function SensorMappingSection({
   reading?: SensorReading
   /** Sensor hardware type from get_info (e.g. "tcs34725"). */
   sensorType?: string
+  /** The device's ACTUAL send root (get_info.topic_root). Shown as the
+   *  card default so the UI matches what the device really publishes to —
+   *  a device provisioned under the old default still reports "hapbeat",
+   *  and a hardcoded "default-topic" placeholder would mislead (N3). */
+  deviceTopicRoot?: string
   sendTo: (msg: ManagerMessage) => void
   onRefresh: () => void
 }) {
@@ -793,7 +870,8 @@ export function SensorMappingSection({
       const next = new Set(s)
       if (next.has(i)) {
         next.delete(i)
-        setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, topic: cardTopic || undefined } : r)))
+        // Back to following the card default — clear the per-row override(s).
+        setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, topic: undefined, topics: undefined } : r)))
       } else {
         next.add(i)
       }
@@ -847,16 +925,19 @@ export function SensorMappingSection({
       setStatus('デフォルトの 3 色しきい値を入れました — イベントを割り当てて保存してください')
       return
     }
-    // Show real newlines (0x0A) the device stored as a literal "\n" in the
-    // single-line text input so it round-trips with the save()-side conversion.
-    setRows(mappings.map((m) => (m.oled && m.oled.includes('\n'))
-      ? { ...m, oled: m.oled.replace(/\n/g, '\\n') }
-      : m))
     // Reconstruct the card-default + per-row-override model from the flat
     // per-row topics the device returned.
     const ct = inferCardTopic(mappings)
     setCardTopic(ct)
-    setOverrideRows(new Set(mappings.flatMap((m, i) => ((m.topic ?? '') !== ct ? [i] : []))))
+    const norm = normalizeRowTopics(mappings, ct).map((m) => (m.oled && m.oled.includes('\n'))
+      // Show real newlines (0x0A) the device stored as a literal "\n" in the
+      // single-line text input so it round-trips with the save()-side conversion.
+      ? { ...m, oled: m.oled.replace(/\n/g, '\\n') }
+      : m)
+    setRows(norm)
+    // After normalization an override row always carries topics[]; follow rows
+    // carry neither, so override = has topics.
+    setOverrideRows(new Set(norm.flatMap((m, i) => ((m.topics && m.topics.length) ? [i] : []))))
   }, [mappings, dirty])
 
   // Auto-load the device's current mappings once per device when the
@@ -980,7 +1061,15 @@ export function SensorMappingSection({
     // whose event_id is empty. A non-destructive warning still nudges the
     // user to assign the missing events.
     const clean = rows
-      .map((r, i) => ({ ...r, topic: (overrideRows.has(i) ? r.topic : cardTopic) || undefined }))
+      .map((r, i) => {
+        if (overrideRows.has(i)) {
+          // Explicit per-row topics (multi). Drop the legacy single `topic`;
+          // the firmware publishes to each entry in `topics`.
+          return { ...r, topics: r.topics && r.topics.length ? r.topics : undefined, topic: undefined }
+        }
+        // Follow the card default (single root). Clear any stale topics.
+        return { ...r, topic: cardTopic || undefined, topics: undefined }
+      })
       .filter((r) => r.key.trim())
       .map((r) => ({
         ...r,
@@ -1060,14 +1149,16 @@ export function SensorMappingSection({
           debounce_ms: typeof m.debounce_ms === 'number' ? m.debounce_ms : undefined,
           oled: typeof m.oled === 'string' ? m.oled : undefined,
           topic: typeof m.topic === 'string' ? m.topic : undefined,
+          topics: Array.isArray(m.topics) ? m.topics.filter((t): t is string => typeof t === 'string') : undefined,
           critical: m.critical === true ? true : undefined,
         }))
-        setRows(imported)
         const ct = inferCardTopic(imported)
         setCardTopic(ct)
-        setOverrideRows(new Set(imported.flatMap((m, i) => ((m.topic ?? '') !== ct ? [i] : []))))
+        const norm = normalizeRowTopics(imported, ct)
+        setRows(norm)
+        setOverrideRows(new Set(norm.flatMap((m, i) => ((m.topics && m.topics.length) ? [i] : []))))
         setDirty(true)
-        setStatus(`${imported.length} 件をインポートしました — 「保存」でデバイスに書き込みます`)
+        setStatus(`${imported.length} 件をインポートしました — 「デバイスに保存」で書き込みます`)
       } catch (e) {
         setStatus(`インポート失敗: ${e instanceof Error ? e.message : 'JSON を解析できません'}`)
       }
@@ -1085,45 +1176,15 @@ export function SensorMappingSection({
             {' '}— 検出値ごとに発火するイベントを割り当てる
           </span>
         </span>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/json,.json"
-            style={{ display: 'none' }}
-            onChange={(e) => {
-              const f = e.target.files?.[0]
-              if (f) importJson(f)
-              e.target.value = ''  // allow re-importing the same file
-            }}
-          />
-          <button
-            className="form-button-secondary"
-            onClick={exportJson}
-            disabled={rows.length === 0}
-            style={{ fontSize: 13, padding: '2px 8px' }}
-            title="現在のマッピングを JSON ファイルに保存"
-          >
-            ⤓ JSON 保存
-          </button>
-          <button
-            className="form-button-secondary"
-            onClick={() => fileInputRef.current?.click()}
-            style={{ fontSize: 13, padding: '2px 8px' }}
-            title="JSON ファイルからマッピングを読み込む（保存ボタンでデバイスに反映）"
-          >
-            ⤒ JSON 読込
-          </button>
-          <button
-            className="form-button-secondary"
-            onClick={reload}
-            disabled={!device.online}
-            style={{ fontSize: 13, padding: '2px 8px' }}
-            title="デバイスから現在のマッピングを再取得"
-          >
-            ⟳ 読み込み
-          </button>
-        </div>
+        <button
+          className="form-button-secondary"
+          onClick={reload}
+          disabled={!device.online}
+          style={{ fontSize: 13, padding: '2px 8px' }}
+          title="デバイスから現在のマッピングを再取得"
+        >
+          ⟳ 読み込み
+        </button>
       </div>
 
       {/* Live reading — tune thresholds while watching the actual value. */}
@@ -1378,9 +1439,10 @@ export function SensorMappingSection({
             <span />
           </div>
 
-          {/* Send-destination topic (item 6). By default the color follows the
-              card-level 送信トピック; tick "個別の Topic に送信する" to send this
-              one color somewhere else. */}
+          {/* Send-destination topic(s) (item 6 / §5). By default the color
+              follows the card-level 送信トピック; tick "個別の Topic に送信する"
+              to choose one or MORE topics for this color (each gets the play).
+              Multi-select writes r.topics[]; the firmware publishes to each. */}
           <div className="form-row">
             <label>送り先</label>
             <div className="form-row-multi" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -1394,27 +1456,36 @@ export function SensorMappingSection({
                   onChange={() => toggleOverride(i)}
                   disabled={!device.online}
                 />
-                個別の Topic に送信する
+                個別の Topic に送信する（複数可）
               </label>
               {overrideRows.has(i) ? (
-                <select
-                  className="form-input"
-                  value={r.topic ?? ''}
-                  onChange={(e) => update(i, { topic: e.target.value || undefined })}
-                  disabled={!device.online}
-                  style={{ flex: '0 0 220px' }}
-                >
-                  <option value="">default-topic（既定）</option>
-                  {topics.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                  {r.topic && !topics.includes(r.topic) && (
-                    <option value={r.topic}>{r.topic}（未登録）</option>
-                  )}
-                </select>
+                <div className="form-row-multi" style={{ flexWrap: 'wrap', gap: 8 }}>
+                  {Array.from(new Set(['default-topic', ...topics, ...(r.topics ?? [])])).map((t) => {
+                    const sel = (r.topics ?? []).includes(t)
+                    return (
+                      <label
+                        key={t}
+                        className="form-status muted"
+                        style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={sel}
+                          onChange={() => {
+                            const cur = r.topics ?? []
+                            const next = sel ? cur.filter((x) => x !== t) : [...cur, t]
+                            update(i, { topics: next.length ? next : undefined, topic: undefined })
+                          }}
+                          disabled={!device.online}
+                        />
+                        {t}
+                      </label>
+                    )
+                  })}
+                </div>
               ) : (
                 <span className="form-status muted" style={{ margin: 0 }}>
-                  カード全体（{cardTopic || 'default-topic'}）に追従
+                  カード全体（{cardTopic || deviceTopicRoot || 'default-topic'}）に追従
                 </span>
               )}
             </div>
@@ -1482,12 +1553,47 @@ export function SensorMappingSection({
         )
       })}
 
-      <div className="form-action-row" style={{ marginTop: 10 }}>
+      <div className="form-action-row" style={{ marginTop: 10, flexWrap: 'wrap' }}>
         <button className="form-button-secondary" onClick={addRow} disabled={!device.online}>
           ＋ 検知色を追加
         </button>
-        <button className="form-button" onClick={save} disabled={!device.online || !dirty}>
-          保存
+        <span style={{ flex: 1 }} />
+        {/* JSON save/load sit next to the device-save button (not the header)
+            so they're noticed (user 2026-06-15). Import only loads into the
+            editor — the user still presses「デバイスに保存」to write it. */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json,.json"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) importJson(f)
+            e.target.value = ''  // allow re-importing the same file
+          }}
+        />
+        <button
+          className="form-button-secondary"
+          onClick={() => fileInputRef.current?.click()}
+          title="JSON ファイルからマッピングを読み込む（「デバイスに保存」で反映）"
+        >
+          ⤒ JSON 読込
+        </button>
+        <button
+          className="form-button-secondary"
+          onClick={exportJson}
+          disabled={rows.length === 0}
+          title="現在のマッピングを JSON ファイルに保存"
+        >
+          ⤓ JSON 保存
+        </button>
+        <button
+          className="form-button"
+          onClick={save}
+          disabled={!device.online || !dirty}
+          title="編集内容をデバイスに書き込む"
+        >
+          デバイスに保存
         </button>
         {status && <span className="form-status ok" style={{ alignSelf: 'center' }}>{status}</span>}
       </div>

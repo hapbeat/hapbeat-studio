@@ -18,9 +18,22 @@ import type { ManagerMessage } from '@/types/manager'
  * by OtaController regardless of which device is selected, so the bar shows on
  * the sidebar card even while the user is looking at another device.
  */
-function OtaCardProgress({ ip }: { ip: string }) {
+function OtaCardProgress({ ip, online }: { ip: string; online: boolean }) {
   const st = useOtaStore((s) => s.byIp[ip] ?? OTA_DEFAULT)
+  const clearResult = useOtaStore((s) => s.clearResult)
   const { progress, running, result, stuck } = st
+  // Auto-clear the "✓ OTA 完了 — 再起動中…" line once the device has rebooted
+  // back online: the OTA caused the device to drop offline then reconnect, so
+  // the offline→online edge is exactly "the reboot finished" (user 2026-06-15).
+  const prevOnlineRef = useRef(online)
+  useEffect(() => {
+    const was = prevOnlineRef.current
+    prevOnlineRef.current = online
+    // Only the SUCCESS "再起動中…" line auto-dismisses on reconnect. A failure
+    // (✗) must persist — the user power-cycling to retry would otherwise wipe
+    // the only on-card explanation right when they need it.
+    if (!was && online && result?.ok && !running) clearResult(ip)
+  }, [online, result, running, ip, clearResult])
   if (!running && !result) return null
   const pct = Math.max(0, Math.min(100, progress?.percent ?? 0))
   return (
@@ -73,11 +86,13 @@ export const SERIAL_DEVICE_PREFIX = 'serial:'
  */
 function RefreshButton({ send }: { send: (msg: ManagerMessage) => void }) {
   const [spinning, setSpinning] = useState(false)
+  const clearAllOtaResults = useOtaStore((s) => s.clearAllResults)
   const onClick = useCallback(() => {
     send({ type: 'rescan', payload: {} })
+    clearAllOtaResults()  // a manual refresh also dismisses stale OTA result lines
     setSpinning(true)
     window.setTimeout(() => setSpinning(false), 700)
-  }, [send])
+  }, [send, clearAllOtaResults])
   return (
     <button
       type="button"
@@ -480,7 +495,7 @@ export function DeviceList() {
                   {dev.address && <span>{dev.address}</span>}
                   {dev.firmwareVersion && <span>fw {dev.firmwareVersion}</span>}
                 </div>
-                <OtaCardProgress ip={dev.ipAddress} />
+                <OtaCardProgress ip={dev.ipAddress} online={dev.online} />
               </div>
             )
           })
