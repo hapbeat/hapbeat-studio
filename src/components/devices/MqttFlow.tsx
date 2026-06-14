@@ -30,10 +30,12 @@ interface FlowNode {
   connected: boolean
   /** Device IP (shown inside the box as device info). */
   ip?: string
-  /** Topic shown UNDER the arrow: sender → its actual send topic (the last
-   *  topic it published, else its default root); receiver → its 購読
-   *  recv_topics. undefined = unknown. (flow redesign 2026-06-14) */
+  /** Sender: its single send topic (the last topic it published, else its
+   *  default root), shown under the line. undefined = unknown. */
   topic?: string
+  /** Receiver: subscribed topic roots — ONE connection line per topic
+   *  (1 line = 1 topic, user 2026-06-14). [] = unknown (single unlabeled line). */
+  topics?: string[]
 }
 
 function clientLabel(c: MqttClientEntry): string {
@@ -104,8 +106,17 @@ export function useMqttFlowData(): MqttFlowData {
     const discovered = devices.filter(
       (d) => isMqttClientNode(d) && d.online && !connectedNames.has(d.name),
     )
-    const discoveredSenders = discovered.filter((d) => d.role === 'sensor')
-    const discoveredReceivers = discovered.filter((d) => d.role !== 'sensor')
+    // A client that has connected but not yet published its presence NAME is
+    // in `clients` with no name, so it is NOT in connectedNames — without this
+    // guard the SAME device also shows up here as a 未接続 ghost (double-render
+    // during the connect→first-presence window). We can't name-correlate a
+    // name-less client to a device, but the COUNT is enough: drop that many
+    // discovered nodes of the matching role so the total stays right (the
+    // dropped one is indistinguishable from the name-less connected one).
+    const namelessSenders = senders.filter((c) => !c.name).length
+    const namelessReceivers = receivers.filter((c) => !c.name).length
+    const discoveredSenders = discovered.filter((d) => d.role === 'sensor').slice(namelessSenders)
+    const discoveredReceivers = discovered.filter((d) => d.role !== 'sensor').slice(namelessReceivers)
 
     // Correlate a node → its device IP (for the in-box device info) and its
     // topic label (shown under the arrow).
@@ -121,11 +132,13 @@ export function useMqttFlowData(): MqttFlowData {
       const ci = ip ? infoCache[ip] : undefined
       return ci?.topic_root || undefined
     }
-    const receiverTopic = (ip: string | undefined): string | undefined => {
+    // Receiver: one line per subscribed topic. [] = unknown (recv_topics not
+    // loaded yet) → a single unlabeled connection line.
+    const receiverTopics = (ip: string | undefined): string[] => {
       const ci = ip ? infoCache[ip] : undefined
       const rt = ci?.recv_topics
-      if (rt == null) return undefined
-      return rt.length ? rt.join(', ') : 'default-topic'
+      if (rt == null) return []
+      return rt.length ? rt : ['default-topic']
     }
 
     const left: FlowNode[] = [
@@ -141,10 +154,10 @@ export function useMqttFlowData(): MqttFlowData {
     const right: FlowNode[] = [
       ...receivers.map((c) => {
         const ip = ipByName.get(c.name ?? '')
-        return { key: `c-${c.id}`, label: clientLabel(c), connected: true, ip, topic: receiverTopic(ip) }
+        return { key: `c-${c.id}`, label: clientLabel(c), connected: true, ip, topics: receiverTopics(ip) }
       }),
       ...discoveredReceivers.map((d) => ({
-        key: `d-${d.ipAddress}`, label: d.name || d.ipAddress, connected: false, ip: d.ipAddress, topic: receiverTopic(d.ipAddress),
+        key: `d-${d.ipAddress}`, label: d.name || d.ipAddress, connected: false, ip: d.ipAddress, topics: receiverTopics(d.ipAddress),
       })),
     ]
 
@@ -188,19 +201,25 @@ function MqttFlowChartSvg(props: MqttFlowData) {
     lastTopic, lastFrom, lastEventId, lastTarget, lastAt, receiverCount,
   } = props
 
-  // Pulse the edges briefly whenever the publish counter advances.
+  // Real data flow is the ONLY thing that adds an arrowhead/emphasis (user
+  // 2026-06-14). When the broker's publish counter advances we know WHICH
+  // sender published (lastFrom) and on WHICH topic (lastTopic). We light up
+  // only the matching lines (sender→broker for that sender, broker→receiver
+  // for each receiver line whose topic matches) in the flow direction, then
+  // fade back to plain connection lines. Idle = plain lines, no direction.
   const prevCountRef = useRef<number | undefined>(undefined)
-  const [pulse, setPulse] = useState(false)
+  const [pulse, setPulse] = useState<{ from?: string; topic?: string } | null>(null)
   useEffect(() => {
     if (pubCount == null) return
     const prev = prevCountRef.current
     prevCountRef.current = pubCount
     if (prev != null && pubCount > prev) {
-      setPulse(true)
-      const t = setTimeout(() => setPulse(false), 600)
+      const topicRoot = lastTopic?.replace(/\/(play|stop)$/, '')
+      setPulse({ from: lastFrom, topic: topicRoot })
+      const t = setTimeout(() => setPulse(null), 1100)
       return () => clearTimeout(t)
     }
-  }, [pubCount])
+  }, [pubCount, lastFrom, lastTopic])
 
   // Layout (redesign 2026-06-14): uniform box height; all three columns are
   // vertically CENTERED on the broker and grow symmetrically from the center.
@@ -243,26 +262,40 @@ function MqttFlowChartSvg(props: MqttFlowData) {
     )
   }
 
-  // Arrow with the topic label UNDER it (at the arrow midpoint).
-  const flowArrow = (
+  // A plain connection LINE by default — no direction, no arrowhead (a line
+  // just means "connected", user 2026-06-14). Only when data actually flowed
+  // on it (`flowing`) does it get an arrowhead (pointing x1→x2 = the flow
+  // direction) + accent emphasis, then it fades back. The topic rides UNDER
+  // the line with NO arrow glyph (the line's geometry is the direction).
+  const connectionLine = (
     x1: number, y1: number, x2: number, y2: number,
-    key: string, connected: boolean, topic: string | undefined, kind: 'sender' | 'receiver',
-  ) => (
-    <g key={key}>
-      <line x1={x1} y1={y1} x2={x2} y2={y2}
-        stroke={!connected ? 'rgba(150,150,150,0.25)' : pulse ? 'var(--accent, #7b6cff)' : 'rgba(150,150,150,0.5)'}
-        strokeWidth={connected && pulse ? 2.5 : 1.3}
-        strokeDasharray={connected ? undefined : '4 3'}
-        markerEnd={connected ? 'url(#mqtt-arrow)' : undefined} />
-      {topic && (
-        <text x={(x1 + x2) / 2} y={(y1 + y2) / 2 + 12} textAnchor="middle" fontSize={9}
-          fill={kind === 'sender' ? '#c9742e' : '#3f9c42'}
-          style={{ fontFamily: 'var(--font-mono)' }}>
-          {kind === 'sender' ? '→ ' : '← '}{trunc(topic, 22)}
-        </text>
-      )}
-    </g>
-  )
+    key: string, connected: boolean, flowing: boolean,
+    topic: string | undefined, kind: 'sender' | 'receiver',
+    labelAnchor: 'middle' | 'end' = 'middle',
+  ) => {
+    const stroke = !connected ? 'rgba(150,150,150,0.25)'
+      : flowing ? 'var(--accent, #7b6cff)' : 'rgba(150,150,150,0.5)'
+    // Multi-line receivers stack labels near the receiver end (end-anchored)
+    // so several topic labels don't pile up at the shared broker endpoint.
+    const lx = labelAnchor === 'end' ? x2 - 6 : (x1 + x2) / 2
+    const ly = labelAnchor === 'end' ? y2 - 4 : (y1 + y2) / 2 + 12
+    return (
+      <g key={key}>
+        <line x1={x1} y1={y1} x2={x2} y2={y2}
+          stroke={stroke}
+          strokeWidth={flowing ? 2.5 : 1.2}
+          strokeDasharray={connected ? undefined : '4 3'}
+          markerEnd={flowing ? 'url(#mqtt-arrow)' : undefined} />
+        {topic && (
+          <text x={lx} y={ly} textAnchor={labelAnchor} fontSize={9}
+            fill={flowing ? 'var(--accent, #7b6cff)' : (kind === 'sender' ? '#c9742e' : '#3f9c42')}
+            style={{ fontFamily: 'var(--font-mono)' }}>
+            {trunc(topic, labelAnchor === 'end' ? 13 : 18)}
+          </text>
+        )}
+      </g>
+    )
+  }
 
   return (
     <div style={{ overflowX: 'auto' }}>
@@ -276,7 +309,7 @@ function MqttFlowChartSvg(props: MqttFlowData) {
         <defs>
           <marker id="mqtt-arrow" viewBox="0 0 8 8" refX="7" refY="4"
             markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M0,0 L8,4 L0,8 z" fill={pulse ? 'var(--accent, #7b6cff)' : 'rgba(150,150,150,0.6)'} />
+            <path d="M0,0 L8,4 L0,8 z" fill="var(--accent, #7b6cff)" />
           </marker>
         </defs>
 
@@ -298,12 +331,19 @@ function MqttFlowChartSvg(props: MqttFlowData) {
           {running ? `:${port} 稼働中` : '停止中'}{pubCount != null ? ` · pub ${pubCount}` : ''}
         </text>
 
-        {/* senders: arrow (topic under it) into the broker + device box */}
+        {/* senders: one connection line each (sender → broker). It gets an
+            arrowhead toward the broker only while THIS sender is publishing. */}
         {left.map((node, i) => {
           const y = colY(i, left.length)
+          // Match the publishing sender by presence name (mqtt_last_from). A
+          // client that hasn't published its name yet labels as its id-tail and
+          // won't match (mqtt_last_from is then the sid) — so the emphasis just
+          // doesn't show for that brief pre-presence window; it self-heals once
+          // the name arrives. Receivers match on topic, so they're unaffected.
+          const flowing = !!pulse && !!pulse.from && node.connected && node.label === pulse.from
           return (
             <g key={node.key}>
-              {flowArrow(leftX + BW, y, brokerX, centerY, `e-l-${node.key}`, node.connected, node.topic, 'sender')}
+              {connectionLine(leftX + BW, y, brokerX, centerY, `e-l-${node.key}`, node.connected, flowing, node.topic, 'sender')}
               {deviceBox(leftX, y, node, 'sender')}
             </g>
           )
@@ -313,12 +353,29 @@ function MqttFlowChartSvg(props: MqttFlowData) {
             fill="var(--text-muted, #777)">(なし)</text>
         )}
 
-        {/* receivers: arrow (topic under it) out of the broker + device box */}
+        {/* receivers: ONE connection line per subscribed topic (1 line = 1
+            topic). Each line gets an arrowhead toward the receiver only while
+            data flows on THAT topic. Lines fan to distinct y points on the box
+            left edge so multiple topics don't overlap. */}
         {right.map((node, i) => {
           const y = colY(i, right.length)
+          // [] = unknown subscriptions → a single unlabeled line.
+          const topics = node.topics && node.topics.length ? node.topics : [undefined]
+          const n = topics.length
+          const pad = 8
           return (
             <g key={node.key}>
-              {flowArrow(brokerX + BW, centerY, rightX, y, `e-r-${node.key}`, node.connected, node.topic, 'receiver')}
+              {topics.map((t, ti) => {
+                // distribute entry points across the box's left edge
+                const entryY = n === 1 ? y
+                  : (y - BH / 2 + pad) + (ti + 0.5) * ((BH - 2 * pad) / n)
+                const flowing = !!pulse && !!pulse.topic && !!t && node.connected && t === pulse.topic
+                return connectionLine(
+                  brokerX + BW, centerY, rightX, entryY,
+                  `e-r-${node.key}-${ti}`, node.connected, flowing, t, 'receiver',
+                  n > 1 ? 'end' : 'middle',
+                )
+              })}
               {deviceBox(rightX, y, node, 'receiver')}
             </g>
           )
