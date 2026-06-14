@@ -28,7 +28,7 @@ import {
   type FirmwareLibraryEntry,
   type FirmwareRegion,
 } from '@/utils/firmwareLibrary'
-import { chipIdForBoard, validateOtaImage } from '@/utils/otaImageValidation'
+import { chipIdForBoard, validateOtaImage, type OtaValidationResult } from '@/utils/otaImageValidation'
 import { DriverHelpLinks } from './DriverHelpLinks'
 
 const ROLE_ORDER: NodeRole[] = ['receiver', 'sensor', 'broker', 'transmitter']
@@ -576,7 +576,78 @@ export function FirmwareSubTab({
       pushLog('ota', 'abort — device offline before OTA start')
       return
     }
-    if (!(await checkBoardMatch('OTA'))) return
+
+    // Resolve the OTA target set up-front. A multi-select batch (>1 online
+    // LAN device ticked in the sidebar) streams the SAME app image to every
+    // target, and those targets' boards may differ (e.g. AtomS3 = ESP32-S3
+    // vs ATOM Lite = classic ESP32). Pre-flight therefore has to run against
+    // EACH target — not just the focused device — otherwise a board/chip
+    // mismatch on a non-focused target slips through to the flash. Mirrors
+    // the per-target check the Serial multi-flash already does (onSerialFlash).
+    const lanCandidates = selectedIps.filter((ip) => !ip.startsWith('serial:'))
+    const onlineLan = lanCandidates
+      .map((ip) => devices.find((d) => d.ipAddress === ip))
+      .filter((d): d is DeviceInfo => !!d && d.online)
+      .map((d) => d.ipAddress)
+    const targets = onlineLan.length > 1 ? onlineLan : [device.ipAddress]
+    const multi = targets.length > 1
+
+    // Per-target board resolver + friendly label (used by the multi-target
+    // pre-flight). The focused device keeps its richer fallback chain
+    // (live serial conn / last-flashed board via knownBoard); other targets
+    // resolve from the get_info cache (mDNS/PING) + last-flashed fallback.
+    const { infoCache, lastFlashedBoard } = useDeviceStore.getState()
+    const boardForIp = (ip: string): string | null =>
+      ip === device.ipAddress
+        ? knownBoard
+        : infoCache[ip]?.board ?? lastFlashedBoard[ip] ?? null
+    const targetLabel = (ip: string): string => {
+      const name = devices.find((d) => d.ipAddress === ip)?.name ?? infoCache[ip]?.name
+      return name ? `${name} (${ip})` : ip
+    }
+
+    // ── Board-mismatch confirm ──
+    if (multi) {
+      // Confirm once, listing every target whose reported board differs from
+      // the selected firmware's board. Library source only — a local .bin
+      // carries no declared board to compare against.
+      if (source === 'library' && selectedEntry) {
+        const expected = entryBoard(selectedEntry)
+        if (expected) {
+          const mismatched = targets.filter((ip) => {
+            const b = boardForIp(ip)
+            return b && b !== 'unknown' && b !== expected
+          })
+          if (mismatched.length > 0) {
+            const ok = await ask({
+              title: '基板バージョン不一致',
+              message: (
+                `選択中のファームウェアは ${boardLabel(expected)} 用ですが、`
+                + `以下のデバイスは別の基板を報告しています:\n`
+                + mismatched
+                    .map((ip) => `・${targetLabel(ip)} → ${boardLabel(boardForIp(ip))}`)
+                    .join('\n')
+                + '\n\n異なるバージョン用のビルドを書き込むと OLED が表示されない等の'
+                + ' 不具合が起きます。このまま全台に書き込みますか？'
+              ),
+              confirmLabel: '不一致のまま書き込む',
+              danger: true,
+            })
+            if (!ok) {
+              pushLog(
+                'ota',
+                `flash aborted — board mismatch (env=${selectedEntry.env} expects ${expected}, `
+                + `targets=[${mismatched.map((ip) => `${ip}:${boardForIp(ip)}`).join(', ')}])`,
+              )
+              return
+            }
+          }
+        }
+      }
+    } else if (!(await checkBoardMatch('OTA'))) {
+      return
+    }
+
     otaClearResult(device.ipAddress)
     let bin: Awaited<ReturnType<typeof readSelectedBin>>
     try {
@@ -586,26 +657,53 @@ export function FirmwareSubTab({
       return
     }
 
-    // Expected chip: derived from the target device's reported board
+    // ── Chip-ID pre-flight ──
+    // Expected chip: derived from each target's reported board
     // (atom_lite → classic ESP32, wearables/AtomS3 → ESP32-S3). Unknown
     // board → chip-allowlist check only, so classic-ESP32 nodes are no
     // longer rejected by the old hardcoded S3 expectation.
-    const validation = validateOtaImage(bin.bytes, chipIdForBoard(knownBoard))
-    if (!validation.ok) {
-      pushLog('ota', `pre-flight FAILED: ${validation.reason}`)
-      otaSetResult(device.ipAddress, {
-        ok: false,
-        message: `書き込みを中止しました (プリフライト検証失敗): ${validation.reason}`,
-      })
-      return
+    if (multi) {
+      // The same image streams to all targets, so it must be valid for EACH;
+      // a single mismatch aborts the whole batch. info is image-derived
+      // (identical across targets) so we keep the last for the OK log.
+      let okValidation: OtaValidationResult | null = null
+      for (const ip of targets) {
+        const v = validateOtaImage(bin.bytes, chipIdForBoard(boardForIp(ip)))
+        if (!v.ok) {
+          pushLog('ota', `pre-flight FAILED [${targetLabel(ip)}]: ${v.reason}`)
+          otaSetResult(device.ipAddress, {
+            ok: false,
+            message: `書き込みを中止しました (プリフライト検証失敗 [${targetLabel(ip)}]): ${v.reason}`,
+          })
+          return
+        }
+        okValidation = v
+      }
+      pushLog(
+        'ota',
+        `pre-flight OK (${targets.length} 台): ${okValidation!.info!.chipName} app, `
+        + `${formatBytes(okValidation!.info!.sizeBytes)}, `
+        + `segments=${okValidation!.info!.segments}, `
+        + `hash=${okValidation!.info!.hashAppended ? 'appended' : 'header-only'}`,
+      )
+    } else {
+      const validation = validateOtaImage(bin.bytes, chipIdForBoard(knownBoard))
+      if (!validation.ok) {
+        pushLog('ota', `pre-flight FAILED: ${validation.reason}`)
+        otaSetResult(device.ipAddress, {
+          ok: false,
+          message: `書き込みを中止しました (プリフライト検証失敗): ${validation.reason}`,
+        })
+        return
+      }
+      pushLog(
+        'ota',
+        `pre-flight OK: ${validation.info!.chipName} app, `
+        + `${formatBytes(validation.info!.sizeBytes)}, `
+        + `segments=${validation.info!.segments}, `
+        + `hash=${validation.info!.hashAppended ? 'appended' : 'header-only'}`,
+      )
     }
-    pushLog(
-      'ota',
-      `pre-flight OK: ${validation.info!.chipName} app, `
-      + `${formatBytes(validation.info!.sizeBytes)}, `
-      + `segments=${validation.info!.segments}, `
-      + `hash=${validation.info!.hashAppended ? 'appended' : 'header-only'}`,
-    )
 
     pushLog('ota', `flash → ${bin.label} (${formatBytes(bin.bytes.length)})`)
     // Verify/board context captured at submit time — OtaController applies them
@@ -613,29 +711,21 @@ export function FirmwareSubTab({
     const expectedFw = source === 'library' ? (selectedEntry?.fwVersion ?? null) : null
     const flashedBoard = (source === 'library' && selectedEntry)
       ? (entryBoard(selectedEntry) ?? null) : null
-    const lanCandidates = selectedIps.filter((ip) => !ip.startsWith('serial:'))
-    const onlineLan = lanCandidates
-      .map((ip) => devices.find((d) => d.ipAddress === ip))
-      .filter((d): d is DeviceInfo => !!d && d.online)
-      .map((d) => d.ipAddress)
-    const targets = onlineLan.length > 1
-      ? onlineLan
-      : [device.ipAddress]
-    if (targets.length > 1) {
+    if (multi) {
       pushLog(
         'ota',
         `multi-target: streaming to ${targets.length} devices sequentially `
         + `[${targets.join(', ')}]`,
       )
     }
-    const beginMsg = targets.length > 1
+    const beginMsg = multi
       ? `OTA 開始要求… (${targets.length} 台 / ${bin.label})`
       : `OTA 開始要求… (${bin.label})`
     // Mark each target as running in the per-device store (survives tab switch).
     for (const ip of targets) {
       otaStart(ip, { expectedFw, flashedBoard, message: beginMsg })
     }
-    if (targets.length > 1) {
+    if (multi) {
       helperSend({
         type: 'ota_data',
         payload: {
