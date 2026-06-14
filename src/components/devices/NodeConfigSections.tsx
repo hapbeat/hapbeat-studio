@@ -830,6 +830,12 @@ export function SensorMappingSection({
 }) {
   const [rows, setRows] = useState<SensorMapping[]>(mappings ?? [])
   const [dirty, setDirty] = useState(false)
+  // Loading/error state for the initial get_sensor_mapping (the device takes a
+  // few seconds to answer over TCP). `mappings === undefined` = not loaded yet;
+  // a defined value (incl. []) = loaded. The mapping is CONFIG, so it shows as
+  // soon as it arrives — independent of the live sensor reading (user 2026-06-15).
+  const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState(false)
   // Feedback as anchored toasts (Toast.tsx) — never shifts the button row.
   const { toast, setAnchor } = useToast()
   const setStatus = (msg: string | null, type: 'success' | 'error' | 'info' | 'warning' = 'success') => {
@@ -944,10 +950,22 @@ export function SensorMappingSection({
   useEffect(() => {
     if (loadedForRef.current === device.ipAddress) return
     loadedForRef.current = device.ipAddress
-    if (device.online && !mappings) onRefresh()
+    if (device.online && !mappings) { setLoading(true); setLoadError(false); onRefresh() }
     // onRefresh identity is unstable (inline arrow); guarded by the ref.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [device.ipAddress, device.online])
+
+  // Clear loading as soon as the config arrives (defined, incl. empty []).
+  useEffect(() => {
+    if (mappings !== undefined) { setLoading(false); setLoadError(false) }
+  }, [mappings])
+
+  // Surface a clear error if the device never answers (vs. an indefinite spinner).
+  useEffect(() => {
+    if (!loading) return
+    const t = window.setTimeout(() => { setLoading(false); setLoadError(true) }, 12000)
+    return () => window.clearTimeout(t)
+  }, [loading])
 
   // Live reading poll (~1 Hz) while this tab is open and the device online.
   // sendTo identity changes per render — keep the latest in a ref so the
@@ -1094,6 +1112,7 @@ export function SensorMappingSection({
   }
 
   const reload = () => {
+    setLoading(true); setLoadError(false)
     onRefresh()                                                   // get_sensor_mapping (keys + thresholds + events)
     sendToRef.current({ type: 'get_sensor_reading', payload: {} }) // + live RGB value, immediately
     setDirty(false)
@@ -1273,11 +1292,17 @@ export function SensorMappingSection({
         {eventIdOptions.map((id) => <option key={id} value={id} />)}
       </datalist>
 
-      {rows.length === 0 && (
+      {loading ? (
+        <div className="form-status muted">⏳ センサ設定を読み込み中…（デバイスの応答に数秒かかる場合があります）</div>
+      ) : loadError ? (
+        <div className="form-status err">
+          ✗ 読み込みに失敗しました。デバイスがオンラインか確認し、「⟳ 読み込み」で再試行してください。
+        </div>
+      ) : rows.length === 0 ? (
         <div className="form-status muted">
           マッピング未設定です。「＋ 検知色を追加」で割り当てを作成してください。
         </div>
-      )}
+      ) : null}
 
       {rows.map((r, i) => {
         const isLive = !!reading && readingMatches(r.match, reading)
@@ -1416,11 +1441,15 @@ export function SensorMappingSection({
               className="form-input"
               value={r.oled ?? ''}
               onChange={(e) => update(i, { oled: e.target.value || undefined })}
-              placeholder="例: Red alert occured（空欄 = 表示なし）"
-              maxLength={32}
+              placeholder="例: <color> alert \n occured（空欄 = 表示なし・\n で改行）"
+              maxLength={40}
               disabled={!device.online}
             />
             <span />
+          </div>
+          <div className="form-status muted">
+            受信機の OLED に表示する文言。<code>\n</code> で改行できます（例:
+            <code>{'<color> alert \\n occured'}</code> → 2 行表示）。空欄 = 表示なし。
           </div>
 
           {/* 重要フラグ (§6.3): a color marked 重要 still plays on receivers that

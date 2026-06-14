@@ -371,7 +371,7 @@ function MqttFlowChartSvg(props: MqttFlowData) {
           // (n-1)*GAP stays inside the broker box (≤ BH-12) and below the row
           // pitch — otherwise lines for 5+ topics emanate from outside the box
           // and adjacent receivers' bands collide (review 2026-06-15).
-          const LINE_GAP = n > 1 ? Math.min(12, (BH - 12) / (n - 1)) : 12
+          const LINE_GAP = n > 1 ? Math.min(18, (BH - 8) / (n - 1)) : 18
           return (
             <g key={node.key}>
               {topics.map((t, ti) => {
