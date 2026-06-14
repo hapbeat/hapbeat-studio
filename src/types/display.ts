@@ -27,6 +27,7 @@ export type DisplayElementType =
   | 'group_id'
   | 'address'
   | 'custom_text'
+  | 'alert_limit_mode'
 
 export interface DisplayPage {
   name: string
@@ -295,6 +296,7 @@ export const ELEMENT_FIXED_SIZES: Record<DisplayElementType, [number, number]> =
                              // 表示は address の prefix 部分のみ
                              // (player_/pos は別要素として持つため重複させない)
   custom_text: [8, 1],       // 任意の固定テキスト (element.text)。S/M/L = 4/8/16
+  alert_limit_mode: [10, 1], // 制限モード/全て再生 (受信機)。standard=10 / compact=4
 }
 
 /** Get element size considering variant. Battery "bar" variant is wider. */
@@ -359,6 +361,12 @@ export function getElementSize(type: DisplayElementType, variant?: string): [num
     if (variant === 'compact') return [4, 1]
     if (variant === 'wide') return [16, 1]
     return [8, 1]
+  }
+  if (type === 'alert_limit_mode') {
+    // 受信制限モード。compact = 制限/全て (2 全角=4 セル) /
+    // standard = 制限モード/全て再生 (最長 5 全角=10 セル)。
+    if (variant === 'compact') return [4, 1]
+    return [10, 1]
   }
   return ELEMENT_FIXED_SIZES[type]
 }

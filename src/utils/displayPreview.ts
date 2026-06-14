@@ -123,6 +123,13 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
       const txt = (text ?? '').trim() || 'テキスト'
       return txt.padEnd(w, ' ').slice(0, w)
     }
+    case 'alert_limit_mode': {
+      // 受信制限モード。プレビューは既定 OFF(全て再生) の状態を表示。
+      // compact = 全て (制限) / standard = 全て再生 (制限モード)。
+      const w = variant === 'compact' ? 4 : 10
+      const txt = variant === 'compact' ? '全て' : '全て再生'
+      return txt.padEnd(w, ' ').slice(0, w)
+    }
   }
 }
 
@@ -145,5 +152,6 @@ export function getElementDescription(type: DisplayElementType): string {
     case 'page_indicator':    return 'N/N'
     case 'group_id':          return 'Gr:XX'
     case 'custom_text':       return 'テキスト'
+    case 'alert_limit_mode':  return '制限/全て'
   }
 }

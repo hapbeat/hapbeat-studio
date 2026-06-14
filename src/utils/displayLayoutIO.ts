@@ -195,9 +195,14 @@ export function toFirmwareFormat(state: DisplaySavedState): FirmwareUiConfig {
         short_press: toFirmwareAction(action.short_press ?? 'none'),
         long_press: toFirmwareAction(action.long_press ?? 'none'),
         hold: toFirmwareAction(activeHold),
-      }
-      if (holdMode !== 'momentary') {
-        entry.hold_mode = holdMode
+        // ALWAYS send hold_mode (not just for latch). The firmware keeps
+        // s_slots[].hold_mode in RAM across config writes and only updates it
+        // when the field is present; omitting it on 'momentary' meant a button
+        // previously set to 'latch' stayed latched on the device even after the
+        // user switched it back to momentary → a momentary display_toggle never
+        // toggled off on release (the OLED "stayed on"). Always emitting the
+        // explicit mode keeps the device in sync with the UI.
+        hold_mode: holdMode,
       }
       button_actions[btnId] = entry
     }
