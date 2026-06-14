@@ -18,7 +18,7 @@ import './DevicePill.css'
  * Shared between Kit (WorkDirBar) and Display (ControlBar) — both
  * surfaces show the same selection summary and open the same modal.
  */
-export function DevicePill() {
+export function DevicePill({ hapbeatOnly }: { hapbeatOnly?: boolean } = {}) {
   const { isConnected: helperConnected, devices } = useHelperConnection()
   const selectedIps = useDeviceStore((s) => s.selectedIps)
   const [open, setOpen] = useState(false)
@@ -70,7 +70,7 @@ export function DevicePill() {
       ) : null}
       {/* "Devices ▸" 個別ボタンは header の Devices タブと冗長なので削除済み。
           pill 自体クリックでモーダルを開く。 */}
-      <DevicesModal open={open} onClose={() => setOpen(false)} />
+      <DevicesModal open={open} onClose={() => setOpen(false)} hapbeatOnly={hapbeatOnly} />
     </>
   )
 }

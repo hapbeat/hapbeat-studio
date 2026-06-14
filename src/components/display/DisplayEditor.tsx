@@ -1685,7 +1685,7 @@ function ControlBar({
           pill 自体クリックで Devices モーダルを開く。
           以前あった "Devices ▸" 補助ボタンは header の Devices タブと
           冗長なため削除済み。 */}
-      <DevicePill />
+      <DevicePill hapbeatOnly />
       <div className="control-separator" />
       <span className="tooltip-wrap">
         <button

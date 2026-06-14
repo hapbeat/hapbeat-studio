@@ -6,6 +6,9 @@ import './DevicesModal.css'
 interface Props {
   open: boolean
   onClose: () => void
+  /** Restrict the picker to Hapbeat wearables (grey + disable non-Hapbeat).
+   *  Set from the UI/Display tab, where the config only applies to Hapbeat. */
+  hapbeatOnly?: boolean
 }
 
 /**
@@ -23,7 +26,7 @@ interface Props {
  * `position: fixed` — only `createPortal(..., document.body)`
  * reliably escapes that.
  */
-export function DevicesModal({ open, onClose }: Props) {
+export function DevicesModal({ open, onClose, hapbeatOnly }: Props) {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -63,7 +66,7 @@ export function DevicesModal({ open, onClose }: Props) {
           </button>
         </div>
         <div className="devices-modal-body">
-          <DeviceList />
+          <DeviceList hapbeatOnly={hapbeatOnly} />
         </div>
       </div>
     </div>

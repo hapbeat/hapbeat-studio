@@ -348,6 +348,25 @@
   border-color: rgba(102, 187, 106, 0.45);
 }
 
+/* Hapbeat 本体 (duo_wl_* / band_wl_*) — shown next to the role tag so a Hapbeat
+   receiver is distinguishable from a 3rd-party receiver. */
+.device-row-roletag.hapbeat {
+  background: rgba(123, 108, 255, 0.16);
+  color: var(--accent, #7b6cff);
+  border-color: rgba(123, 108, 255, 0.5);
+}
+
+/* Blocked (non-Hapbeat) card in the UI/Display tab's Hapbeat-only picker:
+   greyed + not interactive. */
+.device-row.blocked {
+  opacity: 0.42;
+  cursor: not-allowed;
+  filter: grayscale(0.5);
+}
+.device-row.blocked .device-row-checkbox-input {
+  cursor: not-allowed;
+}
+
 /* Connection indicator dot. The Wi-Fi vs USB-Serial distinction is already
    obvious from which section the card is in, so the cards drop the
    "Wi-Fi"/"USB" text tag + emoji and just show a small dot: green = linked,

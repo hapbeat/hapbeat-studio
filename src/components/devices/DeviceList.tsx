@@ -301,7 +301,7 @@ function UsbPortsSection() {
  * Auto-selects the first device on first non-empty list so detail pane
  * is populated without an extra click.
  */
-export function DeviceList() {
+export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = {}) {
   const { isConnected, devices, send } = useHelperConnection()
   const selectedIp = useDeviceStore((s) => s.selectedIp)
   const selectedIps = useDeviceStore((s) => s.selectedIps)
@@ -313,6 +313,22 @@ export function DeviceList() {
   const selectRange = useDeviceStore((s) => s.selectRange)
   const dismissDevice = useDeviceStore((s) => s.dismissDevice)
   const syncOnlineDevices = useDeviceStore((s) => s.syncOnlineDevices)
+
+  // Hapbeat = duo_wl_* / band_wl_* board (from get_info). Used for the card
+  // badge and, in `hapbeatOnly` mode (UI/Display tab picker), to disable
+  // selecting non-Hapbeat nodes — the display config only applies to Hapbeat.
+  const boardOf = (ip: string): string | undefined => infoCache[ip]?.board
+  const isHapbeat = (ip: string): boolean => {
+    const b = boardOf(ip)
+    return !!b && (b.startsWith('duo_wl') || b.startsWith('band_wl'))
+  }
+  // Only block devices KNOWN to be non-Hapbeat (board present and not a
+  // wearable); an un-probed device stays selectable so we never wrongly block.
+  const isBlocked = (ip: string): boolean => {
+    if (!hapbeatOnly) return false
+    const b = boardOf(ip)
+    return !!b && b !== 'unknown' && !(b.startsWith('duo_wl') || b.startsWith('band_wl'))
+  }
 
   // NOTE: the serial-connected device is NOT promoted into this (LAN)
   // list anymore — it lives in the USB Serial section below, and the
@@ -417,7 +433,9 @@ export function DeviceList() {
           visibleDevices.map((dev) => {
             const checked = checkedSet.has(dev.ipAddress)
             const isPrimary = selectedIp === dev.ipAddress
+            const blocked = isBlocked(dev.ipAddress)
             const onCardClick = (e: React.MouseEvent) => {
+              if (blocked) return  // non-Hapbeat not selectable in hapbeatOnly mode
               // Avoid double-firing when the user clicks directly on
               // the checkbox or dismiss button — those handle their
               // own logic.
@@ -440,20 +458,22 @@ export function DeviceList() {
             return (
               <div
                 key={dev.ipAddress || dev.name}
-                className={`device-row${checked ? ' checked' : ''}${isPrimary ? ' primary' : ''}${dev.online ? '' : ' offline'}`}
+                className={`device-row${checked ? ' checked' : ''}${isPrimary ? ' primary' : ''}${dev.online ? '' : ' offline'}${blocked ? ' blocked' : ''}`}
                 onClick={onCardClick}
                 aria-selected={isPrimary}
+                title={blocked ? 'UI 設定は Hapbeat 本体のみ — 非 Hapbeat は選択できません' : undefined}
               >
                 <div className="device-row-top">
                   <label
                     className="device-row-checkbox"
-                    title={checked ? '選択解除' : '選択'}
+                    title={blocked ? 'Hapbeat 本体のみ選択可' : (checked ? '選択解除' : '選択')}
                     onClick={(e) => e.stopPropagation()}
                   >
                     <input
                       type="checkbox"
                       className="device-row-checkbox-input"
                       checked={checked}
+                      disabled={blocked}
                       onChange={() => toggleSelect(dev.ipAddress)}
                       aria-label={`${dev.name || dev.ipAddress} を選択`}
                     />
@@ -488,6 +508,11 @@ export function DeviceList() {
                       </span>
                     )
                   })()}
+                  {/* Hapbeat 本体 (duo_wl_* / band_wl_*) は role タグの隣に
+                      Hapbeat タグも出す — 非 Hapbeat の receiver と区別する。 */}
+                  {isHapbeat(dev.ipAddress) && (
+                    <span className="device-row-roletag hapbeat" title="Hapbeat 本体">Hapbeat</span>
+                  )}
                   {isApMode && (
                     <span className="device-row-roletag ap" title="SoftAP モードで動作中">AP</span>
                   )}
