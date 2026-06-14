@@ -22,6 +22,59 @@ export const DEFAULT_SIM_STATE: SimState = {
 }
 
 /**
+ * 全角 (East-Asian Wide / Fullwidth) 判定。
+ *
+ * device 側 efont は日本語 1 文字を 16px = 2 グリッドセル (1 セル=8px) で
+ * 描画する。プレビューの 1 文字=1 セル前提を崩すので、文字ごとに占有
+ * セル数を出して padding / clip / 描画幅を合わせる。
+ * 範囲はひらがな・カタカナ・漢字・全角記号 (Japanese 主要域) をカバー。
+ */
+export function charCells(ch: string): 1 | 2 {
+  const cp = ch.codePointAt(0)
+  if (cp === undefined) return 1
+  if (
+    (cp >= 0x1100 && cp <= 0x115F) || // Hangul Jamo
+    (cp >= 0x2E80 && cp <= 0x303E) || // CJK 部首・康熙・記号
+    (cp >= 0x3041 && cp <= 0x33FF) || // ひらがな・カタカナ・CJK 記号
+    (cp >= 0x3400 && cp <= 0x4DBF) || // CJK 拡張 A
+    (cp >= 0x4E00 && cp <= 0x9FFF) || // CJK 統合漢字
+    (cp >= 0xA000 && cp <= 0xA4CF) ||
+    (cp >= 0xAC00 && cp <= 0xD7A3) || // Hangul 音節
+    (cp >= 0xF900 && cp <= 0xFAFF) || // CJK 互換漢字
+    (cp >= 0xFE30 && cp <= 0xFE4F) || // CJK 互換形
+    (cp >= 0xFF00 && cp <= 0xFF60) || // 全角英数・記号
+    (cp >= 0xFFE0 && cp <= 0xFFE6)
+  ) {
+    return 2
+  }
+  return 1
+}
+
+/** 文字列の占有セル数 (全角=2, 半角=1)。device の width*8px と対応。 */
+export function textCells(str: string): number {
+  let n = 0
+  for (const ch of str) n += charCells(ch)
+  return n
+}
+
+/**
+ * セル数基準で clip → 末尾スペース pad して、ちょうど `cells` セル幅に揃える。
+ * 全角がセル境界を跨ぐ場合はその文字を入れず手前で切る (半文字描画を防ぐ)。
+ * device の `width*8px` ピクセルクリップと一致する。
+ */
+export function padClipToCells(str: string, cells: number): string {
+  let out = ''
+  let used = 0
+  for (const ch of str) {
+    const c = charCells(ch)
+    if (used + c > cells) break
+    out += ch
+    used += c
+  }
+  return out + ' '.repeat(Math.max(0, cells - used))
+}
+
+/**
  * ファームウェア準拠のプレビューテキスト
  *
  * 重要: 文字数 = getElementSize() の幅と一致させること
@@ -116,19 +169,20 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
       return text.padEnd(8, ' ').slice(0, 8)
     }
     case 'custom_text': {
-      // 任意テキストを要素幅 (compact=4 / standard=8 / wide=16) に pad/clip。
-      // 他要素と同じく「文字数 = getElementSize() の幅」の不変条件を守る
-      // (はみ出し/間延びを防ぎ、device の width クリップとプレビューを一致させる)。
+      // 任意テキストを要素幅 (compact=4 / standard=8 / wide=16 セル) に
+      // pad/clip。全角を含み得るので「セル幅 = getElementSize() の幅」で
+      // 揃える (device の width*8px クリップと一致。全角は 2 セル消費)。
       const w = variant === 'compact' ? 4 : variant === 'wide' ? 16 : 8
       const txt = (text ?? '').trim() || 'テキスト'
-      return txt.padEnd(w, ' ').slice(0, w)
+      return padClipToCells(txt, w)
     }
     case 'alert_limit_mode': {
       // 受信制限モード。プレビューは既定 OFF(全て再生) の状態を表示。
-      // compact = 全て (制限) / standard = 全て再生 (制限モード)。
+      // compact = 全て (4 セル) / standard = 全て再生 (8 セル) を
+      // 要素幅 (4/10 セル) にセル基準で pad。全角=2 セル。
       const w = variant === 'compact' ? 4 : 10
       const txt = variant === 'compact' ? '全て' : '全て再生'
-      return txt.padEnd(w, ' ').slice(0, w)
+      return padClipToCells(txt, w)
     }
   }
 }

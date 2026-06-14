@@ -545,6 +545,12 @@ button.btn-deploy:disabled {
   color: #d0e0ff;
 }
 
+/* 全角 (日本語) は 2 グリッドセル分の幅を占有する — device の efont が
+   16px(=2 セル) で描くのに合わせ、flex 重みを 2 にして 1 文字 2 マスにする。 */
+.grid-element-chars .char-text.fw {
+  flex: 2;
+}
+
 /* 削除ボタン */
 .grid-element-delete {
   position: absolute; top: 0; right: 0;

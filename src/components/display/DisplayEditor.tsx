@@ -15,7 +15,7 @@ import { getElementSize, LED_CONDITION_METAS } from '@/types/display'
 import type { DeviceModel, DeviceHardwareSpec } from '@/types/device'
 import { DEVICE_SPECS } from '@/types/device'
 import { ElementPalette, getElementMeta, PALETTE_SECTIONS } from '@/components/common/ElementPalette'
-import { getElementPreviewText, DEFAULT_SIM_STATE } from '@/utils/displayPreview'
+import { getElementPreviewText, DEFAULT_SIM_STATE, charCells } from '@/utils/displayPreview'
 import type { SimState } from '@/utils/displayPreview'
 import {
   getPagePresetsFor, duoStandardTemplate, bandStandardTemplate,
@@ -1388,8 +1388,13 @@ function OledSimulator({
                       >
                         <span className="grid-element-name">{meta?.label ?? item.el.type}</span>
                         <div className="grid-element-chars">
-                          {item.text.split('').map((ch, ci) => (
-                            <span key={ci} className="char-text">{ch}</span>
+                          {/* 全角は 2 セル占有 (device の efont 16px に対応)。
+                              flex 重みを 2 にして 1 文字=2 マス幅で描く。 */}
+                          {Array.from(item.text).map((ch, ci) => (
+                            <span
+                              key={ci}
+                              className={charCells(ch) === 2 ? 'char-text fw' : 'char-text'}
+                            >{ch}</span>
                           ))}
                         </div>
                         <button
