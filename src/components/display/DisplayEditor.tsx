@@ -99,7 +99,7 @@ function buildGridRows(page: DisplayPage | undefined, simState: SimState): GridI
       if (elId) {
         const el = page.elements.find((e) => e.id === elId)!
         const size = getElementSize(el.type, el.variant)
-        const text = getElementPreviewText(el.type, simState, el.variant)
+        const text = getElementPreviewText(el.type, simState, el.variant, el.text)
         rows[r].push({ kind: 'element', col: c, span: size[0], el, text })
         c += size[0]
       } else {
@@ -193,6 +193,8 @@ function buildActionGroups(pages: DisplayPage[], deviceModel: DeviceModel): Acti
       { value: 'display_toggle', label: 'Display ON/OFF' },
       { value: 'led_toggle', label: 'LED ON/OFF' },
       { value: 'vib_mode', label: 'VibMode Var/Fix' },
+      // Receiver(mqtt) restricted-alert toggle (\u00a76.3): \u5236\u9650\u30e2\u30fc\u30c9 \u21c4 \u5168\u3066\u518d\u751f.
+      { value: 'limit_toggle', label: '\u30a2\u30e9\u30fc\u30c8\u5236\u9650 \u21c4 \u5168\u90e8' },
       { value: 'none', label: '\u2014 (None)' },
     ],
   })
@@ -504,12 +506,14 @@ export function DisplayEditor() {
       //     1 ページ 1 個だけに制限。
       //   それ以外は (type + variant) 単位でユニーク (battery は % と bar
       //     が共存可能)。
-      const dupExists = type === 'app_name'
-        ? page.elements.some((el) => el.type === 'app_name')
-        : page.elements.some(
-            (el) => el.type === type
-              && (el.variant ?? 'standard') === (variant ?? 'standard'),
-          )
+      const dupExists = type === 'custom_text'
+        ? false   // multiple static labels allowed (each has its own text)
+        : type === 'app_name'
+          ? page.elements.some((el) => el.type === 'app_name')
+          : page.elements.some(
+              (el) => el.type === type
+                && (el.variant ?? 'standard') === (variant ?? 'standard'),
+            )
       if (dupExists) {
         if (mouseX != null && mouseY != null) showToast('この要素は既に配置済みです', mouseX, mouseY)
         return false
@@ -527,6 +531,13 @@ export function DisplayEditor() {
       if (variant && variant !== 'standard') {
         newEl.variant = variant as 'compact' | 'bar' | 'wide'
       }
+      // Static custom text: prompt for the label on placement (no inspector
+      // panel exists; double-click a placed one to re-edit — see onEditCustomText).
+      if (type === 'custom_text') {
+        const t = window.prompt('表示するテキストを入力してください', '')
+        if (t == null) return false   // cancelled → don't place
+        newEl.text = t
+      }
       setLayout((prev) => {
         const newPages = [...prev.pages]
         const p = newPages[activePageIndex]
@@ -540,6 +551,28 @@ export function DisplayEditor() {
     },
     [activePageIndex, layout.pages, showToast]
   )
+
+  // Re-edit a placed custom_text element's label (double-click). No inspector
+  // panel exists, so a prompt is the lightweight in-place editor.
+  const editCustomText = useCallback((elId: string) => {
+    // Capture the prompt OUTSIDE the state updater. A blocking side effect
+    // inside setLayout's reducer is impure — StrictMode double-invokes the
+    // updater in dev and would pop the dialog twice. Mirror addElement: read
+    // current text, prompt, then apply a pure update with the captured value.
+    const el = layout.pages[activePageIndex]?.elements.find((e) => e.id === elId)
+    if (!el || el.type !== 'custom_text') return
+    const t = window.prompt('表示するテキストを入力してください', el.text ?? '')
+    if (t == null) return
+    setLayout((prev) => {
+      const p = prev.pages[activePageIndex]
+      if (!p) return prev
+      const newPages = [...prev.pages]
+      newPages[activePageIndex] = {
+        ...p, elements: p.elements.map((e) => (e.id === elId ? { ...e, text: t } : e)),
+      }
+      return { ...prev, pages: newPages }
+    })
+  }, [activePageIndex, layout])
 
   // パレットからの mouse ドラッグ
   useEffect(() => {
@@ -1126,6 +1159,7 @@ export function DisplayEditor() {
             if (el) setLastValidPos({ col: el.pos[0], row: el.pos[1] })
           }}
           onDeleteElement={handleDeleteElement}
+          onEditCustomText={editCustomText}
           onPopupSelect={handlePopupSelect}
           onPopupClose={() => setPopupPos(null)}
           onSimButtonClick={handleSimButtonClick}
@@ -1237,6 +1271,7 @@ interface OledSimulatorProps {
   dragPreview: { col: number; row: number; w: number; h: number; canPlace: boolean } | null
   onInternalDragStart: (id: string, type: DisplayElementType, offsetCol: number) => void
   onDeleteElement: (id: string) => void
+  onEditCustomText: (id: string) => void
   onPopupSelect: (type: DisplayElementType) => void
   onPopupClose: () => void
   onSimButtonClick: (buttonId: string) => void
@@ -1255,7 +1290,7 @@ function OledSimulator({
   popupPos, usedTypes,
   onOledClick,
   dragPreview, onInternalDragStart,
-  onDeleteElement, onPopupSelect, onPopupClose, onSimButtonClick, onSimButtonDown, onSimButtonUp,
+  onDeleteElement, onEditCustomText, onPopupSelect, onPopupClose, onSimButtonClick, onSimButtonDown, onSimButtonUp,
   pages, perButtonActions, onActionChange, onLedClick, onVolumeClick, onUiSettingsClick,
 }: OledSimulatorProps) {
   // ボタンをグリッドエリアに振り分け
@@ -1327,7 +1362,12 @@ function OledSimulator({
                           onInternalDragStart(item.el.id, item.el.type, offsetCol)
                         }}
                         onClick={(e) => e.stopPropagation()}
-                        title={meta?.label ?? item.el.type}
+                        onDoubleClick={(e) => {
+                          if (item.el.type === 'custom_text') { e.stopPropagation(); onEditCustomText(item.el.id) }
+                        }}
+                        title={item.el.type === 'custom_text'
+                          ? 'ダブルクリックでテキスト編集'
+                          : (meta?.label ?? item.el.type)}
                       >
                         <span className="grid-element-name">{meta?.label ?? item.el.type}</span>
                         <div className="grid-element-chars">

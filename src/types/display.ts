@@ -6,6 +6,8 @@ export interface DisplayElement {
   pos: [number, number]  // [col, row]
   variant?: 'standard' | 'compact' | 'bar' | 'wide'
   font_scale?: 1 | 2
+  /** Static label content — only for type 'custom_text'. */
+  text?: string
 }
 
 export type DisplayElementType =
@@ -24,6 +26,7 @@ export type DisplayElementType =
   | 'page_indicator'
   | 'group_id'
   | 'address'
+  | 'custom_text'
 
 export interface DisplayPage {
   name: string
@@ -45,6 +48,7 @@ export type ButtonActionType =
   | 'volume_up'
   | 'volume_down'
   | 'wifi_select'
+  | 'limit_toggle'
 
 /** Hold 動作モード: momentary=離したら戻す, latch=1回押しと同じ */
 export type HoldMode = 'momentary' | 'latch'
@@ -290,6 +294,7 @@ export const ELEMENT_FIXED_SIZES: Record<DisplayElementType, [number, number]> =
   address: [8, 1],           // "prefix__"  標準 8文字 (compact=4, wide=16)。
                              // 表示は address の prefix 部分のみ
                              // (player_/pos は別要素として持つため重複させない)
+  custom_text: [8, 1],       // 任意の固定テキスト (element.text)。S/M/L = 4/8/16
 }
 
 /** Get element size considering variant. Battery "bar" variant is wider. */
@@ -346,6 +351,14 @@ export function getElementSize(type: DisplayElementType, variant?: string): [num
     if (variant === 'compact') return [4, 1]
     if (variant === 'wide') return [16, 1]
     return [5, 1]
+  }
+  if (type === 'custom_text') {
+    // 任意の固定テキスト。3 サイズ展開 (他のテキスト要素と統一):
+    //   compact = 4 / standard (default) = 8 / wide = 16 文字幅。
+    // firmware は width*8px のピクセル境界でクリップ (全角は 2 セル消費)。
+    if (variant === 'compact') return [4, 1]
+    if (variant === 'wide') return [16, 1]
+    return [8, 1]
   }
   return ELEMENT_FIXED_SIZES[type]
 }

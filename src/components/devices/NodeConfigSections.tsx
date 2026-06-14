@@ -31,6 +31,9 @@ export interface NodeConfigInfo {
   mappings_count?: number
   /** Alert-loop mode (MQTT receiver, item 10). */
   alert_loop?: boolean
+  /** Restricted mode (MQTT receiver, §6.3): true = critical-only. Read-only;
+   *  toggled on-device via the limit_toggle button action. */
+  alert_limit?: boolean
   /** MQTT receiver subscribe topic roots (item 8). */
   recv_topics?: string[]
 }
@@ -528,6 +531,24 @@ export function MqttConfigSection({
             既定はループ。変更は次のアラートから即時反映されます。
           </div>
           {alertStatus && <div className="form-status ok" style={{ marginTop: 4 }}>{alertStatus}</div>}
+
+          {/* 制限モード (§6.3) — read-only。本体ボタンの limit_toggle アクション
+              でのみ切替 (シリアル set コマンドなし) なので現在値の表示に留める。 */}
+          {cachedInfo?.alert_limit != null && (
+            <div className="form-row" style={{ marginTop: 10 }}>
+              <label>受信制限</label>
+              <span className={`form-status ${cachedInfo.alert_limit ? 'warn' : 'muted'}`} style={{ textTransform: 'none' }}>
+                {cachedInfo.alert_limit ? '制限モード（重要な色のみ再生）' : '全て再生'}
+              </span>
+              <span />
+            </div>
+          )}
+          {cachedInfo?.alert_limit != null && (
+            <div className="form-status muted">
+              受信機本体に <code>limit_toggle</code> を割り当てたボタンで切替えます（UI からは変更不可・現在値の表示のみ）。
+              「制限モード」では「重要」フラグの付いた色だけを再生します。
+            </div>
+          )}
         </div>
       )}
 
@@ -1214,6 +1235,25 @@ export function SensorMappingSection({
               maxLength={32}
               disabled={!device.online}
             />
+            <span />
+          </div>
+
+          {/* 重要フラグ (§6.3): a color marked 重要 still plays on receivers that
+              are in 制限モード (restricted). */}
+          <div className="form-row">
+            <label>重要</label>
+            <label
+              className="form-status muted"
+              style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <input
+                type="checkbox"
+                checked={r.critical ?? false}
+                onChange={(e) => update(i, { critical: e.target.checked || undefined })}
+                disabled={!device.online}
+              />
+              受信機が「制限モード」でもこの色は再生する（例: 赤）
+            </label>
             <span />
           </div>
 

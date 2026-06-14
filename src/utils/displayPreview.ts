@@ -27,7 +27,7 @@ export const DEFAULT_SIM_STATE: SimState = {
  * 重要: 文字数 = getElementSize() の幅と一致させること
  * 1文字 = 1グリッドセル = 8px
  */
-export function getElementPreviewText(type: DisplayElementType, simState?: SimState, variant?: string): string {
+export function getElementPreviewText(type: DisplayElementType, simState?: SimState, variant?: string, text?: string): string {
   const s = simState ?? DEFAULT_SIM_STATE
   switch (type) {
     case 'volume':            return `vol:${String(s.volume).padStart(2, '0')}`   // 6文字
@@ -115,6 +115,14 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
       if (variant === 'wide')    return text.padEnd(16, ' ').slice(0, 16)
       return text.padEnd(8, ' ').slice(0, 8)
     }
+    case 'custom_text': {
+      // 任意テキストを要素幅 (compact=4 / standard=8 / wide=16) に pad/clip。
+      // 他要素と同じく「文字数 = getElementSize() の幅」の不変条件を守る
+      // (はみ出し/間延びを防ぎ、device の width クリップとプレビューを一致させる)。
+      const w = variant === 'compact' ? 4 : variant === 'wide' ? 16 : 8
+      const txt = (text ?? '').trim() || 'テキスト'
+      return txt.padEnd(w, ' ').slice(0, w)
+    }
   }
 }
 
@@ -136,5 +144,6 @@ export function getElementDescription(type: DisplayElementType): string {
     case 'position':          return 'pos:xxx'
     case 'page_indicator':    return 'N/N'
     case 'group_id':          return 'Gr:XX'
+    case 'custom_text':       return 'テキスト'
   }
 }

@@ -34,6 +34,7 @@ interface FirmwareElement {
   size: [number, number]
   variant?: string
   font_scale?: number
+  text?: string   // custom_text content (firmware reads elem["text"])
 }
 
 interface FirmwarePage {
@@ -166,6 +167,7 @@ export function toFirmwareFormat(state: DisplaySavedState): FirmwareUiConfig {
         out.variant = el.variant
       }
       if (el.font_scale && el.font_scale !== 1) out.font_scale = el.font_scale
+      if (el.type === 'custom_text' && el.text) out.text = el.text
       return out
     }),
   }))
@@ -267,6 +269,7 @@ export function fromFirmwareFormat(fw: FirmwareUiConfig): ImportedFirmwareState 
       if (el.variant === 'bar') base.variant = 'bar'
       if (el.variant === 'wide') base.variant = 'wide'
       if (el.font_scale && el.font_scale !== 1) base.font_scale = el.font_scale as 1 | 2
+      if (el.type === 'custom_text' && typeof el.text === 'string') base.text = el.text
       return base
     }),
   }))

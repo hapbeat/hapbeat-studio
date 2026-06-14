@@ -79,6 +79,7 @@ export const PALETTE_SECTIONS: PaletteSection[] = [
       { type: 'address',     label: 'Address',     description: 'prefix',     icon: 'A', variants: sizeVariants },
       { type: 'app_name',    label: 'AppName',     description: '接続アプリ名', icon: 'A', variants: sizeVariants },
       { type: 'position',    label: 'Position',    description: '装着位置 (pos_xxx)', icon: '⬦', variants: sizeVariants },
+      { type: 'custom_text', label: 'Text',        description: '任意の固定テキスト', icon: 'T', variants: sizeVariants },
     ],
   },
   {

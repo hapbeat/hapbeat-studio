@@ -73,6 +73,11 @@ export interface SensorMapping {
    * `oled` field; empty/undefined → no message. (mqtt-transport.md §4.1)
    */
   oled?: string
+  /**
+   * 重要フラグ (§6.3): when true, this color still plays on receivers that are
+   * in 制限モード (restricted). Sent as the play payload's `critical` flag.
+   */
+  critical?: boolean
 }
 
 export interface DeviceInfo {
@@ -239,7 +244,7 @@ export interface GetInfoResult {
   broker_host?: string
   /** MQTT connect port for manual hosts (receiver(mqtt) / sensor). */
   broker_port?: number
-  /** MQTT topic root, default "hapbeat" (receiver(mqtt) / sensor). */
+  /** MQTT topic root, default "default-topic" (receiver(mqtt) / sensor). */
   topic_root?: string
   /** MQTT QoS 0|1, default 1 (receiver(mqtt) / sensor). */
   mqtt_qos?: number
@@ -265,8 +270,13 @@ export interface GetInfoResult {
    *  expose several sensors (item 3). Single-sensor builds report one element. */
   sensor_types?: string[]
   /** Alert-loop mode (MQTT receiver, item 10): true = loop an incoming alert
-   *  until any button is pressed; false = one-shot. */
+   *  until acknowledged by a deliberate button hold (~1s after release);
+   *  false = one-shot. */
   alert_loop?: boolean
+  /** Restricted mode (MQTT receiver, mqtt-transport.md §6.3): true = play only
+   *  `critical` alerts; false (default) = play all. Read-only here — toggled on
+   *  the device via the `limit_toggle` button action (no serial set command). */
+  alert_limit?: boolean
   /** Receive topic roots the MQTT receiver subscribes to (item 8). Empty =
    *  the default channel ("default-topic"). */
   recv_topics?: string[]

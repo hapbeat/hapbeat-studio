@@ -88,8 +88,12 @@ interface DeviceState {
     mappings_count?: number
     /** Sensor hardware type(s) — array so one sender can host several (item 3). */
     sensor_types?: string[]
-    /** Alert-loop mode (MQTT receiver, item 10): loop until any button press. */
+    /** Alert-loop mode (MQTT receiver, item 10): loop until a deliberate
+     *  button hold acknowledges it. */
     alert_loop?: boolean
+    /** Restricted mode (MQTT receiver, §6.3): true = play critical-only.
+     *  Read-only; toggled on-device via the limit_toggle button action. */
+    alert_limit?: boolean
     /** MQTT receiver subscribe topic roots (item 8). Empty = default-topic. */
     recv_topics?: string[]
   }>
