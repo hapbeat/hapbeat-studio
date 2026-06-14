@@ -1,6 +1,7 @@
 import { DeviceList } from './DeviceList'
 import { DeviceDetail } from './DeviceDetail'
 import { MqttFlowController } from './MqttFlow'
+import { OtaController } from './OtaController'
 import './Devices.css'
 
 /**
@@ -19,6 +20,9 @@ export function Devices() {
           pop-out so it survives switching the selected device. Renders
           nothing inline. */}
       <MqttFlowController />
+      {/* Page-level OTA drain: keeps each device's OTA progress/result + the
+          post-reboot verify alive while you switch devices (per-device OTA). */}
+      <OtaController />
     </div>
   )
 }

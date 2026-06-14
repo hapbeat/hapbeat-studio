@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useLogStore } from '@/stores/logStore'
 import { useDeviceStore } from '@/stores/deviceStore'
+import { useOtaStore, OTA_DEFAULT } from '@/stores/otaStore'
 import type { DeviceInfo, ManagerMessage, NodeRole, NodeTransport } from '@/types/manager'
 import { useConfirm } from '@/components/common/useConfirm'
 import { serialEntryLabel, useSerialMaster } from '@/stores/serialMaster'
@@ -74,13 +75,6 @@ function entryLabel(e: FirmwareLibraryEntry): string {
   return e.label ?? e.env
 }
 
-interface OtaProgress {
-  device: string
-  phase: string
-  percent: number
-  message: string
-}
-
 interface Props {
   /** When omitted (onboarding pane / no device selected), only Serial
    *  flashing is offered — OTA needs an online IP. */
@@ -127,7 +121,7 @@ export function FirmwareSubTab({
   groupFilter,
 }: Props) {
   const showOta = !serialOnly && !!device && !!sendTo
-  const { lastMessage, send: helperSend, devices } = useHelperConnection()
+  const { send: helperSend, devices } = useHelperConnection()
   const pushLog = useLogStore((s) => s.push)
   const selectedIps = useDeviceStore((s) => s.selectedIps)
 
@@ -179,12 +173,18 @@ export function FirmwareSubTab({
   } | null>(null)
   const [localPermissionDenied, setLocalPermissionDenied] = useState(false)
 
-  // Wi-Fi OTA state
-  const [progress, setProgress] = useState<OtaProgress | null>(null)
-  const [running, setRunning] = useState(false)
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
-  const [otaStuck, setOtaStuck] = useState(false)
-  const lastOtaProgressAtRef = useRef<number>(0)
+  // Wi-Fi OTA state — per device, in otaStore so it survives tab/device
+  // switches (OtaController, mounted at the Devices root, drains the messages
+  // and owns the side effects: board-cache, the reboot verify, stuck detect).
+  const ota = useOtaStore((s) => s.byIp[device?.ipAddress ?? '']) ?? OTA_DEFAULT
+  const progress = ota.progress
+  const running = ota.running
+  const result = ota.result
+  const otaStuck = ota.stuck
+  const otaStart = useOtaStore((s) => s.start)
+  const otaSetResult = useOtaStore((s) => s.setResult)
+  const otaClearResult = useOtaStore((s) => s.clearResult)
+  const otaCancel = useOtaStore((s) => s.cancel)
 
   // USB Serial state lives in the SerialMaster.
   const serialRunning = useSerialMaster((s) => s.flashRunning)
@@ -211,7 +211,6 @@ export function FirmwareSubTab({
     const key = device?.ipAddress
     return key ? s.lastFlashedBoard[key] : undefined
   })
-  const invalidateBoard = useDeviceStore((s) => s.invalidateBoard)
   const setLastFlashedBoard = useDeviceStore((s) => s.setLastFlashedBoard)
   const knownBoard = lanBoard ?? serialMasterBoard ?? lastFlashedBoardForIp ?? null
 
@@ -394,92 +393,16 @@ export function FirmwareSubTab({
     }
   }, [])
 
-  const [expectedFwVersion, setExpectedFwVersion] = useState<string | null>(null)
-
-  // ---- Wi-Fi OTA result drain ---------------------------------------
-
-  useEffect(() => {
-    if (!lastMessage) return
-    const t = lastMessage.type
-    const p = lastMessage.payload as Record<string, unknown>
-    if (t === 'ota_progress' && typeof p.device === 'string') {
-      setProgress({
-        device: p.device,
-        phase: String(p.phase ?? ''),
-        percent: Number(p.percent ?? 0),
-        message: String(p.message ?? ''),
-      })
-      lastOtaProgressAtRef.current = Date.now()
-      if (otaStuck) setOtaStuck(false)
-    } else if (t === 'ota_result' && typeof p.device === 'string') {
-      setRunning(false)
-      setOtaStuck(false)
-      const ok = p.success === true
-      setResult({ ok, message: String(p.message ?? '') })
-      setTimeout(() => setProgress(null), 3000)
-      if (ok && device) {
-        invalidateBoard(device.ipAddress)
-        if (source === 'library' && selectedEntry) {
-          const flashed = entryBoard(selectedEntry)
-          if (flashed) setLastFlashedBoard(device.ipAddress, flashed)
-        }
-      }
-      if (ok && expectedFwVersion && device && sendTo) {
-        const ip = device.ipAddress
-        pushLog('ota', `verify scheduled in 8 s (expected fw=${expectedFwVersion})`)
-        setTimeout(() => {
-          sendTo({ type: 'get_info', payload: { ip } })
-        }, 8000)
-      }
-    } else if (t === 'get_info_result' && expectedFwVersion) {
-      const deviceFw = (p.fw as string | undefined) ?? ''
-      if (!deviceFw) {
-        pushLog('ota', 'verify skipped — device get_info did not include fw')
-      } else if (deviceFw !== expectedFwVersion) {
-        setResult({
-          ok: false,
-          message: (
-            `OTA は完了したが、再起動後のファームウェアバージョンが一致しません`
-            + ` (期待 ${expectedFwVersion}, 実際 ${deviceFw})。`
-            + ` otadata の切替に失敗している可能性があります — `
-            + `デバイスを電源 OFF/ON してから再度 OTA を試してください。`
-          ),
-        })
-        pushLog('ota', `verify FAILED — expected=${expectedFwVersion} got=${deviceFw}`)
-      } else {
-        pushLog('ota', `verify OK — fw=${deviceFw}`)
-      }
-      setExpectedFwVersion(null)
-    }
-  }, [lastMessage, expectedFwVersion, device, sendTo, pushLog,
-      source, selectedEntry, invalidateBoard, setLastFlashedBoard, otaStuck])
-
-  useEffect(() => {
-    if (!running) {
-      setOtaStuck(false)
-      return
-    }
-    lastOtaProgressAtRef.current = Date.now()
-    const tick = window.setInterval(() => {
-      const elapsed = Date.now() - lastOtaProgressAtRef.current
-      if (elapsed >= 3000) setOtaStuck(true)
-    }, 500)
-    return () => window.clearInterval(tick)
-  }, [running])
+  // The OTA message drain, the post-reboot verify, board-cache update and
+  // stuck detection all moved to OtaController (mounted once at the Devices
+  // root) so they keep running for a device whose Firmware tab isn't on
+  // screen — which is what makes OTA per-device independent (#5).
 
   const cancelStuckOta = useCallback(() => {
-    pushLog('ota', 'user cancelled stuck OTA — UI released, helper session may still drain')
-    setRunning(false)
-    setOtaStuck(false)
-    setProgress(null)
-    setExpectedFwVersion(null)
-    setResult({
-      ok: false,
-      message:
-        'ユーザーによりキャンセルされました。デバイス側で書込が完了している可能性は'
-        + '残るため、再起動後に fw バージョンを確認してください。',
-    })
-  }, [pushLog])
+    if (!device) return
+    pushLog('ota', `user cancelled stuck OTA (${device.ipAddress}) — UI released, helper session may still drain`)
+    otaCancel(device.ipAddress)
+  }, [pushLog, device, otaCancel])
 
   // ---- Reading freshly from disk ------------------------------------
 
@@ -646,7 +569,7 @@ export function FirmwareSubTab({
   const submit = async () => {
     if (!device || !sendTo) return
     if (!device.online) {
-      setResult({
+      otaSetResult(device.ipAddress, {
         ok: false,
         message: 'デバイスがオフラインです — 電源 OFF/ON してから再試行してください',
       })
@@ -654,12 +577,12 @@ export function FirmwareSubTab({
       return
     }
     if (!(await checkBoardMatch('OTA'))) return
-    setResult(null)
+    otaClearResult(device.ipAddress)
     let bin: Awaited<ReturnType<typeof readSelectedBin>>
     try {
       bin = await readSelectedBin()
     } catch (err) {
-      setResult({ ok: false, message: String((err as Error).message ?? err) })
+      otaSetResult(device.ipAddress, { ok: false, message: String((err as Error).message ?? err) })
       return
     }
 
@@ -670,7 +593,7 @@ export function FirmwareSubTab({
     const validation = validateOtaImage(bin.bytes, chipIdForBoard(knownBoard))
     if (!validation.ok) {
       pushLog('ota', `pre-flight FAILED: ${validation.reason}`)
-      setResult({
+      otaSetResult(device.ipAddress, {
         ok: false,
         message: `書き込みを中止しました (プリフライト検証失敗): ${validation.reason}`,
       })
@@ -684,13 +607,12 @@ export function FirmwareSubTab({
       + `hash=${validation.info!.hashAppended ? 'appended' : 'header-only'}`,
     )
 
-    setRunning(true)
     pushLog('ota', `flash → ${bin.label} (${formatBytes(bin.bytes.length)})`)
-    if (source === 'library') {
-      setExpectedFwVersion(selectedEntry?.fwVersion ?? null)
-    } else {
-      setExpectedFwVersion(null)
-    }
+    // Verify/board context captured at submit time — OtaController applies them
+    // on the device's ota_result (per-device, regardless of what's on screen).
+    const expectedFw = source === 'library' ? (selectedEntry?.fwVersion ?? null) : null
+    const flashedBoard = (source === 'library' && selectedEntry)
+      ? (entryBoard(selectedEntry) ?? null) : null
     const lanCandidates = selectedIps.filter((ip) => !ip.startsWith('serial:'))
     const onlineLan = lanCandidates
       .map((ip) => devices.find((d) => d.ipAddress === ip))
@@ -706,12 +628,13 @@ export function FirmwareSubTab({
         + `[${targets.join(', ')}]`,
       )
     }
-    setProgress({
-      device: device.ipAddress, phase: 'begin', percent: 0,
-      message: targets.length > 1
-        ? `OTA 開始要求… (${targets.length} 台 / ${bin.label})`
-        : `OTA 開始要求… (${bin.label})`,
-    })
+    const beginMsg = targets.length > 1
+      ? `OTA 開始要求… (${targets.length} 台 / ${bin.label})`
+      : `OTA 開始要求… (${bin.label})`
+    // Mark each target as running in the per-device store (survives tab switch).
+    for (const ip of targets) {
+      otaStart(ip, { expectedFw, flashedBoard, message: beginMsg })
+    }
     if (targets.length > 1) {
       helperSend({
         type: 'ota_data',
