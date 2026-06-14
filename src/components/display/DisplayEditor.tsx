@@ -941,7 +941,7 @@ export function DisplayEditor() {
     // previous behavior of broadcasting to all devices made multi-
     // device studios dangerous to edit. Empty selection → toast +
     // abort rather than fall back to broadcast.
-    const { selectedIps, selectedIp } = useDeviceStore.getState()
+    const { selectedIps, selectedIp, infoCache } = useDeviceStore.getState()
     const rawTargets = selectedIps.length > 0
       ? selectedIps
       : (selectedIp ? [selectedIp] : [])
@@ -976,13 +976,30 @@ export function DisplayEditor() {
         lanTargets.filter((ip) => !onlineSet.has(ip)),
       )
     }
+    // The display/UI config only applies to Hapbeat wearables — never write it
+    // to a non-Hapbeat ecosystem node (sensor / broker / transmitter). Exclude
+    // only KNOWN non-Hapbeat (board present and not duo_wl_*/band_wl_*); an
+    // un-probed device (board unknown) is kept so we never wrongly block a
+    // Hapbeat (user 2026-06-15).
+    const isKnownNonHapbeat = (ip: string) => {
+      const board = infoCache[ip]?.board   // from get_info; absent until probed
+      return !!board && board !== 'unknown' && !(board.startsWith('duo_wl') || board.startsWith('band_wl'))
+    }
+    const hapbeatTargets = targets.filter((ip) => !isKnownNonHapbeat(ip))
+    if (hapbeatTargets.length === 0) {
+      toast('UI 設定は Hapbeat 本体のみ対象です（選択中に Hapbeat 機器がありません）', 'error')
+      return
+    }
+    if (hapbeatTargets.length < targets.length) {
+      toast(`非 Hapbeat 機器 ${targets.length - hapbeatTargets.length} 台は対象外にしました`, 'warning')
+    }
     setIsDeploying(true)
     // Pre-seed progress so the UI shows immediately ("sending" for each
     // target). Helper's per-target `write_progress` will overwrite the
     // phase as each one completes.
     setDeployProgress({
-      total: targets.length,
-      targets: Object.fromEntries(targets.map((ip) => [ip, { phase: 'sending' }])),
+      total: hapbeatTargets.length,
+      targets: Object.fromEntries(hapbeatTargets.map((ip) => [ip, { phase: 'sending' }])),
     })
     const uiConfig = toFirmwareFormat(buildSavedState())
     // Helper's `_resolve_targets` looks for `payload.targets` (array)
@@ -992,7 +1009,7 @@ export function DisplayEditor() {
     // user wanted to stop.
     managerSend({
       type: 'write_ui_config',
-      payload: { config: uiConfig, targets },
+      payload: { config: uiConfig, targets: hapbeatTargets },
     })
   }, [managerConnected, managerSend, buildSavedState, toast, devices])
 

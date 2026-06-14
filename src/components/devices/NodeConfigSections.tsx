@@ -2,7 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DeviceInfo, ManagerMessage, MqttClientEntry, SensorColorMatch, SensorMapping, SensorReading } from '@/types/manager'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useMqttTopicsStore, sanitizeTopic } from '@/stores/mqttTopicsStore'
+import { useToast } from '@/components/common/Toast'
 import { MqttFlowPanel } from './MqttFlow'
+
+// Status feedback uses anchored toasts (Toast.tsx) instead of inline text, so
+// showing a message never shifts the surrounding buttons (user 2026-06-15).
+// Each apply handler sets the toast anchor to its button on click, then toasts.
 
 /**
  * Per-node-role config panels (DEC-034). Each speaks the common
@@ -269,11 +274,13 @@ export function MqttConfigSection({
   const [host, setHost] = useState<string>(initialHost === 'auto' ? '' : initialHost)
   const [port, setPort] = useState<number>(cachedInfo?.broker_port ?? 1883)
   const [qos, setQos] = useState<number>(cachedInfo?.mqtt_qos ?? 1)
-  // Per-section status so applying one group's settings doesn't flash a message
-  // in another group's row (user 2026-06-14).
-  const [status, setStatus] = useState<string | null>(null)       // ブローカー設定
-  const [topicStatus, setTopicStatus] = useState<string | null>(null)  // TOPIC
-  const [alertStatus, setAlertStatus] = useState<string | null>(null)  // アラート動作
+  // Feedback is shown as a toast anchored to the clicked button (never shifts
+  // the surrounding rows). `notify` sets the anchor + toasts in one call.
+  const { toast, setAnchor } = useToast()
+  const notify = (e: React.MouseEvent<HTMLElement>, msg: string,
+                  type: 'success' | 'error' | 'info' | 'warning' = 'success') => {
+    setAnchor(e.currentTarget); toast(msg, type)
+  }
   // Alert-loop mode (receiver, item 10): default ON (loop until any button).
   const [alertLoop, setAlertLoop] = useState<boolean>(cachedInfo?.alert_loop ?? true)
   // Deliberate-hold time to acknowledge/stop an alert (receiver, §6.1).
@@ -313,7 +320,7 @@ export function MqttConfigSection({
   }
   // ブローカー設定だけを適用（topic は別グループ）。topic_root は default-topic
   // に固定（broker 接続に topic は不要）。
-  const applyBroker = () => {
+  const applyBroker = (e: React.MouseEvent<HTMLElement>) => {
     const value = auto ? 'auto' : host.trim()
     if (!auto && !value) return
     sendTo({
@@ -321,39 +328,35 @@ export function MqttConfigSection({
       payload: { host: value, port, topic_root: 'default-topic', qos },
     })
     if (role === 'receiver') {
-      setStatus('ブローカー設定を適用しました（受信機を自動再起動して反映します）')
+      notify(e, 'ブローカー設定を適用（受信機を自動再起動して反映）')
       rebootAfter()
     } else {
-      setStatus('ブローカー設定を適用しました（即時再接続）')
+      notify(e, 'ブローカー設定を適用（即時再接続）')
     }
-    setTimeout(() => setStatus(null), 5000)
   }
   // 受信 topic（receiver）だけを適用（item 8）。購読の張り直しに再起動が要るので
   // 適用後に自動で再起動する。
-  const applyRecvTopics = () => {
+  const applyRecvTopics = (e: React.MouseEvent<HTMLElement>) => {
     sendTo({ type: 'set_recv_topics', payload: { topics: recvTopics } })
-    setTopicStatus('受信 topic を適用しました（受信機を自動再起動して反映します）')
+    notify(e, '受信 topic を適用（受信機を自動再起動して反映）')
     rebootAfter()
-    setTimeout(() => setTopicStatus(null), 6000)
   }
 
   // Alert-loop toggle (receiver, item 10) — persisted immediately and applied
   // on the next incoming alert (firmware reads the flag fresh; no reboot).
-  const applyAlertLoop = (next: boolean) => {
+  const applyAlertLoop = (e: React.MouseEvent<HTMLElement>, next: boolean) => {
     setAlertLoop(next)
     sendTo({ type: 'set_alert_mode', payload: { loop: next } })
-    setAlertStatus(`アラートを${next ? 'ループ (ボタンで停止)' : '単発'}に設定しました`)
-    setTimeout(() => setAlertStatus(null), 5000)
+    notify(e, `アラートを${next ? 'ループ (ボタンで停止)' : '単発'}に設定`)
   }
 
   // Deliberate-hold acknowledge time (receiver, §6.1). Persisted in NVS on the
   // device and applied immediately (no reboot — read fresh per press).
-  const applyAckHold = () => {
+  const applyAckHold = (e: React.MouseEvent<HTMLElement>) => {
     const ms = Math.max(200, Math.min(10000, Math.round(ackHoldMs)))
     setAckHoldMs(ms)
     sendTo({ type: 'set_alert_mode', payload: { ack_hold_ms: ms } })
-    setAlertStatus(`停止の長押し時間を ${ms} ms に設定しました`)
-    setTimeout(() => setAlertStatus(null), 5000)
+    notify(e, `停止の長押し時間を ${ms} ms に設定`)
   }
 
   // Gray out the host/port inputs while auto-detect is on, so it's obvious they
@@ -451,8 +454,6 @@ export function MqttConfigSection({
         <div className="form-action-row" style={{ marginTop: 8 }}>
           <button className="form-button" onClick={applyBroker} disabled={!device.online}>適用</button>
         </div>
-        {/* Status on its own line so it never shifts the 適用 button. */}
-        <div className="form-status ok" style={{ marginTop: 4, minHeight: 16 }}>{status ?? ''}</div>
       </div>
 
       {/* ── Group 2: TOPIC — receiver の購読 topic (item 8) ── */}
@@ -519,7 +520,6 @@ export function MqttConfigSection({
             <div className="form-action-row" style={{ marginTop: 8 }}>
               <button className="form-button" onClick={applyRecvTopics} disabled={!device.online}>適用</button>
             </div>
-            <div className="form-status ok" style={{ marginTop: 4, minHeight: 16 }}>{topicStatus ?? ''}</div>
           </div>
         )
       })()}
@@ -537,7 +537,7 @@ export function MqttConfigSection({
               <button
                 type="button"
                 className={`form-button${alertLoop ? '' : '-secondary'}`}
-                onClick={() => applyAlertLoop(true)}
+                onClick={(e) => applyAlertLoop(e, true)}
                 disabled={!device.online}
                 title="アラートを受信したら、本体ボタンを長押しするまで振動を繰り返す"
               >
@@ -546,7 +546,7 @@ export function MqttConfigSection({
               <button
                 type="button"
                 className={`form-button${!alertLoop ? '' : '-secondary'}`}
-                onClick={() => applyAlertLoop(false)}
+                onClick={(e) => applyAlertLoop(e, false)}
                 disabled={!device.online}
                 title="アラートを受信したら 1 回だけ振動する"
               >
@@ -586,7 +586,6 @@ export function MqttConfigSection({
           <div className="form-status muted">
             アラートを止めるには、ボタンを一度離してからこの時間だけ長押しします（誤操作・押しっぱなし対策）。既定 1000 ms。
           </div>
-          {alertStatus && <div className="form-status ok" style={{ marginTop: 4 }}>{alertStatus}</div>}
 
           {/* 制限モード (§6.3) — read-only。本体ボタンの limit_toggle アクション
               でのみ切替 (シリアル set コマンドなし) なので現在値の表示に留める。
@@ -831,7 +830,11 @@ export function SensorMappingSection({
 }) {
   const [rows, setRows] = useState<SensorMapping[]>(mappings ?? [])
   const [dirty, setDirty] = useState(false)
-  const [status, setStatus] = useState<string | null>(null)
+  // Feedback as anchored toasts (Toast.tsx) — never shifts the button row.
+  const { toast, setAnchor } = useToast()
+  const setStatus = (msg: string | null, type: 'success' | 'error' | 'info' | 'warning' = 'success') => {
+    if (msg) toast(msg, type)
+  }
   const [tolerance, setTolerance] = useState<number>(DEFAULT_CAPTURE_TOLERANCE)
   // Accordion: which row indices are expanded for editing. Collapsed by
   // default so the list stays scannable (user feedback 2026-06-13).
@@ -1574,14 +1577,14 @@ export function SensorMappingSection({
         />
         <button
           className="form-button-secondary"
-          onClick={() => fileInputRef.current?.click()}
+          onClick={(e) => { setAnchor(e.currentTarget); fileInputRef.current?.click() }}
           title="JSON ファイルからマッピングを読み込む（「デバイスに保存」で反映）"
         >
           ⤒ JSON 読込
         </button>
         <button
           className="form-button-secondary"
-          onClick={exportJson}
+          onClick={(e) => { setAnchor(e.currentTarget); exportJson() }}
           disabled={rows.length === 0}
           title="現在のマッピングを JSON ファイルに保存"
         >
@@ -1589,17 +1592,13 @@ export function SensorMappingSection({
         </button>
         <button
           className="form-button"
-          onClick={save}
+          onClick={(e) => { setAnchor(e.currentTarget); save() }}
           disabled={!device.online || !dirty}
           title="編集内容をデバイスに書き込む"
         >
           デバイスに保存
         </button>
       </div>
-      {/* Status BELOW the buttons (not inline) so showing it never shifts the
-          button row. A reserved min-height keeps the layout stable whether or
-          not a message is present (user 2026-06-15). */}
-      <div className="form-status ok" style={{ marginTop: 6, minHeight: 18 }}>{status ?? ''}</div>
     </div>
   )
 }
