@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useMqttFlowStore } from '@/stores/mqttFlowStore'
+import { useDeviceStore } from '@/stores/deviceStore'
 import type { DeviceInfo, MqttClientEntry } from '@/types/manager'
 
 /**
@@ -27,6 +28,9 @@ interface FlowNode {
   label: string
   /** true = present in the broker's client list; false = discovered-only. */
   connected: boolean
+  /** Topic this node uses, from its get_info (sender: 送信 topic_root;
+   *  receiver: 購読 recv_topics). undefined = not fetched yet. (item, 06-14) */
+  topic?: string
 }
 
 function clientLabel(c: MqttClientEntry): string {
@@ -75,6 +79,10 @@ export function useMqttFlowData(): MqttFlowData {
   // clearCachesFor on device switch, which used to blank the client list and
   // turn every connected sender into a 未接続 ghost (workflow root cause).
   const telemetry = useMqttFlowStore((s) => s.brokerTelemetry)
+  // Per-device topic config (sender topic_root / receiver recv_topics) comes
+  // from each device's get_info, cached in deviceStore.infoCache. The flow
+  // controller polls the MQTT nodes so this is kept fresh while viewing.
+  const infoCache = useDeviceStore((s) => s.infoCache)
 
   return useMemo(() => {
     const broker = devices.find((d) => d.role === 'broker')
@@ -96,17 +104,29 @@ export function useMqttFlowData(): MqttFlowData {
     const discoveredSenders = discovered.filter((d) => d.role === 'sensor')
     const discoveredReceivers = discovered.filter((d) => d.role !== 'sensor')
 
+    // Topic label for a node, by correlating its name → device → infoCache.
+    const ipByName = new Map(devices.map((d) => [d.name, d.ipAddress]))
+    const topicFor = (ip: string | undefined, kind: 'sender' | 'receiver'): string | undefined => {
+      if (!ip) return undefined
+      const ci = infoCache[ip]
+      if (!ci) return undefined
+      if (kind === 'sender') return ci.topic_root || undefined
+      const rt = ci.recv_topics
+      if (rt == null) return undefined
+      return rt.length ? rt.join(', ') : 'default-topic'
+    }
+
     const left: FlowNode[] = [
-      ...senders.map((c) => ({ key: `c-${c.id}`, label: clientLabel(c), connected: true })),
+      ...senders.map((c) => ({ key: `c-${c.id}`, label: clientLabel(c), connected: true, topic: topicFor(ipByName.get(c.name ?? ''), 'sender') })),
       ...others.map((c) => ({ key: `c-${c.id}`, label: clientLabel(c), connected: true })),
       ...discoveredSenders.map((d) => ({
-        key: `d-${d.ipAddress}`, label: d.name || d.ipAddress, connected: false,
+        key: `d-${d.ipAddress}`, label: d.name || d.ipAddress, connected: false, topic: topicFor(d.ipAddress, 'sender'),
       })),
     ]
     const right: FlowNode[] = [
-      ...receivers.map((c) => ({ key: `c-${c.id}`, label: clientLabel(c), connected: true })),
+      ...receivers.map((c) => ({ key: `c-${c.id}`, label: clientLabel(c), connected: true, topic: topicFor(ipByName.get(c.name ?? ''), 'receiver') })),
       ...discoveredReceivers.map((d) => ({
-        key: `d-${d.ipAddress}`, label: d.name || d.ipAddress, connected: false,
+        key: `d-${d.ipAddress}`, label: d.name || d.ipAddress, connected: false, topic: topicFor(d.ipAddress, 'receiver'),
       })),
     ]
 
@@ -139,7 +159,7 @@ export function useMqttFlowData(): MqttFlowData {
       receiverCount: receivers.length,
       noBroker: !broker,
     }
-  }, [devices, telemetry])
+  }, [devices, telemetry, infoCache])
 }
 
 // --- pure SVG --------------------------------------------------------------
@@ -178,22 +198,32 @@ function MqttFlowChartSvg(props: MqttFlowData) {
     const fill = !node.connected ? 'rgba(128,128,128,0.06)'
       : kind === 'sender' ? 'rgba(255,165,0,0.12)' : 'rgba(76,175,80,0.12)'
     const label = node.label.length > 16 ? `${node.label.slice(0, 15)}…` : node.label
+    // Topic sub-label: receiver 購読 / sender 送信 root. Truncate to fit.
+    const topic = node.topic
+      ? (node.topic.length > 18 ? `${node.topic.slice(0, 17)}…` : node.topic)
+      : undefined
+    const hasSub = !node.connected || !!topic   // a second line under the name
     return (
       <g key={node.key}>
         <rect
-          x={x} y={y - 13} width={150} height={26} rx={5}
+          x={x} y={y - 15} width={150} height={30} rx={5}
           fill={fill} stroke={stroke} strokeWidth={1}
           strokeDasharray={node.connected ? undefined : '4 3'}
         />
-        <text x={x + 75} y={node.connected ? y + 4 : y + 1} textAnchor="middle" fontSize={11}
+        <text x={x + 75} y={hasSub ? y - 2 : y + 4} textAnchor="middle" fontSize={11}
           fill={node.connected ? 'var(--text-primary, #ddd)' : 'var(--text-muted, #888)'}
           style={{ fontFamily: 'var(--font-mono)' }}>
           {label}
         </text>
-        {!node.connected && (
-          <text x={x + 75} y={y + 11} textAnchor="middle" fontSize={8}
-            fill="#c9742e">未接続</text>
-        )}
+        {!node.connected ? (
+          <text x={x + 75} y={y + 10} textAnchor="middle" fontSize={8} fill="#c9742e">未接続</text>
+        ) : topic ? (
+          <text x={x + 75} y={y + 9} textAnchor="middle" fontSize={8}
+            fill={kind === 'sender' ? '#c9742e' : '#3f9c42'}
+            style={{ fontFamily: 'var(--font-mono)' }}>
+            {kind === 'sender' ? '→ ' : '← '}{topic}
+          </text>
+        ) : null}
       </g>
     )
   }
@@ -405,16 +435,30 @@ export function MqttFlowController() {
   // cause #2). A poll to a truly-down broker just fails harmlessly.
   const shouldPoll = !!brokerIp && (viewerCount > 0 || !!popout)
 
-  // Poll the broker for fresh telemetry while a broker exists and is viewed.
+  // Poll the broker for fresh telemetry while a broker exists and is viewed,
+  // plus each online MQTT-client device's get_info so the flow can show their
+  // topic config (sender topic_root / receiver recv_topics — item 06-14). The
+  // results land in infoCache via DeviceDetail's get_info handler. Topic config
+  // is near-static, so 2 s is plenty (small deployments — a handful of nodes).
   const sendRef = useRef(send)
   sendRef.current = send
+  const mqttNodeIps = devices
+    .filter((d) => d.online && (d.role === 'sensor'
+      || (d.transports ?? (d.transport ? [d.transport] : [])).includes('mqtt')))
+    .map((d) => d.ipAddress)
+  const mqttNodeKey = mqttNodeIps.join(',')
   useEffect(() => {
     if (!brokerIp || !shouldPoll) return
-    const tick = () => sendRef.current({ type: 'get_info', payload: { ip: brokerIp } })
+    const tick = () => {
+      sendRef.current({ type: 'get_info', payload: { ip: brokerIp } })
+      for (const ip of mqttNodeKey ? mqttNodeKey.split(',') : []) {
+        sendRef.current({ type: 'get_info', payload: { ip } })
+      }
+    }
     tick()
     const id = window.setInterval(tick, 2000)
     return () => window.clearInterval(id)
-  }, [brokerIp, shouldPoll])
+  }, [brokerIp, shouldPoll, mqttNodeKey])
 
   // OWN the broker telemetry: write every broker get_info_result straight into
   // mqttFlowStore, decoupled from deviceStore.infoCache (which DeviceDetail
