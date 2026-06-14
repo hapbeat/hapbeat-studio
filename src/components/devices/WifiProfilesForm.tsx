@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import type { WifiProfile } from '@/stores/deviceStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
+import { useToast } from '@/components/common/Toast'
 import type { SerialWifiNetwork } from '@/stores/serialMaster'
 
 interface Props {
@@ -60,6 +61,7 @@ export function WifiProfilesForm({
   // path but failed during onboarding (radio not initialized in
   // factory state), so we unified to Helper-only.
   const { send: helperSend, lastMessage } = useHelperConnection()
+  const { toast, setAnchor } = useToast()
   const [scanResults, setScanResults] = useState<SerialWifiNetwork[]>([])
   const [scanState, setScanState] = useState<'idle' | 'scanning' | 'done' | 'error'>('idle')
 
@@ -147,8 +149,11 @@ export function WifiProfilesForm({
     setPassword('')
   }
 
-  const submit = () => {
+  const submit = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (!ssid.trim()) return
+    setAnchor(e.currentTarget)
+    const wasEdit = editingIndex !== null
+    const targetSsid = ssid.trim()
     // password が空欄の場合は pass フィールド自体を含めない
     // (空文字送信で既存パスワードを破壊しないよう write-only 仕様に準拠)
     // Send both `pass` and `password` so the call works on either
@@ -158,27 +163,36 @@ export function WifiProfilesForm({
     const passFields = password.length > 0 ? { pass: password, password } : {}
     sendTo({
       type: 'set_wifi',
-      payload: { ssid: ssid.trim(), ...passFields },
+      payload: { ssid: targetSsid, ...passFields },
     })
     exitEditMode()
     setAddOpen(false)
+    toast(`${targetSsid} を${wasEdit ? '更新' : '追加'}しました`, 'success')
     // Refresh the profile list — the firmware doesn't push, we poll.
     setTimeout(onRefresh, 800)
   }
 
-  const connectProfile = (idx: number) => {
+  const connectProfile = (e: React.MouseEvent<HTMLButtonElement>, idx: number) => {
+    setAnchor(e.currentTarget)
     sendTo({ type: 'connect_wifi_profile', payload: { index: idx } })
+    toast(`プロファイル #${idx} に接続を試行します`, 'info')
   }
 
-  const removeProfile = (idx: number) => {
+  const removeProfile = (e: React.MouseEvent<HTMLButtonElement>, idx: number) => {
+    const btn = e.currentTarget
     if (!confirm(`プロファイル #${idx} を削除しますか？`)) return
+    setAnchor(btn)
     sendTo({ type: 'remove_wifi_profile', payload: { index: idx } })
+    toast(`プロファイル #${idx} を削除しました`, 'success')
     setTimeout(onRefresh, 500)
   }
 
-  const clearAll = () => {
+  const clearAll = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const btn = e.currentTarget
     if (!confirm('保存済みの Wi-Fi 設定をすべて削除します。よろしいですか？')) return
+    setAnchor(btn)
     sendTo({ type: 'clear_wifi', payload: {} })
+    toast('Wi-Fi 設定をすべて削除しました', 'success')
     setTimeout(onRefresh, 500)
   }
 
@@ -242,7 +256,7 @@ export function WifiProfilesForm({
           ) : (
             <button
               className="form-button-secondary wifi-profile-btn"
-              onClick={() => connectProfile(p.index)}
+              onClick={(e) => connectProfile(e, p.index)}
               disabled={!device.online}
             >
               接続
@@ -258,7 +272,7 @@ export function WifiProfilesForm({
           </button>
           <button
             className="form-button-danger wifi-profile-btn"
-            onClick={() => removeProfile(p.index)}
+            onClick={(e) => removeProfile(e, p.index)}
             disabled={!device.online}
           >
             削除

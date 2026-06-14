@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
+import { useToast } from '@/components/common/Toast'
 
 interface ApInfo {
   mode?: 'sta' | 'ap'
@@ -27,12 +28,13 @@ interface Props {
 export function ApModeSection({ device, apInfo, sendTo, onRefreshApStatus }: Props) {
   const [apPass, setApPass] = useState('')
   const [showApPass, setShowApPass] = useState(false)
-  const [passStatus, setPassStatus] = useState<{ kind: 'ok' | 'err' | 'warn'; msg: string } | null>(null)
+  const { toast, setAnchor } = useToast()
 
   const isAp = apInfo.mode === 'ap'
   const online = device.online
 
-  const switchToAp = () => {
+  const switchToAp = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const btn = e.currentTarget
     if (!confirm(
       'デバイスを AP モードに切り替えます。\n' +
       '現在の Wi-Fi 接続が切断され、\n' +
@@ -40,44 +42,51 @@ export function ApModeSection({ device, apInfo, sendTo, onRefreshApStatus }: Pro
       '直接接続できるようになります。\n\n' +
       '切り替えますか？'
     )) return
+    setAnchor(btn)
     sendTo({ type: 'enter_ap_mode', payload: {} })
+    toast('AP モードに切り替えます（再起動）', 'info')
   }
 
-  const switchToSta = () => {
+  const switchToSta = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const btn = e.currentTarget
     if (!confirm(
       'デバイスを通常モード（STA）に戻します。\n' +
       '再起動後、設定済みの Wi-Fi に接続します。\n\n' +
       '切り替えますか？'
     )) return
+    setAnchor(btn)
     sendTo({ type: 'enter_sta_mode', payload: {} })
+    toast('通常モード（STA）に戻します（再起動）', 'info')
   }
 
-  const submitApPass = () => {
+  const submitApPass = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchor(e.currentTarget)
     const val = apPass.trim()
     if (val.length > 0 && (val.length < 8 || val.length > 63)) {
-      setPassStatus({ kind: 'err', msg: 'パスワードは 8〜63 文字で入力してください' })
+      toast('パスワードは 8〜63 文字で入力してください', 'error')
       return
     }
     if (val.length === 0) {
       // Empty → clear
       sendTo({ type: 'clear_ap_pass', payload: {} })
-      setPassStatus({ kind: 'ok', msg: 'AP パスワードを削除しました（オープン AP）' })
+      toast('AP パスワードを削除しました（オープン AP）', 'success')
     } else {
       sendTo({ type: 'set_ap_pass', payload: { pass: val } })
-      setPassStatus({
-        kind: 'ok',
-        msg: isAp
-          ? 'パスワードを設定しました。次回 AP 起動時に有効になります（再起動が必要）'
+      toast(
+        isAp
+          ? 'パスワードを設定しました（次回 AP 起動時に有効・再起動が必要）'
           : 'AP パスワードを設定しました',
-      })
+        'success',
+      )
     }
     setApPass('')
   }
 
-  const clearApPass = () => {
+  const clearApPass = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchor(e.currentTarget)
     sendTo({ type: 'clear_ap_pass', payload: {} })
     setApPass('')
-    setPassStatus({ kind: 'ok', msg: 'AP パスワードを削除しました（オープン AP）' })
+    toast('AP パスワードを削除しました（オープン AP）', 'success')
   }
 
   return (
@@ -250,12 +259,6 @@ export function ApModeSection({ device, apInfo, sendTo, onRefreshApStatus }: Pro
           </span>
         )}
       </div>
-
-      {passStatus && (
-        <div className={`form-status ${passStatus.kind}`} style={{ marginTop: 8 }}>
-          {passStatus.msg}
-        </div>
-      )}
 
       <div className="form-status muted" style={{ marginTop: 8 }}>
         ⚠️ オープン AP では誰でも接続してデバイスを操作できます。公共 LAN ではパスワードを推奨します。

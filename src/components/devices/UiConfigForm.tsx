@@ -1,5 +1,6 @@
 import { useRef, useState, type ChangeEvent } from 'react'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
+import { useToast } from '@/components/common/Toast'
 
 interface Props {
   device: DeviceInfo
@@ -17,7 +18,7 @@ export function UiConfigForm({ device, sendTo }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [filename, setFilename] = useState<string>('')
   const [config, setConfig] = useState<unknown | null>(null)
-  const [status, setStatus] = useState<{ kind: 'ok' | 'err' | 'muted'; msg: string } | null>(null)
+  const { toast, setAnchor } = useToast()
 
   const onFile = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -28,23 +29,24 @@ export function UiConfigForm({ device, sendTo }: Props) {
       try {
         const parsed = JSON.parse(String(reader.result))
         setConfig(parsed)
-        setStatus({ kind: 'muted', msg: 'OK — 「書込」を押してください' })
+        toast('読み込みました — 「書込」を押してください', 'success')
       } catch (err) {
         setConfig(null)
-        setStatus({ kind: 'err', msg: `JSON パース失敗: ${err}` })
+        toast(`JSON パース失敗: ${err}`, 'error')
       }
     }
-    reader.onerror = () => setStatus({ kind: 'err', msg: 'ファイル読み込み失敗' })
+    reader.onerror = () => toast('ファイル読み込み失敗', 'error')
     reader.readAsText(file)
   }
 
-  const submit = () => {
+  const submit = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (!config) return
+    setAnchor(e.currentTarget)
     sendTo({
       type: 'write_ui_config',
       payload: { config },
     })
-    setStatus({ kind: 'muted', msg: '送信中…' })
+    toast('UI config を送信しました', 'success')
   }
 
   return (
@@ -65,7 +67,7 @@ export function UiConfigForm({ device, sendTo }: Props) {
           <button
             type="button"
             className="form-button-secondary"
-            onClick={() => inputRef.current?.click()}
+            onClick={(e) => { setAnchor(e.currentTarget); inputRef.current?.click() }}
             disabled={!device.online}
           >
             参照…
@@ -93,9 +95,6 @@ export function UiConfigForm({ device, sendTo }: Props) {
           書込
         </button>
       </div>
-      {status && (
-        <div className={`form-status ${status.kind}`}>{status.msg}</div>
-      )}
       <div className="form-status muted" style={{ marginTop: 6 }}>
         Display エディタからの直接デプロイは「Display」タブの書込ボタンが便利です。
       </div>

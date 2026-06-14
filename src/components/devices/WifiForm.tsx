@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
+import { useToast } from '@/components/common/Toast'
 
 interface Props {
   device: DeviceInfo
@@ -22,23 +23,29 @@ export function WifiForm({ device, wifiStatus, sendTo }: Props) {
   const [ssid, setSsid] = useState('')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
+  const { toast, setAnchor } = useToast()
 
   // Pre-fill SSID from device's currently-connected network when known.
   useEffect(() => {
     if (wifiStatus?.ssid) setSsid(wifiStatus.ssid)
   }, [wifiStatus?.ssid])
 
-  const submit = () => {
+  const submit = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (!ssid.trim()) return
+    setAnchor(e.currentTarget)
     sendTo({
       type: 'set_wifi',
       payload: { ssid: ssid.trim(), password },
     })
+    toast('Wi-Fi を設定しました（再起動で有効）', 'success')
   }
 
-  const clear = () => {
+  const clear = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const btn = e.currentTarget
     if (!confirm('保存済みの Wi-Fi 設定をすべて削除します。よろしいですか？')) return
+    setAnchor(btn)
     sendTo({ type: 'clear_wifi', payload: {} })
+    toast('Wi-Fi 設定を削除しました', 'success')
   }
 
   return (

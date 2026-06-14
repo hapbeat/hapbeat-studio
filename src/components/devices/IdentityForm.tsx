@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import { useConfirm } from '@/components/common/useConfirm'
+import { useToast } from '@/components/common/Toast'
 import { useInputHistory } from '@/hooks/useInputHistory'
 import {
   POSITION_NAMES,
@@ -38,6 +39,7 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
   // -1 = 未指定 (suffix なし、全グループ受信)、1..99 = 指定。
   const [group, setGroup] = useState<number>(initial.group)
   const { ask, dialog: confirmDialog } = useConfirm()
+  const { toast, setAnchor } = useToast()
   // Persisted recall for free-text identity fields. Recent values are
   // suggested via <datalist> on the same field so a user adding 5 new
   // Hapbeats doesn't have to type "MyShow/" five times.
@@ -55,28 +57,35 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
     setGroup(a.group)
   }, [device.ipAddress, device.address, device.name, cachedInfo?.name])
 
-  const submitName = () => {
+  const submitName = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (!name.trim()) return
+    setAnchor(e.currentTarget)
     sendTo({ type: 'set_name', payload: { name: name.trim() } })
     nameHistory.commit(name.trim())
     onChanged?.()
+    toast(`名前を「${name.trim()}」に変更しました`, 'success')
   }
 
-  const submitAddress = () => {
+  const submitAddress = (e: React.MouseEvent<HTMLButtonElement>) => {
     const addr = buildAddress(prefix, player, position, group)
+    setAnchor(e.currentTarget)
     sendTo({ type: 'set_address', payload: { address: addr } })
     if (prefix.trim()) prefixHistory.commit(prefix.trim())
     onChanged?.()
+    toast(`アドレスを ${addr} に設定しました`, 'success')
   }
 
-  const submitReboot = async () => {
+  const submitReboot = async (e: React.MouseEvent<HTMLButtonElement>) => {
+    const btn = e.currentTarget // capture before await (event is reused after)
     const ok = await ask({
       title: '再起動',
       message: 'デバイスを再起動しますか？',
       confirmLabel: '再起動する',
     })
     if (!ok) return
+    setAnchor(btn)
     sendTo({ type: 'reboot', payload: {} })
+    toast('再起動コマンドを送信しました', 'info')
   }
 
   return (

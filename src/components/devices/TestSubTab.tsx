@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
+import { useToast } from '@/components/common/Toast'
 import { StreamingTestSection } from './StreamingTestSection'
 
 const HISTORY_KEY = 'hapbeat-studio-test-event-history'
@@ -39,13 +40,17 @@ interface Props {
  */
 export function TestSubTab({ device, sendTo }: Props) {
   const { lastMessage, send } = useHelperConnection()
+  const { toast, setAnchor } = useToast()
 
   const [history, setHistory] = useState<string[]>(loadHistory)
   const [eventId, setEventId] = useState<string>(history[0] ?? '')
   const [target, setTarget] = useState<string>(
     () => localStorage.getItem(TARGET_KEY) ?? '',
   )
-  const [pingResult, setPingResult] = useState<string>('')
+  // True while a PING is in flight (between click and PONG/timeout). Lets
+  // the async ping_result effect and the watchdog reuse the same anchored
+  // toast surface without re-rendering an inline status that shifts the row.
+  const pingPendingRef = useRef(false)
 
   // Intensity slider — scoped to the streaming test only. CLIP stream
   // multiplies PCM samples by this value per chunk (live). FIRE
@@ -67,15 +72,15 @@ export function TestSubTab({ device, sendTo }: Props) {
 
   useEffect(() => {
     if (!lastMessage || lastMessage.type !== 'ping_result') return
+    if (!pingPendingRef.current) return
+    pingPendingRef.current = false
     const p = lastMessage.payload as Record<string, unknown>
     if (p.error) {
-      setPingResult(`PING failed: ${p.error}`)
+      toast(`PING failed: ${p.error}`, 'error')
     } else if (typeof p.rtt_ms === 'number') {
-      setPingResult(`PONG ${p.rtt_ms.toFixed(2)} ms`)
+      toast(`PONG ${p.rtt_ms.toFixed(2)} ms`, 'success')
     }
-    const t = setTimeout(() => setPingResult(''), 4000)
-    return () => clearTimeout(t)
-  }, [lastMessage])
+  }, [lastMessage, toast])
 
   const recordEvent = (id: string) => {
     if (!id) return
@@ -111,14 +116,19 @@ export function TestSubTab({ device, sendTo }: Props) {
     })
   }
 
-  const ping = () => {
+  const ping = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchor(e.currentTarget)
     sendTo({ type: 'ping_device', payload: {} })
-    setPingResult('pinging…')
+    pingPendingRef.current = true
+    toast('Ping 送信…', 'info')
     // Local watchdog: helper waits up to 2 s for the PONG, plus tiny
     // round-trip overhead. If nothing arrives in 3 s, it's a helper-or-
     // network problem the user should know about.
     setTimeout(() => {
-      setPingResult((cur) => (cur === 'pinging…' ? 'no response (timeout)' : cur))
+      if (pingPendingRef.current) {
+        pingPendingRef.current = false
+        toast('no response (timeout)', 'error')
+      }
     }, 3000)
   }
 
@@ -222,7 +232,6 @@ export function TestSubTab({ device, sendTo }: Props) {
           >
             PING
           </button>
-          {pingResult && <span className="form-status muted">{pingResult}</span>}
         </div>
 
         <div className="form-row">
