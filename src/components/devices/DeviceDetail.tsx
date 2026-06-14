@@ -602,7 +602,6 @@ export function DeviceDetail() {
             mappings={sensorMapping}
             reading={sensorReading}
             sensorType={cachedInfo?.sensor_types?.[0]}
-            deviceTopicRoot={cachedInfo?.topic_root}
             sendTo={sendTo}
             onRefresh={() => sendTo({ type: 'get_sensor_mapping', payload: {} })}
           />

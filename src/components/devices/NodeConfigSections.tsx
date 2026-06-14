@@ -450,8 +450,9 @@ export function MqttConfigSection({
 
         <div className="form-action-row" style={{ marginTop: 8 }}>
           <button className="form-button" onClick={applyBroker} disabled={!device.online}>適用</button>
-          {status && <span className="form-status ok" style={{ alignSelf: 'center' }}>{status}</span>}
         </div>
+        {/* Status on its own line so it never shifts the 適用 button. */}
+        <div className="form-status ok" style={{ marginTop: 4, minHeight: 16 }}>{status ?? ''}</div>
       </div>
 
       {/* ── Group 2: TOPIC — receiver の購読 topic (item 8) ── */}
@@ -517,8 +518,8 @@ export function MqttConfigSection({
             </div>
             <div className="form-action-row" style={{ marginTop: 8 }}>
               <button className="form-button" onClick={applyRecvTopics} disabled={!device.online}>適用</button>
-              {topicStatus && <span className="form-status ok" style={{ alignSelf: 'center' }}>{topicStatus}</span>}
             </div>
+            <div className="form-status ok" style={{ marginTop: 4, minHeight: 16 }}>{topicStatus ?? ''}</div>
           </div>
         )
       })()}
@@ -815,7 +816,6 @@ export function SensorMappingSection({
   mappings,
   reading,
   sensorType,
-  deviceTopicRoot,
   sendTo,
   onRefresh,
 }: {
@@ -826,11 +826,6 @@ export function SensorMappingSection({
   reading?: SensorReading
   /** Sensor hardware type from get_info (e.g. "tcs34725"). */
   sensorType?: string
-  /** The device's ACTUAL send root (get_info.topic_root). Shown as the
-   *  card default so the UI matches what the device really publishes to —
-   *  a device provisioned under the old default still reports "hapbeat",
-   *  and a hardcoded "default-topic" placeholder would mislead (N3). */
-  deviceTopicRoot?: string
   sendTo: (msg: ManagerMessage) => void
   onRefresh: () => void
 }) {
@@ -1067,8 +1062,13 @@ export function SensorMappingSection({
           // the firmware publishes to each entry in `topics`.
           return { ...r, topics: r.topics && r.topics.length ? r.topics : undefined, topic: undefined }
         }
-        // Follow the card default (single root). Clear any stale topics.
-        return { ...r, topic: cardTopic || undefined, topics: undefined }
+        // Follow the card default. Write the channel EXPLICITLY (never leave
+        // topic empty): an empty topic makes the firmware fall back to the
+        // device's NVS `mq_root`, which on a device provisioned under the old
+        // default is still "hapbeat" — so the alert would publish to "hapbeat"
+        // while the receiver listens on "default-topic" and never arrives. The
+        // contract default channel is "default-topic" (mqtt-transport.md §7).
+        return { ...r, topic: cardTopic || 'default-topic', topics: undefined }
       })
       .filter((r) => r.key.trim())
       .map((r) => ({
@@ -1485,7 +1485,7 @@ export function SensorMappingSection({
                 </div>
               ) : (
                 <span className="form-status muted" style={{ margin: 0 }}>
-                  カード全体（{cardTopic || deviceTopicRoot || 'default-topic'}）に追従
+                  カード全体（{cardTopic || 'default-topic'}）に追従
                 </span>
               )}
             </div>
@@ -1595,8 +1595,11 @@ export function SensorMappingSection({
         >
           デバイスに保存
         </button>
-        {status && <span className="form-status ok" style={{ alignSelf: 'center' }}>{status}</span>}
       </div>
+      {/* Status BELOW the buttons (not inline) so showing it never shifts the
+          button row. A reserved min-height keeps the layout stable whether or
+          not a message is present (user 2026-06-15). */}
+      <div className="form-status ok" style={{ marginTop: 6, minHeight: 18 }}>{status ?? ''}</div>
     </div>
   )
 }

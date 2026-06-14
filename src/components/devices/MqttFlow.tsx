@@ -60,6 +60,7 @@ export interface MqttFlowData {
   lastFrom?: string       // publishing client (送信元)
   lastEventId?: string    // parsed from the play payload
   lastTarget?: string     // parsed from the play payload
+  lastKey?: string        // detected color/classification name (payload `key`)
   lastAt?: number         // epoch ms Studio observed the event
   /** Connected receivers right now. 0 → a publish reaches no one (QoS 1
    *  guarantees sender→broker only; absent receivers are NOT queued). */
@@ -165,11 +166,13 @@ export function useMqttFlowData(): MqttFlowData {
     // {event_id,target,gain}) for the info panel.
     let lastEventId: string | undefined
     let lastTarget: string | undefined
+    let lastKey: string | undefined
     if (info?.mqtt_last_payload) {
       try {
         const o = JSON.parse(info.mqtt_last_payload) as Record<string, unknown>
         if (typeof o.event_id === 'string') lastEventId = o.event_id
         if (typeof o.target === 'string') lastTarget = o.target
+        if (typeof o.key === 'string') lastKey = o.key
       } catch { /* truncated / non-JSON preview — leave undefined */ }
     }
 
@@ -186,6 +189,7 @@ export function useMqttFlowData(): MqttFlowData {
       lastFrom: info?.mqtt_last_from,
       lastEventId,
       lastTarget,
+      lastKey,
       lastAt: info?.lastEventAt,
       receiverCount: receivers.length,
       noBroker: !broker,
@@ -198,7 +202,7 @@ export function useMqttFlowData(): MqttFlowData {
 function MqttFlowChartSvg(props: MqttFlowData) {
   const {
     brokerName, port, running, left, right, pubCount,
-    lastTopic, lastFrom, lastEventId, lastTarget, lastAt, receiverCount,
+    lastTopic, lastFrom, lastEventId, lastTarget, lastKey, lastAt, receiverCount,
   } = props
 
   // Real data flow is the ONLY thing that adds an arrowhead/emphasis (user
@@ -403,6 +407,7 @@ function MqttFlowChartSvg(props: MqttFlowData) {
             <div className="mqtt-flow-info-grid">
               {lastAt != null && (<><span>時刻</span><span className="mono">{new Date(lastAt).toLocaleTimeString()}</span></>)}
               {lastFrom && (<><span>送信元</span><span className="mono">{lastFrom}</span></>)}
+              {lastKey && (<><span>キー（色）</span><span className="mono">{lastKey}</span></>)}
               {lastEventId && (<><span>イベント</span><span className="mono">{lastEventId}</span></>)}
               <><span>topic</span><span className="mono">{lastTopic.replace(/\/(play|stop)$/, '')}</span></>
               <><span>ターゲット</span><span className="mono">{lastTarget || '（全台）'}</span></>
