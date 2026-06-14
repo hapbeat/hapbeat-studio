@@ -292,22 +292,22 @@ export function MqttConfigSection({
   }, [device.ipAddress, cachedInfo?.broker_host, cachedInfo?.broker_port, cachedInfo?.mqtt_qos, cachedInfo?.alert_loop, cachedInfo?.recv_topics])
 
   const connected = cachedInfo?.mqtt_connected
-  const apply = () => {
+  // ブローカー設定だけを適用（topic は別グループ）。topic_root は default-topic
+  // に固定（broker 接続に topic は不要）。
+  const applyBroker = () => {
     const value = auto ? 'auto' : host.trim()
     if (!auto && !value) return
-    // topic_root is no longer user-editable here (broker connection doesn't
-    // need a topic). It's pinned to the default channel; the sender's send
-    // topic lives in the mapping tab, the receiver's receive topics below.
     sendTo({
       type: 'set_broker_host',
       payload: { host: value, port, topic_root: 'default-topic', qos },
     })
-    // Receiver subscribe list (item 8). Sent with the broker settings so one
-    // 適用 applies both; takes effect on the receiver's reconnect/reboot.
-    if (role === 'receiver') {
-      sendTo({ type: 'set_recv_topics', payload: { topics: recvTopics } })
-    }
-    setStatus('適用しました — センサは即時再接続、Hapbeat (受信機) は再起動後に反映されます')
+    setStatus('ブローカー設定を適用しました（センサは即時再接続 / 受信機は再起動後に反映）')
+    setTimeout(() => setStatus(null), 5000)
+  }
+  // 受信 topic（receiver）だけを適用（item 8）。
+  const applyRecvTopics = () => {
+    sendTo({ type: 'set_recv_topics', payload: { topics: recvTopics } })
+    setStatus('受信 topic を適用しました（受信機は再起動後に反映）')
     setTimeout(() => setStatus(null), 5000)
   }
 
@@ -320,112 +320,105 @@ export function MqttConfigSection({
     setTimeout(() => setStatus(null), 5000)
   }
 
+  // Gray out the host/port inputs while auto-detect is on, so it's obvious they
+  // aren't editable (user 2026-06-14: the port looked white/editable).
+  const disabledInputStyle = auto
+    ? { opacity: 0.45, background: 'rgba(127,127,127,0.12)', cursor: 'not-allowed' as const }
+    : undefined
+
   return (
     <>
       {/* Shared page-level flow chart (same instance the broker tab shows). */}
       <MqttFlowPanel />
+
+      {/* ── Group 1: ブローカー設定 — 検出方法 + QoS のみ ── */}
       <div className="form-section">
-      <div
-        className="form-section-title"
-        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-      >
-        <span>
-          MQTT クライアント設定
-          <span className="form-section-sub-inline">
-            {' '}— どのブローカー・topic に接続するか
+        <div
+          className="form-section-title"
+          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+        >
+          <span>
+            ブローカー設定
+            <span className="form-section-sub-inline">{' '}— どのブローカーに接続するか</span>
           </span>
-        </span>
-        {/* This node's slice of the flow: connected to the broker or not. */}
-        {connected != null && (
-          <span className={`device-row-status ${connected ? 'online' : ''}`}
-            style={connected ? undefined : { background: 'rgba(244,67,54,0.15)', color: '#f44336', border: '1px solid rgba(244,67,54,0.4)' }}
-            title={connected ? 'ブローカーに接続中' : 'ブローカーに未接続 (検出中 / 設定確認)'}
-          >
-            <span style={{ textTransform: 'none' }}>{connected ? '● ブローカー接続中' : '○ 未接続'}</span>
-          </span>
-        )}
-      </div>
-
-      <label
-        className="form-status muted"
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-      >
-        <input
-          type="checkbox"
-          checked={auto}
-          onChange={(e) => setAuto(e.target.checked)}
-          disabled={!device.online}
-        />
-        ブローカー自動検出 (mDNS で同一 LAN 上の Hapbeat ブローカーを探す)
-      </label>
-
-      {/* Host/IP + port are ALWAYS shown (disabled while auto-detect is on) so
-          the user can see what they'd be setting without first toggling — and
-          can see the resolved broker isn't editable in auto mode (user
-          2026-06-14). topic は broker 接続には不要なのでこの設定からは外した
-          (sender は「センサー」タブの送信 topic、receiver は下の受信 topic)。 */}
-      <div className="form-row" style={{ marginTop: 6 }}>
-        <label>ホスト/IP</label>
-        <input
-          className="form-input mono"
-          value={auto ? '' : host}
-          onChange={(e) => setHost(e.target.value)}
-          placeholder={auto ? '自動検出 (mDNS)' : '192.168.1.10 または hapbeat-broker.local'}
-          disabled={!device.online || auto}
-        />
-        <span />
-      </div>
-      <div className="form-row">
-        <label>ポート</label>
-        <input
-          className="form-input short"
-          type="number"
-          min={1}
-          max={65535}
-          value={port}
-          onChange={(e) => setPort(Math.max(1, Math.min(65535, Number(e.target.value) || 1883)))}
-          disabled={!device.online || auto}
-        />
-        <span />
-      </div>
-      <div className="form-status muted">
-        自動検出 ON の間はブローカーを mDNS で探し、広告されたホスト/ポートを使います（手動入力は無効）。
-        OFF にすると上のホスト/ポートを直接指定できます。
-      </div>
-
-      <div className="form-row" style={{ marginTop: 6 }}>
-        <label>QoS</label>
-        <div className="form-row-multi" style={{ gap: 6 }}>
-          {[1, 0].map((q) => (
-            <button
-              key={q}
-              type="button"
-              className={`form-button${qos === q ? '' : '-secondary'}`}
-              onClick={() => setQos(q)}
-              disabled={!device.online}
-              title={q === 1
-                ? 'at-least-once: ブローカーが PUBACK を返す。アラート用途の既定'
-                : 'fire-and-forget: 再送なし。低遅延・低負荷'}
+          {connected != null && (
+            <span className={`device-row-status ${connected ? 'online' : ''}`}
+              style={connected ? undefined : { background: 'rgba(244,67,54,0.15)', color: '#f44336', border: '1px solid rgba(244,67,54,0.4)' }}
+              title={connected ? 'ブローカーに接続中' : 'ブローカーに未接続 (検出中 / 設定確認)'}
             >
-              QoS {q}{q === 1 ? ' (確実)' : ' (高速)'}
-            </button>
-          ))}
+              <span style={{ textTransform: 'none' }}>{connected ? '● ブローカー接続中' : '○ 未接続'}</span>
+            </span>
+          )}
         </div>
-        <span />
-      </div>
-      <div className="form-status muted">
-        既定は QoS 1。確実なアラート配信が重要な MQTT 用途向け。低遅延を優先したい / 取りこぼしを
-        許容できる場合のみ QoS 0 に。
+
+        <label className="form-status muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} disabled={!device.online} />
+          ブローカー自動検出 (mDNS で同一 LAN 上の Hapbeat ブローカーを探す)
+        </label>
+
+        <div className="form-row" style={{ marginTop: 6 }}>
+          <label>ホスト/IP</label>
+          <input
+            className="form-input mono"
+            value={auto ? '' : host}
+            onChange={(e) => setHost(e.target.value)}
+            placeholder={auto ? '自動検出 (mDNS)' : '192.168.1.10 または hapbeat-broker.local'}
+            disabled={!device.online || auto}
+            style={disabledInputStyle}
+          />
+          <span />
+        </div>
+        <div className="form-row">
+          <label>ポート</label>
+          <input
+            className="form-input short"
+            type="number"
+            min={1}
+            max={65535}
+            value={port}
+            onChange={(e) => setPort(Math.max(1, Math.min(65535, Number(e.target.value) || 1883)))}
+            disabled={!device.online || auto}
+            style={disabledInputStyle}
+          />
+          <span />
+        </div>
+        <div className="form-status muted">
+          自動検出 ON の間はホスト/ポートは灰色（変更不可）— mDNS で広告された値を使います。
+          OFF にすると直接指定できます。
+        </div>
+
+        <div className="form-row" style={{ marginTop: 6 }}>
+          <label>QoS</label>
+          <div className="form-row-multi" style={{ gap: 6 }}>
+            {[1, 0].map((q) => (
+              <button
+                key={q}
+                type="button"
+                className={`form-button${qos === q ? '' : '-secondary'}`}
+                onClick={() => setQos(q)}
+                disabled={!device.online}
+                title={q === 1
+                  ? 'at-least-once: ブローカーが PUBACK を返す。アラート用途の既定'
+                  : 'fire-and-forget: 再送なし。低遅延・低負荷'}
+              >
+                QoS {q}{q === 1 ? ' (確実)' : ' (高速)'}
+              </button>
+            ))}
+          </div>
+          <span />
+        </div>
+        <div className="form-status muted">
+          既定は QoS 1（at-least-once: ブローカーが PUBACK で確実に受領）。低遅延優先 / 取りこぼし許容
+          の場合のみ QoS 0。
+        </div>
+
+        <div className="form-action-row" style={{ marginTop: 8 }}>
+          <button className="form-button" onClick={applyBroker} disabled={!device.online}>適用</button>
+          {status && <span className="form-status ok" style={{ alignSelf: 'center' }}>{status}</span>}
+        </div>
       </div>
 
-      <div className="form-status muted">
-        QoS は 1 (at-least-once) です。送信→ブローカーは PUBACK 確認付きで確実に届き、{role === 'sensor'
-          ? '加えて「センサー」タブの再送間隔で色が続く間は再送し続けます (取りこぼしのバックストップ)。'
-          : '送信側がアラート継続中は再送も併用するため、接続断があっても次で届きます。'}
-      </div>
-
-      {/* Receive topics — receiver only (item 8). Multi-select from the
-          registered topics + manual entry. Empty = default-topic only. */}
+      {/* ── Group 2: TOPIC — receiver の購読 topic (item 8) ── */}
       {role === 'receiver' && (() => {
         const opts = Array.from(new Set(['default-topic', ...registeredTopics, ...recvTopics]))
         const toggle = (t: string) =>
@@ -436,8 +429,12 @@ export function MqttConfigSection({
           setRecvManual('')
         }
         return (
-          <>
-            <div className="form-row" style={{ marginTop: 10, alignItems: 'flex-start' }}>
+          <div className="form-section">
+            <div className="form-section-title">
+              TOPIC
+              <span className="form-section-sub-inline">{' '}— この受信機が購読する topic</span>
+            </div>
+            <div className="form-row" style={{ marginTop: 6, alignItems: 'flex-start' }}>
               <label>受信 topic</label>
               <div className="form-row-multi" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
                 {opts.map((t) => (
@@ -479,25 +476,33 @@ export function MqttConfigSection({
               <span />
             </div>
             <div className="form-status muted">
-              この受信機が購読する topic。センサー側で送信している topic と一致させてください（複数選択可）。
-              何もチェックしなければ default-topic のみを受信します。topic 名は「センサー」側で登録したものが候補に出ます。
+              この受信機が購読する topic。センサー側で送信している topic と一致させたものだけが届きます（複数選択可）。
+              何もチェックしなければ default-topic のみ受信。チェック状態はデバイスの現在の購読設定を反映します。
             </div>
-          </>
+            <div className="form-action-row" style={{ marginTop: 8 }}>
+              <button className="form-button" onClick={applyRecvTopics} disabled={!device.online}>適用</button>
+              {status && <span className="form-status ok" style={{ alignSelf: 'center' }}>{status}</span>}
+            </div>
+          </div>
         )
       })()}
 
-      {/* Alert-loop mode — receiver only (item 10). */}
+      {/* ── Group 3: アラート動作 — receiver (item 10、即時反映) ── */}
       {role === 'receiver' && (
-        <>
-          <div className="form-row" style={{ marginTop: 10 }}>
-            <label>アラート動作</label>
+        <div className="form-section">
+          <div className="form-section-title">
+            アラート動作
+            <span className="form-section-sub-inline">{' '}— 受信時の振動の挙動</span>
+          </div>
+          <div className="form-row" style={{ marginTop: 6 }}>
+            <label>動作</label>
             <div className="form-row-multi" style={{ gap: 6 }}>
               <button
                 type="button"
                 className={`form-button${alertLoop ? '' : '-secondary'}`}
                 onClick={() => applyAlertLoop(true)}
                 disabled={!device.online}
-                title="アラートを受信したら、いずれかのボタンを押すまで振動を繰り返す"
+                title="アラートを受信したら、本体ボタンを長押しするまで振動を繰り返す"
               >
                 ループ (ボタンで停止)
               </button>
@@ -514,23 +519,15 @@ export function MqttConfigSection({
             <span />
           </div>
           <div className="form-status muted">
-            「ループ」: アラート振動を、本体のいずれかのボタンを押すまで繰り返します
-            (病院アラートのように「気づいて止める」運用)。「単発」: 1 回だけ振動します。
+            「ループ」: アラート振動を、本体ボタンの長押しで止めるまで繰り返します
+            (病院アラートのように「気づいて止める」運用)。「単発」: 1 回だけ振動。
             既定はループ。変更は次のアラートから即時反映されます。
           </div>
-        </>
+        </div>
       )}
 
-      <div className="form-action-row" style={{ marginTop: 8 }}>
-        <button className="form-button" onClick={apply} disabled={!device.online}>
-          適用
-        </button>
-        {status && <span className="form-status ok" style={{ alignSelf: 'center' }}>{status}</span>}
-      </div>
-    </div>
-    {/* Topic registry — only on the sender (sensor) side; receivers just
-        subscribe to their own root. (item 6) */}
-    {role === 'sensor' && <TopicRegistryEditor />}
+      {/* Topic registry — only on the sender (sensor) side. (item 6) */}
+      {role === 'sensor' && <TopicRegistryEditor />}
     </>
   )
 }
@@ -581,7 +578,11 @@ export function BrokerConfigSection({
           <div className={`form-status ${cachedInfo.mqtt_running ? 'ok' : 'warn'}`}>
             ブローカー: {cachedInfo.mqtt_running ? '稼働中' : '停止中'}
             {cachedInfo.mqtt_clients != null && cachedInfo.mqtt_running && (
-              <> · クライアント {cachedInfo.mqtt_clients.length} 台</>
+              <> · クライアント {cachedInfo.mqtt_clients.length} 台
+                {cachedInfo.mqtt_clients.length > 0 && (
+                  <>（{cachedInfo.mqtt_clients.map((c) => c.name || c.id).join(', ')}）</>
+                )}
+              </>
             )}
           </div>
         )}
@@ -631,8 +632,8 @@ export function BrokerConfigSection({
         </div>
 
         <div className="form-status muted" style={{ marginTop: 6 }}>
-          QoS 1 (at-least-once)・認証なし (隔離 LAN 内前提) です。topic は各クライアント側の
-          「MQTT」タブで設定します (ブローカーは全 topic を中継するため設定不要)。
+          topic と QoS は各クライアント側で設定します（センサーの送信 topic / 受信機の受信 topic・QoS）。
+          ブローカーは全 topic をそのまま中継するため、ここでの設定は不要です。
         </div>
       </div>
     </>
