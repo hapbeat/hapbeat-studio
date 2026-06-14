@@ -28,8 +28,11 @@ interface FlowNode {
   label: string
   /** true = present in the broker's client list; false = discovered-only. */
   connected: boolean
-  /** Topic this node uses, from its get_info (sender: 送信 topic_root;
-   *  receiver: 購読 recv_topics). undefined = not fetched yet. (item, 06-14) */
+  /** Device IP (shown inside the box as device info). */
+  ip?: string
+  /** Topic shown UNDER the arrow: sender → its actual send topic (the last
+   *  topic it published, else its default root); receiver → its 購読
+   *  recv_topics. undefined = unknown. (flow redesign 2026-06-14) */
   topic?: string
 }
 
@@ -104,29 +107,44 @@ export function useMqttFlowData(): MqttFlowData {
     const discoveredSenders = discovered.filter((d) => d.role === 'sensor')
     const discoveredReceivers = discovered.filter((d) => d.role !== 'sensor')
 
-    // Topic label for a node, by correlating its name → device → infoCache.
+    // Correlate a node → its device IP (for the in-box device info) and its
+    // topic label (shown under the arrow).
     const ipByName = new Map(devices.map((d) => [d.name, d.ipAddress]))
-    const topicFor = (ip: string | undefined, kind: 'sender' | 'receiver'): string | undefined => {
-      if (!ip) return undefined
-      const ci = infoCache[ip]
-      if (!ci) return undefined
-      if (kind === 'sender') return ci.topic_root || undefined
-      const rt = ci.recv_topics
+    const lastFromName = info?.mqtt_last_from
+    const lastTopicRoot = info?.mqtt_last_topic?.replace(/\/(play|stop)$/, '')
+    // A sender publishes per-color (often a row topic, not its default root), so
+    // its default topic_root can mislead. When this sender is the one that last
+    // published, show the ACTUAL topic the broker received (the real channel);
+    // otherwise fall back to its default root.
+    const senderTopic = (ip: string | undefined, name: string): string | undefined => {
+      if (name && name === lastFromName && lastTopicRoot) return lastTopicRoot
+      const ci = ip ? infoCache[ip] : undefined
+      return ci?.topic_root || undefined
+    }
+    const receiverTopic = (ip: string | undefined): string | undefined => {
+      const ci = ip ? infoCache[ip] : undefined
+      const rt = ci?.recv_topics
       if (rt == null) return undefined
       return rt.length ? rt.join(', ') : 'default-topic'
     }
 
     const left: FlowNode[] = [
-      ...senders.map((c) => ({ key: `c-${c.id}`, label: clientLabel(c), connected: true, topic: topicFor(ipByName.get(c.name ?? ''), 'sender') })),
-      ...others.map((c) => ({ key: `c-${c.id}`, label: clientLabel(c), connected: true })),
+      ...senders.map((c) => {
+        const ip = ipByName.get(c.name ?? '')
+        return { key: `c-${c.id}`, label: clientLabel(c), connected: true, ip, topic: senderTopic(ip, c.name ?? '') }
+      }),
+      ...others.map((c) => ({ key: `c-${c.id}`, label: clientLabel(c), connected: true, ip: ipByName.get(c.name ?? '') })),
       ...discoveredSenders.map((d) => ({
-        key: `d-${d.ipAddress}`, label: d.name || d.ipAddress, connected: false, topic: topicFor(d.ipAddress, 'sender'),
+        key: `d-${d.ipAddress}`, label: d.name || d.ipAddress, connected: false, ip: d.ipAddress, topic: senderTopic(d.ipAddress, d.name),
       })),
     ]
     const right: FlowNode[] = [
-      ...receivers.map((c) => ({ key: `c-${c.id}`, label: clientLabel(c), connected: true, topic: topicFor(ipByName.get(c.name ?? ''), 'receiver') })),
+      ...receivers.map((c) => {
+        const ip = ipByName.get(c.name ?? '')
+        return { key: `c-${c.id}`, label: clientLabel(c), connected: true, ip, topic: receiverTopic(ip) }
+      }),
       ...discoveredReceivers.map((d) => ({
-        key: `d-${d.ipAddress}`, label: d.name || d.ipAddress, connected: false, topic: topicFor(d.ipAddress, 'receiver'),
+        key: `d-${d.ipAddress}`, label: d.name || d.ipAddress, connected: false, ip: d.ipAddress, topic: receiverTopic(d.ipAddress),
       })),
     ]
 
@@ -184,68 +202,72 @@ function MqttFlowChartSvg(props: MqttFlowData) {
     }
   }, [pubCount])
 
+  // Layout (redesign 2026-06-14): uniform box height; all three columns are
+  // vertically CENTERED on the broker and grow symmetrically from the center.
+  // Topics ride UNDER the arrows (not in the box); the box holds device info
+  // (name + IP). Wider arrows. mDNS isn't shown — the arrow itself means
+  // "connected".
+  const W = 680
+  const BW = 156, BH = 44
+  const HEADER = 24
+  const ROW = 64
   const rows = Math.max(left.length, right.length, 1)
-  const ROW_H = 34
-  const height = 60 + rows * ROW_H
-  const W = 560
-  const brokerY = height / 2
+  const height = HEADER + rows * ROW + 14
+  const centerY = HEADER + (rows * ROW) / 2
+  const leftX = 10
+  const rightX = W - BW - 10
+  const brokerX = (W - BW) / 2
+  const trunc = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
+  // y of node i in a column of n nodes, centered on centerY (grow from center).
+  const colY = (i: number, n: number) => centerY + (i - (n - 1) / 2) * ROW
 
-  const nodeBox = (
-    x: number, y: number, node: FlowNode, kind: 'sender' | 'receiver',
-  ) => {
-    const stroke = !node.connected ? '#777'
-      : kind === 'sender' ? '#e8a33d' : '#4caf50'
+  // Box = device info (name + IP). Uniform BW×BH, centered on y.
+  const deviceBox = (x: number, y: number, node: FlowNode, kind: 'sender' | 'receiver') => {
+    const stroke = !node.connected ? '#777' : kind === 'sender' ? '#e8a33d' : '#4caf50'
     const fill = !node.connected ? 'rgba(128,128,128,0.06)'
-      : kind === 'sender' ? 'rgba(255,165,0,0.12)' : 'rgba(76,175,80,0.12)'
-    const label = node.label.length > 16 ? `${node.label.slice(0, 15)}…` : node.label
-    // Topic sub-label: receiver 購読 / sender 送信 root. Truncate to fit.
-    const topic = node.topic
-      ? (node.topic.length > 18 ? `${node.topic.slice(0, 17)}…` : node.topic)
-      : undefined
-    const hasSub = !node.connected || !!topic   // a second line under the name
+      : kind === 'sender' ? 'rgba(232,163,61,0.12)' : 'rgba(76,175,80,0.12)'
     return (
       <g key={node.key}>
-        <rect
-          x={x} y={y - 15} width={150} height={30} rx={5}
+        <rect x={x} y={y - BH / 2} width={BW} height={BH} rx={6}
           fill={fill} stroke={stroke} strokeWidth={1}
-          strokeDasharray={node.connected ? undefined : '4 3'}
-        />
-        <text x={x + 75} y={hasSub ? y - 2 : y + 4} textAnchor="middle" fontSize={11}
-          fill={node.connected ? 'var(--text-primary, #ddd)' : 'var(--text-muted, #888)'}
-          style={{ fontFamily: 'var(--font-mono)' }}>
-          {label}
+          strokeDasharray={node.connected ? undefined : '4 3'} />
+        <text x={x + BW / 2} y={y - 3} textAnchor="middle" fontSize={12} fontWeight={600}
+          fill={node.connected ? 'var(--text-primary, #ddd)' : 'var(--text-muted, #888)'}>
+          {trunc(node.label, 18)}
         </text>
-        {!node.connected ? (
-          <text x={x + 75} y={y + 10} textAnchor="middle" fontSize={8} fill="#c9742e">未接続</text>
-        ) : topic ? (
-          <text x={x + 75} y={y + 9} textAnchor="middle" fontSize={8}
-            fill={kind === 'sender' ? '#c9742e' : '#3f9c42'}
-            style={{ fontFamily: 'var(--font-mono)' }}>
-            {kind === 'sender' ? '→ ' : '← '}{topic}
-          </text>
-        ) : null}
+        <text x={x + BW / 2} y={y + 13} textAnchor="middle" fontSize={9}
+          fill="var(--text-muted, #888)" style={{ fontFamily: 'var(--font-mono)' }}>
+          {node.connected ? (node.ip || '—') : '未接続'}
+        </text>
       </g>
     )
   }
 
-  const edge = (x1: number, y1: number, x2: number, y2: number, key: string, connected: boolean) => (
-    <line
-      key={key}
-      x1={x1} y1={y1} x2={x2} y2={y2}
-      stroke={!connected ? 'rgba(150,150,150,0.25)' : pulse ? 'var(--accent, #7b6cff)' : 'rgba(150,150,150,0.45)'}
-      strokeWidth={connected && pulse ? 2.5 : 1.2}
-      strokeDasharray={connected ? undefined : '4 3'}
-      markerEnd={connected ? 'url(#mqtt-arrow)' : undefined}
-    />
+  // Arrow with the topic label UNDER it (at the arrow midpoint).
+  const flowArrow = (
+    x1: number, y1: number, x2: number, y2: number,
+    key: string, connected: boolean, topic: string | undefined, kind: 'sender' | 'receiver',
+  ) => (
+    <g key={key}>
+      <line x1={x1} y1={y1} x2={x2} y2={y2}
+        stroke={!connected ? 'rgba(150,150,150,0.25)' : pulse ? 'var(--accent, #7b6cff)' : 'rgba(150,150,150,0.5)'}
+        strokeWidth={connected && pulse ? 2.5 : 1.3}
+        strokeDasharray={connected ? undefined : '4 3'}
+        markerEnd={connected ? 'url(#mqtt-arrow)' : undefined} />
+      {topic && (
+        <text x={(x1 + x2) / 2} y={(y1 + y2) / 2 + 12} textAnchor="middle" fontSize={9}
+          fill={kind === 'sender' ? '#c9742e' : '#3f9c42'}
+          style={{ fontFamily: 'var(--font-mono)' }}>
+          {kind === 'sender' ? '→ ' : '← '}{trunc(topic, 22)}
+        </text>
+      )}
+    </g>
   )
 
   return (
     <div style={{ overflowX: 'auto' }}>
       <svg
         viewBox={`0 0 ${W} ${height}`}
-        // Fluid: fill the container (inline panel OR pop-out window). The
-        // viewBox scales, so a wide pop-out no longer leaves big margins
-        // (user feedback 2026-06-13). preserveAspectRatio keeps it centered.
         style={{ width: '100%', display: 'block' }}
         preserveAspectRatio="xMidYMid meet"
         role="img"
@@ -259,52 +281,50 @@ function MqttFlowChartSvg(props: MqttFlowData) {
         </defs>
 
         {/* column headers */}
-        <text x={85} y={16} textAnchor="middle" fontSize={11} fill="var(--text-muted, #888)">SENDER</text>
-        <text x={W / 2} y={16} textAnchor="middle" fontSize={11} fill="var(--text-muted, #888)">BROKER</text>
-        <text x={W - 85} y={16} textAnchor="middle" fontSize={11} fill="var(--text-muted, #888)">RECEIVER</text>
+        <text x={leftX + BW / 2} y={15} textAnchor="middle" fontSize={11} fill="var(--text-muted, #888)">SENDER</text>
+        <text x={W / 2} y={15} textAnchor="middle" fontSize={11} fill="var(--text-muted, #888)">BROKER</text>
+        <text x={rightX + BW / 2} y={15} textAnchor="middle" fontSize={11} fill="var(--text-muted, #888)">RECEIVER</text>
 
-        {/* broker box */}
-        <rect
-          x={W / 2 - 80} y={brokerY - 24} width={160} height={48} rx={7}
+        {/* broker box — same height as the others, vertically centered */}
+        <rect x={brokerX} y={centerY - BH / 2} width={BW} height={BH} rx={6}
           fill={running ? 'rgba(123,108,255,0.14)' : 'rgba(244,67,54,0.12)'}
-          stroke={running ? 'var(--accent, #7b6cff)' : '#f44336'} strokeWidth={1.4}
-        />
-        <text x={W / 2} y={brokerY - 5} textAnchor="middle" fontSize={12} fontWeight={600}
+          stroke={running ? 'var(--accent, #7b6cff)' : '#f44336'} strokeWidth={1.4} />
+        <text x={W / 2} y={centerY - 3} textAnchor="middle" fontSize={12} fontWeight={600}
           fill="var(--text-primary, #ddd)">
-          {brokerName.length > 20 ? `${brokerName.slice(0, 19)}…` : brokerName}
+          {trunc(brokerName, 18)}
         </text>
-        <text x={W / 2} y={brokerY + 13} textAnchor="middle" fontSize={10.5}
+        <text x={W / 2} y={centerY + 13} textAnchor="middle" fontSize={9}
           fill="var(--text-muted, #999)" style={{ fontFamily: 'var(--font-mono)' }}>
           {running ? `:${port} 稼働中` : '停止中'}{pubCount != null ? ` · pub ${pubCount}` : ''}
         </text>
 
-        {/* sender (+unknown) nodes & edges into the broker */}
+        {/* senders: arrow (topic under it) into the broker + device box */}
         {left.map((node, i) => {
-          const y = 40 + i * ROW_H + 13
+          const y = colY(i, left.length)
           return (
             <g key={node.key}>
-              {nodeBox(10, y, node, 'sender')}
-              {edge(162, y, W / 2 - 82, brokerY, `e-l-${node.key}`, node.connected)}
+              {flowArrow(leftX + BW, y, brokerX, centerY, `e-l-${node.key}`, node.connected, node.topic, 'sender')}
+              {deviceBox(leftX, y, node, 'sender')}
             </g>
           )
         })}
         {left.length === 0 && (
-          <text x={85} y={brokerY + 4} textAnchor="middle" fontSize={11}
+          <text x={leftX + BW / 2} y={centerY + 4} textAnchor="middle" fontSize={11}
             fill="var(--text-muted, #777)">(なし)</text>
         )}
 
-        {/* receiver nodes & edges out of the broker */}
+        {/* receivers: arrow (topic under it) out of the broker + device box */}
         {right.map((node, i) => {
-          const y = 40 + i * ROW_H + 13
+          const y = colY(i, right.length)
           return (
             <g key={node.key}>
-              {nodeBox(W - 160, y, node, 'receiver')}
-              {edge(W / 2 + 82, brokerY, W - 162, y, `e-r-${node.key}`, node.connected)}
+              {flowArrow(brokerX + BW, centerY, rightX, y, `e-r-${node.key}`, node.connected, node.topic, 'receiver')}
+              {deviceBox(rightX, y, node, 'receiver')}
             </g>
           )
         })}
         {right.length === 0 && (
-          <text x={W - 85} y={brokerY + 4} textAnchor="middle" fontSize={11}
+          <text x={rightX + BW / 2} y={centerY + 4} textAnchor="middle" fontSize={11}
             fill="var(--text-muted, #777)">(なし)</text>
         )}
       </svg>

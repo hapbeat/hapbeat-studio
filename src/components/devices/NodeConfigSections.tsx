@@ -264,7 +264,11 @@ export function MqttConfigSection({
   const [host, setHost] = useState<string>(initialHost === 'auto' ? '' : initialHost)
   const [port, setPort] = useState<number>(cachedInfo?.broker_port ?? 1883)
   const [qos, setQos] = useState<number>(cachedInfo?.mqtt_qos ?? 1)
-  const [status, setStatus] = useState<string | null>(null)
+  // Per-section status so applying one group's settings doesn't flash a message
+  // in another group's row (user 2026-06-14).
+  const [status, setStatus] = useState<string | null>(null)       // ブローカー設定
+  const [topicStatus, setTopicStatus] = useState<string | null>(null)  // TOPIC
+  const [alertStatus, setAlertStatus] = useState<string | null>(null)  // アラート動作
   // Alert-loop mode (receiver, item 10): default ON (loop until any button).
   const [alertLoop, setAlertLoop] = useState<boolean>(cachedInfo?.alert_loop ?? true)
   // Receive topics (receiver, item 8): the topic roots this node subscribes to.
@@ -307,8 +311,8 @@ export function MqttConfigSection({
   // 受信 topic（receiver）だけを適用（item 8）。
   const applyRecvTopics = () => {
     sendTo({ type: 'set_recv_topics', payload: { topics: recvTopics } })
-    setStatus('受信 topic を適用しました（受信機は再起動後に反映）')
-    setTimeout(() => setStatus(null), 5000)
+    setTopicStatus('受信 topic を適用しました（受信機は再起動後に反映）')
+    setTimeout(() => setTopicStatus(null), 5000)
   }
 
   // Alert-loop toggle (receiver, item 10) — persisted immediately and applied
@@ -316,8 +320,8 @@ export function MqttConfigSection({
   const applyAlertLoop = (next: boolean) => {
     setAlertLoop(next)
     sendTo({ type: 'set_alert_mode', payload: { loop: next } })
-    setStatus(`アラートを${next ? 'ループ (ボタンで停止)' : '単発'}に設定しました`)
-    setTimeout(() => setStatus(null), 5000)
+    setAlertStatus(`アラートを${next ? 'ループ (ボタンで停止)' : '単発'}に設定しました`)
+    setTimeout(() => setAlertStatus(null), 5000)
   }
 
   // Gray out the host/port inputs while auto-detect is on, so it's obvious they
@@ -481,7 +485,7 @@ export function MqttConfigSection({
             </div>
             <div className="form-action-row" style={{ marginTop: 8 }}>
               <button className="form-button" onClick={applyRecvTopics} disabled={!device.online}>適用</button>
-              {status && <span className="form-status ok" style={{ alignSelf: 'center' }}>{status}</span>}
+              {topicStatus && <span className="form-status ok" style={{ alignSelf: 'center' }}>{topicStatus}</span>}
             </div>
           </div>
         )
@@ -523,6 +527,7 @@ export function MqttConfigSection({
             (病院アラートのように「気づいて止める」運用)。「単発」: 1 回だけ振動。
             既定はループ。変更は次のアラートから即時反映されます。
           </div>
+          {alertStatus && <div className="form-status ok" style={{ marginTop: 4 }}>{alertStatus}</div>}
         </div>
       )}
 

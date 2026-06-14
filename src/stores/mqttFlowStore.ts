@@ -109,6 +109,24 @@ export const useMqttFlowStore = create<MqttFlowState>((set, get) => ({
     w.document.body.style.cssText =
       'margin:0;padding:16px;background:#16161a;color:#ddd;'
       + 'font-family:system-ui,-apple-system,sans-serif'
+    // Carry the app's stylesheets + theme into the pop-out so its classed
+    // elements (the 最終イベント table .mqtt-flow-info, .form-status …) render
+    // styled, not as raw text (user 2026-06-14). Vite injects CSS as <style>
+    // (dev) or <link> (prod) — clone both. Also mirror the theme attrs/vars on
+    // <html>/<body> so the CSS variables resolve.
+    try {
+      for (const node of Array.from(
+        document.querySelectorAll('style, link[rel="stylesheet"]'),
+      )) {
+        w.document.head.appendChild(node.cloneNode(true))
+      }
+      const srcHtml = document.documentElement
+      const dstHtml = w.document.documentElement
+      if (srcHtml.className) dstHtml.className = srcHtml.className
+      const htmlStyle = srcHtml.getAttribute('style')
+      if (htmlStyle) dstHtml.setAttribute('style', htmlStyle)
+      if (document.body.className) w.document.body.className = document.body.className
+    } catch { /* cross-origin / detached — fall back to inline body style only */ }
     // Closing the window via its own chrome can't call back into React, so
     // the controller polls `popout.closed`; this handler covers the case
     // where the parent tab is closed/navigated.
