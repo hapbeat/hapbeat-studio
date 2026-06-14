@@ -533,11 +533,19 @@ export function MqttConfigSection({
           {alertStatus && <div className="form-status ok" style={{ marginTop: 4 }}>{alertStatus}</div>}
 
           {/* 制限モード (§6.3) — read-only。本体ボタンの limit_toggle アクション
-              でのみ切替 (シリアル set コマンドなし) なので現在値の表示に留める。 */}
+              でのみ切替 (シリアル set コマンドなし) なので現在値の表示に留める。
+              値は通常サイズ・明色で表示し、補足説明 (.muted) と区別する。 */}
           {cachedInfo?.alert_limit != null && (
             <div className="form-row" style={{ marginTop: 10 }}>
               <label>受信制限</label>
-              <span className={`form-status ${cachedInfo.alert_limit ? 'warn' : 'muted'}`} style={{ textTransform: 'none' }}>
+              <span
+                style={{
+                  fontSize: 15,
+                  fontWeight: 600,
+                  textTransform: 'none',
+                  color: cachedInfo.alert_limit ? 'var(--warning)' : 'var(--text-primary)',
+                }}
+              >
                 {cachedInfo.alert_limit ? '制限モード（重要な色のみ再生）' : '全て再生'}
               </span>
               <span />
@@ -839,7 +847,11 @@ export function SensorMappingSection({
       setStatus('デフォルトの 3 色しきい値を入れました — イベントを割り当てて保存してください')
       return
     }
-    setRows(mappings)
+    // Show real newlines (0x0A) the device stored as a literal "\n" in the
+    // single-line text input so it round-trips with the save()-side conversion.
+    setRows(mappings.map((m) => (m.oled && m.oled.includes('\n'))
+      ? { ...m, oled: m.oled.replace(/\n/g, '\\n') }
+      : m))
     // Reconstruct the card-default + per-row-override model from the flat
     // per-row topics the device returned.
     const ct = inferCardTopic(mappings)
@@ -970,7 +982,16 @@ export function SensorMappingSection({
     const clean = rows
       .map((r, i) => ({ ...r, topic: (overrideRows.has(i) ? r.topic : cardTopic) || undefined }))
       .filter((r) => r.key.trim())
-      .map((r) => ({ ...r, key: r.key.trim(), event_id: r.event_id.trim(), target: r.target.trim() }))
+      .map((r) => ({
+        ...r,
+        key: r.key.trim(),
+        event_id: r.event_id.trim(),
+        target: r.target.trim(),
+        // Convert a literal "\n" the user typed in the OLED text into a real
+        // newline (0x0A). The receiver renders the alert text via printEfontWrap
+        // which line-breaks on 0x0A, so this lets the user lay out 2-line alerts.
+        oled: r.oled ? r.oled.replace(/\\n/g, '\n') : r.oled,
+      }))
     sendTo({ type: 'set_sensor_mapping', payload: { mappings: clean } })
     const noEvent = clean.filter((r) => !r.event_id).length
     setStatus(noEvent > 0
@@ -986,6 +1007,75 @@ export function SensorMappingSection({
     setDirty(false)
   }
 
+  // --- JSON export / import (item 2026-06-14) -------------------------------
+  // Save/share the sensor mapping (colors → events + thresholds + topics) as a
+  // portable file so a tuned config can be backed up or copied to another
+  // sender without re-entering every threshold by hand. Import replaces the
+  // editor rows (and marks dirty — the user still presses 保存 to push to the
+  // device), so it never writes to a device implicitly.
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const exportJson = () => {
+    const payload = {
+      kind: 'hapbeat-sensor-mapping',
+      version: 1,
+      sensor_type: sensorType ?? undefined,
+      mappings: rows,
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const safe = (device.name || device.ipAddress || 'sensor').replace(/[^\w.-]+/g, '_')
+    a.href = url
+    a.download = `sensor-mapping-${safe}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+    setStatus(`${rows.length} 件を JSON にエクスポートしました`)
+    setTimeout(() => setStatus(null), 5000)
+  }
+  const importJson = (file: File) => {
+    const fr = new FileReader()
+    fr.onload = () => {
+      try {
+        const parsed = JSON.parse(String(fr.result)) as unknown
+        // Accept either {mappings:[...]} or a bare array.
+        const arr = Array.isArray(parsed)
+          ? parsed
+          : (parsed as { mappings?: unknown }).mappings
+        if (!Array.isArray(arr)) throw new Error('mappings 配列が見つかりません')
+        const valid = (arr as SensorMapping[]).filter(
+          (m) => m && typeof m === 'object' && typeof m.key === 'string' && m.match,
+        )
+        if (valid.length === 0) throw new Error('有効なマッピングがありません')
+        // Normalize every imported row to the full SensorMapping shape. A
+        // foreign / hand-authored file may omit event_id / target / gain; left
+        // undefined they crash save() (r.event_id.trim()) and render NaN% gain.
+        // Fill the same defaults emptyMapping() uses so imported rows behave
+        // exactly like editor-created ones.
+        const imported: SensorMapping[] = valid.map((m) => ({
+          key: m.key,
+          match: { ...m.match },
+          event_id: typeof m.event_id === 'string' ? m.event_id : '',
+          target: typeof m.target === 'string' ? m.target : '',
+          gain: typeof m.gain === 'number' ? m.gain : 1.0,
+          debounce_ms: typeof m.debounce_ms === 'number' ? m.debounce_ms : undefined,
+          oled: typeof m.oled === 'string' ? m.oled : undefined,
+          topic: typeof m.topic === 'string' ? m.topic : undefined,
+          critical: m.critical === true ? true : undefined,
+        }))
+        setRows(imported)
+        const ct = inferCardTopic(imported)
+        setCardTopic(ct)
+        setOverrideRows(new Set(imported.flatMap((m, i) => ((m.topic ?? '') !== ct ? [i] : []))))
+        setDirty(true)
+        setStatus(`${imported.length} 件をインポートしました — 「保存」でデバイスに書き込みます`)
+      } catch (e) {
+        setStatus(`インポート失敗: ${e instanceof Error ? e.message : 'JSON を解析できません'}`)
+      }
+      setTimeout(() => setStatus(null), 6000)
+    }
+    fr.readAsText(file)
+  }
+
   return (
     <div className="form-section">
       <div className="form-section-title" style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -995,14 +1085,45 @@ export function SensorMappingSection({
             {' '}— 検出値ごとに発火するイベントを割り当てる
           </span>
         </span>
-        <button
-          className="form-button-secondary"
-          onClick={reload}
-          disabled={!device.online}
-          style={{ fontSize: 13, padding: '2px 8px' }}
-        >
-          ⟳ 読み込み
-        </button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json,.json"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) importJson(f)
+              e.target.value = ''  // allow re-importing the same file
+            }}
+          />
+          <button
+            className="form-button-secondary"
+            onClick={exportJson}
+            disabled={rows.length === 0}
+            style={{ fontSize: 13, padding: '2px 8px' }}
+            title="現在のマッピングを JSON ファイルに保存"
+          >
+            ⤓ JSON 保存
+          </button>
+          <button
+            className="form-button-secondary"
+            onClick={() => fileInputRef.current?.click()}
+            style={{ fontSize: 13, padding: '2px 8px' }}
+            title="JSON ファイルからマッピングを読み込む（保存ボタンでデバイスに反映）"
+          >
+            ⤒ JSON 読込
+          </button>
+          <button
+            className="form-button-secondary"
+            onClick={reload}
+            disabled={!device.online}
+            style={{ fontSize: 13, padding: '2px 8px' }}
+            title="デバイスから現在のマッピングを再取得"
+          >
+            ⟳ 読み込み
+          </button>
+        </div>
       </div>
 
       {/* Live reading — tune thresholds while watching the actual value. */}
