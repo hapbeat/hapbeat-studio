@@ -61,7 +61,8 @@ export function WifiProfilesForm({
   // path but failed during onboarding (radio not initialized in
   // factory state), so we unified to Helper-only.
   const { send: helperSend, lastMessage } = useHelperConnection()
-  const { toast, setAnchor } = useToast()
+  // 書込み結果トーストは HelperToastBridge が write_result ベースで出す。
+  const { setAnchor } = useToast()
   const [scanResults, setScanResults] = useState<SerialWifiNetwork[]>([])
   const [scanState, setScanState] = useState<'idle' | 'scanning' | 'done' | 'error'>('idle')
 
@@ -152,7 +153,6 @@ export function WifiProfilesForm({
   const submit = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (!ssid.trim()) return
     setAnchor(e.currentTarget)
-    const wasEdit = editingIndex !== null
     const targetSsid = ssid.trim()
     // password が空欄の場合は pass フィールド自体を含めない
     // (空文字送信で既存パスワードを破壊しないよう write-only 仕様に準拠)
@@ -167,7 +167,7 @@ export function WifiProfilesForm({
     })
     exitEditMode()
     setAddOpen(false)
-    toast(`${targetSsid} を${wasEdit ? '更新' : '追加'}しました`, 'success')
+    // 成功/失敗は HelperToastBridge が write_result ベースで出す（結果ベース）。
     // Refresh the profile list — the firmware doesn't push, we poll.
     setTimeout(onRefresh, 800)
   }
@@ -175,7 +175,6 @@ export function WifiProfilesForm({
   const connectProfile = (e: React.MouseEvent<HTMLButtonElement>, idx: number) => {
     setAnchor(e.currentTarget)
     sendTo({ type: 'connect_wifi_profile', payload: { index: idx } })
-    toast(`プロファイル #${idx} に接続を試行します`, 'info')
   }
 
   const removeProfile = (e: React.MouseEvent<HTMLButtonElement>, idx: number) => {
@@ -183,7 +182,6 @@ export function WifiProfilesForm({
     if (!confirm(`プロファイル #${idx} を削除しますか？`)) return
     setAnchor(btn)
     sendTo({ type: 'remove_wifi_profile', payload: { index: idx } })
-    toast(`プロファイル #${idx} を削除しました`, 'success')
     setTimeout(onRefresh, 500)
   }
 
@@ -192,7 +190,6 @@ export function WifiProfilesForm({
     if (!confirm('保存済みの Wi-Fi 設定をすべて削除します。よろしいですか？')) return
     setAnchor(btn)
     sendTo({ type: 'clear_wifi', payload: {} })
-    toast('Wi-Fi 設定をすべて削除しました', 'success')
     setTimeout(onRefresh, 500)
   }
 

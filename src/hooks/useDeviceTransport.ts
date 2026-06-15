@@ -86,14 +86,32 @@ export function useDeviceTransport(selectedIp: string | null) {
     // stamp the serial pseudo-IP there. Without this, the Serial
     // transport silently dropped responses (e.g. get_debug_dump
     // never populated `debugDumpCache`, leaving the UI blank).
-    if (r && selectedIp) {
+    if (selectedIp) {
       const resultType = SERIAL_GET_CMD_TO_RESULT[msg.type]
       if (resultType) {
+        if (r) {
+          injectMessage({
+            type: resultType,
+            payload: {
+              device: selectedIp,
+              ...(r as Record<string, unknown>),
+            },
+          })
+        }
+      } else {
+        // set_* / action cmds have no dedicated *_result. Surface a
+        // write_result reflecting the ACTUAL firmware response so the
+        // toast bridge reports success/failure by result, not by the act
+        // of sending (LAN path already gets write_result from helper).
+        const ok = !!r && (r as Record<string, unknown>).status === 'ok'
+        const err = r ? String((r as Record<string, unknown>).error ?? '') : 'no response'
         injectMessage({
-          type: resultType,
+          type: 'write_result',
           payload: {
+            success: ok,
             device: selectedIp,
-            ...(r as Record<string, unknown>),
+            cmd: msg.type,
+            message: ok ? `✓ ${selectedIp}: ok` : `✗ ${selectedIp}: ${err || 'failed'}`,
           },
         })
       }

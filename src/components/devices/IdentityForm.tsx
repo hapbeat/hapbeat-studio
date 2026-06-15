@@ -63,7 +63,7 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
     sendTo({ type: 'set_name', payload: { name: name.trim() } })
     nameHistory.commit(name.trim())
     onChanged?.()
-    toast(`名前を「${name.trim()}」に変更しました`, 'success')
+    // 成功/失敗は HelperToastBridge が write_result ベースで出す（結果ベース）。
   }
 
   const submitAddress = (e: React.MouseEvent<HTMLButtonElement>) => {
@@ -72,7 +72,7 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
     sendTo({ type: 'set_address', payload: { address: addr } })
     if (prefix.trim()) prefixHistory.commit(prefix.trim())
     onChanged?.()
-    toast(`アドレスを ${addr} に設定しました`, 'success')
+    // 成功/失敗は HelperToastBridge が write_result ベースで出す（結果ベース）。
   }
 
   const submitReboot = async (e: React.MouseEvent<HTMLButtonElement>) => {

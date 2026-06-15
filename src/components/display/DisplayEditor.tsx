@@ -910,19 +910,13 @@ export function DisplayEditor() {
     const fadeOut = window.setTimeout(() => setDeployProgress(null), 1500)
     void fadeOut
     const success = lastMessage.payload.success as boolean
-    const deviceConfirmed = lastMessage.payload.device_confirmed as boolean | undefined
     const reason = (lastMessage.payload.error ?? lastMessage.payload.message ?? '') as string
     if (!success && reason.includes('no_device')) {
       toast('デバイスが選択されていません', 'warning')
-    } else if (success) {
-      if (deviceConfirmed) {
-        toast('デバイスに書き込みました', 'success')
-      } else {
-        toast('Helper に送信しました', 'info')
-      }
     }
-    // 失敗時は HelperToastBridge が cmd / message を入れた error toast を出すので、
-    // ここで重複表示しない。
+    // 成功/失敗のトーストは HelperToastBridge が write_result（実機の結果）
+    // ベースで一元的に出す（操作ではなく結果で出す方針）。ここでは進捗 UI の
+    // fade のみ行い、トーストは重複させない。
   }, [lastMessage, toast])
 
   // --- エクスポート / インポート / デバイス書き込み ---

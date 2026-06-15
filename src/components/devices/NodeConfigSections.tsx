@@ -275,12 +275,10 @@ export function MqttConfigSection({
   const [port, setPort] = useState<number>(cachedInfo?.broker_port ?? 1883)
   const [qos, setQos] = useState<number>(cachedInfo?.mqtt_qos ?? 1)
   // Feedback is shown as a toast anchored to the clicked button (never shifts
-  // the surrounding rows). `notify` sets the anchor + toasts in one call.
-  const { toast, setAnchor } = useToast()
-  const notify = (e: React.MouseEvent<HTMLElement>, msg: string,
-                  type: 'success' | 'error' | 'info' | 'warning' = 'success') => {
-    setAnchor(e.currentTarget); toast(msg, type)
-  }
+  // the surrounding rows). 書込み結果のトーストは HelperToastBridge が
+  // write_result（実機の結果）ベースで出す。ここでは押下時に anchor だけ
+  // 設定し、結果トーストがそのボタン近傍に出るようにする（操作ではなく結果で出す）。
+  const { setAnchor } = useToast()
   // Alert-loop mode (receiver, item 10): default ON (loop until any button).
   const [alertLoop, setAlertLoop] = useState<boolean>(cachedInfo?.alert_loop ?? true)
   // Deliberate-hold time to acknowledge/stop an alert (receiver, §6.1).
@@ -323,40 +321,37 @@ export function MqttConfigSection({
   const applyBroker = (e: React.MouseEvent<HTMLElement>) => {
     const value = auto ? 'auto' : host.trim()
     if (!auto && !value) return
+    setAnchor(e.currentTarget)
     sendTo({
       type: 'set_broker_host',
       payload: { host: value, port, topic_root: 'default-topic', qos },
     })
-    if (role === 'receiver') {
-      notify(e, 'ブローカー設定を適用（受信機を自動再起動して反映）')
-      rebootAfter()
-    } else {
-      notify(e, 'ブローカー設定を適用（即時再接続）')
-    }
+    // receiver は購読再開に再起動が要るので適用後に自動リブート。
+    if (role === 'receiver') rebootAfter()
   }
   // 受信 topic（receiver）だけを適用（item 8）。購読の張り直しに再起動が要るので
   // 適用後に自動で再起動する。
   const applyRecvTopics = (e: React.MouseEvent<HTMLElement>) => {
+    setAnchor(e.currentTarget)
     sendTo({ type: 'set_recv_topics', payload: { topics: recvTopics } })
-    notify(e, '受信 topic を適用（受信機を自動再起動して反映）')
     rebootAfter()
   }
 
   // Alert-loop toggle (receiver, item 10) — persisted immediately and applied
   // on the next incoming alert (firmware reads the flag fresh; no reboot).
   const applyAlertLoop = (e: React.MouseEvent<HTMLElement>, next: boolean) => {
+    setAnchor(e.currentTarget)
     setAlertLoop(next)
     sendTo({ type: 'set_alert_mode', payload: { loop: next } })
-    notify(e, `アラートを${next ? 'ループ (ボタンで停止)' : '単発'}に設定`)
   }
 
   // Deliberate-hold acknowledge time (receiver, §6.1). Persisted in NVS on the
   // device and applied immediately (no reboot — read fresh per press).
   const applyAckHold = (e: React.MouseEvent<HTMLElement>) => {
+    setAnchor(e.currentTarget)
     const ms = Math.max(200, Math.min(10000, Math.round(ackHoldMs)))
     setAckHoldMs(ms)
     sendTo({ type: 'set_alert_mode', payload: { ack_hold_ms: ms } })
-    notify(e, `停止の長押し時間を ${ms} ms に設定`)
   }
 
   // Gray out the host/port inputs while auto-detect is on, so it's obvious they
@@ -1103,12 +1098,16 @@ export function SensorMappingSection({
         oled: r.oled ? r.oled.replace(/\\n/g, '\n') : r.oled,
       }))
     sendTo({ type: 'set_sensor_mapping', payload: { mappings: clean } })
+    // 「保存しました」の成功表示は出さない — 実際の書込み結果は
+    // HelperToastBridge が write_result（実機の応答）ベースで出す
+    // (TCP 失敗時に成功と誤表示しないため。user 2026-06-16)。
+    // ここではクライアント側の助言（イベント未割当）だけ補足する。
     const noEvent = clean.filter((r) => !r.event_id).length
-    setStatus(noEvent > 0
-      ? `${clean.length} 件を保存（うち ${noEvent} 件はイベント未割当 — 検知しても発火しません）`
-      : `${clean.length} 件を保存しました`)
+    if (noEvent > 0) {
+      setStatus(`※ ${noEvent} 件はイベント未割当（検知しても発火しません）`, 'warning')
+      setTimeout(() => setStatus(null), 6000)
+    }
     setDirty(false)
-    setTimeout(() => setStatus(null), 5000)
   }
 
   const reload = () => {

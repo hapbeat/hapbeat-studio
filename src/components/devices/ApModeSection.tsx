@@ -66,18 +66,11 @@ export function ApModeSection({ device, apInfo, sendTo, onRefreshApStatus }: Pro
       toast('パスワードは 8〜63 文字で入力してください', 'error')
       return
     }
+    // 成功/失敗は HelperToastBridge が write_result ベースで出す（結果ベース）。
     if (val.length === 0) {
-      // Empty → clear
-      sendTo({ type: 'clear_ap_pass', payload: {} })
-      toast('AP パスワードを削除しました（オープン AP）', 'success')
+      sendTo({ type: 'clear_ap_pass', payload: {} })  // empty → clear
     } else {
       sendTo({ type: 'set_ap_pass', payload: { pass: val } })
-      toast(
-        isAp
-          ? 'パスワードを設定しました（次回 AP 起動時に有効・再起動が必要）'
-          : 'AP パスワードを設定しました',
-        'success',
-      )
     }
     setApPass('')
   }
@@ -86,7 +79,6 @@ export function ApModeSection({ device, apInfo, sendTo, onRefreshApStatus }: Pro
     setAnchor(e.currentTarget)
     sendTo({ type: 'clear_ap_pass', payload: {} })
     setApPass('')
-    toast('AP パスワードを削除しました（オープン AP）', 'success')
   }
 
   return (

@@ -23,7 +23,9 @@ export function WifiForm({ device, wifiStatus, sendTo }: Props) {
   const [ssid, setSsid] = useState('')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
-  const { toast, setAnchor } = useToast()
+  // 書込み結果トーストは HelperToastBridge が write_result ベースで出す。
+  // ここは押下時の anchor 設定のみ（結果ベース）。
+  const { setAnchor } = useToast()
 
   // Pre-fill SSID from device's currently-connected network when known.
   useEffect(() => {
@@ -37,7 +39,6 @@ export function WifiForm({ device, wifiStatus, sendTo }: Props) {
       type: 'set_wifi',
       payload: { ssid: ssid.trim(), password },
     })
-    toast('Wi-Fi を設定しました（再起動で有効）', 'success')
   }
 
   const clear = (e: React.MouseEvent<HTMLButtonElement>) => {
@@ -45,7 +46,6 @@ export function WifiForm({ device, wifiStatus, sendTo }: Props) {
     if (!confirm('保存済みの Wi-Fi 設定をすべて削除します。よろしいですか？')) return
     setAnchor(btn)
     sendTo({ type: 'clear_wifi', payload: {} })
-    toast('Wi-Fi 設定を削除しました', 'success')
   }
 
   return (
