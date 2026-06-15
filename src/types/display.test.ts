@@ -12,7 +12,7 @@ describe('getElementSize — 要素のセル幅 (全角は 2 セル換算済み)
   })
   it('テキスト系 3 サイズ (compact/standard/wide)', () => {
     expect(getElementSize('device_name', 'compact')).toEqual([4, 1])
-    expect(getElementSize('device_name')).toEqual([8, 1])
+    expect(getElementSize('device_name')).toEqual([5, 1])  // 既定 5 (DuoWL 衝突回避)
     expect(getElementSize('device_name', 'wide')).toEqual([16, 1])
   })
   it('固定幅要素', () => {

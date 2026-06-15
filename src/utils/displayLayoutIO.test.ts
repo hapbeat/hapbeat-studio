@@ -51,7 +51,7 @@ describe('toFirmwareFormat (Studio → firmware)', () => {
   })
   it('要素は type + position + (getElementSize 由来の) size を出力', () => {
     const els = fw.display.pages[0].elements
-    expect(els[0]).toMatchObject({ type: 'device_name', position: [0, 0], size: [8, 1] })
+    expect(els[0]).toMatchObject({ type: 'device_name', position: [0, 0], size: [5, 1] })
     // battery "bar" は size [8,1] + variant 'bar'
     expect(els[1]).toMatchObject({ type: 'battery', position: [12, 0], size: [8, 1], variant: 'bar' })
     // custom_text は text を保持

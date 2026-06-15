@@ -349,12 +349,13 @@ export function getElementSize(type: DisplayElementType, variant?: string): [num
   if (type === 'device_name') {
     // ホスト名 (NVS の dev_name)。3 サイズ展開:
     //   compact = 4 文字 (e.g. "Duo1")
-    //   standard (default) = 8 文字 (e.g. "Duo-Neck")
+    //   standard (default) = 5 文字 (e.g. "Duo-1")
     //   wide = 16 文字 (1 行全部、e.g. "MyHapbeat-Neck01")
     // firmware は elem.width に合わせて左から N 文字を切出し / 右 pad。
+    // 既定 5: DuoWL の標準レイアウト (name col0 + player col6) で衝突しない幅。
     if (variant === 'compact') return [4, 1]
     if (variant === 'wide') return [16, 1]
-    return [8, 1]
+    return [5, 1]
   }
   if (type === 'custom_text') {
     // 任意の固定テキスト。3 サイズ展開 (他のテキスト要素と統一):
