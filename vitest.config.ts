@@ -11,5 +11,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.{test,spec}.ts'],
+    // 一部モジュールが import 時に window を参照するため最小 stub を先に注入
+    // (jsdom 非依存で純ロジックテストを回す)。
+    setupFiles: ['./src/test-setup.ts'],
   },
 })
