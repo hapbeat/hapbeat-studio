@@ -4,7 +4,7 @@ export interface DisplayElement {
   id: string
   type: DisplayElementType
   pos: [number, number]  // [col, row]
-  variant?: 'standard' | 'compact' | 'bar' | 'wide'
+  variant?: 'standard' | 'compact' | 'bar' | 'wide' | 'medium'
   font_scale?: 1 | 2
   /** Static label content — only for type 'custom_text'. */
   text?: string
@@ -120,7 +120,7 @@ export interface PagePreset {
 
 export interface DisplayElementMeta {
   type: DisplayElementType
-  variant?: 'standard' | 'compact' | 'bar' | 'wide'
+  variant?: 'standard' | 'compact' | 'bar' | 'wide' | 'medium'
   label: string
   description: string
   icon: string
@@ -347,13 +347,14 @@ export function getElementSize(type: DisplayElementType, variant?: string): [num
     return [8, 1]
   }
   if (type === 'device_name') {
-    // ホスト名 (NVS の dev_name)。3 サイズ展開:
-    //   compact = 4 文字 (e.g. "Duo1")
-    //   standard (default) = 5 文字 (e.g. "Duo-1")
-    //   wide = 16 文字 (1 行全部、e.g. "MyHapbeat-Neck01")
-    // firmware は elem.width に合わせて左から N 文字を切出し / 右 pad。
-    // 既定 5: DuoWL の標準レイアウト (name col0 + player col6) で衝突しない幅。
+    // ホスト名 (NVS の dev_name)。4 サイズ展開 (4/5/8/16):
+    //   compact  = 4 文字  (e.g. "Duo1")
+    //   standard = 5 文字  (default。DuoWL 標準レイアウト name col0 + player col6 で衝突しない幅)
+    //   medium   = 8 文字  (e.g. "Duo-Neck")
+    //   wide     = 16 文字 (1 行全部、e.g. "MyHapbeat-Neck01")
+    // firmware は elem.width に合わせて左から N 文字を切出し / 右 pad (variant は不問)。
     if (variant === 'compact') return [4, 1]
+    if (variant === 'medium') return [8, 1]
     if (variant === 'wide') return [16, 1]
     return [5, 1]
   }

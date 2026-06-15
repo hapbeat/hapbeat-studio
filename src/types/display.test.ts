@@ -15,6 +15,12 @@ describe('getElementSize — 要素のセル幅 (全角は 2 セル換算済み)
     expect(getElementSize('device_name')).toEqual([5, 1])  // 既定 5 (DuoWL 衝突回避)
     expect(getElementSize('device_name', 'wide')).toEqual([16, 1])
   })
+  it('device_name は 4/5/8/16 の 4 サイズ', () => {
+    expect(getElementSize('device_name', 'compact')).toEqual([4, 1])
+    expect(getElementSize('device_name', 'standard')).toEqual([5, 1])
+    expect(getElementSize('device_name', 'medium')).toEqual([8, 1])
+    expect(getElementSize('device_name', 'wide')).toEqual([16, 1])
+  })
   it('固定幅要素', () => {
     expect(getElementSize('player_number')).toEqual([4, 1])
     expect(getElementSize('group_id')).toEqual([5, 1])

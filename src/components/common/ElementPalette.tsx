@@ -49,6 +49,14 @@ const sizeVariantsSM: VariantOption[] = [
   { value: 'compact',  label: 'S' },
   { value: 'standard', label: 'M' },
 ]
+// device_name は 4/5/8/16 の 4 サイズ。firmware は elem.width で切出すため
+// variant 値は Studio 内のサイズ選択用 (描画は width のみに依存)。
+const deviceNameVariants: VariantOption[] = [
+  { value: 'compact',  label: 'S' },
+  { value: 'standard', label: 'M' },
+  { value: 'medium',   label: 'L' },
+  { value: 'wide',     label: 'XL' },
+]
 
 export const PALETTE_SECTIONS: PaletteSection[] = [
   {
@@ -77,7 +85,7 @@ export const PALETTE_SECTIONS: PaletteSection[] = [
     title: '識別',
     hint: '設定で決まる固定情報',
     items: [
-      { type: 'device_name', label: 'Device Name', description: 'ホスト名',   icon: 'D', variants: sizeVariants },
+      { type: 'device_name', label: 'Device Name', description: 'ホスト名',   icon: 'D', variants: deviceNameVariants },
       { type: 'address',     label: 'Address',     description: 'prefix',     icon: 'A', variants: sizeVariants },
       { type: 'app_name',    label: 'AppName',     description: '接続アプリ名', icon: 'A', variants: sizeVariants },
       { type: 'position',    label: 'Position',    description: '装着位置 (pos_xxx)', icon: '⬦', variants: sizeVariants },

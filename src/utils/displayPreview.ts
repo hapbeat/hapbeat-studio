@@ -120,11 +120,12 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
     }
     case 'device_name': {
       // 設定された dev_name (NVS) を左から N 文字で切出し / 右 pad。
-      // compact = 4 ('Duo1') / standard = 5 ('Duo-1') / wide = 16 (フル)
+      // compact=4 / standard=5 (既定) / medium=8 / wide=16
       const sample = 'MyHapbeat-Neck01'
       if (variant === 'compact') return sample.padEnd(4, ' ').slice(0, 4)
+      if (variant === 'medium')  return sample.padEnd(8, ' ').slice(0, 8)
       if (variant === 'wide')    return sample.padEnd(16, ' ').slice(0, 16)
-      return sample.padEnd(8, ' ').slice(0, 8)
+      return sample.padEnd(5, ' ').slice(0, 5)  // standard = 5 (以前 8 で溢れていた)
     }
     case 'app_name':
       // CONNECT_STATUS payload の app_name (Unity SDK 等が送信)。
