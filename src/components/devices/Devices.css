@@ -145,31 +145,6 @@
   color: var(--text-secondary);
 }
 
-/* Compact Serial-config link — sits at the bottom of the per-device
-   設定 tab as a low-key fallback path. Looks like an inline link
-   rather than a button so it doesn't compete with the LAN forms. */
-.serial-cfg-compact {
-  padding: 8px 12px;
-  background: transparent;
-  border: 1px dashed var(--border);
-}
-.form-link-button {
-  background: none;
-  border: none;
-  padding: 0;
-  font: inherit;
-  color: var(--accent-light);
-  cursor: pointer;
-  text-decoration: underline;
-}
-.form-link-button:hover:not(:disabled) {
-  color: var(--accent);
-}
-.form-link-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-}
-
 .device-row-top {
   display: flex;
   align-items: center;
@@ -921,41 +896,6 @@
   gap: 8px;
   margin-top: 4px;
   flex-wrap: wrap;
-}
-
-/* ---- Serial connect CTA (onboarding empty state + Config tab) ---- */
-.serial-connect-cta {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 10px;
-  padding: 18px 8px 8px;
-}
-.serial-connect-btn {
-  /* Override the default form-button compact look — this is the main
-   * call-to-action of the empty-state pane. */
-  font-size: 20px;
-  padding: 16px 24px;
-  border-radius: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  width: 100%;
-  box-shadow: 0 2px 8px rgba(124, 92, 191, 0.35);
-  transition: transform var(--transition), box-shadow var(--transition), background var(--transition);
-}
-.serial-connect-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 14px rgba(124, 92, 191, 0.55);
-}
-.serial-connect-btn:active {
-  transform: translateY(0);
-  box-shadow: 0 1px 4px rgba(124, 92, 191, 0.4);
-}
-.serial-connect-hint {
-  font-size: 15px;
-  line-height: 1.7;
-  color: var(--text-secondary);
-  padding: 4px 4px 0;
 }
 
 /* ---- Wi-Fi profile rows ---- */

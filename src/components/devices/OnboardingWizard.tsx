@@ -35,7 +35,6 @@ export function OnboardingWizard() {
   const probeStatus = useSerialMaster((s) => s.probeStatus)
   const probeMessage = useSerialMaster((s) => s.probeMessage)
   const conn = useSerialMaster((s) => s.conn)
-  const openConfig = useSerialMaster((s) => s.openConfig)
   const release = useSerialMaster((s) => s.release)
   const flashLastResult = useSerialMaster((s) => s.flashLastResult)
 
@@ -118,8 +117,6 @@ export function OnboardingWizard() {
         <ProbeStep
           probeStatus={probeStatus}
           probeMessage={probeMessage}
-          onTryProbe={() => openConfig()}
-          onCancel={() => { void release() }}
         />
       )}
 
@@ -132,8 +129,6 @@ export function OnboardingWizard() {
           hasConn={!!conn}
           probeStatus={probeStatus}
           probeMessage={probeMessage}
-          onReconnect={() => openConfig()}
-          onCancelReconnect={() => { void release() }}
           onDisconnect={async () => { await release(); setStep('probe') }}
         />
       )}
@@ -148,50 +143,33 @@ export function OnboardingWizard() {
 function ProbeStep({
   probeStatus,
   probeMessage,
-  onTryProbe,
-  onCancel,
 }: {
-  probeStatus: ReturnType<typeof useSerialMaster> extends never ? never : string
+  probeStatus: string
   probeMessage: string | null
-  onTryProbe: () => void
-  onCancel: () => void
 }) {
-  const busy = probeStatus === 'connecting'
+  // 接続操作は左サイドバーの「USB Serial」カードのチェックに一本化した
+  // (ユーザ要望 2026-06-15)。このステップは「どこを操作するか」を案内する
+  // ガイドに徹し、接続が成立すると probeStatus を監視している親が自動で
+  // 次ステップへ進める。
   return (
     <div className="form-section onboarding-step">
       <div className="form-section-title">Step 1 — USB Serial で接続</div>
       <div className="onboarding-step-body">
         <p>
-          デバイスを USB ケーブルで PC に繋ぎ、下のボタンを押して COM ポートを選択してください。
+          デバイスを USB ケーブルで PC に繋ぎ、
+          <strong>左の「USB Serial」欄</strong>で接続します:
         </p>
+        <ol className="onboarding-substeps">
+          <li><strong>＋</strong> ボタンで USB 機器を追加（COM ポート選択ダイアログ）</li>
+          <li>表示されたカードの<strong>チェックを ✔</strong> にすると接続します</li>
+        </ol>
         <p className="onboarding-step-routing-hint">
-          接続後、デバイスの応答内容に応じて自動で次のステップに進みます:
+          接続すると、デバイスの応答内容に応じて自動で次のステップに進みます:
         </p>
         <ol className="onboarding-substeps">
           <li>ファーム入り → <strong>Step 3 (Wi-Fi 設定)</strong> に自動遷移</li>
           <li>応答なし (新品 / ブートローダー破損) → <strong>Step 2 (ファーム書き込み)</strong> に自動遷移</li>
         </ol>
-        <div className="form-action-row">
-          <button
-            className="form-button onboarding-cta"
-            onClick={onTryProbe}
-            disabled={busy || !isWebSerialSupported()}
-          >
-            {busy ? '接続中…' : '🔌 USB Serial で接続'}
-          </button>
-          {/* 接続が応答しないとき (port.open() で詰まる / get_info に応答が来ない 等)、
-              guardian の 20 秒を待たずに UI からキャンセルできるように 中止 ボタンを
-              並べる。release() で port.close + state リセット。 */}
-          {busy && (
-            <button
-              className="form-button-secondary"
-              onClick={onCancel}
-              title="接続を中止して Step 1 に戻る"
-            >
-              ⨯ 中止
-            </button>
-          )}
-        </div>
         {probeMessage && (
           <div className={`form-status ${
             // failed = 「ファーム未書込」など通常フローのケースが大半。
@@ -253,7 +231,8 @@ function FlashStep({
 
           <div className="form-status muted">
             👉 書き込み完了後、自動で Step 3 (Wi-Fi 設定) に進みます。
-            その後デバイスの<strong> 電源を一度 OFF→ON </strong>してから「USB Serial で再接続」を押してください。
+            その後デバイスの<strong> 電源を一度 OFF→ON </strong>してから、
+            左の USB Serial カードのチェックを入れ直して再接続してください。
           </div>
           <div className="form-action-row" style={{ marginTop: 8 }}>
             <button className="form-button-secondary" onClick={onBack}>
@@ -272,21 +251,16 @@ function ConfigureStep({
   hasConn,
   probeStatus,
   probeMessage,
-  onReconnect,
-  onCancelReconnect,
   onDisconnect,
 }: {
   hasConn: boolean
   probeStatus: string
   probeMessage: string | null
-  onReconnect: () => void
-  onCancelReconnect: () => void
   onDisconnect: () => void
 }) {
-  const busy = probeStatus === 'connecting'
-
   // 接続なし: post-flash / cable 抜け / set_wifi 後 reboot のいずれかで
   // conn が外れた状態。Step 1 に戻さず、ここで電源 OFF→ON + 再接続を促す。
+  // 再接続も左サイドバーの USB Serial カードのチェックに一本化。
   if (!hasConn) {
     return (
       <div className="form-section onboarding-step">
@@ -294,29 +268,11 @@ function ConfigureStep({
         <div className="onboarding-step-body">
           <p>
             ファーム書き込みが完了しました。<strong>デバイスの電源を一度 OFF→ON</strong> してから、
-            下のボタンで USB Serial に再接続してください。
+            <strong>左の USB Serial カードのチェックを入れ直して</strong>再接続してください。
           </p>
           <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
             再接続できたら設定タブの Wi-Fi セクションで SSID / パスワードを入力できます。
           </p>
-          <div className="form-action-row">
-            <button
-              className="form-button onboarding-cta"
-              onClick={onReconnect}
-              disabled={busy || !isWebSerialSupported()}
-            >
-              {busy ? '接続中…' : '🔌 USB Serial で再接続'}
-            </button>
-            {busy && (
-              <button
-                className="form-button-secondary"
-                onClick={onCancelReconnect}
-                title="再接続を中止"
-              >
-                ⨯ 中止
-              </button>
-            )}
-          </div>
           {probeMessage && (
             <div className={`form-status ${
               probeStatus === 'success' ? 'ok' : 'muted'
