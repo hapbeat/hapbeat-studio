@@ -124,6 +124,23 @@ body {
   font-weight: 600;
   color: var(--accent-light);
   letter-spacing: 0.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* バージョンをタイトル横にタグ表示 (Manage で旧版へ切替可) */
+.app-version-badge {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  line-height: 1;
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: var(--accent-light, #b9a8ff);
+  background: rgba(123, 108, 255, 0.16);
+  border: 1px solid rgba(123, 108, 255, 0.45);
+  white-space: nowrap;
 }
 
 /* 右側メタ情報グループ: docs リンク + Helper 接続状態 を縦中央揃えで並べる */

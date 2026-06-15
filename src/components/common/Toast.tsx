@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, createContext, useContext, useRef } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, createContext, useContext, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import './Toast.css'
 
@@ -58,12 +58,20 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   )
 }
 
-/** トースト幅の推定値（実測前のクランプ用） */
+/** 実測前の暫定幅（最初の paint 用フォールバック。幅は CSS の fit-content が
+ *  内容から決めるので、ここは初回 1 フレームだけ使う概算）。 */
 const TOAST_EST_W = 280
 
 function ToastNotification({ item, onRemove }: { item: ToastItem; onRemove: (id: number) => void }) {
   const [exiting, setExiting] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  // 実測幅。CSS の fit-content + max-width で内容に応じて幅が決まるので、
+  // クランプ（画面外に出さない位置補正）には固定の概算ではなく実測値を使う。
+  const [measuredW, setMeasuredW] = useState<number | null>(null)
+
+  useLayoutEffect(() => {
+    if (ref.current) setMeasuredW(ref.current.offsetWidth)
+  }, [])
 
   useEffect(() => {
     const timer = setTimeout(() => setExiting(true), 2000)
@@ -80,10 +88,11 @@ function ToastNotification({ item, onRemove }: { item: ToastItem; onRemove: (id:
   const vw = typeof window !== 'undefined' ? window.innerWidth : 1024
   const vh = typeof window !== 'undefined' ? window.innerHeight : 768
 
-  // クランプ: left を margin 〜 vw - margin - 推定幅 に収める
+  // クランプ: left を margin 〜 vw - margin - 実測幅 に収める
+  const w = measuredW ?? TOAST_EST_W
   const clampLeft = (idealCenter: number) => {
-    const left = idealCenter - TOAST_EST_W / 2
-    return Math.max(margin, Math.min(left, vw - margin - TOAST_EST_W))
+    const left = idealCenter - w / 2
+    return Math.max(margin, Math.min(left, vw - margin - w))
   }
 
   const style: React.CSSProperties = { position: 'fixed', zIndex: 9999 }

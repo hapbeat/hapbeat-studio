@@ -2,20 +2,11 @@ import { useEffect, useState } from 'react'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useSerialMaster } from '@/stores/serialMaster'
 import { isWebSerialSupported } from '@/utils/serialConfig'
-import { FirmwareSubTab, type FirmwareGroup } from './FirmwareSubTab'
+import { FirmwareSubTab } from './FirmwareSubTab'
 import { DriverHelpLinks } from './DriverHelpLinks'
 import './OnboardingWizard.css'
 
 const SERIAL_DEVICE_PREFIX = 'serial:'
-
-/** Node-type choices shown in the flash step — same Hapbeat | 周辺機器
- *  grouping as the firmware library (DEC-034). Hapbeat is the default
- *  so a plain Wi-Fi-UDP user just clicks through without thinking
- *  about modes. */
-const NODE_GROUP_CHOICES: { group: FirmwareGroup; label: string; hint: string }[] = [
-  { group: 'hapbeat', label: 'Hapbeat', hint: '装着デバイス — Unity 連携 / センサ通知 / ライブ受信' },
-  { group: 'peripheral', label: '周辺機器', hint: 'センサ送信機 / ブローカー / ライブ送信機 (MQTT・ESP-NOW 構成用)' },
-]
 
 type Step = 'probe' | 'flash' | 'configure'
 
@@ -39,9 +30,6 @@ export function OnboardingWizard() {
   const flashLastResult = useSerialMaster((s) => s.flashLastResult)
 
   const [step, setStep] = useState<Step>('probe')
-  // Which node group the user is setting up (drives which firmware the
-  // flash step offers). Defaults to the common Hapbeat (wearable) case.
-  const [group, setGroup] = useState<FirmwareGroup>('hapbeat')
 
   // Auto-route based on probe outcome.
   //
@@ -121,7 +109,7 @@ export function OnboardingWizard() {
       )}
 
       {step === 'flash' && (
-        <FlashStep onBack={goProbe} group={group} setGroup={setGroup} />
+        <FlashStep onBack={goProbe} />
       )}
 
       {step === 'configure' && (
@@ -186,49 +174,16 @@ function ProbeStep({
   )
 }
 
-function FlashStep({
-  onBack,
-  group,
-  setGroup,
-}: {
-  onBack: () => void
-  group: FirmwareGroup
-  setGroup: (g: FirmwareGroup) => void
-}) {
+function FlashStep({ onBack }: { onBack: () => void }) {
   return (
     <>
       <div className="form-section onboarding-step">
         <div className="form-section-title">Step 2 — ファームウェア書き込み</div>
         <div className="onboarding-step-body">
           <p>
-            Hapbeat 用のファームウェアを USB Serial 経由で書き込みます。
-            「Serial 書き込み」ボタンを押して完了するまで待ってください。
+            下のファームウェアライブラリで <strong>ノードの種類（Hapbeat / 周辺機器）</strong>
+            のタブを選び、書き込むファームウェアを選んで「Serial 書き込み」を押してください。
           </p>
-
-          {/* Node-type chooser — same Hapbeat | 周辺機器 grouping as the
-            * firmware library; Hapbeat is pre-selected so a plain
-            * Wi-Fi-UDP user doesn't have to think about modes. */}
-          <div className="form-row" style={{ marginTop: 4 }}>
-            <label>ノードの種類</label>
-            <div className="form-row-multi" style={{ flexWrap: 'wrap', gap: 6 }}>
-              {NODE_GROUP_CHOICES.map((c) => (
-                <button
-                  key={c.group}
-                  type="button"
-                  className={`form-button${group === c.group ? '' : '-secondary'}`}
-                  onClick={() => setGroup(c.group)}
-                  title={c.hint}
-                >
-                  {c.label}
-                </button>
-              ))}
-            </div>
-            <span />
-          </div>
-          <div className="form-status muted">
-            {NODE_GROUP_CHOICES.find((c) => c.group === group)?.hint}
-          </div>
-
           <div className="form-status muted">
             👉 書き込み完了後、自動で Step 3 (Wi-Fi 設定) に進みます。
             その後デバイスの<strong> 電源を一度 OFF→ON </strong>してから、
@@ -242,7 +197,9 @@ function FlashStep({
         </div>
       </div>
 
-      <FirmwareSubTab serialOnly postFlashReprobeMs={0} groupFilter={group} />
+      {/* 通常の Firmware タブと同じ — ライブラリ内に Hapbeat | 周辺機器 の
+          グループタブが出る（groupFilter は渡さない）。 */}
+      <FirmwareSubTab serialOnly postFlashReprobeMs={0} />
     </>
   )
 }

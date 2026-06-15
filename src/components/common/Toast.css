@@ -9,9 +9,14 @@
   cursor: pointer;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   animation: toast-in 0.3s ease-out;
-  max-width: 400px;
+  /* 幅は内容に追従させる: 短い文は narrow、長い文は cap まで広がってから
+     折り返す。固定幅 (旧 white-space:nowrap + 400px) だと長文がはみ出すため、
+     ブラウザに「テキスト+フォントから」幅を測らせる (fit-content)。 */
+  width: fit-content;
+  max-width: min(92vw, 420px);
   z-index: 9999;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .toast-item.toast-exit {

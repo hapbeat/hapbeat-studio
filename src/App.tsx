@@ -113,7 +113,12 @@ export function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Hapbeat Studio</h1>
+        <h1>
+          Hapbeat Studio
+          <span className="app-version-badge" title="Studio バージョン (Manage で旧版に切替可)">
+            v{import.meta.env.VITE_APP_VERSION}
+          </span>
+        </h1>
         <div className="header-toggle header-toggle-tabs">
           {TABS.map((tab) => (
             <button
