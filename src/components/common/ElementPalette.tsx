@@ -60,6 +60,7 @@ export const PALETTE_SECTIONS: PaletteSection[] = [
       { type: 'battery',                                   label: 'Battery %',   description: '残量%',     icon: '⚡' },
       { type: 'battery', variant: 'bar',                   label: 'Battery Bar', description: '残量バー',   icon: '█' },
       { type: 'connection_status', label: 'Status',     description: 'Wi-Fi+アプリ', icon: '◉' },
+      { type: 'mqtt_status',       label: 'MQTT',       description: 'ブローカー接続 [OK]/[NG]', icon: '⇄' },
       { type: 'alert_limit_mode',  label: 'Alert Mode', description: '制限/全て (受信機)', icon: '!', variants: sizeVariantsSM },
     ],
   },

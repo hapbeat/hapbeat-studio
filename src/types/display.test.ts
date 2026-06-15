@@ -21,6 +21,9 @@ describe('getElementSize — 要素のセル幅 (全角は 2 セル換算済み)
     expect(getElementSize('page_indicator')).toEqual([3, 1])
     expect(getElementSize('wifi_status')).toEqual([5, 1])
   })
+  it('mqtt_status は [OK]/[NG] 固定 4 セル', () => {
+    expect(getElementSize('mqtt_status')).toEqual([4, 1])
+  })
   it('ip_address は右切り出しの 3 サイズ', () => {
     expect(getElementSize('ip_address', 'compact')).toEqual([4, 1])
     expect(getElementSize('ip_address')).toEqual([6, 1])

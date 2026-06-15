@@ -184,6 +184,7 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
       const txt = variant === 'compact' ? '全て' : '全て再生'
       return padClipToCells(txt, w)
     }
+    case 'mqtt_status': return '[NG]'  // 4文字。ブローカー未接続 (既定) を表示
   }
 }
 
@@ -207,5 +208,6 @@ export function getElementDescription(type: DisplayElementType): string {
     case 'group_id':          return 'Gr:XX'
     case 'custom_text':       return 'テキスト'
     case 'alert_limit_mode':  return '制限/全て'
+    case 'mqtt_status':       return '[OK]/[NG]'
   }
 }

@@ -28,6 +28,7 @@ export type DisplayElementType =
   | 'address'
   | 'custom_text'
   | 'alert_limit_mode'
+  | 'mqtt_status'
 
 export interface DisplayPage {
   name: string
@@ -297,6 +298,7 @@ export const ELEMENT_FIXED_SIZES: Record<DisplayElementType, [number, number]> =
                              // (player_/pos は別要素として持つため重複させない)
   custom_text: [8, 1],       // 任意の固定テキスト (element.text)。S/M/L = 4/8/16
   alert_limit_mode: [10, 1], // 制限モード/全て再生 (受信機)。standard=10 / compact=4
+  mqtt_status: [4, 1],       // "[OK]"/"[NG]" 4文字。ブローカー接続時のみ OK (受信機)
 }
 
 /** Get element size considering variant. Battery "bar" variant is wider. */

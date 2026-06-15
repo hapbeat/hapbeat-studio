@@ -69,4 +69,8 @@ describe('getElementPreviewText — セル幅 = 要素幅 の不変条件', () =
     expect(getElementPreviewText('player_number')).toBe('P:00')
     expect(getElementPreviewText('group_id')).toBe('Gr:00')
   })
+  it('mqtt_status は [NG] (4 セル, 既定=未接続)', () => {
+    expect(getElementPreviewText('mqtt_status')).toBe('[NG]')
+    expect(textCells(getElementPreviewText('mqtt_status'))).toBe(4)
+  })
 })
