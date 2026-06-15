@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { MIN_HELPER_VERSION, type HelperCompat } from '@/config/helperCompat'
+import { VersionSwitcher } from './VersionSwitcher'
 import './HelperOnboardingModal.css'
 
 interface HelperManageModalProps {
@@ -137,6 +138,16 @@ export function HelperManageModal({ open, onClose, helperVersion, helperCompat }
             </p>
             <CopyableCommand cmd="hapbeat-helper uninstall-service" />
             <CopyableCommand cmd="pipx uninstall hapbeat-helper" />
+          </section>
+
+          {/* Studio バージョン表示 + ロールバック用の版切替 (versions.json) */}
+          <section className="helper-modal-section">
+            <h3 className="helper-modal-section-title">バージョン</h3>
+            <p className="helper-modal-section-desc">
+              新しい版で不具合が出た場合は、旧バージョンに切り替えて作業を続けられます
+              （各版は <code>/studio/v0.2.0/</code> のように固定 URL で残ります）。
+            </p>
+            <VersionSwitcher />
           </section>
 
           {/* Studio build metadata — for debugging / bug reports.

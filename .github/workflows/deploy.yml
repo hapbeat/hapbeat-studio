@@ -1,9 +1,17 @@
 name: Deploy
 
+# Deploy targets:
+#   - push to master / firmware-released  → /studio/        (最新・開発プレビュー)
+#   - push tag v*                         → /studio/v<X.Y.Z>/  (不変リリース)
+#                                         + /studio/versions.json (版一覧を更新)
+# 旧リリースは /studio/v<X.Y.Z>/ に永続的に残るので、新版に不具合が出ても
+# ユーザーは固定 URL / アプリ内の版切替で旧版に戻れる (ロールバック)。
 on:
   push:
     branches:
       - master
+    tags:
+      - 'v*'
   repository_dispatch:
     types: [firmware-released]
 
@@ -18,6 +26,29 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # versions.json は全リリースタグから生成するので tag 履歴が要る。
+          fetch-depth: 0
+
+      # Decide base path / version / FTP target from the git ref.
+      - name: Determine deploy target
+        id: target
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF#refs/tags/}"
+            version="${tag#v}"
+            echo "is_release=true"           >> "$GITHUB_OUTPUT"
+            echo "base=/studio/${tag}/"       >> "$GITHUB_OUTPUT"
+            echo "ftp_dir=/studio/${tag}/"    >> "$GITHUB_OUTPUT"
+            echo "version=${version}"         >> "$GITHUB_OUTPUT"
+            echo "Release build: ${tag} → /studio/${tag}/"
+          else
+            echo "is_release=false"           >> "$GITHUB_OUTPUT"
+            echo "base=/studio/"              >> "$GITHUB_OUTPUT"
+            echo "ftp_dir=/studio/"           >> "$GITHUB_OUTPUT"
+            echo "version="                   >> "$GITHUB_OUTPUT"
+            echo "Dev build: master → /studio/"
+          fi
 
       # Download the latest + archive releases (newest 6) so Studio can offer
       # older firmware versions for rollback (firmware-distribution.md,
@@ -56,6 +87,10 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          # vite.config.ts が参照: base path とアプリ表示バージョンを ref から渡す。
+          STUDIO_BASE: ${{ steps.target.outputs.base }}
+          VITE_APP_VERSION: ${{ steps.target.outputs.version }}
 
       - name: FTP Deploy
         uses: SamKirkland/FTP-Deploy-Action@v4.3.6
@@ -65,5 +100,22 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           protocol: ftps
           port: 21
-          server-dir: /studio/
+          server-dir: ${{ steps.target.outputs.ftp_dir }}
           local-dir: ./dist/
+
+      # リリース時のみ: 全タグから versions.json を生成し、/studio/ 直下へ
+      # 単一ファイルとして上書きアップロード (curl FTPS、他ファイルは消さない)。
+      # アプリ内の VersionSwitcher がこれを読んで版切替の選択肢を出す。
+      - name: Publish versions.json (release only)
+        if: steps.target.outputs.is_release == 'true'
+        run: |
+          node scripts/gen-versions-json.mjs out/versions.json
+          cat out/versions.json
+          curl -sS -k --ftp-ssl --ssl-reqd \
+            --user "${FTP_USER}:${FTP_PASS}" \
+            -T out/versions.json \
+            "ftp://${FTP_HOST}/studio/versions.json"
+        env:
+          FTP_HOST: ${{ secrets.FTP_SERVER }}
+          FTP_USER: ${{ secrets.FTP_USERNAME }}
+          FTP_PASS: ${{ secrets.FTP_PASSWORD }}

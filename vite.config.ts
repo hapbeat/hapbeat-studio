@@ -1,7 +1,7 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve, join } from 'path'
-import { promises as fs } from 'fs'
+import { promises as fs, readFileSync } from 'fs'
 import { execSync } from 'child_process'
 
 /** Resolve build metadata: short git SHA (with -dirty suffix if working
@@ -23,6 +23,20 @@ function buildMeta(): { sha: string; date: string } {
     /* not a git checkout */
   }
   return { sha, date: new Date().toISOString() }
+}
+
+/** Human-facing app version (semver) shown in the UI + used by the version
+ *  switcher to highlight "current". Priority: VITE_APP_VERSION passed by CI
+ *  on a release tag → package.json version. Releases set this from the
+ *  `vX.Y.Z` tag so a frozen `/studio/vX.Y.Z/` build self-reports its version. */
+function appVersion(): string {
+  if (process.env.VITE_APP_VERSION) return process.env.VITE_APP_VERSION
+  try {
+    const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8'))
+    return typeof pkg.version === 'string' ? pkg.version : '0.0.0'
+  } catch {
+    return '0.0.0'
+  }
 }
 
 /**
@@ -393,8 +407,13 @@ export default defineConfig(({ command }) => {
   // resolves at both dev (per-request transform) and build time.
   process.env.VITE_BUILD_SHA = meta.sha
   process.env.VITE_BUILD_DATE = meta.date
+  process.env.VITE_APP_VERSION = appVersion()
+  // STUDIO_BASE: CI がリリースタグ時に "/studio/v0.2.0/" を渡す（不変リリースを
+  // サブディレクトリに凍結配信するため）。未指定の通常ビルド(master)は
+  // "/studio/"、dev サーバは "/"。
+  const base = process.env.STUDIO_BASE || (command === 'build' ? '/studio/' : '/')
   return {
-    base: command === 'build' ? '/studio/' : '/',
+    base,
     plugins: [react(), firmwareDevPlugin(FIRMWARE_BUILD_REPOS)],
     resolve: {
       alias: {
