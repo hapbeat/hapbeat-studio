@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "lint": "eslint src --ext ts,tsx",
     "test": "vitest",
+    "test:run": "vitest run",
     "gen:library": "node scripts/generate-library-index.mjs",
     "strip:wav-meta": "node scripts/strip-wav-metadata.mjs"
   },
