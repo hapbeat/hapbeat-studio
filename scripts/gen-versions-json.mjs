@@ -21,7 +21,16 @@ const out = process.argv[2] || 'versions.json'
 function releaseTags() {
   try {
     const raw = execSync('git tag -l "v*" --sort=-v:refname', { encoding: 'utf8' })
-    return raw.split('\n').map((s) => s.trim()).filter(Boolean)
+    return raw
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      // Frozen /studio/vX.Y.Z/ URLs are kept ONLY for minor/major releases
+      // (patch == 0, e.g. v0.2.0 / v1.0.0). Patch releases (v0.2.1 …) ship to
+      // /studio/ (latest) without a frozen snapshot to avoid subdir bloat, so
+      // they must NOT appear in versions.json (their /studio/vX.Y.Z/ doesn't
+      // exist → would 404 in the switcher).
+      .filter((t) => /^v\d+\.\d+\.0$/.test(t))
   } catch {
     return []
   }

@@ -37,11 +37,24 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             tag="${GITHUB_REF#refs/tags/}"
             version="${tag#v}"
-            echo "is_release=true"           >> "$GITHUB_OUTPUT"
-            echo "base=/studio/${tag}/"       >> "$GITHUB_OUTPUT"
-            echo "ftp_dir=/studio/${tag}/"    >> "$GITHUB_OUTPUT"
-            echo "version=${version}"         >> "$GITHUB_OUTPUT"
-            echo "Release build: ${tag} → /studio/${tag}/"
+            patch="${version##*.}"
+            if [[ "$patch" == "0" ]]; then
+              # minor/major (vX.Y.0) → frozen immutable release + versions.json.
+              echo "is_release=true"          >> "$GITHUB_OUTPUT"
+              echo "base=/studio/${tag}/"      >> "$GITHUB_OUTPUT"
+              echo "ftp_dir=/studio/${tag}/"   >> "$GITHUB_OUTPUT"
+              echo "version=${version}"        >> "$GITHUB_OUTPUT"
+              echo "Frozen release: ${tag} → /studio/${tag}/"
+            else
+              # patch (vX.Y.Z, Z>0) → ships to /studio/ (latest), NOT frozen.
+              # Avoids a /studio/vX.Y.Z/ subdir per patch (bloat); versions.json
+              # is left untouched (is_release=false skips the publish step).
+              echo "is_release=false"          >> "$GITHUB_OUTPUT"
+              echo "base=/studio/"             >> "$GITHUB_OUTPUT"
+              echo "ftp_dir=/studio/"          >> "$GITHUB_OUTPUT"
+              echo "version=${version}"        >> "$GITHUB_OUTPUT"
+              echo "Patch release: ${tag} → /studio/ (not frozen)"
+            fi
           else
             echo "is_release=false"           >> "$GITHUB_OUTPUT"
             echo "base=/studio/"              >> "$GITHUB_OUTPUT"
