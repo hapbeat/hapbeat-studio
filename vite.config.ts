@@ -215,7 +215,9 @@ export default defineConfig(({ command }) => {
   process.env.VITE_BUILD_SHA = meta.sha
   process.env.VITE_BUILD_DATE = meta.date
   return {
-    base: command === 'build' ? '/studio/' : '/',
+    // STUDIO_BASE: CI がリリースタグ時に "/studio/v0.1.0/" を渡す（不変リリースを
+    // サブディレクトリに凍結配信するため）。未指定の通常ビルドは "/studio/"、dev は "/"。
+    base: process.env.STUDIO_BASE || (command === 'build' ? '/studio/' : '/'),
     plugins: [react(), firmwareDevPlugin(FIRMWARE_BUILD_ROOT)],
     resolve: {
       alias: {
