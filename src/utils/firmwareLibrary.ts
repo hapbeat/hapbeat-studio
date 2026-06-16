@@ -198,9 +198,24 @@ function isProdMode(): boolean {
   return import.meta.env.PROD
 }
 
+// MQTT-alert (facility-alert) receiver firmware NOT yet verified on hardware.
+// Hidden from the firmware library so it can't be flashed by accident. Only
+// band_v2_mqtt is verified — delete an env from this set once it's tested.
+const UNVERIFIED_MQTT_ENVS = new Set<string>([
+  'necklace_v3_mqtt',
+  'band_v3_mqtt',
+  'band_v4_mqtt',
+])
+
+function isFirmwareVisible(e: FirmwareLibraryEntry): boolean {
+  return !UNVERIFIED_MQTT_ENVS.has(e.env)
+}
+
 export async function listFirmwareBuilds(): Promise<FirmwareLibraryEntry[]> {
   if (isProdMode()) {
-    return (await listFirmwareBuildsFromManifest()).map(withInferredRole)
+    return (await listFirmwareBuildsFromManifest())
+      .map(withInferredRole)
+      .filter(isFirmwareVisible)
   }
   // Dev: use Vite middleware
   const r = await fetch('/firmware-builds/list', { cache: 'no-store' })
@@ -208,7 +223,7 @@ export async function listFirmwareBuilds(): Promise<FirmwareLibraryEntry[]> {
     throw new Error(`firmware list failed (${r.status} ${r.statusText})`)
   }
   const json = (await r.json()) as { envs: FirmwareLibraryEntry[] }
-  return (json.envs ?? []).map(withInferredRole)
+  return (json.envs ?? []).map(withInferredRole).filter(isFirmwareVisible)
 }
 
 interface ManifestArtifact {
