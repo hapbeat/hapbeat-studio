@@ -142,6 +142,27 @@ body {
   border: 1px solid rgba(123, 108, 255, 0.45);
   white-space: nowrap;
 }
+/* バージョンバッジをプルダウン化したもの (versions.json がある本番のみ)。
+   旧版へロールバックできることが初見で分かるよう、▾ を出して選択式にする。 */
+select.app-version-select {
+  cursor: pointer;
+  padding-right: 20px;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--accent-light, #b9a8ff) 50%),
+                    linear-gradient(135deg, var(--accent-light, #b9a8ff) 50%, transparent 50%);
+  background-position: calc(100% - 11px) 55%, calc(100% - 7px) 55%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+}
+select.app-version-select:hover {
+  background-color: rgba(123, 108, 255, 0.28);
+  border-color: rgba(123, 108, 255, 0.7);
+}
+select.app-version-select option {
+  background: var(--bg-primary, #1a1a1a);
+  color: var(--text-secondary, #ddd);
+}
 
 /* 右側メタ情報グループ: docs リンク + Helper 接続状態 を縦中央揃えで並べる */
 .header-meta {

@@ -439,6 +439,7 @@ function useAudioPreview() {
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const { isConnected, devices, send } = useHelperConnection()
+  const { toast } = useToast()
 
   const hasDevice = isConnected && devices.length > 0
 
@@ -453,7 +454,13 @@ function useAudioPreview() {
     if (playingId === id) { stop(); return }
     stop()
     const blob = await getBlob()
-    if (!blob) return
+    if (!blob) {
+      // 音声 blob が IDB に無い (フォルダ未接続 / 別ブラウザ / キャッシュ消失で
+      // メタデータだけ残っている等)。従来は無言で何もせず「クリックしても鳴らない」
+      // 状態だったので、原因が分かるトーストを出す。
+      toast('音声が見つかりません。Library / Kit のフォルダを再接続してください', 'error')
+      return
+    }
 
     setPlayingId(id)
 
@@ -481,7 +488,7 @@ function useAudioPreview() {
       audio.onended = () => { setPlayingId(null); URL.revokeObjectURL(url); audioRef.current = null }
       audio.play()
     }
-  }, [playingId, stop, hasDevice, devices, send])
+  }, [playingId, stop, hasDevice, devices, send, toast])
 
   /** Get current device wiper value (null if unavailable) */
   const getDeviceWiper = useCallback((): number | null => {

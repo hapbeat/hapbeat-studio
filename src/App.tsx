@@ -11,6 +11,7 @@ import { HelperOnboardingModal } from '@/components/common/HelperOnboardingModal
 import { HelperManageModal } from '@/components/common/HelperManageModal'
 import { ExternalLinkIcon } from '@/components/common/ExternalLinkIcon'
 import { HelperToastBridge } from '@/components/common/HelperToastBridge'
+import { VersionSwitcher } from '@/components/common/VersionSwitcher'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { MIN_HELPER_VERSION } from '@/config/helperCompat'
 import './App.css'
@@ -115,9 +116,7 @@ export function App() {
       <header className="app-header">
         <h1>
           Hapbeat Studio
-          <span className="app-version-badge" title="Studio バージョン (Manage で旧版に切替可)">
-            v{import.meta.env.VITE_APP_VERSION}
-          </span>
+          <VersionSwitcher compact />
         </h1>
         <div className="header-toggle header-toggle-tabs">
           {TABS.map((tab) => (
