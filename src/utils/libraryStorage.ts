@@ -208,11 +208,6 @@ export async function loadKit(id: string): Promise<KitDefinition | undefined> {
   return db.get(STORE_KITS, id)
 }
 
-export async function listKits(): Promise<KitDefinition[]> {
-  const db = await getDb()
-  return db.getAll(STORE_KITS)
-}
-
 export async function deleteKit(id: string): Promise<void> {
   const db = await getDb()
   await db.delete(STORE_KITS, id)

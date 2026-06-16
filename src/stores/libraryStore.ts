@@ -10,7 +10,6 @@ import {
   loadKitEventAudio,
   deleteKitEventAudio,
   deleteEncodedWavsForEvent,
-  listKits,
   deleteKit,
 } from '@/utils/libraryStorage'
 import { useLogStore } from '@/stores/logStore'
@@ -26,6 +25,7 @@ import {
   writeClipFile,
   deleteClipFile,
   readClipFile,
+  readKitClipFile,
   archiveClipFile,
   renameClipFile,
   writeMetadataJson,
@@ -1382,18 +1382,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // populated zustand state, so `get().kits` may be empty even though
     // the user has kits from a previous session.
     //
-    // Source of truth (priority order):
+    // Source of truth for kit identity + ev.id (priority order):
     //   1. zustand state — if already populated by an earlier call
     //   2. workdir's `kits-meta.json` — disk-side persisted kit list,
     //      written on every save. Preserves ev.id across browsers / reloads
-    //      / data clears. This is the new primary path; it removes the
-    //      need to write kits into the IDB `kits` store at all.
-    //   3. IDB `listKits()` + dedupe — legacy fallback for first-time
-    //      load after the disk-only refactor. Cleans up duplicates
-    //      accumulated by an earlier bug (saveKit called with fresh
-    //      generateId on every reload → hundreds of stale rows seen in
-    //      the wild). After one successful disk save, kits-meta.json
-    //      covers everything and this branch never runs again.
+    //      / data clears. The actual kit LIST is (re)built from the scanned
+    //      disk folders below; this just supplies prior ev.ids to match.
+    //   (The old IDB `listKits()` legacy seed was removed — see below.)
     let updatedKits = [...get().kits]
     if (updatedKits.length === 0 && workDirHandle) {
       try {
@@ -1407,45 +1402,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         console.warn('[importKitsFromOutputDir] kits-meta.json read failed:', err)
       }
     }
-    if (updatedKits.length === 0) {
-      try {
-        const idbKits = await listKits()
-        if (idbKits.length > 0) {
-          // Group by name. Within each group, sort by updatedAt desc
-          // (fallback createdAt) and keep the first. The rest are
-          // deleted from IDB so they don't reappear next time.
-          const byName = new Map<string, KitDefinition[]>()
-          for (const k of idbKits) {
-            const arr = byName.get(k.name)
-            if (arr) arr.push(k)
-            else byName.set(k.name, [k])
-          }
-          const survivors: KitDefinition[] = []
-          let dropped = 0
-          for (const group of byName.values()) {
-            group.sort((a, b) => {
-              const ta = a.updatedAt || a.createdAt || ''
-              const tb = b.updatedAt || b.createdAt || ''
-              return tb.localeCompare(ta)
-            })
-            survivors.push(group[0])
-            for (const stale of group.slice(1)) {
-              try { await deleteKit(stale.id) } catch { /* ignore */ }
-              dropped++
-            }
-          }
-          if (dropped > 0) {
-            console.info(
-              `[importKitsFromOutputDir] removed ${dropped} duplicate IDB kit row(s)`,
-              `(survivors: ${survivors.map((k) => k.name).join(', ')})`,
-            )
-          }
-          updatedKits = survivors.map((k) => migrateKit(k, updatedClips))
-        }
-      } catch (err) {
-        console.warn('[importKitsFromOutputDir] legacy IDB preload failed:', err)
-      }
-    }
+    // (Removed) — the IDB `listKits()` legacy seed. It used to hydrate
+    // `updatedKits` from the old `kits` IDB store when kits-meta.json was
+    // absent. `saveKit` is dead code (disk-as-truth since 2026-05-26), so that
+    // store only holds stale rows from a past bug. Worse: any stale row whose
+    // kit folder no longer exists on disk SURVIVED in `updatedKits` (the
+    // discovered-folder loop below only updates/adds, never prunes), surfacing
+    // as a "phantom kit" — shown even without a connected folder and whose
+    // audio never plays. Kits now come solely from disk: zustand state →
+    // kits-meta.json → the scanned folders below. No folder ⇒ no kits.
 
     // NOTE — `ensureClip` (library auto-import from kit folder) was
     // intentionally removed. The library and kits are independent now:
@@ -2276,13 +2241,46 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
   getKitEventAudio: async (kitEventId) => {
     // Kit-event audio lives under its own IDB key (`saveKitEventAudio`
-    // wrote it on add / migration). IDB-first because the kit folder
-    // on disk holds the *resampled* (16 kHz) version — the original
-    // bytes the user dropped are what we cached, and what previews
-    // should sound like. Fall back to scanning kit folder install-clips
-    // would be possible but isn't currently needed (events all carry
-    // their own blob post-migration).
-    return loadKitEventAudio(kitEventId)
+    // wrote it on add / migration). IDB-first because the kit folder on disk
+    // holds the *resampled* (16 kHz) version — the original bytes the user
+    // dropped are what we cached, and what previews should sound like.
+    const cached = await loadKitEventAudio(kitEventId)
+    if (cached) return cached
+
+    // Disk fallback: IDB miss (cache cleared / different browser / never
+    // populated) but the kit folder is connected → read the on-disk WAV so a
+    // clip whose file really exists still plays instead of failing silently
+    // ("ファイル実態があれば再生は問題無い"). This serves the resampled copy,
+    // not the original bytes, but a correct preview beats no sound. Repopulate
+    // IDB so the next play is fast and the IDB-first path serves it.
+    const { kits, kitDirHandle, workDirHandle } = get()
+    const outRoot = kitDirHandle ?? workDirHandle
+    if (!outRoot) return undefined
+    let kitName = '', ev: KitEvent | undefined
+    for (const k of kits) {
+      const found = k.events.find((e) => e.id === kitEventId)
+      if (found) { kitName = k.name; ev = found; break }
+    }
+    if (!ev || !ev.clipSourceFilename) return undefined
+    // Bare basename: a disk scan normalizes clipSourceFilename to the on-disk
+    // basename, but a meta-seeded event may still carry a path prefix
+    // (e.g. built-ins "template/foo.wav") which the File System Access API
+    // would reject in getFileHandle. Strip to the last segment.
+    const filename = ev.clipSourceFilename.split('/').pop() || ev.clipSourceFilename
+    // mode → subdir (command=install-clips / stream_clip=stream-clips). The
+    // same source basename is copied into whichever subdir(s) the event uses.
+    const subdirs: string[] = []
+    if (ev.modes.includes('command')) subdirs.push('install-clips')
+    if (ev.modes.includes('stream_clip')) subdirs.push('stream-clips')
+    for (const subdir of subdirs) {
+      const file = await readKitClipFile(outRoot, kitName, subdir, filename)
+      if (file) {
+        const blob = new Blob([await file.arrayBuffer()], { type: 'audio/wav' })
+        try { await saveKitEventAudio(kitEventId, blob) } catch { /* non-fatal */ }
+        return blob
+      }
+    }
+    return undefined
   },
 
   // Kit actions

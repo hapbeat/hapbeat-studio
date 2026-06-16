@@ -292,6 +292,30 @@ export async function readClipFile(
   }
 }
 
+/**
+ * Read a kit-event audio WAV from a kit folder's `install-clips/` or
+ * `stream-clips/` subdir, i.e. `<root>/<kitName>/<subdir>/<filename>`.
+ *
+ * Kit-event audio does NOT live under the library `clips/` dir, so
+ * `readClipFile` can't reach it. Returns null on any miss (folder / subdir /
+ * file absent, or permission denied) so callers fall through cleanly.
+ */
+export async function readKitClipFile(
+  root: FileSystemDirectoryHandle,
+  kitName: string,
+  subdir: string,
+  filename: string,
+): Promise<File | null> {
+  try {
+    const kitDir = await root.getDirectoryHandle(kitName, { create: false })
+    const sub = await kitDir.getDirectoryHandle(subdir, { create: false })
+    const fileHandle = await sub.getFileHandle(filename)
+    return await fileHandle.getFile()
+  } catch {
+    return null
+  }
+}
+
 export async function writeClipFile(
   root: FileSystemDirectoryHandle,
   relPath: string,
