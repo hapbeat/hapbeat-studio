@@ -63,27 +63,40 @@ jobs:
             echo "Dev build: master → /studio/"
           fi
 
-      # Download the latest + archive releases (newest 6) so Studio can offer
-      # older firmware versions for rollback (firmware-distribution.md,
-      # DEC-034). Each release lands in its own tag subdir; the aggregation
-      # script merges them into one manifest.json with per-variant versions[].
+      # Download the latest + archive releases (newest 6) from EVERY firmware
+      # repo so Studio can offer older firmware versions for rollback
+      # (firmware-distribution.md, DEC-034). Each release lands in
+      # fw-staging/<repo>/<tag>/; aggregate-firmware-manifest.mjs merges them
+      # into one manifest.json with per-variant versions[]. Peripheral firmware
+      # (ESP-NOW transmitter) lives in its own repo — without it, the Studio
+      # firmware library only ever shows hapbeat-device-firmware (receiver /
+      # broker / sensor) and never the 周辺機器 transmitter.
       - name: Download firmware releases (latest + archive)
         run: |
-          repo="Hapbeat/hapbeat-device-firmware"
-          mkdir -p fw-staging/hapbeat-device-firmware
-          tags=$(gh release list --repo "$repo" --limit 6 --json tagName --jq '.[].tagName')
-          for t in $tags; do
-            echo "downloading $t"
-            mkdir -p "fw-staging/hapbeat-device-firmware/$t"
-            gh release download "$t" \
-              --repo "$repo" \
-              --dir "fw-staging/hapbeat-device-firmware/$t" \
-              --pattern "*.bin" \
-              --pattern "manifest.json" \
-              --pattern "manifest.fragment.json" \
-              --clobber
+          # A repo with no releases yet (e.g. transmitter before its first tag)
+          # is warned + skipped so the deploy never breaks on it.
+          for repo_name in hapbeat-device-firmware hapbeat-transmitter-firmware; do
+            repo="Hapbeat/$repo_name"
+            mkdir -p "fw-staging/$repo_name"
+            tags=$(gh release list --repo "$repo" --limit 6 --json tagName --jq '.[].tagName' || true)
+            if [ -z "$tags" ]; then
+              echo "::warning::no releases found for $repo — skipping (no firmware aggregated for it)"
+              continue
+            fi
+            for t in $tags; do
+              echo "downloading $repo_name $t"
+              mkdir -p "fw-staging/$repo_name/$t"
+              gh release download "$t" \
+                --repo "$repo" \
+                --dir "fw-staging/$repo_name/$t" \
+                --pattern "*.bin" \
+                --pattern "manifest.json" \
+                --pattern "manifest.fragment.json" \
+                --clobber
+            done
           done
         env:
+          # NOTE: this PAT must have read access to BOTH firmware repos.
           GH_TOKEN: ${{ secrets.FIRMWARE_REPO_PAT }}
 
       - name: Setup Node.js

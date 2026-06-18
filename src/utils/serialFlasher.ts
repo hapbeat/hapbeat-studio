@@ -12,9 +12,12 @@
  *
  * The browser can't see sibling files (no directory access from a
  * single-file picker), so the "bootloader + partitions + app" path
- * Manager supports is unavailable here. Users with a non-merged build
- * should provide a merged firmware bin (PlatformIO emits `firmware.bin`
- * already merged when `merge_firmware.py` is in build_flags).
+ * Manager supports is unavailable here. Users picking a local file must
+ * therefore provide the *merged* single-file image. With
+ * `merge_firmware.py` in the build, that image is `firmware_full_serial.bin`
+ * (bootloader + partition table + app, starting at 0x0) — NOT `firmware.bin`,
+ * which stays app-only (PlatformIO's bare output, for internal use / OTA the
+ * app-only artifact is `firmware_app_ota.bin`).
  */
 
 import { ESPLoader, type FlashOptions, Transport } from 'esptool-js'
