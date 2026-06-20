@@ -10,7 +10,7 @@
     "lint": "eslint src --ext ts,tsx",
     "test": "vitest",
     "test:run": "vitest run",
-    "gen:library": "node scripts/generate-library-index.mjs",
+    "gen:library": "node scripts/generate-library-index.mjs --meta public/library/metadata.tsv",
     "strip:wav-meta": "node scripts/strip-wav-metadata.mjs"
   },
   "dependencies": {

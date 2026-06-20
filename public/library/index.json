@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "generated_at": "2026-06-01T18:14:58.820Z",
+  "generated_at": "2026-06-20T13:59:57.224Z",
   "clips": [
     {
       "id": "builtin/fps-sample.booster",
@@ -430,6 +430,166 @@
       "sample_rate": 16000,
       "channels": 1,
       "filesize_bytes": 1644
+    },
+    {
+      "id": "builtin/sine-tones.100hz",
+      "name": "100 Hz",
+      "category": "sine-tones",
+      "tags": [
+        "sine",
+        "tone"
+      ],
+      "event_id": "sine-tones.100hz",
+      "description": "1s 正弦波テストトーン (100 Hz)",
+      "filename": "sine-tones/100hz.wav",
+      "duration_ms": 1000,
+      "sample_rate": 16000,
+      "channels": 2,
+      "filesize_bytes": 64044
+    },
+    {
+      "id": "builtin/sine-tones.125hz",
+      "name": "125 Hz",
+      "category": "sine-tones",
+      "tags": [
+        "sine",
+        "tone"
+      ],
+      "event_id": "sine-tones.125hz",
+      "description": "1s 正弦波テストトーン (125 Hz)",
+      "filename": "sine-tones/125hz.wav",
+      "duration_ms": 1000,
+      "sample_rate": 16000,
+      "channels": 2,
+      "filesize_bytes": 64044
+    },
+    {
+      "id": "builtin/sine-tones.160hz",
+      "name": "160 Hz",
+      "category": "sine-tones",
+      "tags": [
+        "sine",
+        "tone"
+      ],
+      "event_id": "sine-tones.160hz",
+      "description": "1s 正弦波テストトーン (160 Hz) — calm 既定",
+      "filename": "sine-tones/160hz.wav",
+      "duration_ms": 1000,
+      "sample_rate": 16000,
+      "channels": 2,
+      "filesize_bytes": 64044
+    },
+    {
+      "id": "builtin/sine-tones.20hz",
+      "name": "20 Hz",
+      "category": "sine-tones",
+      "tags": [
+        "sine",
+        "tone"
+      ],
+      "event_id": "sine-tones.20hz",
+      "description": "1s 正弦波テストトーン (20 Hz)",
+      "filename": "sine-tones/20hz.wav",
+      "duration_ms": 1000,
+      "sample_rate": 16000,
+      "channels": 2,
+      "filesize_bytes": 64044
+    },
+    {
+      "id": "builtin/sine-tones.200hz",
+      "name": "200 Hz",
+      "category": "sine-tones",
+      "tags": [
+        "sine",
+        "tone"
+      ],
+      "event_id": "sine-tones.200hz",
+      "description": "1s 正弦波テストトーン (200 Hz)",
+      "filename": "sine-tones/200hz.wav",
+      "duration_ms": 1000,
+      "sample_rate": 16000,
+      "channels": 2,
+      "filesize_bytes": 64044
+    },
+    {
+      "id": "builtin/sine-tones.31_5hz",
+      "name": "31.5 Hz",
+      "category": "sine-tones",
+      "tags": [
+        "sine",
+        "tone"
+      ],
+      "event_id": "sine-tones.31_5hz",
+      "description": "1s 正弦波テストトーン (31.5 Hz)",
+      "filename": "sine-tones/31_5hz.wav",
+      "duration_ms": 1000,
+      "sample_rate": 16000,
+      "channels": 2,
+      "filesize_bytes": 64044
+    },
+    {
+      "id": "builtin/sine-tones.40hz",
+      "name": "40 Hz",
+      "category": "sine-tones",
+      "tags": [
+        "sine",
+        "tone"
+      ],
+      "event_id": "sine-tones.40hz",
+      "description": "1s 正弦波テストトーン (40 Hz)",
+      "filename": "sine-tones/40hz.wav",
+      "duration_ms": 1000,
+      "sample_rate": 16000,
+      "channels": 2,
+      "filesize_bytes": 64044
+    },
+    {
+      "id": "builtin/sine-tones.50hz",
+      "name": "50 Hz",
+      "category": "sine-tones",
+      "tags": [
+        "sine",
+        "tone"
+      ],
+      "event_id": "sine-tones.50hz",
+      "description": "1s 正弦波テストトーン (50 Hz)",
+      "filename": "sine-tones/50hz.wav",
+      "duration_ms": 1000,
+      "sample_rate": 16000,
+      "channels": 2,
+      "filesize_bytes": 64044
+    },
+    {
+      "id": "builtin/sine-tones.63hz",
+      "name": "63 Hz",
+      "category": "sine-tones",
+      "tags": [
+        "sine",
+        "tone"
+      ],
+      "event_id": "sine-tones.63hz",
+      "description": "1s 正弦波テストトーン (63 Hz)",
+      "filename": "sine-tones/63hz.wav",
+      "duration_ms": 1000,
+      "sample_rate": 16000,
+      "channels": 2,
+      "filesize_bytes": 64044
+    },
+    {
+      "id": "builtin/sine-tones.80hz",
+      "name": "80 Hz",
+      "category": "sine-tones",
+      "tags": [
+        "sine",
+        "tone"
+      ],
+      "event_id": "sine-tones.80hz",
+      "description": "1s 正弦波テストトーン (80 Hz) — urgent 既定",
+      "filename": "sine-tones/80hz.wav",
+      "duration_ms": 1000,
+      "sample_rate": 16000,
+      "channels": 2,
+      "filesize_bytes": 64044
     }
   ]
 }

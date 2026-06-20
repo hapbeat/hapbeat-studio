@@ -1,0 +1,11 @@
+filename	name	description	tags	event_id
+sine-tones/20hz.wav	20 Hz	1s 正弦波テストトーン (20 Hz)	sine,tone	sine-tones.20hz
+sine-tones/31_5hz.wav	31.5 Hz	1s 正弦波テストトーン (31.5 Hz)	sine,tone	sine-tones.31_5hz
+sine-tones/40hz.wav	40 Hz	1s 正弦波テストトーン (40 Hz)	sine,tone	sine-tones.40hz
+sine-tones/50hz.wav	50 Hz	1s 正弦波テストトーン (50 Hz)	sine,tone	sine-tones.50hz
+sine-tones/63hz.wav	63 Hz	1s 正弦波テストトーン (63 Hz)	sine,tone	sine-tones.63hz
+sine-tones/80hz.wav	80 Hz	1s 正弦波テストトーン (80 Hz) — urgent 既定	sine,tone	sine-tones.80hz
+sine-tones/100hz.wav	100 Hz	1s 正弦波テストトーン (100 Hz)	sine,tone	sine-tones.100hz
+sine-tones/125hz.wav	125 Hz	1s 正弦波テストトーン (125 Hz)	sine,tone	sine-tones.125hz
+sine-tones/160hz.wav	160 Hz	1s 正弦波テストトーン (160 Hz) — calm 既定	sine,tone	sine-tones.160hz
+sine-tones/200hz.wav	200 Hz	1s 正弦波テストトーン (200 Hz)	sine,tone	sine-tones.200hz
