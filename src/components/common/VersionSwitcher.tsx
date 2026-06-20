@@ -67,7 +67,7 @@ export function VersionSwitcher({ compact = false }: { compact?: boolean }) {
       >
         {options.map((v) => (
           <option key={v.version} value={v.path}>
-            v{v.version}{v.version === current ? '（現在）' : ''}
+            v{v.version}
           </option>
         ))}
       </select>
