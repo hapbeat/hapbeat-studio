@@ -1,8 +1,7 @@
 import { create } from 'zustand'
 import type { LibraryClip, KitDefinition, KitEvent, KitEventMode, LibraryFilter, BuiltinClipMeta, BuiltinLibraryIndex, LibraryViewMode, ClipAmpPreset } from '@/types/library'
 import {
-  saveClip,
-  listClips,
+  clearLegacyClipStores,
   deleteClip,
   updateClipMeta,
   loadClipAudio,
@@ -276,7 +275,6 @@ interface LibraryState {
    *  and merge them into the in-memory kits[] + clips[]. Called automatically
    *  when the kit output folder is chosen or restored on startup. */
   importKitsFromOutputDir: () => Promise<number>
-  syncClipsToDir: () => Promise<void>
   syncClipsFromDir: () => Promise<void>
   /** Re-scan work dir clips/ folder and update clips list (adds new, removes deleted) */
   refreshClipsFromDir: () => Promise<void>
@@ -1077,12 +1075,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         // `instructions/instructions-kit-list-include-intensity-…`
         // in hapbeat-device-firmware for the firmware change spec.
         //
-        // Library `clips` are still loaded from IDB here — same
-        // pre-workdir story (drop a clip, it lives in IDB until you
-        // pick a folder).
-        const clips = await listClips()
-        set({ clips, kits: [] })
+        // Disk-as-truth (2026-06-21): clips have no IDB source of truth
+        // without a work folder — nothing to restore. Show empty library
+        // until the user connects a folder.
+        set({ clips: [], kits: [] })
       }
+      // Purge any stale clip data left in IDB from before the disk-as-truth
+      // migration.  Non-fatal; runs once every page load but is a no-op after
+      // the first run (both stores are already empty).
+      void clearLegacyClipStores()
       // Load the built-in index so subsequent auto-import can consult it.
       await get().loadBuiltinIndex()
       // Fill any missing built-ins (first run after upgrade, or user removed
@@ -1174,10 +1175,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       updatedAt: now,
       builtinId,
     }
-    await saveClip(clip, blob)
+    // Disk-as-truth: persist to work folder only (no IDB write).
     const newClips = [clip, ...get().clips]
     set({ clips: newClips })
-    // Mirror to work directory
     const { workDirHandle: wdh } = get()
     if (wdh) {
       await writeClipFile(wdh, meta.filename, blob)
@@ -1226,7 +1226,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         updatedAt: now,
         builtinId: meta.id,
       }
-      await saveClip(clip, blob)
+      // Disk-as-truth: write to work folder only (no IDB write).
       if (workDirHandle) await writeClipFile(workDirHandle, relPath, blob)
       toAdd.push(clip)
     }
@@ -1259,17 +1259,20 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     try { await migrateLegacyArchiveFolders(handle) }
     catch (err) { console.warn('[pickWorkDir] archive migration failed:', err) }
 
-    // If the new directory already has clips, just adopt them.
-    // Otherwise auto-seed it with the full built-in library so the user
-    // can edit those clips freely from the start.
+    // Reset in-memory clips before adopting the new folder.
+    // This mirrors pickKitDir's resetKitMemory()+kits:[] pattern: switching
+    // work folders must never carry over clips from the previous folder (or
+    // from stale IDB rows) into the new one.
+    set({ clips: [] })
     const existingFiles = await listClipFiles(handle)
     if (existingFiles.length > 0) {
+      // Non-empty folder — disk is truth; adopt its content as-is.
       await get().syncClipsFromDir()
     } else {
-      await get().syncClipsToDir()
-      if (get().clips.length === 0) {
-        await get().importAllBuiltinClips()
-      }
+      // Empty folder — seed with built-in templates only.
+      // Do NOT push in-memory clips (which could be IDB-sourced or from a
+      // previous folder) into the brand-new empty folder.
+      await get().importAllBuiltinClips()
     }
     await get().loadAmpPresets()
     return true
@@ -1773,24 +1776,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     return importedCount
   },
 
-  syncClipsToDir: async () => {
-    const { workDirHandle, clips } = get()
-    if (!workDirHandle) return
-    // Write metadata
-    await saveClipsMetaToDir(workDirHandle, clips)
-    // Write each clip's audio file
-    for (const clip of clips) {
-      const blob = await loadClipAudio(clip.id)
-      if (blob) {
-        const filename = clip.sourceFilename || `${clip.id}.wav`
-        await writeClipFile(workDirHandle, filename, blob)
-      }
-    }
-    // Also save kits metadata
-    const { kits } = get()
-    await saveKitsMetaToDir(workDirHandle, kits)
-  },
-
   syncClipsFromDir: async () => {
     const { workDirHandle } = get()
     if (!workDirHandle) return
@@ -1815,9 +1800,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           existing.name = filenameToDisplayName(existing.sourceFilename)
         }
         clips.push(existing)
-        // Sync to IndexedDB
-        const blob = new Blob([await file.arrayBuffer()], { type: 'audio/wav' })
-        await saveClip(existing, blob)
+        // Disk-as-truth: no IDB write here. getClipAudio reads from disk via
+        // readClipFile(workDirHandle, clip.sourceFilename).
       } else {
         // New file — auto-generate metadata from filename
         try {
@@ -1842,7 +1826,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
             updatedAt: now,
           }
           clips.push(clip)
-          await saveClip(clip, new Blob([arrayBuffer], { type: 'audio/wav' }))
+          // Disk-as-truth: metadata written below via saveClipsMetaToDir.
+          // Audio read on-demand from disk (getClipAudio → readClipFile).
         } catch (err) {
           console.error(`Failed to import ${filename} from work dir:`, err)
         }
@@ -1940,7 +1925,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
               updatedAt: now,
             }
             updatedClips.push(clip)
-            await saveClip(clip, new Blob([arrayBuffer], { type: 'audio/wav' }))
+            // Disk-as-truth: audio read on-demand from disk; no IDB write.
           } catch (err) {
             console.error(`Failed to import ${filename}:`, err)
           }
@@ -1957,6 +1942,11 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   // ---- Clip actions ----
 
   addClipFromBuffer: async (buffer, name, sampleRate, sourceFilename) => {
+    const { workDirHandle } = get()
+    if (!workDirHandle) {
+      get().setLocalFsStatus('error', 'clip を追加するには作業フォルダを接続してください')
+      throw new Error('No work directory connected — connect a folder before adding clips')
+    }
     const blob = await encodeWavBlob(buffer, sampleRate)
     const now = new Date().toISOString()
     const clip: LibraryClip = {
@@ -1972,19 +1962,20 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       createdAt: now,
       updatedAt: now,
     }
-    await saveClip(clip, blob)
+    // Disk-as-truth: persist to work folder only (no IDB write).
     const newClips = [clip, ...get().clips]
     set({ clips: newClips })
-    // Mirror to work directory
-    const { workDirHandle } = get()
-    if (workDirHandle) {
-      await writeClipFile(workDirHandle, sourceFilename, blob)
-      await saveClipsMetaToDir(workDirHandle, newClips)
-    }
+    await writeClipFile(workDirHandle, sourceFilename, blob)
+    await saveClipsMetaToDir(workDirHandle, newClips)
     return clip.id
   },
 
   addClipFromFile: async (file) => {
+    const { workDirHandle } = get()
+    if (!workDirHandle) {
+      get().setLocalFsStatus('error', 'clip を追加するには作業フォルダを接続してください')
+      throw new Error('No work directory connected — connect a folder before adding clips')
+    }
     get().setLocalFsStatus('saving', `clip "${file.name}" を import 中…`)
     try {
       const arrayBuffer = await file.arrayBuffer()
@@ -2013,15 +2004,11 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         createdAt: now,
         updatedAt: now,
       }
-      await saveClip(clip, blob)
+      // Disk-as-truth: persist to work folder only (no IDB write).
       const newClips = [clip, ...get().clips]
       set({ clips: newClips })
-      // Mirror to work directory
-      const { workDirHandle } = get()
-      if (workDirHandle) {
-        await writeClipFile(workDirHandle, file.name, blob)
-        await saveClipsMetaToDir(workDirHandle, newClips)
-      }
+      await writeClipFile(workDirHandle, file.name, blob)
+      await saveClipsMetaToDir(workDirHandle, newClips)
       get().setLocalFsStatus('saved', `clip "${clip.name}" を追加`)
       return clip.id
     } catch (err) {

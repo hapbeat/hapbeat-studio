@@ -3,6 +3,7 @@ import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useLogStore } from '@/stores/logStore'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useOtaStore } from '@/stores/otaStore'
+import { normalizeVersion } from '@/utils/firmwareLibrary'
 
 /**
  * Persistent OTA message drain (#5). Mounted once at the Devices root so it
@@ -89,7 +90,11 @@ export function OtaController() {
       const deviceFw = (p.fw as string | undefined) ?? ''
       if (!deviceFw) {
         pushLog('ota', `verify skipped (${ip}) — get_info had no fw`)
-      } else if (deviceFw !== st.expectedFw) {
+      } else if (normalizeVersion(deviceFw) !== normalizeVersion(st.expectedFw)) {
+        // Normalize both sides: strip "v" prefix and "dN" dev-counter suffix so
+        // "v0.2.0", "0.2.0", "0.2.0d5" all compare equal for the same release.
+        // Note: hash-based post-reboot verify is intentionally not implemented
+        // (the OTA image hash cannot be reliably reconstructed from the device).
         setResult(ip, {
           ok: false,
           message:

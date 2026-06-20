@@ -57,15 +57,28 @@ function inferVariantFromEnv(env) {
   return { role, transport, board }
 }
 
-/** Compare two version strings ("0.1.10" / "v0.1.3d2") — newest first. */
+/**
+ * Compare two version strings ("0.1.10" / "v0.1.3d2") — newest first.
+ *
+ * Strips "v" prefix before comparing.  "dN" dev-counter suffix means the
+ * version is a dev build BETWEEN two releases: "0.2.0d5" is a dev snapshot
+ * taken 5 commits after the v0.2.0 tag, therefore it sorts AFTER "0.2.0"
+ * (i.e. older in the archive picker) when normalised.  In practice only
+ * tagged releases are pushed to GitHub Releases so dN should never appear
+ * in the production manifest — but dev-mode (local dist/) can have them.
+ */
 function compareVersionsDesc(a, b) {
-  const parse = (s) => String(s ?? '').replace(/^v/, '').split(/[.d-]/).map((n) => parseInt(n, 10) || 0)
-  const pa = parse(a), pb = parse(b)
+  // Normalize: strip "v" prefix and separate dN suffix as a minor tie-breaker.
+  const normalize = (s) => String(s ?? '').replace(/^v/, '')
+  const parseSemver = (s) => normalize(s).replace(/d\d+$/, '').split('.').map((n) => parseInt(n, 10) || 0)
+  const devCounter = (s) => { const m = normalize(s).match(/d(\d+)$/) ; return m ? parseInt(m[1], 10) : -1 }
+  const pa = parseSemver(a), pb = parseSemver(b)
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     const d = (pb[i] ?? 0) - (pa[i] ?? 0)
     if (d !== 0) return d
   }
-  return 0
+  // Same semver base: release (dN=-1) sorts BEFORE (newer than) a dev build (dN≥0)
+  return devCounter(a) - devCounter(b)
 }
 
 async function exists(p) {

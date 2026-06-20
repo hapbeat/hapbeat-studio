@@ -48,6 +48,40 @@ export function boardLabel(id?: string | null): string | null {
   return BOARD_LABELS[id] ?? id
 }
 
+/**
+ * Normalize a firmware version string for comparison:
+ * - strips leading "v" prefix
+ * - strips trailing "dN" dev-counter suffix (e.g. "0.2.0d5" → "0.2.0")
+ *
+ * Used in OTA verify and version comparisons so that "v0.2.0", "0.2.0",
+ * "0.2.0d5" are all treated as the same release version.
+ */
+export function normalizeVersion(v: string | null | undefined): string {
+  if (!v) return ''
+  return String(v)
+    .replace(/^v/, '')       // strip "v" prefix
+    .replace(/d\d+$/, '')    // strip "dN" dev suffix
+}
+
+/**
+ * Compare two firmware version strings — returns negative if a is newer,
+ * positive if b is newer, 0 if equal.  Normalizes "v" prefix and "dN"
+ * dev suffix before comparing.
+ *
+ * For archive/version-picker sorts (newest first), pass to sort as
+ * `arr.sort((a, b) => compareVersions(a, b))`.
+ */
+export function compareVersions(a: string | null | undefined, b: string | null | undefined): number {
+  const parse = (s: string) => s.split('.').map((n) => parseInt(n, 10) || 0)
+  const pa = parse(normalizeVersion(a))
+  const pb = parse(normalizeVersion(b))
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pb[i] ?? 0) - (pa[i] ?? 0)
+    if (d !== 0) return d
+  }
+  return 0
+}
+
 /** Per-artifact metadata. */
 export interface FirmwareArtifact {
   /** Bytes on disk / in the release. */

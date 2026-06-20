@@ -72,6 +72,29 @@ export async function deleteClip(id: string): Promise<void> {
   await tx.done
 }
 
+/**
+ * One-time migration helper: clears all persisted clip metadata and audio
+ * blobs from IndexedDB.  Called on startup after disk-as-truth migration
+ * (2026-06-21) to remove stale IDB rows that could otherwise seed a new
+ * work folder with the user's old clip library.
+ *
+ * IDB is now a runtime cache only — no clip data survives a page reload.
+ * Disk (work folder) is the single source of truth.
+ */
+export async function clearLegacyClipStores(): Promise<void> {
+  try {
+    const db = await getDb()
+    const tx = db.transaction([STORE_CLIPS, STORE_AUDIO], 'readwrite')
+    await tx.objectStore(STORE_CLIPS).clear()
+    await tx.objectStore(STORE_AUDIO).clear()
+    await tx.done
+  } catch (err) {
+    // Non-fatal: log and continue; stale IDB data will simply accumulate
+    // but can no longer cause phantom-clip leaks (we no longer read it).
+    console.warn('[clearLegacyClipStores] IDB purge failed (ignored):', err)
+  }
+}
+
 export async function updateClipMeta(id: string, updates: Partial<LibraryClip>): Promise<void> {
   const db = await getDb()
   const clip = await db.get(STORE_CLIPS, id)
