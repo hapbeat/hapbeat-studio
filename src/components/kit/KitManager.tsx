@@ -599,6 +599,32 @@ function flattenTreeInRenderOrder(node: ClipTreeNode): LibraryClip[] {
 }
 
 // ============================================================
+// Import progress banner — count-based bar shown inline at the top of
+// the clip list while built-ins are seeded / a folder is scanned / a
+// multi-file drop is imported. The footer pill is easy to miss; this
+// puts "Loading template… 23/43" right where the user is looking.
+// ============================================================
+
+function ImportProgressBanner({ progress }: { progress: { current: number; total: number; label: string } }) {
+  const pct = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0
+  return (
+    <div className="library-importing" role="status" aria-live="polite">
+      <div className="import-row">
+        {/* Decorative spinner — hidden from AT. */}
+        <span className="import-spinner" aria-hidden="true" />
+        {/* Only the (static) label is announced; the per-tick count and bar
+            are aria-hidden so a screen reader isn't spammed every file. */}
+        <span className="import-msg">{progress.label} please wait…</span>
+        <span className="import-count" aria-hidden="true">{progress.current}/{progress.total}</span>
+      </div>
+      <div className="import-progress-bar" aria-hidden="true">
+        <div className="import-progress-fill" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  )
+}
+
+// ============================================================
 // Clips Panel — unified list (built-ins are auto-imported into the
 // user's work folder so there is no separate built-in/user split)
 // ============================================================
@@ -613,6 +639,8 @@ function ClipsPanel() {
   const filter = useLibraryStore((s) => s.filter)
   const setFilter = useLibraryStore((s) => s.setFilter)
   const addClipFromFile = useLibraryStore((s) => s.addClipFromFile)
+  const importProgress = useLibraryStore((s) => s.importProgress)
+  const setImportProgress = useLibraryStore((s) => s.setImportProgress)
   const archiveClip = useLibraryStore((s) => s.archiveClip)
   const updateClip = useLibraryStore((s) => s.updateClip)
   const commitClipRename = useLibraryStore((s) => s.commitClipRename)
@@ -822,8 +850,22 @@ function ClipsPanel() {
   }, [orderedClips, selectedId, setSelectedId, editingClipId, activeSelection, toggle, stopPreview, getClipAudio, getIntensity, setIntensity, clips, addClipToActiveKit])
 
   const handleImport = useCallback(async (files: FileList) => {
-    for (const f of Array.from(files)) { try { await addClipFromFile(f) } catch (e) { console.error(e) } }
-  }, [addClipFromFile])
+    const arr = Array.from(files)
+    // Single-file drops are instant — only show the count banner for
+    // multi-file batches so the user can track a long paste of N clips.
+    const track = arr.length > 1
+    if (track) setImportProgress({ current: 0, total: arr.length, label: 'Importing…' })
+    let done = 0
+    try {
+      for (const f of arr) {
+        try { await addClipFromFile(f) } catch (e) { console.error(e) }
+        done += 1
+        if (track) setImportProgress({ current: done, total: arr.length, label: 'Importing…' })
+      }
+    } finally {
+      if (track) setImportProgress(null)
+    }
+  }, [addClipFromFile, setImportProgress])
 
   const renderClipRow = (c: LibraryClip) => (
     <ClipRow
@@ -995,8 +1037,9 @@ function ClipsPanel() {
       </div>
       <AmpPresetBar />
       <div className="library-list">
+        {importProgress && <ImportProgressBanner progress={importProgress} />}
         {displayed.length === 0
-          ? <div className="library-empty">{clips.length === 0 ? 'Drop files or + Import.' : 'No match.'}</div>
+          ? (!importProgress && <div className="library-empty">{clips.length === 0 ? 'Drop files or + Import.' : 'No match.'}</div>)
           : listMode === 'flat'
             ? displayed.map((c) => renderClipRow(c))
             : renderTreeNode(buildClipTree(displayed), true)

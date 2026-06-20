@@ -163,6 +163,16 @@ interface LibraryState {
   ) => void
 
   /**
+   * Progress of a long-running clip import / folder scan (built-in
+   * template seed, folder load, multi-file drop). Drives the inline
+   * "Loading template… X/Y" banner + progress bar in the Clips panel so
+   * the user isn't left staring at the easy-to-miss footer pill while a
+   * folder of clips decodes. null when nothing is in flight.
+   */
+  importProgress: { current: number; total: number; label: string } | null
+  setImportProgress: (p: LibraryState['importProgress']) => void
+
+  /**
    * Build the kit ZIP and write `<outRoot>/<kitId>/` to disk *now*.
    * Validates silently — invalid kits / missing outRoot return null.
    * Updates the per-kit ZIP cache used by Deploy.
@@ -555,6 +565,20 @@ function retryDelayMs(attempt: number): number {
  * it lands on disk. Coalesced mutations show the *latest* message.
  */
 const lastOpMessage = new Map<string, string>()
+
+/**
+ * Monotonic token for the inline import-progress banner. Each long-running
+ * import / folder scan grabs a fresh `++importRunSeq` before it starts and
+ * only mutates `importProgress` while it is still the *latest* run. This
+ * guards two things at once:
+ *   1) finally-clear: a thrown disk op can never leave the banner stuck —
+ *      the owning run always clears in its finally.
+ *   2) overlap: if a newer scan starts (e.g. user picks a folder during the
+ *      boot-time load), the older run goes silent so the two don't fight
+ *      over a single shared field (clobbered counts / premature clear).
+ */
+let importRunSeq = 0
+
 function setOp(kitId: string, msg: string) {
   lastOpMessage.set(kitId, msg)
   useLibraryStore.getState().setLocalFsStatus('saving', msg)
@@ -662,6 +686,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       localFsLastTs: Date.now(),
     })
   },
+
+  importProgress: null,
+  setImportProgress: (p) => set({ importProgress: p }),
 
   // ---- Kit folder persistence -------------------------------------------
 
@@ -1200,49 +1227,73 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       get().clips.map((c) => c.builtinId).filter((x): x is string => !!x)
     )
 
-    let failed = 0
-    for (const meta of builtinIndex) {
-      if (existingBuiltinIds.has(meta.id)) continue
-      const blob = await fetchBuiltinClipAudio(meta.id)
-      if (!blob) { failed++; continue }
-      // Built-ins land in clips/template/<filename>. The user can freely
-      // move them out, edit them or delete them — nothing else depends on
-      // the subfolder location, it's purely for organisation.
-      const relPath = `template/${meta.filename}`
-      const clip: LibraryClip = {
-        id: generateId(),
-        name: meta.name,
-        // Preserve the source filename in `note` for later reference
-        // (see `addClipFromFile` comment) — survives any user rename.
-        note: meta.filename,
-        tags: [...meta.tags],
-        group: meta.category || 'template',
-        duration: meta.duration_ms / 1000,
-        channels: meta.channels,
-        sampleRate: meta.sample_rate,
-        fileSize: meta.filesize_bytes,
-        sourceFilename: relPath,
-        createdAt: now,
-        updatedAt: now,
-        builtinId: meta.id,
+    // Only the not-yet-imported built-ins count toward the progress total,
+    // so the bar reflects the real work (skipped ones don't inflate it).
+    const pending = builtinIndex.filter((m) => !existingBuiltinIds.has(m.id))
+    let done = 0
+    // The banner only renders in the work-folder-connected Clips panel — a
+    // folder-less browse import is invisible, so don't tick a state nobody
+    // can see. `tick` is also gated on owning the latest run (see importRunSeq).
+    const showProgress = !!workDirHandle
+    const myRun = ++importRunSeq
+    const tick = (current: number) => {
+      if (showProgress && importRunSeq === myRun) {
+        get().setImportProgress({ current, total: pending.length, label: 'Loading template…' })
       }
-      // Disk-as-truth: write to work folder only (no IDB write).
-      if (workDirHandle) await writeClipFile(workDirHandle, relPath, blob)
-      toAdd.push(clip)
     }
+    tick(0)
 
-    if (toAdd.length === 0) {
-      // Nothing imported — could be "all already present" or "all failed".
-      if (failed > 0) get().setLocalFsStatus('error', `built-in import 失敗: ${failed} 件取得不可`)
-      else get().setLocalFsStatus('saved', 'built-in は全て import 済み')
-      return 0
+    let failed = 0
+    try {
+      for (const meta of builtinIndex) {
+        if (existingBuiltinIds.has(meta.id)) continue
+        const blob = await fetchBuiltinClipAudio(meta.id)
+        done += 1
+        tick(done)
+        if (!blob) { failed++; continue }
+        // Built-ins land in clips/template/<filename>. The user can freely
+        // move them out, edit them or delete them — nothing else depends on
+        // the subfolder location, it's purely for organisation.
+        const relPath = `template/${meta.filename}`
+        const clip: LibraryClip = {
+          id: generateId(),
+          name: meta.name,
+          // Preserve the source filename in `note` for later reference
+          // (see `addClipFromFile` comment) — survives any user rename.
+          note: meta.filename,
+          tags: [...meta.tags],
+          group: meta.category || 'template',
+          duration: meta.duration_ms / 1000,
+          channels: meta.channels,
+          sampleRate: meta.sample_rate,
+          fileSize: meta.filesize_bytes,
+          sourceFilename: relPath,
+          createdAt: now,
+          updatedAt: now,
+          builtinId: meta.id,
+        }
+        // Disk-as-truth: write to work folder only (no IDB write).
+        if (workDirHandle) await writeClipFile(workDirHandle, relPath, blob)
+        toAdd.push(clip)
+      }
+
+      if (toAdd.length === 0) {
+        // Nothing imported — could be "all already present" or "all failed".
+        if (failed > 0) get().setLocalFsStatus('error', `built-in import 失敗: ${failed} 件取得不可`)
+        else get().setLocalFsStatus('saved', 'built-in は全て import 済み')
+        return 0
+      }
+      const newClips = [...toAdd, ...get().clips]
+      set({ clips: newClips })
+      if (workDirHandle) await saveClipsMetaToDir(workDirHandle, newClips)
+      const tailMsg = failed > 0 ? ` (${failed} 件取得失敗)` : ''
+      get().setLocalFsStatus('saved', `built-in ${toAdd.length} 件を追加${tailMsg}`)
+      return toAdd.length
+    } finally {
+      // Always clear the banner — a thrown writeClipFile / saveClipsMetaToDir
+      // must never leave it stuck. Only the latest run clears (overlap guard).
+      if (importRunSeq === myRun) get().setImportProgress(null)
     }
-    const newClips = [...toAdd, ...get().clips]
-    set({ clips: newClips })
-    if (workDirHandle) await saveClipsMetaToDir(workDirHandle, newClips)
-    const tailMsg = failed > 0 ? ` (${failed} 件取得失敗)` : ''
-    get().setLocalFsStatus('saved', `built-in ${toAdd.length} 件を追加${tailMsg}`)
-    return toAdd.length
   },
 
   // ---- Work directory actions ----
@@ -1791,6 +1842,20 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const clips: LibraryClip[] = []
     const ctx = new AudioContext()
 
+    // Surface a count-based progress banner while the folder's WAVs are
+    // read/decoded — this is the path that takes ~10 s for a big folder.
+    // Token-guard the ticks + the finally-clear so a thrown decode/read can't
+    // leave the banner stuck and an overlapping scan can't fight over it.
+    let scanned = 0
+    const myRun = ++importRunSeq
+    const tick = (current: number) => {
+      if (importRunSeq === myRun) {
+        get().setImportProgress({ current, total: fileList.length, label: 'Loading clips…' })
+      }
+    }
+    tick(0)
+
+    try {
     // For each file in clips/, use existing metadata or create new
     for (const { name: filename, file } of fileList) {
       const existing = metaMap.get(filename)
@@ -1832,6 +1897,12 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           console.error(`Failed to import ${filename} from work dir:`, err)
         }
       }
+      scanned += 1
+      tick(scanned)
+    }
+    } finally {
+      // Always clear — only the latest run owns the banner (overlap guard).
+      if (importRunSeq === myRun) get().setImportProgress(null)
     }
 
     // Files in clips/ are the source of truth — clips deleted from folder are removed
