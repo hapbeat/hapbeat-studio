@@ -12,3 +12,5 @@ dev-notes/
 
 # Firmware artifacts downloaded at CI build time (not committed)
 public/firmware/
+CLAUDE.md
+instructions/
