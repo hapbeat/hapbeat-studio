@@ -27,8 +27,9 @@ function buildMeta(): { sha: string; date: string } {
 
 /** Human-facing app version (semver) shown in the UI + used by the version
  *  switcher to highlight "current". Priority: VITE_APP_VERSION passed by CI
- *  on a release tag → package.json version. Releases set this from the
- *  `vX.Y.Z` tag so a frozen `/studio/vX.Y.Z/` build self-reports its version. */
+ *  on a release tag → package.json version. Releases set this from the full
+ *  `vX.Y.Z` tag so a frozen build (served from the minor dir `/studio/vX.Y/`)
+ *  still self-reports its full patch version. */
 function appVersion(): string {
   if (process.env.VITE_APP_VERSION) return process.env.VITE_APP_VERSION
   try {
@@ -408,9 +409,9 @@ export default defineConfig(({ command }) => {
   process.env.VITE_BUILD_SHA = meta.sha
   process.env.VITE_BUILD_DATE = meta.date
   process.env.VITE_APP_VERSION = appVersion()
-  // STUDIO_BASE: CI がリリースタグ時に "/studio/v0.2.0/" を渡す（不変リリースを
-  // サブディレクトリに凍結配信するため）。未指定の通常ビルド(master)は
-  // "/studio/"、dev サーバは "/"。
+  // STUDIO_BASE: CI がリリースタグ時に "/studio/v0.2/" (マイナー単位の凍結 dir) を
+  // 渡す。パッチは同じマイナー dir を上書きするので dir が増えない。未指定の通常
+  // ビルド(master)は "/studio/"、dev サーバは "/"。
   const base = process.env.STUDIO_BASE || (command === 'build' ? '/studio/' : '/')
   return {
     base,

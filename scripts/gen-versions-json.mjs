@@ -2,9 +2,14 @@
 /**
  * Generate `/studio/versions.json` from git release tags (`v*`).
  *
- * Each release is deployed (immutably) to `/studio/<tag>/` by the Deploy
- * workflow. This manifest lists every release so the in-app VersionSwitcher
- * can offer rollback to a known-good frozen build.
+ * Releases are deployed by the Deploy workflow to a MINOR-versioned dir
+ * (`/studio/vX.Y/`): patch releases overwrite the same minor dir rather than
+ * creating a new `/studio/vX.Y.Z/` per patch. This manifest therefore lists
+ * ONE entry per minor line — the newest patch of that line — so the in-app
+ * VersionSwitcher can roll back to the latest build of any previous minor.
+ *
+ * Rollback granularity = minor line (e.g. v0.2 ⇄ v0.1), matching the policy
+ * "凍結リリースは各マイナーバージョン単位、パッチまで追わない".
  *
  * Usage: node scripts/gen-versions-json.mjs <out-path>
  *   e.g. node scripts/gen-versions-json.mjs dist-versions/versions.json
@@ -25,25 +30,31 @@ function releaseTags() {
       .split('\n')
       .map((s) => s.trim())
       .filter(Boolean)
-      // Frozen /studio/vX.Y.Z/ URLs are kept ONLY for minor/major releases
-      // (patch == 0, e.g. v0.2.0 / v1.0.0). Patch releases (v0.2.1 …) ship to
-      // /studio/ (latest) without a frozen snapshot to avoid subdir bloat, so
-      // they must NOT appear in versions.json (their /studio/vX.Y.Z/ doesn't
-      // exist → would 404 in the switcher).
-      .filter((t) => /^v\d+\.\d+\.0$/.test(t))
+      // Any well-formed vX.Y.Z release tag (patches included now).
+      .filter((t) => /^v\d+\.\d+\.\d+$/.test(t))
   } catch {
     return []
   }
 }
 
-// tag `v0.2.0` → { version: "0.2.0", path: "/studio/v0.2.0/" }
-const versions = releaseTags().map((tag) => ({
-  version: tag.replace(/^v/, ''),
-  path: `/studio/${tag}/`,
-}))
+// Collapse tags to one entry per minor line, newest patch wins.
+// `--sort=-v:refname` is descending, so the FIRST tag seen for a given
+// minor is its newest patch.
+//   tags [v0.2.1, v0.2.0, v0.1.0]
+//     → [{ version: "0.2.1", path: "/studio/v0.2/" },
+//        { version: "0.1.0", path: "/studio/v0.1/" }]
+const seenMinor = new Set()
+const versions = []
+for (const tag of releaseTags()) {
+  const version = tag.replace(/^v/, '')          // 0.2.1
+  const minor = version.split('.').slice(0, 2).join('.') // 0.2
+  if (seenMinor.has(minor)) continue             // keep only newest patch of this minor
+  seenMinor.add(minor)
+  versions.push({ version, path: `/studio/v${minor}/` })
+}
 const latest = versions[0]?.version ?? null
 
 const payload = { latest, versions, generated: new Date().toISOString() }
 mkdirSync(dirname(out), { recursive: true })
 writeFileSync(out, JSON.stringify(payload, null, 2) + '\n')
-console.log(`[versions] wrote ${out}: latest=${latest}, ${versions.length} version(s)`)
+console.log(`[versions] wrote ${out}: latest=${latest}, ${versions.length} minor line(s)`)
