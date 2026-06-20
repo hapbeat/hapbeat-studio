@@ -135,8 +135,17 @@ jobs:
       - name: Install deps (ci)
         run: npm ci
 
+      # workflow_dispatch の旧タグ再デプロイでは、その checkout に master 由来の
+      # スクリプトが無いことがある (例: v0.1.0 には aggregate-firmware-manifest.mjs が
+      # 存在しない)。その場合は skip して再デプロイを成立させる (古い版は firmware
+      # ライブラリ機能自体が無いので manifest 不要)。
       - name: Aggregate firmware manifest (versions/archive)
-        run: node scripts/aggregate-firmware-manifest.mjs fw-staging public/firmware
+        run: |
+          if [ -f scripts/aggregate-firmware-manifest.mjs ]; then
+            node scripts/aggregate-firmware-manifest.mjs fw-staging public/firmware
+          else
+            echo "::notice::aggregate-firmware-manifest.mjs absent in this checkout — skipping (old-tag re-deploy)"
+          fi
 
       - name: Build
         run: npm run build
