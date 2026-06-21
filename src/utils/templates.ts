@@ -144,12 +144,6 @@ export const bandStandardTemplate: DisplayTemplate = {
   },
 }
 
-/**
- * 後方互換 alias。projectStore など旧 single-template 想定の箇所が
- * `standardTemplate` を見ている。Duo を default として返す。
- */
-export const standardTemplate: DisplayTemplate = duoStandardTemplate
-
 export const allTemplates: DisplayTemplate[] = [duoStandardTemplate, bandStandardTemplate]
 
 // ========================================

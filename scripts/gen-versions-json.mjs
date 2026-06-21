@@ -23,6 +23,13 @@ import { dirname } from 'node:path'
 
 const out = process.argv[2] || 'versions.json'
 
+// Deploy-root prefix the frozen version dirs live under. The VersionSwitcher
+// navigates straight to these absolute paths, so they must match the host:
+//   - studio.hapbeat.com (Cloudflare, new home): "/"        → /vX.Y/
+//   - devtools.hapbeat.com/studio/ (legacy FTP): "/studio/" → /studio/vX.Y/
+// Default keeps the legacy FTP pipeline (which doesn't set this) unchanged.
+const basePrefix = process.env.STUDIO_VERSIONS_BASE || '/studio/'
+
 function releaseTags() {
   try {
     const raw = execSync('git tag -l "v*" --sort=-v:refname', { encoding: 'utf8' })
@@ -50,7 +57,7 @@ for (const tag of releaseTags()) {
   const minor = version.split('.').slice(0, 2).join('.') // 0.2
   if (seenMinor.has(minor)) continue             // keep only newest patch of this minor
   seenMinor.add(minor)
-  versions.push({ version, path: `/studio/v${minor}/` })
+  versions.push({ version, path: `${basePrefix}v${minor}/` })
 }
 const latest = versions[0]?.version ?? null
 

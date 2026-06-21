@@ -402,17 +402,20 @@ const FIRMWARE_BUILD_REPOS = [
   },
 ]
 
-export default defineConfig(({ command }) => {
+export default defineConfig(() => {
   const meta = buildMeta()
   // Expose as VITE_-prefixed env so `import.meta.env.VITE_BUILD_*`
   // resolves at both dev (per-request transform) and build time.
   process.env.VITE_BUILD_SHA = meta.sha
   process.env.VITE_BUILD_DATE = meta.date
   process.env.VITE_APP_VERSION = appVersion()
-  // STUDIO_BASE: CI がリリースタグ時に "/studio/v0.2/" (マイナー単位の凍結 dir) を
-  // 渡す。パッチは同じマイナー dir を上書きするので dir が増えない。未指定の通常
-  // ビルド(master)は "/studio/"、dev サーバは "/"。
-  const base = process.env.STUDIO_BASE || (command === 'build' ? '/studio/' : '/')
+  // STUDIO_BASE: CI がデプロイ先に応じて base を渡す。
+  //   studio.hapbeat.com (Cloudflare / 新オリジン): "/"（最新）/ "/vX.Y/"（凍結版）
+  //   devtools.hapbeat.com/studio/ (Xserver FTP / 旧オリジン・移行期間のみ並走):
+  //                                  "/studio/"（最新）/ "/studio/vX.Y/"（凍結版）
+  // 未指定（ローカル dev / preview / Cloudflare 既定ビルド）は "/"。新しいホームが
+  // root オリジンになったので既定を "/" にする（旧 FTP 経路は STUDIO_BASE を明示）。
+  const base = process.env.STUDIO_BASE || '/'
   return {
     base,
     plugins: [react(), firmwareDevPlugin(FIRMWARE_BUILD_REPOS)],

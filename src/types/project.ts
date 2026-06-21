@@ -1,14 +1,8 @@
-import type { DisplayLayout } from './display'
-
-export interface HapbeatProject {
-  id: string
-  name: string
-  createdAt: string
-  updatedAt: string
-  displayLayout: DisplayLayout
-  events: EventDefinition[]
-  ledConfig: LedConfig
-}
+// Shared types kept after the Projects store was removed (2026-06-21).
+// The old HapbeatProject / IndexedDB "projects" feature was dead code; these
+// two types are the only members still referenced:
+//   - EventDefinition → src/components/pack/PackBuilder.tsx
+//   - LedPattern      → src/components/led/LedEditor.tsx
 
 export interface EventDefinition {
   eventId: string
@@ -17,12 +11,6 @@ export interface EventDefinition {
   device_wiper?: number
   loop: boolean
   ledColor?: string
-}
-
-export interface LedConfig {
-  idleColor: string
-  idlePattern: LedPattern
-  eventColors: Record<string, string> // eventId -> color
 }
 
 export type LedPattern = 'solid' | 'breathe' | 'pulse' | 'off'

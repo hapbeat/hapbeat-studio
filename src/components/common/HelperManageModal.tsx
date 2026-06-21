@@ -145,7 +145,7 @@ export function HelperManageModal({ open, onClose, helperVersion, helperCompat }
             <h3 className="helper-modal-section-title">バージョン</h3>
             <p className="helper-modal-section-desc">
               新しい版で不具合が出た場合は、旧バージョンに切り替えて作業を続けられます
-              （各版は <code>/studio/v0.2.0/</code> のように固定 URL で残ります）。
+              （各版はマイナー単位で <code>/v0.2/</code> のような固定 URL に残ります）。
             </p>
             <VersionSwitcher />
           </section>

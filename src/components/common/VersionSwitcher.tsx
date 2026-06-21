@@ -13,15 +13,30 @@ interface VersionsManifest { latest: string | null; versions: VersionEntry[]; ge
  * 出ても、ユーザーは旧マイナー線へ即戻れる（URL が永続的なロールバック手段で、
  * このスイッチャはその導線）。dev / versions.json 未配信時は現在版のみ表示。
  */
+/**
+ * デプロイルート (= versions.json と各凍結版 dir が並ぶ場所)。
+ *
+ * `import.meta.env.BASE_URL` はその「ビルドの」base なので、最新版は `/`
+ * (studio.hapbeat.com) / `/studio/` (旧 devtools)、凍結版は `/vX.Y/` /
+ * `/studio/vX.Y/` になる。versions.json は凍結版 dir の *中* ではなくデプロイ
+ * ルート直下に 1 つだけ置かれる（凍結版からでも最新の版一覧を読めるように）。
+ * よって base から末尾の `vX.Y/` セグメントを剥がした値がデプロイルート。
+ *   "/"             → "/"          → /versions.json          (新・最新)
+ *   "/v0.2/"        → "/"          → /versions.json          (新・凍結)
+ *   "/studio/"      → "/studio/"   → /studio/versions.json   (旧・最新)
+ *   "/studio/v0.2/" → "/studio/"   → /studio/versions.json   (旧・凍結)
+ */
+const DEPLOY_ROOT = import.meta.env.BASE_URL.replace(/v\d+\.\d+\/$/, '')
+
 export function VersionSwitcher({ compact = false }: { compact?: boolean }) {
   const current = import.meta.env.VITE_APP_VERSION || '0.0.0'
   const [versions, setVersions] = useState<VersionEntry[]>([])
 
   useEffect(() => {
     let cancelled = false
-    // host-absolute path: `/studio/` 直下でも `/studio/vX.Y/` 配下でも同じ
-    // 場所を指す。dev (base `/`) では 404 → catch で無視し現在版のみ表示。
-    fetch('/studio/versions.json', { cache: 'no-store' })
+    // デプロイルート直下の versions.json を読む。dev (root に未配信) では 404 →
+    // catch で無視し現在版バッジのみ表示。
+    fetch(`${DEPLOY_ROOT}versions.json`, { cache: 'no-store' })
       .then((r) => (r.ok ? (r.json() as Promise<VersionsManifest>) : null))
       .then((m) => { if (!cancelled && m?.versions) setVersions(m.versions) })
       .catch(() => { /* dev / 未配信時は無視 */ })
@@ -52,7 +67,7 @@ export function VersionSwitcher({ compact = false }: { compact?: boolean }) {
     // actually run 0.2.1 from the same minor line) so the same /studio/vX.Y/
     // doesn't appear twice in the dropdown.
     const hasCurrent = versions.some((v) => v.version === current)
-    const currentMinorPath = `/studio/v${current.split('.').slice(0, 2).join('.')}/`
+    const currentMinorPath = `${DEPLOY_ROOT}v${current.split('.').slice(0, 2).join('.')}/`
     const options = hasCurrent
       ? versions
       : [{ version: current, path: '' }, ...versions.filter((v) => v.path !== currentMinorPath)]

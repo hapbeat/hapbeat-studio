@@ -3,6 +3,7 @@ import type { DeviceInfo, ManagerMessage, MqttClientEntry, SensorColorMatch, Sen
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useMqttTopicsStore, sanitizeTopic } from '@/stores/mqttTopicsStore'
 import { useToast } from '@/components/common/Toast'
+import { downloadTextFile } from '@/utils/download'
 import { MqttFlowPanel } from './MqttFlow'
 
 // Status feedback uses anchored toasts (Toast.tsx) instead of inline text, so
@@ -177,6 +178,10 @@ function TopicRegistryEditor() {
   const topics = useMqttTopicsStore((s) => s.topics)
   const addTopic = useMqttTopicsStore((s) => s.addTopic)
   const removeTopic = useMqttTopicsStore((s) => s.removeTopic)
+  const exportTopics = useMqttTopicsStore((s) => s.exportTopics)
+  const importTopics = useMqttTopicsStore((s) => s.importTopics)
+  const { toast } = useToast()
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [name, setName] = useState('')
 
   const add = () => {
@@ -184,6 +189,26 @@ function TopicRegistryEditor() {
     if (!t) return
     addTopic(t)
     setName('')
+  }
+
+  // Topics live only in localStorage (per-origin), so a host move (e.g.
+  // studio.hapbeat.com) would lose them. Export/import lets the user carry the
+  // list across origins; import merges into the existing list (never replaces).
+  const doExport = () => {
+    downloadTextFile('mqtt-topics.json', exportTopics())
+    toast(`トピック ${topics.length} 件をエクスポートしました`, 'success')
+  }
+  const doImport = (file: File) => {
+    const fr = new FileReader()
+    fr.onload = () => {
+      const ok = importTopics(String(fr.result))
+      toast(
+        ok ? 'トピック一覧をインポートしました' : 'インポートに失敗しました（JSON 形式を確認してください）',
+        ok ? 'success' : 'error',
+      )
+    }
+    fr.onerror = () => toast('ファイルの読み込みに失敗しました', 'error')
+    fr.readAsText(file)
   }
 
   return (
@@ -242,6 +267,41 @@ function TopicRegistryEditor() {
         >
           ＋
         </button>
+      </div>
+
+      {/* Origin-independent backup of the topic list (localStorage は origin
+          ごとに隔離されるため、host 移行時に手動退避できる経路を用意する)。 */}
+      <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+        <button
+          type="button"
+          className="form-button-secondary"
+          onClick={doExport}
+          disabled={topics.length === 0}
+          style={{ padding: '0 12px' }}
+          title="登録トピックを JSON ファイルに保存（別アドレスへの移行用バックアップ）"
+        >
+          エクスポート
+        </button>
+        <button
+          type="button"
+          className="form-button-secondary"
+          onClick={() => fileInputRef.current?.click()}
+          style={{ padding: '0 12px' }}
+          title="JSON ファイルからトピックを取り込み（既存の一覧に追加）"
+        >
+          インポート
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="application/json,.json"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) doImport(f)
+            e.target.value = ''
+          }}
+        />
       </div>
 
       <div className="form-status muted">

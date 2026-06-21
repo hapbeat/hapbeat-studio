@@ -49,6 +49,15 @@ interface MqttTopicsState {
   /** Add a topic name. No-op on empty / duplicate. */
   addTopic: (topic: string) => void
   removeTopic: (topic: string) => void
+  /** Current topics as a versioned JSON envelope (for file backup). The
+   *  envelope (not a bare array) leaves room to evolve the format later. */
+  exportTopics: () => string
+  /** Merge topics from a JSON string into the store. Accepts either the
+   *  `{ version, topics }` envelope or a bare `string[]` (hand-written JSON).
+   *  Each entry passes `sanitizeTopic`; existing topics are kept (merge, not
+   *  replace) and duplicates ignored. Returns false — and leaves the store
+   *  unchanged — on parse failure or a non-array shape. */
+  importTopics: (json: string) => boolean
 }
 
 export const useMqttTopicsStore = create<MqttTopicsState>((set, get) => ({
@@ -68,4 +77,34 @@ export const useMqttTopicsStore = create<MqttTopicsState>((set, get) => ({
       persist(next)
       return { topics: next }
     }),
+
+  exportTopics: () =>
+    JSON.stringify({ version: 1, topics: get().topics }, null, 2),
+
+  importTopics: (json) => {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(json)
+    } catch {
+      return false
+    }
+    // Accept the {version, topics} envelope or a bare string[] (hand-written).
+    const raw = Array.isArray(parsed)
+      ? parsed
+      : parsed && typeof parsed === 'object'
+        ? (parsed as { topics?: unknown }).topics
+        : undefined
+    if (!Array.isArray(raw)) return false
+    const incoming = raw
+      .map((t) => (typeof t === 'string' ? sanitizeTopic(t) : ''))
+      .filter((s) => s.length > 0)
+    // Merge into existing (dedupe), never replace.
+    const merged = [...get().topics]
+    for (const t of incoming) {
+      if (!merged.includes(t)) merged.push(t)
+    }
+    persist(merged)
+    set({ topics: merged })
+    return true
+  },
 }))

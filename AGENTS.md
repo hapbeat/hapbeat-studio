@@ -110,14 +110,18 @@ For the full payload shapes of a node, see `get_info_result` (`GetInfoResult` in
 
 ## Where config / data lives
 
-- **Projects:** IndexedDB, DB `hapbeat-studio`, store `projects` (`src/utils/storage.ts`).
 - **UI state:** `localStorage` (e.g. active tab key `hapbeat-studio-tab`).
 - **Kit folders / WAVs:** written to a user-picked directory via the File System
   Access API (`<kit>/install-clips/`, `<kit>/stream-clips/`, `<kit>-manifest.json`).
-- **JSON import/export** of projects is supported in-app.
+  Disk is the source of truth → recovered by re-picking the folder after a host move.
+- **MQTT topic registry:** `localStorage` (`hapbeat-studio-mqtt-topics`,
+  `src/stores/mqttTopicsStore.ts`). Per-origin, so the sensor-config UI offers
+  JSON export/import to carry the list across an origin change.
 - The running Studio version comes from `VITE_APP_VERSION`; the header dropdown
-  switches to frozen `/studio/vX.Y/` builds listed in `/studio/versions.json`
-  (`src/components/common/VersionSwitcher.tsx`).
+  switches to frozen `<deploy-root>vX.Y/` builds listed in `<deploy-root>versions.json`
+  (`src/components/common/VersionSwitcher.tsx`). Deploy root = `/` on
+  studio.hapbeat.com (Cloudflare) and `/studio/` on the legacy devtools host;
+  it is derived from `import.meta.env.BASE_URL` at runtime.
 
 ## Common errors and fixes
 
