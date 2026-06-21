@@ -1,0 +1,226 @@
+name: Deploy (Cloudflare Pages)
+
+# studio.hapbeat.com (Cloudflare Pages) への配信。FTP は使わない。
+#
+# 旧 devtools.hapbeat.com/studio/ (Xserver FTP, deploy.yml) は移行期間中も並走させる
+# ため別ワークフローとして温存する。カットオーバー完了後に deploy.yml と FTP_* secrets
+# を削除する（instructions-deploy-studio-subdomain）。
+#
+# デプロイ:
+#   push master / firmware-released → / (最新=master) を含む全ツリーを atomic deploy
+#   push tag vX.Y.Z                 → 凍結版を build → GitHub Release アセット
+#                                      (studio-site-vX.Y.Z.tar.gz) に保存 + 全ツリー再デプロイ
+#   workflow_dispatch(tag=vX.Y.Z)   → 既存タグの凍結版アセットを作り直す（移行 bootstrap）
+#
+# Cloudflare Pages は 1 デプロイ = root 全体の atomic 置換なので、最新 (/) と全凍結版
+# (/vX.Y/) を 1 つの出力ツリーにまとめて wrangler で一括 deploy する。凍結版は tag 時に
+# build-once で Release アセット化し、deploy 毎に scripts/cf-assemble-versions.mjs が
+# dist/vX.Y/ へ展開し直して versions.json を生成する（実在版のみ列挙＝404 リンクなし）。
+#
+# 必要な GitHub secrets:
+#   CLOUDFLARE_API_TOKEN  — Pages:Edit 権限の API トークン
+#   CLOUDFLARE_ACCOUNT_ID — Cloudflare アカウント ID
+#   FIRMWARE_REPO_PAT     — device/transmitter firmware repo の read（既存・流用）
+# Cloudflare 側: Pages プロジェクト hapbeat-studio を作成し production branch = master、
+#   カスタムドメイン studio.hapbeat.com を割当（手順は dev-notes/cloudflare-pages-setup.md）。
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '凍結版を作り直す既存タグ (例 v0.1.0)。通常運用は空のまま。'
+        required: false
+        default: ''
+  repository_dispatch:
+    types: [firmware-released]
+
+# Node 20 deprecation 後も JS actions を Node 24 で動かす。
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+# 凍結版アセットの作成 / アップロード（GITHUB_TOKEN）に contents: write が要る。
+permissions:
+  contents: write
+
+# 同時 deploy で wrangler が競合しないよう直列化（cancel はしない）。
+concurrency:
+  group: studio-cloudflare-pages
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1) 凍結版 (frozen minor) を build して GitHub Release アセットへ保存。build-once。
+  #    tag push / workflow_dispatch(tag) のときだけ実行。
+  # ---------------------------------------------------------------------------
+  freeze:
+    name: Build & publish frozen version
+    if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event.inputs.tag != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine tag
+        id: tag
+        run: |
+          DISPATCH_TAG="${{ github.event.inputs.tag }}"
+          if [[ -n "$DISPATCH_TAG" ]]; then
+            tag="$DISPATCH_TAG"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+          # 凍結版は strict semver vX.Y.Z のみ（/v<minor>/ dir と versions.json の前提）。
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::tag '$tag' は strict semver vX.Y.Z ではありません — 凍結版を作りません。"
+            exit 1
+          fi
+          version="${tag#v}"          # 0.2.1
+          minor="${version%.*}"       # 0.2
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "minor=$minor"
+          } >> "$GITHUB_OUTPUT"
+          echo "Freeze $tag → /v$minor/ (full version $version)"
+
+      - name: Checkout tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Download firmware releases (latest + archive)
+        run: |
+          for repo_name in hapbeat-device-firmware hapbeat-transmitter-firmware; do
+            repo="Hapbeat/$repo_name"
+            mkdir -p "fw-staging/$repo_name"
+            tags=$(gh release list --repo "$repo" --limit 6 --json tagName --jq '.[].tagName' || true)
+            if [ -z "$tags" ]; then
+              echo "::warning::no releases for $repo — skipping"
+              continue
+            fi
+            for t in $tags; do
+              mkdir -p "fw-staging/$repo_name/$t"
+              gh release download "$t" --repo "$repo" --dir "fw-staging/$repo_name/$t" \
+                --pattern "*.bin" --pattern "manifest.json" --pattern "manifest.fragment.json" --clobber
+            done
+          done
+        env:
+          GH_TOKEN: ${{ secrets.FIRMWARE_REPO_PAT }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install deps (ci)
+        run: npm ci
+
+      - name: Aggregate firmware manifest
+        run: |
+          if [ -f scripts/aggregate-firmware-manifest.mjs ]; then
+            node scripts/aggregate-firmware-manifest.mjs fw-staging public/firmware
+          else
+            echo "::notice::aggregate-firmware-manifest.mjs absent in this checkout (old tag) — skipping"
+          fi
+
+      - name: Build frozen ${{ steps.tag.outputs.version }} (base /v${{ steps.tag.outputs.minor }}/)
+        run: npm run build
+        env:
+          STUDIO_BASE: /v${{ steps.tag.outputs.minor }}/
+          VITE_APP_VERSION: ${{ steps.tag.outputs.version }}
+
+      - name: Pack & upload frozen bundle
+        run: |
+          asset="studio-site-v${{ steps.tag.outputs.version }}.tar.gz"
+          tar -czf "$asset" -C dist .
+          # tag の Release が無ければ作る（既存ならそのまま使う）。アセットは上書き。
+          gh release create "${{ steps.tag.outputs.tag }}" \
+            --title "Studio ${{ steps.tag.outputs.tag }}" \
+            --notes "Frozen Studio build for in-app rollback (served at /v${{ steps.tag.outputs.minor }}/ on studio.hapbeat.com)." \
+            2>/dev/null || true
+          gh release upload "${{ steps.tag.outputs.tag }}" "$asset" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # ---------------------------------------------------------------------------
+  # 2) 本番 atomic deploy。root = 最新 (master)、/vX.Y/ = 全凍結版 を 1 つに組んで
+  #    wrangler pages deploy する。全トリガで実行（freeze 成功後 / freeze 無し）。
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Assemble & deploy to Cloudflare Pages
+    needs: [freeze]
+    if: ${{ always() && (needs.freeze.result == 'success' || needs.freeze.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      # root（最新）は常に master HEAD。tag push でも root は master を出す
+      # （FTP の「/studio/ = 最新プレビュー」と同じ。/vX.Y/ だけが凍結）。
+      - name: Checkout master (root = latest)
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Download firmware releases (latest + archive)
+        run: |
+          for repo_name in hapbeat-device-firmware hapbeat-transmitter-firmware; do
+            repo="Hapbeat/$repo_name"
+            mkdir -p "fw-staging/$repo_name"
+            tags=$(gh release list --repo "$repo" --limit 6 --json tagName --jq '.[].tagName' || true)
+            if [ -z "$tags" ]; then
+              echo "::warning::no releases for $repo — skipping"
+              continue
+            fi
+            for t in $tags; do
+              mkdir -p "fw-staging/$repo_name/$t"
+              gh release download "$t" --repo "$repo" --dir "fw-staging/$repo_name/$t" \
+                --pattern "*.bin" --pattern "manifest.json" --pattern "manifest.fragment.json" --clobber
+            done
+          done
+        env:
+          GH_TOKEN: ${{ secrets.FIRMWARE_REPO_PAT }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install deps (ci)
+        run: npm ci
+
+      - name: Aggregate firmware manifest
+        run: node scripts/aggregate-firmware-manifest.mjs fw-staging public/firmware
+
+      # 最新 (root) を base "/" で build。vite が dist/ を空にしてから埋めるので、
+      # 凍結版の展開は必ずこの build の後に行う（順序が逆だと消える）。
+      - name: Build latest (root, base /)
+        run: npm run build
+        env:
+          STUDIO_BASE: /
+
+      - name: Download frozen version bundles (this repo's releases)
+        run: |
+          mkdir -p frozen-bundles
+          for t in $(gh release list --limit 30 --json tagName --jq '.[].tagName' || true); do
+            gh release download "$t" --pattern 'studio-site-*.tar.gz' \
+              --dir frozen-bundles --clobber 2>/dev/null || true
+          done
+          ls -la frozen-bundles || true
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # 凍結版を dist/vX.Y/ へ展開し、実在版だけの versions.json を生成。
+      - name: Assemble frozen versions + versions.json
+        run: node scripts/cf-assemble-versions.mjs frozen-bundles dist
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # production branch（Pages プロジェクト設定）= master のとき本番 deploy になる。
+          command: pages deploy dist --project-name=hapbeat-studio --branch=master --commit-dirty=true
