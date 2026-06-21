@@ -225,6 +225,9 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # wrangler v4 必須: 既定の 3.90.0 は `main` 無し（静的アセットのみ）の Worker に
+          # 未対応で "Missing entry-point" で落ちる。v4 で assets-only deploy が通る。
+          wranglerVersion: '4'
           # wrangler.jsonc の assets.directory=./dist を本番 Worker (hapbeat-studio) へ。
           # Actions からの `wrangler deploy` は常に production。Worker 名・配信設定は
           # wrangler.jsonc 側（Workers Builds の Git 連携は使わない）。
