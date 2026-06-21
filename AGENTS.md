@@ -136,5 +136,8 @@ For the full payload shapes of a node, see `get_info_result` (`GetInfoResult` in
 
 ## More detail
 
-- Studio docs: https://devtools.hapbeat.com/docs/tools/studio/
-- Docs portal (concepts / contracts / other SDKs): https://devtools.hapbeat.com/
+When this single file is not enough, an agent can fetch:
+
+- **Complete reference in one text file (recommended next step):** https://devtools.hapbeat.com/_llms-txt/studio.txt
+- **Concepts** (shared by every SDK): event id <-> kit https://devtools.hapbeat.com/docs/concepts/event-id-and-kit/ - command vs clip https://devtools.hapbeat.com/docs/concepts/fire-vs-clip/ - targeting https://devtools.hapbeat.com/docs/concepts/group-player-addressing/
+- Human docs: https://devtools.hapbeat.com/docs/tools/studio/ - Portal: https://devtools.hapbeat.com/
