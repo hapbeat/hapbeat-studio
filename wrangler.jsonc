@@ -1,0 +1,19 @@
+{
+  // Cloudflare Workers (Static Assets) で studio.hapbeat.com を配信する設定。
+  // GitHub Actions が組み立てた dist/（最新 = root + 凍結版 /vX.Y/）を、そのまま
+  // 静的アセットとして配信する。サーバサイドコードは無いので `main` は不要。
+  //
+  // 静的アセットのリクエストは Workers 無料枠でも無制限・無料（Worker コードを実行
+  // しないため、10 万/日の invocation 制限には数えない）。
+  //
+  // 配信ルーティングは既定のまま:
+  //   - 既定 html_handling は /v0.2/ → /v0.2/index.html を返す（各 dir の index.html）。
+  //   - SPA フォールバック (not_found_handling: single-page-application) は **使わない**。
+  //     使うと未知パスが全部 root の index.html に飛び、凍結版 /vX.Y/ が壊れる。
+  //     Studio はクライアントルーティングを持たない（タブは state）ので不要。
+  "name": "hapbeat-studio",
+  "compatibility_date": "2026-06-20",
+  "assets": {
+    "directory": "./dist"
+  }
+}

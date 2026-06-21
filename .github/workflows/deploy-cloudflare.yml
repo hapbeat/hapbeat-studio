@@ -1,6 +1,7 @@
-name: Deploy (Cloudflare Pages)
+name: Deploy (Cloudflare Workers)
 
-# studio.hapbeat.com (Cloudflare Pages) への配信。FTP は使わない。
+# studio.hapbeat.com (Cloudflare Workers / Static Assets) への配信。FTP は使わない。
+# 配信設定は repo root の wrangler.jsonc（assets.directory=./dist、Worker 名）。
 #
 # 旧 devtools.hapbeat.com/studio/ (Xserver FTP, deploy.yml) は移行期間中も並走させる
 # ため別ワークフローとして温存する。カットオーバー完了後に deploy.yml と FTP_* secrets
@@ -12,17 +13,19 @@ name: Deploy (Cloudflare Pages)
 #                                      (studio-site-vX.Y.Z.tar.gz) に保存 + 全ツリー再デプロイ
 #   workflow_dispatch(tag=vX.Y.Z)   → 既存タグの凍結版アセットを作り直す（移行 bootstrap）
 #
-# Cloudflare Pages は 1 デプロイ = root 全体の atomic 置換なので、最新 (/) と全凍結版
-# (/vX.Y/) を 1 つの出力ツリーにまとめて wrangler で一括 deploy する。凍結版は tag 時に
+# Workers Static Assets は deploy 毎に「その時アップロードした全アセット」で置換する
+# （前回あって今回無いファイルは消える）ので、最新 (/) と全凍結版 (/vX.Y/) を 1 つの
+# 出力ツリー dist/ にまとめて `wrangler deploy` で一括配信する。凍結版は tag 時に
 # build-once で Release アセット化し、deploy 毎に scripts/cf-assemble-versions.mjs が
 # dist/vX.Y/ へ展開し直して versions.json を生成する（実在版のみ列挙＝404 リンクなし）。
 #
 # 必要な GitHub secrets:
-#   CLOUDFLARE_API_TOKEN  — Pages:Edit 権限の API トークン
+#   CLOUDFLARE_API_TOKEN  — Workers Scripts:Edit 権限（「Edit Cloudflare Workers」テンプレート）
 #   CLOUDFLARE_ACCOUNT_ID — Cloudflare アカウント ID
 #   FIRMWARE_REPO_PAT     — device/transmitter firmware repo の read（既存・流用）
-# Cloudflare 側: Pages プロジェクト hapbeat-studio を作成し production branch = master、
-#   カスタムドメイン studio.hapbeat.com を割当（手順は dev-notes/cloudflare-pages-setup.md）。
+# Cloudflare 側: 初回 `wrangler deploy` で Worker hapbeat-studio が自動作成される。
+#   作成後に Worker へカスタムドメイン studio.hapbeat.com を割当（手順は
+#   dev-notes/cloudflare-deploy-setup.md）。ダッシュボードの Git 連携(Workers Builds)は使わない。
 
 on:
   push:
@@ -148,10 +151,10 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # 2) 本番 atomic deploy。root = 最新 (master)、/vX.Y/ = 全凍結版 を 1 つに組んで
-  #    wrangler pages deploy する。全トリガで実行（freeze 成功後 / freeze 無し）。
+  #    wrangler deploy で配信する。全トリガで実行（freeze 成功後 / freeze 無し）。
   # ---------------------------------------------------------------------------
   deploy:
-    name: Assemble & deploy to Cloudflare Pages
+    name: Assemble & deploy to Cloudflare Workers
     needs: [freeze]
     if: ${{ always() && (needs.freeze.result == 'success' || needs.freeze.result == 'skipped') }}
     runs-on: ubuntu-latest
@@ -217,10 +220,12 @@ jobs:
       - name: Assemble frozen versions + versions.json
         run: node scripts/cf-assemble-versions.mjs frozen-bundles dist
 
-      - name: Deploy to Cloudflare Pages
+      - name: Deploy to Cloudflare Workers (static assets)
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # production branch（Pages プロジェクト設定）= master のとき本番 deploy になる。
-          command: pages deploy dist --project-name=hapbeat-studio --branch=master --commit-dirty=true
+          # wrangler.jsonc の assets.directory=./dist を本番 Worker (hapbeat-studio) へ。
+          # Actions からの `wrangler deploy` は常に production。Worker 名・配信設定は
+          # wrangler.jsonc 側（Workers Builds の Git 連携は使わない）。
+          command: deploy
