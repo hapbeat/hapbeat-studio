@@ -46,8 +46,17 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
   const nameHistory = useInputHistory('device-name')
   const prefixHistory = useInputHistory('device-address-prefix')
 
-  // Re-sync local state when the user picks a different device
-  // (avoids the form silently editing the wrong one).
+  // Re-sync local state ONLY when the user picks a different device
+  // (keyed on ipAddress). The previous deps also re-synced on every
+  // device.name / device.address / cachedInfo.name change, which
+  // clobbered the value the user had just typed: after a successful
+  // set_name the device still reports its OLD name until the next
+  // get_info refresh, and that stale value flowed back into the field,
+  // making the rename appear to "revert" even though the write
+  // succeeded (bug 2026-06-24). The new value now stays in the field;
+  // the canonical name re-appears on the next reload / device re-select
+  // once the device reports it.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reset only on device switch
   useEffect(() => {
     setName(cachedInfo?.name ?? device.name)
     const a = parseAddress(device.address)
@@ -55,7 +64,7 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
     setPlayer(a.player)
     setPosition(a.position)
     setGroup(a.group)
-  }, [device.ipAddress, device.address, device.name, cachedInfo?.name])
+  }, [device.ipAddress])
 
   const submitName = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (!name.trim()) return
