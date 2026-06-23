@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { MIN_HELPER_VERSION, type HelperCompat } from '@/config/helperCompat'
+import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { VersionSwitcher } from './VersionSwitcher'
 import './HelperOnboardingModal.css'
 
@@ -42,6 +43,31 @@ function CopyableCommand({ cmd }: { cmd: string }) {
 export function HelperManageModal({ open, onClose, helperVersion, helperCompat }: HelperManageModalProps) {
   const outdated = helperCompat === 'outdated'
   const closeRef = useRef<HTMLButtonElement>(null)
+  const { send, isConnected, lastMessage } = useHelperConnection()
+  // Recovery feedback is driven by helper's actual `reset_discovery_result`
+  // (NOT optimistic): a re-bind failure must NOT read as success, or the user
+  // is told they recovered while still stuck. idle → pending → ok | fail.
+  const [resetState, setResetState] =
+    useState<'idle' | 'pending' | 'ok' | 'fail'>('idle')
+  const handleResetDiscovery = () => {
+    setResetState('pending')
+    send({ type: 'reset_discovery', payload: {} })
+  }
+  // Resolve on the helper's result.
+  useEffect(() => {
+    if (!lastMessage || lastMessage.type !== 'reset_discovery_result') return
+    const ok = (lastMessage.payload as { ok?: boolean }).ok !== false
+    setResetState(ok ? 'ok' : 'fail')
+    const t = setTimeout(() => setResetState('idle'), ok ? 2500 : 6000)
+    return () => clearTimeout(t)
+  }, [lastMessage])
+  // Safety: if no result ever comes back (helper wedged / WS dropped mid-call),
+  // don't leave the button stuck on "再初期化中…".
+  useEffect(() => {
+    if (resetState !== 'pending') return
+    const t = setTimeout(() => setResetState('idle'), 8000)
+    return () => clearTimeout(t)
+  }, [resetState])
 
   useEffect(() => {
     if (!open) return
@@ -109,6 +135,32 @@ export function HelperManageModal({ open, onClose, helperVersion, helperCompat }
               </p>
             </section>
           )}
+
+          {/* デバイスを見失ったときの軽量リカバリ。ターミナルでの stop/start に
+              頼らず、Helper の検出層 (UDP + mDNS) だけをその場で作り直す。 */}
+          <section className="helper-modal-section helper-modal-section--alt">
+            <h3 className="helper-modal-section-title">デバイスを見失ったとき</h3>
+            <p className="helper-modal-section-desc">
+              ファーム書き換えの直後などにデバイス一覧から消えて戻らない場合、
+              Helper の検出 (UDP / mDNS) を再初期化します。Helper の再起動や
+              ターミナル操作は不要で、この Studio の接続も切れません。
+            </p>
+            <button
+              type="button"
+              className="helper-modal-copy-btn"
+              onClick={handleResetDiscovery}
+              disabled={!isConnected || resetState === 'pending'}
+              title={isConnected ? undefined : 'Helper 未接続のため実行できません'}
+            >
+              {resetState === 'pending'
+                ? '再初期化中…'
+                : resetState === 'ok'
+                  ? '✓ 再初期化しました'
+                  : resetState === 'fail'
+                    ? '✗ 失敗 — Helper を再起動してください'
+                    : '🔄 デバイス検出を再初期化'}
+            </button>
+          </section>
 
           <p className="helper-modal-desc">
             <code>hapbeat-helper</code> はバックグラウンドで動作中です。

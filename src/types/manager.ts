@@ -154,6 +154,10 @@ export interface StudioToManagerMessage {
     | 'get_oled_brightness'
     | 'ping'
     | 'rescan'
+    // In-process recovery: ask Helper to rebuild its UDP + mDNS discovery
+    // layer without a full daemon restart (recovers from a wedged socket
+    // that would otherwise lose all devices until `hapbeat-helper stop/start`).
+    | 'reset_discovery'
     // --- node-roles config (DEC-034) ---
     | 'set_broker_host'      // receiver(mqtt) / sensor
     | 'set_espnow_channel'   // receiver(espnow_stream) / transmitter
@@ -195,6 +199,7 @@ export interface ManagerToStudioMessage {
     | 'oled_brightness_result'
     | 'sensor_mapping_result'
     | 'sensor_reading_result'
+    | 'reset_discovery_result'
     | 'error'
     | 'pong'
   payload: Record<string, unknown>
