@@ -62,6 +62,12 @@ export function HelperToastBridge() {
           ? `${headline} — ${firstDetail.replace(/^✗\s*/, '')}`
           : headline
         toast(`${label}: 失敗 — ${body}`, 'error')
+      } else if (!cmd) {
+        // preview_event / stop は config write ではなく fire-and-forget の
+        // ブロードキャスト *コマンド*。helper はログ用に write_result を返すが
+        // `cmd` を持たず、device ACK も無い。これを「設定を反映しました」と
+        // 出すのは誤り (bug 2026-06-24) なので「送信」と表現する。
+        toast('コマンドを送信しました', 'info')
       } else if (!REBOOT_CMDS.has(cmd)) {
         // 実機が受理した時だけ成功トースト (操作ではなく結果ベース)。
         // 即リブート系 (reboot / mode 切替) は ACK 前に再起動して
