@@ -464,15 +464,36 @@ function useAudioPreview() {
 
     setPlayingId(id)
 
-    if (hasDevice) {
-      // Query volume (wiper) — Manager resolves which device(s) based on its own selection
-      send({ type: 'query_volume', payload: {} })
+    // Resolve playback targets exactly like Deploy does (KitManager
+    // `deployTargets`): online playback devices (receivers / no-role),
+    // restricted to the sidebar selection when there is one, else all
+    // online playback devices. Without this the stream carried NO
+    // `targets`, so Helper's `_resolve_targets` broadcast it to every
+    // known device and clips played on devices the user never selected
+    // (bug report 2026-06-24).
+    const { selectedIps } = useDeviceStore.getState()
+    const isPlayback = (d: DeviceInfo) => !d.role || d.role === 'receiver'
+    const onlinePlayback = devices.filter((d) => d.online && isPlayback(d))
+    const targetIps = (selectedIps.length === 0
+      ? onlinePlayback
+      : onlinePlayback.filter((d) => selectedIps.includes(d.ipAddress))
+    ).map((d) => d.ipAddress)
+
+    if (hasDevice && targetIps.length > 0) {
+      // Scope every device-bound message to the resolved targets by
+      // wrapping `send` (same pattern as StreamingTestSection). Helper
+      // prefers `payload.targets` over its broadcast fallback.
+      const sendToTargets = (msg: import('@/types/manager').ManagerMessage) =>
+        send({ type: msg.type, payload: { ...msg.payload, targets: targetIps } })
+
+      // Query wiper from a selected device (targeted, not broadcast).
+      sendToTargets({ type: 'query_volume', payload: {} })
 
       const { streamClip } = await import('@/utils/audioStreamer')
       const controller = new AbortController()
       abortRef.current = controller
       try {
-        await streamClip(blob, send, { signal: controller.signal, intensity })
+        await streamClip(blob, sendToTargets, { signal: controller.signal, intensity })
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') { /* cancelled */ }
         else console.error('Streaming failed:', err)
@@ -480,7 +501,12 @@ function useAudioPreview() {
       setPlayingId(null)
       abortRef.current = null
     } else {
-      // Fallback: browser audio (apply intensity as volume)
+      // No online playback target (not connected, or the selected
+      // device is offline / not a playback device). Fall back to browser
+      // audio rather than broadcasting to every device.
+      if (hasDevice && selectedIps.length > 0) {
+        toast('選択中の再生デバイスがオフラインです。ブラウザ音声で再生します', 'info')
+      }
       const url = URL.createObjectURL(blob)
       const audio = new Audio(url)
       audio.volume = Math.min(1, Math.max(0, intensity))

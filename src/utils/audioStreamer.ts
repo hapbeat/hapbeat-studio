@@ -1,13 +1,19 @@
 /**
- * Audio streamer — sends audio data to Hapbeat device(s) via Manager WebSocket.
+ * Audio streamer — sends audio data to Hapbeat device(s) via the Helper WebSocket.
  *
- * Flow: Studio → WebSocket (JSON+base64) → Manager → UDP (binary) → Device(s)
+ * Flow: Studio → WebSocket (JSON+base64) → Helper → UDP (binary) → Device(s)
  *
- * Studio does NOT specify target. Manager resolves destinations from its own
- * "selected device" state. This means the user's device selection in Manager
- * drives playback routing; Studio just supplies audio + metadata.
+ * Routing: this module is target-agnostic. The CALLER picks the destinations by
+ * wrapping `send` to inject `targets: [ip, ...]` into each stream message (see
+ * KitManager `useAudioPreview` and StreamingTestSection). Helper's
+ * `_resolve_targets` prefers that list; with NO targets it FALLS BACK to
+ * broadcasting to every known device — so a caller that wants to honour the
+ * user's device selection MUST inject targets. (Earlier copy here claimed
+ * "Manager resolves the selected device"; the Manager is deprecated and the
+ * Helper tracks no selection — that stale assumption was the bug where clips
+ * played on devices the user hadn't selected.)
  *
- * Manager uses command codes 0x30/0x31/0x32 for STREAM_BEGIN/DATA/END.
+ * Helper uses command codes 0x30/0x31/0x32 for STREAM_BEGIN/DATA/END.
  * Default: PCM16 format (format=0), 512-sample chunks, paced at real-time.
  */
 
@@ -90,7 +96,8 @@ export async function streamClip(
   const frameSize = channels * 2 // PCM16
   const chunkFrames = Math.max(1, Math.floor(MAX_PAYLOAD_BYTES / frameSize))
 
-  // Send STREAM_BEGIN (no target — Manager routes to its selected devices)
+  // Send STREAM_BEGIN. Destination = whatever the caller-wrapped `send`
+  // injects as `targets` (see module header); bare `send` broadcasts.
   send({
     type: 'stream_begin',
     payload: {
