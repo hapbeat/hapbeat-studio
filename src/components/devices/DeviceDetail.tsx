@@ -361,11 +361,17 @@ export function DeviceDetail() {
       }
     }
 
-    const payload = { event_id: eventId, target: '', gain: intensity }
+    // Send to the CHECKED devices by IP (helper unicasts when `targets` is
+    // present), so the user doesn't have to set an address/target string.
+    // Fall back to the focused device when nothing is checked — never an
+    // empty list, so the helper never drops to its broadcast-all fallback.
+    const selectedIps = useDeviceStore.getState().selectedIps
+    const targets = selectedIps.length > 0 ? selectedIps : [selectedIp]
+    const payload = { event_id: eventId, target: '', gain: intensity, targets }
     send({ type: 'preview_event', payload })
     pushLog(
       'preview',
-      `→ ${selectedIp}: preview_event event_id=${eventId} gain=${intensity.toFixed(2)} (${source})`,
+      `→ ${targets.join(', ')}: preview_event event_id=${eventId} gain=${intensity.toFixed(2)} (${source})`,
     )
   }, [selectedIp, send, pushLog])
 
