@@ -363,10 +363,23 @@ export function DeviceDetail() {
 
     // Send to the CHECKED devices by IP (helper unicasts when `targets` is
     // present), so the user doesn't have to set an address/target string.
-    // Fall back to the focused device when nothing is checked — never an
-    // empty list, so the helper never drops to its broadcast-all fallback.
-    const selectedIps = useDeviceStore.getState().selectedIps
-    const targets = selectedIps.length > 0 ? selectedIps : [selectedIp]
+    // preview_event rides the helper's UDP path, so only LAN IPs are valid
+    // targets — drop any `serial:` pseudo-device in the selection (helper
+    // would otherwise sendto() a bogus host and the UI would show a false
+    // success). Fall back to the focused device when nothing is checked; the
+    // list is non-empty here so the helper never drops to broadcast-all.
+    const isLan = (ip: string) => !ip.startsWith('serial:')
+    const lanChecked = useDeviceStore.getState().selectedIps.filter(isLan)
+    const targets = lanChecked.length > 0
+      ? lanChecked
+      : (isLan(selectedIp) ? [selectedIp] : [])
+    if (targets.length === 0) {
+      // Serial-only (USB) selection: preview_event can't ride the serial
+      // config channel, so don't send a doomed packet that reads as success.
+      setGlobalStatus({ kind: 'warn', msg: 'シリアル接続デバイスではテスト再生できません（LAN 接続が必要）' })
+      pushLog('preview', `× preview_event skipped: serial-only selection (event_id=${eventId})`)
+      return
+    }
     const payload = { event_id: eventId, target: '', gain: intensity, targets }
     send({ type: 'preview_event', payload })
     pushLog(
