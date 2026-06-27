@@ -1404,11 +1404,51 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const outRoot = kitDirHandle ?? workDirHandle
     if (!outRoot) return 0
 
-    const discovered = await scanKitOutputFolder(outRoot)
+    let discovered = await scanKitOutputFolder(outRoot)
     // Diagnostic — surfaces in DevTools so users can tell *why* a kit
     // disappeared (folder missing / manifest filename mismatch / parse
     // failure). Skip when discovered is non-empty AND every kit has a
     // valid manifest, to keep the console quiet on the happy path.
+    if (discovered.length === 0) {
+      // Auto-materialize sample-kit when the selected folder has no kits yet.
+      // This lets users deploy and verify `sample-kit.sine_100hz` immediately
+      // after choosing a fresh folder, before authoring their own content.
+      // Idempotent: skipped when sample-kit/ folder already exists (even if
+      // its manifest is unreadable), so a corrupted folder is not overwritten.
+      let sampleKitAlreadyExists = false
+      try {
+        await outRoot.getDirectoryHandle('sample-kit')
+        sampleKitAlreadyExists = true
+      } catch {
+        // folder does not exist — safe to materialise
+      }
+      if (!sampleKitAlreadyExists) {
+        try {
+          const base = import.meta.env.BASE_URL as string
+          const CLIPS = ['sine_50hz.wav', 'sine_100hz.wav', 'sine_200hz.wav'] as const
+          const [manifestRes, ...clipResults] = await Promise.all([
+            fetch(`${base}sample-kit/sample-kit-manifest.json`),
+            ...CLIPS.map((c) => fetch(`${base}sample-kit/install-clips/${c}`)),
+          ])
+          if (manifestRes.ok) {
+            const files: { path: string; blob: Blob }[] = [
+              { path: 'sample-kit-manifest.json', blob: await manifestRes.blob() },
+            ]
+            for (let i = 0; i < CLIPS.length; i++) {
+              if (clipResults[i].ok) {
+                files.push({ path: `install-clips/${CLIPS[i]}`, blob: await clipResults[i].blob() })
+              }
+            }
+            await writeKitFolder(outRoot, 'sample-kit', files)
+            console.info('[libraryStore] auto-materialized sample-kit into', outRoot.name)
+            // Re-scan so the new kit is picked up by the rest of this function.
+            discovered = await scanKitOutputFolder(outRoot)
+          }
+        } catch (err) {
+          console.warn('[libraryStore] sample-kit auto-materialize failed:', err)
+        }
+      }
+    }
     if (discovered.length === 0) {
       console.warn(
         '[libraryStore] importKitsFromOutputDir: no kit folders found in',

@@ -11,6 +11,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "gen:library": "node scripts/generate-library-index.mjs --meta public/library/metadata.tsv",
+    "gen:sample-kit": "python scripts/gen-sample-kit.py",
     "strip:wav-meta": "node scripts/strip-wav-metadata.mjs"
   },
   "dependencies": {

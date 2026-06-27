@@ -169,6 +169,7 @@ export interface StudioToManagerMessage {
     | 'get_sensor_reading'   // sensor (live tuning view)
     | 'set_alert_mode'       // receiver(mqtt) — alert-loop on/off (item 10)
     | 'set_recv_topics'      // receiver(mqtt) — subscribe topic list (item 8)
+    | 'set_espnow_ui'        // receiver(espnow_stream) — display/power policy
   payload: Record<string, unknown>
 }
 
@@ -296,6 +297,27 @@ export interface GetInfoResult {
   /** Receive topic roots the MQTT receiver subscribes to (item 8). Empty =
    *  the default channel ("default-topic"). */
   recv_topics?: string[]
+  /** ESP-NOW display/power policy (espnow_stream receiver, §4.19 set_espnow_ui). */
+  espnow_ui?: {
+    auto_off_ms?: number
+    wake_on_button?: boolean
+    wake_on_volume?: boolean
+    led_enabled?: boolean
+    low_batt_pct?: number
+  }
+  /** ESP-NOW audio-stream statistics (espnow_stream receiver, §4.19 get_info stream). */
+  stream?: {
+    received?: number
+    lost?: number
+    recovered?: number
+    dropped?: number
+    max_gap?: number
+    handoffs?: number
+    sources?: number
+    locked?: boolean
+    locked_mac?: string
+    delay_ms?: number
+  }
   error?: string
 }
 

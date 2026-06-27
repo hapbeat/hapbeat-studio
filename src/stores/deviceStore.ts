@@ -98,6 +98,27 @@ interface DeviceState {
     ack_hold_ms?: number
     /** MQTT receiver subscribe topic roots (item 8). Empty = default-topic. */
     recv_topics?: string[]
+    /** ESP-NOW display/power policy (espnow_stream receiver, §4.19 set_espnow_ui). */
+    espnow_ui?: {
+      auto_off_ms?: number
+      wake_on_button?: boolean
+      wake_on_volume?: boolean
+      led_enabled?: boolean
+      low_batt_pct?: number
+    }
+    /** ESP-NOW audio-stream statistics (espnow_stream receiver, §4.19 get_info stream). */
+    stream?: {
+      received?: number
+      lost?: number
+      recovered?: number
+      dropped?: number
+      max_gap?: number
+      handoffs?: number
+      sources?: number
+      locked?: boolean
+      locked_mac?: string
+      delay_ms?: number
+    }
   }>
 
   /** Per-IP cache of the most recent get_wifi_status response. */

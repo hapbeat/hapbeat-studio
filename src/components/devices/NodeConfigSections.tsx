@@ -19,6 +19,8 @@ import { MqttFlowPanel } from './MqttFlow'
 
 /** Subset of the get_info cache these panels read. */
 export interface NodeConfigInfo {
+  /** OLED brightness (1=low / 2=mid / 3=high). Firmware ≥ v0.1.x. */
+  oled_brightness?: number
   espnow_channel?: number
   gain?: number
   input_level?: number
@@ -44,6 +46,27 @@ export interface NodeConfigInfo {
   ack_hold_ms?: number
   /** MQTT receiver subscribe topic roots (item 8). */
   recv_topics?: string[]
+  /** ESP-NOW display/power policy (espnow_stream receiver, §4.19). */
+  espnow_ui?: {
+    auto_off_ms?: number
+    wake_on_button?: boolean
+    wake_on_volume?: boolean
+    led_enabled?: boolean
+    low_batt_pct?: number
+  }
+  /** ESP-NOW audio-stream statistics (espnow_stream receiver, §4.19 get_info stream). */
+  stream?: {
+    received?: number
+    lost?: number
+    recovered?: number
+    dropped?: number
+    max_gap?: number
+    handoffs?: number
+    sources?: number
+    locked?: boolean
+    locked_mac?: string
+    delay_ms?: number
+  }
 }
 
 const ESPNOW_CHANNELS = [1, 6, 11]
@@ -1687,6 +1710,262 @@ export function SensorMappingSection({
           デバイスに保存
         </button>
       </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------
+// ESP-NOW: display / power policy (receiver only, espnow_stream transport)
+// Serial-only — espnow_stream receivers have no Wi-Fi/TCP. Reaches the
+// device through useDeviceTransport's serial: branch (Web Serial).
+// ---------------------------------------------------------------------
+
+export function EspNowDisplayPowerSection({
+  device,
+  cachedInfo,
+  oledLevel,
+  sendTo,
+}: {
+  device: DeviceInfo
+  cachedInfo?: NodeConfigInfo
+  /** Current OLED brightness level (1/2/3) from DeviceDetail info cache. */
+  oledLevel: number | undefined
+  sendTo: (msg: ManagerMessage) => void
+}) {
+  const ui = cachedInfo?.espnow_ui
+  const [autoOffMs, setAutoOffMs] = useState<number>(ui?.auto_off_ms ?? 4000)
+  const [wakeOnButton, setWakeOnButton] = useState<boolean>(ui?.wake_on_button ?? true)
+  const [wakeOnVolume, setWakeOnVolume] = useState<boolean>(ui?.wake_on_volume ?? true)
+  const [ledEnabled, setLedEnabled] = useState<boolean>(ui?.led_enabled ?? false)
+  const [lowBattPct, setLowBattPct] = useState<number>(ui?.low_batt_pct ?? 15)
+
+  // Sync from device whenever cachedInfo.espnow_ui changes (get_info result).
+  useEffect(() => {
+    if (!ui) return
+    if (ui.auto_off_ms != null) setAutoOffMs(ui.auto_off_ms)
+    if (ui.wake_on_button != null) setWakeOnButton(ui.wake_on_button)
+    if (ui.wake_on_volume != null) setWakeOnVolume(ui.wake_on_volume)
+    if (ui.led_enabled != null) setLedEnabled(ui.led_enabled)
+    if (ui.low_batt_pct != null) setLowBattPct(ui.low_batt_pct)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    ui?.auto_off_ms, ui?.wake_on_button, ui?.wake_on_volume,
+    ui?.led_enabled, ui?.low_batt_pct,
+  ])
+
+  const { setAnchor } = useToast()
+
+  const applyAll = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchor(e.currentTarget)
+    sendTo({
+      type: 'set_espnow_ui',
+      payload: { auto_off_ms: autoOffMs, wake_on_button: wakeOnButton,
+                 wake_on_volume: wakeOnVolume, led_enabled: ledEnabled,
+                 low_batt_pct: lowBattPct },
+    })
+  }
+
+  const offline = !device.online
+
+  const BRIGHTNESS_LEVELS = [
+    { value: 1 as const, label: 'Low',  hint: '暗所・夜間 (~6%)' },
+    { value: 2 as const, label: 'Mid',  hint: '通常室内 (50%)' },
+    { value: 3 as const, label: 'High', hint: '明所 (100%)' },
+  ]
+
+  return (
+    <div className="form-section">
+      <div className="form-section-title">
+        表示・電力設定
+        <span className="form-section-sub-inline"> — ESP-NOW 受信機</span>
+      </div>
+
+      {/* OLED brightness */}
+      <div className="form-row">
+        <label>OLED 輝度</label>
+        <div className="device-toggle" role="group" aria-label="OLED brightness">
+          {BRIGHTNESS_LEVELS.map((l) => (
+            <button
+              key={l.value}
+              type="button"
+              className={`btn btn-sm device-toggle-btn ${oledLevel === l.value ? 'active' : ''}`}
+              onClick={(e) => { setAnchor(e.currentTarget); sendTo({ type: 'set_oled_brightness', payload: { level: l.value } }) }}
+              disabled={offline}
+              title={l.hint}
+            >
+              {l.label}
+            </button>
+          ))}
+        </div>
+        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+          {oledLevel == null ? '読込中…' : BRIGHTNESS_LEVELS.find((l) => l.value === oledLevel)?.hint ?? ''}
+        </span>
+      </div>
+
+      {/* Auto-off timeout */}
+      <div className="form-row">
+        <label>自動消灯</label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={500}
+            max={60000}
+            step={500}
+            value={autoOffMs}
+            onChange={(e) => setAutoOffMs(Number(e.target.value))}
+            disabled={offline}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 56, textAlign: 'right' }}>
+            {(autoOffMs / 1000).toFixed(1)} s
+          </span>
+        </div>
+        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+          操作後に OLED を消灯するまでの時間
+        </span>
+      </div>
+
+      {/* Wake sources */}
+      <div className="form-row">
+        <label>点灯源</label>
+        <div className="form-row-multi" style={{ gap: 12, alignItems: 'center' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={wakeOnButton}
+              onChange={(e) => setWakeOnButton(e.target.checked)}
+              disabled={offline}
+            />
+            ボタン
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={wakeOnVolume}
+              onChange={(e) => setWakeOnVolume(e.target.checked)}
+              disabled={offline}
+            />
+            ボリューム変更
+          </label>
+        </div>
+        <span />
+      </div>
+
+      {/* LED */}
+      <div className="form-row">
+        <label>ステータス LED</label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={ledEnabled}
+            onChange={(e) => setLedEnabled(e.target.checked)}
+            disabled={offline}
+          />
+          使用する
+        </label>
+        <span />
+      </div>
+
+      {/* Low battery threshold */}
+      <div className="form-row">
+        <label>低電池表示 (%)</label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            value={lowBattPct}
+            onChange={(e) => setLowBattPct(Number(e.target.value))}
+            disabled={offline}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 40, textAlign: 'right' }}>
+            {lowBattPct}%
+          </span>
+        </div>
+        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+          バッテリー残量がこの値以下で OLED 点灯
+        </span>
+      </div>
+
+      <div className="form-action-row" style={{ marginTop: 8 }}>
+        <button
+          className="form-button"
+          onClick={applyAll}
+          disabled={offline}
+        >
+          適用
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------
+// ESP-NOW: stream statistics readout (debug / field verification)
+// Read-only. Fetches from get_info.stream object. Manually refreshed
+// to avoid overloading the serial link with frequent polling.
+// ---------------------------------------------------------------------
+
+export function EspNowStreamReadout({
+  cachedInfo,
+  onRefresh,
+  disabled,
+}: {
+  cachedInfo?: NodeConfigInfo
+  onRefresh: () => void
+  disabled?: boolean
+}) {
+  const s = cachedInfo?.stream
+  const total = (s?.received ?? 0) + (s?.lost ?? 0)
+  const lossRate = total > 0 ? ((s?.lost ?? 0) / total) * 100 : null
+
+  const Row = ({ label, value }: { label: string; value: React.ReactNode }) => (
+    <div className="form-row" style={{ paddingBlock: 2 }}>
+      <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</label>
+      <span className="mono" style={{ fontSize: 12 }}>{value ?? '—'}</span>
+      <span />
+    </div>
+  )
+
+  return (
+    <div className="form-section">
+      <div className="form-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span>ストリーム統計（デバッグ用）</span>
+        <button
+          className="form-button-secondary"
+          style={{ fontSize: 11, padding: '2px 8px' }}
+          onClick={onRefresh}
+          disabled={disabled}
+        >
+          更新
+        </button>
+      </div>
+      {s == null ? (
+        <div className="form-status muted">
+          「更新」を押すと get_info からストリーム統計を取得します。
+        </div>
+      ) : (
+        <>
+          <Row
+            label="損失率（電波強度目安）"
+            value={lossRate != null ? `${lossRate.toFixed(1)} %` : '—'}
+          />
+          <Row label="受信" value={s.received} />
+          <Row label="ロスト" value={s.lost} />
+          <Row label="回復（piggyback）" value={s.recovered} />
+          <Row label="ドロップ" value={s.dropped} />
+          <Row label="最大連続欠落" value={s.max_gap} />
+          <Row label="送信元切替" value={s.handoffs} />
+          <Row label="生存送信元数" value={s.sources} />
+          <Row label="ロック中" value={s.locked != null ? (s.locked ? 'はい' : 'いいえ') : undefined} />
+          {s.locked && s.locked_mac && (
+            <Row label="ロック先 MAC" value={<span style={{ fontSize: 10 }}>{s.locked_mac}</span>} />
+          )}
+          <Row label="推定遅延" value={s.delay_ms != null ? `${s.delay_ms} ms` : undefined} />
+        </>
+      )}
     </div>
   )
 }

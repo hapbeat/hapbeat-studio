@@ -16,6 +16,8 @@ import { FirmwareSubTab } from './FirmwareSubTab'
 import { OnboardingWizard } from './OnboardingWizard'
 import {
   EspNowConfigSection,
+  EspNowDisplayPowerSection,
+  EspNowStreamReadout,
   MqttConfigSection,
   BrokerConfigSection,
   SensorMappingSection,
@@ -226,6 +228,9 @@ export function DeviceDetail() {
         alert_limit: p.alert_limit as boolean | undefined,
         ack_hold_ms: p.ack_hold_ms as number | undefined,
         recv_topics: p.recv_topics as string[] | undefined,
+        // ESP-NOW display/power + stream stats (espnow_stream receiver)
+        espnow_ui: p.espnow_ui as { auto_off_ms?: number; wake_on_button?: boolean; wake_on_volume?: boolean; led_enabled?: boolean; low_batt_pct?: number } | undefined,
+        stream: p.stream as { received?: number; lost?: number; recovered?: number; dropped?: number; max_gap?: number; handoffs?: number; sources?: number; locked?: boolean; locked_mac?: string; delay_ms?: number } | undefined,
         // SoftAP extension fields (firmware ≥ v0.1.0)
         mode: p.mode as 'sta' | 'ap' | undefined,
         ap_ssid: p.ap_ssid as string | undefined,
@@ -456,6 +461,8 @@ export function DeviceDetail() {
         alert_limit: masterInfo.alert_limit,
         ack_hold_ms: masterInfo.ack_hold_ms,
         recv_topics: masterInfo.recv_topics,
+        espnow_ui: masterInfo.espnow_ui,
+        stream: masterInfo.stream,
       } : undefined)
     : infoCache[selectedIp]
   const wifiStatus = transport.isSerial
@@ -607,12 +614,29 @@ export function DeviceDetail() {
         )}
 
         {activeSubTab === 'espnow' && (
-          <EspNowConfigSection
-            device={device}
-            cachedInfo={cachedInfo}
-            sendTo={sendTo}
-            role={nodeRole === 'transmitter' ? 'transmitter' : 'receiver'}
-          />
+          <>
+            <EspNowConfigSection
+              device={device}
+              cachedInfo={cachedInfo}
+              sendTo={sendTo}
+              role={nodeRole === 'transmitter' ? 'transmitter' : 'receiver'}
+            />
+            {nodeTransport === 'espnow_stream' && nodeRole !== 'transmitter' && (
+              <>
+                <EspNowDisplayPowerSection
+                  device={device}
+                  cachedInfo={cachedInfo}
+                  oledLevel={cachedInfo?.oled_brightness}
+                  sendTo={sendTo}
+                />
+                <EspNowStreamReadout
+                  cachedInfo={cachedInfo}
+                  onRefresh={() => sendTo({ type: 'get_info', payload: {} })}
+                  disabled={!device.online}
+                />
+              </>
+            )}
+          </>
         )}
 
         {activeSubTab === 'mapping' && (

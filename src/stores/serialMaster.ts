@@ -143,6 +143,27 @@ export interface SerialDeviceInfo {
   alert_limit?: boolean
   ack_hold_ms?: number
   recv_topics?: string[]
+  /** ESP-NOW display/power policy (espnow_stream receiver, §4.19). */
+  espnow_ui?: {
+    auto_off_ms?: number
+    wake_on_button?: boolean
+    wake_on_volume?: boolean
+    led_enabled?: boolean
+    low_batt_pct?: number
+  }
+  /** ESP-NOW audio-stream statistics (espnow_stream receiver, §4.19 get_info stream). */
+  stream?: {
+    received?: number
+    lost?: number
+    recovered?: number
+    dropped?: number
+    max_gap?: number
+    handoffs?: number
+    sources?: number
+    locked?: boolean
+    locked_mac?: string
+    delay_ms?: number
+  }
 }
 
 /** Parse a firmware get_info JSON into a SerialDeviceInfo (shared by
@@ -182,6 +203,8 @@ function parseSerialInfo(r: Record<string, unknown>): SerialDeviceInfo {
     alert_limit: r.alert_limit as boolean | undefined,
     ack_hold_ms: r.ack_hold_ms as number | undefined,
     recv_topics: r.recv_topics as string[] | undefined,
+    espnow_ui: r.espnow_ui as SerialDeviceInfo['espnow_ui'],
+    stream: r.stream as SerialDeviceInfo['stream'],
   }
 }
 
