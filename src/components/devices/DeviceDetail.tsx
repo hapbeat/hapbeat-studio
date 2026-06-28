@@ -155,9 +155,14 @@ export function DeviceDetail() {
       : wifiStatusCache[selectedIp]
     if (wifiStatus?.connected === false && autoJumpedIpRef.current !== selectedIp) {
       autoJumpedIpRef.current = selectedIp
-      setSubTab('wifi')
+      // espnow_stream receivers have no Wi-Fi — jump to the espnow tab instead
+      // of the Wi-Fi setup tab (which would be irrelevant for them).
+      const transport = selectedIp.startsWith('serial:')
+        ? useSerialMaster.getState().info?.transport
+        : devices.find((d) => d.ipAddress === selectedIp)?.transport
+      setSubTab(transport === 'espnow_stream' ? 'espnow' : 'wifi')
     }
-  }, [selectedIp, wifiStatusCache])
+  }, [selectedIp, wifiStatusCache, devices])
 
   const [globalStatus, setGlobalStatus] = useState<{ kind: 'ok' | 'err' | 'warn' | 'muted'; msg: string } | null>(null)
 

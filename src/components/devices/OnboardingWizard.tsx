@@ -42,9 +42,17 @@ export function OnboardingWizard() {
   // where mode briefly flipped to 'config' before get_info returned.
   useEffect(() => {
     if (probeStatus === 'success' && mode === 'config' && conn && step === 'probe') {
-      // Step 3 へ遷移するだけ。selectDevice() で sidebar を切り替えると
-      // DeviceDetail が前面に出て OnboardingWizard が消えてしまうため、
-      // Wi-Fi 設定が完了するまでサイドバー切替は行わない (ユーザ要望
+      // espnow_stream receivers have no Wi-Fi — skip the Wi-Fi setup step
+      // entirely and go directly to device view (espnow tab).
+      const info = useSerialMaster.getState().info
+      if (info?.transport === 'espnow_stream') {
+        const id = `${SERIAL_DEVICE_PREFIX}${info.mac ?? 'active'}`
+        useDeviceStore.getState().selectDevice(id)
+        return
+      }
+      // Other devices: Step 3 へ遷移するだけ。selectDevice() で sidebar を
+      // 切り替えると DeviceDetail が前面に出て OnboardingWizard が消えてしまう
+      // ため、Wi-Fi 設定が完了するまでサイドバー切替は行わない (ユーザ要望
       // 2026-05-09: 「一般の設定に飛んでしまう」)。完了は Step 3 内の
       // 「完了して設定タブへ」ボタンで明示的に行う。
       setStep('configure')

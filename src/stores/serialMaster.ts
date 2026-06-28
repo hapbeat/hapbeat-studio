@@ -849,7 +849,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
     },
 
     probePort: async (id) => {
-      const { mode, activePortId, info } = get()
+      const { mode, activePortId, info, probeStatus } = get()
       // Active config port: identity already known — just mirror it.
       if (id === activePortId && mode === 'config' && info) {
         patchEntry(id, { probe: 'success', info })
@@ -863,8 +863,16 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
         log(`probePort(${id}) refused: this port is flashing`)
         return
       }
-      if (id === activePortId && get().mode === 'config') {
+      if (id === activePortId && mode === 'config') {
         log(`probePort(${id}) refused: this port holds the active config conn`)
+        return
+      }
+      // Also refuse when the config handshake for this port is in flight
+      // (mode is still 'idle' but setHeldPort was already called by
+      // openConfigFor). Trying to close+reopen the same Web Serial port
+      // concurrently would cause a port-contention failure → "未書込?" badge.
+      if (id === activePortId && probeStatus === 'connecting') {
+        log(`probePort(${id}) refused: config handshake in flight`)
         return
       }
       const port = portById.get(id)
