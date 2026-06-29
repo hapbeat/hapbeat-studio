@@ -97,6 +97,11 @@ export interface FirmwareVersionInfo {
   fwVersion: string
   /** GitHub Release tag this version came from (e.g. "v0.1.3"). */
   tag?: string
+  /** GitHub Release publish time (ms since epoch). 0/undefined when the
+   *  release date is unknown (dev builds / hand-rolled manifests). This is
+   *  the release-tag date — distinct from an artifact's `mtime`, which is
+   *  just when CI wrote the .bin (≈ deploy time, not the release date). */
+  publishedAt?: number
   appOta?: FirmwareArtifact
   fullSerial?: FirmwareArtifact
 }
@@ -117,6 +122,9 @@ export interface FirmwareLibraryEntry {
   fullSerial?: FirmwareArtifact
   /** FIRMWARE_VERSION baked into the binary at build time. */
   fwVersion?: string
+  /** Release-tag publish time of the latest version (ms since epoch).
+   *  Mirrors versions[0].publishedAt. See FirmwareVersionInfo.publishedAt. */
+  publishedAt?: number
   // --- manifest v2 (node-roles, DEC-034) ---
   /** Unique id within the manifest (`<repo-short>/<env>`). */
   id?: string
@@ -269,6 +277,7 @@ interface ManifestArtifact {
 interface ManifestVersionV2 {
   fwVersion: string
   tag?: string
+  publishedAt?: number
   appOta?: ManifestArtifact
   fullSerial?: ManifestArtifact
 }
@@ -341,11 +350,14 @@ async function listFirmwareBuildsFromManifest(): Promise<FirmwareLibraryEntry[]>
       label: v.label,
       description: v.description,
       fwVersion: v.fwVersion,
+      // Latest version's release date (versions are newest-first).
+      publishedAt: v.versions?.[0]?.publishedAt,
       appOta: toArtifact(v.appOta),
       fullSerial: toArtifact(v.fullSerial),
       versions: v.versions?.map((ver) => ({
         fwVersion: ver.fwVersion,
         tag: ver.tag,
+        publishedAt: ver.publishedAt,
         appOta: toArtifact(ver.appOta),
         fullSerial: toArtifact(ver.fullSerial),
       })),
@@ -519,6 +531,15 @@ export function formatMtime(ms: number): string {
     `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
     + ` ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
   )
+}
+
+/** Date only (YYYY-MM-DD). Used for release-tag dates where the time-of-day
+ *  is noise — the user cares which day a firmware version was released. */
+export function formatDate(ms: number): string {
+  if (!ms) return '不明'
+  const d = new Date(ms)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
 export function formatBytes(n: number): string {

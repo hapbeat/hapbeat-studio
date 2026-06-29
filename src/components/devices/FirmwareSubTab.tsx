@@ -22,9 +22,11 @@ import {
   fetchFirmwareAppOta,
   fetchFirmwareSerialRegions,
   formatBytes,
+  formatDate,
   formatMtime,
   inferVariantFromEnv,
   listFirmwareBuilds,
+  normalizeVersion,
   type FirmwareLibraryEntry,
   type FirmwareRegion,
 } from '@/utils/firmwareLibrary'
@@ -244,6 +246,7 @@ export function FirmwareSubTab({
     return {
       ...baseEntry,
       fwVersion: v.fwVersion,
+      publishedAt: v.publishedAt,
       appOta: v.appOta,
       fullSerial: v.fullSerial,
     }
@@ -939,7 +942,7 @@ export function FirmwareSubTab({
                         setSource('library')
                         setLibSelected(e.env)
                       }}
-                      title={`${entryLabel(e)} — ${e.env}${e.fwVersion ? ` · v${e.fwVersion}` : ''}`}
+                      title={`${entryLabel(e)} — ${e.env}${e.fwVersion ? ` · v${normalizeVersion(e.fwVersion)}` : ''}`}
                     >
                       <span className="firmware-variant-cell-label">{entryLabel(e)}</span>
                     </button>
@@ -968,7 +971,7 @@ export function FirmwareSubTab({
                       }}
                       title="ファームウェアバージョン (FIRMWARE_VERSION)。OTA 完了後の起動バージョン照合に使用。"
                     >
-                      v{selectedEntry.fwVersion}
+                      v{normalizeVersion(selectedEntry.fwVersion)}
                     </span>
                   )}
                   <span className="form-section-sub-inline" style={{ fontSize: 12 }}>
@@ -1003,9 +1006,9 @@ export function FirmwareSubTab({
                           type="button"
                           className={`firmware-version-chip${isActive ? ' selected' : ''}${i > 0 ? ' archive' : ''}`}
                           onClick={() => setSelectedVersionFw(i === 0 ? null : v.fwVersion)}
-                          title={v.tag ?? `v${v.fwVersion}`}
+                          title={`${v.tag ?? `v${normalizeVersion(v.fwVersion)}`}${v.publishedAt ? ` · ${formatDate(v.publishedAt)} リリース` : ''}`}
                         >
-                          v{v.fwVersion}
+                          v{normalizeVersion(v.fwVersion)}
                           {i === 0 && <span className="firmware-version-chip-latest"> 最新</span>}
                         </button>
                       )
@@ -1014,7 +1017,7 @@ export function FirmwareSubTab({
                 )}
                 {selectedVersionFw && (
                   <div className="form-status warn" style={{ marginTop: 4 }}>
-                    アーカイブ版 v{selectedVersionFw} を選択中 — 最新版より古いファームを書き込みます。
+                    アーカイブ版 v{normalizeVersion(selectedVersionFw)} を選択中 — 最新版より古いファームを書き込みます。
                   </div>
                 )}
 
@@ -1023,6 +1026,15 @@ export function FirmwareSubTab({
                     {selectedEntry.description}
                   </div>
                 )}
+                {/* Release date = the firmware version's GitHub Release tag
+                  * date (manifest publishedAt), NOT the .bin file's mtime
+                  * (≈ CI deploy time). Shown once per version; dev builds have
+                  * no release date so the per-artifact build time is kept. */}
+                {selectedEntry.publishedAt ? (
+                  <div className="form-section-sub-inline" style={{ marginTop: 4, fontSize: 12 }}>
+                    リリース日: {formatDate(selectedEntry.publishedAt)}
+                  </div>
+                ) : null}
                 <div
                   className="firmware-lib-detail-artifacts"
                   style={{
@@ -1038,13 +1050,13 @@ export function FirmwareSubTab({
                   <div title={selectedEntry.appOta?.path ?? ''}>
                     <span style={{ marginRight: 6 }}>OTA  app:</span>
                     {selectedEntry.appOta
-                      ? `${formatBytes(selectedEntry.appOta.size)} · ${formatMtime(selectedEntry.appOta.mtime)}`
+                      ? `${formatBytes(selectedEntry.appOta.size)}${selectedEntry.publishedAt ? '' : ` · ${formatMtime(selectedEntry.appOta.mtime)}`}`
                       : '— (Wi-Fi 非接続ノード / 未生成)'}
                   </div>
                   <div title={selectedEntry.fullSerial?.path ?? ''}>
                     <span style={{ marginRight: 6 }}>SERIAL full:</span>
                     {selectedEntry.fullSerial
-                      ? `${formatBytes(selectedEntry.fullSerial.size)} · ${formatMtime(selectedEntry.fullSerial.mtime)}`
+                      ? `${formatBytes(selectedEntry.fullSerial.size)}${selectedEntry.publishedAt ? '' : ` · ${formatMtime(selectedEntry.fullSerial.mtime)}`}`
                       : '— firmware_full_serial.bin が未生成'}
                   </div>
                 </div>

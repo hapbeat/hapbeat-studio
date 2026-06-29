@@ -99,13 +99,20 @@ jobs:
           for repo_name in hapbeat-device-firmware hapbeat-transmitter-firmware; do
             repo="Hapbeat/$repo_name"
             mkdir -p "fw-staging/$repo_name"
-            tags=$(gh release list --repo "$repo" --limit 6 --json tagName --jq '.[].tagName' || true)
+            # Capture tagName + publishedAt so the aggregator records the
+            # release date. (The .bin mtime is just when CI downloaded it,
+            # ≈ deploy time — not when the version was released.)
+            rel_json=$(gh release list --repo "$repo" --limit 6 --json tagName,publishedAt || echo '[]')
+            tags=$(echo "$rel_json" | jq -r '.[].tagName')
             if [ -z "$tags" ]; then
               echo "::warning::no releases for $repo — skipping"
               continue
             fi
             for t in $tags; do
               mkdir -p "fw-staging/$repo_name/$t"
+              published=$(echo "$rel_json" | jq -r --arg t "$t" '.[] | select(.tagName==$t) | .publishedAt // ""')
+              printf '{"tag":"%s","publishedAt":"%s"}\n' "$t" "$published" \
+                > "fw-staging/$repo_name/$t/release-meta.json"
               gh release download "$t" --repo "$repo" --dir "fw-staging/$repo_name/$t" \
                 --pattern "*.bin" --pattern "manifest.json" --pattern "manifest.fragment.json" --clobber
             done
@@ -172,13 +179,20 @@ jobs:
           for repo_name in hapbeat-device-firmware hapbeat-transmitter-firmware; do
             repo="Hapbeat/$repo_name"
             mkdir -p "fw-staging/$repo_name"
-            tags=$(gh release list --repo "$repo" --limit 6 --json tagName --jq '.[].tagName' || true)
+            # Capture tagName + publishedAt so the aggregator records the
+            # release date. (The .bin mtime is just when CI downloaded it,
+            # ≈ deploy time — not when the version was released.)
+            rel_json=$(gh release list --repo "$repo" --limit 6 --json tagName,publishedAt || echo '[]')
+            tags=$(echo "$rel_json" | jq -r '.[].tagName')
             if [ -z "$tags" ]; then
               echo "::warning::no releases for $repo — skipping"
               continue
             fi
             for t in $tags; do
               mkdir -p "fw-staging/$repo_name/$t"
+              published=$(echo "$rel_json" | jq -r --arg t "$t" '.[] | select(.tagName==$t) | .publishedAt // ""')
+              printf '{"tag":"%s","publishedAt":"%s"}\n' "$t" "$published" \
+                > "fw-staging/$repo_name/$t/release-meta.json"
               gh release download "$t" --repo "$repo" --dir "fw-staging/$repo_name/$t" \
                 --pattern "*.bin" --pattern "manifest.json" --pattern "manifest.fragment.json" --clobber
             done

@@ -6,6 +6,12 @@ Hapbeat Studio の変更履歴。形式は [Keep a Changelog](https://keepachang
 - **最新版** `https://studio.hapbeat.com/` は master の package.json バージョンを表示。
 - **凍結版** `https://studio.hapbeat.com/vX.Y/` は `vX.Y.Z` タグ push 時に作成（マイナー単位）。
 
+## [0.3.1] - 2026-06-29
+
+### Fixed（修正）
+- ファームウェアのバージョン一覧で旧版が `vv0.1.1` と「v」が二重表示される不具合（manifest の `fwVersion` を先頭 `v` なしの正準形に統一 + 表示側でも正規化）
+- バージョンの日付表示を、ファイルの更新日時（≒デプロイ時刻）から**リリースタグの公開日**に変更（CI が GitHub Release の `publishedAt` を manifest に取り込み）
+
 ## [0.3.0] - 2026-06-26
 
 ### Added（追加）

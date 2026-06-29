@@ -110,6 +110,30 @@ function versionSlug(v) {
 }
 
 /**
+ * Canonical fwVersion = strip a leading "v" only (keep any "dN" dev suffix).
+ * Older firmware baked "v0.1.0" into FIRMWARE_VERSION before the prefix was
+ * dropped; storing it verbatim makes Studio render "vv0.1.0" (it prepends a
+ * "v"). The manifest is the boundary where we canonicalize: no leading "v".
+ */
+function canonicalFwVersion(v) {
+  return String(v ?? 'unknown').replace(/^v/, '')
+}
+
+/** Read release-meta.json (written by the deploy workflow per tag) and return
+ *  the release publish time as epoch ms, or undefined. */
+async function readPublishedAt(srcDir) {
+  const p = join(srcDir, 'release-meta.json')
+  if (!(await exists(p))) return undefined
+  try {
+    const meta = JSON.parse(await fs.readFile(p, 'utf-8'))
+    const ms = Date.parse(meta.publishedAt ?? '')
+    return Number.isFinite(ms) ? ms : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Read one release dir (a manifest + bins) and return its variant rows:
  * [{ id, repo, env, role, transport, transports?, board?, label, description?,
  *    fwVersion, tag?, appOtaSrc?, fullSerialSrc? }]
@@ -124,6 +148,8 @@ async function readReleaseDir(repoName, repoShort, srcDir, tag) {
     return []
   }
 
+  const publishedAt = await readPublishedAt(srcDir)
+
   const rows = []
   if (Array.isArray(manifest.variants)) {
     for (const v of manifest.variants) {
@@ -132,8 +158,9 @@ async function readReleaseDir(repoName, repoShort, srcDir, tag) {
         repo: repoName, env: v.env,
         role: v.role, transport: v.transport, transports: v.transports,
         board: v.board, label: v.label ?? v.env, description: v.description,
-        fwVersion: v.fwVersion ?? manifest.tag?.replace(/^v/, '') ?? 'unknown',
+        fwVersion: canonicalFwVersion(v.fwVersion ?? manifest.tag ?? 'unknown'),
         tag: tag ?? manifest.tag,
+        publishedAt,
         appOtaSrc: v.appOta?.filename ?? null,
         fullSerialSrc: v.fullSerial?.filename ?? null,
         srcDir,
@@ -147,8 +174,9 @@ async function readReleaseDir(repoName, repoShort, srcDir, tag) {
         repo: repoName, env: e.env,
         role: inf.role, transport: inf.transport, board: inf.board,
         label: e.env, description: undefined,
-        fwVersion: e.fwVersion ?? manifest.tag?.replace(/^v/, '') ?? 'unknown',
+        fwVersion: canonicalFwVersion(e.fwVersion ?? manifest.tag ?? 'unknown'),
         tag: tag ?? manifest.tag,
+        publishedAt,
         appOtaSrc: await resolveV1Bin(srcDir, e.env, 'firmware_app_ota'),
         fullSerialSrc: await resolveV1Bin(srcDir, e.env, 'firmware_full_serial'),
         srcDir,
@@ -229,6 +257,7 @@ async function main() {
       versions.push({
         fwVersion: row.fwVersion,
         ...(row.tag ? { tag: row.tag } : {}),
+        ...(row.publishedAt ? { publishedAt: row.publishedAt } : {}),
         ...(appOta ? { appOta } : {}),
         ...(fullSerial ? { fullSerial } : {}),
       })
