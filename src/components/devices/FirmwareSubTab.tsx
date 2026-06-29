@@ -1015,9 +1015,18 @@ export function FirmwareSubTab({
                     })}
                   </div>
                 )}
-                {selectedVersionFw && (
-                  <div className="form-status warn" style={{ marginTop: 4 }}>
-                    アーカイブ版 v{normalizeVersion(selectedVersionFw)} を選択中 — 最新版より古いファームを書き込みます。
+                {/* Always render one line while the picker is shown so that
+                  * switching latest ⇄ archive doesn't shift the rows below by
+                  * a line. Latest = muted note, archive = warning (same box
+                  * height via .form-status min-height). */}
+                {baseEntry?.versions && baseEntry.versions.length > 1 && (
+                  <div
+                    className={`form-status ${selectedVersionFw ? 'warn' : 'muted'}`}
+                    style={{ marginTop: 4 }}
+                  >
+                    {selectedVersionFw
+                      ? `アーカイブ版 v${normalizeVersion(selectedVersionFw)} を選択中 — 最新版より古いファームを書き込みます。`
+                      : '最新版を選択中。'}
                   </div>
                 )}
 
