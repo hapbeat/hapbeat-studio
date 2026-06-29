@@ -119,17 +119,36 @@ function canonicalFwVersion(v) {
   return String(v ?? 'unknown').replace(/^v/, '')
 }
 
-/** Read release-meta.json (written by the deploy workflow per tag) and return
- *  the release publish time as epoch ms, or undefined. */
-async function readPublishedAt(srcDir) {
+/**
+ * Bare semver from a tag. Handles namespaced per-env tags
+ * (dev/necklace_v3/v0.1.4 → 0.1.4) and legacy global tags (v0.1.4 → 0.1.4).
+ * Only used as a fallback when a fragment variant lacks an explicit fwVersion.
+ */
+function bareVersionFromTag(t) {
+  const s = String(t ?? '')
+  if (!s || s === 'unknown') return 'unknown'
+  return s.includes('/v') ? s.slice(s.lastIndexOf('/v') + 2) : s.replace(/^v/, '')
+}
+
+/**
+ * Read release-meta.json (written by the deploy workflow per tag). Returns
+ * { tag, publishedAt } — `tag` is the REAL (possibly namespaced, slash-bearing)
+ * release tag, which the staging DIRECTORY name can no longer carry verbatim
+ * (slashes are sanitized to underscores for the filesystem). `publishedAt` is
+ * epoch ms or undefined.
+ */
+async function readReleaseMeta(srcDir) {
   const p = join(srcDir, 'release-meta.json')
-  if (!(await exists(p))) return undefined
+  if (!(await exists(p))) return { tag: undefined, publishedAt: undefined }
   try {
     const meta = JSON.parse(await fs.readFile(p, 'utf-8'))
     const ms = Date.parse(meta.publishedAt ?? '')
-    return Number.isFinite(ms) ? ms : undefined
+    return {
+      tag: meta.tag || undefined,
+      publishedAt: Number.isFinite(ms) ? ms : undefined,
+    }
   } catch {
-    return undefined
+    return { tag: undefined, publishedAt: undefined }
   }
 }
 
@@ -148,7 +167,13 @@ async function readReleaseDir(repoName, repoShort, srcDir, tag) {
     return []
   }
 
-  const publishedAt = await readPublishedAt(srcDir)
+  const { tag: metaTag, publishedAt } = await readReleaseMeta(srcDir)
+  // Real tag priority: release-meta.json (survives dir-name sanitization) →
+  // the dir-name `tag` arg → the fragment's own `tag`.
+  const realTag = metaTag ?? tag ?? manifest.tag
+  // fwVersion fallback when a fragment variant has no explicit fwVersion:
+  // derive the bare semver from the (possibly namespaced) tag.
+  const tagFw = bareVersionFromTag(realTag)
 
   const rows = []
   if (Array.isArray(manifest.variants)) {
@@ -158,11 +183,15 @@ async function readReleaseDir(repoName, repoShort, srcDir, tag) {
         repo: repoName, env: v.env,
         role: v.role, transport: v.transport, transports: v.transports,
         board: v.board, label: v.label ?? v.env, description: v.description,
-        fwVersion: canonicalFwVersion(v.fwVersion ?? manifest.tag ?? 'unknown'),
-        tag: tag ?? manifest.tag,
+        fwVersion: canonicalFwVersion(v.fwVersion ?? tagFw),
+        tag: realTag,
         publishedAt,
         appOtaSrc: v.appOta?.filename ?? null,
         fullSerialSrc: v.fullSerial?.filename ?? null,
+        // DEC-035 advisory drift metadata, propagated onto the copied artifacts.
+        appOtaHash: v.appOta?.contentHash ?? null,
+        fullSerialHash: v.fullSerial?.contentHash ?? null,
+        buildCommit: v.buildCommit ?? null,
         srcDir,
       })
     }
@@ -174,8 +203,8 @@ async function readReleaseDir(repoName, repoShort, srcDir, tag) {
         repo: repoName, env: e.env,
         role: inf.role, transport: inf.transport, board: inf.board,
         label: e.env, description: undefined,
-        fwVersion: canonicalFwVersion(e.fwVersion ?? manifest.tag ?? 'unknown'),
-        tag: tag ?? manifest.tag,
+        fwVersion: canonicalFwVersion(e.fwVersion ?? tagFw),
+        tag: realTag,
         publishedAt,
         appOtaSrc: await resolveV1Bin(srcDir, e.env, 'firmware_app_ota'),
         fullSerialSrc: await resolveV1Bin(srcDir, e.env, 'firmware_full_serial'),
@@ -254,10 +283,14 @@ async function main() {
         ? await copyBin(row.srcDir, row.fullSerialSrc, outDir, serName)
         : null
       if (!appOta && !fullSerial) continue
+      // Carry the published-byte hashes (identity/drift signal) onto artifacts.
+      if (appOta && row.appOtaHash) appOta.contentHash = row.appOtaHash
+      if (fullSerial && row.fullSerialHash) fullSerial.contentHash = row.fullSerialHash
       versions.push({
         fwVersion: row.fwVersion,
         ...(row.tag ? { tag: row.tag } : {}),
         ...(row.publishedAt ? { publishedAt: row.publishedAt } : {}),
+        ...(row.buildCommit ? { buildSha: row.buildCommit } : {}),
         ...(appOta ? { appOta } : {}),
         ...(fullSerial ? { fullSerial } : {}),
       })
@@ -277,6 +310,8 @@ async function main() {
       label: head.label,
       ...(head.description ? { description: head.description } : {}),
       fwVersion: latest.fwVersion,
+      ...(head.publishedAt ? { publishedAt: head.publishedAt } : {}),
+      ...(latest.buildSha ? { buildSha: latest.buildSha } : {}),
       ...(latest.appOta ? { appOta: latest.appOta } : {}),
       ...(latest.fullSerial ? { fullSerial: latest.fullSerial } : {}),
       versions,
@@ -285,7 +320,7 @@ async function main() {
 
   variants.sort((a, b) => (a.role + a.env).localeCompare(b.role + b.env))
   const manifest = {
-    schema_version: 2,
+    schema_version: 3,
     generated_at: Date.now(),
     variants,
   }

@@ -102,18 +102,26 @@ jobs:
             # Capture tagName + publishedAt so the aggregator records the
             # release date. (The .bin mtime is just when CI downloaded it,
             # ≈ deploy time — not when the version was released.)
-            rel_json=$(gh release list --repo "$repo" --limit 6 --json tagName,publishedAt || echo '[]')
+            # Limit is generous: per-env namespaced tags (DEC-035) mean each env
+            # releases on its own line, so several envs × a few archives need
+            # covering. Raise if envs/archives outgrow this window.
+            rel_json=$(gh release list --repo "$repo" --limit 40 --json tagName,publishedAt || echo '[]')
             tags=$(echo "$rel_json" | jq -r '.[].tagName')
             if [ -z "$tags" ]; then
               echo "::warning::no releases for $repo — skipping"
               continue
             fi
             for t in $tags; do
-              mkdir -p "fw-staging/$repo_name/$t"
+              # Per-env tags are namespaced (e.g. dev/necklace_v3/v0.1.4); the
+              # slashes can't be a single staging dir, so sanitize for the path
+              # while keeping the REAL tag in release-meta.json (the aggregator
+              # reads the tag/date from there, not from the dir name).
+              dir=$(echo "$t" | tr '/' '_')
+              dest="fw-staging/$repo_name/$dir"
+              mkdir -p "$dest"
               published=$(echo "$rel_json" | jq -r --arg t "$t" '.[] | select(.tagName==$t) | .publishedAt // ""')
-              printf '{"tag":"%s","publishedAt":"%s"}\n' "$t" "$published" \
-                > "fw-staging/$repo_name/$t/release-meta.json"
-              gh release download "$t" --repo "$repo" --dir "fw-staging/$repo_name/$t" \
+              printf '{"tag":"%s","publishedAt":"%s"}\n' "$t" "$published" > "$dest/release-meta.json"
+              gh release download "$t" --repo "$repo" --dir "$dest" \
                 --pattern "*.bin" --pattern "manifest.json" --pattern "manifest.fragment.json" --clobber
             done
           done
@@ -182,18 +190,26 @@ jobs:
             # Capture tagName + publishedAt so the aggregator records the
             # release date. (The .bin mtime is just when CI downloaded it,
             # ≈ deploy time — not when the version was released.)
-            rel_json=$(gh release list --repo "$repo" --limit 6 --json tagName,publishedAt || echo '[]')
+            # Limit is generous: per-env namespaced tags (DEC-035) mean each env
+            # releases on its own line, so several envs × a few archives need
+            # covering. Raise if envs/archives outgrow this window.
+            rel_json=$(gh release list --repo "$repo" --limit 40 --json tagName,publishedAt || echo '[]')
             tags=$(echo "$rel_json" | jq -r '.[].tagName')
             if [ -z "$tags" ]; then
               echo "::warning::no releases for $repo — skipping"
               continue
             fi
             for t in $tags; do
-              mkdir -p "fw-staging/$repo_name/$t"
+              # Per-env tags are namespaced (e.g. dev/necklace_v3/v0.1.4); the
+              # slashes can't be a single staging dir, so sanitize for the path
+              # while keeping the REAL tag in release-meta.json (the aggregator
+              # reads the tag/date from there, not from the dir name).
+              dir=$(echo "$t" | tr '/' '_')
+              dest="fw-staging/$repo_name/$dir"
+              mkdir -p "$dest"
               published=$(echo "$rel_json" | jq -r --arg t "$t" '.[] | select(.tagName==$t) | .publishedAt // ""')
-              printf '{"tag":"%s","publishedAt":"%s"}\n' "$t" "$published" \
-                > "fw-staging/$repo_name/$t/release-meta.json"
-              gh release download "$t" --repo "$repo" --dir "fw-staging/$repo_name/$t" \
+              printf '{"tag":"%s","publishedAt":"%s"}\n' "$t" "$published" > "$dest/release-meta.json"
+              gh release download "$t" --repo "$repo" --dir "$dest" \
                 --pattern "*.bin" --pattern "manifest.json" --pattern "manifest.fragment.json" --clobber
             done
           done
