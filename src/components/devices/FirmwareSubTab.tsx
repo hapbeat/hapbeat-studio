@@ -79,9 +79,15 @@ function entryBoard(e: FirmwareLibraryEntry): string | null {
   return e.board ?? inferVariantFromEnv(e.env).board ?? null
 }
 
-/** Human label for a variant button (manifest label, else env name). */
+/** Human label for a variant button (manifest label, else env name).
+ *  The product was renamed Necklace→DuoWL / Band→BandWL, but some firmware
+ *  variant.json labels still carry the old names. Normalize here so the
+ *  library matches the DuoWL/BandWL naming used everywhere else (boardLabel,
+ *  DisplayEditor). `\bBand\b` (word boundary) leaves an already-"BandWL"
+ *  untouched and never mangles unrelated words. */
 function entryLabel(e: FirmwareLibraryEntry): string {
-  return e.label ?? e.env
+  const raw = e.label ?? e.env
+  return raw.replace(/Necklace/g, 'DuoWL').replace(/\bBand\b/g, 'BandWL')
 }
 
 interface Props {
