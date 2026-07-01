@@ -6,6 +6,18 @@ Hapbeat Studio の変更履歴。形式は [Keep a Changelog](https://keepachang
 - **最新版** `https://studio.hapbeat.com/` は master の package.json バージョンを表示。
 - **凍結版** `https://studio.hapbeat.com/vX.Y/` は `vX.Y.Z` タグ push 時に作成（マイナー単位）。
 
+## [0.4.0] - 2026-07-01
+
+### Added（追加）
+- USB serial カードの選択を Wi-Fi カードと統一（単クリック=このデバイスだけ選択 / Ctrl+クリック=追加選択 / Shift+クリック=範囲選択）
+- USB serial セクションに「全選択 / 全解除」ボタン（5〜10 台の一斉並列書き込み向け）
+- USB serial カードに「接続」ボタン（設定接続を選択とは別操作に分離）
+
+### Fixed（修正）
+- カード選択時のレイアウトシフトを解消（Wi-Fi・USB 両方 — 選択表示は border 色のみで箱サイズ不変）
+- ファームウェアライブラリのラベルを製品名に統一（Necklace → DuoWL / Band → BandWL）
+- dev（ローカル）ファームウェアライブラリが repos-* 再編後の実ビルドを読めるようパス修正（凍結スナップショットの古い版を配信していた問題を解消。表示は各ビルドの実 fwVersion）
+
 ## [0.3.1] - 2026-06-29
 
 ### Fixed（修正）
