@@ -210,8 +210,11 @@ function firmwareDevPlugin(buildRepos: FirmwareBuildRepo[]): Plugin {
                 }
                 if (!appOta && !fullSerial) continue
                 const variant = await readVariantMeta(root, env)
-                // Per-env fwVersion from variant.json beats the repo-global
-                // build_version.h (which only reflects the LAST build).
+                // Per-env fwVersion from variant.json = the ACTUAL version baked
+                // into THIS build's binary. Show it verbatim (honest: the dev
+                // list must match what get_info will report after flashing —
+                // never a "release-intended" version the local .bin doesn't
+                // actually carry). Falls back to the repo-global build_version.h.
                 const fwVersion = variant.fwVersion
                   ?? await readFirmwareVersion(srcDir)
                 const item: ListItem = {
@@ -366,41 +369,37 @@ async function readFirmwareVersion(srcDir: string | undefined): Promise<string |
 
 
 /**
- * Workspace firmware repos whose `.pio/build` dirs are served in dev.
- * Non-existent roots are simply skipped (safeReaddir → []), so a
- * checkout without every firmware repo still works.
+ * Workspace firmware repos whose dist/ + .pio/build dirs are served in dev.
+ * Non-existent roots are simply skipped (safeReaddir → []), so a checkout
+ * without every firmware repo still works.
  *
- * Per DEC-033/034 the workspace homes for node firmware are:
- *   - hapbeat-device-firmware     → receiver (udp/mqtt) + broker + sensor envs
- *   - hapbeat-transmitter-firmware → transmitter (ESP-NOW audio source) env
- * (External hapbeat-wireless-firmware / wireless-sender-firmware are
- *  reference/port-source only.)
+ * Repos live under `repos-firmware/` after the workspace repos-* reorg
+ * (2026-06-18). The legacy FLAT sibling layout (`../hapbeat-*`) is kept as a
+ * fallback base so an older flat checkout still resolves — a non-existent
+ * path costs nothing (skipped). Before this fix the ONLY paths were the flat
+ * ones, so post-reorg the live list was empty and Studio served a frozen
+ * snapshot cache with stale versions (user 2026-07-01).
+ *
+ * Per DEC-033/034 the node-firmware homes are:
+ *   - hapbeat-device-firmware      → receiver (udp/mqtt) + broker + sensor
+ *   - hapbeat-transmitter-firmware → transmitter (ESP-NOW audio source)
  */
-const FIRMWARE_BUILD_REPOS = [
-  // dist/ first: the post-build scripts copy distributables there and pio
-  // never prunes it, so it's the stable primary. `.pio/build` stays as a
-  // fallback for older checkouts whose post-build predates the dist copy.
-  {
-    repo: 'dev',
-    root: resolve(__dirname, '../hapbeat-device-firmware/dist'),
-    srcDir: resolve(__dirname, '../hapbeat-device-firmware/src'),
-  },
-  {
-    repo: 'dev',
-    root: resolve(__dirname, '../hapbeat-device-firmware/.pio/build'),
-    srcDir: resolve(__dirname, '../hapbeat-device-firmware/src'),
-  },
-  {
-    repo: 'tx',
-    root: resolve(__dirname, '../hapbeat-transmitter-firmware/dist'),
-    srcDir: resolve(__dirname, '../hapbeat-transmitter-firmware/src'),
-  },
-  {
-    repo: 'tx',
-    root: resolve(__dirname, '../hapbeat-transmitter-firmware/.pio/build'),
-    srcDir: resolve(__dirname, '../hapbeat-transmitter-firmware/src'),
-  },
+const FIRMWARE_REPO_DIRS: Array<{ repo: string; dir: string }> = [
+  { repo: 'dev', dir: 'hapbeat-device-firmware' },
+  { repo: 'tx', dir: 'hapbeat-transmitter-firmware' },
 ]
+// repos-firmware/ (current) is listed first; the flat sibling is a fallback.
+// dist/ before .pio/build within each: post-build copies to dist and pio
+// never prunes it, so it's the stable primary.
+const FIRMWARE_BUILD_REPOS = FIRMWARE_REPO_DIRS.flatMap(({ repo, dir }) =>
+  ['../../repos-firmware', '..'].flatMap((base) => {
+    const srcDir = resolve(__dirname, `${base}/${dir}/src`)
+    return [
+      { repo, root: resolve(__dirname, `${base}/${dir}/dist`), srcDir },
+      { repo, root: resolve(__dirname, `${base}/${dir}/.pio/build`), srcDir },
+    ]
+  }),
+)
 
 export default defineConfig(() => {
   const meta = buildMeta()
