@@ -143,10 +143,11 @@ function ProbeStep({
   probeStatus: string
   probeMessage: string | null
 }) {
-  // 接続操作は左サイドバーの「USB Serial」カードのチェックに一本化した
-  // (ユーザ要望 2026-06-15)。このステップは「どこを操作するか」を案内する
-  // ガイドに徹し、接続が成立すると probeStatus を監視している親が自動で
-  // 次ステップへ進める。
+  // 接続操作は左サイドバーの「USB Serial」カードの「接続」ボタン。
+  // カードのクリック/チェックは書き込み対象の選択に変わったため、接続は
+  // 明示ボタンに分離した (ユーザ要望 2026-07-01)。このステップは「どこを
+  // 操作するか」を案内するガイドに徹し、接続が成立すると probeStatus を
+  // 監視している親が自動で次ステップへ進める。
   return (
     <div className="form-section onboarding-step">
       <div className="form-section-title">Step 1 — USB Serial で接続</div>
@@ -157,7 +158,7 @@ function ProbeStep({
         </p>
         <ol className="onboarding-substeps">
           <li><strong>＋</strong> ボタンで USB 機器を追加（COM ポート選択ダイアログ）</li>
-          <li>表示されたカードの<strong>チェックを ✔</strong> にすると接続します</li>
+          <li>表示されたカードの<strong>「接続」ボタン</strong>を押すと接続します</li>
         </ol>
         <p className="onboarding-step-routing-hint">
           接続すると、デバイスの応答内容に応じて自動で次のステップに進みます:
@@ -195,7 +196,7 @@ function FlashStep({ onBack }: { onBack: () => void }) {
           <div className="form-status muted">
             👉 書き込み完了後、自動で Step 3 (Wi-Fi 設定) に進みます。
             その後デバイスの<strong> 電源を一度 OFF→ON </strong>してから、
-            左の USB Serial カードのチェックを入れ直して再接続してください。
+            左の USB Serial カードの<strong>「接続」ボタン</strong>で再接続してください。
           </div>
           <div className="form-action-row" style={{ marginTop: 8 }}>
             <button className="form-button-secondary" onClick={onBack}>
@@ -225,7 +226,7 @@ function ConfigureStep({
 }) {
   // 接続なし: post-flash / cable 抜け / set_wifi 後 reboot のいずれかで
   // conn が外れた状態。Step 1 に戻さず、ここで電源 OFF→ON + 再接続を促す。
-  // 再接続も左サイドバーの USB Serial カードのチェックに一本化。
+  // 再接続も左サイドバーの USB Serial カードの「接続」ボタンで。
   if (!hasConn) {
     return (
       <div className="form-section onboarding-step">
@@ -233,7 +234,7 @@ function ConfigureStep({
         <div className="onboarding-step-body">
           <p>
             ファーム書き込みが完了しました。<strong>デバイスの電源を一度 OFF→ON</strong> してから、
-            <strong>左の USB Serial カードのチェックを入れ直して</strong>再接続してください。
+            <strong>左の USB Serial カードの「接続」ボタンで</strong>再接続してください。
           </p>
           <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
             再接続できたら設定タブの Wi-Fi セクションで SSID / パスワードを入力できます。

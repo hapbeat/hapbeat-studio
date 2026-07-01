@@ -132,8 +132,12 @@
 .device-row.primary {
   background: var(--bg-hover);
   border-color: var(--accent);
+  /* Accent bar via inset box-shadow only — box-shadow never affects
+     layout, so becoming primary must NOT change padding/border width or
+     the card content would shift sideways (user 2026-07-01: 「選択すると
+     要素が微妙に動くのが目障り」). The base 10px padding already clears
+     the 3px bar, so no padding-left bump is needed. */
   box-shadow: inset 3px 0 0 var(--accent);
-  padding-left: 13px;
 }
 .device-row.primary .device-row-name {
   color: var(--accent-light);

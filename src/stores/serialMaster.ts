@@ -259,8 +259,12 @@ interface SerialMasterState {
   /** Registry id of the port the single-master flow holds (config /
    *  flash). Lets the sidebar mark the active card. */
   activePortId: string | null
-  /** Multi-select for the sequential flash (registry ids). */
+  /** Multi-select for the parallel flash (registry ids). */
   selectedPortIds: string[]
+  /** Anchor/primary for Shift+range select — mirrors deviceStore.selectedIp
+   *  so USB cards select exactly like the Wi-Fi cards (plain=exclusive,
+   *  Ctrl=toggle, Shift=range). */
+  selectedPortId: string | null
 
   // ── actions ─────────────────────────────────────────────
   /**
@@ -301,7 +305,20 @@ interface SerialMasterState {
   /** One-shot identity probe (open → get_info → close) for a card.
    *  Refused while the master is busy (config conn open / flashing). */
   probePort: (id: string) => Promise<void>
+  /** Ctrl+click / checkbox — additive toggle in the flash-target set. */
   toggleSelectPort: (id: string) => void
+  /** Plain click — exclusive single selection (Explorer-style, like the
+   *  Wi-Fi cards' plain click). */
+  selectExclusivePort: (id: string) => void
+  /** Shift+click — contiguous range from the anchor, in display order
+   *  (「オセロのように間のデバイスを全て選択」). */
+  selectPortRange: (id: string, orderedIds: string[]) => void
+  /** Select EVERY currently-known port as a flash target (bulk "全選択").
+   *  For the 5–10-device production-flash flow so the user doesn't tick
+   *  each card one by one. */
+  selectAllPorts: () => void
+  /** Clear the flash-target selection ("全解除"). */
+  clearSelectedPorts: () => void
   /** Open the config conn on a specific registry port (sidebar card
    *  "接続" button). Closes any other active conn first. */
   openConfigFor: (id: string) => Promise<SerialConfigConn | null>
@@ -456,6 +473,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
     knownPorts: [],
     activePortId: null,
     selectedPortIds: [],
+    selectedPortId: null,
 
     openConfig: async ({ forcePicker = false } = {}) => {
       const cur = get()
@@ -832,6 +850,8 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       set((s) => ({
         knownPorts: entries,
         selectedPortIds: s.selectedPortIds.filter((id) => liveIds.has(id)),
+        selectedPortId:
+          s.selectedPortId && liveIds.has(s.selectedPortId) ? s.selectedPortId : null,
       }))
     },
 
@@ -905,12 +925,38 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
     },
 
     toggleSelectPort: (id) => {
-      set((s) => ({
-        selectedPortIds: s.selectedPortIds.includes(id)
+      // Mirror deviceStore.toggleSelect: the anchor follows the just-added
+      // id, or the first remaining one when the toggle was a removal.
+      set((s) => {
+        const has = s.selectedPortIds.includes(id)
+        const next = has
           ? s.selectedPortIds.filter((x) => x !== id)
-          : [...s.selectedPortIds, id],
-      }))
+          : [...s.selectedPortIds, id]
+        const anchor = has
+          ? (s.selectedPortId === id ? (next[0] ?? null) : s.selectedPortId)
+          : id
+        return { selectedPortIds: next, selectedPortId: anchor }
+      })
     },
+
+    selectExclusivePort: (id) => set({ selectedPortIds: [id], selectedPortId: id }),
+
+    selectPortRange: (id, orderedIds) => {
+      set((s) => {
+        const anchor = s.selectedPortId
+        const ai = anchor ? orderedIds.indexOf(anchor) : -1
+        const bi = orderedIds.indexOf(id)
+        if (ai < 0 || bi < 0) return { selectedPortIds: [id], selectedPortId: id }
+        const [lo, hi] = ai <= bi ? [ai, bi] : [bi, ai]
+        return { selectedPortIds: orderedIds.slice(lo, hi + 1), selectedPortId: id }
+      })
+    },
+
+    selectAllPorts: () => {
+      set((s) => ({ selectedPortIds: s.knownPorts.map((e) => e.id) }))
+    },
+
+    clearSelectedPorts: () => set({ selectedPortIds: [], selectedPortId: null }),
 
     openConfigFor: async (id) => {
       const port = portById.get(id)

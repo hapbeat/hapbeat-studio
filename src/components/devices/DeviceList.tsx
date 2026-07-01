@@ -109,77 +109,69 @@ function RefreshButton({ send }: { send: (msg: ManagerMessage) => void }) {
 
 /**
  * USB serial port cards — every granted Web Serial port, flashed or
- * blank. Identity is bridge chip + VID:PID until a probe (or config
- * conn) fills in name/fw/role. Checkbox feeds the multi-flash target
- * set (`selectedPortIds`); 接続 opens the config conn on that port.
- * Independent of Helper — renders even when the daemon is down.
+ * blank. Selection works like the Wi-Fi cards: **click the card body (or
+ * the checkbox) to select / deselect it as a flash target**
+ * (`selectedPortIds`), so 5–10 devices can be picked for one parallel
+ * flash without connecting each first. Connecting for config (get_info /
+ * Wi-Fi setup) is a separate explicit 接続 button — the live config port
+ * is single-master, so it stays one device at a time. Identity is bridge
+ * chip + VID:PID until a probe fills in name/fw/role. Independent of
+ * Helper — renders even when the daemon is down.
  */
-function UsbPortCard({ entry }: { entry: SerialPortEntry }) {
+function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds: string[] }) {
   const activePortId = useSerialMaster((s) => s.activePortId)
   const mode = useSerialMaster((s) => s.mode)
   const selectedPortIds = useSerialMaster((s) => s.selectedPortIds)
+  const selectedPortId = useSerialMaster((s) => s.selectedPortId)
   const toggleSelectPort = useSerialMaster((s) => s.toggleSelectPort)
+  const selectExclusivePort = useSerialMaster((s) => s.selectExclusivePort)
+  const selectPortRange = useSerialMaster((s) => s.selectPortRange)
   const probePort = useSerialMaster((s) => s.probePort)
   const openConfigFor = useSerialMaster((s) => s.openConfigFor)
-  const release = useSerialMaster((s) => s.release)
-  const selectedIp = useDeviceStore((s) => s.selectedIp)
   const selectDevice = useDeviceStore((s) => s.selectDevice)
 
   const checked = selectedPortIds.includes(entry.id)
   const isActive = entry.id === activePortId && mode === 'config'
-  // The active card doubles as the sidebar entry for the serial
-  // pseudo-device (`serial:<mac>`) — there's no separate card in the
-  // LAN section anymore.
   const pseudoId = `${SERIAL_DEVICE_PREFIX}${entry.info?.mac ?? 'active'}`
-  const isPrimary = isActive && selectedIp === pseudoId
+  // Primary = the selection anchor, unified with the Wi-Fi cards' `.primary`
+  // (the focused/anchor selection). The live config-connection state is shown
+  // separately by the ConnIndicator dot + the 接続/設定 button.
+  const isPrimary = selectedPortId === entry.id
   const probing = entry.probe === 'connecting'
   const f = entry.flash
 
   return (
     <div
       className={`device-row usb${checked ? ' checked' : ''}${isPrimary ? ' primary' : ''}`}
-      title={isActive ? '設定接続中 — クリックで設定タブを開く' : 'クリックで USB Serial 接続'}
+      title="クリック=このデバイスだけ選択 / Ctrl+クリック=追加選択 / Shift+クリック=範囲選択"
       onClick={(e) => {
         const target = e.target as HTMLElement
         if (target.closest('button')) return
         if (target.closest('.device-row-checkbox-input')) return
-        // Card click connects (or focuses if already connected). The
-        // separate 接続 button is gone — clicking the card body IS the
-        // connect action now (user feedback 2026-06-13). The checkbox
-        // stays a flash-target selector (it must work on blank chips that
-        // can't connect, so it can't double as a "connected" indicator).
-        if (isActive) selectDevice(pseudoId)
-        else void openConfigFor(entry.id)
+        // Explorer-style selection, identical to the Wi-Fi cards
+        // (user 2026-07-01: 単=排他 / Ctrl=加算トグル / Shift=範囲). Selection
+        // is the flash-target set; connecting for config is the separate 接続
+        // button (single-master live port, one at a time).
+        if (e.shiftKey) selectPortRange(entry.id, orderedIds)
+        else if (e.ctrlKey || e.metaKey) toggleSelectPort(entry.id)
+        else selectExclusivePort(entry.id)
       }}
     >
       <div className="device-row-top">
         <label
           className="device-row-checkbox"
-          title={checked
-            ? 'チェックを外す（接続中なら切断 + 書き込み対象から除外）'
-            : '✔ で USB Serial 接続 + 書き込み対象に選択（ファーム未書込でも接続可）'}
+          title={checked ? '書き込み対象から外す' : '書き込み対象に選択'}
           onClick={(e) => e.stopPropagation()}
         >
           <input
             type="checkbox"
             className="device-row-checkbox-input"
             checked={checked}
-            onChange={() => {
-              if (checked) {
-                // Uncheck: drop from the flash set, and if this port holds
-                // the live config conn, disconnect it.
-                toggleSelectPort(entry.id)
-                if (isActive) void release()
-              } else {
-                // ✔ = connect. USB Serial opens even on a blank chip (only
-                // get_info fails), so the checkbox doubles as the connect
-                // switch — user feedback 2026-06-13: 「ファームが空でも USB
-                // 接続はできる → ✔ で接続」. Also marks it a flash target.
-                toggleSelectPort(entry.id)
-                void openConfigFor(entry.id)
-              }
-            }}
-            aria-label={`${serialEntryLabel(entry)} を接続 / 書き込み対象に選択`}
+            // Pure flash-target toggle now (no connect side-effect). Works
+            // on blank chips too — selection never needs an open port; the
+            // flash opens/closes each port itself.
+            onChange={() => toggleSelectPort(entry.id)}
+            aria-label={`${serialEntryLabel(entry)} を書き込み対象に選択`}
           />
         </label>
         {/* Stable per-session index (#1, #2…) — Web Serial does not expose
@@ -189,9 +181,10 @@ function UsbPortCard({ entry }: { entry: SerialPortEntry }) {
           #{entry.id.replace('usb-', '')}
         </span>
         <span className="device-row-name">{serialEntryLabel(entry)}</span>
-        {/* No "USB" transport tag — the section header says it. Link icon +
-            dot shows the connection state. */}
-        <ConnIndicator online={isActive} title={isActive ? '接続中 (USB Serial)' : '未接続（✔ で接続）'} />
+        {/* No "USB" transport tag — the section header says it. Dot shows
+            the live config-connection state (接続 button), independent of
+            the flash-target selection (card click / checkbox). */}
+        <ConnIndicator online={isActive} title={isActive ? '設定接続中 (USB Serial)' : '未接続（設定は「接続」ボタン）'} />
       </div>
       <div className="device-row-meta">
         {entry.info && (() => {
@@ -226,8 +219,22 @@ function UsbPortCard({ entry }: { entry: SerialPortEntry }) {
           className="device-row-meta"
           style={{ marginTop: 4, gap: 6, display: 'flex', justifyContent: 'flex-end' }}
         >
-          {/* 接続 button removed — clicking the card body connects. Only
-              識別 (probe without taking over the config conn) remains. */}
+          {/* 接続 = open the single-master config conn on THIS port (for
+              get_info / Wi-Fi setup). Kept separate from selection so the
+              card click can be a pure multi-select like the Wi-Fi cards. */}
+          <button
+            type="button"
+            className="form-button-secondary"
+            style={{ fontSize: 12, padding: '3px 10px' }}
+            onClick={(e) => {
+              e.stopPropagation()
+              if (isActive) selectDevice(pseudoId)
+              else void openConfigFor(entry.id)
+            }}
+            title={isActive ? '設定タブを開く' : 'USB Serial で接続して設定 (get_info / Wi-Fi)。1 台ずつ'}
+          >
+            {isActive ? '設定' : '接続'}
+          </button>
           <button
             type="button"
             className="form-button-secondary"
@@ -248,7 +255,10 @@ function UsbPortsSection() {
   const knownPorts = useSerialMaster((s) => s.knownPorts)
   const selectedPortIds = useSerialMaster((s) => s.selectedPortIds)
   const addPort = useSerialMaster((s) => s.addPort)
+  const selectAllPorts = useSerialMaster((s) => s.selectAllPorts)
+  const clearSelectedPorts = useSerialMaster((s) => s.clearSelectedPorts)
   if (!isWebSerialSupported()) return null
+  const allSelected = knownPorts.length > 0 && selectedPortIds.length === knownPorts.length
   return (
     <div className="devices-usb-section">
       <div className="devices-sidebar-header" style={{ borderTop: '1px solid var(--border, #333)' }}>
@@ -262,11 +272,24 @@ function UsbPortsSection() {
             </>
           )}
         </span>
+        {/* Bulk select for the 5–10-device production flash: one click to
+            select every granted port, instead of ticking each card. */}
+        {knownPorts.length > 1 && (
+          <button
+            type="button"
+            className="devices-sidebar-refresh"
+            style={{ fontSize: 11, width: 'auto', padding: '0 6px' }}
+            onClick={() => (allSelected ? clearSelectedPorts() : selectAllPorts())}
+            title={allSelected ? '全ての書き込み対象を解除' : '全 USB デバイスを書き込み対象に選択'}
+          >
+            {allSelected ? '全解除' : '全選択'}
+          </button>
+        )}
         <button
           type="button"
           className="devices-sidebar-refresh"
           onClick={() => void addPort()}
-          title="USB Serial デバイスを追加 (COM ポート選択ダイアログが開きます)"
+          title="USB Serial デバイスを追加（初回のみブラウザの選択ダイアログ。一度許可すれば次回以降は自動で表示されます）"
           aria-label="USB デバイス追加"
         >
           ＋
@@ -275,13 +298,19 @@ function UsbPortsSection() {
       {knownPorts.length === 0 ? (
         <div className="devices-empty" style={{ padding: '6px 10px', fontSize: 12 }}>
           ＋ で USB デバイスを追加
+          <br />
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            初回は 1 台ずつブラウザの許可が必要（ブラウザ仕様）。一度許可すれば次回から自動表示されます。
+          </span>
         </div>
       ) : (
         <>
-          {knownPorts.map((e) => <UsbPortCard key={e.id} entry={e} />)}
+          {knownPorts.map((e) => (
+            <UsbPortCard key={e.id} entry={e} orderedIds={knownPorts.map((p) => p.id)} />
+          ))}
           <div className="devices-empty" style={{ padding: '4px 10px', fontSize: 11, textAlign: 'left' }}>
-            ※ ブラウザ (Web Serial) は COM ポート名を取得できないため、#番号 と
-            「↻ 識別」結果 (デバイス名) で区別してください。
+            ※ カードをクリックで書き込み対象を選択。「全選択」→ Firmware タブで一斉並列書き込みできます。
+            ブラウザは COM 名を取得できないため #番号 と「↻ 識別」で区別してください。
           </div>
         </>
       )}
