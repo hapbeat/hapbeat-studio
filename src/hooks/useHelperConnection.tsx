@@ -9,6 +9,7 @@ import {
 } from 'react'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import { checkHelperCompat, type HelperCompat } from '@/config/helperCompat'
+import { isDemoMode } from '@/demo/isDemoMode'
 
 const HELPER_WS_URL = 'ws://localhost:7703'
 const RECONNECT_INTERVAL_BASE = 2000
@@ -157,6 +158,24 @@ export function HelperConnectionProvider({ children }: { children: ReactNode }) 
   }, [])
 
   useEffect(() => {
+    // Demo/screenshot mode (`?demo=1`): never open the real WebSocket.
+    // Instead, fake "Helper 接続中" + a device list via a guarded dynamic
+    // import of the demo data module (kept separate from seedDemo.ts's
+    // orchestration — this Provider has no other reason to know about
+    // `src/demo/*`, and importing the small device payload directly here
+    // avoids threading a callback/store through seedDemo.ts just for this
+    // one Context's local useState). Code-split: only fetched when the
+    // flag is present, so production carries zero extra bytes/behavior.
+    if (isDemoMode()) {
+      let cancelled = false
+      void import('@/demo/demoData').then(({ DEMO_DEVICES, DEMO_FW_VERSION }) => {
+        if (cancelled) return
+        setDevices(DEMO_DEVICES)
+        setHelperVersion(DEMO_FW_VERSION)
+        setIsConnected(true)
+      })
+      return () => { cancelled = true }
+    }
     connect()
     return () => {
       clearReconnectTimer()

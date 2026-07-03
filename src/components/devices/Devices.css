@@ -746,6 +746,16 @@
   color: var(--text-primary);
 }
 
+/* DuoWL v4 gain/stream config: wider label column so the JP labels (e.g.
+   "触覚ライン出力") + the IC sub-line don't wrap. Scoped so other sections keep
+   the compact 90px column. */
+.duo-v4-config .form-row {
+  grid-template-columns: 128px 1fr auto;
+}
+.duo-v4-config .form-row > label {
+  line-height: 1.3;
+}
+
 .form-row-multi {
   display: flex;
   gap: 6px;

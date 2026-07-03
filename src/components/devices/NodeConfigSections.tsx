@@ -19,6 +19,8 @@ import { MqttFlowPanel } from './MqttFlow'
 
 /** Subset of the get_info cache these panels read. */
 export interface NodeConfigInfo {
+  /** Hardware board id (e.g. band_wl_v3, duo_wl_v4). Gates board-specific panels. */
+  board?: string
   /** OLED brightness (1=low / 2=mid / 3=high). Firmware ≥ v0.1.x. */
   oled_brightness?: number
   espnow_channel?: number
@@ -66,6 +68,13 @@ export interface NodeConfigInfo {
     locked?: boolean
     locked_mac?: string
     delay_ms?: number
+  }
+  /** DuoWL v4 audio stage settings (DEC-041, board === "duo_wl_v4" only). */
+  audio?: {
+    pam_db?: number
+    lineout_db?: number
+    boost_db?: number
+    hp_db?: number
   }
 }
 
@@ -1899,6 +1908,250 @@ export function EspNowDisplayPowerSection({
         </button>
       </div>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------
+// DuoWL v4: per-device audio stage calibration (DEC-041)
+// board === "duo_wl_v4" only. Wire: set_haptic_gain / set_dac_boost /
+// set_headphone_volume, readback via get_info.audio (no dedicated get_).
+// ---------------------------------------------------------------------
+
+const PAM_GAIN_STEPS = [6, 12, 18, 24] as const
+
+export function DuoWlV4AudioSection({
+  device,
+  cachedInfo,
+  sendTo,
+}: {
+  device: DeviceInfo
+  cachedInfo?: NodeConfigInfo
+  sendTo: (msg: ManagerMessage) => void
+}) {
+  const audio = cachedInfo?.audio
+  const [pamDb, setPamDb] = useState<number>(audio?.pam_db ?? 24)
+  const [lineoutDb, setLineoutDb] = useState<number>(audio?.lineout_db ?? 6)
+  const [boostDb, setBoostDb] = useState<number>(audio?.boost_db ?? 0)
+  const [hpDb, setHpDb] = useState<number>(audio?.hp_db ?? -10)
+  // Stream jitter buffer (set_stream_buffer). Write-only — not in get_info yet.
+  const [bufferMs, setBufferMs] = useState<number>(0)
+
+  // Sync from device whenever cachedInfo.audio changes (get_info result).
+  useEffect(() => {
+    if (!audio) return
+    if (audio.pam_db != null) setPamDb(audio.pam_db)
+    if (audio.lineout_db != null) setLineoutDb(audio.lineout_db)
+    if (audio.boost_db != null) setBoostDb(audio.boost_db)
+    if (audio.hp_db != null) setHpDb(audio.hp_db)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audio?.pam_db, audio?.lineout_db, audio?.boost_db, audio?.hp_db])
+
+  const { setAnchor } = useToast()
+  const offline = !device.online
+
+  // set_haptic_gain covers both the PAM select and the line-out slider — send
+  // both fields together (partial update is also allowed by the wire spec,
+  // but sending both keeps the two controls' "適用" behavior simple/atomic).
+  const applyHapticGain = (e: React.MouseEvent<HTMLElement>) => {
+    setAnchor(e.currentTarget)
+    sendTo({ type: 'set_haptic_gain', payload: { pam_db: pamDb, lineout_db: lineoutDb } })
+  }
+  const applyBoost = (e: React.MouseEvent<HTMLElement>) => {
+    setAnchor(e.currentTarget)
+    sendTo({ type: 'set_dac_boost', payload: { boost_db: boostDb } })
+  }
+  const applyHpVolume = (e: React.MouseEvent<HTMLElement>) => {
+    setAnchor(e.currentTarget)
+    sendTo({ type: 'set_headphone_volume', payload: { hp_db: hpDb } })
+  }
+  const applyBuffer = (e: React.MouseEvent<HTMLElement>) => {
+    setAnchor(e.currentTarget)
+    sendTo({ type: 'set_stream_buffer', payload: { buffer_ms: bufferMs } })
+  }
+
+  return (
+    <>
+    <div className="form-section duo-v4-config">
+      <div className="form-section-title">
+        ゲイン設定（DuoWL v4）
+        <span className="form-section-sub-inline"> — IC 別・個体差キャリブレーション</span>
+      </div>
+      <div className="form-status muted" style={{ marginBottom: 6, fontSize: 12 }}>
+        信号の流れ: DAC(AIC3204) → ライン出力(AIC3204) → PAM8404 → 触覚モータ ／ 別系統: DAC → TPA6130A2 → ヘッドホン
+      </div>
+
+      {/* 1. PAM8404 power amp (coarse, drives the motors) */}
+      <div className="form-row">
+        <label>触覚アンプ<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>PAM8404</span></label>
+        <div className="device-toggle" role="group" aria-label="PAM8404 gain">
+          {PAM_GAIN_STEPS.map((v) => (
+            <button
+              key={v}
+              type="button"
+              className={`btn btn-sm device-toggle-btn ${pamDb === v ? 'active' : ''}`}
+              onClick={() => setPamDb(v)}
+              disabled={offline}
+            >
+              {v} dB
+            </button>
+          ))}
+        </div>
+        <span />
+      </div>
+      <div className="form-status muted" style={{ fontSize: 12 }}>パワーアンプの粗ゲイン。触覚モータを駆動（4 段）</div>
+
+      {/* 2. AIC3204 (U1) line-out driver — analog pre-amp before the PAM */}
+      <div className="form-row">
+        <label>触覚ライン出力<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>AIC3204 U1</span></label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={-6}
+            max={29}
+            step={1}
+            value={lineoutDb}
+            onChange={(e) => setLineoutDb(Math.max(-6, Math.min(29, Number(e.target.value))))}
+            disabled={offline}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 56, textAlign: 'right' }}>
+            {lineoutDb} dB
+          </span>
+        </div>
+        <span />
+      </div>
+      <div className="form-status muted" style={{ fontSize: 12 }}>
+        codec のライン出力ドライバ（PAM の前段・<b>固定</b>アナログゲイン、−6〜+29 dB）。
+        ※ ボリュームノブ（var/fix）で変わる音量はこれとは別系統（DAC デジタルボリューム、debug 情報の Volume 参照）。
+      </div>
+
+      <div className="form-action-row" style={{ marginTop: 8 }}>
+        <button className="form-button" onClick={applyHapticGain} disabled={offline}>
+          触覚ゲインを適用（PAM + ライン出力）
+        </button>
+      </div>
+
+      {/* 3. AIC3204 DAC digital make-up boost (affects BOTH codecs) */}
+      <div className="form-row" style={{ marginTop: 12 }}>
+        <label>DAC ブースト<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>AIC3204 DAC</span></label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={0}
+            max={24}
+            step={1}
+            value={boostDb}
+            onChange={(e) => setBoostDb(Math.max(0, Math.min(24, Number(e.target.value))))}
+            disabled={offline}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 56, textAlign: 'right' }}>
+            {boostDb} dB
+          </span>
+        </div>
+        <span />
+      </div>
+      {/* min-height reserved so this hint is always present — never shifts
+          the action row below when boostDb changes (layout-shift rule). */}
+      <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
+        DAC デジタルボリュームに一律加算（触覚・HP 両 codec）。0 = 無効（既定・0 dB 上限）。
+        0 超は 0dBFS 素材がクリップし得る（歪みが少ないのはアナログの「ライン出力」側）。
+      </div>
+      <div className="form-action-row" style={{ marginTop: 8 }}>
+        <button className="form-button" onClick={applyBoost} disabled={offline}>
+          DAC ブーストを適用
+        </button>
+      </div>
+
+      {/* 4. TPA6130A2 headphone amp (independent of the haptic path) */}
+      <div className="form-row" style={{ marginTop: 12 }}>
+        <label>ヘッドホン音量<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>TPA6130A2</span></label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={-59}
+            max={4}
+            step={1}
+            value={hpDb}
+            onChange={(e) => setHpDb(Math.max(-59, Math.min(4, Number(e.target.value))))}
+            disabled={offline}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 56, textAlign: 'right' }}>
+            {hpDb} dB
+          </span>
+        </div>
+        <span />
+      </div>
+      <div className="form-status muted" style={{ fontSize: 12 }}>HP アンプ出力（触覚音量とは独立）</div>
+
+      <div className="form-action-row" style={{ marginTop: 8 }}>
+        <button className="form-button" onClick={applyHpVolume} disabled={offline}>
+          ヘッドホン音量を適用
+        </button>
+      </div>
+    </div>
+
+    {/* Stream jitter buffer (set_stream_buffer). General to all UDP receivers;
+        surfaced here as it's the main v4 headphone-music tuning knob. */}
+    <div className="form-section duo-v4-config">
+      <div className="form-section-title">
+        ストリーム再生バッファ
+        <span className="form-section-sub-inline"> — 遅延 vs 途切れ</span>
+      </div>
+      <div className="form-row">
+        <label>プリセット</label>
+        <div className="device-toggle" role="group" aria-label="stream buffer preset">
+          <button
+            type="button"
+            className={`btn btn-sm device-toggle-btn ${bufferMs === 0 ? 'active' : ''}`}
+            onClick={() => setBufferMs(0)}
+            disabled={offline}
+          >
+            低遅延 0ms（触覚）
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm device-toggle-btn ${bufferMs === 120 ? 'active' : ''}`}
+            onClick={() => setBufferMs(120)}
+            disabled={offline}
+          >
+            音楽 120ms
+          </button>
+        </div>
+        <span />
+      </div>
+      <div className="form-row">
+        <label>微調整</label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={0}
+            max={200}
+            step={10}
+            value={bufferMs}
+            onChange={(e) => setBufferMs(Math.max(0, Math.min(200, Number(e.target.value))))}
+            disabled={offline}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 56, textAlign: 'right' }}>
+            {bufferMs} ms
+          </span>
+        </div>
+        <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+          0=低遅延（触覚向き）。大きいほど Wi-Fi のゆらぎで途切れにくいが、その分再生が遅れる（HP 音楽向き）。
+        </span>
+      </div>
+      <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
+        ※ 全 UDP 受信機共通の設定。現在値の読み戻しは未対応（設定は反映されます）。
+      </div>
+      <div className="form-action-row" style={{ marginTop: 8 }}>
+        <button className="form-button" onClick={applyBuffer} disabled={offline}>
+          バッファを適用
+        </button>
+      </div>
+    </div>
+    </>
   )
 }
 

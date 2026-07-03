@@ -137,6 +137,19 @@ interface LibraryState {
   kitDirHandle: FileSystemDirectoryHandle | null
   kitDirName: string | null
 
+  /**
+   * Demo/screenshot mode (`?demo=1`, see `src/demo/seedDemo.ts`). When
+   * true, the Kit tab's "pick a folder to start" empty-state gate is
+   * bypassed so a folder-less seeded `clips`/`kits` list renders. All
+   * disk-write call sites already check `workDirHandle` (which stays
+   * `null` in demo mode — no stub handle is created) so they silently
+   * no-op; this flag ONLY affects the render gate and `loadLibrary`'s
+   * startup restore (which would otherwise wipe the seeded state).
+   * Always `false` in production; never set outside `seedDemo.ts`.
+   */
+  demoMode: boolean
+  setDemoMode: (v: boolean) => void
+
   // Kit management
   kits: KitDefinition[]
   activeKitId: string | null
@@ -665,6 +678,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   workDirSupported: isFileSystemAccessSupported(),
   kitDirHandle: null,
   kitDirName: null,
+  demoMode: false,
+  setDemoMode: (v) => set({ demoMode: v }),
   kits: [],
   activeKitId: null,
   editingClipId: null,
@@ -1077,6 +1092,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   getLastBuiltKit: (kitId) => lastBuiltKit.get(kitId),
 
   loadLibrary: async () => {
+    // Demo/screenshot mode: `seedDemo.ts` has already populated `clips` /
+    // `kits` directly via setState before KitManager mounts. Skip the
+    // normal disk-restore flow entirely — it would otherwise call
+    // restoreWorkDir() (no-op, no real handle was ever picked) and then
+    // `set({ clips: [], kits: [] })` on the "no workdir" branch below,
+    // wiping the seeded demo data on the very first render.
+    if (get().demoMode) return
     set({ isLoading: true })
     try {
       // Try to restore work directory first

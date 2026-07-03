@@ -69,6 +69,13 @@ function formatDump(d: Record<string, unknown>): string {
     `Audio:   ${audioPlay}  Gain: ${get('audio_gain')}  Events: ${get('event_count')}  Storage: ${used.toFixed(1)}KB / ${cap.toFixed(1)}MB`,
     `FW:      ${get('fw')}  Uptime: ${uptimeStr}  Heap: ${heap.toFixed(0)}KB`,
   ]
+
+  // HP-jack detect ADC (DuoWL v4 only — G3). Raw 0-4095; plug/unplug to find
+  // the detect threshold. Only shown when the field is present.
+  if (d.jack_adc !== undefined && d.jack_adc !== null) {
+    lines.splice(lines.length - 1, 0, `Jack:    ADC: ${get('jack_adc')} / 4095  (HP挿入検出 生値)`)
+  }
+
   return lines.join('\n')
 }
 

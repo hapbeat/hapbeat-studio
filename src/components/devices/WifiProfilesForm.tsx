@@ -19,6 +19,13 @@ interface Props {
   }
   sendTo: (msg: ManagerMessage) => void
   onRefresh: () => void
+  /** Number of USB-serial cards currently selected (serial path only). When
+   *  > 1, a "選択 N 台に一括適用" button appears that applies the SAME Wi-Fi to
+   *  all of them in parallel via serialMaster.bulkConfigCmd. 0/undefined = the
+   *  LAN path or a single device → no bulk button. */
+  bulkCount?: number
+  /** Apply this message to all selected USB-serial devices in parallel. */
+  onBulkApply?: (msg: ManagerMessage) => void
 }
 
 /**
@@ -35,6 +42,8 @@ export function WifiProfilesForm({
   wifiStatus,
   sendTo,
   onRefresh,
+  bulkCount = 0,
+  onBulkApply,
 }: Props) {
   const [addOpen, setAddOpen] = useState(false)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
@@ -170,6 +179,18 @@ export function WifiProfilesForm({
     // 成功/失敗は HelperToastBridge が write_result ベースで出す（結果ベース）。
     // Refresh the profile list — the firmware doesn't push, we poll.
     setTimeout(onRefresh, 800)
+  }
+
+  // Bulk: apply the SAME Wi-Fi to every selected USB-serial device in
+  // parallel (serialMaster.bulkConfigCmd via the parent's onBulkApply).
+  const submitBulk = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (!ssid.trim() || !onBulkApply) return
+    setAnchor(e.currentTarget)
+    const targetSsid = ssid.trim()
+    const passFields = password.length > 0 ? { pass: password, password } : {}
+    onBulkApply({ type: 'set_wifi', payload: { ssid: targetSsid, ...passFields } })
+    exitEditMode()
+    setAddOpen(false)
   }
 
   const connectProfile = (e: React.MouseEvent<HTMLButtonElement>, idx: number) => {
@@ -443,6 +464,22 @@ export function WifiProfilesForm({
               {editingIndex !== null ? '更新・接続' : '追加・接続'}
             </button>
           </div>
+          {/* Bulk apply: same Wi-Fi to all selected USB-serial devices in
+              parallel. Only in add mode (edit targets one profile) and when
+              >1 device is selected. */}
+          {editingIndex === null && bulkCount > 1 && onBulkApply && (
+            <div className="form-action-row" style={{ marginTop: 8 }}>
+              <button
+                className="form-button"
+                onClick={submitBulk}
+                disabled={!ssid.trim()}
+                title="選択中の USB Serial デバイス全台に、この Wi-Fi 設定を並列で一括適用します（各機は適用後に再起動）"
+                style={{ width: '100%' }}
+              >
+                ⚡ 選択 {bulkCount} 台に一括適用（並列）
+              </button>
+            </div>
+          )}
         </div>
       )}
 

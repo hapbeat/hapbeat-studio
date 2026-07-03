@@ -214,6 +214,17 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
           {f.state === 'error' && <span title={f.message}>✗ 失敗: {f.message?.slice(0, 40)}</span>}
         </div>
       )}
+      {/* Bulk config apply state (bulkConfigCmd) — parallel to the flash line. */}
+      {entry.config && entry.config.state !== 'idle' && (
+        <div className="device-row-meta" style={{ marginTop: 2 }}>
+          {entry.config.state === 'connecting' && <span>⏳ 設定接続中…</span>}
+          {entry.config.state === 'sending' && <span>⚙ 設定送信中…</span>}
+          {entry.config.state === 'done' && <span>✓ 設定 {entry.config.message}</span>}
+          {entry.config.state === 'error' && (
+            <span title={entry.config.message}>✗ 設定失敗: {entry.config.message?.slice(0, 30)}</span>
+          )}
+        </div>
+      )}
       {f.state !== 'flashing' && f.state !== 'waiting' && (
         <div
           className="device-row-meta"

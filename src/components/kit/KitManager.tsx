@@ -156,12 +156,15 @@ function AmpPresetBar() {
   const deletePreset = useLibraryStore((s) => s.deleteAmpPreset)
   const setLibraryIntensity = useLibraryStore((s) => s.setLibraryIntensity)
   const workDirHandle = useLibraryStore((s) => s.workDirHandle)
+  const demoMode = useLibraryStore((s) => s.demoMode)
   const { toast } = useToast()
   const [selected, setSelected] = useState<string>(NEW_PRESET_VALUE)
   const [dialog, setDialog] = useState<null | 'save' | 'confirm-delete' | 'confirm-overwrite'>(null)
   const [nameInput, setNameInput] = useState('')
 
-  if (!workDirHandle) return null
+  // Demo/screenshot mode bypasses the "no folder" gate (see seedDemo.ts) —
+  // no real workDirHandle exists, so this bar would otherwise stay hidden.
+  if (!workDirHandle && !demoMode) return null
 
   const close = () => { setDialog(null); setNameInput('') }
 
@@ -673,6 +676,7 @@ function ClipsPanel() {
   const workDirHandle = useLibraryStore((s) => s.workDirHandle)
   const workDirName = useLibraryStore((s) => s.workDirName)
   const workDirSupported = useLibraryStore((s) => s.workDirSupported)
+  const demoMode = useLibraryStore((s) => s.demoMode)
   const pickWorkDir = useLibraryStore((s) => s.pickWorkDir)
   const disconnectWorkDir = useLibraryStore((s) => s.disconnectWorkDir)
   const refreshClipsFromDir = useLibraryStore((s) => s.refreshClipsFromDir)
@@ -970,7 +974,10 @@ function ClipsPanel() {
     return isRoot ? body : body
   }
 
-  if (!workDirHandle) {
+  // Demo/screenshot mode (`?demo=1`, see src/demo/seedDemo.ts) bypasses this
+  // "pick a folder to start" empty state so the seeded Library + Kit
+  // Editor render with no real File System Access folder ever selected.
+  if (!workDirHandle && !demoMode) {
     return (
       <div className="clip-panel">
         <div className="panel-header">

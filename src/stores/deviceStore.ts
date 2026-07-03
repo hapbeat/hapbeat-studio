@@ -119,6 +119,13 @@ interface DeviceState {
       locked_mac?: string
       delay_ms?: number
     }
+    /** DuoWL v4 audio stage settings (DEC-041, board === "duo_wl_v4" only). */
+    audio?: {
+      pam_db?: number
+      lineout_db?: number
+      boost_db?: number
+      hp_db?: number
+    }
   }>
 
   /** Per-IP cache of the most recent get_wifi_status response. */

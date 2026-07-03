@@ -170,6 +170,11 @@ export interface StudioToManagerMessage {
     | 'set_alert_mode'       // receiver(mqtt) — alert-loop on/off (item 10)
     | 'set_recv_topics'      // receiver(mqtt) — subscribe topic list (item 8)
     | 'set_espnow_ui'        // receiver(espnow_stream) — display/power policy
+    // --- DuoWL v4 audio stage (DEC-041) ---
+    | 'set_haptic_gain'         // DuoWL v4 receiver — PAM8404 + AIC3204 line-out
+    | 'set_dac_boost'           // DuoWL v4 receiver — DAC digital makeup gain
+    | 'set_headphone_volume'    // DuoWL v4 receiver — TPA6130A2 HP volume
+    | 'set_stream_buffer'       // all UDP receivers — stream jitter buffer (ms)
   payload: Record<string, unknown>
 }
 
@@ -317,6 +322,17 @@ export interface GetInfoResult {
     locked?: boolean
     locked_mac?: string
     delay_ms?: number
+  }
+  /** DuoWL v4 audio stage settings (DEC-041, board === "duo_wl_v4" only). */
+  audio?: {
+    /** PAM8404 coarse gain, one of {6, 12, 18, 24} dB. */
+    pam_db?: number
+    /** AIC3204 haptic LOL/LOR line-out driver gain, −6..+29 dB. */
+    lineout_db?: number
+    /** DAC digital makeup gain, 0..24 dB (0 = disabled/default). */
+    boost_db?: number
+    /** TPA6130A2 headphone volume, −59..+4 dB. */
+    hp_db?: number
   }
   error?: string
 }

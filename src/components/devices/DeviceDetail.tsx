@@ -21,6 +21,7 @@ import {
   MqttConfigSection,
   BrokerConfigSection,
   SensorMappingSection,
+  DuoWlV4AudioSection,
 } from './NodeConfigSections'
 import { useDeviceTransport } from '@/hooks/useDeviceTransport'
 import { useSerialMaster } from '@/stores/serialMaster'
@@ -87,7 +88,7 @@ const SUBTAB_KEY = 'hapbeat-studio-devices-subtab'
  * Right-hand pane: per-device tabs, gated by the node's role/transport.
  */
 export function DeviceDetail() {
-  const { devices, lastMessage, send } = useHelperConnection()
+  const { devices, lastMessage, send, injectMessage } = useHelperConnection()
   const pushLog = useLogStore((s) => s.push)
   const selectedIp = useDeviceStore((s) => s.selectedIp)
   const setInfo = useDeviceStore((s) => s.setInfo)
@@ -236,6 +237,8 @@ export function DeviceDetail() {
         // ESP-NOW display/power + stream stats (espnow_stream receiver)
         espnow_ui: p.espnow_ui as { auto_off_ms?: number; wake_on_button?: boolean; wake_on_volume?: boolean; led_enabled?: boolean; low_batt_pct?: number } | undefined,
         stream: p.stream as { received?: number; lost?: number; recovered?: number; dropped?: number; max_gap?: number; handoffs?: number; sources?: number; locked?: boolean; locked_mac?: string; delay_ms?: number } | undefined,
+        // DuoWL v4 audio stage settings (DEC-041, board === "duo_wl_v4" only)
+        audio: p.audio as { pam_db?: number; lineout_db?: number; boost_db?: number; hp_db?: number } | undefined,
         // SoftAP extension fields (firmware ≥ v0.1.0)
         mode: p.mode as 'sta' | 'ap' | undefined,
         ap_ssid: p.ap_ssid as string | undefined,
@@ -401,6 +404,47 @@ export function DeviceDetail() {
   const transport = useDeviceTransport(selectedIp)
   const sendTo = useCallback((msg: ManagerMessage) => { void transport.sendTo(msg) }, [transport])
 
+  // ── Bulk config over USB serial ─────────────────────────────────────
+  // Apply a config command to ALL selected USB-serial cards in parallel
+  // (serial path only), mirroring the parallel firmware flash.
+  const bulkConfigCmd = useSerialMaster((s) => s.bulkConfigCmd)
+  const selectedPortIds = useSerialMaster((s) => s.selectedPortIds)
+  const activePortId = useSerialMaster((s) => s.activePortId)
+  const isSerialDevice = !!selectedIp && selectedIp.startsWith('serial:')
+  // Targets = the selected cards PLUS the device whose form is on screen (the
+  // held config port). Card selection and the detail-pane primary are
+  // independent, so without this the shown device could be silently excluded
+  // from its own bulk apply.
+  const bulkTargetIds = useMemo(() => {
+    const s = new Set(selectedPortIds)
+    if (activePortId) s.add(activePortId)
+    return [...s]
+  }, [selectedPortIds, activePortId])
+  const bulkApply = useCallback((msg: ManagerMessage) => {
+    // Same ManagerMessage → firmware serial-config JSON translation as
+    // useDeviceTransport's single-port serial path.
+    const cmd: Record<string, unknown> = {
+      cmd: msg.type,
+      ...(msg.payload as Record<string, unknown>),
+    }
+    delete cmd.ip
+    delete cmd.targets
+    void bulkConfigCmd(bulkTargetIds.map((id) => ({ id, cmd }))).then(({ ok, fail }) => {
+      // Summary toast (symmetric with the single-device write_result path).
+      injectMessage({
+        type: 'write_result',
+        payload: {
+          success: fail === 0,
+          device: selectedIp,
+          cmd: `${msg.type} (一括 ${ok + fail} 台)`,
+          message: fail === 0
+            ? `✓ ${ok} 台に一括適用しました`
+            : `一括設定: 成功 ${ok} / 失敗 ${fail}`,
+        },
+      })
+    })
+  }, [bulkConfigCmd, bulkTargetIds, injectMessage, selectedIp])
+
   if (!device || !selectedIp) {
     return <OnboardingWizard />
   }
@@ -442,6 +486,7 @@ export function DeviceDetail() {
         build: masterInfo.build,
         group: masterInfo.group,
         wifi_connected: masterInfo.wifi_connected,
+        board: masterInfo.board,
         role: masterInfo.role,
         transport: masterInfo.transport,
         transports: masterInfo.transports,
@@ -468,6 +513,7 @@ export function DeviceDetail() {
         recv_topics: masterInfo.recv_topics,
         espnow_ui: masterInfo.espnow_ui,
         stream: masterInfo.stream,
+        audio: masterInfo.audio,
       } : undefined)
     : infoCache[selectedIp]
   const wifiStatus = transport.isSerial
@@ -576,6 +622,8 @@ export function DeviceDetail() {
               wifiStatus={wifiStatus}
               sendTo={sendTo}
               onRefresh={refreshWifiProfiles}
+              bulkCount={isSerialDevice ? bulkTargetIds.length : 0}
+              onBulkApply={isSerialDevice ? bulkApply : undefined}
             />
             <ApModeSection
               device={device}
@@ -595,6 +643,13 @@ export function DeviceDetail() {
             />
             {nodeRole === 'receiver' && (
               <UiConfigForm device={device} sendTo={sendTo} />
+            )}
+            {cachedInfo?.board === 'duo_wl_v4' && (
+              <DuoWlV4AudioSection
+                device={device}
+                cachedInfo={cachedInfo}
+                sendTo={sendTo}
+              />
             )}
             <DebugDumpSection
               device={device}

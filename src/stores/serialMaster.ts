@@ -62,6 +62,12 @@ export interface SerialPortEntry {
     progress: FlashProgress | null
     message?: string
   }
+  /** Per-port state for a bulk config apply (bulkConfigCmd) — parallel to
+   *  `flash`, shown on the card the same way. Absent until a bulk op runs. */
+  config?: {
+    state: 'idle' | 'connecting' | 'sending' | 'done' | 'error'
+    message?: string
+  }
 }
 
 const portIdByPort = new WeakMap<SerialPort, string>()
@@ -164,6 +170,13 @@ export interface SerialDeviceInfo {
     locked_mac?: string
     delay_ms?: number
   }
+  /** DuoWL v4 audio stage settings (DEC-041, board === "duo_wl_v4" only). */
+  audio?: {
+    pam_db?: number
+    lineout_db?: number
+    boost_db?: number
+    hp_db?: number
+  }
 }
 
 /** Parse a firmware get_info JSON into a SerialDeviceInfo (shared by
@@ -205,6 +218,7 @@ function parseSerialInfo(r: Record<string, unknown>): SerialDeviceInfo {
     recv_topics: r.recv_topics as string[] | undefined,
     espnow_ui: r.espnow_ui as SerialDeviceInfo['espnow_ui'],
     stream: r.stream as SerialDeviceInfo['stream'],
+    audio: r.audio as SerialDeviceInfo['audio'],
   }
 }
 
@@ -330,6 +344,19 @@ interface SerialMasterState {
     regions: ReadonlyArray<{ address: number; bytes: Uint8Array; label: string }>,
     opts?: { eraseAll?: boolean; compress?: boolean },
   ) => Promise<void>
+  /**
+   * Apply a config command to SEVERAL registry ports in PARALLEL — the
+   * config analogue of flashSelected. Each target opens its own transient
+   * config conn (like probePort), sends its cmd, and closes; all run
+   * concurrently via Promise.all. Per-port outcome lands in each entry's
+   * `config` slot. `targets` is `{id, cmd}[]` so the SAME cmd can go to all
+   * (map ids → one cmd) OR a DIFFERENT cmd per device. `cmd` is the raw
+   * firmware serial-config JSON, e.g. `{cmd:'set_wifi', ssid, pass}`.
+   * Returns a `{ ok, fail }` count. Ports mid-flash are skipped.
+   */
+  bulkConfigCmd: (
+    targets: Array<{ id: string; cmd: Record<string, unknown> }>,
+  ) => Promise<{ ok: number; fail: number }>
 }
 
 export const useSerialMaster = create<SerialMasterState>((set, get) => {
@@ -839,6 +866,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
           probe: old?.probe ?? 'idle',
           info: old?.info ?? null,
           flash: old?.flash ?? { state: 'idle', progress: null },
+          config: old?.config,
         }
       })
       const liveIds = new Set(entries.map((e) => e.id))
@@ -1091,6 +1119,82 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
           }
         }
       }, 5000)
+    },
+
+    bulkConfigCmd: async (targets) => {
+      await get().syncPorts()
+      // Skip ports that are mid-flash (USB contention) or gone. Each port's
+      // config runs on its OWN transient conn, independent of the others and
+      // of the single held config conn — same model as probePort/flashSelected.
+      const entries = get().knownPorts
+      const runnable = targets.filter((t) => {
+        const e = entries.find((x) => x.id === t.id)
+        return !!e && e.flash.state !== 'flashing' && e.flash.state !== 'waiting'
+      })
+      if (runnable.length === 0) {
+        return { ok: 0, fail: 0 }
+      }
+      // If the held config conn is one of the targets, close it first so its
+      // transient bulk conn can take the port (mirror flashSelected:1006-1013).
+      const runIds = new Set(runnable.map((t) => t.id))
+      const { conn, activePortId } = get()
+      if (conn && activePortId && runIds.has(activePortId)) {
+        await conn.close().catch(() => { /* already closed */ })
+        set({ conn: null, mode: 'idle', info: null, wifiStatus: null, wifiProfiles: [], activePortId: null, port: null })
+      }
+      const pushLog = useLogStore.getState().push
+      for (const t of runnable) patchEntry(t.id, { config: { state: 'connecting' } })
+
+      const applyOne = async (t: { id: string; cmd: Record<string, unknown> }): Promise<boolean> => {
+        const e = get().knownPorts.find((x) => x.id === t.id)
+        const label = e ? serialEntryLabel(e) : t.id
+        const port = portById.get(t.id)
+        if (!port) {
+          patchEntry(t.id, { config: { state: 'error', message: 'ポートが見つかりません (抜かれた?)' } })
+          return false
+        }
+        let c: SerialConfigConn | null = null
+        try {
+          try { await port.close() } catch { /* not open */ }
+          c = await openConfigConnection(port, {
+            onLog: (line) => useLogStore.getState().push('serial-cfg', `[bulk:${t.id}] ${line}`),
+          })
+          patchEntry(t.id, { config: { state: 'sending' } })
+          // set_wifi (and other applied settings) reboot the device right
+          // after taking effect, so the reply may not arrive before the reset.
+          // Treat "status:ok" and "no reply (reboot)" both as SENT; only a
+          // thrown open/write error is a real failure.
+          const r = await c.send(t.cmd, { timeoutMs: 3000 }).catch(() => null)
+          const ok = !!r && (r as Record<string, unknown>).status === 'ok'
+          patchEntry(t.id, {
+            config: { state: 'done', message: ok ? 'OK' : '送信済 (応答なし/再起動)' },
+          })
+          pushLog('serial', `[${label}] bulk ${String(t.cmd.cmd ?? '')} → ${ok ? 'ok' : 'sent (no reply)'}`)
+          return true
+        } catch (err) {
+          const msg = (err as Error).message ?? String(err)
+          patchEntry(t.id, { config: { state: 'error', message: msg } })
+          pushLog('serial', `[${label}] bulk config FAILED: ${msg}`)
+          return false
+        } finally {
+          if (c) await c.close().catch(() => { /* already closed */ })
+        }
+      }
+
+      pushLog('serial', `bulk config → ${runnable.length} 台 並列 (${String(runnable[0]?.cmd.cmd ?? '')})`)
+      const results = await Promise.all(runnable.map(applyOne))
+      const okCount = results.filter(Boolean).length
+      const failCount = results.length - okCount
+      // Clear per-card config state after a beat (mirror flash).
+      setTimeout(() => {
+        for (const t of runnable) {
+          const cur = get().knownPorts.find((x) => x.id === t.id)
+          if (cur?.config && (cur.config.state === 'done' || cur.config.state === 'error')) {
+            patchEntry(t.id, { config: { state: 'idle' } })
+          }
+        }
+      }, 6000)
+      return { ok: okCount, fail: failCount }
     },
   }
 })

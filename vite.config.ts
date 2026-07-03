@@ -389,8 +389,20 @@ const FIRMWARE_REPO_DIRS: Array<{ repo: string; dir: string }> = [
   { repo: 'tx', dir: 'hapbeat-transmitter-firmware' },
 ]
 // repos-firmware/ (current) is listed first; the flat sibling is a fallback.
-// dist/ before .pio/build within each: post-build copies to dist and pio
-// never prunes it, so it's the stable primary.
+//
+// Both `dist/` and `.pio/build/` are scanned; the mtime comparison below keeps
+// the NEWEST per env. `dist/` persists across PlatformIO pruning (`.pio/build/
+// <env>` is deleted when another env builds or platformio.ini changes), so a
+// built env stays in the Studio library without needing a Studio visit to
+// snapshot it into CACHE_ROOT.
+//
+// The "local version ahead of published" bug (2026-07-04) was fixed at the
+// SOURCE — firmware-versions.json now registers every env (so no build falls
+// back to NEXT_RELEASE_VERSION) and NEXT_RELEASE_VERSION was aligned to the
+// release line. A fresh build therefore writes the CORRECT version into dist/.
+// If an env ever shows a stale version, rebuild that env → merge_firmware.py
+// refreshes dist/<env>/variant.json. (Removing dist/ entirely was tried but it
+// broke persistence: building one env then made the others vanish.)
 const FIRMWARE_BUILD_REPOS = FIRMWARE_REPO_DIRS.flatMap(({ repo, dir }) =>
   ['../../repos-firmware', '..'].flatMap((base) => {
     const srcDir = resolve(__dirname, `${base}/${dir}/src`)
