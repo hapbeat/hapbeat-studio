@@ -405,8 +405,9 @@ export function DeviceDetail() {
   const sendTo = useCallback((msg: ManagerMessage) => { void transport.sendTo(msg) }, [transport])
 
   // ── Bulk config over USB serial ─────────────────────────────────────
-  // Apply a config command to ALL selected USB-serial cards in parallel
-  // (serial path only), mirroring the parallel firmware flash.
+  // Apply a config command to ALL selected USB-serial cards ONE AT A TIME
+  // (serial path only). Unlike the parallel firmware flash, config is
+  // serialized because set_wifi self-reboots each device — see bulkConfigCmd.
   const bulkConfigCmd = useSerialMaster((s) => s.bulkConfigCmd)
   const selectedPortIds = useSerialMaster((s) => s.selectedPortIds)
   const activePortId = useSerialMaster((s) => s.activePortId)

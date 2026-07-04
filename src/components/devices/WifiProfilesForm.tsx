@@ -473,10 +473,10 @@ export function WifiProfilesForm({
                 className="form-button"
                 onClick={submitBulk}
                 disabled={!ssid.trim()}
-                title="選択中の USB Serial デバイス全台に、この Wi-Fi 設定を並列で一括適用します（各機は適用後に再起動）"
+                title="選択中の USB Serial デバイスに、この Wi-Fi 設定を 1 台ずつ順に適用します（各機は適用後に再起動。同時書き込みは再起動が重なって失敗するため順次）"
                 style={{ width: '100%' }}
               >
-                ⚡ 選択 {bulkCount} 台に一括適用（並列）
+                ⚡ 選択 {bulkCount} 台に一括適用（順次）
               </button>
             </div>
           )}

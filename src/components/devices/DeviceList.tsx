@@ -435,6 +435,12 @@ export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = 
   useEffect(() => {
     if (didAutoSelectRef.current) return
     if (visibleDevices.length === 0) return
+    // Don't auto-steal: if the user already selected a USB-serial card
+    // (selections are mutually exclusive across transports), an automatic
+    // LAN pick would clear it. Skip WITHOUT latching the ref so the
+    // convenience still kicks in once the USB selection is cleared.
+    const usb = useSerialMaster.getState()
+    if (usb.selectedPortIds.length > 0 || usb.selectedPortId) return
     didAutoSelectRef.current = true
     if (!selectedIp) selectDevice(visibleDevices[0].ipAddress)
   }, [visibleDevices, selectedIp, selectDevice])

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { MqttClientEntry, NodeRole, NodeTransport, SensorMapping, SensorReading } from '@/types/manager'
+import { useSerialMaster } from './serialMaster'
 
 const STORAGE_KEY_SELECTED = 'hapbeat-studio-selected-device'
 const STORAGE_KEY_SELECTED_SET = 'hapbeat-studio-selected-devices'
@@ -187,6 +188,11 @@ interface DeviceState {
   selectExclusive: (ip: string) => void
   /** Shift+click — contiguous range from the primary, in display order. */
   selectRange: (ip: string, orderedIps: string[]) => void
+  /** Clear the LAN multi-select set (`selectedIps`) only — leaves the
+   *  detail-pane primary (`selectedIp`) alone. Used to keep the USB and
+   *  Wi-Fi selections mutually exclusive: serialMaster calls this when the
+   *  user selects a USB card. Idempotent. */
+  clearSelectedIps: () => void
   dismissDevice: (ip: string) => void
   /** Helper-driven housekeeping: every push of the device list calls
    *  this so dismissed-but-now-online IPs un-dismiss themselves. Idempotent. */
@@ -321,6 +327,19 @@ const initialLastFlashedBoard: Record<string, string> = (() => {
   }
 })()
 
+/**
+ * Clear the USB-serial multi-select so the USB and Wi-Fi(LAN) selections
+ * stay mutually exclusive (user 2026-07-05:「serial が選択されている時は
+ * wifi 側は選択を外す」). Called from every LAN "establish selection"
+ * action. No-op when nothing is selected, so it never triggers a
+ * redundant `set()` / re-render. Terminal: `clearSelectedPorts` does not
+ * call back into this store, so no cross-store update loop is possible.
+ */
+function clearUsbSelectionIfAny() {
+  const sm = useSerialMaster.getState()
+  if (sm.selectedPortIds.length > 0) sm.clearSelectedPorts()
+}
+
 export const useDeviceStore = create<DeviceState>((set) => ({
   selectedIp: initialSelected,
   selectedIps: initialSelectedIps,
@@ -337,6 +356,11 @@ export const useDeviceStore = create<DeviceState>((set) => ({
 
   selectDevice: (ip) => {
     persist(STORAGE_KEY_SELECTED, ip)
+    // Selecting a real LAN device clears any USB-serial selection (mutual
+    // exclusivity). The isSerialId guard is load-bearing: openConfigFor
+    // hands off to selectDevice('serial:<mac>') after a USB connect, and
+    // that must NOT wipe the USB card the user just connected.
+    if (ip && !isSerialId(ip)) clearUsbSelectionIfAny()
     set((s) => {
       const next = new Set(s.selectedIps)
       if (ip) next.add(ip)
@@ -368,6 +392,10 @@ export const useDeviceStore = create<DeviceState>((set) => ({
         primary = ip
       }
       const arr = [...set_]
+      // Any remaining LAN selection makes the two transports exclusive →
+      // clear USB. A toggle that empties the LAN set (arr.length === 0)
+      // leaves USB alone (nothing to be exclusive against).
+      if (arr.length > 0) clearUsbSelectionIfAny()
       persist(STORAGE_KEY_SELECTED_SET, arr)
       persist(STORAGE_KEY_SELECTED, primary)
       return { selectedIps: arr, selectedIp: primary }
@@ -381,6 +409,7 @@ export const useDeviceStore = create<DeviceState>((set) => ({
    */
   selectExclusive: (ip) =>
     set(() => {
+      clearUsbSelectionIfAny()
       persist(STORAGE_KEY_SELECTED_SET, [ip])
       persist(STORAGE_KEY_SELECTED, ip)
       return { selectedIps: [ip], selectedIp: ip }
@@ -393,6 +422,8 @@ export const useDeviceStore = create<DeviceState>((set) => ({
    */
   selectRange: (ip, orderedIps) =>
     set((s) => {
+      // Both branches below establish a non-empty LAN selection → clear USB.
+      clearUsbSelectionIfAny()
       const anchor = s.selectedIp
       const ai = anchor ? orderedIps.indexOf(anchor) : -1
       const bi = orderedIps.indexOf(ip)
@@ -406,6 +437,16 @@ export const useDeviceStore = create<DeviceState>((set) => ({
       persist(STORAGE_KEY_SELECTED_SET, arr)
       persist(STORAGE_KEY_SELECTED, ip)
       return { selectedIps: arr, selectedIp: ip }
+    }),
+
+  clearSelectedIps: () =>
+    set((s) => {
+      if (s.selectedIps.length === 0) return {}
+      persist(STORAGE_KEY_SELECTED_SET, [])
+      // Intentionally leaves `selectedIp` (the shared detail-pane key)
+      // untouched — only the multi-select set is mutually exclusive with
+      // the USB selection; the detail pane stays on whatever was shown.
+      return { selectedIps: [] }
     }),
 
   /** Hide an offline card. Persisted; cleared when the IP comes back online. */
