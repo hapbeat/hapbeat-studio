@@ -143,7 +143,7 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
   return (
     <div
       className={`device-row usb${checked ? ' checked' : ''}${isPrimary ? ' primary' : ''}`}
-      title="クリック=このデバイスだけ選択 / Ctrl+クリック=追加選択 / Shift+クリック=範囲選択"
+      title="クリック=書き込み(フラッシュ)対象に選択 / Ctrl+クリック=追加選択 / Shift+クリック=範囲選択　※選択だけで接続はしません。設定・Wi-Fi は「接続」ボタンから"
       onClick={(e) => {
         const target = e.target as HTMLElement
         if (target.closest('button')) return
@@ -242,7 +242,7 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
               if (isActive) selectDevice(pseudoId)
               else void openConfigFor(entry.id)
             }}
-            title={isActive ? '設定タブを開く' : 'USB Serial で接続して設定 (get_info / Wi-Fi)。1 台ずつ'}
+            title={isActive ? '設定タブを開く' : 'USB Serial で接続 → get_info/Wi-Fi 等の設定へ（設定はここから。カードのクリック/チェックはフラッシュ対象の選択のみ）。1 台ずつ'}
           >
             {isActive ? '設定' : '接続'}
           </button>
@@ -252,7 +252,7 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
             style={{ fontSize: 12, padding: '3px 10px' }}
             onClick={(e) => { e.stopPropagation(); void probePort(entry.id) }}
             disabled={probing}
-            title="get_info でデバイス情報を取得 (ファーム入りなら名前/fw が出ます)。書き込み完了表示もクリアされます"
+            title="get_info でデバイス情報を取得 (名前/fw 等)。書き込み完了表示もクリア。※現状 S3 (DuoWL v3/v4) は接続の開閉でデバイスが再起動します (FW 修正予定)"
           >
             {probing ? '識別中…' : '↻ 識別'}
           </button>
@@ -320,8 +320,9 @@ function UsbPortsSection() {
             <UsbPortCard key={e.id} entry={e} orderedIds={knownPorts.map((p) => p.id)} />
           ))}
           <div className="devices-empty" style={{ padding: '4px 10px', fontSize: 11, textAlign: 'left' }}>
-            ※ カードをクリックで書き込み対象を選択。「全選択」→ Firmware タブで一斉並列書き込みできます。
-            ブラウザは COM 名を取得できないため #番号 と「↻ 識別」で区別してください。
+            ※ カードのクリック/チェック＝書き込み(フラッシュ)対象の選択（接続はしません）。
+            設定・Wi-Fi は各カードの「接続」、情報取得だけなら「↻ 識別」。
+            「全選択」→ Firmware タブで一斉書き込み。ブラウザは COM 名を取得できないため #番号 で区別してください。
           </div>
         </>
       )}
