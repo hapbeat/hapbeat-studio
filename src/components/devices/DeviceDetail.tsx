@@ -238,7 +238,7 @@ export function DeviceDetail() {
         espnow_ui: p.espnow_ui as { auto_off_ms?: number; wake_on_button?: boolean; wake_on_volume?: boolean; led_enabled?: boolean; low_batt_pct?: number } | undefined,
         stream: p.stream as { received?: number; lost?: number; recovered?: number; dropped?: number; max_gap?: number; handoffs?: number; sources?: number; locked?: boolean; locked_mac?: string; delay_ms?: number } | undefined,
         // DuoWL v4 audio stage settings (DEC-041, board === "duo_wl_v4" only)
-        audio: p.audio as { pam_db?: number; lineout_db?: number; boost_db?: number; hp_db?: number } | undefined,
+        audio: p.audio as { pam_db?: number; lineout_db?: number; boost_db?: number; hp_db?: number; input_mode?: 'output' | 'line_in' } | undefined,
         // SoftAP extension fields (firmware ≥ v0.1.0)
         mode: p.mode as 'sta' | 'ap' | undefined,
         ap_ssid: p.ap_ssid as string | undefined,

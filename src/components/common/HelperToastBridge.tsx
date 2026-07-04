@@ -18,6 +18,7 @@ const WRITE_CMD_LABEL: Record<string, string> = {
   reboot: '再起動', kit_delete: 'Kit 削除',
   set_haptic_gain: '触覚ゲイン', set_dac_boost: 'DAC ブースト',
   set_headphone_volume: 'ヘッドホン音量', set_stream_buffer: 'ストリームバッファ',
+  set_input_mode: '入出力モード',
 }
 
 /** 即リブートして ACK を返さない可能性が高い cmd。成功トーストはパネル側の

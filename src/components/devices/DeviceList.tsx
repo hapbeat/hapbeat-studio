@@ -354,6 +354,8 @@ export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = 
   const selectRange = useDeviceStore((s) => s.selectRange)
   const dismissDevice = useDeviceStore((s) => s.dismissDevice)
   const syncOnlineDevices = useDeviceStore((s) => s.syncOnlineDevices)
+  const markOnlineness = useDeviceStore((s) => s.markOnlineness)
+  const pruneStaleOffline = useDeviceStore((s) => s.pruneStaleOffline)
 
   // Hapbeat = duo_wl_* / band_wl_* board (from get_info). Used for the card
   // badge and, in `hapbeatOnly` mode (UI/Display tab picker), to disable
@@ -386,6 +388,26 @@ export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = 
     const onlineIps = devices.filter((d) => d.online).map((d) => d.ipAddress)
     syncOnlineDevices(onlineIps)
   }, [devices, syncOnlineDevices])
+
+  // Track each device's offline-streak start (cleared the instant it's
+  // seen online again) so a single missed PONG cycle can't count toward
+  // auto-removal — only a SUSTAINED absence does.
+  useEffect(() => {
+    markOnlineness(devices.map((d) => ({ ip: d.ipAddress, online: d.online })))
+  }, [devices, markOnlineness])
+
+  // Auto-remove: once a device has been continuously offline for
+  // AUTO_REMOVE_MS, hide its card the same way the manual ✕ does (so
+  // the user doesn't have to remember to clean up after unplugging a
+  // device). Slightly above the ~8s helper offline-detection threshold
+  // so we never race the flicker this was designed to avoid — the
+  // streak must survive a couple of poll ticks past helper's own
+  // online→offline flip before Studio acts on it.
+  useEffect(() => {
+    const AUTO_REMOVE_MS = 10_000
+    const id = window.setInterval(() => pruneStaleOffline(AUTO_REMOVE_MS), 1000)
+    return () => window.clearInterval(id)
+  }, [pruneStaleOffline])
 
   // One-shot prune of stale selections from previous Studio sessions.
   // Background: localStorage carries `selectedIps` across reloads, so a

@@ -176,6 +176,8 @@ export interface SerialDeviceInfo {
     lineout_db?: number
     boost_db?: number
     hp_db?: number
+    /** Input/output routing (DEC-041 follow-up, DuoWL v4 only). */
+    input_mode?: 'output' | 'line_in'
   }
 }
 
