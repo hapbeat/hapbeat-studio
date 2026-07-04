@@ -175,6 +175,7 @@ export interface StudioToManagerMessage {
     | 'set_dac_boost'           // DuoWL v4 receiver — DAC digital makeup gain
     | 'set_headphone_volume'    // DuoWL v4 receiver — TPA6130A2 HP volume
     | 'set_stream_buffer'       // all UDP receivers — stream jitter buffer (ms)
+    | 'set_input_mode'          // DuoWL v4 receiver — output (HP) vs line_in (jack → haptics)
   payload: Record<string, unknown>
 }
 
@@ -333,6 +334,9 @@ export interface GetInfoResult {
     boost_db?: number
     /** TPA6130A2 headphone volume, −59..+4 dB. */
     hp_db?: number
+    /** Input/output routing (DEC-041 follow-up): "output" = normal headphone
+     *  playback; "line_in" = jack audio-in routed to haptics (DuoWL v4 only). */
+    input_mode?: 'output' | 'line_in'
   }
   error?: string
 }

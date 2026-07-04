@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { MqttClientEntry, NodeRole, NodeTransport, SensorMapping, SensorReading } from '@/types/manager'
+import { useSerialMaster } from './serialMaster'
 
 const STORAGE_KEY_SELECTED = 'hapbeat-studio-selected-device'
 const STORAGE_KEY_SELECTED_SET = 'hapbeat-studio-selected-devices'
@@ -30,8 +31,22 @@ interface DeviceState {
    *  an offline card adds the IP here; the sidebar then hides that
    *  card. Auto-cleared when the device comes back online (helper
    *  push reports `online: true`) so users don't have to manually
-   *  un-dismiss after a reboot. Persisted across reloads. */
+   *  un-dismiss after a reboot. Persisted across reloads.
+   *
+   *  Also populated automatically by `pruneStaleOffline` (below) once a
+   *  device has been continuously offline for AUTO_REMOVE_MS — same
+   *  storage, same auto-undismiss-on-reconnect behavior as a manual ✕. */
   dismissedIps: string[]
+
+  /** Per-IP timestamp (ms, `Date.now()`) of when the device was FIRST
+   *  observed offline in the current unbroken offline streak. Cleared
+   *  the moment the device is seen online again, so a transient blip
+   *  (helper misses one PONG cycle) resets the streak instead of
+   *  accumulating toward auto-removal — this is what keeps the old
+   *  "flickering list" bug from coming back (2026-06-16 offline
+   *  threshold 5s→8s fix). Not persisted: it's only meaningful for the
+   *  live session's polling loop. */
+  offlineSince: Record<string, number>
 
   /** Per-IP cache of the most recent get_info response. */
   infoCache: Record<string, {
@@ -125,6 +140,8 @@ interface DeviceState {
       lineout_db?: number
       boost_db?: number
       hp_db?: number
+      /** Input/output routing (DEC-041 follow-up, DuoWL v4 only). */
+      input_mode?: 'output' | 'line_in'
     }
   }>
 
@@ -171,10 +188,31 @@ interface DeviceState {
   selectExclusive: (ip: string) => void
   /** Shift+click — contiguous range from the primary, in display order. */
   selectRange: (ip: string, orderedIps: string[]) => void
+  /** Clear the LAN multi-select set (`selectedIps`) only — leaves the
+   *  detail-pane primary (`selectedIp`) alone. Used to keep the USB and
+   *  Wi-Fi selections mutually exclusive: serialMaster calls this when the
+   *  user selects a USB card. Idempotent. */
+  clearSelectedIps: () => void
   dismissDevice: (ip: string) => void
   /** Helper-driven housekeeping: every push of the device list calls
    *  this so dismissed-but-now-online IPs un-dismiss themselves. Idempotent. */
   syncOnlineDevices: (onlineIps: string[]) => void
+  /**
+   * Record/clear the offline-streak start for every currently-known
+   * device. Call this on every `device_list` push with the FULL set of
+   * `{ip, online}` pairs helper reported. A device not present in the
+   * push at all (helper dropped it from the list) is left alone here —
+   * `visibleDevices` in DeviceList only ever sees what helper sent, so
+   * there's nothing to track for an IP that already vanished upstream.
+   */
+  markOnlineness: (entries: Array<{ ip: string; online: boolean }>) => void
+  /**
+   * Auto-hide any device whose offline streak (tracked by
+   * `markOnlineness`) has exceeded `thresholdMs`. Reuses the same
+   * dismissed-list storage as the manual ✕ button, so it inherits
+   * auto-undismiss-on-reconnect for free. Call from a ~1s poll.
+   */
+  pruneStaleOffline: (thresholdMs: number) => void
   /** Drop selection entries that no longer correspond to any *known*
    *  device (i.e. the helper's mDNS list never returned this IP this
    *  session). Use to clean up stale persisted IPs from previous
@@ -289,10 +327,24 @@ const initialLastFlashedBoard: Record<string, string> = (() => {
   }
 })()
 
+/**
+ * Clear the USB-serial multi-select so the USB and Wi-Fi(LAN) selections
+ * stay mutually exclusive (user 2026-07-05:「serial が選択されている時は
+ * wifi 側は選択を外す」). Called from every LAN "establish selection"
+ * action. No-op when nothing is selected, so it never triggers a
+ * redundant `set()` / re-render. Terminal: `clearSelectedPorts` does not
+ * call back into this store, so no cross-store update loop is possible.
+ */
+function clearUsbSelectionIfAny() {
+  const sm = useSerialMaster.getState()
+  if (sm.selectedPortIds.length > 0) sm.clearSelectedPorts()
+}
+
 export const useDeviceStore = create<DeviceState>((set) => ({
   selectedIp: initialSelected,
   selectedIps: initialSelectedIps,
   dismissedIps: initialDismissed,
+  offlineSince: {},
   infoCache: {},
   wifiStatusCache: {},
   wifiProfilesCache: {},
@@ -304,6 +356,11 @@ export const useDeviceStore = create<DeviceState>((set) => ({
 
   selectDevice: (ip) => {
     persist(STORAGE_KEY_SELECTED, ip)
+    // Selecting a real LAN device clears any USB-serial selection (mutual
+    // exclusivity). The isSerialId guard is load-bearing: openConfigFor
+    // hands off to selectDevice('serial:<mac>') after a USB connect, and
+    // that must NOT wipe the USB card the user just connected.
+    if (ip && !isSerialId(ip)) clearUsbSelectionIfAny()
     set((s) => {
       const next = new Set(s.selectedIps)
       if (ip) next.add(ip)
@@ -335,6 +392,10 @@ export const useDeviceStore = create<DeviceState>((set) => ({
         primary = ip
       }
       const arr = [...set_]
+      // Any remaining LAN selection makes the two transports exclusive →
+      // clear USB. A toggle that empties the LAN set (arr.length === 0)
+      // leaves USB alone (nothing to be exclusive against).
+      if (arr.length > 0) clearUsbSelectionIfAny()
       persist(STORAGE_KEY_SELECTED_SET, arr)
       persist(STORAGE_KEY_SELECTED, primary)
       return { selectedIps: arr, selectedIp: primary }
@@ -348,6 +409,7 @@ export const useDeviceStore = create<DeviceState>((set) => ({
    */
   selectExclusive: (ip) =>
     set(() => {
+      clearUsbSelectionIfAny()
       persist(STORAGE_KEY_SELECTED_SET, [ip])
       persist(STORAGE_KEY_SELECTED, ip)
       return { selectedIps: [ip], selectedIp: ip }
@@ -360,6 +422,8 @@ export const useDeviceStore = create<DeviceState>((set) => ({
    */
   selectRange: (ip, orderedIps) =>
     set((s) => {
+      // Both branches below establish a non-empty LAN selection → clear USB.
+      clearUsbSelectionIfAny()
       const anchor = s.selectedIp
       const ai = anchor ? orderedIps.indexOf(anchor) : -1
       const bi = orderedIps.indexOf(ip)
@@ -373,6 +437,16 @@ export const useDeviceStore = create<DeviceState>((set) => ({
       persist(STORAGE_KEY_SELECTED_SET, arr)
       persist(STORAGE_KEY_SELECTED, ip)
       return { selectedIps: arr, selectedIp: ip }
+    }),
+
+  clearSelectedIps: () =>
+    set((s) => {
+      if (s.selectedIps.length === 0) return {}
+      persist(STORAGE_KEY_SELECTED_SET, [])
+      // Intentionally leaves `selectedIp` (the shared detail-pane key)
+      // untouched — only the multi-select set is mutually exclusive with
+      // the USB selection; the detail pane stays on whatever was shown.
+      return { selectedIps: [] }
     }),
 
   /** Hide an offline card. Persisted; cleared when the IP comes back online. */
@@ -412,6 +486,61 @@ export const useDeviceStore = create<DeviceState>((set) => ({
       if (filtered.length === s.dismissedIps.length) return {}
       persist(STORAGE_KEY_DISMISSED, filtered)
       return { dismissedIps: filtered }
+    }),
+
+  markOnlineness: (entries) =>
+    set((s) => {
+      let changed = false
+      const next = { ...s.offlineSince }
+      for (const { ip, online } of entries) {
+        if (online) {
+          if (ip in next) {
+            delete next[ip]
+            changed = true
+          }
+        } else if (!(ip in next)) {
+          next[ip] = Date.now()
+          changed = true
+        }
+      }
+      if (!changed) return {}
+      return { offlineSince: next }
+    }),
+
+  pruneStaleOffline: (thresholdMs) =>
+    set((s) => {
+      const now = Date.now()
+      const toHide = Object.entries(s.offlineSince)
+        .filter(([ip, since]) => now - since >= thresholdMs && !s.dismissedIps.includes(ip))
+        .map(([ip]) => ip)
+      if (toHide.length === 0) return {}
+
+      const dismissedArr = [...s.dismissedIps, ...toHide]
+      persist(STORAGE_KEY_DISMISSED, dismissedArr)
+
+      // Mirror dismissDevice's selection cleanup so an auto-removed card
+      // can't leave a dangling "selected" entry behind (a card that just
+      // disappeared from the list shouldn't keep contributing to
+      // broadcast ops, and a stale `selectedIp` would leave the detail
+      // pane pointed at nothing).
+      const hideSet = new Set(toHide)
+      const sel = new Set(s.selectedIps)
+      let selChanged = false
+      for (const ip of hideSet) {
+        if (sel.delete(ip)) selChanged = true
+      }
+      const selArr = selChanged ? [...sel] : s.selectedIps
+      if (selChanged) persist(STORAGE_KEY_SELECTED_SET, selArr)
+
+      const primaryHidden = s.selectedIp !== null && hideSet.has(s.selectedIp)
+      const primary = primaryHidden ? (selArr[0] ?? null) : s.selectedIp
+      if (primaryHidden) persist(STORAGE_KEY_SELECTED, primary)
+
+      return {
+        dismissedIps: dismissedArr,
+        selectedIps: selArr,
+        selectedIp: primary,
+      }
     }),
 
   pruneSelectionsToKnown: (knownIps) =>

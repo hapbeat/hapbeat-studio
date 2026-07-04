@@ -75,6 +75,9 @@ export interface NodeConfigInfo {
     lineout_db?: number
     boost_db?: number
     hp_db?: number
+    /** Input/output routing (DEC-041 follow-up, DuoWL v4 only):
+     *  "output" = normal headphone playback / "line_in" = jack audio-in → haptics. */
+    input_mode?: 'output' | 'line_in'
   }
 }
 
@@ -1935,6 +1938,9 @@ export function DuoWlV4AudioSection({
   const [hpDb, setHpDb] = useState<number>(audio?.hp_db ?? -10)
   // Stream jitter buffer (set_stream_buffer). Write-only — not in get_info yet.
   const [bufferMs, setBufferMs] = useState<number>(0)
+  // Input/output routing (DEC-041 follow-up): output=normal HP playback,
+  // line_in=jack audio-in → haptics (DuoWL v4 only).
+  const [inputMode, setInputMode] = useState<'output' | 'line_in'>(audio?.input_mode ?? 'output')
 
   // Sync from device whenever cachedInfo.audio changes (get_info result).
   useEffect(() => {
@@ -1943,8 +1949,9 @@ export function DuoWlV4AudioSection({
     if (audio.lineout_db != null) setLineoutDb(audio.lineout_db)
     if (audio.boost_db != null) setBoostDb(audio.boost_db)
     if (audio.hp_db != null) setHpDb(audio.hp_db)
+    if (audio.input_mode != null) setInputMode(audio.input_mode)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audio?.pam_db, audio?.lineout_db, audio?.boost_db, audio?.hp_db])
+  }, [audio?.pam_db, audio?.lineout_db, audio?.boost_db, audio?.hp_db, audio?.input_mode])
 
   const { setAnchor } = useToast()
   const offline = !device.online
@@ -1968,6 +1975,11 @@ export function DuoWlV4AudioSection({
     setAnchor(e.currentTarget)
     sendTo({ type: 'set_stream_buffer', payload: { buffer_ms: bufferMs } })
   }
+  const applyInputMode = (e: React.MouseEvent<HTMLElement>, next: 'output' | 'line_in') => {
+    setAnchor(e.currentTarget)
+    setInputMode(next)
+    sendTo({ type: 'set_input_mode', payload: { mode: next } })
+  }
 
   return (
     <>
@@ -1978,6 +1990,38 @@ export function DuoWlV4AudioSection({
       </div>
       <div className="form-status muted" style={{ marginBottom: 6, fontSize: 12 }}>
         信号の流れ: DAC(AIC3204) → ライン出力(AIC3204) → PAM8404 → 触覚モータ ／ 別系統: DAC → TPA6130A2 → ヘッドホン
+      </div>
+
+      {/* 0. Input/output routing — output=通常のヘッドホン出力, line_in=ジャックから
+          有線音声を入力して触覚に出す（DuoWL v4 専用）。 */}
+      <div className="form-row">
+        <label>入出力モード</label>
+        <div className="device-toggle" role="group" aria-label="input/output mode">
+          <button
+            type="button"
+            className={`btn btn-sm device-toggle-btn ${inputMode === 'output' ? 'active' : ''}`}
+            onClick={(e) => applyInputMode(e, 'output')}
+            disabled={offline}
+          >
+            出力（ヘッドホン）
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm device-toggle-btn ${inputMode === 'line_in' ? 'active' : ''}`}
+            onClick={(e) => applyInputMode(e, 'line_in')}
+            disabled={offline}
+          >
+            入力（ライン入力）
+          </button>
+        </div>
+        <span />
+      </div>
+      {/* min-height reserved so this hint is always present — never shifts
+          the rows below when inputMode changes (layout-shift rule). */}
+      <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
+        {inputMode === 'line_in'
+          ? 'ライン入力: ジャックからの有線音声を触覚として出力します。'
+          : '出力: 通常のヘッドホン再生です。'}
       </div>
 
       {/* 1. PAM8404 power amp (coarse, drives the motors) */}

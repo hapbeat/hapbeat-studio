@@ -11,6 +11,18 @@ import {
 import { eraseFlash as eraseFlashImpl, flashRegions, type FlashProgress } from '@/utils/serialFlasher'
 
 /**
+ * Clear the LAN (Wi-Fi) multi-select so the USB and Wi-Fi selections stay
+ * mutually exclusive (user 2026-07-05:「serial が選択されている時は wifi 側は
+ * 選択を外す」). Called from every USB "establish selection" action. No-op
+ * when nothing is selected. Terminal: `clearSelectedIps` does not call back
+ * into this store, so no cross-store update loop is possible.
+ */
+function clearLanSelectionIfAny() {
+  const ds = useDeviceStore.getState()
+  if (ds.selectedIps.length > 0) ds.clearSelectedIps()
+}
+
+/**
  * SerialMaster — single source of truth for the Studio-wide USB
  * Serial connection.
  *
@@ -176,6 +188,8 @@ export interface SerialDeviceInfo {
     lineout_db?: number
     boost_db?: number
     hp_db?: number
+    /** Input/output routing (DEC-041 follow-up, DuoWL v4 only). */
+    input_mode?: 'output' | 'line_in'
   }
 }
 
@@ -345,14 +359,25 @@ interface SerialMasterState {
     opts?: { eraseAll?: boolean; compress?: boolean },
   ) => Promise<void>
   /**
-   * Apply a config command to SEVERAL registry ports in PARALLEL — the
-   * config analogue of flashSelected. Each target opens its own transient
-   * config conn (like probePort), sends its cmd, and closes; all run
-   * concurrently via Promise.all. Per-port outcome lands in each entry's
-   * `config` slot. `targets` is `{id, cmd}[]` so the SAME cmd can go to all
-   * (map ids → one cmd) OR a DIFFERENT cmd per device. `cmd` is the raw
-   * firmware serial-config JSON, e.g. `{cmd:'set_wifi', ssid, pass}`.
-   * Returns a `{ ok, fail }` count. Ports mid-flash are skipped.
+   * Apply a config command to SEVERAL registry ports, ONE AT A TIME.
+   * Each target opens its own transient config conn (like probePort),
+   * sends its cmd, and closes; a short settle delay separates devices.
+   *
+   * Deliberately SEQUENTIAL, not `Promise.all` (unlike flashSelected):
+   * set_wifi makes the firmware reboot the instant it applies, so running
+   * N ports at once clusters N EN-resets + N reboot-driven USB
+   * re-enumerations in the same window and the write is dropped on some
+   * ports (user 2026-07-05:「複数同時だと再起動がかかって書き込めない、
+   * 1 台ずつなら成功する」). Serializing makes each write equivalent to the
+   * proven-reliable single-device path. Flash keeps its fan-out because
+   * esptool-js owns the port through a robust reset+sync and never
+   * self-reboots mid-stream.
+   *
+   * Per-port outcome lands in each entry's `config` slot. `targets` is
+   * `{id, cmd}[]` so the SAME cmd can go to all (map ids → one cmd) OR a
+   * DIFFERENT cmd per device. `cmd` is the raw firmware serial-config
+   * JSON, e.g. `{cmd:'set_wifi', ssid, pass}`. Returns a `{ ok, fail }`
+   * count. Ports mid-flash are skipped.
    */
   bulkConfigCmd: (
     targets: Array<{ id: string; cmd: Record<string, unknown> }>,
@@ -963,13 +988,20 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
         const anchor = has
           ? (s.selectedPortId === id ? (next[0] ?? null) : s.selectedPortId)
           : id
+        // Any remaining USB selection makes the transports exclusive →
+        // clear LAN. A toggle that empties the USB set leaves LAN alone.
+        if (next.length > 0) clearLanSelectionIfAny()
         return { selectedPortIds: next, selectedPortId: anchor }
       })
     },
 
-    selectExclusivePort: (id) => set({ selectedPortIds: [id], selectedPortId: id }),
+    selectExclusivePort: (id) => {
+      clearLanSelectionIfAny()
+      set({ selectedPortIds: [id], selectedPortId: id })
+    },
 
     selectPortRange: (id, orderedIds) => {
+      clearLanSelectionIfAny()  // both branches establish a non-empty USB selection
       set((s) => {
         const anchor = s.selectedPortId
         const ai = anchor ? orderedIds.indexOf(anchor) : -1
@@ -981,7 +1013,10 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
     },
 
     selectAllPorts: () => {
-      set((s) => ({ selectedPortIds: s.knownPorts.map((e) => e.id) }))
+      set((s) => {
+        if (s.knownPorts.length > 0) clearLanSelectionIfAny()
+        return { selectedPortIds: s.knownPorts.map((e) => e.id) }
+      })
     },
 
     clearSelectedPorts: () => set({ selectedPortIds: [], selectedPortId: null }),
@@ -1181,8 +1216,16 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
         }
       }
 
-      pushLog('serial', `bulk config → ${runnable.length} 台 並列 (${String(runnable[0]?.cmd.cmd ?? '')})`)
-      const results = await Promise.all(runnable.map(applyOne))
+      pushLog('serial', `bulk config → ${runnable.length} 台 順次 (${String(runnable[0]?.cmd.cmd ?? '')})`)
+      // SEQUENTIAL — see the bulkConfigCmd JSDoc. A settle delay between
+      // devices lets the previous device's set_wifi reboot + USB
+      // re-enumeration finish before we open the next port, so their
+      // resets never overlap (the cause of the "複数同時だと書き込めない" bug).
+      const results: boolean[] = []
+      for (let i = 0; i < runnable.length; i++) {
+        if (i > 0) await new Promise((r) => setTimeout(r, 400))
+        results.push(await applyOne(runnable[i]))
+      }
       const okCount = results.filter(Boolean).length
       const failCount = results.length - okCount
       // Clear per-card config state after a beat (mirror flash).
