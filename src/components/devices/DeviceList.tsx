@@ -252,7 +252,7 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
             style={{ fontSize: 12, padding: '3px 10px' }}
             onClick={(e) => { e.stopPropagation(); void probePort(entry.id) }}
             disabled={probing}
-            title="get_info でデバイス情報を取得 (名前/fw 等)。書き込み完了表示もクリア。※現状 S3 (DuoWL v3/v4) は接続の開閉でデバイスが再起動します (FW 修正予定)"
+            title="get_info でデバイス情報を取得 (名前/fw 等)。書き込み完了表示もクリア。※ S3 (DuoWL v3/v4) は USB 切断時に必ず再起動します (S3 の USB-Serial-JTAG 仕様・回避不可・実害なし)"
           >
             {probing ? '識別中…' : '↻ 識別'}
           </button>
