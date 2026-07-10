@@ -28,8 +28,16 @@ export function OnboardingWizard() {
   const conn = useSerialMaster((s) => s.conn)
   const release = useSerialMaster((s) => s.release)
   const flashLastResult = useSerialMaster((s) => s.flashLastResult)
+  const selectedPortIds = useSerialMaster((s) => s.selectedPortIds)
 
   const [step, setStep] = useState<Step>('probe')
+
+  // Primary onboarding path (user 2026-07-10): CHECKING a USB card (flash-target
+  // selection) auto-advances to firmware flashing — no "connect" click needed.
+  // The 設定 (config-connect) button is for AFTER flashing (Wi-Fi setup, Step 3).
+  useEffect(() => {
+    if (step === 'probe' && selectedPortIds.length > 0) setStep('flash')
+  }, [selectedPortIds, step])
 
   // Auto-route based on probe outcome.
   //
@@ -89,7 +97,7 @@ export function OnboardingWizard() {
       </header>
 
       <ol className="onboarding-stepper">
-        <StepPill index={1} label="シリアル接続" state={stepStateFor('probe', step)}
+        <StepPill index={1} label="デバイス選択" state={stepStateFor('probe', step)}
           onClick={() => setStep('probe')} />
         <StepArrow />
         <StepPill index={2} label="ファーム書き込み" state={stepStateFor('flash', step)}
@@ -143,30 +151,31 @@ function ProbeStep({
   probeStatus: string
   probeMessage: string | null
 }) {
-  // 接続操作は左サイドバーの「USB Serial」カードの「接続」ボタン。
-  // カードのクリック/チェックは書き込み対象の選択に変わったため、接続は
-  // 明示ボタンに分離した (ユーザ要望 2026-07-01)。このステップは「どこを
-  // 操作するか」を案内するガイドに徹し、接続が成立すると probeStatus を
-  // 監視している親が自動で次ステップへ進める。
+  // 初回セットアップの主動線は「カードをチェック → 自動で書き込み」。書き込みは
+  // チェック（書き込み対象の選択）だけで成立し、設定接続（⚙ 設定）は不要
+  // (ユーザ要望 2026-07-10)。このステップは操作案内に徹し、チェックが入ると
+  // 親の effect が自動で Step 2 へ進める。既にファーム入りのデバイスを設定だけ
+  // したい場合の「⚙ 設定」接続 → Step 3 直行も probeStatus 監視で残している。
   return (
     <div className="form-section onboarding-step">
-      <div className="form-section-title">Step 1 — USB Serial で接続</div>
+      <div className="form-section-title">Step 1 — USB デバイスを選ぶ</div>
       <div className="onboarding-step-body">
         <p>
           デバイスを USB ケーブルで PC に繋ぎ、
-          <strong>左の「USB Serial」欄</strong>で接続します:
+          <strong>左の「USB Serial」欄</strong>で選びます:
         </p>
         <ol className="onboarding-substeps">
           <li><strong>＋</strong> ボタンで USB 機器を追加（COM ポート選択ダイアログ）</li>
-          <li>表示されたカードの<strong>「接続」ボタン</strong>を押すと接続します</li>
+          <li>表示されたカードの<strong>チェックボックス ☑</strong> を入れる（書き込み対象に選択）</li>
         </ol>
         <p className="onboarding-step-routing-hint">
-          接続すると、デバイスの応答内容に応じて自動で次のステップに進みます:
+          チェックを入れると <strong>自動で Step 2（ファーム書き込み）</strong> へ進みます。
+          複数チェックすれば同時書き込みもできます。
         </p>
-        <ol className="onboarding-substeps">
-          <li>ファーム入り → <strong>Step 3 (Wi-Fi 設定)</strong> に自動遷移</li>
-          <li>応答なし (新品 / ブートローダー破損) → <strong>Step 2 (ファーム書き込み)</strong> に自動遷移</li>
-        </ol>
+        <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+          ※「⚙ 設定」ボタンは<strong>書き込み後の Wi-Fi 設定用</strong>です（初回書き込みには不要）。
+          既にファーム入りのデバイスを設定だけしたいときは「⚙ 設定」で接続すると Step 3 へ直行します。
+        </p>
         {probeMessage && (
           <div className={`form-status ${
             // failed = 「ファーム未書込」など通常フローのケースが大半。
@@ -196,7 +205,7 @@ function FlashStep({ onBack }: { onBack: () => void }) {
           <div className="form-status muted">
             👉 書き込み完了後、自動で Step 3 (Wi-Fi 設定) に進みます。
             その後デバイスの<strong> 電源を一度 OFF→ON </strong>してから、
-            左の USB Serial カードの<strong>「接続」ボタン</strong>で再接続してください。
+            左の USB Serial カードの<strong>「⚙ 設定」ボタン</strong>で設定接続してください。
           </div>
           <div className="form-action-row" style={{ marginTop: 8 }}>
             <button className="form-button-secondary" onClick={onBack}>
@@ -234,10 +243,11 @@ function ConfigureStep({
         <div className="onboarding-step-body">
           <p>
             ファーム書き込みが完了しました。<strong>デバイスの電源を一度 OFF→ON</strong> してから、
-            <strong>左の USB Serial カードの「接続」ボタンで</strong>再接続してください。
+            <strong>左の USB Serial カードの「⚙ 設定」ボタンで</strong>設定接続してください
+            （接続中はカード枠が緑になります）。
           </p>
           <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-            再接続できたら設定タブの Wi-Fi セクションで SSID / パスワードを入力できます。
+            設定接続できたら設定タブの Wi-Fi セクションで SSID / パスワードを入力できます。
           </p>
           {probeMessage && (
             <div className={`form-status ${

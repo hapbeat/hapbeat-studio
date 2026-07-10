@@ -396,24 +396,32 @@
 }
 .usb-config-toggle:hover { background: var(--bg-hover); border-color: var(--success); }
 .usb-config-toggle.on {
+  /* ON state shown by colour ONLY (border + text + faint fill) — the label is
+     fixed ("⚙ 設定"), and no font-weight change, so the button never changes
+     width (user 2026-07-10: 枠の色のみ). The card's green frame reinforces it. */
   background: rgba(76, 175, 80, 0.14);
   border-color: var(--success);
   color: var(--success);
-  font-weight: 600;
 }
 
-/* USB section legend — the two-mechanism explainer under the cards. */
-.devices-usb-legend {
-  padding: 6px 10px;
+/* USB section help popover (opened by the ⓘ button; moved out from under the
+   cards for visibility). Click anywhere on it to dismiss. */
+.devices-usb-help {
+  padding: 8px 10px;
+  margin: 4px 6px 2px;
+  border: 1px solid var(--success);
+  border-radius: 6px;
+  background: var(--bg-hover);
   font-size: 11px;
-  line-height: 1.5;
+  line-height: 1.6;
   text-align: left;
   color: var(--text-secondary);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
+  cursor: pointer;
 }
-.devices-usb-legend .legend-chip {
+.devices-usb-help .legend-chip {
   display: inline-block;
   padding: 0 5px;
   border-radius: 3px;
@@ -421,8 +429,8 @@
   font-weight: 600;
   white-space: nowrap;
 }
-.devices-usb-legend .legend-chip.select { border-color: var(--accent); color: var(--accent-light); }
-.devices-usb-legend .legend-chip.conn { border-color: var(--success); color: var(--success); }
+.devices-usb-help .legend-chip.select { border-color: var(--accent); color: var(--accent-light); }
+.devices-usb-help .legend-chip.conn { border-color: var(--success); color: var(--success); }
 
 /* Muted delete ✕ — red semantics (it removes a row) but a dark, blends-in
    tint + rounded-rect so it doesn't grab attention like the bright offline

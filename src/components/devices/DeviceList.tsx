@@ -128,14 +128,14 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
   const selectPortRange = useSerialMaster((s) => s.selectPortRange)
   const probePort = useSerialMaster((s) => s.probePort)
   const openConfigFor = useSerialMaster((s) => s.openConfigFor)
-  const selectDevice = useDeviceStore((s) => s.selectDevice)
+  const closeConfig = useSerialMaster((s) => s.closeConfig)
+  const forgetPort = useSerialMaster((s) => s.forgetPort)
 
   const checked = selectedPortIds.includes(entry.id)
   const isActive = entry.id === activePortId && mode === 'config'
-  const pseudoId = `${SERIAL_DEVICE_PREFIX}${entry.info?.mac ?? 'active'}`
   // Primary = the selection anchor, unified with the Wi-Fi cards' `.primary`
   // (the focused/anchor selection). The live config-connection state is shown
-  // separately by the ConnIndicator dot + the 接続/設定 button.
+  // separately by the ConnIndicator dot + the green card frame + 設定 toggle.
   const isPrimary = selectedPortId === entry.id
   const probing = entry.probe === 'connecting'
   const f = entry.flash
@@ -181,10 +181,19 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
           #{entry.id.replace('usb-', '')}
         </span>
         <span className="device-row-name">{serialEntryLabel(entry)}</span>
-        {/* No "USB" transport tag — the section header says it. Dot shows
-            the live config-connection state (接続 button), independent of
-            the flash-target selection (card click / checkbox). */}
-        <ConnIndicator online={isActive} title={isActive ? '設定接続中 (USB Serial)' : '未接続（設定は「接続」ボタン）'} />
+        {/* No "USB" transport tag — the section header says it. Dot + green
+            card frame show the live config-connection state (設定 toggle),
+            independent of the flash-target selection (card click / checkbox). */}
+        <ConnIndicator online={isActive} title={isActive ? '設定接続 ON (USB Serial)' : '未接続（設定は「設定」ボタン）'} />
+        <button
+          type="button"
+          className="device-row-dismiss"
+          title="このカードを閉じる（COM ポートの許可を取り消す）。Hapbeat 以外のポートを消すのに使います。再接続時は「＋」で再追加できます"
+          onClick={(e) => { e.stopPropagation(); void forgetPort(entry.id) }}
+          aria-label={`${serialEntryLabel(entry)} を閉じる`}
+        >
+          ✕
+        </button>
       </div>
       <div className="device-row-meta">
         {entry.info && (() => {
@@ -230,25 +239,25 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
           className="device-row-meta"
           style={{ marginTop: 4, gap: 6, display: 'flex', justifyContent: 'flex-end' }}
         >
-          {/* ② 設定接続 = the single-master config conn on THIS port (get_info
-              / Wi-Fi). A GREEN "接続中 ✓" toggle (matches the online dot),
-              deliberately distinct from the PURPLE flash-target checkbox so the
-              two mechanisms read apart. Single-master: connecting another card
-              auto-releases this one — the toggle makes that state explicit. */}
+          {/* ② 設定接続トグル: a FIXED-width "⚙ 設定" button whose ON/OFF is shown
+              only by the frame colour (green .on + the card's green config-active
+              frame) — no label/width change (user 2026-07-10). Single-master:
+              turning another card ON auto-releases this one. Flashing does NOT
+              need this — it runs off the checkbox selection. */}
           <button
             type="button"
             className={`usb-config-toggle${isActive ? ' on' : ''}`}
             aria-pressed={isActive}
             onClick={(e) => {
               e.stopPropagation()
-              if (isActive) selectDevice(pseudoId)
-              else void openConfigFor(entry.id)
+              if (isActive) void closeConfig()          // 設定 ON → OFF (切断)
+              else void openConfigFor(entry.id)         // OFF → ON (設定接続)
             }}
             title={isActive
-              ? '設定接続中（1 台だけ）— クリックで設定タブを開く。別カードで「接続」すると、この接続は自動で解除されます'
-              : 'このデバイスに設定接続（get_info / Wi-Fi 等の設定用）。設定接続は 1 台ずつ。※カード左のチェックは「書込み対象」の選択で、接続とは別物です'}
+              ? '設定接続 ON（1 台だけ）。クリックで OFF（切断）。緑の枠が接続中の印。別カードを ON にすると自動で OFF になります'
+              : '設定接続を ON（get_info / Wi-Fi 等の設定用・1 台ずつ）。書き込みは左のチェックだけでOK（設定接続は不要）'}
           >
-            {isActive ? '⚙ 設定接続中 ✓' : '⚙ 接続'}
+            ⚙ 設定
           </button>
           <button
             type="button"
@@ -272,6 +281,7 @@ function UsbPortsSection() {
   const addPort = useSerialMaster((s) => s.addPort)
   const selectAllPorts = useSerialMaster((s) => s.selectAllPorts)
   const clearSelectedPorts = useSerialMaster((s) => s.clearSelectedPorts)
+  const [showHelp, setShowHelp] = useState(false)
   if (!isWebSerialSupported()) return null
   const allSelected = knownPorts.length > 0 && selectedPortIds.length === knownPorts.length
   return (
@@ -287,6 +297,18 @@ function UsbPortsSection() {
             </>
           )}
         </span>
+        {/* Info button — the card-legend moved here from under the cards (poor
+            visibility). Left of 全選択; opens a small help popover. */}
+        <button
+          type="button"
+          className={`devices-sidebar-refresh${showHelp ? ' spinning' : ''}`}
+          style={{ fontSize: 13, width: 'auto', padding: '0 7px' }}
+          onClick={() => setShowHelp((v) => !v)}
+          title="USB カードの見方（説明）"
+          aria-label="説明"
+        >
+          ⓘ
+        </button>
         {/* Bulk select for the 5–10-device production flash: one click to
             select every granted port, instead of ticking each card. */}
         {knownPorts.length > 1 && (
@@ -310,6 +332,19 @@ function UsbPortsSection() {
           ＋
         </button>
       </div>
+      {showHelp && (
+        <div className="devices-usb-help" onClick={() => setShowHelp(false)} role="note">
+          <div>
+            <span className="legend-chip select">☑ チェック</span> = <b>書込み対象</b>（複数OK → Firmware で一斉書込み）
+          </div>
+          <div>
+            <span className="legend-chip conn">⚙ 設定</span> = <b>設定接続</b>（get_info / Wi-Fi・<b>1 台ずつ</b>・緑枠が接続中）
+          </div>
+          <div style={{ color: 'var(--text-muted)' }}>
+            情報取得だけは「↻ 識別」。<b>✕</b> でカードを閉じる（Hapbeat 以外の COM 消し）。COM 名は取れないため #番号 で区別。
+          </div>
+        </div>
+      )}
       {knownPorts.length === 0 ? (
         <div className="devices-empty" style={{ padding: '6px 10px', fontSize: 12 }}>
           ＋ で USB デバイスを追加
@@ -323,19 +358,6 @@ function UsbPortsSection() {
           {knownPorts.map((e) => (
             <UsbPortCard key={e.id} entry={e} orderedIds={knownPorts.map((p) => p.id)} />
           ))}
-          <div className="devices-usb-legend">
-            <div>
-              <span className="legend-chip select">☑ チェック</span> = <b>書込み対象</b>
-              （複数選択OK → Firmware で一斉書込み）
-            </div>
-            <div>
-              <span className="legend-chip conn">⚙ 接続</span> = <b>設定接続</b>
-              （get_info / Wi-Fi 等・<b>1 台ずつ</b>／別を接続すると前は解除）
-            </div>
-            <div style={{ color: 'var(--text-muted)' }}>
-              情報取得だけは「↻ 識別」。ブラウザは COM 名を取れないため #番号 で区別。
-            </div>
-          </div>
         </>
       )}
     </div>

@@ -86,6 +86,13 @@ const portIdByPort = new WeakMap<SerialPort, string>()
 const portById = new Map<string, SerialPort>()
 let portIdCounter = 0
 
+// Ports the user closed with the card ✕ (e.g. a non-Hapbeat COM port). syncPorts
+// filters these out so they stop showing as cards. `port.forget()` (Chrome 103+)
+// also revokes the grant so getPorts() won't return it; this set covers the
+// session even if forget() is unavailable. A re-added port is a new SerialPort
+// object → new id → not in this set, so it reappears (intended).
+const dismissedPorts = new Set<string>()
+
 // Count of in-flight flashSelected batches. Lets concurrent independent
 // flashes (different firmware on different ports) coexist: the global
 // `flashRunning`/`mode` only clears when this returns to 0.
@@ -330,6 +337,9 @@ interface SerialMasterState {
   syncPorts: () => Promise<void>
   /** Show the picker to grant one more port, then sync. */
   addPort: () => Promise<void>
+  /** Card ✕: forget a granted port (revoke via port.forget when available) and
+   *  hide it for the session — for clearing non-Hapbeat COM ports. */
+  forgetPort: (id: string) => Promise<void>
   /** One-shot identity probe (open → get_info → close) for a card.
    *  Refused while the master is busy (config conn open / flashing). */
   probePort: (id: string) => Promise<void>
@@ -894,14 +904,16 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
           config: old?.config,
         }
       })
-      const liveIds = new Set(entries.map((e) => e.id))
+      // Hide ports the user closed with the card ✕ (non-Hapbeat COM ports).
+      const visible = entries.filter((e) => !dismissedPorts.has(e.id))
+      const liveIds = new Set(visible.map((e) => e.id))
       // Unplugged ports drop out of getPorts() — prune their handles
       // and any selection so flashSelected can't target a ghost.
       for (const id of [...portById.keys()]) {
         if (!liveIds.has(id)) portById.delete(id)
       }
       set((s) => ({
-        knownPorts: entries,
+        knownPorts: visible,
         selectedPortIds: s.selectedPortIds.filter((id) => liveIds.has(id)),
         selectedPortId:
           s.selectedPortId && liveIds.has(s.selectedPortId) ? s.selectedPortId : null,
@@ -919,6 +931,24 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
         }
       }
       await get().syncPorts()
+    },
+
+    forgetPort: async (id) => {
+      // If this port holds the live config conn, close it first.
+      if (id === get().activePortId) await get().closeConfig().catch(() => { /* ignore */ })
+      dismissedPorts.add(id)
+      const port = portById.get(id)
+      // Chrome 103+ can revoke the grant so getPorts() no longer returns it.
+      if (port && typeof (port as { forget?: () => Promise<void> }).forget === 'function') {
+        try { await (port as { forget: () => Promise<void> }).forget() } catch { /* older browser / already gone */ }
+      }
+      portById.delete(id)
+      set((s) => ({
+        knownPorts: s.knownPorts.filter((e) => e.id !== id),
+        selectedPortIds: s.selectedPortIds.filter((x) => x !== id),
+        selectedPortId: s.selectedPortId === id ? null : s.selectedPortId,
+      }))
+      log(`forgetPort ${id}`)
     },
 
     probePort: async (id) => {
