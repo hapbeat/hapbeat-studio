@@ -97,11 +97,12 @@ const dismissedPorts = new Set<string>()
 // 「繋いだら自動で識別」— ボタンを押すのが面倒). Sticky for the session: an id is
 // never auto-probed twice, so an S3's post-probe USB re-enumeration (closing its
 // port reboots the chip) can't spin an auto-probe → reboot → auto-probe loop.
-// `autoProbeSeeded` makes the FIRST syncPorts (page load, already-granted ports)
-// seed this set WITHOUT probing — a page refresh must not reboot every plugged
-// device. Only ports that appear AFTER load (a real plug-in / ＋add) auto-probe.
+// Probing happens on EVERY appearance including the first sync (page load) —
+// the user opted into identifying already-plugged devices at open too (user
+// 2026-07-11), accepting a one-time S3 reboot per device when Studio opens/
+// reloads. Each id is still probed at most once per session, so a reload probes
+// each device once (not a loop), and the session cap below is the last backstop.
 const autoProbedIds = new Set<string>()
-let autoProbeSeeded = false
 // Backstop for the (theoretical) case where a device surfaces a NEW port id on
 // every re-enumeration — then sticky-by-id can't stop an auto-probe→reboot loop.
 // Chromium returns a STABLE SerialPort object for a persisted grant (the whole
@@ -937,16 +938,15 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
           s.selectedPortId && liveIds.has(s.selectedPortId) ? s.selectedPortId : null,
       }))
 
-      // Auto-identify newly-appeared ports (user 2026-07-10: 繋いだら自動で識別).
-      // One-shot per id; the FIRST sync only seeds (no probe) so a refresh
-      // doesn't reboot already-plugged devices. Skip flash targets / the live
-      // config port / mid-flash / while flashing so the probe's open-close never
-      // contends with an imminent flash or the active conn — re-checked at fire
-      // time in case the user selected or started something in the interim.
-      if (!autoProbeSeeded) {
-        autoProbeSeeded = true
-        for (const e of visible) autoProbedIds.add(e.id)
-      } else {
+      // Auto-identify newly-appeared ports (user 2026-07-10: 繋いだら自動で識別;
+      // 2026-07-11: also identify already-plugged devices on open/reload). Probe
+      // each fresh id ONCE per session (autoProbedIds) — so a reload probes each
+      // device a single time (an S3's post-probe reboot re-enumerates the SAME id
+      // → not re-probed → no loop). Skip flash targets / the live config port /
+      // mid-flash / while flashing so the probe's open-close never contends with
+      // an imminent flash or the active conn — re-checked at fire time in case
+      // the user selected or started something in the interim.
+      {
         const fresh = visible.filter(
           (e) => e.probe === 'idle' && e.flash.state === 'idle' && !autoProbedIds.has(e.id),
         )
