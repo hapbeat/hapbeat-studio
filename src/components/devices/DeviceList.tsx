@@ -10,6 +10,7 @@ import { isWebSerialSupported } from '@/utils/serialConfig'
 import { roleBadge } from '@/utils/roleLabels'
 import { isHapbeatBoard, isKnownNonHapbeatBoard } from '@/utils/hapbeatBoard'
 import { useOtaStore, OTA_DEFAULT } from '@/stores/otaStore'
+import { UsbInfoModal } from './UsbInfoModal'
 import type { ManagerMessage } from '@/types/manager'
 
 /**
@@ -185,10 +186,14 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
             card frame show the live config-connection state (設定 toggle),
             independent of the flash-target selection (card click / checkbox). */}
         <ConnIndicator online={isActive} title={isActive ? '設定接続 ON (USB Serial)' : '未接続（設定は「設定」ボタン）'} />
+        {/* Card close ✕ — deliberately LOW-KEY (muted, dim-red outline, square):
+            normally unused (unplugging removes the card). It exists only to
+            drop a COM port that was granted by mistake and isn't Hapbeat-related
+            (user 2026-07-10:「目立ちすぎ / 抜けば消える / 誤ペアリング削除用」). */}
         <button
           type="button"
-          className="device-row-dismiss"
-          title="このカードを閉じる（COM ポートの許可を取り消す）。Hapbeat 以外のポートを消すのに使います。再接続時は「＋」で再追加できます"
+          className="btn-x-muted usb-card-close"
+          title="このカードを閉じる（COM ポートの許可を取り消す）。通常は不要 — 抜けば消えます。Hapbeat 以外の COM を誤って追加したときの削除用です。再追加は「＋」から"
           onClick={(e) => { e.stopPropagation(); void forgetPort(entry.id) }}
           aria-label={`${serialEntryLabel(entry)} を閉じる`}
         >
@@ -281,70 +286,66 @@ function UsbPortsSection() {
   const addPort = useSerialMaster((s) => s.addPort)
   const selectAllPorts = useSerialMaster((s) => s.selectAllPorts)
   const clearSelectedPorts = useSerialMaster((s) => s.clearSelectedPorts)
-  const [showHelp, setShowHelp] = useState(false)
+  const [showInfo, setShowInfo] = useState(false)
   if (!isWebSerialSupported()) return null
   const allSelected = knownPorts.length > 0 && selectedPortIds.length === knownPorts.length
   return (
     <div className="devices-usb-section">
-      <div className="devices-sidebar-header" style={{ borderTop: '1px solid var(--border, #333)' }}>
-        <span className="devices-sidebar-title" style={{ fontSize: 12 }}>USB Serial</span>
-        <span className="devices-sidebar-count">
-          {knownPorts.length}
-          {selectedPortIds.length > 0 && (
-            <>
-              {' '}
-              <span className="devices-sidebar-checked">({selectedPortIds.length}選択)</span>
-            </>
-          )}
-        </span>
-        {/* Info button — the card-legend moved here from under the cards (poor
-            visibility). Left of 全選択; opens a small help popover. */}
-        <button
-          type="button"
-          className={`devices-sidebar-refresh${showHelp ? ' spinning' : ''}`}
-          style={{ fontSize: 13, width: 'auto', padding: '0 7px' }}
-          onClick={() => setShowHelp((v) => !v)}
-          title="USB カードの見方（説明）"
-          aria-label="説明"
-        >
-          ⓘ
-        </button>
-        {/* Bulk select for the 5–10-device production flash: one click to
-            select every granted port, instead of ticking each card. */}
-        {knownPorts.length > 1 && (
+      {/* Two-row header: the title + count sit on their own line so the
+          「(N選択)」 indicator can grow/shrink without ever pushing the action
+          buttons into a wrapped second line (user 2026-07-10: 選択中に崩れる).
+          The actions row is fixed and right-aligned. */}
+      <div className="devices-usb-header">
+        <div className="devices-usb-header-line">
+          <span className="devices-sidebar-title" style={{ fontSize: 12 }}>USB Serial</span>
+          <span className="devices-sidebar-count">
+            {knownPorts.length}
+            {selectedPortIds.length > 0 && (
+              <>
+                {' '}
+                <span className="devices-sidebar-checked">({selectedPortIds.length}選択)</span>
+              </>
+            )}
+          </span>
+        </div>
+        <div className="devices-usb-header-actions">
+          {/* Info — opens a modal (same feel as the UI-tab info modal) instead
+              of an inline popover that pushed the cards down. */}
           <button
             type="button"
             className="devices-sidebar-refresh"
-            style={{ fontSize: 11, width: 'auto', padding: '0 6px' }}
-            onClick={() => (allSelected ? clearSelectedPorts() : selectAllPorts())}
-            title={allSelected ? '全ての書き込み対象を解除' : '全 USB デバイスを書き込み対象に選択'}
+            style={{ fontSize: 13, width: 'auto', padding: '0 7px' }}
+            onClick={() => setShowInfo(true)}
+            title="USB カードの見方（説明）"
+            aria-label="説明"
           >
-            {allSelected ? '全解除' : '全選択'}
+            ⓘ
           </button>
-        )}
-        <button
-          type="button"
-          className="devices-sidebar-refresh"
-          onClick={() => void addPort()}
-          title="USB Serial デバイスを追加（初回のみブラウザの選択ダイアログ。一度許可すれば次回以降は自動で表示されます）"
-          aria-label="USB デバイス追加"
-        >
-          ＋
-        </button>
-      </div>
-      {showHelp && (
-        <div className="devices-usb-help" onClick={() => setShowHelp(false)} role="note">
-          <div>
-            <span className="legend-chip select">☑ チェック</span> = <b>書込み対象</b>（複数OK → Firmware で一斉書込み）
-          </div>
-          <div>
-            <span className="legend-chip conn">⚙ 設定</span> = <b>設定接続</b>（get_info / Wi-Fi・<b>1 台ずつ</b>・緑枠が接続中）
-          </div>
-          <div style={{ color: 'var(--text-muted)' }}>
-            情報取得だけは「↻ 識別」。<b>✕</b> でカードを閉じる（Hapbeat 以外の COM 消し）。COM 名は取れないため #番号 で区別。
-          </div>
+          {/* Bulk select for the 5–10-device production flash: one click to
+              select every granted port, instead of ticking each card. */}
+          {knownPorts.length > 1 && (
+            <button
+              type="button"
+              className="devices-sidebar-refresh"
+              style={{ fontSize: 11, width: 'auto', padding: '0 7px' }}
+              onClick={() => (allSelected ? clearSelectedPorts() : selectAllPorts())}
+              title={allSelected ? '全ての書き込み対象を解除' : '全 USB デバイスを書き込み対象に選択'}
+            >
+              {allSelected ? 'clear' : 'all'}
+            </button>
+          )}
+          <button
+            type="button"
+            className="devices-sidebar-refresh"
+            onClick={() => void addPort()}
+            title="USB Serial デバイスを追加（初回のみブラウザの選択ダイアログ。一度許可すれば次回以降は自動で表示されます）"
+            aria-label="USB デバイス追加"
+          >
+            ＋
+          </button>
         </div>
-      )}
+      </div>
+      {showInfo && <UsbInfoModal onClose={() => setShowInfo(false)} />}
       {knownPorts.length === 0 ? (
         <div className="devices-empty" style={{ padding: '6px 10px', fontSize: 12 }}>
           ＋ で USB デバイスを追加

@@ -404,33 +404,142 @@
   color: var(--success);
 }
 
-/* USB section help popover (opened by the ⓘ button; moved out from under the
-   cards for visibility). Click anywhere on it to dismiss. */
-.devices-usb-help {
-  padding: 8px 10px;
-  margin: 4px 6px 2px;
-  border: 1px solid var(--success);
-  border-radius: 6px;
-  background: var(--bg-hover);
-  font-size: 11px;
-  line-height: 1.6;
-  text-align: left;
-  color: var(--text-secondary);
+/* USB section header — TWO rows (title/count on line 1, action buttons on
+   line 2). Splitting them means the 「(N選択)」 count on line 1 can change width
+   without ever wrapping the action buttons (user 2026-07-10: 選択中に崩れる). */
+.devices-usb-header {
+  padding: 10px 14px 8px;
+  border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  cursor: pointer;
+  gap: 6px;
+  flex-shrink: 0;
 }
-.devices-usb-help .legend-chip {
-  display: inline-block;
-  padding: 0 5px;
+.devices-usb-header-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.devices-usb-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+/* Card close ✕ on a USB card — a SMALLER, squarer take on .btn-x-muted so it
+   sits quietly in the card's top row (user 2026-07-10: 目立ちすぎ → 彩度↓/薄い
+   赤線/□枠). Rarely used (unplug removes the card). */
+.usb-card-close {
+  width: 18px;
+  height: 18px;
+  font-size: 11px;
+  border-radius: 4px;
+}
+
+/* ── USB card info modal (opened by ⓘ) — same chrome as ClipModeInfoModal so
+   it reads as one of the app's info modals. Replaces the old inline popover
+   that pushed the cards down. ─────────────────────────────────────────── */
+.usb-info-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.usb-info-modal {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: min(520px, 92vw);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.usb-info-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.usb-info-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--text-primary);
+}
+.usb-info-close {
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
   border-radius: 3px;
+}
+.usb-info-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+.usb-info-body {
+  padding: 14px 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.usb-info-intro {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.usb-info-row {
+  display: grid;
+  grid-template-columns: 82px 1fr;
+  gap: 12px;
+  align-items: start;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.usb-info-row b { color: var(--text-primary); }
+.usb-info-note {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.usb-info-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 6px;
+  border-radius: 4px;
   border: 1px solid var(--border);
   font-weight: 600;
+  font-size: 12px;
   white-space: nowrap;
+  text-align: center;
 }
-.devices-usb-help .legend-chip.select { border-color: var(--accent); color: var(--accent-light); }
-.devices-usb-help .legend-chip.conn { border-color: var(--success); color: var(--success); }
+.usb-info-chip.select { border-color: var(--accent); color: var(--accent-light); }
+.usb-info-chip.conn { border-color: var(--success); color: var(--success); }
+.usb-info-chip.probe { color: var(--text-secondary); }
+.usb-info-chip.close {
+  border-color: rgba(229, 115, 115, 0.4);
+  color: #c98178;
+}
+.usb-info-footer {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+}
 
 /* Muted delete ✕ — red semantics (it removes a row) but a dark, blends-in
    tint + rounded-rect so it doesn't grab attention like the bright offline

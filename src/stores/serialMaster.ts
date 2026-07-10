@@ -93,6 +93,24 @@ let portIdCounter = 0
 // object → new id → not in this set, so it reappears (intended).
 const dismissedPorts = new Set<string>()
 
+// Ports we've already fired a ONE-SHOT auto-identify probe for (user 2026-07-10:
+// 「繋いだら自動で識別」— ボタンを押すのが面倒). Sticky for the session: an id is
+// never auto-probed twice, so an S3's post-probe USB re-enumeration (closing its
+// port reboots the chip) can't spin an auto-probe → reboot → auto-probe loop.
+// `autoProbeSeeded` makes the FIRST syncPorts (page load, already-granted ports)
+// seed this set WITHOUT probing — a page refresh must not reboot every plugged
+// device. Only ports that appear AFTER load (a real plug-in / ＋add) auto-probe.
+const autoProbedIds = new Set<string>()
+let autoProbeSeeded = false
+// Backstop for the (theoretical) case where a device surfaces a NEW port id on
+// every re-enumeration — then sticky-by-id can't stop an auto-probe→reboot loop.
+// Chromium returns a STABLE SerialPort object for a persisted grant (the whole
+// registry already depends on this), so in practice a normal session's auto-probe
+// count == distinct physical devices ever plugged (small). This absolute session
+// cap bounds any pathological loop to a finite number of probes and logs once.
+let autoProbeCount = 0
+const AUTO_PROBE_SESSION_CAP = 30
+
 // Count of in-flight flashSelected batches. Lets concurrent independent
 // flashes (different firmware on different ports) coexist: the global
 // `flashRunning`/`mode` only clears when this returns to 0.
@@ -918,6 +936,41 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
         selectedPortId:
           s.selectedPortId && liveIds.has(s.selectedPortId) ? s.selectedPortId : null,
       }))
+
+      // Auto-identify newly-appeared ports (user 2026-07-10: 繋いだら自動で識別).
+      // One-shot per id; the FIRST sync only seeds (no probe) so a refresh
+      // doesn't reboot already-plugged devices. Skip flash targets / the live
+      // config port / mid-flash / while flashing so the probe's open-close never
+      // contends with an imminent flash or the active conn — re-checked at fire
+      // time in case the user selected or started something in the interim.
+      if (!autoProbeSeeded) {
+        autoProbeSeeded = true
+        for (const e of visible) autoProbedIds.add(e.id)
+      } else {
+        const fresh = visible.filter(
+          (e) => e.probe === 'idle' && e.flash.state === 'idle' && !autoProbedIds.has(e.id),
+        )
+        fresh.forEach((e, i) => {
+          autoProbedIds.add(e.id)
+          setTimeout(() => {
+            const s = get()
+            if (s.mode === 'flashing') return
+            if (s.activePortId === e.id) return
+            if (s.selectedPortIds.includes(e.id)) return
+            const cur = s.knownPorts.find((x) => x.id === e.id)
+            if (!cur || cur.probe !== 'idle' || cur.flash.state !== 'idle') return
+            if (autoProbeCount >= AUTO_PROBE_SESSION_CAP) {
+              if (autoProbeCount === AUTO_PROBE_SESSION_CAP) {
+                autoProbeCount++  // log exactly once, then stay silent
+                log(`auto-identify backstop tripped (${AUTO_PROBE_SESSION_CAP} probes) — disabling auto-probe for this session; use ↻ 識別 manually. If unexpected, a device may be re-enumerating with a new port id each probe.`)
+              }
+              return
+            }
+            autoProbeCount++
+            void get().probePort(e.id)
+          }, 300 + i * 400)
+        })
+      }
     },
 
     addPort: async () => {

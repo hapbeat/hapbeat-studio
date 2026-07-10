@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useSerialMaster } from '@/stores/serialMaster'
 import { isWebSerialSupported } from '@/utils/serialConfig'
@@ -71,12 +71,17 @@ export function OnboardingWizard() {
     }
   }, [probeStatus, mode, conn, step])
 
-  // 書き込み成功 → 自動で Step 3 へ遷移 (ユーザ要望 2026-05-09)。
-  // 旧フローは「Step 1 に戻って再接続」を要求していたが、success が
-  // 出ているのにユーザに余分な操作をさせる必然性がない。conn は flash
-  // 後に切断されているので Step 3 側で「電源 OFF→ON → 再接続」を促す。
+  // 書き込み成功 → 自動で Step 3 へ「その書き込み 1 回だけ」遷移する
+  // (ユーザ要望 2026-05-09)。flashLastResult は成功後もストアに残るため、素の
+  // `ok && step==='flash'` だと Step 2 に戻る/開くたびに再発火し、ユーザーが
+  // 能動的にファーム書き込み(Step 2)を開いても Step 3 へ強制連行されてしまう
+  // (user 2026-07-10:「能動的に押しても 3 に強制遷移する」)。結果オブジェクトの
+  // 同一性で成功エッジだけを 1 回拾う: ref を現在値で初期化するので、mount 時に
+  // 残っている古い成功結果では遷移せず、新しい書き込み(新オブジェクト)でのみ発火。
+  const handledFlashRef = useRef(flashLastResult)
   useEffect(() => {
-    if (flashLastResult?.ok && step === 'flash') {
+    if (flashLastResult?.ok && step === 'flash' && flashLastResult !== handledFlashRef.current) {
+      handledFlashRef.current = flashLastResult
       setStep('configure')
     }
   }, [flashLastResult, step])
