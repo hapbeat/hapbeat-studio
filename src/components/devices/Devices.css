@@ -142,6 +142,20 @@
 .device-row.primary .device-row-name {
   color: var(--accent-light);
 }
+
+/* Config-connected USB card: a GREEN frame (matches the 設定接続中 toggle +
+   online dot), deliberately a DIFFERENT colour from the PURPLE flash-target
+   selection frame so "connected for config" never looks like "selected for
+   flash". box-shadow (not border/padding) → no layout shift. A card can be
+   BOTH selected (purple bar) and connected (green ring) at once. */
+.device-row.usb.config-active {
+  border-color: var(--success);
+  box-shadow: 0 0 0 1px var(--success);
+}
+.device-row.usb.config-active.primary {
+  /* keep the purple selection bar AND add the green connection ring */
+  box-shadow: inset 3px 0 0 var(--accent), 0 0 0 1px var(--success);
+}
 .device-row.offline {
   background: transparent;
 }

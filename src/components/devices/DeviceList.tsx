@@ -142,7 +142,7 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
 
   return (
     <div
-      className={`device-row usb${checked ? ' checked' : ''}${isPrimary ? ' primary' : ''}`}
+      className={`device-row usb${checked ? ' checked' : ''}${isPrimary ? ' primary' : ''}${isActive ? ' config-active' : ''}`}
       title="クリック=書き込み(フラッシュ)対象に選択 / Ctrl+クリック=追加選択 / Shift+クリック=範囲選択　※選択だけで接続はしません。設定・Wi-Fi は「接続」ボタンから"
       onClick={(e) => {
         const target = e.target as HTMLElement
