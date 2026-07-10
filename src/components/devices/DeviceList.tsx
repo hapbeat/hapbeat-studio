@@ -230,21 +230,25 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
           className="device-row-meta"
           style={{ marginTop: 4, gap: 6, display: 'flex', justifyContent: 'flex-end' }}
         >
-          {/* 接続 = open the single-master config conn on THIS port (for
-              get_info / Wi-Fi setup). Kept separate from selection so the
-              card click can be a pure multi-select like the Wi-Fi cards. */}
+          {/* ② 設定接続 = the single-master config conn on THIS port (get_info
+              / Wi-Fi). A GREEN "接続中 ✓" toggle (matches the online dot),
+              deliberately distinct from the PURPLE flash-target checkbox so the
+              two mechanisms read apart. Single-master: connecting another card
+              auto-releases this one — the toggle makes that state explicit. */}
           <button
             type="button"
-            className="form-button-secondary"
-            style={{ fontSize: 12, padding: '3px 10px' }}
+            className={`usb-config-toggle${isActive ? ' on' : ''}`}
+            aria-pressed={isActive}
             onClick={(e) => {
               e.stopPropagation()
               if (isActive) selectDevice(pseudoId)
               else void openConfigFor(entry.id)
             }}
-            title={isActive ? '設定タブを開く' : 'USB Serial で接続 → get_info/Wi-Fi 等の設定へ（設定はここから。カードのクリック/チェックはフラッシュ対象の選択のみ）。1 台ずつ'}
+            title={isActive
+              ? '設定接続中（1 台だけ）— クリックで設定タブを開く。別カードで「接続」すると、この接続は自動で解除されます'
+              : 'このデバイスに設定接続（get_info / Wi-Fi 等の設定用）。設定接続は 1 台ずつ。※カード左のチェックは「書込み対象」の選択で、接続とは別物です'}
           >
-            {isActive ? '設定' : '接続'}
+            {isActive ? '⚙ 設定接続中 ✓' : '⚙ 接続'}
           </button>
           <button
             type="button"
@@ -319,10 +323,18 @@ function UsbPortsSection() {
           {knownPorts.map((e) => (
             <UsbPortCard key={e.id} entry={e} orderedIds={knownPorts.map((p) => p.id)} />
           ))}
-          <div className="devices-empty" style={{ padding: '4px 10px', fontSize: 11, textAlign: 'left' }}>
-            ※ カードのクリック/チェック＝書き込み(フラッシュ)対象の選択（接続はしません）。
-            設定・Wi-Fi は各カードの「接続」、情報取得だけなら「↻ 識別」。
-            「全選択」→ Firmware タブで一斉書き込み。ブラウザは COM 名を取得できないため #番号 で区別してください。
+          <div className="devices-usb-legend">
+            <div>
+              <span className="legend-chip select">☑ チェック</span> = <b>書込み対象</b>
+              （複数選択OK → Firmware で一斉書込み）
+            </div>
+            <div>
+              <span className="legend-chip conn">⚙ 接続</span> = <b>設定接続</b>
+              （get_info / Wi-Fi 等・<b>1 台ずつ</b>／別を接続すると前は解除）
+            </div>
+            <div style={{ color: 'var(--text-muted)' }}>
+              情報取得だけは「↻ 識別」。ブラウザは COM 名を取れないため #番号 で区別。
+            </div>
           </div>
         </>
       )}

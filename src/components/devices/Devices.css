@@ -365,6 +365,51 @@
   box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.22);
 }
 
+/* ── USB card: two distinct mechanisms, two colors ──────────────────
+   ② config-connect toggle = GREEN "設定接続中 ✓" (matches the online dot),
+   one device at a time. Deliberately NOT purple so it never reads like the
+   PURPLE flash-target selection (checkbox / .primary). Green = live config
+   link, purple = batch flash-target. */
+.usb-config-toggle {
+  font-size: 12px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.usb-config-toggle:hover { background: var(--bg-hover); border-color: var(--success); }
+.usb-config-toggle.on {
+  background: rgba(76, 175, 80, 0.14);
+  border-color: var(--success);
+  color: var(--success);
+  font-weight: 600;
+}
+
+/* USB section legend — the two-mechanism explainer under the cards. */
+.devices-usb-legend {
+  padding: 6px 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: left;
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.devices-usb-legend .legend-chip {
+  display: inline-block;
+  padding: 0 5px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.devices-usb-legend .legend-chip.select { border-color: var(--accent); color: var(--accent-light); }
+.devices-usb-legend .legend-chip.conn { border-color: var(--success); color: var(--success); }
+
 /* Muted delete ✕ — red semantics (it removes a row) but a dark, blends-in
    tint + rounded-rect so it doesn't grab attention like the bright offline
    dismiss button does (user feedback 2026-06-13). */
