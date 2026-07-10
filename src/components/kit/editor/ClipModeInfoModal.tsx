@@ -6,7 +6,7 @@ export interface ClipModeInfoModalProps {
 }
 
 /**
- * 3 つの再生モード（FIRE / CLIP / LIVE）が「デバイス側で何が起きるか」
+ * 3 つの再生モード（FIRE / CLIP / BOTH）が「デバイス側で何が起きるか」
  * を並べて比較するモーダル。Kit カード右サイドの `?` から開く。
  *
  * ラベルと先頭記号は KitEventRow の MODE_OPTIONS と揃えること。
@@ -65,17 +65,18 @@ export function ClipModeInfoModal({ onClose }: ClipModeInfoModalProps) {
           </div>
 
           <div className="clip-mode-info-row">
-            <div className="clip-mode-info-badge live"><span className="sym">~</span>LIVE</div>
+            <div className="clip-mode-info-badge live"><span className="sym">&gt;♪</span>BOTH</div>
             <div className="clip-mode-info-text">
-              <div className="clip-mode-info-title">ライブ音声をそのまま送信</div>
+              <div className="clip-mode-info-title">FIRE と CLIP を両方出力</div>
               <p>
-                SDK がゲーム内 AudioSource やマイクなどの生音をキャプチャして
-                リアルタイムでデバイスにストリームします。Kit に WAV は含まれません。
+                FIRE と CLIP の両 entry を manifest に出力します（<code>events</code> と{' '}
+                <code>stream_events</code> に同じ base eventId で並存）。
+                主に開発段階で両モードを試したいときに使うモードです。
               </p>
               <ul className="clip-mode-info-pros">
-                <li>合成音・環境音などに追従</li>
-                <li>Kit に事前クリップを置く必要なし</li>
-                <li>Wi-Fi 帯域と同期精度に依存</li>
+                <li>FIRE・CLIP どちらの挙動も同じ Event ID で試せる</li>
+                <li>Kit ファイルサイズ・帯域は両方の合算になる</li>
+                <li>Kit を出荷する際は通常どちらか一方に絞る</li>
               </ul>
             </div>
           </div>

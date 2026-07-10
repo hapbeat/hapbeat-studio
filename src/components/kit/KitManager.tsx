@@ -319,7 +319,7 @@ function ShortcutHelp() {
           <div className="shortcut-help-title">マウス操作 (Kit)</div>
           <ul className="shortcut-help-list">
             <li><span className="shortcut-help-key">☰ ドラッグ</span>Kit 内で並び替え</li>
-            <li><span className="shortcut-help-key">FIRE / CLIP / LIVE</span>再生モード切替 (ヘッダーの「モード説明」参照)</li>
+            <li><span className="shortcut-help-key">FIRE / CLIP / BOTH</span>再生モード切替 (ヘッダーの「モード説明」参照)</li>
             <li><span className="shortcut-help-key">×</span>Kit から削除</li>
           </ul>
 
@@ -1500,7 +1500,7 @@ function KitEditor() {
   }, [activeKitId, activeKit, clips, dragOverIdx, addEventToKit, updateKit, toast])
 
   // Kit のデバイス flash 使用量は FIRE (command) モードのイベントだけ数える。
-  // CLIP / LIVE はデバイスに WAV を載せず SDK 側ストリームで送るため flash を消費しない。
+  // CLIP はデバイスに WAV を載せず SDK 側ストリームで送るため flash を消費しない。
   // multi-mode (FIRE+CLIP) は command 側だけが install-clips/ に焼かれる
   // ので、ev.modes に 'command' が含まれていれば 1 回だけ計上する。
   const kitSize = activeKit
