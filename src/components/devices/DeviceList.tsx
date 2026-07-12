@@ -441,7 +441,19 @@ export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = 
   // online→offline flip before Studio acts on it.
   useEffect(() => {
     const AUTO_REMOVE_MS = 10_000
-    const id = window.setInterval(() => pruneStaleOffline(AUTO_REMOVE_MS), 1000)
+    const id = window.setInterval(() => {
+      // Protect devices that are mid-OTA (transfer running) or awaiting the
+      // post-reboot fw verify: they go offline for several seconds by design,
+      // and auto-hiding them would make an in-progress update disappear from
+      // the sidebar and pull the detail pane off the device being watched
+      // (2026-07-12). getState() reads the latest OTA set at tick time without
+      // re-subscribing the interval to every OTA progress event.
+      const otaByIp = useOtaStore.getState().byIp
+      const protectedIps = Object.entries(otaByIp)
+        .filter(([, st]) => st.running || st.verifyArmed)
+        .map(([ip]) => ip)
+      pruneStaleOffline(AUTO_REMOVE_MS, protectedIps)
+    }, 1000)
     return () => window.clearInterval(id)
   }, [pruneStaleOffline])
 

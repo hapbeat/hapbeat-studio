@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { MqttClientEntry, NodeRole, NodeTransport, SensorMapping, SensorReading } from '@/types/manager'
 import { useSerialMaster } from './serialMaster'
+import { isDemoMode } from '@/demo/isDemoMode'
 
 const STORAGE_KEY_SELECTED = 'hapbeat-studio-selected-device'
 const STORAGE_KEY_SELECTED_SET = 'hapbeat-studio-selected-devices'
@@ -211,8 +212,15 @@ interface DeviceState {
    * `markOnlineness`) has exceeded `thresholdMs`. Reuses the same
    * dismissed-list storage as the manual ✕ button, so it inherits
    * auto-undismiss-on-reconnect for free. Call from a ~1s poll.
+   *
+   * `protectedIps` are IPs that are EXPECTED to be offline right now and must
+   * never be auto-hidden — a device mid-OTA (transfer running) or awaiting the
+   * post-reboot fw verify goes offline for several seconds by design. Hiding it
+   * would make an in-progress update vanish from the sidebar and (if it was the
+   * detail-pane primary) yank the view off the device the user is watching. The
+   * caller passes the current OTA-active set from `otaStore` (2026-07-12).
    */
-  pruneStaleOffline: (thresholdMs: number) => void
+  pruneStaleOffline: (thresholdMs: number, protectedIps?: string[]) => void
   /** Drop selection entries that no longer correspond to any *known*
    *  device (i.e. the helper's mDNS list never returned this IP this
    *  session). Use to clean up stale persisted IPs from previous
@@ -294,6 +302,14 @@ const initialSelectedIps = (() => {
 const initialDismissed = readJsonArray(STORAGE_KEY_DISMISSED)
 
 const persist = (key: string, value: string[] | string | null) => {
+  // Demo/screenshot mode (`?demo=1`) seeds fake devices into the in-memory
+  // store, but must NEVER touch real localStorage. Otherwise clicking or
+  // ✕-dismissing a demo card would overwrite the user's real selection /
+  // dismiss state with phantom 192.168.10.x demo IPs (data-safety, 2026-07-12).
+  // Hydration reads (initialSelected etc.) still see the real values at module
+  // load; only writes are gated, so the real state is intact on the next
+  // non-demo visit.
+  if (isDemoMode()) return
   try {
     if (value == null) {
       localStorage.removeItem(key)
@@ -507,11 +523,20 @@ export const useDeviceStore = create<DeviceState>((set) => ({
       return { offlineSince: next }
     }),
 
-  pruneStaleOffline: (thresholdMs) =>
+  pruneStaleOffline: (thresholdMs, protectedIps) =>
     set((s) => {
       const now = Date.now()
+      const protectedSet =
+        protectedIps && protectedIps.length > 0 ? new Set(protectedIps) : null
       const toHide = Object.entries(s.offlineSince)
-        .filter(([ip, since]) => now - since >= thresholdMs && !s.dismissedIps.includes(ip))
+        .filter(
+          ([ip, since]) =>
+            now - since >= thresholdMs
+            && !s.dismissedIps.includes(ip)
+            // Devices mid-OTA / awaiting post-reboot verify are offline by
+            // design — never auto-hide them (2026-07-12).
+            && !protectedSet?.has(ip),
+        )
         .map(([ip]) => ip)
       if (toHide.length === 0) return {}
 
@@ -591,9 +616,14 @@ export const useDeviceStore = create<DeviceState>((set) => ({
   setLastFlashedBoard: (ip, board) =>
     set((s) => {
       const next = { ...s.lastFlashedBoard, [ip]: board }
-      try {
-        localStorage.setItem(STORAGE_KEY_LAST_FLASHED_BOARD, JSON.stringify(next))
-      } catch { /* quota / privacy mode */ }
+      // Same demo-mode guard as `persist()` — never write real localStorage
+      // from a `?demo=1` session (defensive: demo doesn't flash, but keep every
+      // localStorage write in this store consistent).
+      if (!isDemoMode()) {
+        try {
+          localStorage.setItem(STORAGE_KEY_LAST_FLASHED_BOARD, JSON.stringify(next))
+        } catch { /* quota / privacy mode */ }
+      }
       return { lastFlashedBoard: next }
     }),
 
