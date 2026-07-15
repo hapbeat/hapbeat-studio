@@ -228,17 +228,46 @@ export async function openConfigConnection(
   }
 
   const tryDeliverJsonBlob = (blob: string) => {
+    let obj: Record<string, unknown>
     try {
-      const obj = JSON.parse(blob)
-      const w = waiters.shift()
-      if (w) {
-        if (w.timer) clearTimeout(w.timer)
-        w.resolve(obj as Record<string, unknown>)
-      } else {
-        cb.onLog?.(blob)
-      }
+      obj = JSON.parse(blob) as Record<string, unknown>
     } catch {
       cb.onLog?.(`(parse error) ${blob.slice(0, 200)}${blob.length > 200 ? '…' : ''}`)
+      return
+    }
+    // Unsolicited pushes — firmware emits `{"event":"volume_changed",...}`
+    // (volume_control.cpp `pushVolumeChangedEvent`) over this SAME serial
+    // stream any time the volume knob rests at a step boundary, at up to
+    // ~4 lines/sec, completely independent of the request/response
+    // protocol. They must never consume a pending command's waiter slot:
+    // the old code shifted the FIFO on ANY parseable JSON line, so on a
+    // device that's actively spamming events, the very next line after a
+    // command write would almost always be an event line rather than the
+    // real reply — the command's promise resolved with the wrong object
+    // (e.g. get_info's `transport` field silently became `undefined`)
+    // while the real, correct response arrived later with no waiter left
+    // to claim it and was dropped to `onLog`. Route events the same way
+    // an already-unmatched blob is (onLog) and keep the waiter armed.
+    if ('event' in obj) {
+      cb.onLog?.(blob)
+      return
+    }
+    // Every serial_config.cpp command handler sets `response["status"]`
+    // (51 call sites, `get_info`/`get_wifi_status`/`list_wifi_profiles`/…
+    // all included) — so "status" present is what actually distinguishes
+    // a real command reply from any other unsolicited/unknown JSON line.
+    // Anything else is left in onLog and the waiter stays pending so a
+    // genuine reply can still resolve it before the timeout.
+    if (!('status' in obj)) {
+      cb.onLog?.(blob)
+      return
+    }
+    const w = waiters.shift()
+    if (w) {
+      if (w.timer) clearTimeout(w.timer)
+      w.resolve(obj)
+    } else {
+      cb.onLog?.(blob)
     }
   }
 
