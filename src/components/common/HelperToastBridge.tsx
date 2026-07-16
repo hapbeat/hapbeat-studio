@@ -19,6 +19,8 @@ const WRITE_CMD_LABEL: Record<string, string> = {
   set_haptic_gain: '触覚ゲイン', set_dac_boost: 'DAC ブースト',
   set_headphone_volume: 'ヘッドホン音量', set_stream_buffer: 'ストリームバッファ',
   set_input_mode: '入出力モード',
+  set_opus_complexity: 'Opus complexity', set_stream_hp_buffer: 'HP ジッターバッファ',
+  set_eq_band: 'EQ バンド', set_av_delay: 'A-V ディレイ',
 }
 
 /** 即リブートして ACK を返さない可能性が高い cmd。成功トーストはパネル側の

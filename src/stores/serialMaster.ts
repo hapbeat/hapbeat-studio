@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { useLogStore } from '@/stores/logStore'
 import { useDeviceStore } from '@/stores/deviceStore'
-import type { MqttClientEntry, NodeRole, NodeTransport } from '@/types/manager'
+import type { EqBandReadout, MqttClientEntry, NodeRole, NodeTransport } from '@/types/manager'
 import {
   isWebSerialSupported,
   openConfigConnection,
@@ -169,6 +169,12 @@ export interface SerialDeviceInfo {
   espnow_channel?: number
   gain?: number
   input_level?: number
+  /** SOLID48 (mode 9) TX-local Opus encoder complexity override (DEC-046
+   *  follow-up, transmitter only). -1/undefined = unset (mode default). */
+  opus_complexity?: number
+  /** SOLID48 (mode 9) receiver HP jitter-buffer target the TX broadcasts
+   *  as 0xAC fleet-tune param 6 (DEC-046 follow-up, transmitter only), ms. */
+  stream_hp_buffer_ms?: number
   broker_host?: string
   broker_port?: number
   topic_root?: string
@@ -217,6 +223,15 @@ export interface SerialDeviceInfo {
     /** Input/output routing (DEC-041 follow-up, DuoWL v4 only). */
     input_mode?: 'output' | 'line_in'
   }
+  /** DuoWL v4 ESP-NOW hp48 receiver EQ state (audio-dsp-config.md §2,
+   *  board === "duo_wl_v4" only). */
+  eq?: {
+    haptic: EqBandReadout[]
+    hp: EqBandReadout[]
+  }
+  /** A-V delay, ms (audio-dsp-config.md §3, DuoWL v4 ESP-NOW hp48 receiver
+   *  only). 0..30. */
+  av_delay_ms?: number
 }
 
 /** Parse a firmware get_info JSON into a SerialDeviceInfo (shared by
@@ -238,6 +253,8 @@ function parseSerialInfo(r: Record<string, unknown>): SerialDeviceInfo {
     espnow_channel: r.espnow_channel as number | undefined,
     gain: r.gain as number | undefined,
     input_level: r.input_level as number | undefined,
+    opus_complexity: r.opus_complexity as number | undefined,
+    stream_hp_buffer_ms: r.stream_hp_buffer_ms as number | undefined,
     broker_host: r.broker_host as string | undefined,
     broker_port: r.broker_port as number | undefined,
     topic_root: r.topic_root as string | undefined,
@@ -259,6 +276,8 @@ function parseSerialInfo(r: Record<string, unknown>): SerialDeviceInfo {
     espnow_ui: r.espnow_ui as SerialDeviceInfo['espnow_ui'],
     stream: r.stream as SerialDeviceInfo['stream'],
     audio: r.audio as SerialDeviceInfo['audio'],
+    eq: r.eq as SerialDeviceInfo['eq'],
+    av_delay_ms: r.av_delay_ms as number | undefined,
   }
 }
 

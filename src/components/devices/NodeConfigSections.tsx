@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { DeviceInfo, ManagerMessage, MqttClientEntry, SensorColorMatch, SensorMapping, SensorReading } from '@/types/manager'
+import type { DeviceInfo, EqBandReadout, ManagerMessage, MqttClientEntry, SensorColorMatch, SensorMapping, SensorReading } from '@/types/manager'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useMqttTopicsStore, sanitizeTopic } from '@/stores/mqttTopicsStore'
 import { useToast } from '@/components/common/Toast'
 import { downloadTextFile } from '@/utils/download'
+import { clampOpusComplexity, clampHpBufferMs } from '@/utils/solidTransmitterTuning'
+import {
+  computeAic3204Eq,
+  aic3204CoeffsToArray,
+  type EqFtype,
+} from '@/utils/aic3204Eq'
 import { MqttFlowPanel } from './MqttFlow'
 
 // Status feedback uses anchored toasts (Toast.tsx) instead of inline text, so
@@ -26,6 +32,18 @@ export interface NodeConfigInfo {
   espnow_channel?: number
   gain?: number
   input_level?: number
+  /**
+   * SOLID48 (mode 9, Opus 48k stereo HP) TX-local Opus encoder complexity
+   * override (DEC-046 follow-up, transmitter only). -1/undefined = unset
+   * (the per-mode MODE_DEFS default is used); 0..10 = explicit override.
+   */
+  opus_complexity?: number
+  /**
+   * SOLID48 (mode 9) receiver HP jitter-buffer target, ms (DEC-046
+   * follow-up, transmitter only). The TX stores this and broadcasts it to
+   * the fleet as 0xAC fleet-tune param 6; only mode-9 receivers apply it.
+   */
+  stream_hp_buffer_ms?: number
   broker_host?: string
   broker_port?: number
   topic_root?: string
@@ -79,6 +97,17 @@ export interface NodeConfigInfo {
      *  "output" = normal headphone playback / "line_in" = jack audio-in → haptics. */
     input_mode?: 'output' | 'line_in'
   }
+  /** DuoWL v4 ESP-NOW hp48 receiver EQ state (audio-dsp-config.md §2,
+   *  board === "duo_wl_v4" only). fc/Q/gain aren't recoverable from the
+   *  committed ints — only ftype + raw coeffs are reported. */
+  eq?: {
+    haptic: EqBandReadout[]
+    hp: EqBandReadout[]
+  }
+  /** A-V delay, ms (audio-dsp-config.md §3, DuoWL v4 ESP-NOW hp48 receiver
+   *  only): extra target added to the HP (48k) ring only, delaying audio
+   *  vs. haptic. 0..30. */
+  av_delay_ms?: number
 }
 
 const ESPNOW_CHANNELS = [1, 6, 11]
@@ -193,6 +222,135 @@ export function EspNowConfigSection({
       <div className="form-action-row" style={{ marginTop: 8 }}>
         <button className="form-button" onClick={apply} disabled={!device.online}>
           適用
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------
+// SOLID48 (mode 9, Opus 48k stereo HP) transmitter tuning — Opus encoder
+// complexity (TX-local, re-configures the live encoder immediately) + HP
+// jitter-buffer target (fleet-broadcast as 0xAC param 6; only mode-9
+// receivers apply it). DEC-046 follow-up. Shown alongside
+// EspNowConfigSection for role === 'transmitter' — Studio doesn't know
+// which stream mode is currently active on the TX (that's picked on the
+// CoreS3 touch UI), so these are always offered when talking to a
+// transmitter; they're no-ops for receivers on other modes.
+// ---------------------------------------------------------------------
+
+export function SolidTransmitterTuningSection({
+  device,
+  cachedInfo,
+  sendTo,
+}: {
+  device: DeviceInfo
+  cachedInfo?: NodeConfigInfo
+  sendTo: (msg: ManagerMessage) => void
+}) {
+  const isAuto = cachedInfo?.opus_complexity == null || cachedInfo.opus_complexity < 0
+  const [complexity, setComplexity] = useState<number>(
+    !isAuto ? clampOpusComplexity(cachedInfo!.opus_complexity!) : 5,
+  )
+  const [hpBufferMs, setHpBufferMs] = useState<number>(
+    clampHpBufferMs(cachedInfo?.stream_hp_buffer_ms ?? 120),
+  )
+
+  useEffect(() => {
+    if (cachedInfo?.opus_complexity != null && cachedInfo.opus_complexity >= 0) {
+      setComplexity(clampOpusComplexity(cachedInfo.opus_complexity))
+    }
+    if (cachedInfo?.stream_hp_buffer_ms != null) {
+      setHpBufferMs(clampHpBufferMs(cachedInfo.stream_hp_buffer_ms))
+    }
+  }, [device.ipAddress, cachedInfo?.opus_complexity, cachedInfo?.stream_hp_buffer_ms])
+
+  const { setAnchor } = useToast()
+  const offline = !device.online
+
+  const applyComplexity = (e: React.MouseEvent<HTMLElement>) => {
+    setAnchor(e.currentTarget)
+    const v = clampOpusComplexity(complexity)
+    setComplexity(v)
+    sendTo({ type: 'set_opus_complexity', payload: { value: v } })
+  }
+  const applyHpBuffer = (e: React.MouseEvent<HTMLElement>) => {
+    setAnchor(e.currentTarget)
+    const ms = clampHpBufferMs(hpBufferMs)
+    setHpBufferMs(ms)
+    sendTo({ type: 'set_stream_hp_buffer', payload: { value: ms } })
+  }
+
+  return (
+    <div className="form-section">
+      <div className="form-section-title">
+        SOLID48 送信チューニング
+        <span className="form-section-sub-inline"> — Opus 48k stereo HP（mode 9）向け</span>
+      </div>
+
+      {/* 1. Opus encoder complexity — TX-local global override, applied to
+          the live encoder immediately (no reboot). */}
+      <div className="form-row">
+        <label>Opus complexity</label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={0}
+            max={10}
+            step={1}
+            value={complexity}
+            onChange={(e) => setComplexity(clampOpusComplexity(Number(e.target.value)))}
+            disabled={offline}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 40, textAlign: 'right' }}>
+            {complexity}
+          </span>
+        </div>
+        <span />
+      </div>
+      {/* min-height reserved so this hint is always present — never shifts
+          the action row below when the auto/override state changes
+          (layout-shift rule). */}
+      <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
+        {isAuto
+          ? '現在: 自動（モード既定の complexity を使用中）。適用すると、現在アクティブなモードのエンコーダにこの値を上書きします。'
+          : `現在: ${cachedInfo!.opus_complexity} で上書き中。0=軽い（低 CPU）〜10=高品質（高 CPU、既定 5 目安）。`}
+      </div>
+      <div className="form-action-row" style={{ marginTop: 8 }}>
+        <button className="form-button" onClick={applyComplexity} disabled={offline}>
+          Complexity を適用
+        </button>
+      </div>
+
+      {/* 2. HP jitter-buffer target — TX stores + broadcasts to the fleet
+          as 0xAC param 6; only mode-9 (SOLID48) receivers apply it. */}
+      <div className="form-row" style={{ marginTop: 12 }}>
+        <label>HP ジッターバッファ</label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={40}
+            max={500}
+            step={10}
+            value={hpBufferMs}
+            onChange={(e) => setHpBufferMs(clampHpBufferMs(Number(e.target.value)))}
+            disabled={offline}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 56, textAlign: 'right' }}>
+            {hpBufferMs} ms
+          </span>
+        </div>
+        <span />
+      </div>
+      <div className="form-status muted" style={{ fontSize: 12 }}>
+        SOLID48 受信機（mode 9）の再生バッファ深さ目標を編隊全体へ配信します（既定 120ms）。
+        大きいほど ESP-NOW のゆらぎに強くなりますが、その分再生が遅れます。他モードの受信機には影響しません。
+      </div>
+      <div className="form-action-row" style={{ marginTop: 8 }}>
+        <button className="form-button" onClick={applyHpBuffer} disabled={offline}>
+          バッファを適用
         </button>
       </div>
     </div>
@@ -2195,6 +2353,405 @@ export function DuoWlV4AudioSection({
         </button>
       </div>
     </div>
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------
+// DuoWL v4 ESP-NOW hp48 receiver: HP volume (dB) + A-V delay (audio-dsp-
+// config.md §1/§3). Shown on the ESP-NOW tab (not the 設定 tab, unlike
+// DuoWlV4AudioSection above) because a pure-espnow_stream receiver has no
+// 設定 tab (computeSubTabs in DeviceDetail.tsx) — this is the ESP-NOW-side
+// counterpart, board === "duo_wl_v4" gated by the caller.
+//
+// HP volume reuses the existing `set_headphone_volume` (§1: "既存を流用")
+// — same wire command as DuoWlV4AudioSection's TPA6130A2 slider, just
+// surfaced here too since that section isn't reachable for this receiver.
+// ---------------------------------------------------------------------
+
+export function DuoWlV4EspNowAudioSection({
+  device,
+  cachedInfo,
+  sendTo,
+}: {
+  device: DeviceInfo
+  cachedInfo?: NodeConfigInfo
+  sendTo: (msg: ManagerMessage) => void
+}) {
+  const clampHpDb = (v: number) => Math.max(-59, Math.min(4, Math.round(v)))
+  const clampAvDelay = (v: number) => Math.max(0, Math.min(30, Math.round(v)))
+
+  const [hpDb, setHpDb] = useState<number>(clampHpDb(cachedInfo?.audio?.hp_db ?? -10))
+  const [avDelayMs, setAvDelayMs] = useState<number>(clampAvDelay(cachedInfo?.av_delay_ms ?? 0))
+
+  useEffect(() => {
+    if (cachedInfo?.audio?.hp_db != null) setHpDb(clampHpDb(cachedInfo.audio.hp_db))
+    if (cachedInfo?.av_delay_ms != null) setAvDelayMs(clampAvDelay(cachedInfo.av_delay_ms))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [device.ipAddress, cachedInfo?.audio?.hp_db, cachedInfo?.av_delay_ms])
+
+  const { setAnchor } = useToast()
+  const offline = !device.online
+
+  const applyHpVolume = (e: React.MouseEvent<HTMLElement>) => {
+    setAnchor(e.currentTarget)
+    sendTo({ type: 'set_headphone_volume', payload: { hp_db: hpDb } })
+  }
+  const applyAvDelay = (e: React.MouseEvent<HTMLElement>) => {
+    setAnchor(e.currentTarget)
+    sendTo({ type: 'set_av_delay', payload: { ms: avDelayMs } })
+  }
+
+  return (
+    <div className="form-section duo-v4-config">
+      <div className="form-section-title">
+        音量 / 遅延（DuoWL v4）
+        <span className="form-section-sub-inline"> — ヘッドホン音量 + 音声-触覚間ディレイ</span>
+      </div>
+
+      {/* 1. TPA6130A2 headphone volume (analog only — DAC digital volume is
+          pinned to 0dB on the HP codec; the ADC wheel drives haptic only). */}
+      <div className="form-row">
+        <label>ヘッドホン音量<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>TPA6130A2</span></label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={-59}
+            max={4}
+            step={1}
+            value={hpDb}
+            onChange={(e) => setHpDb(clampHpDb(Number(e.target.value)))}
+            disabled={offline}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 56, textAlign: 'right' }}>
+            {hpDb} dB
+          </span>
+        </div>
+        <span />
+      </div>
+      <div className="form-status muted" style={{ fontSize: 12 }}>
+        本体ボタン（再生モード時: Btn4=+ / Btn5=−）でも操作できます。ホイールは触覚音量のみを操作します。
+      </div>
+      <div className="form-action-row" style={{ marginTop: 8 }}>
+        <button className="form-button" onClick={applyHpVolume} disabled={offline}>
+          ヘッドホン音量を適用
+        </button>
+      </div>
+
+      {/* 2. A-V delay — delays HP audio relative to haptic (audio-dsp-config.md §3). */}
+      <div className="form-row" style={{ marginTop: 12 }}>
+        <label>A-V ディレイ</label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={0}
+            max={30}
+            step={1}
+            value={avDelayMs}
+            onChange={(e) => setAvDelayMs(clampAvDelay(Number(e.target.value)))}
+            disabled={offline}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 56, textAlign: 'right' }}>
+            {avDelayMs} ms
+          </span>
+        </div>
+        <span />
+      </div>
+      <div className="form-status muted" style={{ fontSize: 12 }}>
+        音声（ヘッドホン）を触覚に対して遅らせます（モーターの反応が遅いぶん、音声側を合わせる）。0=遅延なし。
+      </div>
+      <div className="form-action-row" style={{ marginTop: 8 }}>
+        <button className="form-button" onClick={applyAvDelay} disabled={offline}>
+          ディレイを適用
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------
+// DuoWL v4 ESP-NOW hp48 receiver: per-codec EQ designer (audio-dsp-
+// config.md §2). Up to 3 AIC3204 in-codec biquads per codec (haptic
+// 16kHz / hp 48kHz). Each band's fc/Q/gain are LOCAL design controls —
+// the device only persists/reports ftype + the committed raw Q1.23 ints
+// (get_info.eq), which aren't invertible back to fc/Q/gain — so this
+// editor doesn't try to resync those from the device; it shows the
+// committed ints read-only alongside the (locally-held) design controls.
+// ---------------------------------------------------------------------
+
+type EqCodec = 'haptic' | 'hp'
+
+interface EqBandDraft {
+  ftype: EqFtype
+  fc: number
+  q: number
+  gainDb: number
+}
+
+const EQ_BAND_COUNT = 3
+const EQ_FS: Record<EqCodec, number> = { haptic: 16000, hp: 48000 }
+/** RBJ Q for a 2nd-order Butterworth response (1/√2). */
+const EQ_BUTTERWORTH_Q = 1 / Math.sqrt(2)
+
+/** haptic band0 default = 100Hz 2nd-order Butterworth LPF (audio-dsp-
+ *  config.md §2 "既定 EQ" — matches the BT product / firmware boot
+ *  default). Every other band defaults to off (passthrough). */
+function defaultEqDraft(codec: EqCodec, band: number): EqBandDraft {
+  if (codec === 'haptic' && band === 0) {
+    return { ftype: 'lpf', fc: 100, q: EQ_BUTTERWORTH_Q, gainDb: 0 }
+  }
+  return { ftype: 'off', fc: 1000, q: EQ_BUTTERWORTH_Q, gainDb: 0 }
+}
+function defaultEqDrafts(codec: EqCodec): EqBandDraft[] {
+  return Array.from({ length: EQ_BAND_COUNT }, (_, i) => defaultEqDraft(codec, i))
+}
+
+const EQ_FTYPE_OPTIONS: Array<{ value: EqFtype; label: string }> = [
+  { value: 'off', label: 'オフ' },
+  { value: 'lpf', label: 'LPF' },
+  { value: 'hpf', label: 'HPF' },
+  { value: 'peaking', label: 'ピーキング' },
+  { value: 'lowshelf', label: 'ローシェルフ' },
+  { value: 'highshelf', label: 'ハイシェルフ' },
+  { value: 'notch', label: 'ノッチ' },
+]
+/** Only these ftypes read `gainDb` — the input is grayed out otherwise
+ *  (always rendered, never removed, so the row height never shifts). */
+const EQ_GAIN_FTYPES = new Set<EqFtype>(['peaking', 'lowshelf', 'highshelf'])
+
+function clampEqFc(fc: number, fs: number): number {
+  if (!Number.isFinite(fc)) return 100
+  return Math.max(20, Math.min(Math.round(fs / 2) - 20, Math.round(fc)))
+}
+function clampEqQ(q: number): number {
+  if (!Number.isFinite(q)) return EQ_BUTTERWORTH_Q
+  return Math.max(0.1, Math.min(20, q))
+}
+function clampEqGainDb(g: number): number {
+  if (!Number.isFinite(g)) return 0
+  return Math.max(-24, Math.min(24, g))
+}
+
+/** One band's edit row: ftype/fc/Q/gain controls + a fixed-height
+ *  computed-coefficient / warning readout + the per-band 適用 button. */
+function EqBandEditor({
+  codec,
+  band,
+  draft,
+  committed,
+  offline,
+  onChange,
+  onApply,
+}: {
+  codec: EqCodec
+  band: number
+  draft: EqBandDraft
+  committed?: EqBandReadout
+  offline: boolean
+  onChange: (next: EqBandDraft) => void
+  onApply: (e: React.MouseEvent<HTMLElement>) => void
+}) {
+  const fs = EQ_FS[codec]
+  const result = useMemo(
+    () => computeAic3204Eq({ ftype: draft.ftype, fs, fc: draft.fc, q: draft.q, gainDb: draft.gainDb }),
+    [draft.ftype, fs, draft.fc, draft.q, draft.gainDb],
+  )
+  const showGain = EQ_GAIN_FTYPES.has(draft.ftype)
+  const isOff = draft.ftype === 'off'
+
+  return (
+    <div className="form-row" style={{ marginTop: band === 0 ? 6 : 14, alignItems: 'flex-start' }}>
+      <label>band {band}</label>
+      <div className="form-row-multi" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <select
+            className="form-input"
+            value={draft.ftype}
+            onChange={(e) => onChange({ ...draft, ftype: e.target.value as EqFtype })}
+            disabled={offline}
+            style={{ flex: '0 0 110px' }}
+          >
+            {EQ_FTYPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, opacity: isOff ? 0.4 : 1 }}>
+            fc
+            <input
+              className="form-input mono"
+              type="number"
+              min={20}
+              max={Math.round(fs / 2) - 20}
+              value={draft.fc}
+              onChange={(e) => onChange({ ...draft, fc: clampEqFc(Number(e.target.value), fs) })}
+              disabled={offline || isOff}
+              style={{ width: 72 }}
+            />
+            Hz
+          </label>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, opacity: isOff ? 0.4 : 1 }}>
+            Q
+            <input
+              className="form-input mono"
+              type="number"
+              min={0.1}
+              max={20}
+              step={0.01}
+              value={draft.q}
+              onChange={(e) => onChange({ ...draft, q: clampEqQ(Number(e.target.value)) })}
+              disabled={offline || isOff}
+              style={{ width: 60 }}
+            />
+          </label>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, opacity: showGain ? 1 : 0.4 }}>
+            gain
+            <input
+              className="form-input mono"
+              type="number"
+              min={-24}
+              max={24}
+              step={0.5}
+              value={draft.gainDb}
+              onChange={(e) => onChange({ ...draft, gainDb: clampEqGainDb(Number(e.target.value)) })}
+              disabled={offline || !showGain}
+              style={{ width: 60 }}
+            />
+            dB
+          </label>
+          <button
+            type="button"
+            className="form-button-secondary"
+            onClick={onApply}
+            disabled={offline}
+            style={{ marginLeft: 'auto', flexShrink: 0 }}
+          >
+            適用
+          </button>
+        </div>
+        {/* Fixed-height status line (layout-shift rule): always present,
+            only the text/color changes between off / ok / warn states. */}
+        <div className="form-status muted" style={{ minHeight: 16, fontSize: 11, margin: 0 }}>
+          {isOff
+            ? 'オフ（素通し）'
+            : result.clamped
+              ? '⚠ 係数が上限を超えクランプされました。ゲインを下げるか別バンド/DAC ブーストで補ってください。'
+              : result.overflowed
+                ? `オートプリスケール中 — 約 ${result.makeupDb.toFixed(2)}dB 分を他（DAC ブースト等）で補ってください`
+                : `N0=${result.coeffs.N0} N1=${result.coeffs.N1} N2=${result.coeffs.N2} D1=${result.coeffs.D1} D2=${result.coeffs.D2}`}
+        </div>
+        {committed && (
+          <div className="form-status muted" style={{ fontSize: 10, margin: 0, opacity: 0.7 }}>
+            実機の設定: {committed.ftype} [{committed.coeffs.join(', ')}]
+          </div>
+        )}
+      </div>
+      <span />
+    </div>
+  )
+}
+
+function DuoWlV4EqCodecBlock({
+  codec,
+  title,
+  fsLabel,
+  device,
+  committed,
+  sendTo,
+}: {
+  codec: EqCodec
+  title: string
+  fsLabel: string
+  device: DeviceInfo
+  committed?: EqBandReadout[]
+  sendTo: (msg: ManagerMessage) => void
+}) {
+  const [drafts, setDrafts] = useState<EqBandDraft[]>(() => defaultEqDrafts(codec))
+  // Local-only design state (fc/Q/gain aren't recoverable from the device) —
+  // reset to defaults when the SELECTED DEVICE changes so edits don't bleed
+  // across devices (mirrors the deviceRef reset pattern used elsewhere in
+  // this file, e.g. SensorMappingSection).
+  const deviceRef = useRef(device.ipAddress)
+  useEffect(() => {
+    if (deviceRef.current === device.ipAddress) return
+    deviceRef.current = device.ipAddress
+    setDrafts(defaultEqDrafts(codec))
+  }, [device.ipAddress, codec])
+
+  const offline = !device.online
+  const { setAnchor } = useToast()
+
+  const applyBand = (band: number) => (e: React.MouseEvent<HTMLElement>) => {
+    setAnchor(e.currentTarget)
+    const draft = drafts[band]
+    const result = computeAic3204Eq({
+      ftype: draft.ftype,
+      fs: EQ_FS[codec],
+      fc: draft.fc,
+      q: draft.q,
+      gainDb: draft.gainDb,
+    })
+    sendTo({
+      type: 'set_eq_band',
+      payload: {
+        codec,
+        band,
+        ftype: draft.ftype,
+        coeffs: aic3204CoeffsToArray(result.coeffs),
+      },
+    })
+  }
+
+  return (
+    <div className="form-section duo-v4-config">
+      <div className="form-section-title">
+        {title}
+        <span className="form-section-sub-inline"> — AIC3204 in-codec biquad × 3band（{fsLabel}）</span>
+      </div>
+      {drafts.map((draft, i) => (
+        <EqBandEditor
+          key={i}
+          codec={codec}
+          band={i}
+          draft={draft}
+          committed={committed?.[i]}
+          offline={offline}
+          onChange={(next) => setDrafts((ds) => ds.map((d, idx) => (idx === i ? next : d)))}
+          onApply={applyBand(i)}
+        />
+      ))}
+    </div>
+  )
+}
+
+export function DuoWlV4EqSection({
+  device,
+  cachedInfo,
+  sendTo,
+}: {
+  device: DeviceInfo
+  cachedInfo?: NodeConfigInfo
+  sendTo: (msg: ManagerMessage) => void
+}) {
+  return (
+    <>
+      <DuoWlV4EqCodecBlock
+        codec="haptic"
+        title="触覚 EQ"
+        fsLabel="16kHz"
+        device={device}
+        committed={cachedInfo?.eq?.haptic}
+        sendTo={sendTo}
+      />
+      <DuoWlV4EqCodecBlock
+        codec="hp"
+        title="ヘッドホン EQ"
+        fsLabel="48kHz"
+        device={device}
+        committed={cachedInfo?.eq?.hp}
+        sendTo={sendTo}
+      />
     </>
   )
 }

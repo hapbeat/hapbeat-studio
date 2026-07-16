@@ -176,6 +176,12 @@ export interface StudioToManagerMessage {
     | 'set_headphone_volume'    // DuoWL v4 receiver — TPA6130A2 HP volume
     | 'set_stream_buffer'       // all UDP receivers — stream jitter buffer (ms)
     | 'set_input_mode'          // DuoWL v4 receiver — output (HP) vs line_in (jack → haptics)
+    // --- SOLID48 (mode 9) transmitter tuning (DEC-046 follow-up) ---
+    | 'set_opus_complexity'     // transmitter — TX-local Opus encoder complexity override (0..10)
+    | 'set_stream_hp_buffer'    // transmitter — HP jitter-buffer target, broadcast as 0xAC param 6 (ms)
+    // --- DuoWL v4 ESP-NOW hp48 audio-DSP config (audio-dsp-config.md) ---
+    | 'set_eq_band'             // DuoWL v4 receiver — per-codec/band AIC3204 biquad coeffs (§2)
+    | 'set_av_delay'            // DuoWL v4 receiver — audio-vs-haptic delay, ms (§3)
   payload: Record<string, unknown>
 }
 
@@ -338,6 +344,16 @@ export interface GetInfoResult {
      *  playback; "line_in" = jack audio-in routed to haptics (DuoWL v4 only). */
     input_mode?: 'output' | 'line_in'
   }
+  /** DuoWL v4 ESP-NOW hp48 receiver EQ state (audio-dsp-config.md §2,
+   *  board === "duo_wl_v4" only). 3 bands per codec, ftype "off" default. */
+  eq?: {
+    haptic: EqBandReadout[]
+    hp: EqBandReadout[]
+  }
+  /** A-V delay, ms (audio-dsp-config.md §3, DuoWL v4 ESP-NOW hp48 receiver
+   *  only): extra target added to the HP (48k) ring only, delaying audio
+   *  vs. haptic. 0..30. */
+  av_delay_ms?: number
   error?: string
 }
 
@@ -347,6 +363,19 @@ export interface MqttClientEntry {
   /** Studio-assigned device name (presence message); absent on old firmware. */
   name?: string
   role: 'sensor' | 'receiver' | 'unknown'
+}
+
+/**
+ * One EQ band's COMMITTED AIC3204 coefficients, as reported by
+ * `get_info.eq` (audio-dsp-config.md §2). Only `ftype` + the raw Q1.23
+ * ints are persisted/reported by the firmware — the fc/Q/gainDb the ints
+ * were originally designed from are NOT recoverable from them, so Studio's
+ * EQ designer UI treats this as a read-only "what's committed on the
+ * device" readout, separate from the (locally-held) design controls.
+ */
+export interface EqBandReadout {
+  ftype: string
+  coeffs: [number, number, number, number, number]
 }
 
 export interface WifiStatusResult {

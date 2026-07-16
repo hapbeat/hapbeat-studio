@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { MqttClientEntry, NodeRole, NodeTransport, SensorMapping, SensorReading } from '@/types/manager'
+import type { EqBandReadout, MqttClientEntry, NodeRole, NodeTransport, SensorMapping, SensorReading } from '@/types/manager'
 import { useSerialMaster } from './serialMaster'
 import { isDemoMode } from '@/demo/isDemoMode'
 
@@ -89,6 +89,12 @@ interface DeviceState {
     espnow_channel?: number
     gain?: number
     input_level?: number
+    /** SOLID48 (mode 9) TX-local Opus encoder complexity override (DEC-046
+     *  follow-up, transmitter only). -1/undefined = unset (mode default). */
+    opus_complexity?: number
+    /** SOLID48 (mode 9) receiver HP jitter-buffer target the TX broadcasts
+     *  as 0xAC fleet-tune param 6 (DEC-046 follow-up, transmitter only), ms. */
+    stream_hp_buffer_ms?: number
     broker_host?: string
     broker_port?: number
     topic_root?: string
@@ -144,6 +150,15 @@ interface DeviceState {
       /** Input/output routing (DEC-041 follow-up, DuoWL v4 only). */
       input_mode?: 'output' | 'line_in'
     }
+    /** DuoWL v4 ESP-NOW hp48 receiver EQ state (audio-dsp-config.md §2,
+     *  board === "duo_wl_v4" only). */
+    eq?: {
+      haptic: EqBandReadout[]
+      hp: EqBandReadout[]
+    }
+    /** A-V delay, ms (audio-dsp-config.md §3, DuoWL v4 ESP-NOW hp48 receiver
+     *  only). 0..30. */
+    av_delay_ms?: number
   }>
 
   /** Per-IP cache of the most recent get_wifi_status response. */

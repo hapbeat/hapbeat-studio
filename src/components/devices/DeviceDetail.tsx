@@ -5,7 +5,7 @@ import { ApModeSection } from './ApModeSection'
 import { useLibraryStore } from '@/stores/libraryStore'
 import type { KitDefinition, KitEvent } from '@/types/library'
 import { useLogStore } from '@/stores/logStore'
-import type { DeviceInfo, ManagerMessage, MqttClientEntry, NodeRole, NodeTransport, SensorMapping } from '@/types/manager'
+import type { DeviceInfo, EqBandReadout, ManagerMessage, MqttClientEntry, NodeRole, NodeTransport, SensorMapping } from '@/types/manager'
 import { IdentityForm } from './IdentityForm'
 import { WifiProfilesForm } from './WifiProfilesForm'
 import { UiConfigForm } from './UiConfigForm'
@@ -22,6 +22,9 @@ import {
   BrokerConfigSection,
   SensorMappingSection,
   DuoWlV4AudioSection,
+  DuoWlV4EspNowAudioSection,
+  DuoWlV4EqSection,
+  SolidTransmitterTuningSection,
 } from './NodeConfigSections'
 import { useDeviceTransport } from '@/hooks/useDeviceTransport'
 import { useSerialMaster } from '@/stores/serialMaster'
@@ -216,6 +219,8 @@ export function DeviceDetail() {
         espnow_channel: p.espnow_channel as number | undefined,
         gain: p.gain as number | undefined,
         input_level: p.input_level as number | undefined,
+        opus_complexity: p.opus_complexity as number | undefined,
+        stream_hp_buffer_ms: p.stream_hp_buffer_ms as number | undefined,
         broker_host: p.broker_host as string | undefined,
         broker_port: p.broker_port as number | undefined,
         topic_root: p.topic_root as string | undefined,
@@ -239,6 +244,9 @@ export function DeviceDetail() {
         stream: p.stream as { received?: number; lost?: number; recovered?: number; dropped?: number; max_gap?: number; handoffs?: number; sources?: number; locked?: boolean; locked_mac?: string; delay_ms?: number } | undefined,
         // DuoWL v4 audio stage settings (DEC-041, board === "duo_wl_v4" only)
         audio: p.audio as { pam_db?: number; lineout_db?: number; boost_db?: number; hp_db?: number; input_mode?: 'output' | 'line_in' } | undefined,
+        // DuoWL v4 ESP-NOW hp48 audio-DSP config (audio-dsp-config.md §2/§3)
+        eq: p.eq as { haptic: EqBandReadout[]; hp: EqBandReadout[] } | undefined,
+        av_delay_ms: p.av_delay_ms as number | undefined,
         // SoftAP extension fields (firmware ≥ v0.1.0)
         mode: p.mode as 'sta' | 'ap' | undefined,
         ap_ssid: p.ap_ssid as string | undefined,
@@ -494,6 +502,8 @@ export function DeviceDetail() {
         espnow_channel: masterInfo.espnow_channel,
         gain: masterInfo.gain,
         input_level: masterInfo.input_level,
+        opus_complexity: masterInfo.opus_complexity,
+        stream_hp_buffer_ms: masterInfo.stream_hp_buffer_ms,
         broker_host: masterInfo.broker_host,
         broker_port: masterInfo.broker_port,
         topic_root: masterInfo.topic_root,
@@ -515,6 +525,8 @@ export function DeviceDetail() {
         espnow_ui: masterInfo.espnow_ui,
         stream: masterInfo.stream,
         audio: masterInfo.audio,
+        eq: masterInfo.eq,
+        av_delay_ms: masterInfo.av_delay_ms,
       } : undefined)
     : infoCache[selectedIp]
   const wifiStatus = transport.isSerial
@@ -682,6 +694,13 @@ export function DeviceDetail() {
               sendTo={sendTo}
               role={nodeRole === 'transmitter' ? 'transmitter' : 'receiver'}
             />
+            {nodeRole === 'transmitter' && (
+              <SolidTransmitterTuningSection
+                device={device}
+                cachedInfo={cachedInfo}
+                sendTo={sendTo}
+              />
+            )}
             {nodeTransport === 'espnow_stream' && nodeRole !== 'transmitter' && (
               <>
                 <EspNowDisplayPowerSection
@@ -690,6 +709,25 @@ export function DeviceDetail() {
                   oledLevel={cachedInfo?.oled_brightness}
                   sendTo={sendTo}
                 />
+                {cachedInfo?.board === 'duo_wl_v4' && (
+                  <>
+                    {/* DuoWL v4 ESP-NOW hp48 receiver audio-DSP config
+                        (audio-dsp-config.md): HP volume + A-V delay, then
+                        the per-codec EQ designer. This is the only place
+                        these controls are reachable for a pure espnow_stream
+                        receiver — it has no 設定 tab (computeSubTabs). */}
+                    <DuoWlV4EspNowAudioSection
+                      device={device}
+                      cachedInfo={cachedInfo}
+                      sendTo={sendTo}
+                    />
+                    <DuoWlV4EqSection
+                      device={device}
+                      cachedInfo={cachedInfo}
+                      sendTo={sendTo}
+                    />
+                  </>
+                )}
                 <EspNowStreamReadout
                   cachedInfo={cachedInfo}
                   onRefresh={() => sendTo({ type: 'get_info', payload: {} })}
