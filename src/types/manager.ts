@@ -182,6 +182,13 @@ export interface StudioToManagerMessage {
     // --- DuoWL v4 ESP-NOW hp48 audio-DSP config (audio-dsp-config.md) ---
     | 'set_eq_band'             // DuoWL v4 receiver — per-codec/band AIC3204 biquad coeffs (§2)
     | 'set_av_delay'            // DuoWL v4 receiver — audio-vs-haptic delay, ms (§3)
+    // --- DuoWL v4 full AIC3204 DSP feature set (aic3204-full-dsp-registers.md) ---
+    | 'set_dsp_profile'         // DuoWL v4 receiver — per-codec DSP profile select (§0/§1)
+    | 'set_eq_iir'              // DuoWL v4 receiver — per-codec 1st-order IIR coeffs (§8.5)
+    | 'set_drc'                 // DuoWL v4 receiver — per-codec compressor/limiter (§2)
+    | 'set_beep'                // DuoWL v4 receiver — one-shot test tone, profile "full" only (§3)
+    | 'set_3d'                  // DuoWL v4 receiver — per-codec 3D effect depth, profile "full" only (§4)
+    | 'set_agc'                 // DuoWL v4 receiver — AGC, line-in/HP-codec ADC path (§5, no codec field)
   payload: Record<string, unknown>
 }
 
@@ -343,6 +350,10 @@ export interface GetInfoResult {
     /** Input/output routing (DEC-041 follow-up): "output" = normal headphone
      *  playback; "line_in" = jack audio-in routed to haptics (DuoWL v4 only). */
     input_mode?: 'output' | 'line_in'
+    /** Stream jitter buffer, ms (set_stream_buffer). Applies to all UDP
+     *  receivers, surfaced here since DuoWL v4 is the primary tuning target
+     *  (headphone music vs. low-latency haptics). */
+    stream_buffer_ms?: number
   }
   /** DuoWL v4 ESP-NOW hp48 receiver EQ state (audio-dsp-config.md §2,
    *  board === "duo_wl_v4" only). 3 bands per codec, ftype "off" default. */
@@ -350,10 +361,47 @@ export interface GetInfoResult {
     haptic: EqBandReadout[]
     hp: EqBandReadout[]
   }
-  /** A-V delay, ms (audio-dsp-config.md §3, DuoWL v4 ESP-NOW hp48 receiver
-   *  only): extra target added to the HP (48k) ring only, delaying audio
-   *  vs. haptic. 0..30. */
+  /** EQ engine backing `eq`/`set_eq_band` on THIS device: "sw" = a plain
+   *  software biquad on the 16kHz haptic mixer (necklace_v3 / band_v2/v3/v4
+   *  receivers, all transports — no hp codec, no DSP profiles, no IIR/DRC/
+   *  3D/Beep). Absent on DuoWL v4 (its `eq` is the AIC3204 in-codec biquad,
+   *  gated by `board === "duo_wl_v4"` instead). The cleanest, presence-driven
+   *  gate for the non-DuoWL-v4 haptic EQ UI — no board allow-list to maintain. */
+  eq_engine?: 'sw' | string
+  /** A-V delay, ms, SIGNED (audio-dsp-config.md §3, DuoWL v4 ESP-NOW hp48
+   *  receiver only): negative = delay the haptic ring relative to HP audio;
+   *  positive = delay the HP (48k) ring relative to haptic; 0 = no offset.
+   *  Range −100..+100. */
   av_delay_ms?: number
+  /** DSP profile selection + capabilities per codec (aic3204-full-dsp-
+   *  registers.md §0/§1, board === "duo_wl_v4" only). */
+  dsp_profile?: {
+    haptic: DspProfileInfo
+    hp: DspProfileInfo
+  }
+  /** 1st-order IIR, raw [N0,N1,D1] Q1.23 ints per codec (aic3204-full-dsp-
+   *  registers.md §8.5, board === "duo_wl_v4" only) — unlike the biquad `eq`
+   *  bands above, these ARE the exact ints Studio would send (no fc/Q design
+   *  abstraction), so they fully round-trip. */
+  eq_iir?: {
+    haptic: [number, number, number]
+    hp: [number, number, number]
+  }
+  /** DRC (compressor/limiter) config + live status per codec (aic3204-full-
+   *  dsp-registers.md §2, board === "duo_wl_v4" only). */
+  drc?: {
+    haptic: DrcInfo
+    hp: DrcInfo
+  }
+  /** 3D effect depth per codec, 0.0..1.0 (aic3204-full-dsp-registers.md §4,
+   *  board === "duo_wl_v4" only; only audible on profile "full"). */
+  effect_3d?: {
+    haptic: number
+    hp: number
+  }
+  /** AGC config + applied-gain telemetry (aic3204-full-dsp-registers.md §5,
+   *  board === "duo_wl_v4" only; line-in / HP-codec ADC path). */
+  agc?: AgcInfo
   error?: string
 }
 
@@ -376,6 +424,54 @@ export interface MqttClientEntry {
 export interface EqBandReadout {
   ftype: string
   coeffs: [number, number, number, number, number]
+}
+
+/** DSP profile name + capability summary for one codec, as reported by
+ *  `get_info.dsp_profile.<codec>` (aic3204-full-dsp-registers.md §0/§1).
+ *  `bands` is the usable biquad band count for the CURRENT profile (3/5/6) —
+ *  bands beyond it are still accepted/stored but inert. */
+export interface DspProfileInfo {
+  profile: 'standard' | 'eq6' | 'eq6_drc' | 'full'
+  bands: number
+  has_iir: boolean
+  has_drc: boolean
+  has_3d: boolean
+  has_beep: boolean
+}
+
+/** DRC (compressor/limiter) config + live status for one codec, as reported
+ *  by `get_info.drc.<codec>` (aic3204-full-dsp-registers.md §2). Field names
+ *  match `set_drc`'s request/response fields exactly (hold/attack/decay are
+ *  RAW 0..15 register codes, not dB/ms). */
+export interface DrcInfo {
+  enable_l: boolean
+  enable_r: boolean
+  threshold_db: number
+  hysteresis_db: number
+  hold: number
+  attack: number
+  decay: number
+  /** Live threshold-exceeded flags (no continuous gain-reduction readback
+   *  exists on this part). */
+  compressing_l: boolean
+  compressing_r: boolean
+}
+
+/** AGC (line-in / HP-codec ADC path) config + applied-gain telemetry, as
+ *  reported by `get_info.agc` (aic3204-full-dsp-registers.md §5). Global —
+ *  no per-codec split (only the HP codec's ADC is ever enabled on this
+ *  hardware). `attack`/`decay` are RAW 0..255 register bytes (no confirmed
+ *  dB/ms decode). */
+export interface AgcInfo {
+  enable: boolean
+  target_level_db: number
+  max_gain_db: number
+  attack: number
+  decay: number
+  noise_threshold_db: number
+  hysteresis_db: number
+  applied_gain_l_db: number
+  applied_gain_r_db: number
 }
 
 export interface WifiStatusResult {

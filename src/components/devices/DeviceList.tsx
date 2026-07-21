@@ -218,6 +218,11 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
         {entry.info?.fw && <span>fw {entry.info.fw}</span>}
         {entry.probe === 'failed' && <span title="get_info 無応答 — ファーム未書込の可能性">未書込?</span>}
       </div>
+      {/* Per-card badges for these two states were removed (user feedback
+          2026-07-20: redundant) — 設定接続 is already visible via the green
+          config-active card frame + the ⚙ 設定 toggle's own ON styling, and
+          書込対象 is already visible via the checkbox itself. The section
+          header's legend below still spells out what ☑ means. */}
       {f.state !== 'idle' && (
         <div className="device-row-meta" style={{ marginTop: 2 }}>
           {f.state === 'waiting' && <span>⏳ 書き込み待機中…</span>}
@@ -298,6 +303,19 @@ function UsbPortsSection() {
       <div className="devices-usb-header">
         <div className="devices-usb-header-line">
           <span className="devices-sidebar-title" style={{ fontSize: 12 }}>USB Serial</span>
+          {/* Explicit legend for the per-card checkbox column — its meaning
+              (書込対象 = flash / bulk-config write target) was previously
+              hover-title-only, which is easy to miss (user 2026-07-20).
+              Per-card ⚙/✔ badges were removed as redundant (config state
+              already shown by the green frame + toggle, checkbox already
+              shows its own checked state) — this legend now carries the
+              one implicit piece of info: what ☑ actually does. */}
+          <span
+            className="devices-usb-legend"
+            title="各カードのチェックボックス ☑ は Serial 書き込み・一括設定の対象（書込対象）を選びます"
+          >
+            ☑ = 書込対象（フラッシュ・一括設定に適用）
+          </span>
           <span className="devices-sidebar-count">
             {knownPorts.length}
             {selectedPortIds.length > 0 && (

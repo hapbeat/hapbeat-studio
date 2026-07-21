@@ -1,14 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { DeviceInfo, EqBandReadout, ManagerMessage, MqttClientEntry, SensorColorMatch, SensorMapping, SensorReading } from '@/types/manager'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { AgcInfo, DeviceInfo, DrcInfo, DspProfileInfo, EqBandReadout, ManagerMessage, MqttClientEntry, SensorColorMatch, SensorMapping, SensorReading } from '@/types/manager'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useMqttTopicsStore, sanitizeTopic } from '@/stores/mqttTopicsStore'
+import {
+  useDuoWlV4AudioStore,
+  type DuoWlV4AgcValue,
+  type DuoWlV4AudioSnapshot,
+  type DuoWlV4BeepValue,
+  type DuoWlV4DrcValue,
+  type DuoWlV4DspProfile,
+  type DuoWlV4InputMode,
+  type DuoWlV4NumericField,
+} from '@/stores/duoWlV4AudioStore'
 import { useToast } from '@/components/common/Toast'
 import { downloadTextFile } from '@/utils/download'
 import { clampOpusComplexity, clampHpBufferMs } from '@/utils/solidTransmitterTuning'
 import {
   computeAic3204Eq,
   aic3204CoeffsToArray,
+  eqResponseCurve,
   type EqFtype,
+  type EqCurvePoint,
 } from '@/utils/aic3204Eq'
 import { MqttFlowPanel } from './MqttFlow'
 
@@ -96,18 +108,55 @@ export interface NodeConfigInfo {
     /** Input/output routing (DEC-041 follow-up, DuoWL v4 only):
      *  "output" = normal headphone playback / "line_in" = jack audio-in → haptics. */
     input_mode?: 'output' | 'line_in'
+    /** Stream jitter buffer, ms (set_stream_buffer). Applies to all UDP
+     *  receivers; surfaced on the DuoWL v4 audio panel as the main
+     *  headphone-music tuning knob. */
+    stream_buffer_ms?: number
   }
   /** DuoWL v4 ESP-NOW hp48 receiver EQ state (audio-dsp-config.md §2,
    *  board === "duo_wl_v4" only). fc/Q/gain aren't recoverable from the
-   *  committed ints — only ftype + raw coeffs are reported. */
+   *  committed ints — only ftype + raw coeffs are reported. Up to 6 bands
+   *  per codec (aic3204-full-dsp-registers.md §8.5 — was 3, now A..F). */
   eq?: {
     haptic: EqBandReadout[]
     hp: EqBandReadout[]
   }
-  /** A-V delay, ms (audio-dsp-config.md §3, DuoWL v4 ESP-NOW hp48 receiver
-   *  only): extra target added to the HP (48k) ring only, delaying audio
-   *  vs. haptic. 0..30. */
+  /** EQ engine backing `eq`/`set_eq_band` on THIS device: "sw" = software
+   *  biquad on the 16kHz haptic mixer (necklace_v3 / band_v2/v3/v4 receivers,
+   *  all transports — no hp codec, no DSP profiles, no IIR/DRC/3D/Beep).
+   *  Absent on DuoWL v4 (AIC3204 in-codec biquad, gated by board instead).
+   *  The presence-driven gate for the non-DuoWL-v4 haptic EQ UI (SwHapticEqSection). */
+  eq_engine?: 'sw' | string
+  /** A-V delay, ms, SIGNED (audio-dsp-config.md §3, DuoWL v4 ESP-NOW hp48
+   *  receiver only): negative = delay the haptic ring relative to HP audio;
+   *  positive = delay the HP (48k) ring relative to haptic; 0 = no offset.
+   *  Range −100..+100. */
   av_delay_ms?: number
+  /** DSP profile + capabilities per codec (aic3204-full-dsp-registers.md
+   *  §0/§1, board === "duo_wl_v4" only). */
+  dsp_profile?: {
+    haptic: DspProfileInfo
+    hp: DspProfileInfo
+  }
+  /** 1st-order IIR, raw [N0,N1,D1] Q1.23 ints per codec (§8.5, board ===
+   *  "duo_wl_v4" only) — fully round-trips (no fc/Q abstraction). */
+  eq_iir?: {
+    haptic: [number, number, number]
+    hp: [number, number, number]
+  }
+  /** DRC config + live status per codec (§2, board === "duo_wl_v4" only). */
+  drc?: {
+    haptic: DrcInfo
+    hp: DrcInfo
+  }
+  /** 3D effect depth per codec, 0.0..1.0 (§4, board === "duo_wl_v4" only;
+   *  only audible on profile "full"). */
+  effect_3d?: {
+    haptic: number
+    hp: number
+  }
+  /** AGC config + applied-gain telemetry (§5, board === "duo_wl_v4" only). */
+  agc?: AgcInfo
 }
 
 const ESPNOW_CHANNELS = [1, 6, 11]
@@ -2075,68 +2124,443 @@ export function EspNowDisplayPowerSection({
 // ---------------------------------------------------------------------
 // DuoWL v4: per-device audio stage calibration (DEC-041)
 // board === "duo_wl_v4" only. Wire: set_haptic_gain / set_dac_boost /
-// set_headphone_volume, readback via get_info.audio (no dedicated get_).
+// set_headphone_volume / set_stream_buffer / set_input_mode, each taking an
+// optional `persist` (default true; false = live preview, no NVS write).
+// Readback via get_info.audio (+ av_delay_ms top-level, DuoWlV4EspNowAudioSection).
 // ---------------------------------------------------------------------
 
 const PAM_GAIN_STEPS = [6, 12, 18, 24] as const
+
+function clampPamDb(v: number): number {
+  if (!Number.isFinite(v)) return 24
+  return PAM_GAIN_STEPS.reduce(
+    (best, step) => (Math.abs(step - v) < Math.abs(best - v) ? step : best),
+    PAM_GAIN_STEPS[0] as number,
+  )
+}
+function clampLineoutDb(v: number): number {
+  if (!Number.isFinite(v)) return 6
+  return Math.max(-6, Math.min(29, Math.round(v)))
+}
+function clampBoostDb(v: number): number {
+  if (!Number.isFinite(v)) return 0
+  return Math.max(0, Math.min(24, Math.round(v)))
+}
+function clampHpDb(v: number): number {
+  if (!Number.isFinite(v)) return -10
+  return Math.max(-59, Math.min(4, Math.round(v)))
+}
+function clampBufferMs(v: number): number {
+  if (!Number.isFinite(v)) return 0
+  return Math.max(0, Math.min(200, Math.round(v)))
+}
+function clampAvDelayMs(v: number): number {
+  if (!Number.isFinite(v)) return 0
+  return Math.max(-100, Math.min(100, Math.round(v)))
+}
+
+// ---------------------------------------------------------------------
+// Device-backed control behavior (shared by every DuoWL v4 audio-tab
+// slider/toggle): the DEVICE is the source of truth (`deviceValue`), but a
+// local edit stays "dirty" (git-diff-like: edited/not-yet-persisted) until
+// explicitly committed, so an in-flight get_info refresh never clobbers
+// what the user is mid-way through typing/dragging. `state` is EXTERNAL
+// (not local useState) — every caller here backs it with
+// `useDuoWlV4AudioStore` (duoWlV4AudioStore.ts) so the draft survives
+// switching between the 音声/EQ sub-tabs and is reachable by the JSON
+// export/import pair (DuoWlV4SettingsBackup).
+//
+//   - onInput(v): live preview — updates the shown value immediately,
+//     marks dirty, and after `debounceMs` of no further input sends
+//     persist:false (device previews the change without an NVS write).
+//   - commit(v?): sends persist:true immediately (cancels any pending
+//     debounce) and clears dirty. Sliders wire this to pointer-up/blur;
+//     discrete controls (buttons) call it directly with no `onInput` at
+//     all — "send persist:true immediately on click, no debounce".
+// ---------------------------------------------------------------------
+
+interface DeviceBackedState<T> {
+  value: T
+  dirty: boolean
+  setState: (value: T, dirty: boolean) => void
+}
+
+function useDeviceBackedValue<T>(
+  deviceValue: T | undefined,
+  state: DeviceBackedState<T>,
+  send: (v: T, persist: boolean) => void,
+  opts?: {
+    debounceMs?: number
+    syncTick?: number
+    /**
+     * Equality check used to decide "did the device value actually change /
+     * does it already match the local value" — defaults to reference
+     * equality (`===`), which is correct for primitives (number/string) and
+     * for values that are read straight off the store/cache BY REFERENCE
+     * (e.g. an array pulled directly off `cachedInfo`, unchanged between
+     * renders unless a new get_info snapshot lands).
+     *
+     * MUST be overridden with a structural comparator for any `deviceValue`
+     * the CALLER constructs as a fresh object literal in the component body
+     * (e.g. `cachedInfoField && { camelCase: cachedInfoField.snake_case,
+     * ... }`) — that literal is a NEW reference every render regardless of
+     * whether the underlying data changed, so reference equality here would
+     * never be true and the adopt effect below would re-fire (setState →
+     * new store object → selector identity changes → re-render → effect
+     * re-fires again) every render, forever. Memoizing the literal with
+     * `useMemo` at the call site is REQUIRED either way (this comparator
+     * alone doesn't stop the caller from producing a new object each
+     * render) — this is the second layer, so an accidental missing
+     * `useMemo` degrades to "extra reconcile churn" instead of an infinite
+     * loop.
+     */
+    isEqual?: (a: T, b: T) => boolean
+  },
+) {
+  const { value, dirty, setState } = state
+  const debounceMs = opts?.debounceMs ?? 280
+  const syncTick = opts?.syncTick
+  const isEqual = opts?.isEqual ?? ((a: T, b: T) => a === b)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Adopt the device's committed value ONLY while not locally dirty — this is
+  // what makes the device authoritative without clobbering an edit. Keyed on
+  // `syncTick` in ADDITION to `deviceValue` so a fresh get_info snapshot
+  // reconciles the local value even when the device echoed the SAME number as
+  // before (e.g. it clamped a write back to its prior value): the value alone
+  // wouldn't change, so a value-keyed effect would leave Studio showing a
+  // figure the device doesn't actually hold. The same-value guard keeps this
+  // idempotent (no redundant store write when already in sync), and NOT
+  // depending on value/dirty is deliberate — re-running on a local edit is
+  // exactly what we must avoid.
+  useEffect(() => {
+    if (deviceValue === undefined || dirty) return
+    if (isEqual(value, deviceValue)) return
+    setState(deviceValue, false)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceValue, syncTick])
+
+  useEffect(() => () => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+  }, [])
+
+  const onInput = useCallback((v: T) => {
+    setState(v, deviceValue === undefined ? true : !isEqual(v, deviceValue))
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null
+      send(v, false)
+    }, debounceMs)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceValue, send, debounceMs, setState])
+
+  const commit = useCallback((v?: T) => {
+    if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null }
+    const finalV = v !== undefined ? v : value
+    setState(finalV, false)
+    send(finalV, true)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, send, setState])
+
+  return { value, dirty, onInput, commit }
+}
+
+/** Shallow structural equality for a flat record of primitives (booleans/
+ *  numbers/strings) — the `isEqual` comparator for useDeviceBackedValue when
+ *  T is a compound object the caller reconstructs each render (DRC/AGC
+ *  values below), so a same-content-but-new-reference deviceValue doesn't
+ *  re-trigger the adopt effect. Also correct (if unnecessary — those already
+ *  pass a by-reference array) for a plain array like the IIR tuple, since
+ *  `Object.keys` on an array yields its index strings. */
+function shallowEqualRecord<T extends object>(a: T, b: T): boolean {
+  const keysA = Object.keys(a) as Array<keyof T>
+  const keysB = Object.keys(b)
+  if (keysA.length !== keysB.length) return false
+  for (const k of keysA) {
+    if (a[k] !== b[k]) return false
+  }
+  return true
+}
+
+/** Store-backed numeric field for one DuoWL v4 device (pam/lineout/boost/
+ *  hp/buffer/avDelay all share this — they only differ in which store slot
+ *  and which `send` wire command they use). `syncTick` bumps once per
+ *  get_info so a device echo reconciles even at an unchanged value (finding 3). */
+function useDuoAudioField(
+  ip: string,
+  field: DuoWlV4NumericField,
+  deviceValue: number | undefined,
+  send: (v: number, persist: boolean) => void,
+  syncTick?: number,
+) {
+  const value = useDuoWlV4AudioStore((s) => s.draftFor(ip)[field].value)
+  const dirty = useDuoWlV4AudioStore((s) => s.draftFor(ip)[field].dirty)
+  const setNumeric = useDuoWlV4AudioStore((s) => s.setNumeric)
+  const setState = useCallback(
+    (v: number, d: boolean) => setNumeric(ip, field, v, d),
+    [ip, field, setNumeric],
+  )
+  return useDeviceBackedValue(deviceValue, { value, dirty, setState }, send, { syncTick })
+}
+
+/** Store-backed input_mode field (string enum, not numeric — same behavior). */
+function useDuoInputModeField(
+  ip: string,
+  deviceValue: DuoWlV4InputMode | undefined,
+  send: (v: DuoWlV4InputMode, persist: boolean) => void,
+  syncTick?: number,
+) {
+  const value = useDuoWlV4AudioStore((s) => s.draftFor(ip).inputMode.value)
+  const dirty = useDuoWlV4AudioStore((s) => s.draftFor(ip).inputMode.dirty)
+  const setInputMode = useDuoWlV4AudioStore((s) => s.setInputMode)
+  const setState = useCallback(
+    (v: DuoWlV4InputMode, d: boolean) => setInputMode(ip, v, d),
+    [ip, setInputMode],
+  )
+  return useDeviceBackedValue(deviceValue, { value, dirty, setState }, send, { syncTick })
+}
+
+/** Store-backed DSP profile field for one codec (same shape as
+ *  useDuoInputModeField, generalized with a `codec` param). */
+function useDuoDspProfileField(
+  ip: string,
+  codec: EqCodec,
+  deviceValue: DuoWlV4DspProfile | undefined,
+  send: (v: DuoWlV4DspProfile, persist: boolean) => void,
+  syncTick?: number,
+) {
+  const field = codec === 'haptic' ? 'dspProfileHaptic' : 'dspProfileHp'
+  const value = useDuoWlV4AudioStore((s) => s.draftFor(ip)[field].value)
+  const dirty = useDuoWlV4AudioStore((s) => s.draftFor(ip)[field].dirty)
+  const setDspProfile = useDuoWlV4AudioStore((s) => s.setDspProfile)
+  const setState = useCallback(
+    (v: DuoWlV4DspProfile, d: boolean) => setDspProfile(ip, codec, v, d),
+    [ip, codec, setDspProfile],
+  )
+  return useDeviceBackedValue(deviceValue, { value, dirty, setState }, send, { syncTick })
+}
+
+/** Store-backed 1st-order IIR field for one codec — raw [N0,N1,D1] Q1.23
+ *  ints, fully device-round-trippable (unlike the biquad bands), so this
+ *  reuses useDeviceBackedValue directly over the 3-tuple. */
+function useDuoIirField(
+  ip: string,
+  codec: EqCodec,
+  deviceValue: [number, number, number] | undefined,
+  send: (v: [number, number, number], persist: boolean) => void,
+  syncTick?: number,
+) {
+  const field = codec === 'haptic' ? 'iirHaptic' : 'iirHp'
+  const value = useDuoWlV4AudioStore((s) => s.draftFor(ip)[field].value)
+  const dirty = useDuoWlV4AudioStore((s) => s.draftFor(ip)[field].dirty)
+  const setIir = useDuoWlV4AudioStore((s) => s.setIir)
+  const setState = useCallback(
+    (v: [number, number, number], d: boolean) => setIir(ip, codec, v, d),
+    [ip, codec, setIir],
+  )
+  return useDeviceBackedValue(deviceValue, { value, dirty, setState }, send, { syncTick })
+}
+
+/** Store-backed DRC field for one codec — the WHOLE config as one object
+ *  (see DuoWlV4DrcValue doc: every control ships the full struct so no
+ *  partial-edit can go stale between fields). */
+function useDuoDrcField(
+  ip: string,
+  codec: EqCodec,
+  deviceValue: DuoWlV4DrcValue | undefined,
+  send: (v: DuoWlV4DrcValue, persist: boolean) => void,
+  syncTick?: number,
+) {
+  const field = codec === 'haptic' ? 'drcHaptic' : 'drcHp'
+  const value = useDuoWlV4AudioStore((s) => s.draftFor(ip)[field].value)
+  const dirty = useDuoWlV4AudioStore((s) => s.draftFor(ip)[field].dirty)
+  const setDrc = useDuoWlV4AudioStore((s) => s.setDrc)
+  const setState = useCallback(
+    (v: DuoWlV4DrcValue, d: boolean) => setDrc(ip, codec, v, d),
+    [ip, codec, setDrc],
+  )
+  // isEqual: shallowEqualRecord — the caller (DrcPanel) reconstructs
+  // `deviceValue` as a fresh camelCase object literal every render (mapping
+  // from the snake_case DrcInfo cache), so reference equality would never
+  // hold and the adopt effect would loop forever. See useDeviceBackedValue's
+  // `isEqual` doc.
+  return useDeviceBackedValue(deviceValue, { value, dirty, setState }, send, { syncTick, isEqual: shallowEqualRecord })
+}
+
+/** Store-backed AGC field (global, whole-object commit — same discipline as
+ *  useDuoDrcField, including the shallowEqualRecord isEqual — see that
+ *  function's comment). */
+function useDuoAgcField(
+  ip: string,
+  deviceValue: DuoWlV4AgcValue | undefined,
+  send: (v: DuoWlV4AgcValue, persist: boolean) => void,
+  syncTick?: number,
+) {
+  const value = useDuoWlV4AudioStore((s) => s.draftFor(ip).agc.value)
+  const dirty = useDuoWlV4AudioStore((s) => s.draftFor(ip).agc.dirty)
+  const setAgc = useDuoWlV4AudioStore((s) => s.setAgc)
+  const setState = useCallback(
+    (v: DuoWlV4AgcValue, d: boolean) => setAgc(ip, v, d),
+    [ip, setAgc],
+  )
+  return useDeviceBackedValue(deviceValue, { value, dirty, setState }, send, { syncTick, isEqual: shallowEqualRecord })
+}
+
+/** Store-backed 3D effect depth field for one codec. Dedicated hook (not
+ *  useDuoAudioField/setNumeric) so it can flip `effect3dLoaded` — see
+ *  DuoWlV4Draft.effect3dLoaded doc. `deviceValue` here is a plain number
+ *  read straight off cachedInfo (not a reconstructed literal), so the
+ *  default reference-equality isEqual is fine — no shallowEqualRecord needed. */
+function useDuoEffect3dField(
+  ip: string,
+  codec: EqCodec,
+  deviceValue: number | undefined,
+  send: (v: number, persist: boolean) => void,
+  syncTick?: number,
+) {
+  const field = codec === 'haptic' ? 'effect3dHaptic' : 'effect3dHp'
+  const value = useDuoWlV4AudioStore((s) => s.draftFor(ip)[field].value)
+  const dirty = useDuoWlV4AudioStore((s) => s.draftFor(ip)[field].dirty)
+  const setEffect3d = useDuoWlV4AudioStore((s) => s.setEffect3d)
+  const setState = useCallback(
+    (v: number, d: boolean) => setEffect3d(ip, codec, v, d),
+    [ip, codec, setEffect3d],
+  )
+  return useDeviceBackedValue(deviceValue, { value, dirty, setState }, send, { syncTick })
+}
+
+/**
+ * Returns a debounced `scheduleReconcile()` — call it after every
+ * persist:true commit. It coalesces a burst of commits into ONE get_info
+ * (`onReconcile`, wired by the caller to the transport-correct refresh)
+ * ~600ms after the last commit, so the device echoes its real value back and
+ * the adopt-when-not-dirty effect (useDeviceBackedValue) reconciles. Without
+ * this, "device is source of truth" only holds on the next unrelated refresh
+ * (device switch / manual 読み込み), so a clamped/rejected write could sit
+ * unreconciled in the UI (finding 3).
+ */
+function useReconcileScheduler(onReconcile: (() => void) | undefined) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cbRef = useRef(onReconcile)
+  cbRef.current = onReconcile
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current) }, [])
+  return useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null
+      cbRef.current?.()
+    }, 600)
+  }, [])
+}
+
+/** Small trailing dirty marker, reused by every DuoWL v4 control. Always
+ *  renders the same fixed-width span (layout-shift rule) — only the dot's
+ *  visibility/tooltip changes, so no row ever shifts when a control goes
+ *  dirty/clean. */
+function DirtyMark({
+  dirty,
+  deviceValue,
+  format,
+}: {
+  dirty: boolean
+  deviceValue?: number | string
+  format?: (v: number | string) => string
+}) {
+  const title = !dirty
+    ? 'デバイスと一致'
+    : deviceValue !== undefined
+      ? `未保存（自動プレビュー中、適用で確定・デバイス値: ${format ? format(deviceValue) : deviceValue}）`
+      : '未保存（自動プレビュー中、適用で確定）'
+  return (
+    <span
+      className={`duo-dirty-mark${dirty ? ' is-dirty' : ''}`}
+      title={title}
+      aria-label={title}
+    >
+      {dirty ? '●' : ''}
+    </span>
+  )
+}
 
 export function DuoWlV4AudioSection({
   device,
   cachedInfo,
   sendTo,
+  syncTick,
+  onReconcile,
 }: {
   device: DeviceInfo
   cachedInfo?: NodeConfigInfo
   sendTo: (msg: ManagerMessage) => void
+  /** get_info counter — reconciles same-value device echoes (finding 3). */
+  syncTick?: number
+  /** Transport-correct get_info refresh, wired by DeviceDetail (finding 3). */
+  onReconcile?: () => void
 }) {
+  const ip = device.ipAddress
   const audio = cachedInfo?.audio
-  const [pamDb, setPamDb] = useState<number>(audio?.pam_db ?? 24)
-  const [lineoutDb, setLineoutDb] = useState<number>(audio?.lineout_db ?? 6)
-  const [boostDb, setBoostDb] = useState<number>(audio?.boost_db ?? 0)
-  const [hpDb, setHpDb] = useState<number>(audio?.hp_db ?? -10)
-  // Stream jitter buffer (set_stream_buffer). Write-only — not in get_info yet.
-  const [bufferMs, setBufferMs] = useState<number>(0)
-  // Input/output routing (DEC-041 follow-up): output=normal HP playback,
-  // line_in=jack audio-in → haptics (DuoWL v4 only).
-  const [inputMode, setInputMode] = useState<'output' | 'line_in'>(audio?.input_mode ?? 'output')
-
-  // Sync from device whenever cachedInfo.audio changes (get_info result).
-  useEffect(() => {
-    if (!audio) return
-    if (audio.pam_db != null) setPamDb(audio.pam_db)
-    if (audio.lineout_db != null) setLineoutDb(audio.lineout_db)
-    if (audio.boost_db != null) setBoostDb(audio.boost_db)
-    if (audio.hp_db != null) setHpDb(audio.hp_db)
-    if (audio.input_mode != null) setInputMode(audio.input_mode)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audio?.pam_db, audio?.lineout_db, audio?.boost_db, audio?.hp_db, audio?.input_mode])
-
   const { setAnchor } = useToast()
   const offline = !device.online
+  const scheduleReconcile = useReconcileScheduler(onReconcile)
 
-  // set_haptic_gain covers both the PAM select and the line-out slider — send
-  // both fields together (partial update is also allowed by the wire spec,
-  // but sending both keeps the two controls' "適用" behavior simple/atomic).
+  // set_haptic_gain covers both the PAM select and the line-out slider — each
+  // field's `send` re-reads the OTHER field's current draft value so a single
+  // control's live-preview/commit always ships the wire command's required
+  // pair (pam_db + lineout_db), never a stale half. On a persist:true commit
+  // it ALSO clears the coupled field's dirty flag: the one wire command
+  // persists BOTH values, so if the other field was mid-edit dirty its `●`
+  // must clear too (otherwise it stays stuck until re-touched — finding 2).
+  const pam = useDuoAudioField(ip, 'pamDb', audio?.pam_db, (v, persist) => {
+    const store = useDuoWlV4AudioStore.getState()
+    const lineoutVal = store.draftFor(ip).lineoutDb.value
+    sendTo({ type: 'set_haptic_gain', payload: { pam_db: v, lineout_db: lineoutVal, persist } })
+    if (persist) { store.setNumeric(ip, 'lineoutDb', lineoutVal, false); scheduleReconcile() }
+  }, syncTick)
+  const lineout = useDuoAudioField(ip, 'lineoutDb', audio?.lineout_db, (v, persist) => {
+    const store = useDuoWlV4AudioStore.getState()
+    const pamVal = store.draftFor(ip).pamDb.value
+    sendTo({ type: 'set_haptic_gain', payload: { pam_db: pamVal, lineout_db: v, persist } })
+    if (persist) { store.setNumeric(ip, 'pamDb', pamVal, false); scheduleReconcile() }
+  }, syncTick)
+  const boost = useDuoAudioField(ip, 'boostDb', audio?.boost_db, (v, persist) => {
+    sendTo({ type: 'set_dac_boost', payload: { boost_db: v, persist } })
+    if (persist) scheduleReconcile()
+  }, syncTick)
+  const hp = useDuoAudioField(ip, 'hpDb', audio?.hp_db, (v, persist) => {
+    sendTo({ type: 'set_headphone_volume', payload: { hp_db: v, persist } })
+    if (persist) scheduleReconcile()
+  }, syncTick)
+  const buffer = useDuoAudioField(ip, 'bufferMs', audio?.stream_buffer_ms, (v, persist) => {
+    sendTo({ type: 'set_stream_buffer', payload: { buffer_ms: v, persist } })
+    if (persist) scheduleReconcile()
+  }, syncTick)
+  const inputMode = useDuoInputModeField(ip, audio?.input_mode, (v, persist) => {
+    sendTo({ type: 'set_input_mode', payload: { mode: v, persist } })
+    if (persist) scheduleReconcile()
+  }, syncTick)
+
   const applyHapticGain = (e: React.MouseEvent<HTMLElement>) => {
     setAnchor(e.currentTarget)
-    sendTo({ type: 'set_haptic_gain', payload: { pam_db: pamDb, lineout_db: lineoutDb } })
+    // Single combined send (not pam.commit() + lineout.commit(), which would
+    // each independently ship the full pam_db+lineout_db pair — correct but
+    // sends set_haptic_gain to the device twice for one click). Clear both
+    // fields' dirty flags directly since this one send covers both.
+    sendTo({ type: 'set_haptic_gain', payload: { pam_db: pam.value, lineout_db: lineout.value, persist: true } })
+    useDuoWlV4AudioStore.getState().setNumeric(ip, 'pamDb', pam.value, false)
+    useDuoWlV4AudioStore.getState().setNumeric(ip, 'lineoutDb', lineout.value, false)
+    scheduleReconcile()
   }
   const applyBoost = (e: React.MouseEvent<HTMLElement>) => {
     setAnchor(e.currentTarget)
-    sendTo({ type: 'set_dac_boost', payload: { boost_db: boostDb } })
+    boost.commit()
   }
   const applyHpVolume = (e: React.MouseEvent<HTMLElement>) => {
     setAnchor(e.currentTarget)
-    sendTo({ type: 'set_headphone_volume', payload: { hp_db: hpDb } })
+    hp.commit()
   }
   const applyBuffer = (e: React.MouseEvent<HTMLElement>) => {
     setAnchor(e.currentTarget)
-    sendTo({ type: 'set_stream_buffer', payload: { buffer_ms: bufferMs } })
-  }
-  const applyInputMode = (e: React.MouseEvent<HTMLElement>, next: 'output' | 'line_in') => {
-    setAnchor(e.currentTarget)
-    setInputMode(next)
-    sendTo({ type: 'set_input_mode', payload: { mode: next } })
+    buffer.commit()
   }
 
   return (
@@ -2151,38 +2575,40 @@ export function DuoWlV4AudioSection({
       </div>
 
       {/* 0. Input/output routing — output=通常のヘッドホン出力, line_in=ジャックから
-          有線音声を入力して触覚に出す（DuoWL v4 専用）。 */}
+          有線音声を入力して触覚に出す（DuoWL v4 専用）。discrete: クリックで
+          即座に persist:true 送信（適用ボタンを待たない）。 */}
       <div className="form-row">
         <label>入出力モード</label>
         <div className="device-toggle" role="group" aria-label="input/output mode">
           <button
             type="button"
-            className={`btn btn-sm device-toggle-btn ${inputMode === 'output' ? 'active' : ''}`}
-            onClick={(e) => applyInputMode(e, 'output')}
+            className={`btn btn-sm device-toggle-btn ${inputMode.value === 'output' ? 'active' : ''}`}
+            onClick={(e) => { setAnchor(e.currentTarget); inputMode.commit('output') }}
             disabled={offline}
           >
             出力（ヘッドホン）
           </button>
           <button
             type="button"
-            className={`btn btn-sm device-toggle-btn ${inputMode === 'line_in' ? 'active' : ''}`}
-            onClick={(e) => applyInputMode(e, 'line_in')}
+            className={`btn btn-sm device-toggle-btn ${inputMode.value === 'line_in' ? 'active' : ''}`}
+            onClick={(e) => { setAnchor(e.currentTarget); inputMode.commit('line_in') }}
             disabled={offline}
           >
             入力（ライン入力）
           </button>
         </div>
-        <span />
+        <DirtyMark dirty={inputMode.dirty} deviceValue={audio?.input_mode} />
       </div>
       {/* min-height reserved so this hint is always present — never shifts
           the rows below when inputMode changes (layout-shift rule). */}
       <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
-        {inputMode === 'line_in'
+        {inputMode.value === 'line_in'
           ? 'ライン入力: ジャックからの有線音声を触覚として出力します。'
           : '出力: 通常のヘッドホン再生です。'}
       </div>
 
-      {/* 1. PAM8404 power amp (coarse, drives the motors) */}
+      {/* 1. PAM8404 power amp (coarse, drives the motors). discrete: クリックで
+          即座に persist:true 送信（下の適用ボタンはライン出力との一括再送用）。 */}
       <div className="form-row">
         <label>触覚アンプ<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>PAM8404</span></label>
         <div className="device-toggle" role="group" aria-label="PAM8404 gain">
@@ -2190,19 +2616,21 @@ export function DuoWlV4AudioSection({
             <button
               key={v}
               type="button"
-              className={`btn btn-sm device-toggle-btn ${pamDb === v ? 'active' : ''}`}
-              onClick={() => setPamDb(v)}
+              className={`btn btn-sm device-toggle-btn ${pam.value === v ? 'active' : ''}`}
+              onClick={() => pam.commit(v)}
               disabled={offline}
             >
               {v} dB
             </button>
           ))}
         </div>
-        <span />
+        <DirtyMark dirty={pam.dirty} deviceValue={audio?.pam_db} format={(v) => `${v} dB`} />
       </div>
       <div className="form-status muted" style={{ fontSize: 12 }}>パワーアンプの粗ゲイン。触覚モータを駆動（4 段）</div>
 
-      {/* 2. AIC3204 (U1) line-out driver — analog pre-amp before the PAM */}
+      {/* 2. AIC3204 (U1) line-out driver — analog pre-amp before the PAM.
+          slider: ドラッグ中は persist:false でライブプレビュー、離した瞬間
+          (pointer-up/blur) に persist:true でコミット。 */}
       <div className="form-row">
         <label>触覚ライン出力<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>AIC3204 U1</span></label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
@@ -2211,16 +2639,18 @@ export function DuoWlV4AudioSection({
             min={-6}
             max={29}
             step={1}
-            value={lineoutDb}
-            onChange={(e) => setLineoutDb(Math.max(-6, Math.min(29, Number(e.target.value))))}
+            value={lineout.value}
+            onChange={(e) => lineout.onInput(clampLineoutDb(Number(e.target.value)))}
+            onPointerUp={() => lineout.commit()}
+            onBlur={() => lineout.commit()}
             disabled={offline}
             style={{ flex: 1 }}
           />
           <span className="mono" style={{ width: 56, textAlign: 'right' }}>
-            {lineoutDb} dB
+            {lineout.value} dB
           </span>
         </div>
-        <span />
+        <DirtyMark dirty={lineout.dirty} deviceValue={audio?.lineout_db} format={(v) => `${v} dB`} />
       </div>
       <div className="form-status muted" style={{ fontSize: 12 }}>
         codec のライン出力ドライバ（PAM の前段・<b>固定</b>アナログゲイン、−6〜+29 dB）。
@@ -2242,16 +2672,18 @@ export function DuoWlV4AudioSection({
             min={0}
             max={24}
             step={1}
-            value={boostDb}
-            onChange={(e) => setBoostDb(Math.max(0, Math.min(24, Number(e.target.value))))}
+            value={boost.value}
+            onChange={(e) => boost.onInput(clampBoostDb(Number(e.target.value)))}
+            onPointerUp={() => boost.commit()}
+            onBlur={() => boost.commit()}
             disabled={offline}
             style={{ flex: 1 }}
           />
           <span className="mono" style={{ width: 56, textAlign: 'right' }}>
-            {boostDb} dB
+            {boost.value} dB
           </span>
         </div>
-        <span />
+        <DirtyMark dirty={boost.dirty} deviceValue={audio?.boost_db} format={(v) => `${v} dB`} />
       </div>
       {/* min-height reserved so this hint is always present — never shifts
           the action row below when boostDb changes (layout-shift rule). */}
@@ -2265,7 +2697,11 @@ export function DuoWlV4AudioSection({
         </button>
       </div>
 
-      {/* 4. TPA6130A2 headphone amp (independent of the haptic path) */}
+      {/* 4. TPA6130A2 headphone amp (independent of the haptic path). Also
+          followed live by SW4/SW5 button presses — DeviceDetail.tsx merges
+          the pushed volume_changed.hp_db into cachedInfo.audio.hp_db, and
+          the adopt-when-not-dirty rule above (useDeviceBackedValue) picks
+          it up automatically. */}
       <div className="form-row" style={{ marginTop: 12 }}>
         <label>ヘッドホン音量<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>TPA6130A2</span></label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
@@ -2274,18 +2710,22 @@ export function DuoWlV4AudioSection({
             min={-59}
             max={4}
             step={1}
-            value={hpDb}
-            onChange={(e) => setHpDb(Math.max(-59, Math.min(4, Number(e.target.value))))}
+            value={hp.value}
+            onChange={(e) => hp.onInput(clampHpDb(Number(e.target.value)))}
+            onPointerUp={() => hp.commit()}
+            onBlur={() => hp.commit()}
             disabled={offline}
             style={{ flex: 1 }}
           />
           <span className="mono" style={{ width: 56, textAlign: 'right' }}>
-            {hpDb} dB
+            {hp.value} dB
           </span>
         </div>
-        <span />
+        <DirtyMark dirty={hp.dirty} deviceValue={audio?.hp_db} format={(v) => `${v} dB`} />
       </div>
-      <div className="form-status muted" style={{ fontSize: 12 }}>HP アンプ出力（触覚音量とは独立）</div>
+      <div className="form-status muted" style={{ fontSize: 12 }}>
+        HP アンプ出力（触覚音量とは独立）／本体ボタン（再生モード時: 右上 SW4=+ / 右下 SW5=−）でも操作できます。ホイールは触覚音量のみ。
+      </div>
 
       <div className="form-action-row" style={{ marginTop: 8 }}>
         <button className="form-button" onClick={applyHpVolume} disabled={offline}>
@@ -2295,7 +2735,8 @@ export function DuoWlV4AudioSection({
     </div>
 
     {/* Stream jitter buffer (set_stream_buffer). General to all UDP receivers;
-        surfaced here as it's the main v4 headphone-music tuning knob. */}
+        surfaced here as it's the main v4 headphone-music tuning knob. Now
+        read back via get_info.audio.stream_buffer_ms (was write-only). */}
     <div className="form-section duo-v4-config">
       <div className="form-section-title">
         ストリーム再生バッファ
@@ -2306,22 +2747,22 @@ export function DuoWlV4AudioSection({
         <div className="device-toggle" role="group" aria-label="stream buffer preset">
           <button
             type="button"
-            className={`btn btn-sm device-toggle-btn ${bufferMs === 0 ? 'active' : ''}`}
-            onClick={() => setBufferMs(0)}
+            className={`btn btn-sm device-toggle-btn ${buffer.value === 0 ? 'active' : ''}`}
+            onClick={() => buffer.commit(0)}
             disabled={offline}
           >
             低遅延 0ms（触覚）
           </button>
           <button
             type="button"
-            className={`btn btn-sm device-toggle-btn ${bufferMs === 120 ? 'active' : ''}`}
-            onClick={() => setBufferMs(120)}
+            className={`btn btn-sm device-toggle-btn ${buffer.value === 120 ? 'active' : ''}`}
+            onClick={() => buffer.commit(120)}
             disabled={offline}
           >
             音楽 120ms
           </button>
         </div>
-        <span />
+        <DirtyMark dirty={buffer.dirty} deviceValue={audio?.stream_buffer_ms} format={(v) => `${v} ms`} />
       </div>
       <div className="form-row">
         <label>微調整</label>
@@ -2331,13 +2772,15 @@ export function DuoWlV4AudioSection({
             min={0}
             max={200}
             step={10}
-            value={bufferMs}
-            onChange={(e) => setBufferMs(Math.max(0, Math.min(200, Number(e.target.value))))}
+            value={buffer.value}
+            onChange={(e) => buffer.onInput(clampBufferMs(Number(e.target.value)))}
+            onPointerUp={() => buffer.commit()}
+            onBlur={() => buffer.commit()}
             disabled={offline}
             style={{ flex: 1 }}
           />
           <span className="mono" style={{ width: 56, textAlign: 'right' }}>
-            {bufferMs} ms
+            {buffer.value} ms
           </span>
         </div>
         <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
@@ -2345,7 +2788,10 @@ export function DuoWlV4AudioSection({
         </span>
       </div>
       <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
-        ※ 全 UDP 受信機共通の設定。現在値の読み戻しは未対応（設定は反映されます）。
+        ※ Wi-Fi UDP では常に有効。ESP-NOW では <b>SOLID48 (mode 9) 専用</b>です —
+        SOLID48 選択中のみ既定 120ms よりこの値が優先され（送信機の fleet 設定(0xAC)があれば最優先）、
+        他のモード (0-8) はモード別の固定バッファで動作しこの設定の影響を受けません。
+        縮小も再生中に即反映されます。
       </div>
       <div className="form-action-row" style={{ marginTop: 8 }}>
         <button className="form-button" onClick={applyBuffer} disabled={offline}>
@@ -2358,109 +2804,92 @@ export function DuoWlV4AudioSection({
 }
 
 // ---------------------------------------------------------------------
-// DuoWL v4 ESP-NOW hp48 receiver: HP volume (dB) + A-V delay (audio-dsp-
-// config.md §1/§3). Shown on the ESP-NOW tab (not the 設定 tab, unlike
-// DuoWlV4AudioSection above) because a pure-espnow_stream receiver has no
-// 設定 tab (computeSubTabs in DeviceDetail.tsx) — this is the ESP-NOW-side
+// DuoWL v4 ESP-NOW hp48 receiver: A-V delay (audio-dsp-config.md §3).
+// Shown on the ESP-NOW tab (not the 設定 tab, unlike DuoWlV4AudioSection
+// above) because a pure-espnow_stream receiver has no 設定 tab
+// (computeSubTabs in DeviceDetail.tsx) — this is the ESP-NOW-side
 // counterpart, board === "duo_wl_v4" gated by the caller.
 //
-// HP volume reuses the existing `set_headphone_volume` (§1: "既存を流用")
-// — same wire command as DuoWlV4AudioSection's TPA6130A2 slider, just
-// surfaced here too since that section isn't reachable for this receiver.
+// HP volume used to be duplicated here (same `set_headphone_volume` wire
+// command as DuoWlV4AudioSection's TPA6130A2 slider) because that section
+// wasn't reachable from this tab. DuoWlV4AudioSection is now also rendered
+// on the ESP-NOW tab (DeviceDetail.tsx), so this section is A-V-delay-only
+// to avoid a duplicate HP-volume slider.
 // ---------------------------------------------------------------------
 
 export function DuoWlV4EspNowAudioSection({
   device,
   cachedInfo,
   sendTo,
+  syncTick,
+  onReconcile,
 }: {
   device: DeviceInfo
   cachedInfo?: NodeConfigInfo
   sendTo: (msg: ManagerMessage) => void
+  syncTick?: number
+  onReconcile?: () => void
 }) {
-  const clampHpDb = (v: number) => Math.max(-59, Math.min(4, Math.round(v)))
-  const clampAvDelay = (v: number) => Math.max(0, Math.min(30, Math.round(v)))
-
-  const [hpDb, setHpDb] = useState<number>(clampHpDb(cachedInfo?.audio?.hp_db ?? -10))
-  const [avDelayMs, setAvDelayMs] = useState<number>(clampAvDelay(cachedInfo?.av_delay_ms ?? 0))
-
-  useEffect(() => {
-    if (cachedInfo?.audio?.hp_db != null) setHpDb(clampHpDb(cachedInfo.audio.hp_db))
-    if (cachedInfo?.av_delay_ms != null) setAvDelayMs(clampAvDelay(cachedInfo.av_delay_ms))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [device.ipAddress, cachedInfo?.audio?.hp_db, cachedInfo?.av_delay_ms])
-
+  const ip = device.ipAddress
   const { setAnchor } = useToast()
   const offline = !device.online
+  const scheduleReconcile = useReconcileScheduler(onReconcile)
 
-  const applyHpVolume = (e: React.MouseEvent<HTMLElement>) => {
-    setAnchor(e.currentTarget)
-    sendTo({ type: 'set_headphone_volume', payload: { hp_db: hpDb } })
-  }
+  const avDelay = useDuoAudioField(ip, 'avDelayMs', cachedInfo?.av_delay_ms, (v, persist) => {
+    sendTo({ type: 'set_av_delay', payload: { ms: v, persist } })
+    if (persist) scheduleReconcile()
+  }, syncTick)
+
   const applyAvDelay = (e: React.MouseEvent<HTMLElement>) => {
     setAnchor(e.currentTarget)
-    sendTo({ type: 'set_av_delay', payload: { ms: avDelayMs } })
+    avDelay.commit()
   }
+
+  // Dynamic hint (min-height reserved — layout-shift rule, changes on drag).
+  const hintText = avDelay.value < 0
+    ? `触覚を ${Math.abs(avDelay.value)}ms 遅延`
+    : avDelay.value > 0
+      ? `音声(HP)を ${avDelay.value}ms 遅延`
+      : 'ディレイなし'
 
   return (
     <div className="form-section duo-v4-config">
       <div className="form-section-title">
-        音量 / 遅延（DuoWL v4）
-        <span className="form-section-sub-inline"> — ヘッドホン音量 + 音声-触覚間ディレイ</span>
+        A-V ディレイ（DuoWL v4）
+        <span className="form-section-sub-inline"> — 音声-触覚間ディレイ</span>
       </div>
 
-      {/* 1. TPA6130A2 headphone volume (analog only — DAC digital volume is
-          pinned to 0dB on the HP codec; the ADC wheel drives haptic only). */}
+      {/* A-V delay — SIGNED: negative delays haptic, positive delays HP audio
+          (audio-dsp-config.md §3). slider: ドラッグ中は persist:false でライブ
+          プレビュー、離した瞬間 (pointer-up/blur) に persist:true でコミット。 */}
       <div className="form-row">
-        <label>ヘッドホン音量<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>TPA6130A2</span></label>
-        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
-          <input
-            type="range"
-            min={-59}
-            max={4}
-            step={1}
-            value={hpDb}
-            onChange={(e) => setHpDb(clampHpDb(Number(e.target.value)))}
-            disabled={offline}
-            style={{ flex: 1 }}
-          />
-          <span className="mono" style={{ width: 56, textAlign: 'right' }}>
-            {hpDb} dB
-          </span>
-        </div>
-        <span />
-      </div>
-      <div className="form-status muted" style={{ fontSize: 12 }}>
-        本体ボタン（再生モード時: Btn4=+ / Btn5=−）でも操作できます。ホイールは触覚音量のみを操作します。
-      </div>
-      <div className="form-action-row" style={{ marginTop: 8 }}>
-        <button className="form-button" onClick={applyHpVolume} disabled={offline}>
-          ヘッドホン音量を適用
-        </button>
-      </div>
-
-      {/* 2. A-V delay — delays HP audio relative to haptic (audio-dsp-config.md §3). */}
-      <div className="form-row" style={{ marginTop: 12 }}>
         <label>A-V ディレイ</label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
             type="range"
-            min={0}
-            max={30}
+            min={-100}
+            max={100}
             step={1}
-            value={avDelayMs}
-            onChange={(e) => setAvDelayMs(clampAvDelay(Number(e.target.value)))}
+            value={avDelay.value}
+            onChange={(e) => avDelay.onInput(clampAvDelayMs(Number(e.target.value)))}
+            onPointerUp={() => avDelay.commit()}
+            onBlur={() => avDelay.commit()}
             disabled={offline}
             style={{ flex: 1 }}
           />
-          <span className="mono" style={{ width: 56, textAlign: 'right' }}>
-            {avDelayMs} ms
+          <span className="mono" style={{ width: 64, textAlign: 'right' }}>
+            {avDelay.value > 0 ? '+' : ''}{avDelay.value} ms
           </span>
         </div>
-        <span />
+        <DirtyMark dirty={avDelay.dirty} deviceValue={cachedInfo?.av_delay_ms} format={(v) => `${v} ms`} />
+      </div>
+      {/* min-height reserved so this hint is always present — never shifts
+          the description line below while dragging (layout-shift rule). */}
+      <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
+        {hintText}
       </div>
       <div className="form-status muted" style={{ fontSize: 12 }}>
-        音声（ヘッドホン）を触覚に対して遅らせます（モーターの反応が遅いぶん、音声側を合わせる）。0=遅延なし。
+        負の値: 触覚を音声（ヘッドホン）に対して遅らせます。正の値: 音声を触覚に対して遅らせます（モーターの反応が遅いぶん、音声側を遅らせて合わせる）。0=遅延なし。
       </div>
       <div className="form-action-row" style={{ marginTop: 8 }}>
         <button className="form-button" onClick={applyAvDelay} disabled={offline}>
@@ -2473,12 +2902,17 @@ export function DuoWlV4EspNowAudioSection({
 
 // ---------------------------------------------------------------------
 // DuoWL v4 ESP-NOW hp48 receiver: per-codec EQ designer (audio-dsp-
-// config.md §2). Up to 3 AIC3204 in-codec biquads per codec (haptic
-// 16kHz / hp 48kHz). Each band's fc/Q/gain are LOCAL design controls —
-// the device only persists/reports ftype + the committed raw Q1.23 ints
-// (get_info.eq), which aren't invertible back to fc/Q/gain — so this
-// editor doesn't try to resync those from the device; it shows the
-// committed ints read-only alongside the (locally-held) design controls.
+// config.md §2, extended by aic3204-full-dsp-registers.md §8.5/§9). Up to 6
+// AIC3204 in-codec biquads per codec (haptic 16kHz / hp 48kHz) — the exact
+// usable count depends on the codec's selected DSP profile (3/5/6, see
+// DSP_PROFILE_CAPS below); bands beyond the active count are still
+// accepted/stored by the firmware (harmless, per the reference doc) so they
+// stay editable here too, just visually marked inert. Each band's fc/Q/gain
+// are LOCAL design controls — the device only persists/reports ftype + the
+// committed raw Q1.23 ints (get_info.eq), which aren't invertible back to
+// fc/Q/gain — so this editor doesn't try to resync those from the device;
+// it shows the committed ints read-only alongside the (locally-held) design
+// controls.
 // ---------------------------------------------------------------------
 
 type EqCodec = 'haptic' | 'hp'
@@ -2490,22 +2924,72 @@ interface EqBandDraft {
   gainDb: number
 }
 
-const EQ_BAND_COUNT = 3
+/** Fixed max band count — the device always reports/accepts this many
+ *  (DUO_V4_EQ_BANDS = 6, A..F). The ACTIVE (usable) count for a given codec
+ *  depends on its current DSP profile — see DSP_PROFILE_CAPS. */
+const EQ_BAND_COUNT = 6
 const EQ_FS: Record<EqCodec, number> = { haptic: 16000, hp: 48000 }
 /** RBJ Q for a 2nd-order Butterworth response (1/√2). */
 const EQ_BUTTERWORTH_Q = 1 / Math.sqrt(2)
 
+/**
+ * DSP profile selector (aic3204-full-dsp-registers.md §0/§1/§9). The raw
+ * AIC3204 PRB number is never exposed to Studio — only these 4 verified
+ * "profile" names, each a Filter-A stereo Processing Block so switching
+ * never touches AOSR/DOSR/NDAC/MDAC. Capabilities below are firmware's own
+ * `aic3204GetProfileCaps()` lookup table (aic3204.cpp), reproduced here so
+ * the profile buttons can show a capability summary BEFORE get_info answers
+ * (get_info.dsp_profile.<codec> is still the live/authoritative source once
+ * connected — see DspProfileSelector).
+ */
+const DSP_PROFILE_OPTIONS: Array<{
+  value: DuoWlV4DspProfile
+  label: string
+  desc: string
+}> = [
+  { value: 'standard', label: 'standard', desc: '3band EQ（既定・現行）' },
+  { value: 'eq6', label: 'eq6', desc: '6band EQ + 1次IIR' },
+  { value: 'eq6_drc', label: 'eq6_drc', desc: '6band EQ + 1次IIR + DRC' },
+  { value: 'full', label: 'full', desc: '5band EQ + IIR + DRC + 3D + Beep' },
+]
+
+const DSP_PROFILE_CAPS: Record<DuoWlV4DspProfile, DspProfileInfo> = {
+  standard: { profile: 'standard', bands: 3, has_iir: false, has_drc: false, has_3d: false, has_beep: false },
+  eq6: { profile: 'eq6', bands: 6, has_iir: true, has_drc: false, has_3d: false, has_beep: false },
+  eq6_drc: { profile: 'eq6_drc', bands: 6, has_iir: true, has_drc: true, has_3d: false, has_beep: false },
+  full: { profile: 'full', bands: 5, has_iir: true, has_drc: true, has_3d: true, has_beep: true },
+}
+
+/**
+ * One codec's capability summary — LIVE get_info.dsp_profile when connected,
+ * falling back to the static DSP_PROFILE_CAPS lookup keyed on the locally-
+ * drafted profile selection (so gating is correct even before the first
+ * get_info answers, and stays consistent whether read from the EQ tab
+ * (DuoWlV4EqCodecBlock) or the DSP tab (DuoWlV4DspSection's DRC/3D/Beep
+ * panels) — both need the SAME answer for "does this codec's current
+ * profile support X". */
+function useDspProfileCaps(ip: string, codec: EqCodec, cachedInfo?: NodeConfigInfo): DspProfileInfo {
+  const field = codec === 'haptic' ? 'dspProfileHaptic' : 'dspProfileHp'
+  const localProfile = useDuoWlV4AudioStore((s) => s.draftFor(ip)[field].value)
+  return cachedInfo?.dsp_profile?.[codec] ?? DSP_PROFILE_CAPS[localProfile]
+}
+
 /** haptic band0 default = 100Hz 2nd-order Butterworth LPF (audio-dsp-
- *  config.md §2 "既定 EQ" — matches the BT product / firmware boot
- *  default). Every other band defaults to off (passthrough). */
-function defaultEqDraft(codec: EqCodec, band: number): EqBandDraft {
-  if (codec === 'haptic' && band === 0) {
+ *  config.md §2 "既定 EQ" — matches the DuoWL v4 (AIC3204 in-codec biquad)
+ *  BT product / firmware boot default) ONLY. Every other band defaults to
+ *  off (passthrough).
+ *
+ *  `allOff` forces band0 off too — the non-DuoWL-v4 software haptic EQ
+ *  (SwHapticEqSection) firmware boots ALL 3 bands off (no fleet-wide 100Hz
+ *  LPF default there; don't change existing fleet behavior). Without this,
+ *  a fresh v3 device's UNTOUCHED draft showed a 100Hz-LPF design that was
+ *  never actually applied (get_info.eq's committed readout reports off,
+ *  nothing auto-sends — cosmetic, but misleading; review finding). */
+function defaultEqDraft(codec: EqCodec, band: number, allOff = false): EqBandDraft {
+  if (!allOff && codec === 'haptic' && band === 0) {
     return { ftype: 'lpf', fc: 100, q: EQ_BUTTERWORTH_Q, gainDb: 0 }
   }
   return { ftype: 'off', fc: 1000, q: EQ_BUTTERWORTH_Q, gainDb: 0 }
-}
-function defaultEqDrafts(codec: EqCodec): EqBandDraft[] {
-  return Array.from({ length: EQ_BAND_COUNT }, (_, i) => defaultEqDraft(codec, i))
 }
 
 const EQ_FTYPE_OPTIONS: Array<{ value: EqFtype; label: string }> = [
@@ -2534,6 +3018,76 @@ function clampEqGainDb(g: number): number {
   return Math.max(-24, Math.min(24, g))
 }
 
+/**
+ * Free-typing numeric field for fc/Q/gain. Holds an uncontrolled draft
+ * STRING in local state that updates on every keystroke with NO clamping —
+ * the previous `type="number"` + clamp-on-every-onChange snapped mid-edit
+ * values back immediately (e.g. typing "0.1" → delete "1" → "0." → the
+ * clamp re-snapped to 0.1, so "0.7" could never be typed). The draft is
+ * only parsed + committed (via `onCommit`, which the caller wires to
+ * clampEqFc/clampEqQ/clampEqGainDb + onChange) on blur or Enter; Escape
+ * reverts to the last committed `value`. Mirrors the proven
+ * IntensityValueEditor pattern (IntensityControl.tsx) but stays always-
+ * visible (not click-to-edit) since these fields are edited far more often.
+ * `type="text"` (not "number") also removes the native spinner arrows.
+ */
+function EqNumberField({
+  value,
+  onCommit,
+  disabled,
+  width,
+}: {
+  value: number
+  /** Applies the value (caller clamps) and RETURNS the clamped value so the
+   *  field can normalize its shown text — needed because if the clamped value
+   *  equals the current `value` (e.g. typing "999" for a Q already at max 20),
+   *  the `value` prop doesn't change, so the useEffect below never re-fires and
+   *  the raw over-range text would otherwise stay in the box. */
+  onCommit: (v: number) => number
+  disabled?: boolean
+  width: number
+}) {
+  const [draft, setDraft] = useState(String(value))
+
+  // External changes (preset load, device switch reset) refresh the shown text.
+  useEffect(() => {
+    setDraft(String(value))
+  }, [value])
+
+  const commit = () => {
+    const n = Number(draft)
+    if (!Number.isFinite(n)) {
+      setDraft(String(value))
+      return
+    }
+    // Normalize the box to the clamped value the caller actually applied, so an
+    // out-of-range entry never lingers as raw text even when the clamp is a no-op.
+    setDraft(String(onCommit(n)))
+  }
+
+  return (
+    <input
+      className="form-input mono"
+      type="text"
+      inputMode="decimal"
+      value={draft}
+      disabled={disabled}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          commit()
+          e.currentTarget.blur()
+        } else if (e.key === 'Escape') {
+          setDraft(String(value))
+          e.currentTarget.blur()
+        }
+      }}
+      style={{ width }}
+    />
+  )
+}
+
 /** One band's edit row: ftype/fc/Q/gain controls + a fixed-height
  *  computed-coefficient / warning readout + the per-band 適用 button. */
 function EqBandEditor({
@@ -2542,6 +3096,7 @@ function EqBandEditor({
   draft,
   committed,
   offline,
+  active,
   onChange,
   onApply,
 }: {
@@ -2550,6 +3105,12 @@ function EqBandEditor({
   draft: EqBandDraft
   committed?: EqBandReadout
   offline: boolean
+  /** Whether this band index is within the codec's CURRENT DSP profile's
+   *  usable band count (DSP_PROFILE_CAPS.bands). Bands beyond it are still
+   *  fully editable/stored (per aic3204-full-dsp-registers.md §9 — writing
+   *  unused biquad RAM is harmless) — this only dims the row and notes it,
+   *  never disables or hides it (spec: mark inert, don't hide). */
+  active: boolean
   onChange: (next: EqBandDraft) => void
   onApply: (e: React.MouseEvent<HTMLElement>) => void
 }) {
@@ -2562,7 +3123,11 @@ function EqBandEditor({
   const isOff = draft.ftype === 'off'
 
   return (
-    <div className="form-row" style={{ marginTop: band === 0 ? 6 : 14, alignItems: 'flex-start' }}>
+    <div
+      className="form-row"
+      style={{ marginTop: band === 0 ? 6 : 14, alignItems: 'flex-start', opacity: active ? 1 : 0.45 }}
+      title={active ? undefined : 'このプロファイルでは無効なバンドです（値は保存されますが再生には反映されません）'}
+    >
       <label>band {band}</label>
       <div className="form-row-multi" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -2579,44 +3144,30 @@ function EqBandEditor({
           </select>
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, opacity: isOff ? 0.4 : 1 }}>
             fc
-            <input
-              className="form-input mono"
-              type="number"
-              min={20}
-              max={Math.round(fs / 2) - 20}
+            <EqNumberField
               value={draft.fc}
-              onChange={(e) => onChange({ ...draft, fc: clampEqFc(Number(e.target.value), fs) })}
+              onCommit={(v) => { const c = clampEqFc(v, fs); onChange({ ...draft, fc: c }); return c }}
               disabled={offline || isOff}
-              style={{ width: 72 }}
+              width={72}
             />
             Hz
           </label>
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, opacity: isOff ? 0.4 : 1 }}>
             Q
-            <input
-              className="form-input mono"
-              type="number"
-              min={0.1}
-              max={20}
-              step={0.01}
+            <EqNumberField
               value={draft.q}
-              onChange={(e) => onChange({ ...draft, q: clampEqQ(Number(e.target.value)) })}
+              onCommit={(v) => { const c = clampEqQ(v); onChange({ ...draft, q: c }); return c }}
               disabled={offline || isOff}
-              style={{ width: 60 }}
+              width={60}
             />
           </label>
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, opacity: showGain ? 1 : 0.4 }}>
             gain
-            <input
-              className="form-input mono"
-              type="number"
-              min={-24}
-              max={24}
-              step={0.5}
+            <EqNumberField
               value={draft.gainDb}
-              onChange={(e) => onChange({ ...draft, gainDb: clampEqGainDb(Number(e.target.value)) })}
+              onCommit={(v) => { const c = clampEqGainDb(v); onChange({ ...draft, gainDb: c }); return c }}
               disabled={offline || !showGain}
-              style={{ width: 60 }}
+              width={60}
             />
             dB
           </label>
@@ -2633,6 +3184,7 @@ function EqBandEditor({
         {/* Fixed-height status line (layout-shift rule): always present,
             only the text/color changes between off / ok / warn states. */}
         <div className="form-status muted" style={{ minHeight: 16, fontSize: 11, margin: 0 }}>
+          {!active ? 'このプロファイルでは無効（値は保存されるのみ）・ ' : ''}
           {isOff
             ? 'オフ（素通し）'
             : result.clamped
@@ -2652,42 +3204,562 @@ function EqBandEditor({
   )
 }
 
+// ---------------------------------------------------------------------
+// Frequency-response graph (inline SVG, no chart lib). Plots the COMBINED
+// cascade magnitude from eqResponseCurve (aic3204Eq.ts) — log-spaced
+// 20Hz..fs/2 on X, fixed −24..+24 dB on Y (points are clamped into that
+// range for display only; the design itself isn't clamped here — the
+// per-band status line below already surfaces the real Q1.23 overflow/
+// clamp warning). Updates live as fc/Q/gain/ftype change (caller passes a
+// freshly-computed curve via useMemo).
+// ---------------------------------------------------------------------
+
+const EQ_GRAPH_W = 600
+const EQ_GRAPH_H = 120
+const EQ_GRAPH_PAD = { l: 32, r: 8, t: 8, b: 16 }
+const EQ_GRAPH_DB_MIN = -24
+const EQ_GRAPH_DB_MAX = 24
+const EQ_GRAPH_F_MIN = 20
+/** Visual Q range for a node's vertical axis on lpf/hpf/notch bands (drag
+ *  up = higher Q / narrower notch / steeper slope). Deliberately narrower
+ *  than clampEqQ's full 0.1..20 range — this is the "by ear" useful span
+ *  for a coarse drag; clampEqQ is still applied to the result, so a node
+ *  pinned at the top/bottom edge always yields a valid, safe Q (fine values
+ *  beyond this visual range remain reachable via the numeric field or the
+ *  wheel nudge below). */
+const EQ_GRAPH_Q_MIN = 0.1
+const EQ_GRAPH_Q_MAX = 8
+/** Node drag → device live-preview (persist:false) send delay. Same
+ *  trailing-debounce convention as useDeviceBackedValue's onInput (used by
+ *  every other DuoWL v4 audio slider above) — rapid pointermove/wheel
+ *  events keep resetting this timer, and it only fires once motion pauses,
+ *  so a smooth drag never floods the serial link. Shorter than that hook's
+ *  280ms default: a direct-manipulation graph node reads as "live" and
+ *  should catch up quickly once the pointer settles. Drag release / wheel
+ *  tick's trailing settle both bypass this and commit immediately.
+ */
+const EQ_NODE_DRAG_DEBOUNCE_MS = 150
+/** Per-wheel-tick Q nudge (mouse wheel over a node = fine resonance trim,
+ *  independent of the node's drag axis — see EqResponseGraph). */
+const EQ_NODE_WHEEL_Q_STEP = 0.1
+/** Distinct per-band node colors, reused from the existing theme accent
+ *  tokens (App.css :root) rather than the curve's own --accent, so a node
+ *  always reads as a separate draggable handle from the line it sits on. */
+const EQ_NODE_COLORS = [
+  'var(--accent-light, #a78bfa)',
+  'var(--warning, #ff9800)',
+  'var(--success, #4caf50)',
+  'var(--error, #f44336)',
+  '#4dabf7',
+  '#f06292',
+] as const
+
+function EqResponseGraph({
+  curve,
+  fs,
+  drafts,
+  offline,
+  onDraftChange,
+  onLiveSend,
+  onCommitSend,
+}: {
+  curve: EqCurvePoint[]
+  fs: number
+  /** Current design drafts — used to place/color the draggable nodes (one
+   *  per active band) on top of the curve. */
+  drafts: EqBandDraft[]
+  offline: boolean
+  /** Local-only update of ONE band (fc + gainDb or fc + q, depending on
+   *  ftype) — called on every drag move / wheel tick. Purely client-side:
+   *  the curve and the numeric EqBandEditor rows re-render live from this,
+   *  same as any other draft edit. */
+  onDraftChange: (band: number, next: EqBandDraft) => void
+  /** Device live-preview send (persist:false) — already debounced by this
+   *  component; the caller just ships it. */
+  onLiveSend: (band: number, next: EqBandDraft) => void
+  /** Device commit send (persist:true) — drag release / wheel settle. */
+  onCommitSend: (band: number, next: EqBandDraft) => void
+}) {
+  const fMax = fs / 2
+  const plotW = EQ_GRAPH_W - EQ_GRAPH_PAD.l - EQ_GRAPH_PAD.r
+  const plotH = EQ_GRAPH_H - EQ_GRAPH_PAD.t - EQ_GRAPH_PAD.b
+  const logMin = Math.log10(EQ_GRAPH_F_MIN)
+  const logMax = Math.log10(fMax)
+
+  const xForF = (f: number) =>
+    EQ_GRAPH_PAD.l + ((Math.log10(f) - logMin) / (logMax - logMin)) * plotW
+  const fForX = (x: number) =>
+    Math.pow(10, logMin + ((x - EQ_GRAPH_PAD.l) / plotW) * (logMax - logMin))
+  const yForDb = (db: number) => {
+    const c = Math.max(EQ_GRAPH_DB_MIN, Math.min(EQ_GRAPH_DB_MAX, db))
+    return EQ_GRAPH_PAD.t + (1 - (c - EQ_GRAPH_DB_MIN) / (EQ_GRAPH_DB_MAX - EQ_GRAPH_DB_MIN)) * plotH
+  }
+  const dbForY = (y: number) =>
+    EQ_GRAPH_DB_MIN + (1 - (y - EQ_GRAPH_PAD.t) / plotH) * (EQ_GRAPH_DB_MAX - EQ_GRAPH_DB_MIN)
+  const yForQ = (q: number) => {
+    const c = Math.max(EQ_GRAPH_Q_MIN, Math.min(EQ_GRAPH_Q_MAX, q))
+    return EQ_GRAPH_PAD.t + (1 - (c - EQ_GRAPH_Q_MIN) / (EQ_GRAPH_Q_MAX - EQ_GRAPH_Q_MIN)) * plotH
+  }
+  const qForY = (y: number) =>
+    EQ_GRAPH_Q_MIN + (1 - (y - EQ_GRAPH_PAD.t) / plotH) * (EQ_GRAPH_Q_MAX - EQ_GRAPH_Q_MIN)
+
+  const pathD = curve
+    .map((p, i) => `${i === 0 ? 'M' : 'L'}${xForF(p.f).toFixed(1)},${yForDb(p.db).toFixed(1)}`)
+    .join(' ')
+
+  const dbTicks = [-24, -12, 0, 12, 24]
+  // Decade gridlines, only where they actually fall inside this codec's range
+  // (16kHz haptic's Nyquist is 8kHz, so 10kHz is dropped there).
+  const freqTicks = [100, 1000, 10000].filter((f) => f > EQ_GRAPH_F_MIN && f < fMax)
+
+  // ---- VST-style draggable nodes -------------------------------------
+  // Pointer-capture drag (same convention as LogDrawer.tsx's resize handle):
+  // setPointerCapture on pointerdown routes all subsequent move/up events to
+  // THAT node regardless of where the cursor wanders (including outside the
+  // svg bounds), so a fast/escaping drag can never leak onto a neighboring
+  // node or leave state stuck mid-drag. `draggingBand` (state, for the
+  // active-node visual) + `dragPointerIdRef` (ref, for correctness with the
+  // captured pointer id) gate move/up so a stray hover-move on a
+  // non-captured node is a no-op.
+  const svgRef = useRef<SVGSVGElement>(null)
+  const [draggingBand, setDraggingBand] = useState<number | null>(null)
+  const dragPointerIdRef = useRef<number | null>(null)
+  const liveSendTimers = useRef<Record<number, ReturnType<typeof setTimeout> | null>>({})
+
+  useEffect(() => () => {
+    for (const t of Object.values(liveSendTimers.current)) if (t) clearTimeout(t)
+  }, [])
+
+  const scheduleLiveSend = (band: number, next: EqBandDraft) => {
+    const timers = liveSendTimers.current
+    if (timers[band]) clearTimeout(timers[band]!)
+    timers[band] = setTimeout(() => {
+      timers[band] = null
+      onLiveSend(band, next)
+    }, EQ_NODE_DRAG_DEBOUNCE_MS)
+  }
+  const commitNow = (band: number, next: EqBandDraft) => {
+    const timers = liveSendTimers.current
+    if (timers[band]) { clearTimeout(timers[band]!); timers[band] = null }
+    onCommitSend(band, next)
+  }
+
+  // Screen (clientX/Y) → viewBox coords. The svg is responsive-width +
+  // fixed-px-height with preserveAspectRatio="none", so its rendered CSS
+  // size is generally NOT EQ_GRAPH_W×EQ_GRAPH_H px — X and Y need their own
+  // scale factors from the live bounding rect, not a shared 1:1 ratio.
+  const clientToSvgPoint = (clientX: number, clientY: number): { x: number; y: number } | null => {
+    const svg = svgRef.current
+    if (!svg) return null
+    const rect = svg.getBoundingClientRect()
+    if (!(rect.width > 0) || !(rect.height > 0)) return null
+    return {
+      x: (clientX - rect.left) * (EQ_GRAPH_W / rect.width),
+      y: (clientY - rect.top) * (EQ_GRAPH_H / rect.height),
+    }
+  }
+
+  // Pointer position → the next draft for `band`, per the spec: horizontal
+  // always drives fc (inverse of the same log mapping the curve uses);
+  // vertical drives gainDb for peaking/shelf, Q for lpf/hpf/notch. Guards
+  // against NaN from a degenerate rect/pointer so a drag can never write a
+  // non-finite fc/Q into state.
+  const nextDraftForPoint = (draft: EqBandDraft, clientX: number, clientY: number): EqBandDraft | null => {
+    const pt = clientToSvgPoint(clientX, clientY)
+    if (!pt || !Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return null
+    const nextFc = clampEqFc(fForX(pt.x), fs)
+    if (!Number.isFinite(nextFc)) return null
+    if (EQ_GAIN_FTYPES.has(draft.ftype)) {
+      const nextGain = clampEqGainDb(dbForY(pt.y))
+      if (!Number.isFinite(nextGain)) return null
+      return { ...draft, fc: nextFc, gainDb: nextGain }
+    }
+    const nextQ = clampEqQ(qForY(pt.y))
+    if (!Number.isFinite(nextQ)) return null
+    return { ...draft, fc: nextFc, q: nextQ }
+  }
+
+  const handleNodePointerDown = (band: number) => (e: React.PointerEvent<SVGCircleElement>) => {
+    if (offline) return
+    e.preventDefault()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    dragPointerIdRef.current = e.pointerId
+    setDraggingBand(band)
+  }
+  const handleNodePointerMove = (band: number, draft: EqBandDraft) => (e: React.PointerEvent<SVGCircleElement>) => {
+    if (draggingBand !== band || dragPointerIdRef.current !== e.pointerId) return
+    const next = nextDraftForPoint(draft, e.clientX, e.clientY)
+    if (!next) return
+    onDraftChange(band, next)
+    scheduleLiveSend(band, next)
+  }
+  const handleNodeDragEnd = (band: number, draft: EqBandDraft) => (e: React.PointerEvent<SVGCircleElement>) => {
+    if (draggingBand !== band || dragPointerIdRef.current !== e.pointerId) return
+    try { e.currentTarget.releasePointerCapture(e.pointerId) } catch { /* already released */ }
+    dragPointerIdRef.current = null
+    setDraggingBand(null)
+    const next = nextDraftForPoint(draft, e.clientX, e.clientY) ?? draft
+    onDraftChange(band, next)
+    commitNow(band, next)
+  }
+  const handleNodeWheel = (band: number, draft: EqBandDraft) => (e: React.WheelEvent<SVGCircleElement>) => {
+    if (offline) return
+    e.preventDefault()
+    const nextQ = clampEqQ(draft.q + (e.deltaY > 0 ? -EQ_NODE_WHEEL_Q_STEP : EQ_NODE_WHEEL_Q_STEP))
+    const next: EqBandDraft = { ...draft, q: nextQ }
+    onDraftChange(band, next)
+    scheduleLiveSend(band, next)
+  }
+
+  return (
+    // Capped width (was 100% of the whole config column — a 5:1 viewBox
+    // stretched edge-to-edge read as an oddly wide banner). Still responsive
+    // (max-width, not a fixed px) so it shrinks gracefully on narrow panels.
+    <div style={{ maxWidth: 380, width: '100%' }}>
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${EQ_GRAPH_W} ${EQ_GRAPH_H}`}
+        preserveAspectRatio="none"
+        // touch-action:none — without it, a touch-drag on a node scrolls the
+        // page instead of moving the node (spec requirement).
+        style={{ width: '100%', height: EQ_GRAPH_H, display: 'block', marginBottom: 4, touchAction: 'none' }}
+      >
+        {dbTicks.map((db) => (
+          <line
+            key={`db-${db}`}
+            x1={EQ_GRAPH_PAD.l} x2={EQ_GRAPH_W - EQ_GRAPH_PAD.r}
+            y1={yForDb(db)} y2={yForDb(db)}
+            stroke={db === 0 ? 'var(--border-light, #3a3a5e)' : 'var(--border, #2a2a4e)'}
+            strokeWidth={db === 0 ? 1.2 : 1}
+          />
+        ))}
+        {freqTicks.map((f) => (
+          <line
+            key={`f-${f}`}
+            x1={xForF(f)} x2={xForF(f)}
+            y1={EQ_GRAPH_PAD.t} y2={EQ_GRAPH_H - EQ_GRAPH_PAD.b}
+            stroke="var(--border, #2a2a4e)"
+            strokeWidth={1}
+          />
+        ))}
+        <path d={pathD} fill="none" stroke="var(--accent, #7c5cbf)" strokeWidth={1.6} />
+        {freqTicks.map((f) => (
+          <text
+            key={`fl-${f}`}
+            x={xForF(f)} y={EQ_GRAPH_H - 4}
+            textAnchor="middle" fontSize={9}
+            fill="var(--text-muted, #adafba)"
+          >
+            {f >= 1000 ? `${f / 1000}k` : f}
+          </text>
+        ))}
+        <text x={2} y={EQ_GRAPH_PAD.t + 8} fontSize={9} fill="var(--text-muted, #adafba)">+24</text>
+        <text x={2} y={yForDb(0) + 3} fontSize={9} fill="var(--text-muted, #adafba)">0</text>
+        <text x={2} y={EQ_GRAPH_H - EQ_GRAPH_PAD.b - 2} fontSize={9} fill="var(--text-muted, #adafba)">−24</text>
+
+        {/* Draggable VST-style band nodes — one per ACTIVE band (ftype !==
+            "off"; an off band has no coefficient to place, so no handle). */}
+        {drafts.map((draft, band) => {
+          if (draft.ftype === 'off' || !Number.isFinite(draft.fc)) return null
+          const cx = xForF(draft.fc)
+          const usesGainAxis = EQ_GAIN_FTYPES.has(draft.ftype)
+          const cy = usesGainAxis ? yForDb(draft.gainDb) : yForQ(draft.q)
+          if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null
+          const color = EQ_NODE_COLORS[band % EQ_NODE_COLORS.length]
+          const isDragging = draggingBand === band
+          const moveHandler = handleNodePointerMove(band, draft)
+          const dragEndHandler = handleNodeDragEnd(band, draft)
+          return (
+            <g key={band}>
+              {/* Enlarged, invisible hit-area (r=12) — keeps the visible dot
+                  small while staying easy to grab on trackpad/touch (spec:
+                  nodes big enough to grab, ~r=6-8 visible). */}
+              <circle
+                cx={cx} cy={cy} r={12}
+                fill="transparent"
+                // pointerEvents:'all' is required here — SVG's default
+                // pointer-events:visiblePainted does NOT hit-test a
+                // transparent fill, so without this the invisible hit-area
+                // would silently swallow no events at all.
+                style={{
+                  cursor: offline ? 'default' : isDragging ? 'grabbing' : 'grab',
+                  touchAction: 'none',
+                  pointerEvents: 'all',
+                }}
+                onPointerDown={handleNodePointerDown(band)}
+                onPointerMove={moveHandler}
+                onPointerUp={dragEndHandler}
+                onPointerCancel={dragEndHandler}
+                onWheel={handleNodeWheel(band, draft)}
+              />
+              <circle
+                cx={cx} cy={cy} r={isDragging ? 9 : 7}
+                fill={color}
+                stroke="var(--bg-primary, #1a1a2e)"
+                strokeWidth={1.5}
+                style={{ pointerEvents: 'none' }}
+              />
+              <text
+                x={cx} y={cy}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fontSize={8}
+                fontWeight={700}
+                fill="var(--bg-primary, #1a1a2e)"
+                style={{ pointerEvents: 'none', userSelect: 'none' }}
+              >
+                {band}
+              </text>
+            </g>
+          )
+        })}
+      </svg>
+      <div style={{ fontSize: 10, color: 'var(--text-muted, #adafba)', marginBottom: 8 }}>
+        ノードをドラッグ: 横=fc / 縦=gain・Q（ホイールで Q 微調整、離すと確定）
+      </div>
+    </div>
+  )
+}
+
+/**
+ * DSP profile selector, one per codec (aic3204-full-dsp-registers.md §0/§1).
+ * Discrete 4-button group — commits (persist:true) immediately on click, no
+ * separate 適用 button (matches the input-mode toggle's convention: a
+ * profile SWITCH is a discrete action, not something you'd drag/preview).
+ * Shows a capability summary line below the buttons, sourced from the LIVE
+ * get_info.dsp_profile when connected, falling back to the verified static
+ * DSP_PROFILE_CAPS lookup for the locally-selected profile before the first
+ * get_info answers (so the summary is never blank).
+ */
+function DspProfileSelector({
+  ip,
+  codec,
+  device,
+  cachedInfo,
+  sendTo,
+  syncTick,
+  onReconcile,
+}: {
+  ip: string
+  codec: EqCodec
+  device: DeviceInfo
+  cachedInfo?: NodeConfigInfo
+  sendTo: (msg: ManagerMessage) => void
+  syncTick?: number
+  onReconcile?: () => void
+}) {
+  const offline = !device.online
+  const { setAnchor } = useToast()
+  const scheduleReconcile = useReconcileScheduler(onReconcile)
+  const deviceProfile = cachedInfo?.dsp_profile?.[codec]?.profile
+  const profile = useDuoDspProfileField(
+    ip,
+    codec,
+    deviceProfile,
+    (v, persist) => {
+      sendTo({ type: 'set_dsp_profile', payload: { codec, profile: v, persist } })
+      if (persist) scheduleReconcile()
+    },
+    syncTick,
+  )
+  const caps = useDspProfileCaps(ip, codec, cachedInfo)
+  const activeDesc = DSP_PROFILE_OPTIONS.find((o) => o.value === profile.value)?.desc ?? ''
+
+  return (
+    <div className="form-row" style={{ marginTop: 6, alignItems: 'flex-start' }}>
+      <label>DSP プロファイル</label>
+      <div className="form-row-multi" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+        <div className="device-toggle" role="group" aria-label="DSP profile">
+          {DSP_PROFILE_OPTIONS.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              className={`btn btn-sm device-toggle-btn ${profile.value === o.value ? 'active' : ''}`}
+              onClick={(e) => { setAnchor(e.currentTarget); profile.commit(o.value) }}
+              disabled={offline}
+              title={o.desc}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+        <div className="form-status muted" style={{ minHeight: 16, fontSize: 11, margin: 0 }}>
+          {activeDesc} — band {caps.bands} / IIR {caps.has_iir ? '○' : '×'} / DRC {caps.has_drc ? '○' : '×'} / 3D {caps.has_3d ? '○' : '×'} / Beep {caps.has_beep ? '○' : '×'}
+        </div>
+      </div>
+      <DirtyMark dirty={profile.dirty} deviceValue={deviceProfile} />
+    </div>
+  )
+}
+
+/**
+ * 1st-order IIR editor, one per codec (aic3204-full-dsp-registers.md §8.5).
+ * Raw Q1.23 [N0,N1,D1] ints only — no fc/Q design abstraction is offered
+ * (no verified RBJ-style recipe for a 1st-order shelf on this part; see
+ * DuoWlV4Draft.iirHaptic doc). Rendered inside the EQ block, right after the
+ * biquad bands, sharing the same visual language (EqNumberField + a fixed-
+ * height status/apply row) — but unlike the biquad bands this field IS
+ * device-backed (get_info.eq_iir round-trips the exact ints), so it commits
+ * via useDeviceBackedValue + a 適用 button rather than the local-draft +
+ * bulk-apply-only pattern the biquad bands use.
+ */
+function IirEditor({
+  ip,
+  codec,
+  device,
+  cachedInfo,
+  hasIir,
+  sendTo,
+  syncTick,
+  onReconcile,
+}: {
+  ip: string
+  codec: EqCodec
+  device: DeviceInfo
+  cachedInfo?: NodeConfigInfo
+  /** Whether the codec's CURRENT profile supports the IIR block (still
+   *  editable/sendable when false — just marked inert, same "don't hide,
+   *  don't disable" rule as the biquad bands beyond the active count). */
+  hasIir: boolean
+  sendTo: (msg: ManagerMessage) => void
+  syncTick?: number
+  onReconcile?: () => void
+}) {
+  const offline = !device.online
+  const { setAnchor } = useToast()
+  const scheduleReconcile = useReconcileScheduler(onReconcile)
+  const deviceIir = cachedInfo?.eq_iir?.[codec]
+  const iir = useDuoIirField(
+    ip,
+    codec,
+    deviceIir,
+    (v, persist) => {
+      sendTo({ type: 'set_eq_iir', payload: { codec, coeffs: v, persist } })
+      if (persist) scheduleReconcile()
+    },
+    syncTick,
+  )
+  const [n0, n1, d1] = iir.value
+  const setCoeff = (idx: 0 | 1 | 2, v: number) => {
+    const next: [number, number, number] = [n0, n1, d1]
+    next[idx] = v
+    iir.onInput(next)
+  }
+
+  return (
+    <div
+      className="form-row"
+      style={{ marginTop: 14, alignItems: 'flex-start', opacity: hasIir ? 1 : 0.45 }}
+      title={hasIir ? undefined : 'このプロファイルでは無効なブロックです（値は保存されるのみ）'}
+    >
+      <label>1次IIR</label>
+      <div className="form-row-multi" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+            N0
+            <EqNumberField
+              value={n0}
+              onCommit={(v) => { const c = Math.round(v); setCoeff(0, c); return c }}
+              disabled={offline}
+              width={90}
+            />
+          </label>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+            N1
+            <EqNumberField
+              value={n1}
+              onCommit={(v) => { const c = Math.round(v); setCoeff(1, c); return c }}
+              disabled={offline}
+              width={90}
+            />
+          </label>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+            D1
+            <EqNumberField
+              value={d1}
+              onCommit={(v) => { const c = Math.round(v); setCoeff(2, c); return c }}
+              disabled={offline}
+              width={90}
+            />
+          </label>
+          <button
+            type="button"
+            className="form-button-secondary"
+            onClick={(e) => { setAnchor(e.currentTarget); iir.commit() }}
+            disabled={offline}
+            style={{ marginLeft: 'auto', flexShrink: 0 }}
+          >
+            適用
+          </button>
+        </div>
+        <div className="form-status muted" style={{ minHeight: 16, fontSize: 11, margin: 0 }}>
+          {!hasIir && 'このプロファイルでは無効（値は保存されるのみ）・ '}
+          raw Q1.23 int [N0,N1,D1]（H(z)=(N0+2N1z⁻¹)/(1−2D1z⁻¹) 想定・fc/Q 設計は未対応）
+        </div>
+      </div>
+      <DirtyMark dirty={iir.dirty} deviceValue={deviceIir ? `${deviceIir[0]},${deviceIir[1]},${deviceIir[2]}` : undefined} />
+    </div>
+  )
+}
+
 function DuoWlV4EqCodecBlock({
   codec,
   title,
   fsLabel,
+  subtitle,
   device,
+  cachedInfo,
   committed,
+  drafts,
+  onDraftsChange,
   sendTo,
+  syncTick,
+  onReconcile,
+  advanced = true,
 }: {
   codec: EqCodec
   title: string
   fsLabel: string
+  /** Overrides the auto-composed "AIC3204 in-codec biquad ×Nband（fsLabel）"
+   *  sub-title text. Used by SwHapticEqSection (non-DuoWL-v4 software biquad
+   *  — a different engine than the DuoWL v4 AIC3204 in-codec block). */
+  subtitle?: string
   device: DeviceInfo
+  cachedInfo?: NodeConfigInfo
   committed?: EqBandReadout[]
+  drafts: EqBandDraft[]
+  onDraftsChange: (drafts: EqBandDraft[]) => void
   sendTo: (msg: ManagerMessage) => void
+  syncTick?: number
+  onReconcile?: () => void
+  /** false = the non-DuoWL-v4 software haptic EQ (SwHapticEqSection): hides
+   *  the DSP profile selector and 1st-order IIR editor (neither exists on
+   *  those boards — fixed 3-band SW biquad only) and treats every rendered
+   *  band as active (no DSP-profile-driven band-count concept there).
+   *  Defaults true so DuoWlV4EqSection (DuoWL v4) is unaffected. */
+  advanced?: boolean
 }) {
-  const [drafts, setDrafts] = useState<EqBandDraft[]>(() => defaultEqDrafts(codec))
-  // Local-only design state (fc/Q/gain aren't recoverable from the device) —
-  // reset to defaults when the SELECTED DEVICE changes so edits don't bleed
-  // across devices (mirrors the deviceRef reset pattern used elsewhere in
-  // this file, e.g. SensorMappingSection).
-  const deviceRef = useRef(device.ipAddress)
-  useEffect(() => {
-    if (deviceRef.current === device.ipAddress) return
-    deviceRef.current = device.ipAddress
-    setDrafts(defaultEqDrafts(codec))
-  }, [device.ipAddress, codec])
-
+  const ip = device.ipAddress
   const offline = !device.online
   const { setAnchor } = useToast()
+  const fs = EQ_FS[codec]
+  const curve = useMemo(() => eqResponseCurve(drafts, fs, { points: 96 }), [drafts, fs])
 
-  const applyBand = (band: number) => (e: React.MouseEvent<HTMLElement>) => {
-    setAnchor(e.currentTarget)
-    const draft = drafts[band]
+  // Active band count for THIS codec's CURRENT profile (also gates the IIR
+  // editor below via caps.has_iir) — see useDspProfileCaps. Only meaningful
+  // when `advanced` (DuoWL v4) — the non-advanced (sw) caller has no DSP
+  // profile concept at all, so every one of its (fixed 3) drafts is active.
+  const caps = useDspProfileCaps(ip, codec, cachedInfo)
+  const activeBandCount = advanced ? caps.bands : drafts.length
+
+  // Shared by the numeric-field 適用 button AND the graph nodes — `persist`
+  // and the exact `draft` to send are always passed explicitly (never read
+  // off the `drafts` closure at call time) so an in-flight drag can never
+  // ship a one-tick-stale value (React state updates are async).
+  const sendBand = (band: number, persist: boolean, draft: EqBandDraft) => {
     const result = computeAic3204Eq({
       ftype: draft.ftype,
-      fs: EQ_FS[codec],
+      fs,
       fc: draft.fc,
       q: draft.q,
       gainDb: draft.gainDb,
@@ -2699,16 +3771,54 @@ function DuoWlV4EqCodecBlock({
         band,
         ftype: draft.ftype,
         coeffs: aic3204CoeffsToArray(result.coeffs),
+        persist,
       },
     })
   }
+
+  const applyBand = (band: number) => (e: React.MouseEvent<HTMLElement>) => {
+    setAnchor(e.currentTarget)
+    sendBand(band, true, drafts[band])
+  }
+
+  // Graph node wiring: onDraftChange only ever touches the ONE dragged
+  // band (matches "only the dragged band is sent"); onLiveSend/onCommitSend
+  // are the debounced persist:false / immediate persist:true device sends
+  // EqResponseGraph already schedules — this block just forwards them to
+  // the same `sendBand` the 適用 button uses.
+  const handleNodeDraftChange = (band: number, next: EqBandDraft) => {
+    onDraftsChange(drafts.map((d, idx) => (idx === band ? next : d)))
+  }
+  const handleNodeLiveSend = (band: number, next: EqBandDraft) => sendBand(band, false, next)
+  const handleNodeCommitSend = (band: number, next: EqBandDraft) => sendBand(band, true, next)
 
   return (
     <div className="form-section duo-v4-config">
       <div className="form-section-title">
         {title}
-        <span className="form-section-sub-inline"> — AIC3204 in-codec biquad × 3band（{fsLabel}）</span>
+        <span className="form-section-sub-inline"> — {subtitle ?? `AIC3204 in-codec biquad ×${drafts.length}band（${fsLabel}）`}</span>
       </div>
+      {advanced && (
+        <DspProfileSelector
+          ip={ip}
+          codec={codec}
+          device={device}
+          cachedInfo={cachedInfo}
+          sendTo={sendTo}
+          syncTick={syncTick}
+          onReconcile={onReconcile}
+        />
+      )}
+      <EqPresetBar codec={codec} device={device} drafts={drafts} onLoad={onDraftsChange} sendTo={sendTo} allOffDefault={!advanced} />
+      <EqResponseGraph
+        curve={curve}
+        fs={fs}
+        drafts={drafts}
+        offline={offline}
+        onDraftChange={handleNodeDraftChange}
+        onLiveSend={handleNodeLiveSend}
+        onCommitSend={handleNodeCommitSend}
+      />
       {drafts.map((draft, i) => (
         <EqBandEditor
           key={i}
@@ -2717,10 +3827,316 @@ function DuoWlV4EqCodecBlock({
           draft={draft}
           committed={committed?.[i]}
           offline={offline}
-          onChange={(next) => setDrafts((ds) => ds.map((d, idx) => (idx === i ? next : d)))}
+          active={i < activeBandCount}
+          onChange={(next) => onDraftsChange(drafts.map((d, idx) => (idx === i ? next : d)))}
           onApply={applyBand(i)}
         />
       ))}
+      {advanced && (
+        <IirEditor
+          ip={ip}
+          codec={codec}
+          device={device}
+          cachedInfo={cachedInfo}
+          hasIir={caps.has_iir}
+          sendTo={sendTo}
+          syncTick={syncTick}
+          onReconcile={onReconcile}
+        />
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------
+// EQ presets: localStorage-persisted save/load/delete + JSON export/import,
+// PER CODEC (haptic and hp each get their own preset list + storage key —
+// they're different filters at different sample rates, so bundling both
+// under one "preset" forced a haptic tweak and a headphone tweak to always
+// travel together). Presets/JSON only mutate the local drafts held by
+// DuoWlV4EqSection — the device is never touched implicitly. The user still
+// presses each band's 適用, or this bar's 適用 (this codec's up to 6 bands), to
+// push drafts to the device (same discipline as the sensor-mapping JSON
+// import above: load into the editor, apply explicitly).
+// ---------------------------------------------------------------------
+
+const EQ_PRESETS_STORAGE_KEYS: Record<EqCodec, string> = {
+  haptic: 'hapbeat.studio.eqPresets.haptic',
+  hp: 'hapbeat.studio.eqPresets.hp',
+}
+
+interface EqPreset {
+  name: string
+  bands: EqBandDraft[]
+}
+
+function loadEqPresets(codec: EqCodec): EqPreset[] {
+  try {
+    const raw = localStorage.getItem(EQ_PRESETS_STORAGE_KEYS[codec])
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    // Validate each element's shape — a corrupt or externally-written value must
+    // not yield presets with an undefined name (bad <option> keys / blank rows).
+    return (parsed as unknown[]).filter(
+      (p): p is EqPreset =>
+        !!p &&
+        typeof p === 'object' &&
+        typeof (p as EqPreset).name === 'string' &&
+        (p as EqPreset).name.trim() !== '' &&
+        Array.isArray((p as EqPreset).bands),
+    )
+  } catch {
+    return []
+  }
+}
+
+function saveEqPresetsToStorage(codec: EqCodec, presets: EqPreset[]): void {
+  try {
+    localStorage.setItem(EQ_PRESETS_STORAGE_KEYS[codec], JSON.stringify(presets))
+  } catch {
+    // localStorage full/unavailable — presets are a convenience, not critical state.
+  }
+}
+
+/** Normalize one band from an untrusted source (preset/import) — falls back
+ *  to the codec/band default on a missing or malformed field so a
+ *  hand-edited JSON file can't crash the editor or send NaN to the device.
+ *  `allOff` — see defaultEqDraft doc — forwarded to the fallback so a
+ *  missing/malformed band0 for the sw haptic EQ falls back to off, not the
+ *  DuoWL v4 100Hz-LPF default. */
+function normalizeEqBandDraft(input: unknown, codec: EqCodec, band: number, allOff = false): EqBandDraft {
+  const fallback = defaultEqDraft(codec, band, allOff)
+  if (!input || typeof input !== 'object') return fallback
+  const o = input as Partial<Record<keyof EqBandDraft, unknown>>
+  const ftype = EQ_FTYPE_OPTIONS.some((opt) => opt.value === o.ftype) ? (o.ftype as EqFtype) : fallback.ftype
+  const fc = typeof o.fc === 'number' ? clampEqFc(o.fc, EQ_FS[codec]) : fallback.fc
+  const q = typeof o.q === 'number' ? clampEqQ(o.q) : fallback.q
+  const gainDb = typeof o.gainDb === 'number' ? clampEqGainDb(o.gainDb) : fallback.gainDb
+  return { ftype, fc, q, gainDb }
+}
+
+/** `bandCount` defaults to EQ_BAND_COUNT (6, DuoWL v4's AIC3204 in-codec
+ *  biquad). Callers for the non-DuoWL-v4 software haptic EQ (SwHapticEqSection)
+ *  pass 3 (SW_HAPTIC_EQ_BAND_COUNT) — a preset/import carrying more bands than
+ *  the target simply has its extras ignored (`arr[i]` past bandCount is never
+ *  read), and one carrying fewer is padded with `defaultEqDraft`, same as today.
+ *  `allOff` — see defaultEqDraft doc — SwHapticEqSection passes true so an
+ *  untouched/malformed band0 falls back to off (matching the v3 firmware's
+ *  actual all-off boot default), not DuoWL v4's 100Hz-LPF default. */
+function normalizeEqDrafts(
+  input: unknown,
+  codec: EqCodec,
+  bandCount: number = EQ_BAND_COUNT,
+  allOff = false,
+): EqBandDraft[] {
+  const arr = Array.isArray(input) ? input : []
+  return Array.from({ length: bandCount }, (_, i) => normalizeEqBandDraft(arr[i], codec, i, allOff))
+}
+
+function EqPresetBar({
+  codec,
+  device,
+  drafts,
+  onLoad,
+  sendTo,
+  allOffDefault = false,
+}: {
+  codec: EqCodec
+  device: DeviceInfo
+  drafts: EqBandDraft[]
+  onLoad: (bands: EqBandDraft[]) => void
+  sendTo: (msg: ManagerMessage) => void
+  /** Forwarded to normalizeEqDrafts on preset-select/JSON-import — see
+   *  defaultEqDraft's `allOff` doc. true for the non-DuoWL-v4 software
+   *  haptic EQ (SwHapticEqSection), so a preset/import missing/malformed
+   *  band0 falls back to off instead of DuoWL v4's 100Hz-LPF default. */
+  allOffDefault?: boolean
+}) {
+  const [presets, setPresets] = useState<EqPreset[]>(() => loadEqPresets(codec))
+  const [selected, setSelected] = useState<string>('')
+  const [importError, setImportError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const { setAnchor, toast } = useToast()
+  const offline = !device.online
+  const codecLabel = codec === 'haptic' ? '触覚' : 'ヘッドホン'
+  // Actual band count for THIS block — 6 for DuoWL v4 (EQ_BAND_COUNT), 3 for
+  // the non-DuoWL-v4 software haptic EQ (SwHapticEqSection passes 3-length
+  // drafts). Read from `drafts` (not the EQ_BAND_COUNT constant) so labels/
+  // renormalization stay correct for both callers without a separate prop.
+  const bandCount = drafts.length
+
+  // Reset the selected-preset label when the target device changes. The parent
+  // (DuoWlV4EqSection) resets the drafts to defaults on device switch; without
+  // this the dropdown would keep showing the previous device's preset name while
+  // the editor/graph show defaults — and 適用 (which reads `drafts`, not
+  // `selected`) would write defaults, contradicting the shown label.
+  const deviceRef = useRef(device.ipAddress)
+  useEffect(() => {
+    if (deviceRef.current === device.ipAddress) return
+    deviceRef.current = device.ipAddress
+    setSelected('')
+    setImportError(null)
+  }, [device.ipAddress])
+
+  const persist = (next: EqPreset[]) => {
+    setPresets(next)
+    saveEqPresetsToStorage(codec, next)
+  }
+
+  const handleSelectChange = (name: string) => {
+    setSelected(name)
+    if (!name) return
+    const preset = presets.find((p) => p.name === name)
+    if (!preset) return
+    onLoad(normalizeEqDrafts(preset.bands, codec, bandCount, allOffDefault))
+  }
+
+  const handleSave = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchor(e.currentTarget)
+    const name = window.prompt('プリセット名を入力してください')
+    const trimmed = name?.trim()
+    if (!trimmed) return
+    const next = [...presets.filter((p) => p.name !== trimmed), { name: trimmed, bands: drafts }]
+    next.sort((a, b) => a.name.localeCompare(b.name))
+    persist(next)
+    setSelected(trimmed)
+    toast(`プリセット「${trimmed}」を保存しました`, 'success')
+  }
+
+  const handleDelete = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchor(e.currentTarget)
+    if (!selected) return
+    persist(presets.filter((p) => p.name !== selected))
+    toast(`プリセット「${selected}」を削除しました`, 'success')
+    setSelected('')
+  }
+
+  const handleExport = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchor(e.currentTarget)
+    const payload = { version: 1, codec, bands: drafts }
+    downloadTextFile(`hapbeat-eq-${codec}-${Date.now()}.json`, JSON.stringify(payload, null, 2))
+    toast('EQ 設定を JSON にエクスポートしました', 'success')
+  }
+
+  const handleImportFile = (file: File) => {
+    const fr = new FileReader()
+    fr.onload = () => {
+      try {
+        const parsed = JSON.parse(String(fr.result)) as unknown
+        if (!parsed || typeof parsed !== 'object') throw new Error('不正な JSON です')
+        const obj = parsed as Record<string, unknown>
+        if (!Array.isArray(obj.bands)) {
+          throw new Error('bands 配列が見つかりません')
+        }
+        onLoad(normalizeEqDrafts(obj.bands, codec, bandCount, allOffDefault))
+        setImportError(null)
+        setSelected('')
+        toast('EQ 設定を JSON から読み込みました（未適用 — 「適用」で反映）', 'success')
+      } catch (e) {
+        setImportError(e instanceof Error ? e.message : 'JSON を解析できません')
+        setTimeout(() => setImportError(null), 6000)
+      }
+    }
+    fr.readAsText(file)
+  }
+
+  const applyAll = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchor(e.currentTarget)
+    drafts.forEach((draft, band) => {
+      const result = computeAic3204Eq({
+        ftype: draft.ftype,
+        fs: EQ_FS[codec],
+        fc: draft.fc,
+        q: draft.q,
+        gainDb: draft.gainDb,
+      })
+      sendTo({
+        type: 'set_eq_band',
+        payload: { codec, band, ftype: draft.ftype, coeffs: aic3204CoeffsToArray(result.coeffs), persist: true },
+      })
+    })
+    toast(`${codecLabel} EQ ${bandCount} バンドをデバイスへ送信しました`, 'success')
+  }
+
+  return (
+    <div className="form-section duo-v4-config">
+      <div className="form-section-title">
+        EQ プリセット
+        <span className="form-section-sub-inline"> — 保存・呼び出し・JSON 共有（{codecLabel} {bandCount}band）</span>
+      </div>
+      <div className="form-row">
+        <label>プリセット</label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <select
+            className="form-input"
+            value={selected}
+            onChange={(e) => handleSelectChange(e.target.value)}
+            style={{ flex: 1 }}
+          >
+            <option value="">プリセットを選択…</option>
+            {presets.map((p) => (
+              <option key={p.name} value={p.name}>{p.name}</option>
+            ))}
+          </select>
+          <button className="form-button-secondary" onClick={handleSave} style={{ flexShrink: 0 }}>
+            保存
+          </button>
+          <button
+            className="form-button-secondary"
+            onClick={handleDelete}
+            disabled={!selected}
+            style={{ flexShrink: 0 }}
+          >
+            削除
+          </button>
+        </div>
+        <span />
+      </div>
+      {/* Fixed-height status line (layout-shift rule): reserved even when idle
+          so an import error never shifts the action row below. */}
+      <div className="form-status muted" style={{ minHeight: 16, fontSize: 12 }}>
+        {importError
+          ? `⚠ インポート失敗: ${importError}`
+          : '保存・呼び出し・読込は draft のみ変更します。デバイスへは下の各バンドの「適用」またはこの「適用」で反映してください。'}
+      </div>
+
+      <div className="form-action-row" style={{ marginTop: 8 }}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json,application/json"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) handleImportFile(f)
+            e.target.value = '' // allow re-importing the same file
+          }}
+        />
+        <button
+          className="form-button-secondary"
+          onClick={(e) => { setAnchor(e.currentTarget); fileInputRef.current?.click() }}
+          title="JSON ファイルから EQ 設定を読み込む（適用ボタンで反映）"
+        >
+          JSON インポート
+        </button>
+        <button
+          className="form-button-secondary"
+          onClick={handleExport}
+          title={`現在の${codecLabel} EQ 設定を JSON ファイルに保存`}
+        >
+          JSON エクスポート
+        </button>
+        <span style={{ flex: 1 }} />
+        <button
+          className="form-button"
+          onClick={applyAll}
+          disabled={offline}
+          title={`${codecLabel} の ${bandCount} バンドをまとめてデバイスへ送信`}
+        >
+          適用
+        </button>
+      </div>
     </div>
   )
 }
@@ -2729,30 +4145,1311 @@ export function DuoWlV4EqSection({
   device,
   cachedInfo,
   sendTo,
+  syncTick,
+  onReconcile,
 }: {
   device: DeviceInfo
   cachedInfo?: NodeConfigInfo
   sendTo: (msg: ManagerMessage) => void
+  /** get_info counter — reconciles same-value device echoes (DSP profile /
+   *  1st-order IIR device-backed fields, finding 3). */
+  syncTick?: number
+  /** Transport-correct get_info refresh, wired by DeviceDetail. */
+  onReconcile?: () => void
 }) {
+  const ip = device.ipAddress
+
+  // Local-only design state (fc/Q/gain aren't recoverable from the device) —
+  // held in useDuoWlV4AudioStore (keyed per device IP), NOT local useState,
+  // so it (a) survives switching between the 音声/EQ sub-tabs, which unmount
+  // whichever isn't active, and (b) is reachable by the JSON export/import
+  // pair on the 音声 tab (DuoWlV4SettingsBackup). normalizeEqDrafts fills an
+  // empty/short/malformed raw array with the codec's defaults, so a device
+  // never touched here still shows (and exports) sensible values.
+  const rawHaptic = useDuoWlV4AudioStore((s) => s.draftFor(ip).eqHaptic)
+  const rawHp = useDuoWlV4AudioStore((s) => s.draftFor(ip).eqHp)
+  const setEq = useDuoWlV4AudioStore((s) => s.setEq)
+  const hapticDrafts = useMemo(() => normalizeEqDrafts(rawHaptic, 'haptic'), [rawHaptic])
+  const hpDrafts = useMemo(() => normalizeEqDrafts(rawHp, 'hp'), [rawHp])
+  const setHapticDrafts = useCallback((next: EqBandDraft[]) => setEq(ip, 'haptic', next), [ip, setEq])
+  const setHpDrafts = useCallback((next: EqBandDraft[]) => setEq(ip, 'hp', next), [ip, setEq])
+
   return (
     <>
+      {/* Each codec block owns its own EqPresetBar (per-codec presets — see
+          EqPresetBar above) rendered above its graph, so haptic and hp
+          preset/save/load/JSON are fully independent. */}
       <DuoWlV4EqCodecBlock
         codec="haptic"
         title="触覚 EQ"
         fsLabel="16kHz"
         device={device}
+        cachedInfo={cachedInfo}
         committed={cachedInfo?.eq?.haptic}
+        drafts={hapticDrafts}
+        onDraftsChange={setHapticDrafts}
         sendTo={sendTo}
+        syncTick={syncTick}
+        onReconcile={onReconcile}
       />
       <DuoWlV4EqCodecBlock
         codec="hp"
         title="ヘッドホン EQ"
         fsLabel="48kHz"
         device={device}
+        cachedInfo={cachedInfo}
         committed={cachedInfo?.eq?.hp}
+        drafts={hpDrafts}
+        onDraftsChange={setHpDrafts}
         sendTo={sendTo}
+        syncTick={syncTick}
+        onReconcile={onReconcile}
       />
     </>
+  )
+}
+
+// ---------------------------------------------------------------------
+// Non-DuoWL-v4 (v3-family) haptic-only receivers: software biquad EQ.
+// necklace_v3 / band_v2/v3/v4, over EITHER transport (espnow_stream OR
+// wifi-udp) — `set_eq_band {codec:"haptic", band:0..2, ftype, coeffs, persist?}`
+// runs as a plain SOFTWARE biquad on the 16kHz haptic mixer (no AIC3204, no
+// hp codec, no DSP profiles, no IIR/DRC/3D/Beep). Gated purely on
+// `cachedInfo.eq_engine === 'sw'` (presence-driven — no board allow-list to
+// maintain) by the caller (DeviceDetail.tsx), not by this component.
+//
+// Reuses the EXACT same preset storage / graph / band-editor machinery as
+// DuoWlV4EqCodecBlock — same Q1.23 wire coeffs, same fs (16000), so the
+// per-codec haptic preset list (hapbeat.studio.eqPresets.haptic) is
+// deliberately SHARED with DuoWL v4's 触覚 EQ block (a 100Hz LPF preset
+// applies identically to both families).
+// ---------------------------------------------------------------------
+
+/** Fixed band count for the non-DuoWL-v4 software haptic EQ — these boards
+ *  have no DSP-profile-driven variable band count (see DuoWlV4Draft's
+ *  dsp_profile doc); it's always exactly 3. */
+const SW_HAPTIC_EQ_BAND_COUNT = 3
+
+/** Write-time draft default for the SW haptic EQ (v3 系列): band0 = LPF 200 Hz
+ *  / Q 0.7071 (Butterworth), bands 1-2 off. The FIRMWARE boot default stays
+ *  all-off (fleet-safe) — this only pre-fills a fresh editor so the first 適用
+ *  writes the recommended motor LPF (user request 2026-07-21). Matches the
+ *  device-side Btn4 preset (contracts audio-dsp-config.md §2.1). */
+function swDefaultEqDrafts(): EqBandDraft[] {
+  return Array.from({ length: SW_HAPTIC_EQ_BAND_COUNT }, (_, i) =>
+    i === 0
+      ? { ftype: 'lpf' as EqFtype, fc: 200, q: EQ_BUTTERWORTH_Q, gainDb: 0 }
+      : defaultEqDraft('haptic', i, true),
+  )
+}
+
+export function SwHapticEqSection({
+  device,
+  cachedInfo,
+  sendTo,
+  syncTick,
+  onReconcile,
+}: {
+  device: DeviceInfo
+  cachedInfo?: NodeConfigInfo
+  sendTo: (msg: ManagerMessage) => void
+  syncTick?: number
+  onReconcile?: () => void
+}) {
+  const ip = device.ipAddress
+
+  // Same store as DuoWL v4 (keyed per device IP, EqBandDraft[] shape is
+  // identical) — a given IP is only ever one board family, so there's no
+  // cross-contamination; normalizeEqDrafts pads/truncates to exactly 3.
+  // Fresh editor (no store draft yet): pre-fill the write-time default
+  // (band0 = LPF 200 Hz / Q 0.7071, see swDefaultEqDrafts) — the DEVICE
+  // stays untouched until 適用 (firmware boot default = all off). Once the
+  // user has edited (store draft exists), normalize with allOff fallbacks so
+  // a malformed/partial entry degrades to off, not to a phantom design.
+  const rawHaptic = useDuoWlV4AudioStore((s) => s.draftFor(ip).eqHaptic)
+  const setEq = useDuoWlV4AudioStore((s) => s.setEq)
+  const hapticDrafts = useMemo(() => {
+    const hasRaw = Array.isArray(rawHaptic) && rawHaptic.length > 0
+    if (!hasRaw) return swDefaultEqDrafts()
+    return normalizeEqDrafts(rawHaptic, 'haptic', SW_HAPTIC_EQ_BAND_COUNT, true)
+  }, [rawHaptic])
+  const setHapticDrafts = useCallback((next: EqBandDraft[]) => setEq(ip, 'haptic', next), [ip, setEq])
+
+  return (
+    <DuoWlV4EqCodecBlock
+      codec="haptic"
+      title="触覚 EQ"
+      fsLabel="16kHz"
+      subtitle={`ソフトウェア biquad（ミキサー段）×${SW_HAPTIC_EQ_BAND_COUNT}band（16kHz）`}
+      device={device}
+      cachedInfo={cachedInfo}
+      committed={cachedInfo?.eq?.haptic}
+      drafts={hapticDrafts}
+      onDraftsChange={setHapticDrafts}
+      sendTo={sendTo}
+      syncTick={syncTick}
+      onReconcile={onReconcile}
+      advanced={false}
+    />
+  )
+}
+
+// ---------------------------------------------------------------------
+// DuoWL v4 ESP-NOW hp48 receiver: DSP sub-tab (aic3204-full-dsp-registers.md
+// §2/§3/§4/§5) — DRC (compressor/limiter) + 3D effect + Beep (test tone) per
+// codec, plus the global AGC (line-in / HP-codec ADC path). All device-backed
+// (drc/effect_3d/agc round-trip losslessly through get_info) except Beep,
+// which is fire-and-forget (no on-device config to reconcile against).
+// ---------------------------------------------------------------------
+
+/** DRC hold/attack/decay register-code → human-readable conversion
+ *  (aic3204-full-dsp-registers.md §2's bit-field table — NOT SLAA557's prose,
+ *  which disagrees by 10x). `fs` selects the codec's DAC word clock rate for
+ *  the hold→ms conversion (16k haptic / 48k hp). */
+function drcAttackDbPerSample(code: number): number {
+  return 4.0 / Math.pow(2, code)
+}
+function drcDecayDbPerSample(code: number): number {
+  return 1.5625e-2 / Math.pow(2, code)
+}
+/** null = code 0 = disabled (hold not confirmed as "0 word clocks", the
+ *  reference doc lists code 0 as its own "無効" state, not 32·2⁰). */
+function drcHoldMs(code: number, fs: number): number | null {
+  if (code <= 0) return null
+  return ((32 * Math.pow(2, code - 1)) / fs) * 1000
+}
+
+const DRC_HYSTERESIS_STEPS = [0, 1, 2, 3] as const
+
+/** DuoWlV4DrcValue (camelCase) -> `set_drc` wire payload (audio-dsp-config
+ *  field names). Shared by DrcPanel's device-backed send AND
+ *  DuoWlV4SettingsBackup's bulk applyAll so the two can never drift apart. */
+function drcValueToMessage(codec: EqCodec, v: DuoWlV4DrcValue, persist: boolean): ManagerMessage {
+  return {
+    type: 'set_drc',
+    payload: {
+      codec,
+      enable_l: v.enableL,
+      enable_r: v.enableR,
+      threshold_db: v.thresholdDb,
+      hysteresis_db: v.hysteresisDb,
+      hold: v.hold,
+      attack: v.attack,
+      decay: v.decay,
+      persist,
+    },
+  }
+}
+
+/** DuoWlV4AgcValue (camelCase) -> `set_agc` wire payload. Shared by AgcPanel
+ *  and DuoWlV4SettingsBackup's bulk applyAll (see drcValueToMessage doc). */
+function agcValueToMessage(v: DuoWlV4AgcValue, persist: boolean): ManagerMessage {
+  return {
+    type: 'set_agc',
+    payload: {
+      enable: v.enable,
+      target_level_db: v.targetLevelDb,
+      max_gain_db: v.maxGainDb,
+      attack: v.attack,
+      decay: v.decay,
+      noise_threshold_db: v.noiseThresholdDb,
+      hysteresis_db: v.hysteresisDb,
+      persist,
+    },
+  }
+}
+
+/** get_info.drc.<codec> (DrcInfo, snake_case + live compressing_l/r) ->
+ *  DuoWlV4DrcValue (camelCase, config-only). The INVERSE of drcValueToMessage
+ *  minus the live status fields (those aren't part of the editable draft).
+ *  Shared by DrcPanel's memoized deviceValue AND DuoWlV4SettingsBackup's
+ *  export/import-fallback (adversarial review finding 2) — factored out so
+ *  the mapping can't drift between the two call sites. */
+function drcInfoToValue(info: DrcInfo): DuoWlV4DrcValue {
+  return {
+    enableL: info.enable_l,
+    enableR: info.enable_r,
+    thresholdDb: info.threshold_db,
+    hysteresisDb: info.hysteresis_db,
+    hold: info.hold,
+    attack: info.attack,
+    decay: info.decay,
+  }
+}
+
+/** get_info.agc (AgcInfo, snake_case + applied-gain telemetry) ->
+ *  DuoWlV4AgcValue (camelCase, config-only). See drcInfoToValue doc. */
+function agcInfoToValue(info: AgcInfo): DuoWlV4AgcValue {
+  return {
+    enable: info.enable,
+    targetLevelDb: info.target_level_db,
+    maxGainDb: info.max_gain_db,
+    attack: info.attack,
+    decay: info.decay,
+    noiseThresholdDb: info.noise_threshold_db,
+    hysteresisDb: info.hysteresis_db,
+  }
+}
+
+/** One codec's DRC (compressor/limiter) panel. Every control ships the
+ *  FULL DuoWlV4DrcValue on commit (see that type's doc) — sliders debounce
+ *  persist:false then commit persist:true on pointer-up (useDuoDrcField),
+ *  the enable/hysteresis toggle buttons commit immediately. */
+function DrcPanel({
+  ip,
+  codec,
+  title,
+  device,
+  cachedInfo,
+  sendTo,
+  syncTick,
+  onReconcile,
+}: {
+  ip: string
+  codec: EqCodec
+  title: string
+  device: DeviceInfo
+  cachedInfo?: NodeConfigInfo
+  sendTo: (msg: ManagerMessage) => void
+  syncTick?: number
+  onReconcile?: () => void
+}) {
+  const offline = !device.online
+  const { setAnchor } = useToast()
+  const scheduleReconcile = useReconcileScheduler(onReconcile)
+  const fs = EQ_FS[codec]
+  const caps = useDspProfileCaps(ip, codec, cachedInfo)
+  const deviceDrcInfo = cachedInfo?.drc?.[codec]
+  // MUST be memoized on deviceDrcInfo (not rebuilt as a bare literal every
+  // render) — this is `deviceValue` for useDeviceBackedValue, whose adopt
+  // effect re-runs whenever this reference changes. An unmemoized literal is
+  // a NEW object every render regardless of whether deviceDrcInfo changed,
+  // which (even with the isEqual structural comparator below) still forces
+  // the effect to re-run and diff on every render — memoizing here is what
+  // makes the reference itself stable when nothing changed, so the effect
+  // doesn't even need to run. See useDeviceBackedValue's `isEqual` doc.
+  const deviceDrc: DuoWlV4DrcValue | undefined = useMemo(
+    () => deviceDrcInfo && drcInfoToValue(deviceDrcInfo),
+    [deviceDrcInfo],
+  )
+  const drc = useDuoDrcField(
+    ip,
+    codec,
+    deviceDrc,
+    (v, persist) => {
+      sendTo(drcValueToMessage(codec, v, persist))
+      if (persist) scheduleReconcile()
+    },
+    syncTick,
+  )
+  const v = drc.value
+  // `disabled` is offline-only — a profile without DRC support does NOT
+  // block editing (adversarial review finding 4): set_drc is always
+  // accepted and cached/persisted by firmware regardless of the codec's
+  // current profile (applied:false in the response, not a write failure),
+  // and the status line below explicitly promises "値は保存され...反映され
+  // ます" — disabling the controls would make that promise false and would
+  // also be inconsistent with the "dim, don't disable" treatment already
+  // given to inert EQ bands (EqBandEditor) and the IIR block (IirEditor).
+  const disabled = offline
+  const attackDb = drcAttackDbPerSample(v.attack)
+  const decayDb = drcDecayDbPerSample(v.decay)
+  const holdMs = drcHoldMs(v.hold, fs)
+
+  return (
+    <div className="form-section duo-v4-config">
+      <div className="form-section-title">
+        {title}
+        <span className="form-section-sub-inline"> — DRC（コンプレッサ／リミッタ）</span>
+      </div>
+      {/* Fixed-height status line (layout-shift rule): always present. */}
+      <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
+        {caps.has_drc
+          ? '現在のプロファイルで有効です。'
+          : `⚠ 現在のプロファイルは DRC 非対応です（eq6_drc / full を選択してください）。値は保存され、対応プロファイルに切り替えると反映されます。`}
+      </div>
+
+      {/* Dim (not disable) when the profile lacks DRC — same "still
+          editable/stored, just inert" treatment as EQ bands beyond the
+          active count / the IIR block, matching the status line's promise
+          above. */}
+      <div style={{ opacity: caps.has_drc ? 1 : 0.6 }}>
+      <div className="form-row">
+        <label>有効</label>
+        <div className="device-toggle" role="group" aria-label="DRC enable L/R">
+          <button
+            type="button"
+            className={`btn btn-sm device-toggle-btn ${v.enableL ? 'active' : ''}`}
+            onClick={(e) => { setAnchor(e.currentTarget); drc.commit({ ...v, enableL: !v.enableL }) }}
+            disabled={disabled}
+          >
+            L
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm device-toggle-btn ${v.enableR ? 'active' : ''}`}
+            onClick={(e) => { setAnchor(e.currentTarget); drc.commit({ ...v, enableR: !v.enableR }) }}
+            disabled={disabled}
+          >
+            R
+          </button>
+        </div>
+        <DirtyMark dirty={drc.dirty} />
+      </div>
+
+      <div className="form-row">
+        <label>しきい値</label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={-24}
+            max={-3}
+            step={3}
+            value={v.thresholdDb}
+            onChange={(e) => drc.onInput({ ...v, thresholdDb: Number(e.target.value) })}
+            onPointerUp={() => drc.commit()}
+            onBlur={() => drc.commit()}
+            disabled={disabled}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 56, textAlign: 'right' }}>{v.thresholdDb} dB</span>
+        </div>
+        <span />
+      </div>
+
+      <div className="form-row">
+        <label>ヒステリシス</label>
+        <div className="device-toggle" role="group" aria-label="DRC hysteresis">
+          {DRC_HYSTERESIS_STEPS.map((step) => (
+            <button
+              key={step}
+              type="button"
+              className={`btn btn-sm device-toggle-btn ${v.hysteresisDb === step ? 'active' : ''}`}
+              onClick={() => drc.commit({ ...v, hysteresisDb: step })}
+              disabled={disabled}
+            >
+              {step} dB
+            </button>
+          ))}
+        </div>
+        <span />
+      </div>
+
+      <div className="form-row">
+        <label>ホールド<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>raw code 0-15</span></label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={0}
+            max={15}
+            step={1}
+            value={v.hold}
+            onChange={(e) => drc.onInput({ ...v, hold: Number(e.target.value) })}
+            onPointerUp={() => drc.commit()}
+            onBlur={() => drc.commit()}
+            disabled={disabled}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 90, textAlign: 'right', fontSize: 11 }}>
+            {v.hold}（{holdMs == null ? '無効' : `${holdMs.toFixed(1)} ms`}）
+          </span>
+        </div>
+        <span />
+      </div>
+
+      <div className="form-row">
+        <label>アタック<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>raw code 0-15</span></label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={0}
+            max={15}
+            step={1}
+            value={v.attack}
+            onChange={(e) => drc.onInput({ ...v, attack: Number(e.target.value) })}
+            onPointerUp={() => drc.commit()}
+            onBlur={() => drc.commit()}
+            disabled={disabled}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 110, textAlign: 'right', fontSize: 11 }}>
+            {v.attack}（{attackDb.toFixed(4)} dB/sample）
+          </span>
+        </div>
+        <span />
+      </div>
+
+      <div className="form-row">
+        <label>ディケイ<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>raw code 0-15</span></label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={0}
+            max={15}
+            step={1}
+            value={v.decay}
+            onChange={(e) => drc.onInput({ ...v, decay: Number(e.target.value) })}
+            onPointerUp={() => drc.commit()}
+            onBlur={() => drc.commit()}
+            disabled={disabled}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 110, textAlign: 'right', fontSize: 11 }}>
+            {v.decay}（{decayDb.toFixed(6)} dB/sample）
+          </span>
+        </div>
+        <span />
+      </div>
+      </div>
+
+      <div className="form-row">
+        <label>圧縮中</label>
+        <span className="mono" style={{ fontSize: 12 }}>
+          L: {deviceDrcInfo?.compressing_l ? '● 圧縮中' : '－'} ／ R: {deviceDrcInfo?.compressing_r ? '● 圧縮中' : '－'}
+        </span>
+        <span />
+      </div>
+      <div className="form-status muted" style={{ fontSize: 11 }}>
+        ※ get_info 取得時点のスナップショットです（連続読み出しは未対応・「デバイスから読み込み」で更新）。
+      </div>
+    </div>
+  )
+}
+
+/** One codec's 3D effect depth (profile "full" only). */
+function Effect3dPanel({
+  ip,
+  codec,
+  title,
+  device,
+  cachedInfo,
+  sendTo,
+  syncTick,
+  onReconcile,
+}: {
+  ip: string
+  codec: EqCodec
+  title: string
+  device: DeviceInfo
+  cachedInfo?: NodeConfigInfo
+  sendTo: (msg: ManagerMessage) => void
+  syncTick?: number
+  onReconcile?: () => void
+}) {
+  const offline = !device.online
+  const { setAnchor } = useToast()
+  const caps = useDspProfileCaps(ip, codec, cachedInfo)
+  const scheduleReconcile = useReconcileScheduler(onReconcile)
+  const deviceValue = cachedInfo?.effect_3d?.[codec]
+  const depth = useDuoEffect3dField(ip, codec, deviceValue, (v, persist) => {
+    sendTo({ type: 'set_3d', payload: { codec, depth: v, persist } })
+    if (persist) scheduleReconcile()
+  }, syncTick)
+  // `disabled` is offline-only — same reasoning as DrcPanel (adversarial
+  // review finding 4): set_3d is always accepted/cached regardless of
+  // profile, and the status line below promises the value is saved.
+  const disabled = offline
+
+  return (
+    <div className="form-section duo-v4-config">
+      <div className="form-section-title">
+        {title}
+        <span className="form-section-sub-inline"> — 3D エフェクト</span>
+      </div>
+      <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
+        {caps.has_3d
+          ? '現在のプロファイルで有効です。'
+          : '⚠ 現在のプロファイルは 3D 非対応です（full を選択してください）。値は保存され、full に切り替えると反映されます。'}
+      </div>
+      {/* Dim (not disable) when the profile lacks 3D — see DrcPanel's
+          identical comment. */}
+      <div style={{ opacity: caps.has_3d ? 1 : 0.6 }}>
+      <div className="form-row">
+        <label>深さ</label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={depth.value}
+            onChange={(e) => depth.onInput(Number(e.target.value))}
+            onPointerUp={() => depth.commit()}
+            onBlur={() => depth.commit()}
+            disabled={disabled}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 56, textAlign: 'right' }}>{depth.value.toFixed(2)}</span>
+        </div>
+        <DirtyMark dirty={depth.dirty} deviceValue={deviceValue} format={(v) => Number(v).toFixed(2)} />
+      </div>
+      <div className="form-action-row" style={{ marginTop: 8 }}>
+        <button
+          className="form-button"
+          onClick={(e) => { setAnchor(e.currentTarget); depth.commit() }}
+          disabled={disabled}
+        >
+          深さを適用
+        </button>
+      </div>
+      </div>
+    </div>
+  )
+}
+
+/** One codec's Beep (one-shot test tone, profile "full" only). Local-only —
+ *  the part has no beep config readback, so this is NOT device-backed; the
+ *  knobs just survive tab switches via the store (setBeep). */
+function BeepPanel({
+  ip,
+  codec,
+  title,
+  device,
+  cachedInfo,
+  sendTo,
+}: {
+  ip: string
+  codec: EqCodec
+  title: string
+  device: DeviceInfo
+  cachedInfo?: NodeConfigInfo
+  sendTo: (msg: ManagerMessage) => void
+}) {
+  const offline = !device.online
+  const { setAnchor, toast } = useToast()
+  const caps = useDspProfileCaps(ip, codec, cachedInfo)
+  const beepField = codec === 'haptic' ? 'beepHaptic' : 'beepHp'
+  const beep = useDuoWlV4AudioStore((s) => s.draftFor(ip)[beepField])
+  const setBeep = useDuoWlV4AudioStore((s) => s.setBeep)
+  const update = (patch: Partial<DuoWlV4BeepValue>) => setBeep(ip, codec, { ...beep, ...patch })
+  const disabled = offline || !caps.has_beep
+
+  const play = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchor(e.currentTarget)
+    sendTo({
+      type: 'set_beep',
+      payload: { codec, freq_hz: beep.freqHz, volume_db: beep.volumeDb, length_ms: beep.lengthMs, enable: true },
+    })
+    toast(`${title}: テストトーンを再生しました`, 'success')
+  }
+
+  return (
+    <div className="form-section duo-v4-config">
+      <div className="form-section-title">
+        {title}
+        <span className="form-section-sub-inline"> — Beep（テストトーン）</span>
+      </div>
+      <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
+        {caps.has_beep
+          ? '一発鳴動（NVS には保存されません）。'
+          : '⚠ 現在のプロファイルは Beep 非対応です（full を選択してください）。'}
+      </div>
+      <div className="form-row">
+        <label>周波数</label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 4 }}>
+          <EqNumberField
+            value={beep.freqHz}
+            onCommit={(v) => { const c = Math.max(1, Math.round(v)); update({ freqHz: c }); return c }}
+            disabled={disabled}
+            width={80}
+          />
+          <span style={{ fontSize: 12 }}>Hz</span>
+        </div>
+        <span />
+      </div>
+      <div className="form-row">
+        <label>音量</label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={-63}
+            max={0}
+            step={1}
+            value={beep.volumeDb}
+            onChange={(e) => update({ volumeDb: Number(e.target.value) })}
+            disabled={disabled}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 56, textAlign: 'right' }}>{beep.volumeDb} dB</span>
+        </div>
+        <span />
+      </div>
+      <div className="form-row">
+        <label>長さ</label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 4 }}>
+          <EqNumberField
+            value={beep.lengthMs}
+            onCommit={(v) => { const c = Math.max(1, Math.round(v)); update({ lengthMs: c }); return c }}
+            disabled={disabled}
+            width={80}
+          />
+          <span style={{ fontSize: 12 }}>ms</span>
+        </div>
+        <span />
+      </div>
+      <div className="form-action-row" style={{ marginTop: 8 }}>
+        <button className="form-button" onClick={play} disabled={disabled}>
+          ▶ 再生
+        </button>
+      </div>
+    </div>
+  )
+}
+
+const AGC_TARGET_LEVELS_DB = [-5.5, -8, -10, -12, -14, -17, -20, -24] as const
+const AGC_HYSTERESIS_OPTIONS = [0, 1.0, 2.0, 4.0] as const
+
+/** Global AGC panel (line-in / HP-codec ADC path only — no per-codec split,
+ *  see DuoWlV4AgcValue doc). Not gated by a DSP profile (AGC is available on
+ *  every ADC PRB, independent of the DAC profile machinery). */
+function AgcPanel({
+  ip,
+  device,
+  cachedInfo,
+  sendTo,
+  syncTick,
+  onReconcile,
+}: {
+  ip: string
+  device: DeviceInfo
+  cachedInfo?: NodeConfigInfo
+  sendTo: (msg: ManagerMessage) => void
+  syncTick?: number
+  onReconcile?: () => void
+}) {
+  const offline = !device.online
+  const { setAnchor } = useToast()
+  const scheduleReconcile = useReconcileScheduler(onReconcile)
+  const deviceAgcInfo = cachedInfo?.agc
+  // MUST be memoized on deviceAgcInfo — same infinite-loop hazard as
+  // DrcPanel's deviceDrc above (see that useMemo's comment).
+  const deviceAgc: DuoWlV4AgcValue | undefined = useMemo(
+    () => deviceAgcInfo && agcInfoToValue(deviceAgcInfo),
+    [deviceAgcInfo],
+  )
+  const agc = useDuoAgcField(
+    ip,
+    deviceAgc,
+    (v, persist) => {
+      sendTo(agcValueToMessage(v, persist))
+      if (persist) scheduleReconcile()
+    },
+    syncTick,
+  )
+  const v = agc.value
+  const disabled = offline
+
+  return (
+    <div className="form-section duo-v4-config">
+      <div className="form-section-title">
+        AGC（ライン入力）
+        <span className="form-section-sub-inline"> — 自動ゲイン制御・HP codec ADC 経路</span>
+      </div>
+      <div className="form-status muted" style={{ fontSize: 12 }}>
+        ライン入力（HP codec の ADC 経路）に適用されます。入出力モードで「入力（ライン入力）」を選んでいる時のみ音声経路に乗ります。
+      </div>
+
+      <div className="form-row">
+        <label>有効</label>
+        <div className="device-toggle" role="group" aria-label="AGC enable">
+          <button
+            type="button"
+            className={`btn btn-sm device-toggle-btn ${!v.enable ? 'active' : ''}`}
+            onClick={(e) => { setAnchor(e.currentTarget); agc.commit({ ...v, enable: false }) }}
+            disabled={disabled}
+          >
+            無効
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm device-toggle-btn ${v.enable ? 'active' : ''}`}
+            onClick={(e) => { setAnchor(e.currentTarget); agc.commit({ ...v, enable: true }) }}
+            disabled={disabled}
+          >
+            有効
+          </button>
+        </div>
+        <DirtyMark dirty={agc.dirty} />
+      </div>
+
+      <div className="form-row">
+        <label>目標レベル</label>
+        <div className="device-toggle" role="group" aria-label="AGC target level" style={{ flexWrap: 'wrap' }}>
+          {AGC_TARGET_LEVELS_DB.map((lv) => (
+            <button
+              key={lv}
+              type="button"
+              className={`btn btn-sm device-toggle-btn ${v.targetLevelDb === lv ? 'active' : ''}`}
+              onClick={() => agc.commit({ ...v, targetLevelDb: lv })}
+              disabled={disabled}
+            >
+              {lv} dB
+            </button>
+          ))}
+        </div>
+        <span />
+      </div>
+
+      <div className="form-row">
+        <label>最大ゲイン</label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={0}
+            max={58}
+            step={0.5}
+            value={v.maxGainDb}
+            onChange={(e) => agc.onInput({ ...v, maxGainDb: Number(e.target.value) })}
+            onPointerUp={() => agc.commit()}
+            onBlur={() => agc.commit()}
+            disabled={disabled}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 56, textAlign: 'right' }}>{v.maxGainDb.toFixed(1)} dB</span>
+        </div>
+        <span />
+      </div>
+
+      <div className="form-row">
+        <label>アタック<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>raw code 0-255</span></label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={0}
+            max={255}
+            step={1}
+            value={v.attack}
+            onChange={(e) => agc.onInput({ ...v, attack: Number(e.target.value) })}
+            onPointerUp={() => agc.commit()}
+            onBlur={() => agc.commit()}
+            disabled={disabled}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 40, textAlign: 'right' }}>{v.attack}</span>
+        </div>
+        <span />
+      </div>
+
+      <div className="form-row">
+        <label>ディケイ<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>raw code 0-255</span></label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={0}
+            max={255}
+            step={1}
+            value={v.decay}
+            onChange={(e) => agc.onInput({ ...v, decay: Number(e.target.value) })}
+            onPointerUp={() => agc.commit()}
+            onBlur={() => agc.commit()}
+            disabled={disabled}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 40, textAlign: 'right' }}>{v.decay}</span>
+        </div>
+        <span />
+      </div>
+
+      <div className="form-row">
+        <label>ノイズゲート</label>
+        <div className="device-toggle" role="group" aria-label="AGC noise gate">
+          <button
+            type="button"
+            className={`btn btn-sm device-toggle-btn ${v.noiseThresholdDb === 0 ? 'active' : ''}`}
+            onClick={() => agc.commit({ ...v, noiseThresholdDb: 0 })}
+            disabled={disabled}
+          >
+            無効
+          </button>
+          <button
+            type="button"
+            className={`btn btn-sm device-toggle-btn ${v.noiseThresholdDb !== 0 ? 'active' : ''}`}
+            // Sensible on-grid default (-60dB, 2dB grid — see aic3204-full-
+            // dsp-registers.md §5 agcNoiseCode) when enabling from the default
+            // (0 = disabled) state — without this there was no path from a
+            // default device to a non-zero threshold (adversarial review
+            // finding 3): the slider below was disabled whenever the value
+            // was 0, and 0 IS the module default, so nothing could ever
+            // un-disable it.
+            onClick={() => agc.commit({ ...v, noiseThresholdDb: v.noiseThresholdDb !== 0 ? v.noiseThresholdDb : -60 })}
+            disabled={disabled}
+          >
+            有効
+          </button>
+        </div>
+        <span />
+      </div>
+      {/* min-height reserved so this hint/slider row is always present
+          (layout-shift rule) — dims instead of disappearing when disabled. */}
+      <div className="form-row" style={{ opacity: v.noiseThresholdDb === 0 ? 0.45 : 1 }}>
+        <label>しきい値</label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={-90}
+            max={-30}
+            step={2}
+            value={v.noiseThresholdDb === 0 ? -30 : v.noiseThresholdDb}
+            onChange={(e) => agc.onInput({ ...v, noiseThresholdDb: Number(e.target.value) })}
+            onPointerUp={() => agc.commit()}
+            onBlur={() => agc.commit()}
+            disabled={disabled || v.noiseThresholdDb === 0}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 56, textAlign: 'right' }}>
+            {v.noiseThresholdDb === 0 ? '無効' : `${v.noiseThresholdDb} dB`}
+          </span>
+        </div>
+        <span />
+      </div>
+
+      <div className="form-row">
+        <label>ヒステリシス</label>
+        <div className="device-toggle" role="group" aria-label="AGC hysteresis">
+          {AGC_HYSTERESIS_OPTIONS.map((hy) => (
+            <button
+              key={hy}
+              type="button"
+              className={`btn btn-sm device-toggle-btn ${v.hysteresisDb === hy ? 'active' : ''}`}
+              onClick={() => agc.commit({ ...v, hysteresisDb: hy })}
+              disabled={disabled}
+            >
+              {hy === 0 ? '無効' : `${hy.toFixed(1)} dB`}
+            </button>
+          ))}
+        </div>
+        <span />
+      </div>
+
+      <div className="form-row">
+        <label>適用ゲイン</label>
+        <span className="mono" style={{ fontSize: 12 }}>
+          L: {deviceAgcInfo?.applied_gain_l_db != null ? `${deviceAgcInfo.applied_gain_l_db.toFixed(1)} dB` : '—'}
+          {' '}／ R: {deviceAgcInfo?.applied_gain_r_db != null ? `${deviceAgcInfo.applied_gain_r_db.toFixed(1)} dB` : '—'}
+        </span>
+        <span />
+      </div>
+      <div className="form-status muted" style={{ fontSize: 11 }}>
+        ※ get_info 取得時点のスナップショットです（「デバイスから読み込み」で更新）。
+      </div>
+    </div>
+  )
+}
+
+export function DuoWlV4DspSection({
+  device,
+  cachedInfo,
+  sendTo,
+  syncTick,
+  onReconcile,
+}: {
+  device: DeviceInfo
+  cachedInfo?: NodeConfigInfo
+  sendTo: (msg: ManagerMessage) => void
+  /** get_info counter — reconciles same-value device echoes (finding 3). */
+  syncTick?: number
+  /** Transport-correct get_info refresh, wired by DeviceDetail. */
+  onReconcile?: () => void
+}) {
+  const ip = device.ipAddress
+  return (
+    <>
+      <DrcPanel ip={ip} codec="haptic" title="触覚 DRC" device={device} cachedInfo={cachedInfo} sendTo={sendTo} syncTick={syncTick} onReconcile={onReconcile} />
+      <DrcPanel ip={ip} codec="hp" title="ヘッドホン DRC" device={device} cachedInfo={cachedInfo} sendTo={sendTo} syncTick={syncTick} onReconcile={onReconcile} />
+      <Effect3dPanel ip={ip} codec="haptic" title="触覚 3D" device={device} cachedInfo={cachedInfo} sendTo={sendTo} syncTick={syncTick} onReconcile={onReconcile} />
+      <Effect3dPanel ip={ip} codec="hp" title="ヘッドホン 3D" device={device} cachedInfo={cachedInfo} sendTo={sendTo} syncTick={syncTick} onReconcile={onReconcile} />
+      <BeepPanel ip={ip} codec="haptic" title="触覚 Beep" device={device} cachedInfo={cachedInfo} sendTo={sendTo} />
+      <BeepPanel ip={ip} codec="hp" title="ヘッドホン Beep" device={device} cachedInfo={cachedInfo} sendTo={sendTo} />
+      <AgcPanel ip={ip} device={device} cachedInfo={cachedInfo} sendTo={sendTo} syncTick={syncTick} onReconcile={onReconcile} />
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------
+// Defensive normalizers for the NEW full-DSP snapshot fields — same "fall
+// back to the current draft on a missing/malformed field" discipline as the
+// existing clampPamDb/clampLineoutDb/etc. above and normalizeEqBandDraft in
+// the EQ section, so a hand-edited or partial (pre-DSP-feature) JSON import
+// can never crash the editor or send NaN/garbage to the device.
+// ---------------------------------------------------------------------
+
+function clampDspProfile(v: unknown, fallback: DuoWlV4DspProfile): DuoWlV4DspProfile {
+  return DSP_PROFILE_OPTIONS.some((o) => o.value === v) ? (v as DuoWlV4DspProfile) : fallback
+}
+
+function clampIirCoeffs(v: unknown, fallback: [number, number, number]): [number, number, number] {
+  if (!Array.isArray(v) || v.length !== 3 || v.some((n) => typeof n !== 'number' || !Number.isFinite(n))) {
+    return fallback
+  }
+  return [Math.round(v[0]), Math.round(v[1]), Math.round(v[2])]
+}
+
+// Snaps to the 3dB grid firmware actually stores (drcThresholdCode in
+// duowl_v4_audio.cpp derives 8 discrete codes 0..7 <-> {-3,-6,...,-24}) —
+// a plain Math.round(v) left an imported/hand-typed off-grid value (e.g.
+// -10) disagreeing with the device's snapped echo (-9) until the next
+// get_info reconcile (adversarial review finding 5).
+function clampDrcThresholdDb(v: number): number {
+  return Math.max(-24, Math.min(-3, Math.round(v / 3) * 3))
+}
+function clampDrcHysteresisDb(v: number): number {
+  return Math.max(0, Math.min(3, Math.round(v)))
+}
+/** Shared 0..15 raw-code clamp for DRC hold/attack/decay. */
+function clampDrcCode(v: number): number {
+  return Math.max(0, Math.min(15, Math.round(v)))
+}
+function normalizeDrcValue(input: unknown, fallback: DuoWlV4DrcValue): DuoWlV4DrcValue {
+  if (!input || typeof input !== 'object') return fallback
+  const o = input as Partial<Record<keyof DuoWlV4DrcValue, unknown>>
+  return {
+    enableL: typeof o.enableL === 'boolean' ? o.enableL : fallback.enableL,
+    enableR: typeof o.enableR === 'boolean' ? o.enableR : fallback.enableR,
+    thresholdDb: typeof o.thresholdDb === 'number' && Number.isFinite(o.thresholdDb) ? clampDrcThresholdDb(o.thresholdDb) : fallback.thresholdDb,
+    hysteresisDb: typeof o.hysteresisDb === 'number' && Number.isFinite(o.hysteresisDb) ? clampDrcHysteresisDb(o.hysteresisDb) : fallback.hysteresisDb,
+    hold: typeof o.hold === 'number' && Number.isFinite(o.hold) ? clampDrcCode(o.hold) : fallback.hold,
+    attack: typeof o.attack === 'number' && Number.isFinite(o.attack) ? clampDrcCode(o.attack) : fallback.attack,
+    decay: typeof o.decay === 'number' && Number.isFinite(o.decay) ? clampDrcCode(o.decay) : fallback.decay,
+  }
+}
+
+/** Shared 0..255 raw-code clamp for AGC attack/decay. */
+function clampAgcCode(v: number): number {
+  return Math.max(0, Math.min(255, Math.round(v)))
+}
+function normalizeAgcValue(input: unknown, fallback: DuoWlV4AgcValue): DuoWlV4AgcValue {
+  if (!input || typeof input !== 'object') return fallback
+  const o = input as Partial<Record<keyof DuoWlV4AgcValue, unknown>>
+  return {
+    enable: typeof o.enable === 'boolean' ? o.enable : fallback.enable,
+    targetLevelDb: typeof o.targetLevelDb === 'number' && Number.isFinite(o.targetLevelDb) ? o.targetLevelDb : fallback.targetLevelDb,
+    maxGainDb: typeof o.maxGainDb === 'number' && Number.isFinite(o.maxGainDb) ? Math.max(0, Math.min(58, o.maxGainDb)) : fallback.maxGainDb,
+    attack: typeof o.attack === 'number' && Number.isFinite(o.attack) ? clampAgcCode(o.attack) : fallback.attack,
+    decay: typeof o.decay === 'number' && Number.isFinite(o.decay) ? clampAgcCode(o.decay) : fallback.decay,
+    noiseThresholdDb: typeof o.noiseThresholdDb === 'number' && Number.isFinite(o.noiseThresholdDb) ? o.noiseThresholdDb : fallback.noiseThresholdDb,
+    hysteresisDb: typeof o.hysteresisDb === 'number' && Number.isFinite(o.hysteresisDb) ? o.hysteresisDb : fallback.hysteresisDb,
+  }
+}
+
+function clampEffect3dDepth(v: unknown, fallback: number): number {
+  return typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : fallback
+}
+
+/** `v !== null && typeof v === 'object'` — guards the `hadX` presence
+ *  checks below against `typeof null === 'object'`. */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object'
+}
+
+// ---------------------------------------------------------------------
+// DuoWL v4: single-JSON backup of EVERY audio-tab + EQ-tab setting.
+// Rendered once at the top of the 音声 sub-tab (DeviceDetail.tsx). Reads
+// from / writes to useDuoWlV4AudioStore directly, so it's reachable from
+// here regardless of whether the EQ tab has ever been mounted for this
+// device (normalizeEqDrafts fills sensible defaults for an untouched
+// codec). Import never auto-writes — it only loads the draft (marking
+// every field dirty); "読み込んだ設定を書き込む" is the explicit write path,
+// alongside each section's own 適用 buttons.
+// ---------------------------------------------------------------------
+
+export function DuoWlV4SettingsBackup({
+  device,
+  cachedInfo,
+  sendTo,
+}: {
+  device: DeviceInfo
+  cachedInfo?: NodeConfigInfo
+  sendTo: (msg: ManagerMessage) => void
+}) {
+  const ip = device.ipAddress
+  const draft = useDuoWlV4AudioStore((s) => s.draftFor(ip))
+  const loadSnapshot = useDuoWlV4AudioStore((s) => s.loadSnapshot)
+  const markAllClean = useDuoWlV4AudioStore((s) => s.markAllClean)
+  const { setAnchor, toast } = useToast()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [importError, setImportError] = useState<string | null>(null)
+  const offline = !device.online
+
+  const eqHaptic = useMemo(() => normalizeEqDrafts(draft.eqHaptic, 'haptic'), [draft.eqHaptic])
+  const eqHp = useMemo(() => normalizeEqDrafts(draft.eqHp, 'hp'), [draft.eqHp])
+
+  // "Effective truth" for each full-DSP family: the user's own in-progress
+  // edit when dirty, else the LIVE device value (cachedInfo — this
+  // component now receives it, unlike before), else whatever the draft
+  // currently holds (module default, only reached if this family has never
+  // been reconciled with a real device this session — e.g. offline/never
+  // connected). Adversarial review finding 2: without preferring cachedInfo
+  // here, "設定を JSON 保存" silently exported/wrote module DEFAULTS
+  // (DEFAULT_DRC/DEFAULT_AGC/'standard'/unity IIR/depth 0) whenever the
+  // DSP/EQ sub-tabs — the ONLY components that otherwise reconcile these
+  // fields — hadn't been visited this session (they're on separate tabs
+  // from this component, which lives on the 音声 tab, and React unmounts
+  // inactive tab content). Used for BOTH export and the import fallback.
+  const deviceDrcHaptic = cachedInfo?.drc?.haptic
+  const deviceDrcHp = cachedInfo?.drc?.hp
+  const deviceAgcInfo = cachedInfo?.agc
+  const effectiveProfileHaptic = draft.dspProfileHaptic.dirty
+    ? draft.dspProfileHaptic.value
+    : (cachedInfo?.dsp_profile?.haptic?.profile ?? draft.dspProfileHaptic.value)
+  const effectiveProfileHp = draft.dspProfileHp.dirty
+    ? draft.dspProfileHp.value
+    : (cachedInfo?.dsp_profile?.hp?.profile ?? draft.dspProfileHp.value)
+  const effectiveIirHaptic = draft.iirHaptic.dirty
+    ? draft.iirHaptic.value
+    : (cachedInfo?.eq_iir?.haptic ?? draft.iirHaptic.value)
+  const effectiveIirHp = draft.iirHp.dirty
+    ? draft.iirHp.value
+    : (cachedInfo?.eq_iir?.hp ?? draft.iirHp.value)
+  const effectiveDrcHaptic = draft.drcHaptic.dirty
+    ? draft.drcHaptic.value
+    : (deviceDrcHaptic ? drcInfoToValue(deviceDrcHaptic) : draft.drcHaptic.value)
+  const effectiveDrcHp = draft.drcHp.dirty
+    ? draft.drcHp.value
+    : (deviceDrcHp ? drcInfoToValue(deviceDrcHp) : draft.drcHp.value)
+  const effectiveEffect3dHaptic = draft.effect3dHaptic.dirty
+    ? draft.effect3dHaptic.value
+    : (cachedInfo?.effect_3d?.haptic ?? draft.effect3dHaptic.value)
+  const effectiveEffect3dHp = draft.effect3dHp.dirty
+    ? draft.effect3dHp.value
+    : (cachedInfo?.effect_3d?.hp ?? draft.effect3dHp.value)
+  const effectiveAgc = draft.agc.dirty
+    ? draft.agc.value
+    : (deviceAgcInfo ? agcInfoToValue(deviceAgcInfo) : draft.agc.value)
+
+  const handleExport = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchor(e.currentTarget)
+    const snapshot: DuoWlV4AudioSnapshot = {
+      version: 1,
+      pam_db: draft.pamDb.value,
+      lineout_db: draft.lineoutDb.value,
+      boost_db: draft.boostDb.value,
+      hp_db: draft.hpDb.value,
+      input_mode: draft.inputMode.value,
+      stream_buffer_ms: draft.bufferMs.value,
+      av_delay_ms: draft.avDelayMs.value,
+      eq: { haptic: eqHaptic, hp: eqHp },
+      eq_iir: { haptic: effectiveIirHaptic, hp: effectiveIirHp },
+      dsp_profile: { haptic: effectiveProfileHaptic, hp: effectiveProfileHp },
+      drc: { haptic: effectiveDrcHaptic, hp: effectiveDrcHp },
+      effect_3d: { haptic: effectiveEffect3dHaptic, hp: effectiveEffect3dHp },
+      agc: effectiveAgc,
+    }
+    downloadTextFile(`hapbeat-duowlv4-audio-${Date.now()}.json`, JSON.stringify(snapshot, null, 2))
+    toast('DuoWL v4 設定を JSON にエクスポートしました', 'success')
+  }
+
+  const handleImportFile = (file: File) => {
+    const fr = new FileReader()
+    fr.onload = () => {
+      try {
+        const parsed = JSON.parse(String(fr.result)) as unknown
+        if (!parsed || typeof parsed !== 'object') throw new Error('不正な JSON です')
+        const o = parsed as Record<string, unknown>
+        const eqObj = isPlainObject(o.eq) ? o.eq : undefined
+        // Did the file EXPLICITLY carry each family's section? Only then is
+        // that family adopted + made bulk-writable — mirrors the existing
+        // hadEq discipline (finding 1), extended to every full-DSP family
+        // (adversarial review finding 2): a file that doesn't mention a
+        // family must never silently seed it with a fallback default AND
+        // mark it dirty/loaded, which would make applyAll ship that default
+        // over the device's real (possibly very different) state.
+        const hadEq = !!eqObj && (Array.isArray(eqObj.haptic) || Array.isArray(eqObj.hp))
+        const iirObj = isPlainObject(o.eq_iir) ? o.eq_iir : undefined
+        const hadIir = !!iirObj && (Array.isArray(iirObj.haptic) || Array.isArray(iirObj.hp))
+        const dspProfileObj = isPlainObject(o.dsp_profile) ? o.dsp_profile : undefined
+        const hadProfile = !!dspProfileObj && (typeof dspProfileObj.haptic === 'string' || typeof dspProfileObj.hp === 'string')
+        const drcObj = isPlainObject(o.drc) ? o.drc : undefined
+        const hadDrc = !!drcObj && (isPlainObject(drcObj.haptic) || isPlainObject(drcObj.hp))
+        const effect3dObj = isPlainObject(o.effect_3d) ? o.effect_3d : undefined
+        const had3d = !!effect3dObj && (typeof effect3dObj.haptic === 'number' || typeof effect3dObj.hp === 'number')
+        const hadAgc = isPlainObject(o.agc)
+        const snapshot: DuoWlV4AudioSnapshot = {
+          version: 1,
+          pam_db: clampPamDb(Number(o.pam_db)),
+          lineout_db: clampLineoutDb(Number(o.lineout_db)),
+          boost_db: clampBoostDb(Number(o.boost_db)),
+          hp_db: clampHpDb(Number(o.hp_db)),
+          input_mode: o.input_mode === 'line_in' ? 'line_in' : 'output',
+          stream_buffer_ms: clampBufferMs(Number(o.stream_buffer_ms)),
+          av_delay_ms: clampAvDelayMs(Number(o.av_delay_ms)),
+          eq: {
+            haptic: normalizeEqDrafts(eqObj?.haptic, 'haptic'),
+            hp: normalizeEqDrafts(eqObj?.hp, 'hp'),
+          },
+          // Fallback (used only when hadX is false, in which case
+          // loadSnapshot ignores this family's value entirely — see its
+          // doc) is the SAME "effective truth" used for export, not a bare
+          // draft/module-default read (adversarial review finding 2).
+          eq_iir: {
+            haptic: clampIirCoeffs(iirObj?.haptic, effectiveIirHaptic),
+            hp: clampIirCoeffs(iirObj?.hp, effectiveIirHp),
+          },
+          dsp_profile: {
+            haptic: clampDspProfile(dspProfileObj?.haptic, effectiveProfileHaptic),
+            hp: clampDspProfile(dspProfileObj?.hp, effectiveProfileHp),
+          },
+          drc: {
+            haptic: normalizeDrcValue(drcObj?.haptic, effectiveDrcHaptic),
+            hp: normalizeDrcValue(drcObj?.hp, effectiveDrcHp),
+          },
+          effect_3d: {
+            haptic: clampEffect3dDepth(effect3dObj?.haptic, effectiveEffect3dHaptic),
+            hp: clampEffect3dDepth(effect3dObj?.hp, effectiveEffect3dHp),
+          },
+          agc: normalizeAgcValue(o.agc, effectiveAgc),
+        }
+        loadSnapshot(ip, snapshot, { eq: hadEq, iir: hadIir, drc: hadDrc, profile: hadProfile, effect3d: had3d, agc: hadAgc })
+        setImportError(null)
+        const loadedFamilies = [
+          hadProfile && 'DSP プロファイル',
+          hadEq && 'EQ',
+          hadIir && '1次IIR',
+          hadDrc && 'DRC',
+          had3d && '3D',
+          hadAgc && 'AGC',
+        ].filter((x): x is string => !!x)
+        toast(
+          loadedFamilies.length > 0
+            ? `DuoWL v4 設定（音声 + ${loadedFamilies.join('/')}）を JSON から読み込みました（未適用 — 各「適用」または下の書き込みボタンで反映）`
+            : 'DuoWL v4 音声設定を JSON から読み込みました（EQ/DSP 情報なし → EQ/DSP は変更しません。未適用 — 各「適用」または下の書き込みボタンで反映）',
+          'success',
+        )
+      } catch (e) {
+        setImportError(e instanceof Error ? e.message : 'JSON を解析できません')
+        setTimeout(() => setImportError(null), 6000)
+      }
+    }
+    fr.readAsText(file)
+  }
+
+  // Sends every DuoWL v4 AUDIO setter with persist:true unconditionally
+  // (round-trips losslessly, always safe), then marks every device-backed
+  // field clean — the same optimistic-commit behavior as each section's own
+  // 適用 button, just for all of them at once.
+  //
+  // EVERY full-DSP family (EQ biquad bands, 1st-order IIR, DRC, 3D, DSP
+  // profile, AGC) is gated behind its own `*Loaded` flag (adversarial
+  // review finding 2 — extends the pre-existing `eqLoaded` gate to all of
+  // them): each family's draft is only trustworthy once its owning panel
+  // has reconciled with a live device value OR the user edited it OR an
+  // import explicitly carried it — see DuoWlV4Draft.eqLoaded doc for why
+  // "round-trips losslessly through get_info" is NOT the same guarantee as
+  // "this draft's CURRENT value reflects that round-trip" (the owning panel
+  // lives on a different, possibly-never-visited sub-tab).
+  const applyAll = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchor(e.currentTarget)
+    sendTo({
+      type: 'set_haptic_gain',
+      payload: { pam_db: draft.pamDb.value, lineout_db: draft.lineoutDb.value, persist: true },
+    })
+    sendTo({ type: 'set_dac_boost', payload: { boost_db: draft.boostDb.value, persist: true } })
+    sendTo({ type: 'set_headphone_volume', payload: { hp_db: draft.hpDb.value, persist: true } })
+    sendTo({ type: 'set_input_mode', payload: { mode: draft.inputMode.value, persist: true } })
+    sendTo({ type: 'set_stream_buffer', payload: { buffer_ms: draft.bufferMs.value, persist: true } })
+    sendTo({ type: 'set_av_delay', payload: { ms: draft.avDelayMs.value, persist: true } })
+
+    const sentFamilies: string[] = []
+    if (draft.profileLoaded) {
+      sendTo({ type: 'set_dsp_profile', payload: { codec: 'haptic', profile: draft.dspProfileHaptic.value, persist: true } })
+      sendTo({ type: 'set_dsp_profile', payload: { codec: 'hp', profile: draft.dspProfileHp.value, persist: true } })
+      sentFamilies.push('DSP プロファイル')
+    }
+    if (draft.eqLoaded) {
+      eqHaptic.forEach((b, band) => {
+        const result = computeAic3204Eq({ ftype: b.ftype as EqFtype, fs: EQ_FS.haptic, fc: b.fc, q: b.q, gainDb: b.gainDb })
+        sendTo({ type: 'set_eq_band', payload: { codec: 'haptic', band, ftype: b.ftype, coeffs: aic3204CoeffsToArray(result.coeffs), persist: true } })
+      })
+      eqHp.forEach((b, band) => {
+        const result = computeAic3204Eq({ ftype: b.ftype as EqFtype, fs: EQ_FS.hp, fc: b.fc, q: b.q, gainDb: b.gainDb })
+        sendTo({ type: 'set_eq_band', payload: { codec: 'hp', band, ftype: b.ftype, coeffs: aic3204CoeffsToArray(result.coeffs), persist: true } })
+      })
+      sentFamilies.push('EQ')
+    }
+    if (draft.iirLoaded) {
+      sendTo({ type: 'set_eq_iir', payload: { codec: 'haptic', coeffs: draft.iirHaptic.value, persist: true } })
+      sendTo({ type: 'set_eq_iir', payload: { codec: 'hp', coeffs: draft.iirHp.value, persist: true } })
+      sentFamilies.push('1次IIR')
+    }
+    if (draft.drcLoaded) {
+      sendTo(drcValueToMessage('haptic', draft.drcHaptic.value, true))
+      sendTo(drcValueToMessage('hp', draft.drcHp.value, true))
+      sentFamilies.push('DRC')
+    }
+    if (draft.effect3dLoaded) {
+      sendTo({ type: 'set_3d', payload: { codec: 'haptic', depth: draft.effect3dHaptic.value, persist: true } })
+      sendTo({ type: 'set_3d', payload: { codec: 'hp', depth: draft.effect3dHp.value, persist: true } })
+      sentFamilies.push('3D')
+    }
+    if (draft.agcLoaded) {
+      sendTo(agcValueToMessage(draft.agc.value, true))
+      sentFamilies.push('AGC')
+    }
+    markAllClean(ip)
+    toast(
+      sentFamilies.length > 0
+        ? `音声設定 + ${sentFamilies.join('/')} をデバイスへ書き込みました`
+        : '音声設定のみ書き込みました（EQ/DSP は未編集・未読込のため送信していません。各タブで編集するか対応 JSON を読み込むと対象になります）',
+      'success',
+    )
+  }
+
+  return (
+    <div className="form-section duo-v4-config">
+      <div className="form-section-title">
+        設定のバックアップ
+        <span className="form-section-sub-inline"> — 音声・A-V ディレイ・EQ・DSP（プロファイル/IIR/DRC/3D/AGC）を JSON でまとめて保存/復元</span>
+      </div>
+      {/* EQ readback caveat (finding 1): the device only reports the committed
+          ftype + raw coeffs, not the fc/Q/gain they were designed from — so an
+          exported EQ reflects the Studio-side design, which may not match the
+          device's actual on-codec EQ. Always-present muted note. */}
+      <div className="form-status muted" style={{ fontSize: 12 }}>
+        ※ EQ の fc/Q/gain はデバイスから読み戻せません。エクスポートされる EQ は Studio 側の設計値で、デバイスの現在値と一致しない場合があります。「読み込んだ設定を書き込む」は各項目（EQ/1次IIR/DRC/3D/DSP プロファイル/AGC）を編集済み・読込済み・またはそれを含む JSON を読み込んだ場合のみ、その項目を送信します（音声設定は常に送信）。
+      </div>
+      {/* Fixed-height status line (layout-shift rule): reserved even when idle
+          so an import error never shifts the action row below. */}
+      <div className="form-status muted" style={{ minHeight: 16, fontSize: 12 }}>
+        {importError
+          ? `⚠ インポート失敗: ${importError}`
+          : '保存・読込は draft のみ変更します（デバイスへは各「適用」または右の書き込みボタンで反映）。'}
+      </div>
+      <div className="form-action-row" style={{ marginTop: 8 }}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json,application/json"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) handleImportFile(f)
+            e.target.value = '' // allow re-importing the same file
+          }}
+        />
+        <button
+          className="form-button-secondary"
+          onClick={(e) => { setAnchor(e.currentTarget); fileInputRef.current?.click() }}
+          title="JSON ファイルから DuoWL v4 の全設定を読み込む"
+        >
+          設定を JSON 読込
+        </button>
+        <button
+          className="form-button-secondary"
+          onClick={handleExport}
+          title="現在の DuoWL v4 全設定を JSON ファイルに保存"
+        >
+          設定を JSON 保存
+        </button>
+        <span style={{ flex: 1 }} />
+        <button
+          className="form-button"
+          onClick={applyAll}
+          disabled={offline}
+          title="読み込んだ（または編集中の）設定をすべてデバイスへ書き込みます"
+        >
+          読み込んだ設定を書き込む
+        </button>
+      </div>
+    </div>
   )
 }
 

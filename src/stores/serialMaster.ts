@@ -112,6 +112,31 @@ const autoProbedIds = new Set<string>()
 let autoProbeCount = 0
 const AUTO_PROBE_SESSION_CAP = 30
 
+// ── Fix 3 race-avoidance state (2026-07-20 bug report) ─────────────────
+// 設定 (config-connect) intermittently re-triggered the browser's serial
+// permission prompt + a visible device reboot. Root cause: openConfigFor
+// could call port.close()/port.open() on a SerialPort object that a
+// concurrent probePort() (auto-identify, or a stray manual ↻ 識別) already
+// had open — the collision threw "already open" style errors, which
+// openConfig()'s stale-handle fallback treated as a revoked grant and
+// re-prompted via requestPort(). These three module-level maps let
+// openConfigFor / probePort / openConfig coordinate around a single
+// physical port instead of racing it. See openConfigFor's doc comment for
+// the full sequence.
+
+/** A probePort() call currently holding `id`'s SerialPort open, keyed by
+ *  port id. openConfigFor awaits this before touching the same port. */
+const probeInFlight = new Map<string, Promise<void>>()
+/** Timestamp of the last probePort()-triggered close for a port id. The S3
+ *  resets on CDC CLOSE (not open — known device behavior), so after a
+ *  probe's close we pad a short settle delay before the next open to let
+ *  USB re-enumeration finish. */
+const lastProbeCloseAt = new Map<string, number>()
+/** Ports the user has an in-flight 設定-connect (openConfigFor) for.
+ *  Auto-identify (and a stray manual ↻ 識別) must never probe — and
+ *  reboot — a port while the user is actively trying to configure it. */
+const configIntentIds = new Set<string>()
+
 // Count of in-flight flashSelected batches. Lets concurrent independent
 // flashes (different firmware on different ports) coexist: the global
 // `flashRunning`/`mode` only clears when this returns to 0.
@@ -222,16 +247,57 @@ export interface SerialDeviceInfo {
     hp_db?: number
     /** Input/output routing (DEC-041 follow-up, DuoWL v4 only). */
     input_mode?: 'output' | 'line_in'
+    /** Stream jitter buffer, ms (set_stream_buffer, all UDP receivers). */
+    stream_buffer_ms?: number
   }
   /** DuoWL v4 ESP-NOW hp48 receiver EQ state (audio-dsp-config.md §2,
-   *  board === "duo_wl_v4" only). */
+   *  board === "duo_wl_v4" only). Up to 6 bands/codec (aic3204-full-dsp-
+   *  registers.md §8.5). */
   eq?: {
     haptic: EqBandReadout[]
     hp: EqBandReadout[]
   }
-  /** A-V delay, ms (audio-dsp-config.md §3, DuoWL v4 ESP-NOW hp48 receiver
-   *  only). 0..30. */
+  /** EQ engine backing `eq`/`set_eq_band` on this device — "sw" = software
+   *  biquad on the 16kHz haptic mixer (necklace_v3 / band_v2/v3/v4, all
+   *  transports). Absent on DuoWL v4 (AIC3204 in-codec biquad instead). */
+  eq_engine?: 'sw' | string
+  /** A-V delay, ms, SIGNED (audio-dsp-config.md §3, DuoWL v4 ESP-NOW hp48
+   *  receiver only): negative = delay haptic, positive = delay HP audio,
+   *  0 = no offset. Range −100..+100. */
   av_delay_ms?: number
+  /** DSP profile + capabilities per codec (aic3204-full-dsp-registers.md
+   *  §0/§1, board === "duo_wl_v4" only). */
+  dsp_profile?: {
+    haptic: { profile: 'standard' | 'eq6' | 'eq6_drc' | 'full'; bands: number; has_iir: boolean; has_drc: boolean; has_3d: boolean; has_beep: boolean }
+    hp: { profile: 'standard' | 'eq6' | 'eq6_drc' | 'full'; bands: number; has_iir: boolean; has_drc: boolean; has_3d: boolean; has_beep: boolean }
+  }
+  /** 1st-order IIR, raw [N0,N1,D1] ints per codec (§8.5, board === "duo_wl_v4" only). */
+  eq_iir?: {
+    haptic: [number, number, number]
+    hp: [number, number, number]
+  }
+  /** DRC config + live status per codec (§2, board === "duo_wl_v4" only). */
+  drc?: {
+    haptic: { enable_l: boolean; enable_r: boolean; threshold_db: number; hysteresis_db: number; hold: number; attack: number; decay: number; compressing_l: boolean; compressing_r: boolean }
+    hp: { enable_l: boolean; enable_r: boolean; threshold_db: number; hysteresis_db: number; hold: number; attack: number; decay: number; compressing_l: boolean; compressing_r: boolean }
+  }
+  /** 3D effect depth per codec, 0.0..1.0 (§4, board === "duo_wl_v4" only). */
+  effect_3d?: {
+    haptic: number
+    hp: number
+  }
+  /** AGC config + applied-gain telemetry (§5, board === "duo_wl_v4" only). */
+  agc?: {
+    enable: boolean
+    target_level_db: number
+    max_gain_db: number
+    attack: number
+    decay: number
+    noise_threshold_db: number
+    hysteresis_db: number
+    applied_gain_l_db: number
+    applied_gain_r_db: number
+  }
 }
 
 /** Parse a firmware get_info JSON into a SerialDeviceInfo (shared by
@@ -277,7 +343,13 @@ function parseSerialInfo(r: Record<string, unknown>): SerialDeviceInfo {
     stream: r.stream as SerialDeviceInfo['stream'],
     audio: r.audio as SerialDeviceInfo['audio'],
     eq: r.eq as SerialDeviceInfo['eq'],
+    eq_engine: r.eq_engine as string | undefined,
     av_delay_ms: r.av_delay_ms as number | undefined,
+    dsp_profile: r.dsp_profile as SerialDeviceInfo['dsp_profile'],
+    eq_iir: r.eq_iir as SerialDeviceInfo['eq_iir'],
+    drc: r.drc as SerialDeviceInfo['drc'],
+    effect_3d: r.effect_3d as SerialDeviceInfo['effect_3d'],
+    agc: r.agc as SerialDeviceInfo['agc'],
   }
 }
 
@@ -661,8 +733,49 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
         // しない」ケースで、ピッカー再表示よりは明確な失敗メッセージを
         // 残してユーザー自身に判断させる方が UX が良い。
         if (/Failed to open serial port|InvalidStateError|already open|Failed to execute 'open'/.test(lastMsg)) {
-          log(`stale port handle, re-prompting: ${lastMsg}`)
+          // Fix 3 (2026-07-20 bug report): this is USUALLY a transient
+          // re-enumeration window (e.g. right after a probePort()-
+          // triggered device reboot on close), not a genuinely revoked
+          // grant. Retry against the ALREADY-GRANTED navigator.serial.
+          // getPorts() list — matched by VID/PID since a fresh
+          // re-enumeration can hand back a logically-equivalent but
+          // distinct SerialPort object — before ever falling back to
+          // requestPort()'s permission prompt. The prompt reappearing for
+          // an already-granted device was the actual reported bug; the
+          // proactive settle-delay in openConfigFor should make this
+          // retry loop rarely needed in practice, but it's the safety net
+          // for whatever it doesn't fully cover (e.g. re-enumeration
+          // taking longer than the fixed budget).
+          log(`stale port handle, retrying against getPorts() before re-prompting: ${lastMsg}`)
+          let vid: number | undefined
+          let pid: number | undefined
+          try {
+            const gi = port.getInfo()
+            vid = gi.usbVendorId
+            pid = gi.usbProductId
+          } catch { /* getInfo unavailable */ }
           setHeldPort(null)
+          let recovered: SerialPort | null = null
+          for (let attempt = 0; attempt < 3 && !recovered; attempt++) {
+            await new Promise((r) => setTimeout(r, 500))
+            try {
+              const granted = await navigator.serial.getPorts()
+              recovered = granted.find((p) => {
+                if (p === port) return true
+                if (vid === undefined) return false
+                try {
+                  const gi = p.getInfo()
+                  return gi.usbVendorId === vid && gi.usbProductId === pid
+                } catch { return false }
+              }) ?? null
+            } catch { /* getPorts unavailable — fall through to prompt */ }
+          }
+          if (recovered) {
+            log('recovered an already-granted port after re-enumeration — no permission prompt needed')
+            setHeldPort(recovered)
+            try { await recovered.close() } catch { /* ignore */ }
+            return await attachConfigConn(recovered)
+          }
           const fresh = await promptForPort()
           if (!fresh) return null
           try { await fresh.close() } catch { /* ignore */ }
@@ -976,6 +1089,10 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
             if (s.mode === 'flashing') return
             if (s.activePortId === e.id) return
             if (s.selectedPortIds.includes(e.id)) return
+            // Fix 3 (2026-07-20): the user already clicked 設定 for this
+            // port (openConfigFor in flight) — never fire an auto-identify
+            // probe (and its close-triggered reboot) into that.
+            if (configIntentIds.has(e.id)) return
             const cur = s.knownPorts.find((x) => x.id === e.id)
             if (!cur || cur.probe !== 'idle' || cur.flash.state !== 'idle') return
             if (autoProbeCount >= AUTO_PROBE_SESSION_CAP) {
@@ -1050,12 +1167,34 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
         log(`probePort(${id}) refused: config handshake in flight`)
         return
       }
+      // Fix 3 (2026-07-20): also refuse for the GAP before setHeldPort/
+      // probeStatus land — openConfigFor marks intent in configIntentIds
+      // immediately, before it has necessarily touched activePortId/
+      // probeStatus yet, so this port id is covered from the very start of
+      // a 設定-connect, not just once it's underway. And refuse a second
+      // concurrent probe on the same port outright (auto-identify only
+      // ever schedules one, but a manual ↻ 識別 click could otherwise race
+      // it) — both would independently close()/open() the SAME SerialPort.
+      if (configIntentIds.has(id)) {
+        log(`probePort(${id}) refused: config-connect in progress for this port`)
+        return
+      }
+      if (probeInFlight.has(id)) {
+        log(`probePort(${id}) refused: a probe is already in flight for this port`)
+        return
+      }
       const port = portById.get(id)
       if (!port) return
       // A manual probe also acknowledges/clears the last flash outcome
       // shown on the card (「書き込み完了」が消えない — 2026-06-13).
       patchEntry(id, { probe: 'connecting', flash: { state: 'idle', progress: null } })
       let c: SerialConfigConn | null = null
+      // Fix 3 (2026-07-20): publish this probe as in-flight for the whole
+      // try/finally so openConfigFor can await it instead of racing a
+      // second close()/open() on the same port — resolved in `finally`,
+      // AFTER the close below actually happens.
+      let markProbeDone: () => void = () => {}
+      probeInFlight.set(id, new Promise((res) => { markProbeDone = res }))
       try {
         try { await port.close() } catch { /* not open */ }
         c = await openConfigConnection(port, {
@@ -1076,6 +1215,13 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
         patchEntry(id, { probe: 'failed' })
       } finally {
         if (c) await c.close().catch(() => { /* already closed */ })
+        // Record the close AFTER it actually happened (device reboot, if
+        // any, has now been triggered) and only THEN release the
+        // in-flight marker — openConfigFor awaits this promise, so it
+        // never proceeds until this port is genuinely idle again.
+        lastProbeCloseAt.set(id, Date.now())
+        probeInFlight.delete(id)
+        markProbeDone()
       }
     },
 
@@ -1132,23 +1278,66 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       if (thisEntry && (thisEntry.flash.state === 'flashing' || thisEntry.flash.state === 'waiting')) {
         return null
       }
-      const { conn } = get()
-      if (conn) await get().closeConfig()
-      // Same acknowledgement as probePort — connecting supersedes the
-      // card's stale flash-done/error banner.
-      patchEntry(id, { flash: { state: 'idle', progress: null } })
-      setHeldPort(port)
-      const result = await get().openConfig()
-      if (result) {
-        // Mirror the conn's identity onto the registry card and make the
-        // pseudo-device the primary selection so the detail pane opens on
-        // it right away (the card itself is the only sidebar entry now —
-        // no separate serial pseudo-card in the LAN section).
-        const info = get().info
-        if (info) patchEntry(id, { probe: 'success', info })
-        useDeviceStore.getState().selectDevice(`serial:${info?.mac ?? 'active'}`)
+      // Fix 3 (race, 2026-07-20 bug report): mark 設定-intent BEFORE
+      // touching the port so (a) any auto-identify timer scheduled-but-
+      // not-yet-fired for this id backs off at fire time (see syncPorts'
+      // re-check), and (b) probePort() refuses to START a new probe on
+      // this id while we're connecting. If a probe is ALREADY mid-flight
+      // (auto-identify beat us here), wait for it to finish — and for its
+      // close-triggered device reboot's USB re-enumeration to settle —
+      // instead of racing a second close()/open() on the SAME SerialPort
+      // object. That race is exactly what used to intermittently throw
+      // "already open" / "Failed to execute 'open'" below and forced the
+      // requestPort() permission-prompt fallback (the reported bug: 設定
+      // sometimes re-prompts for permission + the device visibly reboots).
+      configIntentIds.add(id)
+      try {
+        const inFlightProbe = probeInFlight.get(id)
+        if (inFlightProbe) {
+          log(`openConfigFor(${id}): a probe is in flight for this port — waiting for it to finish first`)
+          await inFlightProbe
+        }
+        // Settle delay: the S3 resets on CDC CLOSE (not open — known
+        // device behavior), so if a probe just closed this exact port,
+        // pad out to ~1.2s since that close before opening again so the
+        // USB-CDC re-enumeration has time to finish. Skipped entirely
+        // when no probe has ever touched this port (the common case).
+        const closedAt = lastProbeCloseAt.get(id)
+        if (closedAt !== undefined) {
+          const SETTLE_MS = 1200
+          const remaining = SETTLE_MS - (Date.now() - closedAt)
+          if (remaining > 0) await new Promise((r) => setTimeout(r, remaining))
+        }
+        const { conn } = get()
+        if (conn) await get().closeConfig()
+        // Same acknowledgement as probePort — connecting supersedes the
+        // card's stale flash-done/error banner.
+        patchEntry(id, { flash: { state: 'idle', progress: null } })
+        setHeldPort(port)
+        const result = await get().openConfig()
+        if (result) {
+          // Mirror the conn's identity onto the registry card and make the
+          // pseudo-device the primary selection so the detail pane opens on
+          // it right away (the card itself is the only sidebar entry now —
+          // no separate serial pseudo-card in the LAN section).
+          const info = get().info
+          if (info) patchEntry(id, { probe: 'success', info })
+          useDeviceStore.getState().selectDevice(`serial:${info?.mac ?? 'active'}`)
+          // Fix 2(a) (2026-07-20): auto-check this port as a write target
+          // (flash / bulk-config) the instant 設定-connect succeeds, so the
+          // common single-device flow (設定 → edit → write) just works
+          // without an extra manual checkbox click. Never auto-UNCHECK on
+          // disconnect (closeConfig / device reboot) — the user may still
+          // want to flash a device they've stopped actively configuring.
+          if (!get().selectedPortIds.includes(id)) {
+            clearLanSelectionIfAny()
+            set((s) => ({ selectedPortIds: [...s.selectedPortIds, id], selectedPortId: id }))
+          }
+        }
+        return result
+      } finally {
+        configIntentIds.delete(id)
       }
-      return result
     },
 
     flashSelected: async (ids, regions, { eraseAll = false, compress = true } = {}) => {

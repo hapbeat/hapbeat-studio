@@ -222,7 +222,7 @@ function FlashStep({ onBack }: { onBack: () => void }) {
 
       {/* 通常の Firmware タブと同じ — ライブラリ内に Hapbeat | 周辺機器 の
           グループタブが出る（groupFilter は渡さない）。 */}
-      <FirmwareSubTab serialOnly postFlashReprobeMs={0} />
+      <FirmwareSubTab serialOnly />
     </>
   )
 }

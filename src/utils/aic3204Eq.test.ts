@@ -4,6 +4,8 @@ import {
   rbjToAic3204,
   computeAic3204Eq,
   aic3204CoeffsToArray,
+  biquadMagnitudeDb,
+  eqResponseCurve,
   AIC3204_COEFF_SCALE,
   AIC3204_COEFF_MAX_INT,
   AIC3204_COEFF_MIN_INT,
@@ -180,5 +182,70 @@ describe('degenerate inputs are clamped, not NaN/Infinity', () => {
     const tooLow = computeRbjCoeffs({ ftype: 'lpf', fs: 16000, fc: -50, q: 0.707 })
     for (const v of Object.values(tooHigh)) expect(Number.isFinite(v)).toBe(true)
     for (const v of Object.values(tooLow)) expect(Number.isFinite(v)).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------
+// eqResponseCurve / biquadMagnitudeDb — the Studio EQ graph's data source
+// (src/components/devices/NodeConfigSections.tsx EqResponseGraph).
+// ---------------------------------------------------------------------
+describe('eqResponseCurve / biquadMagnitudeDb', () => {
+  const fs = 16000
+
+  it('100Hz Butterworth LPF: ~0dB well below fc, ~-3dB at fc, strongly attenuated well above fc', () => {
+    const rbj = computeRbjCoeffs({ ftype: 'lpf', fs, fc: 100, q: 1 / Math.sqrt(2) })
+    const dbAt = (f: number) => biquadMagnitudeDb(rbj, fs, f)
+
+    // Well below the corner (20-40Hz): a Butterworth response is maximally
+    // flat in the passband, so magnitude should sit close to 0dB.
+    expect(dbAt(20)).toBeGreaterThan(-1)
+    expect(dbAt(20)).toBeLessThan(1)
+    expect(dbAt(40)).toBeGreaterThan(-1)
+    expect(dbAt(40)).toBeLessThan(1)
+
+    // At the corner: exactly -3.01dB for an ideal 2nd-order Butterworth.
+    expect(dbAt(100)).toBeGreaterThan(-4)
+    expect(dbAt(100)).toBeLessThan(-2)
+
+    // Well above the corner (2kHz+, still well under the 8kHz Nyquist):
+    // 2nd-order (12dB/oct) rolloff should be deep.
+    expect(dbAt(2000)).toBeLessThan(-20)
+    expect(dbAt(5000)).toBeLessThan(-20)
+  })
+
+  it("an 'off' band contributes 0dB flat across all sampled frequencies", () => {
+    const curve = eqResponseCurve([{ ftype: 'off', fc: 1000, q: 1 / Math.sqrt(2) }], fs, { points: 24 })
+    expect(curve.length).toBe(24)
+    for (const p of curve) expect(p.db).toBeCloseTo(0, 6)
+  })
+
+  it('two cascaded bands sum their individual dB at a sample frequency', () => {
+    const bandA = { ftype: 'lpf' as const, fc: 500, q: 1 / Math.sqrt(2) }
+    const bandB = { ftype: 'peaking' as const, fc: 500, q: 1, gainDb: 6 }
+    const f = 500
+
+    const rbjA = computeRbjCoeffs({ ftype: bandA.ftype, fs, fc: bandA.fc, q: bandA.q })
+    const rbjB = computeRbjCoeffs({ ftype: bandB.ftype, fs, fc: bandB.fc, q: bandB.q, gainDb: bandB.gainDb })
+    const expectedDb = biquadMagnitudeDb(rbjA, fs, f) + biquadMagnitudeDb(rbjB, fs, f)
+
+    // fMin===fMax pins every sampled point to the same frequency (f).
+    const combined = eqResponseCurve([bandA, bandB], fs, { fMin: f, fMax: f, points: 2 })
+    expect(combined[0].f).toBeCloseTo(f, 6)
+    expect(combined[0].db).toBeCloseTo(expectedDb, 6)
+    expect(combined[1].db).toBeCloseTo(expectedDb, 6)
+  })
+
+  it('returns `points` entries with f ascending from ~fMin to ~fMax', () => {
+    const curve = eqResponseCurve([{ ftype: 'off', fc: 100, q: 1 / Math.sqrt(2) }], fs, {
+      fMin: 50,
+      fMax: 4000,
+      points: 10,
+    })
+    expect(curve).toHaveLength(10)
+    expect(curve[0].f).toBeCloseTo(50, 1)
+    expect(curve[curve.length - 1].f).toBeCloseTo(4000, 1)
+    for (let i = 1; i < curve.length; i++) {
+      expect(curve[i].f).toBeGreaterThan(curve[i - 1].f)
+    }
   })
 })

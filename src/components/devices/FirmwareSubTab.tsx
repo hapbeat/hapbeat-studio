@@ -99,14 +99,6 @@ interface Props {
    *  empty-state onboarding view to keep focus on Serial bring-up. */
   serialOnly?: boolean
   /**
-   * After a successful Serial flash, ask the SerialMaster to wait this
-   * many ms then re-probe the device (re-open the config conn). Used
-   * by the onboarding wizard so the user lands in Wi-Fi setup
-   * automatically. The per-device ファームウェア sub-tab passes 0 to
-   * skip the auto re-probe (the device is already an LAN peer).
-   */
-  postFlashReprobeMs?: number
-  /**
    * Pre-filter the firmware library to one group (Hapbeat | 周辺機器).
    * Set by the onboarding wizard once the user picks a node type, so the
    * group toggle is hidden and only that group's variants show. When
@@ -132,7 +124,6 @@ export function FirmwareSubTab({
   device,
   sendTo,
   serialOnly = false,
-  postFlashReprobeMs = 0,
   groupFilter,
 }: Props) {
   const showOta = !serialOnly && !!device && !!sendTo
@@ -205,7 +196,6 @@ export function FirmwareSubTab({
   const serialRunning = useSerialMaster((s) => s.flashRunning)
   const serialProgress = useSerialMaster((s) => s.flashProgress)
   const serialResult = useSerialMaster((s) => s.flashLastResult)
-  const masterFlash = useSerialMaster((s) => s.flash)
   const masterFlashSelected = useSerialMaster((s) => s.flashSelected)
   const masterEraseFlash = useSerialMaster((s) => s.eraseFlash)
   const masterRePick = useSerialMaster((s) => s.rePick)
@@ -217,6 +207,14 @@ export function FirmwareSubTab({
     () => knownPorts.filter((e) => selectedPortIds.includes(e.id)),
     [knownPorts, selectedPortIds],
   )
+  // Fix 2 (2026-07-20): the ✔ 書込対象 checkboxes are the ONE selection for
+  // both flash and bulk-config, so the 設定-connected device (shown on the
+  // 設定 sub-tab) and the flash-target set can silently diverge — surfaced
+  // below as a warning instead of staying implicit.
+  const masterMode = useSerialMaster((s) => s.mode)
+  const activePortId = useSerialMaster((s) => s.activePortId)
+  const configConnectedNotChecked =
+    masterMode === 'config' && !!activePortId && !selectedPortIds.includes(activePortId)
   const [eraseAll, setEraseAll] = useState(false)
   const { ask, dialog: confirmDialog } = useConfirm()
   const lanBoard = useDeviceStore((s) =>
@@ -226,7 +224,6 @@ export function FirmwareSubTab({
     const key = device?.ipAddress
     return key ? s.lastFlashedBoard[key] : undefined
   })
-  const setLastFlashedBoard = useDeviceStore((s) => s.setLastFlashedBoard)
   const knownBoard = lanBoard ?? serialMasterBoard ?? lastFlashedBoardForIp ?? null
 
   // The currently-selected library entry (before version resolution).
@@ -769,51 +766,42 @@ export function FirmwareSubTab({
   async function onSerialFlash() {
     setLocalError(null)
 
-    // ── Multi-target path: USB cards checked in the sidebar ──
-    // Single-target pre-flight (checkBoardMatch) compares against the
-    // active conn's board; for multi we check each probed target.
-    if (serialTargets.length > 0) {
-      if (source === 'library' && selectedEntry) {
-        const expected = entryBoard(selectedEntry)
-        const mismatched = expected
-          ? serialTargets.filter(
-              (e) => e.info?.board && e.info.board !== 'unknown' && e.info.board !== expected,
-            )
-          : []
-        if (mismatched.length > 0) {
-          const ok = await ask({
-            title: '基板バージョン不一致',
-            message: (
-              `選択中のファームウェアは ${boardLabel(expected!)} 用ですが、`
-              + `以下のデバイスは別の基板を報告しています:\n`
-              + mismatched
-                  .map((e) => `・${serialEntryLabel(e)} → ${boardLabel(e.info!.board!)}`)
-                  .join('\n')
-              + '\n\nこのまま全台に書き込みますか？'
-            ),
-            confirmLabel: '不一致のまま書き込む',
-            danger: true,
-          })
-          if (!ok) return
-        }
-      }
-      let plan: Awaited<ReturnType<typeof readSelectedRegions>>
-      try {
-        plan = await readSelectedRegions()
-      } catch (err) {
-        setLocalError(String((err as Error).message ?? err))
-        return
-      }
-      await masterFlashSelected(
-        serialTargets.map((e) => e.id),
-        plan.regions,
-        { eraseAll },
-      )
+    // Checked USB cards (✔ 書込対象) are the ONLY flash-target set — never
+    // silently fall back to the config-connected ("⚙ 設定") port when
+    // nothing is checked. The write button is disabled at 0 checked (see
+    // the button's `disabled` below); this guard makes the invariant hold
+    // even if this handler is ever reached some other way (bug report
+    // 2026-07-20: a write landed on a device whose card was NOT checked
+    // because this used to fall through to the single active port).
+    if (serialTargets.length === 0) {
+      setLocalError('書き込み対象のデバイスを ✔ で選択してください')
       return
     }
 
-    // ── Single-target path (従来) ──
-    if (!(await checkBoardMatch('Serial'))) return
+    if (source === 'library' && selectedEntry) {
+      const expected = entryBoard(selectedEntry)
+      const mismatched = expected
+        ? serialTargets.filter(
+            (e) => e.info?.board && e.info.board !== 'unknown' && e.info.board !== expected,
+          )
+        : []
+      if (mismatched.length > 0) {
+        const ok = await ask({
+          title: '基板バージョン不一致',
+          message: (
+            `選択中のファームウェアは ${boardLabel(expected!)} 用ですが、`
+            + `以下のデバイスは別の基板を報告しています:\n`
+            + mismatched
+                .map((e) => `・${serialEntryLabel(e)} → ${boardLabel(e.info!.board!)}`)
+                .join('\n')
+            + '\n\nこのまま全台に書き込みますか？'
+          ),
+          confirmLabel: '不一致のまま書き込む',
+          danger: true,
+        })
+        if (!ok) return
+      }
+    }
     let plan: Awaited<ReturnType<typeof readSelectedRegions>>
     try {
       plan = await readSelectedRegions()
@@ -821,16 +809,11 @@ export function FirmwareSubTab({
       setLocalError(String((err as Error).message ?? err))
       return
     }
-    await masterFlash(plan.regions, {
-      eraseAll,
-      postFlashReprobeMs,
-    })
-    if (source === 'library' && selectedEntry && device?.ipAddress) {
-      const flashed = entryBoard(selectedEntry)
-      if (flashed) {
-        setLastFlashedBoard(device.ipAddress, flashed)
-      }
-    }
+    await masterFlashSelected(
+      serialTargets.map((e) => e.id),
+      plan.regions,
+      { eraseAll },
+    )
   }
 
   async function onSerialErase() {
@@ -1229,11 +1212,27 @@ export function FirmwareSubTab({
             このブラウザは Web Serial API 非対応です (Chrome / Edge を使用してください)。
           </div>
         )}
+        {/* Always-rendered selection status — a fixed one-line slot so
+          * toggling between "0 checked" (warning) / "config-connected but
+          * not checked" (warning) / "N checked" (device list) never shifts
+          * the write button below by a line (layout-shift rule). Checked
+          * USB cards are the ONLY write target for both flash and
+          * bulk-config (2026-07-20 fix — see onSerialFlash). The
+          * config-mismatch warning takes priority over the plain target
+          * list when both are true — it means the device the user is
+          * looking at on the 設定 tab won't actually receive this write. */}
+        <div
+          className={`form-status ${serialTargets.length === 0 || configConnectedNotChecked ? 'warn' : 'muted'}`}
+          style={{ marginTop: 4 }}
+        >
+          {serialTargets.length === 0
+            ? '⚠ 書き込み対象が未選択です — 左の USB Serial カードで ✔ を入れてください'
+            : configConnectedNotChecked
+              ? '※ 設定中のデバイスは書込対象（✔）に含まれていません'
+              : `書き込み対象 (${serialTargets.length} 台): ${serialTargets.map((e) => serialEntryLabel(e)).join(' / ')}`}
+        </div>
         {serialTargets.length > 0 && (
-          <div className="form-section-sub-inline" style={{ opacity: 0.85 }}>
-            サイドバーの USB Serial で {serialTargets.length} 台選択中 — 並列で書き込みます:
-            {' '}{serialTargets.map((e) => serialEntryLabel(e)).join(' / ')}
-            <br />
+          <div className="form-section-sub-inline" style={{ opacity: 0.85, marginTop: 2 }}>
             ※ 別のファームを別デバイスへ同時に書きたい場合は、片方を選んで書き込みを開始した後、
             もう片方のファームを選び直して別デバイスを選択 → もう一度書き込めば並行して走ります。
           </div>
@@ -1242,12 +1241,13 @@ export function FirmwareSubTab({
           <button
             className="form-button"
             onClick={onSerialFlash}
-            disabled={!haveSelection || serialRunning || !isWebSerialSupported()}
+            disabled={!haveSelection || serialRunning || !isWebSerialSupported() || serialTargets.length === 0}
+            title={serialTargets.length === 0 ? '書き込み対象のデバイスを ✔ で選択してください' : undefined}
           >
             {serialRunning
               ? '送信中…'
               : serialTargets.length > 0
-                ? `Serial 書き込み (${serialTargets.length} 台)`
+                ? `選択中の ${serialTargets.length} 台に書き込む`
                 : 'Serial 書き込み'}
           </button>
           <button

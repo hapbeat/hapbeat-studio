@@ -404,6 +404,15 @@
   color: var(--success);
 }
 
+/* Explicit legend for the USB checkbox column meaning (書込対象), next to
+   the section title — was previously hover-title-only. */
+.devices-usb-legend {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  cursor: help;
+}
+
 /* USB section header — TWO rows (title/count on line 1, action buttons on
    line 2). Splitting them means the 「(N選択)」 count on line 1 can change width
    without ever wrapping the action buttons (user 2026-07-10: 選択中に崩れる). */
@@ -420,6 +429,11 @@
   align-items: baseline;
   gap: 8px;
   min-width: 0;
+  /* Wrap (not clip/overflow) if the title + legend + count don't fit the
+   * 280px sidebar at once — this row is independent of the action-buttons
+   * row below (that's the thing 2026-07-10 kept from wrapping), so wrapping
+   * here is safe and just adapts to width, not a state-driven shift. */
+  flex-wrap: wrap;
 }
 .devices-usb-header-actions {
   display: flex;
@@ -936,6 +950,20 @@
   display: flex;
   gap: 6px;
   align-items: center;
+}
+
+/* ---- DuoWL v4 device-backed dirty marker (a `.form-row`'s trailing 3rd
+ * grid column) — always rendered at a fixed min-width so the dot appearing/
+ * disappearing never shifts anything (layout-shift rule). Accent tone, not
+ * warning/error: "dirty" is an in-progress edit, not a problem. */
+.duo-dirty-mark {
+  display: inline-block;
+  min-width: 14px;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--accent-light);
+  cursor: default;
 }
 
 /* ---- SSID combobox (custom dropdown for Wi-Fi profile add) ---- */

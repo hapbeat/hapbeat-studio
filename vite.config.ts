@@ -100,6 +100,15 @@ async function readVariantMeta(root: string, env: string): Promise<DevVariantMet
 // live env's bins to a persistent cache outside `.pio` and serve the union
 // (live preferred) so previously-seen envs stay flashable. See
 // instructions-firmware-dev-list-disappears.
+//
+// That persistence has a downside: an env can also be PERMANENTLY removed
+// from the firmware repo (renamed / consolidated into another env — e.g.
+// `duowl_v4_stream_espnow_hp48` was folded into `duowl_v4_stream_espnow`,
+// 2026-07-16). Rebuilding can never bring such an env back, so the cache
+// would otherwise keep serving a ghost "キャッシュ版" entry forever. We
+// prune those against each repo's `platformio.ini` — the definitive,
+// always-on-disk registry of envs the repo still defines — in the /list
+// handler below (see readValidEnvNames / cache-only section).
 const CACHE_ROOT = resolve(__dirname, 'node_modules/.cache/hapbeat-firmware-dev')
 const BIN_STEMS = ['firmware_app_ota', 'firmware_full_serial', 'firmware'] as const
 
@@ -141,6 +150,43 @@ interface CacheEntry {
   fullSerial?: { size: number; mtime: number; path: string }
 }
 
+/**
+ * Read the set of env names a repo's `platformio.ini` still defines
+ * (`[env:<name>]` sections). Unlike `.pio/build`/`dist` (which only
+ * reflect what has been built locally and are routinely pruned by
+ * PlatformIO), this file is the repo's permanent env registry — an env
+ * absent here has been renamed/removed/consolidated and can never
+ * become "live" again.
+ *
+ * Returns `null` when the file can't be read (repo not checked out at
+ * this candidate path, etc.) so callers can tell "confirmed absent"
+ * apart from "unknown" and skip pruning in the unknown case (fail safe
+ * — never delete a cache snapshot just because a checkout is missing).
+ */
+async function readValidEnvNames(repoDir: string): Promise<Set<string> | null> {
+  try {
+    const ini = await fs.readFile(join(repoDir, 'platformio.ini'), 'utf-8')
+    const names = new Set<string>()
+    const re = /^\[env:([^\]]+)\]/gm
+    let m: RegExpExecArray | null
+    while ((m = re.exec(ini))) names.add(m[1].trim())
+    return names
+  } catch {
+    return null
+  }
+}
+
+/** Try each candidate repo dir (repos-firmware/ layout, then legacy flat
+ *  sibling) in order and return the first one whose platformio.ini reads
+ *  successfully. */
+async function firstValidEnvNames(repoDirs: string[]): Promise<Set<string> | null> {
+  for (const dir of repoDirs) {
+    const names = await readValidEnvNames(dir)
+    if (names) return names
+  }
+  return null
+}
+
 /** Read all cached envs that still have at least one bin. */
 async function readCachedEnvs(): Promise<Map<string, CacheEntry>> {
   const out = new Map<string, CacheEntry>()
@@ -165,7 +211,14 @@ async function readCachedEnvs(): Promise<Map<string, CacheEntry>> {
   return out
 }
 
-function firmwareDevPlugin(buildRepos: FirmwareBuildRepo[]): Plugin {
+/** Repo tag + every candidate root dir (repos-firmware/ then legacy flat
+ *  sibling) to check for `platformio.ini`, used by the cache-pruning pass. */
+interface FirmwareRepoRoot {
+  repo: string
+  dirs: string[]
+}
+
+function firmwareDevPlugin(buildRepos: FirmwareBuildRepo[], repoRoots: FirmwareRepoRoot[]): Plugin {
   return {
     name: 'hapbeat-firmware-dev',
     apply: 'serve',
@@ -237,9 +290,30 @@ function firmwareDevPlugin(buildRepos: FirmwareBuildRepo[]): Plugin {
               )
             }
             // 2) Cache-only envs — previously seen but pruned everywhere.
+            //    Before serving them, drop any whose source repo no longer
+            //    DEFINES the env at all (platformio.ini has no [env:<name>]
+            //    section for it) — those are permanently stale (renamed /
+            //    removed / consolidated into another env) and a rebuild can
+            //    never refresh them, so keeping them around just shows a
+            //    ghost "キャッシュ版" entry forever. Envs that still exist
+            //    but simply lack a current local build are unaffected —
+            //    they keep serving from the cache as before.
+            const validEnvsByRepo = new Map<string, Set<string>>()
+            for (const { repo, dirs } of repoRoots) {
+              const names = await firstValidEnvNames(dirs)
+              if (names) validEnvsByRepo.set(repo, names)
+            }
             const cached = await readCachedEnvs()
             for (const [env, { meta, appOta, fullSerial }] of cached) {
               if (live.has(env)) continue   // live wins
+              // meta.repo unset (older cache entries) or a repo whose
+              // platformio.ini we couldn't read ⇒ unknown, not "removed" —
+              // don't prune (fail safe).
+              const validSet = meta.repo ? validEnvsByRepo.get(meta.repo) : undefined
+              if (validSet && !validSet.has(env)) {
+                await fs.rm(join(CACHE_ROOT, env), { recursive: true, force: true }).catch(() => {})
+                continue
+              }
               items.push({
                 env, repo: meta.repo, fwVersion: meta.fwVersion,
                 appOta, fullSerial, ...(meta.variant ?? {}),
@@ -413,6 +487,13 @@ const FIRMWARE_BUILD_REPOS = FIRMWARE_REPO_DIRS.flatMap(({ repo, dir }) =>
   }),
 )
 
+// Bare repo dirs (not dist/.pio/build) — used only to read platformio.ini
+// for the snapshot-cache pruning pass (see readValidEnvNames).
+const FIRMWARE_REPO_ROOTS: FirmwareRepoRoot[] = FIRMWARE_REPO_DIRS.map(({ repo, dir }) => ({
+  repo,
+  dirs: ['../../repos-firmware', '..'].map((base) => resolve(__dirname, `${base}/${dir}`)),
+}))
+
 export default defineConfig(() => {
   const meta = buildMeta()
   // Expose as VITE_-prefixed env so `import.meta.env.VITE_BUILD_*`
@@ -429,7 +510,7 @@ export default defineConfig(() => {
   const base = process.env.STUDIO_BASE || '/'
   return {
     base,
-    plugins: [react(), firmwareDevPlugin(FIRMWARE_BUILD_REPOS)],
+    plugins: [react(), firmwareDevPlugin(FIRMWARE_BUILD_REPOS, FIRMWARE_REPO_ROOTS)],
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src'),

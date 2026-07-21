@@ -24,7 +24,10 @@ import {
   DuoWlV4AudioSection,
   DuoWlV4EspNowAudioSection,
   DuoWlV4EqSection,
+  DuoWlV4DspSection,
+  DuoWlV4SettingsBackup,
   SolidTransmitterTuningSection,
+  SwHapticEqSection,
 } from './NodeConfigSections'
 import { useDeviceTransport } from '@/hooks/useDeviceTransport'
 import { useSerialMaster } from '@/stores/serialMaster'
@@ -35,6 +38,9 @@ type SubTab =
   | 'mqtt'      // single shared MQTT tab: broker panel OR client settings,
                 // + flow chart. Shared id so switching sensor↔broker keeps it.
   | 'mapping'   // sensor live value + mapping editor
+  | 'audio'     // DuoWL v4 pure espnow_stream receiver only — gain stage + A-V delay
+  | 'eq'        // DuoWL v4 pure espnow_stream receiver only — per-codec EQ designer
+  | 'dsp'       // DuoWL v4 pure espnow_stream receiver only — DSP profile + DRC/3D/Beep/AGC
 
 const SUB_TAB_LABEL: Record<SubTab, string> = {
   wifi: 'Wi-Fi',
@@ -45,17 +51,25 @@ const SUB_TAB_LABEL: Record<SubTab, string> = {
   espnow: 'ESP-NOW',
   mqtt: 'MQTT',
   mapping: 'センサー',
+  audio: '音声',
+  eq: 'EQ',
+  dsp: 'DSP',
 }
 
 /**
  * Which sub-tabs a node shows, by role/transport (DEC-034). A node
  * that doesn't report a role is a `receiver` on `udp` → the classic
- * 5-tab layout, identical to before.
+ * 5-tab layout, identical to before. `board` only matters for the pure
+ * espnow_stream receiver case: a DuoWL v4 unit gets three extra tabs
+ * (音声 / EQ / DSP) split off from what used to be crammed into the espnow
+ * tab — DSP (aic3204-full-dsp-registers.md) is DRC/3D/Beep/AGC, split from
+ * EQ (biquad bands + 1st-order IIR + profile selector) purely for tab width.
  */
 function computeSubTabs(
   role: NodeRole,
   transport: NodeTransport,
   transports: NodeTransport[],
+  board: string | undefined,
 ): SubTab[] {
   switch (role) {
     case 'sensor':
@@ -75,7 +89,11 @@ function computeSubTabs(
         transport === 'espnow_stream'
         && !transports.includes('udp')
         && !transports.includes('mqtt')
-      if (pureStream) return ['espnow', 'firmware']
+      if (pureStream) {
+        return board === 'duo_wl_v4'
+          ? ['espnow', 'audio', 'eq', 'dsp', 'firmware']
+          : ['espnow', 'firmware']
+      }
       // mqtt receiver gets the MQTT client tab; plain udp doesn't.
       if (transports.includes('mqtt')) {
         return ['wifi', 'config', 'mqtt', 'kit', 'test', 'firmware']
@@ -102,7 +120,9 @@ export function DeviceDetail() {
   const setKitList = useDeviceStore((s) => s.setKitList)
   const setSensorMapping = useDeviceStore((s) => s.setSensorMapping)
   const setSensorReading = useDeviceStore((s) => s.setSensorReading)
+  const bumpInfoTick = useDeviceStore((s) => s.bumpInfoTick)
   const infoCache = useDeviceStore((s) => s.infoCache)
+  const infoTickCache = useDeviceStore((s) => s.infoTick)
   const wifiStatusCache = useDeviceStore((s) => s.wifiStatusCache)
   const wifiProfilesCache = useDeviceStore((s) => s.wifiProfilesCache)
   const debugDumpCache = useDeviceStore((s) => s.debugDumpCache)
@@ -112,6 +132,7 @@ export function DeviceDetail() {
 
   const masterMode = useSerialMaster((s) => s.mode)
   const masterInfo = useSerialMaster((s) => s.info)
+  const masterRefreshTick = useSerialMaster((s) => s.refreshTick)
   const masterWifiStatus = useSerialMaster((s) => s.wifiStatus)
   const masterWifiProfiles = useSerialMaster((s) => s.wifiProfiles)
   const masterWifiProfileMax = useSerialMaster((s) => s.wifiProfileMax)
@@ -243,10 +264,42 @@ export function DeviceDetail() {
         espnow_ui: p.espnow_ui as { auto_off_ms?: number; wake_on_button?: boolean; wake_on_volume?: boolean; led_enabled?: boolean; low_batt_pct?: number } | undefined,
         stream: p.stream as { received?: number; lost?: number; recovered?: number; dropped?: number; max_gap?: number; handoffs?: number; sources?: number; locked?: boolean; locked_mac?: string; delay_ms?: number } | undefined,
         // DuoWL v4 audio stage settings (DEC-041, board === "duo_wl_v4" only)
-        audio: p.audio as { pam_db?: number; lineout_db?: number; boost_db?: number; hp_db?: number; input_mode?: 'output' | 'line_in' } | undefined,
+        audio: p.audio as {
+          pam_db?: number
+          lineout_db?: number
+          boost_db?: number
+          hp_db?: number
+          input_mode?: 'output' | 'line_in'
+          stream_buffer_ms?: number
+        } | undefined,
         // DuoWL v4 ESP-NOW hp48 audio-DSP config (audio-dsp-config.md §2/§3)
         eq: p.eq as { haptic: EqBandReadout[]; hp: EqBandReadout[] } | undefined,
+        // Non-DuoWL-v4 (v3-family) software haptic EQ engine marker — "sw" gates
+        // SwHapticEqSection (see NodeConfigSections.tsx). Absent on DuoWL v4.
+        eq_engine: p.eq_engine as string | undefined,
         av_delay_ms: p.av_delay_ms as number | undefined,
+        // DuoWL v4 full AIC3204 DSP feature set (aic3204-full-dsp-registers.md)
+        dsp_profile: p.dsp_profile as {
+          haptic: { profile: 'standard' | 'eq6' | 'eq6_drc' | 'full'; bands: number; has_iir: boolean; has_drc: boolean; has_3d: boolean; has_beep: boolean }
+          hp: { profile: 'standard' | 'eq6' | 'eq6_drc' | 'full'; bands: number; has_iir: boolean; has_drc: boolean; has_3d: boolean; has_beep: boolean }
+        } | undefined,
+        eq_iir: p.eq_iir as { haptic: [number, number, number]; hp: [number, number, number] } | undefined,
+        drc: p.drc as {
+          haptic: { enable_l: boolean; enable_r: boolean; threshold_db: number; hysteresis_db: number; hold: number; attack: number; decay: number; compressing_l: boolean; compressing_r: boolean }
+          hp: { enable_l: boolean; enable_r: boolean; threshold_db: number; hysteresis_db: number; hold: number; attack: number; decay: number; compressing_l: boolean; compressing_r: boolean }
+        } | undefined,
+        effect_3d: p.effect_3d as { haptic: number; hp: number } | undefined,
+        agc: p.agc as {
+          enable: boolean
+          target_level_db: number
+          max_gain_db: number
+          attack: number
+          decay: number
+          noise_threshold_db: number
+          hysteresis_db: number
+          applied_gain_l_db: number
+          applied_gain_r_db: number
+        } | undefined,
         // SoftAP extension fields (firmware ≥ v0.1.0)
         mode: p.mode as 'sta' | 'ap' | undefined,
         ap_ssid: p.ap_ssid as string | undefined,
@@ -254,6 +307,12 @@ export function DeviceDetail() {
         ap_has_pass: p.ap_has_pass as boolean | undefined,
         ap_client_count: p.ap_client_count as number | undefined,
       })
+      // Bump the per-IP get_info counter so device-backed controls reconcile
+      // to the echoed value even when it's numerically unchanged (finding 3).
+      // Only on get_info (a full snapshot) — NOT on the partial ap_status /
+      // oled / volume_changed merges below, so an unrelated push can't
+      // prematurely revert an optimistic just-committed value.
+      bumpInfoTick(p.device)
     } else if (t === 'ap_status_result' && typeof p.device === 'string') {
       setApStatus(p.device, {
         mode: p.mode as 'sta' | 'ap' | undefined,
@@ -309,6 +368,23 @@ export function DeviceDetail() {
         events?: Array<string | { name: string; mode?: string }>
       }> | undefined) ?? []
       setKitList(p.device, kits)
+    } else if (t === 'volume_changed') {
+      // Unsolicited push from a physical volume knob/button (helper relays
+      // it straight from the device's PONG/serial event). `hp_db` (DuoWL v4
+      // TPA6130A2 headphone volume, SW4/SW5 buttons) is the only field this
+      // view cares about — merge it into infoCache.audio.hp_db so the
+      // DuoWlV4AudioSection headphone slider follows the physical buttons
+      // live. Merges onto the CURRENT audio object (not a bare replace) so
+      // the other audio fields (pam_db/lineout_db/...) aren't clobbered.
+      // The "don't clobber a dirty edit" rule lives in the consumer
+      // (useDeviceBackedValue's adopt-when-not-dirty effect) — writing the
+      // cache here is always safe.
+      const ip = typeof p.device === 'string' ? p.device : (typeof p.ip === 'string' ? p.ip : null)
+      const hpDb = typeof p.hp_db === 'number' ? p.hp_db : undefined
+      if (ip && hpDb !== undefined) {
+        const prevAudio = useDeviceStore.getState().infoCache[ip]?.audio
+        setInfo(ip, { audio: { ...prevAudio, hp_db: hpDb } })
+      }
     } else if (t === 'write_result') {
       const ok = p.success === true
       const summary = (p.summary as string)
@@ -350,6 +426,7 @@ export function DeviceDetail() {
     setKitList,
     setSensorMapping,
     setSensorReading,
+    bumpInfoTick,
   ])
 
   useEffect(() => {
@@ -412,6 +489,17 @@ export function DeviceDetail() {
   const transport = useDeviceTransport(selectedIp)
   const sendTo = useCallback((msg: ManagerMessage) => { void transport.sendTo(msg) }, [transport])
 
+  // Debounced get_info trigger for the DuoWL v4 device-backed controls
+  // (finding 3). The Serial path can't reconcile through the injected
+  // get_info_result (that lands in infoCache, but a serial device's UI reads
+  // masterInfo) — so it goes through refreshAll(), which repopulates
+  // masterInfo AND bumps serialMaster.refreshTick (the serial syncTick). The
+  // LAN path sends get_info; get_info_result then bumps deviceStore.infoTick.
+  const reconcileInfo = useCallback(() => {
+    if (transport.isSerial) { void useSerialMaster.getState().refreshAll(); return }
+    if (selectedIp) send({ type: 'get_info', payload: { ip: selectedIp } })
+  }, [transport.isSerial, send, selectedIp])
+
   // ── Bulk config over USB serial ─────────────────────────────────────
   // Apply a config command to ALL selected USB-serial cards ONE AT A TIME
   // (serial path only). Unlike the parallel firmware flash, config is
@@ -420,15 +508,24 @@ export function DeviceDetail() {
   const selectedPortIds = useSerialMaster((s) => s.selectedPortIds)
   const activePortId = useSerialMaster((s) => s.activePortId)
   const isSerialDevice = !!selectedIp && selectedIp.startsWith('serial:')
-  // Targets = the selected cards PLUS the device whose form is on screen (the
-  // held config port). Card selection and the detail-pane primary are
-  // independent, so without this the shown device could be silently excluded
-  // from its own bulk apply.
-  const bulkTargetIds = useMemo(() => {
-    const s = new Set(selectedPortIds)
-    if (activePortId) s.add(activePortId)
-    return [...s]
-  }, [selectedPortIds, activePortId])
+  // Targets = EXACTLY the checked USB cards (✔ 書込対象) — never auto-add the
+  // config-connected ("⚙ 設定", activePortId) card just because its form
+  // happens to be on screen. That auto-add used to silently write to an
+  // unchecked device whenever the user was mid-config on one card and had
+  // ticked a *different* card for a bulk apply (bug report 2026-07-20): the
+  // on-screen device got written too even though its checkbox was empty.
+  // The checkbox is now the ONE selection concept for every write action
+  // (flash + bulk-config) — if the user wants the on-screen device included,
+  // they check its box like any other target.
+  const bulkTargetIds = useMemo(() => [...selectedPortIds], [selectedPortIds])
+  // Fix 2 (2026-07-20): now that the checkbox is the ONE selection concept
+  // (above), the 設定-connected device and the ✔ write-target set can
+  // silently diverge — the config form on screen edits one device, but a
+  // write goes to whatever's checked. Surface that mismatch once, near the
+  // write actions, instead of leaving it implicit. True only when there IS
+  // a live config connection and its port isn't in the checked set.
+  const configConnectedNotChecked =
+    masterMode === 'config' && !!activePortId && !bulkTargetIds.includes(activePortId)
   const bulkApply = useCallback((msg: ManagerMessage) => {
     // Same ManagerMessage → firmware serial-config JSON translation as
     // useDeviceTransport's single-port serial path.
@@ -526,7 +623,13 @@ export function DeviceDetail() {
         stream: masterInfo.stream,
         audio: masterInfo.audio,
         eq: masterInfo.eq,
+        eq_engine: masterInfo.eq_engine,
         av_delay_ms: masterInfo.av_delay_ms,
+        dsp_profile: masterInfo.dsp_profile,
+        eq_iir: masterInfo.eq_iir,
+        drc: masterInfo.drc,
+        effect_3d: masterInfo.effect_3d,
+        agc: masterInfo.agc,
       } : undefined)
     : infoCache[selectedIp]
   const wifiStatus = transport.isSerial
@@ -539,6 +642,11 @@ export function DeviceDetail() {
   const kitList = kitListCache[selectedIp]
   const sensorMapping = sensorMappingCache[selectedIp]
   const sensorReading = sensorReadingCache[selectedIp]
+  // get_info counter for the DuoWL v4 device-backed controls (finding 3):
+  // serialMaster.refreshTick on the USB path, deviceStore.infoTick on LAN.
+  const cachedSyncTick = transport.isSerial
+    ? masterRefreshTick
+    : infoTickCache[selectedIp]
   const apInfo = {
     mode: cachedInfo?.mode,
     ap_ssid: cachedInfo?.ap_ssid,
@@ -558,7 +666,7 @@ export function DeviceDetail() {
   const nodeTransport: NodeTransport =
     cachedInfo?.transport ?? device.transport ?? nodeTransports[0] ?? 'udp'
 
-  const subTabs = computeSubTabs(nodeRole, nodeTransport, nodeTransports)
+  const subTabs = computeSubTabs(nodeRole, nodeTransport, nodeTransports, cachedInfo?.board)
   const activeSubTab: SubTab = subTabs.includes(subTab) ? subTab : (subTabs[0] ?? 'firmware')
 
   return (
@@ -637,6 +745,7 @@ export function DeviceDetail() {
               onRefresh={refreshWifiProfiles}
               bulkCount={isSerialDevice ? bulkTargetIds.length : 0}
               onBulkApply={isSerialDevice ? bulkApply : undefined}
+              configConnectedNotChecked={isSerialDevice && configConnectedNotChecked}
             />
             <ApModeSection
               device={device}
@@ -669,6 +778,20 @@ export function DeviceDetail() {
               dump={debugDump}
               sendTo={sendTo}
             />
+            {/* Non-DuoWL-v4 (v3-family) haptic-only Wi-Fi/UDP receivers
+                (necklace_v3 / band_v2/v3/v4): software haptic EQ, gated
+                purely on eq_engine === "sw" (presence-driven — see
+                SwHapticEqSection doc). DuoWL v4 never reports eq_engine
+                "sw" (its EQ lives on the dedicated eq sub-tab instead). */}
+            {cachedInfo?.eq_engine === 'sw' && (
+              <SwHapticEqSection
+                device={device}
+                cachedInfo={cachedInfo}
+                sendTo={sendTo}
+                syncTick={cachedSyncTick}
+                onReconcile={reconcileInfo}
+              />
+            )}
             {/* The compact Serial-connect link was removed here — USB
                 connection now happens by clicking the card in the left
                 Devices panel (user feedback 2026-06-13). */}
@@ -709,33 +832,78 @@ export function DeviceDetail() {
                   oledLevel={cachedInfo?.oled_brightness}
                   sendTo={sendTo}
                 />
-                {cachedInfo?.board === 'duo_wl_v4' && (
-                  <>
-                    {/* DuoWL v4 ESP-NOW hp48 receiver audio-DSP config
-                        (audio-dsp-config.md): HP volume + A-V delay, then
-                        the per-codec EQ designer. This is the only place
-                        these controls are reachable for a pure espnow_stream
-                        receiver — it has no 設定 tab (computeSubTabs). */}
-                    <DuoWlV4EspNowAudioSection
-                      device={device}
-                      cachedInfo={cachedInfo}
-                      sendTo={sendTo}
-                    />
-                    <DuoWlV4EqSection
-                      device={device}
-                      cachedInfo={cachedInfo}
-                      sendTo={sendTo}
-                    />
-                  </>
-                )}
+                {/* DuoWL v4 gain stage / A-V delay / EQ moved to their own
+                    音声 / EQ sub-tabs (computeSubTabs) — this tab stays
+                    connection + display/power + diagnostics only. Non-
+                    DuoWL-v4 (v3-family) receivers have no 音声/EQ/DSP
+                    sub-tabs at all (computeSubTabs is unchanged for them),
+                    so their software haptic EQ renders right here instead,
+                    gated purely on eq_engine === "sw" (never true for
+                    DuoWL v4 — its EQ lives on the dedicated eq sub-tab). */}
                 <EspNowStreamReadout
                   cachedInfo={cachedInfo}
                   onRefresh={() => sendTo({ type: 'get_info', payload: {} })}
                   disabled={!device.online}
                 />
+                {cachedInfo?.eq_engine === 'sw' && (
+                  <SwHapticEqSection
+                    device={device}
+                    cachedInfo={cachedInfo}
+                    sendTo={sendTo}
+                    syncTick={cachedSyncTick}
+                    onReconcile={reconcileInfo}
+                  />
+                )}
               </>
             )}
           </>
+        )}
+
+        {activeSubTab === 'audio' && cachedInfo?.board === 'duo_wl_v4' && (
+          <>
+            {/* DuoWL v4 ESP-NOW hp48 receiver audio-DSP config
+                (audio-dsp-config.md): the full gain-stage settings panel
+                (入出力モード / 触覚アンプ / 触覚ライン出力 / DAC ブースト /
+                ヘッドホン音量 / ストリームバッファ), then A-V delay, then the
+                JSON backup pair covering both this tab AND the EQ tab. This
+                is the only place these controls are reachable for a pure
+                espnow_stream receiver — it has no 設定 tab (computeSubTabs). */}
+            <DuoWlV4SettingsBackup device={device} cachedInfo={cachedInfo} sendTo={sendTo} />
+            <DuoWlV4AudioSection
+              device={device}
+              cachedInfo={cachedInfo}
+              sendTo={sendTo}
+              syncTick={cachedSyncTick}
+              onReconcile={reconcileInfo}
+            />
+            <DuoWlV4EspNowAudioSection
+              device={device}
+              cachedInfo={cachedInfo}
+              sendTo={sendTo}
+              syncTick={cachedSyncTick}
+              onReconcile={reconcileInfo}
+            />
+          </>
+        )}
+
+        {activeSubTab === 'eq' && cachedInfo?.board === 'duo_wl_v4' && (
+          <DuoWlV4EqSection
+            device={device}
+            cachedInfo={cachedInfo}
+            sendTo={sendTo}
+            syncTick={cachedSyncTick}
+            onReconcile={reconcileInfo}
+          />
+        )}
+
+        {activeSubTab === 'dsp' && cachedInfo?.board === 'duo_wl_v4' && (
+          <DuoWlV4DspSection
+            device={device}
+            cachedInfo={cachedInfo}
+            sendTo={sendTo}
+            syncTick={cachedSyncTick}
+            onReconcile={reconcileInfo}
+          />
         )}
 
         {activeSubTab === 'mapping' && (

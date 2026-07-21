@@ -293,3 +293,66 @@ export function computeAic3204Eq(
 export function aic3204CoeffsToArray(c: Aic3204Coeffs): [number, number, number, number, number] {
   return [c.N0, c.N1, c.N2, c.D1, c.D2]
 }
+
+// ---------------------------------------------------------------------
+// Frequency-response magnitude (for the Studio EQ graph)
+// ---------------------------------------------------------------------
+
+/**
+ * Magnitude (dB) of ONE biquad section at frequency `f` (Hz), sample rate
+ * `fs` (Hz), from its un-normalized RBJ coeffs. Evaluates the transfer
+ * function H(z)=(b0+b1 z⁻¹+b2 z⁻²)/(a0+a1 z⁻¹+a2 z⁻²) at z=e^{jω},
+ * ω=2πf/fs. This is the IDEAL design response (pre-Q1.23-quantization /
+ * pre-auto-prescale) — the shape the user is designing; the per-band
+ * readout separately flags any prescale makeup that shifts overall level.
+ */
+export function biquadMagnitudeDb(c: RbjCoeffs, fs: number, f: number): number {
+  const w = (2 * Math.PI * f) / fs
+  const cw = Math.cos(w)
+  const sw = Math.sin(w)
+  const c2w = Math.cos(2 * w)
+  const s2w = Math.sin(2 * w)
+  // e^{-jω} = cw − j·sw, e^{-2jω} = c2w − j·s2w.
+  const numRe = c.b0 + c.b1 * cw + c.b2 * c2w
+  const numIm = -(c.b1 * sw + c.b2 * s2w)
+  const denRe = c.a0 + c.a1 * cw + c.a2 * c2w
+  const denIm = -(c.a1 * sw + c.a2 * s2w)
+  const numMag = Math.hypot(numRe, numIm)
+  const denMag = Math.hypot(denRe, denIm) || 1e-12
+  return 20 * Math.log10((numMag || 1e-12) / denMag)
+}
+
+export interface EqCurvePoint {
+  f: number
+  db: number
+}
+
+/**
+ * Combined magnitude response (dB) of a cascade of EQ bands, sampled at
+ * `points` log-spaced frequencies from fMin..fMax (default 20 Hz..fs/2).
+ * Cascade = sum of the per-band dB. `ftype:"off"` bands contribute 0 dB.
+ * Used by the Studio EQ graph to plot the resulting curve live as the user
+ * edits fc/Q/gain.
+ */
+export function eqResponseCurve(
+  bands: Array<{ ftype: EqFtype; fc: number; q: number; gainDb?: number }>,
+  fs: number,
+  opts: { fMin?: number; fMax?: number; points?: number } = {},
+): EqCurvePoint[] {
+  const fMin = opts.fMin ?? 20
+  const fMax = opts.fMax ?? fs / 2
+  const points = opts.points ?? 96
+  const coeffs = bands
+    .filter((b) => b.ftype !== 'off')
+    .map((b) => computeRbjCoeffs({ ftype: b.ftype as FilterType, fs, fc: b.fc, q: b.q, gainDb: b.gainDb }))
+  const logMin = Math.log10(fMin)
+  const logMax = Math.log10(fMax)
+  const out: EqCurvePoint[] = []
+  for (let i = 0; i < points; i++) {
+    const f = Math.pow(10, logMin + ((logMax - logMin) * i) / (points - 1))
+    let db = 0
+    for (const c of coeffs) db += biquadMagnitudeDb(c, fs, f)
+    out.push({ f, db })
+  }
+  return out
+}

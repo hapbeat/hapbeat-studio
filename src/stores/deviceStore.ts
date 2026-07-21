@@ -149,16 +149,58 @@ interface DeviceState {
       hp_db?: number
       /** Input/output routing (DEC-041 follow-up, DuoWL v4 only). */
       input_mode?: 'output' | 'line_in'
+      /** Stream jitter buffer, ms (set_stream_buffer, all UDP receivers). */
+      stream_buffer_ms?: number
     }
     /** DuoWL v4 ESP-NOW hp48 receiver EQ state (audio-dsp-config.md §2,
-     *  board === "duo_wl_v4" only). */
+     *  board === "duo_wl_v4" only). Up to 6 bands/codec (aic3204-full-dsp-
+     *  registers.md §8.5). */
     eq?: {
       haptic: EqBandReadout[]
       hp: EqBandReadout[]
     }
-    /** A-V delay, ms (audio-dsp-config.md §3, DuoWL v4 ESP-NOW hp48 receiver
-     *  only). 0..30. */
+    /** EQ engine backing `eq`/`set_eq_band` on this device — "sw" = software
+     *  biquad on the 16kHz haptic mixer (necklace_v3 / band_v2/v3/v4, all
+     *  transports; no hp codec/DSP profiles/IIR/DRC/3D/Beep). Absent on
+     *  DuoWL v4 (AIC3204 in-codec biquad, gated by board instead). */
+    eq_engine?: 'sw' | string
+    /** A-V delay, ms, SIGNED (audio-dsp-config.md §3, DuoWL v4 ESP-NOW hp48
+     *  receiver only): negative = delay haptic, positive = delay HP audio,
+     *  0 = no offset. Range −100..+100. */
     av_delay_ms?: number
+    /** DSP profile + capabilities per codec (aic3204-full-dsp-registers.md
+     *  §0/§1, board === "duo_wl_v4" only). */
+    dsp_profile?: {
+      haptic: { profile: 'standard' | 'eq6' | 'eq6_drc' | 'full'; bands: number; has_iir: boolean; has_drc: boolean; has_3d: boolean; has_beep: boolean }
+      hp: { profile: 'standard' | 'eq6' | 'eq6_drc' | 'full'; bands: number; has_iir: boolean; has_drc: boolean; has_3d: boolean; has_beep: boolean }
+    }
+    /** 1st-order IIR, raw [N0,N1,D1] ints per codec (§8.5, board === "duo_wl_v4" only). */
+    eq_iir?: {
+      haptic: [number, number, number]
+      hp: [number, number, number]
+    }
+    /** DRC config + live status per codec (§2, board === "duo_wl_v4" only). */
+    drc?: {
+      haptic: { enable_l: boolean; enable_r: boolean; threshold_db: number; hysteresis_db: number; hold: number; attack: number; decay: number; compressing_l: boolean; compressing_r: boolean }
+      hp: { enable_l: boolean; enable_r: boolean; threshold_db: number; hysteresis_db: number; hold: number; attack: number; decay: number; compressing_l: boolean; compressing_r: boolean }
+    }
+    /** 3D effect depth per codec, 0.0..1.0 (§4, board === "duo_wl_v4" only). */
+    effect_3d?: {
+      haptic: number
+      hp: number
+    }
+    /** AGC config + applied-gain telemetry (§5, board === "duo_wl_v4" only). */
+    agc?: {
+      enable: boolean
+      target_level_db: number
+      max_gain_db: number
+      attack: number
+      decay: number
+      noise_threshold_db: number
+      hysteresis_db: number
+      applied_gain_l_db: number
+      applied_gain_r_db: number
+    }
   }>
 
   /** Per-IP cache of the most recent get_wifi_status response. */
@@ -197,6 +239,16 @@ interface DeviceState {
   /** Per-IP latest live sensor reading (get_sensor_reading, polled ~1 Hz
    *  while the mapping tab is open). Ephemeral — never persisted. */
   sensorReadingCache: Record<string, SensorReading>
+
+  /** Per-IP monotonic counter bumped once per get_info_result. Lets a
+   *  device-backed control reconcile to the device's echoed value even when
+   *  that value is NUMERICALLY UNCHANGED from before (e.g. the device clamped
+   *  a write back to its prior value) — the value alone wouldn't change, so
+   *  an effect keyed on the value never fires; keying on this tick does.
+   *  Bumped ONLY by get_info (a full snapshot), never by the partial
+   *  volume_changed / ap_status merges, so an unrelated push can't prematurely
+   *  revert an optimistic just-committed value. Ephemeral — never persisted. */
+  infoTick: Record<string, number>
 
   selectDevice: (ip: string | null) => void
   toggleSelect: (ip: string) => void
@@ -243,6 +295,8 @@ interface DeviceState {
    *  the old IP in localStorage as a phantom "選択済". Idempotent. */
   pruneSelectionsToKnown: (knownIps: string[]) => void
   setInfo: (ip: string, info: DeviceState['infoCache'][string]) => void
+  /** Bump `infoTick[ip]` — call once per get_info_result (see infoTick). */
+  bumpInfoTick: (ip: string) => void
   /** Merge AP status into infoCache (from get_ap_status or get_info extension). */
   setApStatus: (ip: string, status: {
     mode?: 'sta' | 'ap'
@@ -383,6 +437,7 @@ export const useDeviceStore = create<DeviceState>((set) => ({
   kitListCache: {},
   sensorMappingCache: {},
   sensorReadingCache: {},
+  infoTick: {},
   lastFlashedBoard: initialLastFlashedBoard,
 
   selectDevice: (ip) => {
@@ -615,6 +670,9 @@ export const useDeviceStore = create<DeviceState>((set) => ({
       )
       return { infoCache: { ...s.infoCache, [ip]: { ...s.infoCache[ip], ...defined } } }
     }),
+
+  bumpInfoTick: (ip) =>
+    set((s) => ({ infoTick: { ...s.infoTick, [ip]: (s.infoTick[ip] ?? 0) + 1 } })),
 
   setApStatus: (ip, status) =>
     set((s) => ({ infoCache: { ...s.infoCache, [ip]: { ...s.infoCache[ip], ...status } } })),

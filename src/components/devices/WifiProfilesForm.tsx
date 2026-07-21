@@ -20,12 +20,17 @@ interface Props {
   sendTo: (msg: ManagerMessage) => void
   onRefresh: () => void
   /** Number of USB-serial cards currently selected (serial path only). When
-   *  > 1, a "選択 N 台に一括適用" button appears that applies the SAME Wi-Fi to
-   *  all of them in parallel via serialMaster.bulkConfigCmd. 0/undefined = the
-   *  LAN path or a single device → no bulk button. */
+   *  > 1, a "選択中の N 台に書き込む" button appears that applies the SAME
+   *  Wi-Fi to all of them (sequentially) via serialMaster.bulkConfigCmd.
+   *  0/undefined = the LAN path or a single device → no bulk button. */
   bulkCount?: number
-  /** Apply this message to all selected USB-serial devices in parallel. */
+  /** Apply this message to all selected USB-serial devices, one at a time. */
   onBulkApply?: (msg: ManagerMessage) => void
+  /** True when there's a live 設定-connected USB-serial device (the one
+   *  this form is editing) whose port is NOT in the ✔ 書込対象 (bulk write
+   *  target) set — the bulk button below would skip it. Surfaced as a
+   *  warning next to the bulk button instead of silently diverging. */
+  configConnectedNotChecked?: boolean
 }
 
 /**
@@ -44,6 +49,7 @@ export function WifiProfilesForm({
   onRefresh,
   bulkCount = 0,
   onBulkApply,
+  configConnectedNotChecked = false,
 }: Props) {
   const [addOpen, setAddOpen] = useState(false)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
@@ -464,21 +470,35 @@ export function WifiProfilesForm({
               {editingIndex !== null ? '更新・接続' : '追加・接続'}
             </button>
           </div>
-          {/* Bulk apply: same Wi-Fi to all selected USB-serial devices in
-              parallel. Only in add mode (edit targets one profile) and when
-              >1 device is selected. */}
+          {/* Bulk apply: same Wi-Fi to all selected (✔ 書込対象) USB-serial
+              devices, one at a time. Only in add mode (edit targets one
+              profile) and when >1 device is selected. A fixed-height status
+              line sits above the button — normally the target summary, or a
+              warning when the 設定-connected device (the one this form is
+              editing) isn't itself in the checked set, since the bulk write
+              would then skip it (layout-shift rule: same slot either way). */}
           {editingIndex === null && bulkCount > 1 && onBulkApply && (
-            <div className="form-action-row" style={{ marginTop: 8 }}>
-              <button
-                className="form-button"
-                onClick={submitBulk}
-                disabled={!ssid.trim()}
-                title="選択中の USB Serial デバイスに、この Wi-Fi 設定を 1 台ずつ順に適用します（各機は適用後に再起動。同時書き込みは再起動が重なって失敗するため順次）"
-                style={{ width: '100%' }}
+            <>
+              <div
+                className={`form-status ${configConnectedNotChecked ? 'warn' : 'muted'}`}
+                style={{ marginTop: 8, minHeight: 18 }}
               >
-                ⚡ 選択 {bulkCount} 台に一括適用（順次）
-              </button>
-            </div>
+                {configConnectedNotChecked
+                  ? '※ 設定中のデバイスは書込対象（✔）に含まれていません'
+                  : `選択中の USB Serial ${bulkCount} 台に適用します`}
+              </div>
+              <div className="form-action-row" style={{ marginTop: 4 }}>
+                <button
+                  className="form-button"
+                  onClick={submitBulk}
+                  disabled={!ssid.trim()}
+                  title="選択中の USB Serial デバイスに、この Wi-Fi 設定を 1 台ずつ順に適用します（各機は適用後に再起動。同時書き込みは再起動が重なって失敗するため順次）"
+                  style={{ width: '100%' }}
+                >
+                  ⚡ 選択中の {bulkCount} 台に書き込む（順次）
+                </button>
+              </div>
+            </>
           )}
         </div>
       )}
