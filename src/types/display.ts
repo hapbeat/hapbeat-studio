@@ -51,6 +51,9 @@ export type ButtonActionType =
   | 'volume_down'
   | 'wifi_select'
   | 'limit_toggle'
+  | 'eq_preset_toggle'
+  | 'hp_vol_up'
+  | 'hp_vol_down'
 
 /** Hold 動作モード: momentary=離したら戻す, latch=1回押しと同じ */
 export type HoldMode = 'momentary' | 'latch'

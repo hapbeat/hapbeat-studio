@@ -181,6 +181,19 @@ function buildActionGroups(pages: DisplayPage[], deviceModel: DeviceModel): Acti
     })
   }
 
+  // HP volume: DuoWL v4 のみ実装 (in-codec AIC3204 段)。deviceModel では
+  // v3/v4 を区別できないため、他機種にボタン設定しても firmware 側が
+  // no-op になるだけ (害はない)。ラベルに "(v4)" を明示。
+  if (deviceModel === 'duo_wl') {
+    groups.push({
+      label: 'HP Audio (DuoWL v4)',
+      items: [
+        { value: 'hp_vol_up', label: 'HP Volume +' },
+        { value: 'hp_vol_down', label: 'HP Volume -' },
+      ],
+    })
+  }
+
   groups.push({
     label: 'System',
     items: [
@@ -196,6 +209,9 @@ function buildActionGroups(pages: DisplayPage[], deviceModel: DeviceModel): Acti
       { value: 'vib_mode', label: 'VibMode Var/Fix' },
       // Receiver(mqtt) restricted-alert toggle (\u00a76.3): \u5236\u9650\u30e2\u30fc\u30c9 \u21c4 \u5168\u3066\u518d\u751f.
       { value: 'limit_toggle', label: '\u30a2\u30e9\u30fc\u30c8\u5236\u9650 \u21c4 \u5168\u90e8' },
+      // \u89e6\u899a EQ LPF200 \u30d7\u30ea\u30bb\u30c3\u30c8 \u21c4 OFF\u3002\u5168\u53d7\u4fe1\u6a5f\u5171\u901a
+      // (v3\u7cfb=\u30bd\u30d5\u30c8\u30a6\u30a7\u30a2EQ / DuoWL v4=in-codec EQ)\u3002
+      { value: 'eq_preset_toggle', label: '\u89e6\u899aEQ LPF \u21c4 OFF' },
       { value: 'none', label: '\u2014 (None)' },
     ],
   })
@@ -1080,6 +1096,9 @@ export function DisplayEditor() {
         case 'group_dec': setSimState((s) => ({ ...s, group: Math.max(0, s.group - 1) })); break
         case 'vib_mode': setSimState((s) => ({ ...s, volumeAdcEnabled: !s.volumeAdcEnabled })); break
         case 'wifi_select': break // Wi-Fi 選択モード遷移はファーム側で OLED が固定描画する。Studio のプレビューでは表現しない
+        case 'eq_preset_toggle': break // EQ/HP 音量はプレビュー上の表示対象外 — 実機の OLED 表示要素に現れない
+        case 'hp_vol_up': break // EQ/HP 音量はプレビュー上の表示対象外 — 実機の OLED 表示要素に現れない
+        case 'hp_vol_down': break // EQ/HP 音量はプレビュー上の表示対象外 — 実機の OLED 表示要素に現れない
       }
     },
     [perButtonActions, layout.pages.length]
@@ -1128,6 +1147,9 @@ export function DisplayEditor() {
         case 'group_dec': setSimState((s) => ({ ...s, group: Math.max(0, s.group - 1) })); break
         case 'vib_mode': setSimState((s) => ({ ...s, volumeAdcEnabled: !s.volumeAdcEnabled })); break
         case 'wifi_select': break // Wi-Fi 選択モード遷移はファーム側で OLED が固定描画する。Studio のプレビューでは表現しない
+        case 'eq_preset_toggle': break // EQ/HP 音量はプレビュー上の表示対象外 — 実機の OLED 表示要素に現れない
+        case 'hp_vol_up': break // EQ/HP 音量はプレビュー上の表示対象外 — 実機の OLED 表示要素に現れない
+        case 'hp_vol_down': break // EQ/HP 音量はプレビュー上の表示対象外 — 実機の OLED 表示要素に現れない
       }
     },
     [perButtonActions, layout.pages.length, activePageIndex]
