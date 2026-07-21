@@ -6,6 +6,22 @@ Hapbeat Studio の変更履歴。形式は [Keep a Changelog](https://keepachang
 - **最新版** `https://studio.hapbeat.com/` は master の package.json バージョンを表示。
 - **凍結版** `https://studio.hapbeat.com/vX.Y/` は `vX.Y.Z` タグ push 時に作成（マイナー単位）。
 
+## [0.6.0] - 2026-07-22
+
+### Added（追加）
+- DuoWL v4 の音声DSP 設定 UI — in-codec EQ デザイナー / ヘッドホン音量 / A-V（音声-触覚間）delay（対象デバイス接続時のみ表示）
+- v3 系受信機のソフトウェア触覚 EQ 設定 UI（対応ファームのみ表示）+ EQ プリセットのブラウザ保存
+- SOLID48 送信機のランタイムチューニング（Opus complexity / HP バッファ）
+- ボタンアクションに「触覚EQ LPF ⇄ OFF」（全受信機）と「HP Volume +/−」（DuoWL v4、16 段階）を追加
+- スクリーンショット / デモ用モード等の細部改善
+
+### Changed（変更）
+- ファーム書込対象を ✔ チェック済み USB カードのみに変更（設定接続時に自動チェック）
+- USB の設定接続と自動識別が競合するレースを解消（接続動作の安定化）
+
+### Fixed（修正）
+- serial コマンドの応答が volume_changed 等のイベント行と混線し、get_info 結果が壊れることがある問題を修正
+
 ## [0.5.0] - 2026-07-12
 
 ### Added（追加）
