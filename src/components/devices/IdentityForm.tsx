@@ -109,7 +109,7 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
           value={name}
           onChange={(e) => setName(e.target.value)}
           maxLength={32}
-          placeholder="hapbeat-XXXX"
+          placeholder="AB12-duo-wl-v3"
           disabled={!device.online}
           list={nameHistory.historyId}
         />
