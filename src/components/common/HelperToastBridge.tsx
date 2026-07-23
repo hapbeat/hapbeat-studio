@@ -5,7 +5,7 @@ import { useToast } from '@/components/common/Toast'
 /** デバイス書込みコマンド (write_result を返すもの) の日本語ラベル。
  *  結果トーストの文言に使う。未知の cmd は cmd 名そのまま。 */
 const WRITE_CMD_LABEL: Record<string, string> = {
-  set_name: '名前', set_address: 'アドレス', set_group: 'グループ',
+  set_name: '名前', set_address: 'アドレス',
   set_wifi: 'Wi-Fi 設定', clear_wifi: 'Wi-Fi 削除',
   connect_wifi_profile: 'Wi-Fi 接続', remove_wifi_profile: 'Wi-Fi プロファイル削除',
   set_sensor_mapping: 'センサーマッピング', set_broker_host: 'ブローカー設定',

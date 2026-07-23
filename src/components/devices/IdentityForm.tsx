@@ -33,10 +33,9 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
   const [prefix, setPrefix] = useState(initial.prefix)
   const [player, setPlayer] = useState<number>(initial.player)
   const [position, setPosition] = useState<string>(initial.position)
-  // Group は contracts spec §2 改定 (2026-05-07, DEC-030) で
-  // address 末尾の `/group_<N>` 任意セグメントに統合された。
-  // 旧 set_group (uint8) は廃止 — source of truth は address のみ。
-  // -1 = 未指定 (suffix なし、全グループ受信)、1..99 = 指定。
+  // デバイスは常に group を保持する (1..99、既定 1)。source of truth は
+  // address 末尾の `/group_<N>` セグメントのみ (DEC-048)。旧 NVS group_id /
+  // set_group コマンドは廃止済み — 「未指定」という状態は存在しない。
   const [group, setGroup] = useState<number>(initial.group)
   const { ask, dialog: confirmDialog } = useConfirm()
   const { toast, setAnchor } = useToast()
@@ -168,18 +167,13 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
             type="number"
             min={1}
             max={99}
-            value={group < 1 ? '' : group}
-            placeholder="未指定"
+            value={group}
             onChange={(e) => {
-              const v = e.target.value
-              if (v === '') setGroup(-1)
-              else {
-                const n = Number(v)
-                if (Number.isFinite(n) && n >= 1 && n <= 99) setGroup(n)
-              }
+              const n = Number(e.target.value)
+              if (Number.isFinite(n)) setGroup(Math.max(1, Math.min(99, Math.round(n))))
             }}
             disabled={!device.online}
-            title="1〜99 で指定、空欄で全グループ受信 (suffix なし)"
+            title="1〜99 で指定 (既定 1)"
           />
         </div>
         <button

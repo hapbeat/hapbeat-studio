@@ -27,8 +27,9 @@ export function positionLabel(key: string): string {
 /**
  * Parse "[prefix/]player_N/pos_xxx[/group_M]" → { prefix, player, position, group }.
  *
- * Prefix may itself contain "/" (e.g. "red/alpha"). 末尾の `group_<N>` は
- * 任意セグメント (contracts spec §2 改定後)。group=-1 は未指定 (suffix なし)。
+ * Prefix may itself contain "/" (e.g. "red/alpha"). デバイスは常に group を
+ * 保持する (DEC-048)。末尾の `group_<N>` セグメントが無い、または範囲外
+ * (1..99 外) の場合は既定値 1 を返す — 「未指定」という状態は存在しない。
  */
 export function parseAddress(address: string): {
   prefix: string
@@ -36,11 +37,11 @@ export function parseAddress(address: string): {
   position: string
   group: number
 } {
-  if (!address) return { prefix: '', player: 1, position: 'pos_chest', group: -1 }
+  if (!address) return { prefix: '', player: 1, position: 'pos_chest', group: 1 }
   const parts = address.split('/')
 
-  // 末尾が group_<N> なら抽出して parts から除く (1..99 のみ valid)
-  let group = -1
+  // 末尾が group_<N> なら抽出して parts から除く (1..99 のみ valid、それ以外は既定 1)
+  let group = 1
   if (parts.length >= 1 && parts[parts.length - 1].startsWith('group_')) {
     const gStr = parts[parts.length - 1].slice(6)
     const gNum = Number(gStr)
@@ -68,12 +69,10 @@ export function buildAddress(
   prefix: string,
   player: number,
   position: string,
-  group: number = -1,
+  group: number = 1,
 ): string {
   const tail = `player_${player}/${position}`
-  let addr = prefix.trim() ? `${prefix.trim()}/${tail}` : tail
-  if (group >= 1 && group <= 99) {
-    addr += `/group_${group}`
-  }
-  return addr
+  const addr = prefix.trim() ? `${prefix.trim()}/${tail}` : tail
+  const g = Number.isFinite(group) ? Math.max(1, Math.min(99, Math.round(group))) : 1
+  return `${addr}/group_${g}`
 }
