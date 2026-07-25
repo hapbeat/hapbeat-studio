@@ -561,18 +561,20 @@ function invalidateBuiltKit(kitId: string): void {
 
 /**
  * Per-kit flush mutex. Prevents two `flushKitFolderNow` calls for the
- * same kit from interleaving — the File System Access API throws
- * `InvalidStateError` ("operation that depends on state cached in an
- * interface object …") when `getFileHandle` / `getFile` reads against
- * a directory that another concurrent call is in the middle of
- * overwriting. We chain new requests onto the in-flight promise so
- * each kit's writes are strictly serialized.
+ * same kit from interleaving — overlapping `getFileHandle` / `getFile`
+ * reads against a directory another call is mid-overwrite on have been
+ * seen to fail with `InvalidStateError` ("operation that depends on
+ * state cached in an interface object …"). We chain new requests onto
+ * the in-flight promise so each kit's writes are strictly serialized.
+ * Note: serializing does not eliminate that error — it is also raised
+ * when an *external* app (Unity Editor) touches the folder, which is
+ * handled as `stale-handle` below.
  */
 const kitFlushChain = new Map<string, Promise<unknown>>()
 
 /**
- * Per-kit auto-retry state. When `flushKitFolderNow` fails (typically
- * a transient `InvalidStateError` from a racy directory read), we
+ * Per-kit auto-retry state. When `flushKitFolderNow` fails with a
+ * failure kind that can plausibly recover on its own, we
  * schedule another attempt after exponential backoff so the user
  * never has to manually retry. A successful flush — or a fresh user
  * action arriving via scheduleKitFlush — resets the attempt counter.
@@ -597,16 +599,26 @@ function retryDelayMs(attempt: number): number {
  *   locked     → the file is open elsewhere (Unity Editor, editor swap
  *                files, AV scanner). Give it a couple of attempts in
  *                case it's a momentary hold, then hand it to the user.
+ *   stale-handle → the directory handle's cached state no longer agrees
+ *                with what's on disk (`InvalidStateError`). Observed in
+ *                the field while Unity Editor was operating on the same
+ *                folder, and it did NOT recover across 8 retries —
+ *                re-taking the *file* handle each attempt doesn't help,
+ *                which points at the root directory handle itself. The
+ *                exact Chromium-internal trigger is unconfirmed, so we
+ *                stop after a token retry instead of burning the ladder
+ *                and show the user the one action known to rebuild the
+ *                handle: re-picking the folder.
  *   transient  → everything else (FS-API races etc). Full backoff.
  */
-type KitFlushFailureKind = 'permission' | 'locked' | 'transient'
+type KitFlushFailureKind = 'permission' | 'locked' | 'stale-handle' | 'transient'
 
 const PERMISSION_ERROR_NAMES = ['NotAllowedError', 'SecurityError']
-// `InvalidStateError` is deliberately NOT here: it is the typical
-// transient FS-API race (see the kitFlushChain doc-comment) and keeps
-// the full backoff budget. Chromium surfaces a real cross-process file
-// lock as `NoModificationAllowedError` (swap-file creation failed).
+// Chromium surfaces a real cross-process file lock as
+// `NoModificationAllowedError` (swap-file creation failed).
 const LOCK_ERROR_NAMES = ['NoModificationAllowedError']
+/** Handle-cache mismatch — see `stale-handle` above. */
+const STALE_HANDLE_ERROR_NAMES = ['InvalidStateError']
 /** Substrings seen in OS/browser messages when another process holds the file. */
 const LOCK_MESSAGE_PATTERNS = [
   /swap file/i,
@@ -618,6 +630,8 @@ const LOCK_MESSAGE_PATTERNS = [
 
 /** Retry budget per failure kind. */
 const LOCKED_MAX_ATTEMPTS = 2
+/** Stale handle: one token retry (in case it really was momentary), then stop. */
+const STALE_HANDLE_MAX_ATTEMPTS = 2
 /** After a successful permission re-grant we allow exactly one more attempt. */
 const PERMISSION_MAX_ATTEMPTS = 1
 
@@ -660,6 +674,7 @@ async function classifyKitFlushError(
   const name = errorName(err)
   if (PERMISSION_ERROR_NAMES.includes(name)) return 'permission'
   if (await isPermissionLost(root)) return 'permission'
+  if (STALE_HANDLE_ERROR_NAMES.includes(name)) return 'stale-handle'
   if (LOCK_ERROR_NAMES.includes(name)) return 'locked'
   const msg = errorMessage(err)
   if (LOCK_MESSAGE_PATTERNS.some((re) => re.test(msg))) return 'locked'
@@ -1106,6 +1121,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       let maxAttempts = RETRY_MAX_ATTEMPTS
       if (kind === 'locked') {
         maxAttempts = LOCKED_MAX_ATTEMPTS
+      } else if (kind === 'stale-handle') {
+        maxAttempts = STALE_HANDLE_MAX_ATTEMPTS
       } else if (kind === 'permission') {
         // Try to re-acquire the grant once. requestPermission needs
         // user activation, so outside a click this throws / returns
@@ -1142,7 +1159,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
             ? 'フォルダへのアクセス許可が失効しています。Library / Kit Folder を選び直して再試行してください'
             : kind === 'locked'
               ? '他のアプリがファイルを開いている可能性があります (Unity Editor など)。閉じてから「Save Folder」で再試行してください'
-              : 'Library / Kit Folder を選び直して再試行してください'
+              : kind === 'stale-handle'
+                ? 'ワークフォルダの参照が古くなりました (他のアプリがフォルダを操作した可能性があります)。Library / Kit Folder を選び直すと復帰する場合があります'
+                : 'Library / Kit Folder を選び直して再試行してください'
         state.setLocalFsStatus(
           'error',
           `「${label}」が失敗しました (${detail}) — ${hint}`,

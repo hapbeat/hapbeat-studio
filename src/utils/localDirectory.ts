@@ -316,16 +316,38 @@ export async function readKitClipFile(
   }
 }
 
+/**
+ * Re-throw a File System Access failure with the failing path attached.
+ *
+ * `err.name` is preserved verbatim because callers classify by name
+ * (`libraryStore.classifyKitFlushError`), and the status pill only shows
+ * `name - message` — without a path a failed flush can't be told apart
+ * (manifest? which WAV?), which is exactly the information needed to
+ * decide whether another app is holding one specific file.
+ */
+function rethrowWithPath(err: unknown, path: string): never {
+  const name = err instanceof Error && err.name ? err.name : 'Error'
+  const msg = err instanceof Error ? err.message : String(err)
+  const wrapped = new Error(`${path}: ${msg}`)
+  wrapped.name = name
+  ;(wrapped as Error & { cause?: unknown }).cause = err
+  throw wrapped
+}
+
 export async function writeClipFile(
   root: FileSystemDirectoryHandle,
   relPath: string,
   blob: Blob,
 ): Promise<void> {
-  const { dir, filename } = await resolveClipPath(root, relPath, true)
-  const fileHandle = await dir.getFileHandle(filename, { create: true })
-  const writable = await fileHandle.createWritable()
-  await writable.write(blob)
-  await writable.close()
+  try {
+    const { dir, filename } = await resolveClipPath(root, relPath, true)
+    const fileHandle = await dir.getFileHandle(filename, { create: true })
+    const writable = await fileHandle.createWritable()
+    await writable.write(blob)
+    await writable.close()
+  } catch (err) {
+    rethrowWithPath(err, `clips/${relPath}`)
+  }
 }
 
 export async function deleteClipFile(
@@ -564,19 +586,28 @@ export async function writeKitFolder(
   // (ライブラリ / kit-out どちらを root に指定してもこの階層構造)。
   // 以前は library workDir と共用する想定で `kits/` 階層を挟んでいたが、
   // フォルダを分離できるようになったため削除した。
-  const kitDir = await root.getDirectoryHandle(kitName, { create: true })
+  let kitDir: FileSystemDirectoryHandle
+  try {
+    kitDir = await root.getDirectoryHandle(kitName, { create: true })
+  } catch (err) {
+    rethrowWithPath(err, `${kitName}/`)
+  }
 
   for (const { path, blob } of files) {
-    // Handle nested paths like "install-clips/gunshot.wav"
-    const parts = path.split('/')
-    let dir = kitDir
-    for (let i = 0; i < parts.length - 1; i++) {
-      dir = await dir.getDirectoryHandle(parts[i], { create: true })
+    try {
+      // Handle nested paths like "install-clips/gunshot.wav"
+      const parts = path.split('/')
+      let dir = kitDir
+      for (let i = 0; i < parts.length - 1; i++) {
+        dir = await dir.getDirectoryHandle(parts[i], { create: true })
+      }
+      const fileHandle = await dir.getFileHandle(parts[parts.length - 1], { create: true })
+      const writable = await fileHandle.createWritable()
+      await writable.write(blob)
+      await writable.close()
+    } catch (err) {
+      rethrowWithPath(err, `${kitName}/${path}`)
     }
-    const fileHandle = await dir.getFileHandle(parts[parts.length - 1], { create: true })
-    const writable = await fileHandle.createWritable()
-    await writable.write(blob)
-    await writable.close()
   }
 }
 
