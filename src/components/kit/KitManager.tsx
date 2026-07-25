@@ -1933,7 +1933,22 @@ function KitEditor() {
  * leaving room for a legitimately slow flash write. The flag is advisory and
  * clears itself on the next progress event.
  */
-const DEPLOY_STUCK_MS = 12000
+const DEPLOY_STUCK_MS = 5000
+
+/**
+ * Commit is the one phase that is legitimately silent for a while: the helper
+ * emits `_progress(99, "committing…")` and then waits up to 15 s for the
+ * device to write the manifest. Warning there would tell the user to power-
+ * cycle in the middle of a valid install, so the commit phase gets its own
+ * allowance — still under the helper's own 15 s timeout, which resolves the
+ * transfer either way.
+ */
+const DEPLOY_COMMIT_STUCK_MS = 12000
+
+/** True while the row is in the helper's commit phase (see above). */
+function isCommitPhase(st: { pct: number; msg: string }): boolean {
+  return st.pct >= 99 || /commit/i.test(st.msg)
+}
 
 /** Stuck copy — same tone as the OTA stuck notice in FirmwareSubTab. */
 const DEPLOY_STUCK_TEXT =
@@ -2029,9 +2044,11 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
 
   // Stuck detection (same shape as OtaController's watchdog): a row that
   // has started transferring but got neither `deploy_progress` nor
-  // `deploy_result` for DEPLOY_STUCK_MS is flagged. Rows still waiting in
-  // the helper's sequential per-IP queue keep `lastAt = 0` and are skipped,
-  // so a queued device is never mistaken for a stuck one.
+  // `deploy_result` for its phase allowance is flagged — 5 s while chunks are
+  // streaming (the helper emits one per 4096 B, so healthy rows update every
+  // few ms), longer during commit. Rows still waiting in the helper's
+  // sequential per-IP queue keep `lastAt = 0` and are skipped, so a queued
+  // device is never mistaken for a stuck one.
   useEffect(() => {
     const id = window.setInterval(() => {
       const now = Date.now()
@@ -2039,7 +2056,8 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
         let changed = false
         const next: Record<string, DeployProgressState> = {}
         for (const [ip, st] of Object.entries(cur)) {
-          if (!st.done && !st.stuck && st.lastAt > 0 && now - st.lastAt >= DEPLOY_STUCK_MS) {
+          const allowance = isCommitPhase(st) ? DEPLOY_COMMIT_STUCK_MS : DEPLOY_STUCK_MS
+          if (!st.done && !st.stuck && st.lastAt > 0 && now - st.lastAt >= allowance) {
             next[ip] = { ...st, stuck: true }
             changed = true
           } else {
