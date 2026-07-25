@@ -572,6 +572,87 @@ function retryDelayMs(attempt: number): number {
 }
 
 /**
+ * Failure taxonomy for a kit flush. Blind retrying every exception
+ * burned the full 8-attempt / ~27 s budget even for failures that can
+ * never recover on their own (revoked folder permission) or that need
+ * the user to act (a file locked by another app). Classify first, then
+ * pick a retry budget + a recovery hint.
+ *
+ *   permission → the handle lost readwrite. Retrying is pointless; the
+ *                only fix is a (re-)grant, so we ask once then stop.
+ *   locked     → the file is open elsewhere (Unity Editor, editor swap
+ *                files, AV scanner). Give it a couple of attempts in
+ *                case it's a momentary hold, then hand it to the user.
+ *   transient  → everything else (FS-API races etc). Full backoff.
+ */
+type KitFlushFailureKind = 'permission' | 'locked' | 'transient'
+
+const PERMISSION_ERROR_NAMES = ['NotAllowedError', 'SecurityError']
+// `InvalidStateError` is deliberately NOT here: it is the typical
+// transient FS-API race (see the kitFlushChain doc-comment) and keeps
+// the full backoff budget. Chromium surfaces a real cross-process file
+// lock as `NoModificationAllowedError` (swap-file creation failed).
+const LOCK_ERROR_NAMES = ['NoModificationAllowedError']
+/** Substrings seen in OS/browser messages when another process holds the file. */
+const LOCK_MESSAGE_PATTERNS = [
+  /swap file/i,
+  /\.swp\b/i,
+  /locked/i,
+  /in use by another/i,
+  /being used by another/i,
+]
+
+/** Retry budget per failure kind. */
+const LOCKED_MAX_ATTEMPTS = 2
+/** After a successful permission re-grant we allow exactly one more attempt. */
+const PERMISSION_MAX_ATTEMPTS = 1
+
+function errorName(err: unknown): string {
+  return err instanceof Error && err.name ? err.name : ''
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+/**
+ * One-line `Name - message` for the status pill. The pill sits in a
+ * width-constrained footer, so the message is truncated hard — the
+ * full exception is always in the console (`console.error` below).
+ */
+function describeError(err: unknown, maxMessageChars = 70): string {
+  const name = errorName(err) || 'Error'
+  const raw = errorMessage(err).replace(/\s+/g, ' ').trim()
+  if (!raw) return name
+  const msg = raw.length > maxMessageChars ? `${raw.slice(0, maxMessageChars - 1)}…` : raw
+  return `${name} - ${msg}`
+}
+
+/** True when the directory handle no longer holds a readwrite grant. */
+async function isPermissionLost(root: FileSystemDirectoryHandle): Promise<boolean> {
+  try {
+    return (await root.queryPermission({ mode: 'readwrite' })) !== 'granted'
+  } catch {
+    // queryPermission itself failing tells us nothing usable — don't
+    // misclassify an unrelated failure as a permission problem.
+    return false
+  }
+}
+
+async function classifyKitFlushError(
+  err: unknown,
+  root: FileSystemDirectoryHandle,
+): Promise<KitFlushFailureKind> {
+  const name = errorName(err)
+  if (PERMISSION_ERROR_NAMES.includes(name)) return 'permission'
+  if (await isPermissionLost(root)) return 'permission'
+  if (LOCK_ERROR_NAMES.includes(name)) return 'locked'
+  const msg = errorMessage(err)
+  if (LOCK_MESSAGE_PATTERNS.some((re) => re.test(msg))) return 'locked'
+  return 'transient'
+}
+
+/**
  * Per-kit pending operation description. Each mutation sets a
  * human-readable string (e.g. `kit "X" の "old.wav" → "new.wav"`)
  * which the status pill surfaces while the flush is queued and once
@@ -990,24 +1071,44 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       } catch { /* logStore unavailable shouldn't break the flush */ }
       return { files: result.files, kitId }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
       console.error('flushKitFolderNow failed:', err)
 
-      // Auto-retry with exponential backoff. Most failures are
-      // transient FS-API races (`InvalidStateError`) that resolve on
-      // the next attempt. A fresh user action via scheduleKitFlush
-      // resets the counter independently — see scheduleKitFlush.
+      // Auto-retry with backoff, but only for failures that can
+      // plausibly recover on their own. Permission loss and locked
+      // files are surfaced immediately (or after a token retry) so the
+      // user isn't left watching a 27-second retry ladder that was
+      // never going to succeed. A fresh user action via
+      // scheduleKitFlush resets the counter independently.
       const attempt = (retryAttempts.get(kit.id) ?? 0) + 1
       retryAttempts.set(kit.id, attempt)
       // Build a label even when the caller didn't seed an op message
       // — failures must never be silent.
       const label = opMsg ?? `kit "${kit.name}" の自動保存`
-      if (attempt <= RETRY_MAX_ATTEMPTS) {
-        // Soft state: warning, not error. The retry mechanism will
-        // recover on its own — the user doesn't have to do anything.
+      // Shown from the FIRST failure on: the retry pill carries the
+      // actual exception, not just a counter.
+      const detail = describeError(err)
+
+      const kind = await classifyKitFlushError(err, outRoot)
+      let maxAttempts = RETRY_MAX_ATTEMPTS
+      if (kind === 'locked') {
+        maxAttempts = LOCKED_MAX_ATTEMPTS
+      } else if (kind === 'permission') {
+        // Try to re-acquire the grant once. requestPermission needs
+        // user activation, so outside a click this throws / returns
+        // denied — in that case there is nothing to retry.
+        let regranted = false
+        try {
+          regranted = await verifyPermission(outRoot, true)
+        } catch { regranted = false }
+        maxAttempts = regranted ? PERMISSION_MAX_ATTEMPTS : 0
+      }
+
+      if (attempt <= maxAttempts) {
+        // Soft state: warning, not error. The retry mechanism may
+        // recover on its own — but show why it failed regardless.
         state.setLocalFsStatus(
           'retrying',
-          `${label}（リトライ中... ${attempt}/${RETRY_MAX_ATTEMPTS}）`,
+          `${label}（リトライ中 ${attempt}/${maxAttempts}）: ${detail}`,
         )
         const existingTimer = retryTimers.get(kit.id)
         if (existingTimer !== undefined) window.clearTimeout(existingTimer)
@@ -1018,12 +1119,19 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         }, delay)
         retryTimers.set(kit.id, t)
       } else {
-        // Retry budget exhausted — this is a real failure that needs
-        // user intervention. Surface what was being attempted plus
-        // a hint at the most common recovery (re-pick the folder).
+        // Retry budget exhausted (or never applicable) — a real
+        // failure that needs user intervention. Recovery in every
+        // case is the existing "Save Folder" button, so the hints
+        // point at what to fix before pressing it again.
+        const hint =
+          kind === 'permission'
+            ? 'フォルダへのアクセス許可が失効しています。Library / Kit Folder を選び直して再試行してください'
+            : kind === 'locked'
+              ? '他のアプリがファイルを開いている可能性があります (Unity Editor など)。閉じてから「Save Folder」で再試行してください'
+              : 'Library / Kit Folder を選び直して再試行してください'
         state.setLocalFsStatus(
           'error',
-          `「${label}」が失敗しました (${msg}) — Library / Kit Folder を選び直して再試行してください`,
+          `「${label}」が失敗しました (${detail}) — ${hint}`,
         )
       }
       return null

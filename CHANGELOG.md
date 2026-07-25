@@ -6,6 +6,11 @@ Hapbeat Studio の変更履歴。形式は [Keep a Changelog](https://keepachang
 - **最新版** `https://studio.hapbeat.com/` は master の package.json バージョンを表示。
 - **凍結版** `https://studio.hapbeat.com/vX.Y/` は `vX.Y.Z` タグ push 時に作成（マイナー単位）。
 
+## [Unreleased]
+
+### Fixed（修正）
+- Kit の Save Folder 失敗時に、原因（例外名 + メッセージ）を最初の失敗時点から表示するように変更。権限失効は再要求 1 回で打ち切り、ファイルロック（Unity Editor などが開いている）は 2 回で打ち切り、それぞれ対処方法を表示（従来は原因非表示のまま約 27 秒リトライし続けた）
+
 ## [0.6.0] - 2026-07-22
 
 ### Added（追加）
