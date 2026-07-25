@@ -1918,6 +1918,40 @@ function KitEditor() {
 // Kit Export
 // ============================================================
 
+/**
+ * No `deploy_progress` / `deploy_result` for this long on a device that has
+ * already started transferring → show the stuck warning (OTA uses the same
+ * pattern with 3 s, see OtaController). The helper emits one progress event
+ * per 4096 B TCP chunk, so a healthy transfer updates every few ms; the only
+ * legitimate silences are the per-file ack (helper waits up to 10 s) and
+ * kit_commit (up to 15 s), which are worst-case allowances.
+ *
+ * The threshold sits just under the helper's 15 s commit timeout on purpose:
+ * the warning tells the user to power-cycle the device, so firing it during a
+ * slow-but-healthy commit would invite a reboot in the middle of a valid
+ * install. 12 s still surfaces a real stall before the helper gives up, while
+ * leaving room for a legitimately slow flash write. The flag is advisory and
+ * clears itself on the next progress event.
+ */
+const DEPLOY_STUCK_MS = 12000
+
+/** Stuck copy — same tone as the OTA stuck notice in FirmwareSubTab. */
+const DEPLOY_STUCK_TEXT =
+  '⚠ 配信の進捗が途絶えています。デバイスからの応答がないため、'
+  + 'デバイスを再起動（電源 OFF/ON）してから再試行してください。'
+
+/** Per-IP kit deploy progress row state. */
+interface DeployProgressState {
+  pct: number
+  msg: string
+  done?: boolean
+  ok?: boolean
+  /** Date.now() of the last progress event; 0 = not transferring yet
+   *  (queued behind another device) or already settled. */
+  lastAt: number
+  stuck?: boolean
+}
+
 function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, devices, send }: {
   kit: import('@/types/library').KitDefinition
   isExporting: boolean; setIsExporting: (v: boolean) => void
@@ -1946,7 +1980,9 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
 
   // Per-IP deploy progress sourced from Helper's `deploy_progress` push.
   // Cleared on a new deploy (`deploy started`) and on completion.
-  const [progressByIp, setProgressByIp] = useState<Record<string, { pct: number; msg: string; done?: boolean; ok?: boolean }>>({})
+  // `lastAt` (Date.now() of the last progress event) drives stuck detection,
+  // mirroring otaStore.lastProgressAt / OtaController's watchdog.
+  const [progressByIp, setProgressByIp] = useState<Record<string, DeployProgressState>>({})
 
   useEffect(() => {
     if (!lastMessage) return
@@ -1958,6 +1994,10 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
         [p.ip as string]: {
           pct: Math.max(0, Math.min(100, Number(p.percent ?? 0))),
           msg: String(p.message ?? ''),
+          // Live progress always clears a prior stuck flag (same as
+          // otaStore.setProgress).
+          lastAt: Date.now(),
+          stuck: false,
         },
       }))
     } else if (t === 'deploy_result' && typeof p.ip === 'string') {
@@ -1973,6 +2013,10 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
           msg,
           done: true,
           ok,
+          // Settled (success or failure) — the watchdog must never
+          // re-flag this row.
+          lastAt: 0,
+          stuck: false,
         },
       }))
       // Surface failures via toast — the inline progress row also
@@ -1982,6 +2026,31 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
       if (!ok) toast(`${ip} 配信失敗: ${msg}`, 'error')
     }
   }, [lastMessage, toast])
+
+  // Stuck detection (same shape as OtaController's watchdog): a row that
+  // has started transferring but got neither `deploy_progress` nor
+  // `deploy_result` for DEPLOY_STUCK_MS is flagged. Rows still waiting in
+  // the helper's sequential per-IP queue keep `lastAt = 0` and are skipped,
+  // so a queued device is never mistaken for a stuck one.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const now = Date.now()
+      setProgressByIp((cur) => {
+        let changed = false
+        const next: Record<string, DeployProgressState> = {}
+        for (const [ip, st] of Object.entries(cur)) {
+          if (!st.done && !st.stuck && st.lastAt > 0 && now - st.lastAt >= DEPLOY_STUCK_MS) {
+            next[ip] = { ...st, stuck: true }
+            changed = true
+          } else {
+            next[ip] = st
+          }
+        }
+        return changed ? next : cur
+      })
+    }, 500)
+    return () => window.clearInterval(id)
+  }, [])
   const kitDirHandle = useLibraryStore((s) => s.kitDirHandle)
   // kit-out dir が設定されていればそちらを、無ければ library workDir を root にする。
   // どちらの場合も root 直下に `<kitId>/` フォルダを作る (kits/ 階層は挟まない)。
@@ -2099,7 +2168,10 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
 
     setIsExporting(true)
     setProgressByIp(
-      Object.fromEntries(targetIps.map((ip) => [ip, { pct: 0, msg: 'queued…' }])),
+      // lastAt = 0: the helper deploys targets sequentially, so a queued
+      // device legitimately sits silent until its turn — the watchdog only
+      // starts counting from its first real deploy_progress.
+      Object.fromEntries(targetIps.map((ip) => [ip, { pct: 0, msg: 'queued…', lastAt: 0 }])),
     )
     try {
       // Save Folder doesn't build a ZIP any more (decode/encode are
@@ -2209,12 +2281,21 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
                 <span className="kit-deploy-progress-ip">{ip}</span>
                 <div className="kit-deploy-progress-bar">
                   <div
-                    className={`kit-deploy-progress-fill ${st.done ? (st.ok ? 'ok' : 'err') : ''}`}
+                    className={`kit-deploy-progress-fill ${st.done ? (st.ok ? 'ok' : 'err') : st.stuck ? 'stuck' : ''}`}
                     style={{ width: `${st.pct}%` }}
                   />
                 </div>
                 <span className="kit-deploy-progress-pct">{st.pct}%</span>
-                <span className="kit-deploy-progress-msg">{st.msg}</span>
+                {/* Stuck swaps the text/color of THIS span only — no extra
+                    row is inserted, so nothing below moves (workspace
+                    no-layout-shift rule). The full sentence lives in the
+                    tooltip since the span is width-capped + ellipsised. */}
+                <span
+                  className={`kit-deploy-progress-msg${st.stuck ? ' stuck' : ''}`}
+                  title={st.stuck ? DEPLOY_STUCK_TEXT : st.msg}
+                >
+                  {st.stuck ? DEPLOY_STUCK_TEXT : st.msg}
+                </span>
               </div>
             ))
           )}
