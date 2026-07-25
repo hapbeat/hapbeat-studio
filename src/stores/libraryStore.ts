@@ -537,6 +537,20 @@ const lastWrittenKitId = new Map<string, string>()
  * removal so a stale build can't end up on the wire.
  */
 const lastBuiltKit = new Map<string, { files: ExportFile[]; kitId: string }>()
+
+/**
+ * Drop the cached build for a kit whose *content* changed.
+ *
+ * Event edits (mode toggle, intensity, rename, add/remove) deliberately
+ * skip the Pack rebuild — it used to re-encode every WAV on each
+ * keystroke — and rely on Deploy to rebuild. But Deploy prefers
+ * `getLastBuiltKit` when present, so without this the next Deploy ships
+ * the manifest that was built *before* the edit: e.g. switching an event
+ * to BOTH would still send the old single-mode entry.
+ */
+function invalidateBuiltKit(kitId: string): void {
+  lastBuiltKit.delete(kitId)
+}
 // Skip-write ledger is no longer in-memory: the IDB encoded-wavs cache
 // already records (sourceHash → encodedBlob) per (eventId, mode), so
 // `flushKitFolderNow` reads `ExportFile.cached` (set by exportKitAsPack
@@ -2620,6 +2634,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // (Disk-as-truth) State + kits-meta.json on disk. No IDB kit mirror.
     const newKits = kits.map((k) => (k.id === kitId ? updated : k))
     set({ kits: newKits })
+    invalidateBuiltKit(kitId)
     const { workDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
     // Kit folder Pack rebuild (resample + install-clips/ + manifest)
@@ -2640,6 +2655,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // (Disk-as-truth) State + kits-meta.json. No IDB kit mirror.
     const newKits = kits.map((k) => (k.id === kitId ? updated : k))
     set({ kits: newKits })
+    invalidateBuiltKit(kitId)
     // Drop the kit-owned audio blob so removed events don't leak into
     // IDB indefinitely. Best-effort; a missing blob is fine (e.g. for
     // events whose audio failed to import).
@@ -2672,13 +2688,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // (Disk-as-truth) State + kits-meta.json. No IDB kit mirror.
     const newKits = kits.map((k) => (k.id === kitId ? updated : k))
     set({ kits: newKits })
+    invalidateBuiltKit(kitId)
     const { workDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
     // Metadata-only update — no Pack rebuild. Mode toggle / intensity
     // drag / rename used to trigger a 400 ms-debounced full kit
     // re-emit (resample + write every WAV) and that was the dominant
     // source of UI lag while editing. The kit folder picks up these
-    // changes on the next Deploy.
+    // changes on the next Deploy — which is why the cached build has to
+    // go here, or Deploy would reuse the pre-edit manifest.
     void prevName
   },
 
@@ -2708,6 +2726,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // (Disk-as-truth) State + kits-meta.json. No IDB kit mirror.
     const newKits = kits.map((k) => (k.id === id ? updated : k))
     set({ kits: newKits })
+    invalidateBuiltKit(id)
     const { workDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
     // Kit-level rename / metadata change — no Pack rebuild. Deploy
