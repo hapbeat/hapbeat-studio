@@ -1087,12 +1087,23 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // disk for that event. The device firmware still only plays
       // what the manifest says, so the extra file just sits unused
       // on LittleFS until the next clean kit re-export.
+      // Built from the paths exportKitAsPack ACTUALLY produced, per subfolder
+      // — not re-derived from event names. Re-deriving got the de-duplication
+      // wrong: two events resolving to the same filename are written as
+      // `foo.wav` + `foo_2.wav`, but a name-derived Set only ever contains
+      // `foo.wav`, so `foo_2.wav` was deleted moments after being written and
+      // the manifest ended up referencing a file that wasn't on disk. Using
+      // result.files makes "owned" mean exactly "we just wrote it".
+      // A UNION across subfolders, deliberately not per-subfolder: keeping a
+      // name owned anywhere is what preserves the mode-toggle tolerance
+      // described above (a FIRE→CLIP flip leaves the old subfolder's copy in
+      // place instead of churning the file).
       const ownedBasenames = new Set<string>()
-      for (const ev of kit.events) {
-        const candidate = (ev.clipName || ev.clipSourceFilename || '').trim()
-        if (!candidate) continue
-        const stem = candidate.replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]/g, '_')
-        if (stem) ownedBasenames.add(`${stem}.wav`)
+      for (const f of result.files) {
+        const slash = f.path.lastIndexOf('/')
+        if (slash < 0) continue          // kit-root file (manifest) — not pruned here
+        const base = f.path.slice(slash + 1)
+        if (base) ownedBasenames.add(base)
       }
       try {
         const kitDir = await outRoot.getDirectoryHandle(kitId)
