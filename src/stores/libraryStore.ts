@@ -38,6 +38,7 @@ import {
   isHiddenStudioDir,
   type DiscoveredKit,
   type KitDiskCache,
+  type DirectoryHandleKey,
 } from '@/utils/localDirectory'
 import {
   exportKitAsPack,
@@ -215,6 +216,12 @@ interface LibraryState {
    *  builds the ZIP on demand from this via `buildKitZip` — Save Folder
    *  never needs a ZIP, so we skip the encode/decode round trip. */
   getLastBuiltKit: (kitId: string) => { files: ExportFile[]; kitId: string } | undefined
+
+  /** Build a kit's file set IN MEMORY, touching no disk. Deploy's last-resort
+   *  path: shipping a kit to a device must not require a writable local
+   *  folder, so a save failure (stale handle, locked file, folder gone) can't
+   *  block it. Save Folder still owns persistence. */
+  buildKitInMemory: (kitId: string) => Promise<{ files: ExportFile[]; kitId: string } | null>
 
   /** Clip id currently open in the inline editor (Clips panel). Set from
    *  either the Clips panel itself or from a Kit event row's Edit action so
@@ -667,6 +674,47 @@ async function isPermissionLost(root: FileSystemDirectoryHandle): Promise<boolea
   }
 }
 
+/**
+ * Re-materialise the kit output directory handle from IndexedDB and swap it
+ * into the store.
+ *
+ * A `stale-handle` retry is otherwise guaranteed to fail: `flushKitFolderNow`
+ * reads `kitDirHandle ?? workDirHandle` fresh each call, so retrying without
+ * replacing the handle just re-runs the same dead object. Handles go stale
+ * when another process recreates the directory underneath us — which is
+ * exactly what an editor that watches its own asset tree (Unity) does on
+ * reimport, and why this only ever bit kit folders living inside such a
+ * project.
+ *
+ * Reading the handle back out of IDB gives a newly deserialised handle bound
+ * to the same entry, which is the only recovery available without a user
+ * gesture (re-picking the folder needs a click). Returns the fresh handle, or
+ * null if it couldn't be restored / re-permissioned — in which case the caller
+ * surfaces the "pick the folder again" hint.
+ */
+async function reacquireOutRoot(): Promise<FileSystemDirectoryHandle | null> {
+  const { kitDirHandle } = useLibraryStore.getState()
+  const key: DirectoryHandleKey = kitDirHandle ? 'kitdir' : 'workdir'
+  try {
+    const fresh = await loadDirectoryHandle(key)
+    if (!fresh) return null
+    // readwrite, not read: the retry this unblocks is a WRITE. Checking only
+    // read would pass a handle whose write grant is gone, so the retry fails
+    // again and the user eats two prompts instead of one. queryPermission
+    // (no prompt) — requestPermission needs a user gesture we don't have here,
+    // and the permission-lost case is already handled by its own branch.
+    if ((await fresh.queryPermission({ mode: 'readwrite' })) !== 'granted') return null
+    if (key === 'kitdir') {
+      useLibraryStore.setState({ kitDirHandle: fresh, kitDirName: fresh.name })
+    } else {
+      useLibraryStore.setState({ workDirHandle: fresh, workDirName: fresh.name })
+    }
+    return fresh
+  } catch {
+    return null
+  }
+}
+
 async function classifyKitFlushError(
   err: unknown,
   root: FileSystemDirectoryHandle,
@@ -702,6 +750,19 @@ const lastOpMessage = new Map<string, string>()
  */
 let importRunSeq = 0
 
+/**
+ * Bumped ONLY when the user re-targets Studio at a different folder
+ * (pickKitDir / disconnectKitDir / pickWorkDir). A long folder scan compares
+ * this at commit time to decide whether it is still relevant.
+ *
+ * Deliberately not an identity check on the handle itself: `reacquireOutRoot`
+ * swaps in a freshly deserialised handle for the SAME folder when recovering
+ * from a stale handle, which would make an identity compare read as "the user
+ * switched folders" and silently discard a perfectly good scan — leaving the
+ * kit list empty until the user picks the folder again.
+ */
+let outRootEpoch = 0
+
 function setOp(kitId: string, msg: string) {
   lastOpMessage.set(kitId, msg)
   useLibraryStore.getState().setLocalFsStatus('saving', msg)
@@ -714,6 +775,9 @@ function setOp(kitId: string, msg: string) {
  * against the new folder.
  */
 function resetKitMemory() {
+  // Retargeting to a different folder: invalidate any scan still in flight for
+  // the old one so its (late) result can't overwrite the new folder's kits.
+  outRootEpoch++
   for (const t of kitFlushTimers.values()) window.clearTimeout(t)
   kitFlushTimers.clear()
   for (const t of retryTimers.values()) window.clearTimeout(t)
@@ -723,6 +787,11 @@ function resetKitMemory() {
   lastWrittenKitId.clear()
   lastBuiltKit.clear()
   lastOpMessage.clear()
+  // A failure belongs to the folder that produced it. `error` is otherwise
+  // sticky until the next SUCCESSFUL write (LocalFsStatus keeps it visible on
+  // purpose), so switching away from a folder that couldn't be written left
+  // the pill accusing the newly-chosen folder indefinitely.
+  useLibraryStore.getState().setLocalFsStatus('idle')
 }
 
 /**
@@ -1035,6 +1104,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           const stale: string[] = []
           for await (const entry of sub.values()) {
             if (entry.kind !== 'file') continue
+            // ONLY ever delete .wav — never any other file we didn't write.
+            // The kit folder can legitimately live inside someone else's
+            // project: a Unity Assets/ tree keeps a `<clip>.wav.meta`
+            // sidecar next to every clip, and deleting those makes Unity
+            // reimport with fresh GUIDs, silently breaking every scene /
+            // prefab reference to that asset. Extension-scoping this keeps
+            // the prune to files this app actually owns.
+            if (!/\.wav$/i.test(entry.name)) continue
             if (!ownedBasenames.has(entry.name)) stale.push(entry.name)
           }
           for (const n of stale) {
@@ -1122,7 +1199,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       if (kind === 'locked') {
         maxAttempts = LOCKED_MAX_ATTEMPTS
       } else if (kind === 'stale-handle') {
-        maxAttempts = STALE_HANDLE_MAX_ATTEMPTS
+        // Swap in a freshly deserialised handle BEFORE retrying. The retry
+        // re-reads `kitDirHandle ?? workDirHandle`, so without this it would
+        // reuse the same dead handle and fail identically every time — the
+        // "kit deploy into a Unity project fails forever" symptom. If the
+        // handle can't be restored there is nothing a retry could fix, so go
+        // straight to the error + "pick the folder again" hint.
+        maxAttempts = (await reacquireOutRoot()) ? STALE_HANDLE_MAX_ATTEMPTS : 0
       } else if (kind === 'permission') {
         // Try to re-acquire the grant once. requestPermission needs
         // user activation, so outside a click this throws / returns
@@ -1231,6 +1314,22 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 
   getLastBuiltKit: (kitId) => lastBuiltKit.get(kitId),
+
+  buildKitInMemory: async (kitId) => {
+    const kit = useLibraryStore.getState().kits.find((k) => k.id === kitId)
+    if (!kit) return null
+    if (validateKitName(kit.name)) return null
+    try {
+      const result = await exportKitAsPack(kit)
+      // Same guard flushKitFolderNow uses: the kit may have been removed
+      // while the (async) export ran.
+      if (!useLibraryStore.getState().kits.some((k) => k.id === kit.id)) return null
+      return { files: result.files, kitId: result.kitId }
+    } catch (err) {
+      console.error('buildKitInMemory failed:', err)
+      return null
+    }
+  },
 
   loadLibrary: async () => {
     // Demo/screenshot mode: `seedDemo.ts` has already populated `clips` /
@@ -1465,6 +1564,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (!isFileSystemAccessSupported()) return false
     const handle = await pickWorkDirectory()
     if (!handle) return false
+    // Retarget: when no dedicated kitDir is set this IS the kit outRoot, and
+    // this path doesn't go through resetKitMemory(). (See outRootEpoch.)
+    outRootEpoch++
     set({ workDirHandle: handle, workDirName: handle.name })
 
     // One-shot rename of the pre-tilde archive folders before any
@@ -1538,6 +1640,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (!handle) return false
     const granted = await verifyPermission(handle, true)
     if (!granted) return false
+    // Adopting a dedicated kitDir moves outRoot off workDirHandle, so any scan
+    // already running against the workdir is now for the wrong folder.
+    outRootEpoch++
     set({ kitDirHandle: handle, kitDirName: handle.name })
     // 起動時の復元でも同様に自動取り込み (ローカル ≥ IDB)
     await get().importKitsFromOutputDir().catch((err) => console.error('Auto-import after restoreKitDir failed:', err))
@@ -1566,6 +1671,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const { kitDirHandle, workDirHandle } = get()
     const outRoot = kitDirHandle ?? workDirHandle
     if (!outRoot) return 0
+
+    // Which folder generation this scan is FOR. A scan can run for many
+    // seconds (every WAV gets decoded), so the user can easily switch folders
+    // mid-flight — and the final `set({ kits })` below would then resurrect
+    // the previous folder's kits over the new folder's, leaving "phantom"
+    // kits that don't exist in the folder now connected.
+    const scanEpoch = outRootEpoch
+    const isStillCurrent = () => outRootEpoch === scanEpoch
 
     let discovered = await scanKitOutputFolder(outRoot)
     // Diagnostic — surfaces in DevTools so users can tell *why* a kit
@@ -2021,6 +2134,12 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       lastWrittenKitId.set(kit.id, kitId)
       importedCount++
     }
+
+    // Superseded by a newer folder selection while we were scanning — discard
+    // rather than clobber it (see `isStillCurrent` at the top). Persisting
+    // would be worse still: it would write this folder's kit list into the
+    // metadata of the folder the user actually has open now.
+    if (!isStillCurrent()) return 0
 
     set({ clips: updatedClips, kits: updatedKits })
     if (workDirHandle) {

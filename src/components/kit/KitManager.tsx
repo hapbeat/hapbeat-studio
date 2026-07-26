@@ -2199,7 +2199,20 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
       // ExportFile[]. If nothing has been built yet, force a synchronous
       // flush first so we have an aligned file set.
       const store = useLibraryStore.getState()
-      const built = store.getLastBuiltKit(kit.id) ?? await store.flushKitFolderNow(kit.id)
+      // Deploy must not be blocked by a local-folder problem. Saving is a
+      // nice-to-have here (it keeps the on-disk copy in step); shipping the
+      // kit to the device is the actual request. So if the flush fails —
+      // stale handle, a file locked by another app, no folder picked at all —
+      // fall back to building the same file set purely in memory.
+      let built = store.getLastBuiltKit(kit.id) ?? await store.flushKitFolderNow(kit.id)
+      if (!built) {
+        built = await store.buildKitInMemory(kit.id)
+        // Say so explicitly: the deploy below will succeed, and the inline
+        // progress row replaces this kit's save-status text while it runs, so
+        // the footer pill would otherwise be the only hint that the folder
+        // copy is now out of date.
+        if (built) toast('フォルダへの保存に失敗しました（デバイスへの送信は続行します）', 'warning')
+      }
       if (!built) { toast('Build failed', 'error'); return }
       const { buildKitZip } = await import('@/utils/kitExporter')
       const { blob } = await buildKitZip(built.files, built.kitId)
