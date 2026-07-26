@@ -13,6 +13,7 @@ Hapbeat Studio の変更履歴。形式は [Keep a Changelog](https://keepachang
 - Kit の Save Folder 失敗時に、原因（例外名 + メッセージ + 失敗したファイルのパス）を最初の失敗時点から表示するように変更。権限失効は再要求 1 回、ファイルロック（Unity Editor などが開いている）とワークフォルダ参照の失効（`InvalidStateError`）は 2 回で打ち切り、それぞれ対処方法を表示（従来は原因非表示のまま約 27 秒リトライし続けた）
 - 同一のエンコード済み音源を複数 Event が使う場合、WAV を複製せず manifest の各 Event から同じファイルを参照するように修正（intensity / loop 等の parameters は Event ごとに独立）
 - 作業フォルダを切り替えた際、切替前のフォルダにだけ存在する Kit が一覧へ残る問題を修正。Kit 一覧を選択中フォルダの実ファイルから再構築するように変更
+- Save Folder が複数ファイルを書き込む途中で外部フォルダ監視により Kit ディレクトリハンドルが無効化され、最後の manifest 書込みが `InvalidStateError` になる問題を修正。各出力ファイルの直前に Kit ディレクトリを再取得するように変更
 
 ## [0.6.0] - 2026-07-22
 

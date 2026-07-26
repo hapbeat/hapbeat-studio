@@ -582,22 +582,15 @@ export async function writeKitFolder(
   kitName: string,
   files: { path: string; blob: Blob }[],
 ): Promise<void> {
-  // 各 kit は必ず root 直下に kit 名のフォルダとして書き出す
-  // (ライブラリ / kit-out どちらを root に指定してもこの階層構造)。
-  // 以前は library workDir と共用する想定で `kits/` 階層を挟んでいたが、
-  // フォルダを分離できるようになったため削除した。
-  let kitDir: FileSystemDirectoryHandle
-  try {
-    kitDir = await root.getDirectoryHandle(kitName, { create: true })
-  } catch (err) {
-    rethrowWithPath(err, `${kitName}/`)
-  }
-
+  // Reacquire the Kit directory for every file. External folder watchers
+  // (notably Unity AssetDatabase) can replace/invalidate a child directory
+  // handle after a WAV write; retaining it until the final manifest write
+  // then raises InvalidStateError even though the root handle is still valid.
   for (const { path, blob } of files) {
     try {
       // Handle nested paths like "install-clips/gunshot.wav"
       const parts = path.split('/')
-      let dir = kitDir
+      let dir = await root.getDirectoryHandle(kitName, { create: true })
       for (let i = 0; i < parts.length - 1; i++) {
         dir = await dir.getDirectoryHandle(parts[i], { create: true })
       }
