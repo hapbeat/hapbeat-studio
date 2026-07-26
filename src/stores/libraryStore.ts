@@ -2,14 +2,7 @@ import { create } from 'zustand'
 import type { LibraryClip, KitDefinition, KitEvent, KitEventMode, LibraryFilter, BuiltinClipMeta, BuiltinLibraryIndex, LibraryViewMode, ClipAmpPreset } from '@/types/library'
 import {
   clearLegacyClipStores,
-  deleteClip,
-  updateClipMeta,
-  loadClipAudio,
-  saveKitEventAudio,
-  loadKitEventAudio,
-  deleteKitEventAudio,
   deleteEncodedWavsForEvent,
-  deleteKit,
 } from '@/utils/libraryStorage'
 import { useLogStore } from '@/stores/logStore'
 import { encodeWavBlob } from '@/utils/wavIO'
@@ -33,6 +26,7 @@ import {
   writeKitFolder,
   loadKitDiskCache,
   saveKitDiskCache,
+  STUDIO_KIT_METADATA_FILENAME,
   migrateLegacyArchiveFolders,
   isHiddenStudioDir,
   type DiscoveredKit,
@@ -41,6 +35,7 @@ import {
 } from '@/utils/localDirectory'
 import {
   exportKitAsPack,
+  kitEventOutputFilename,
   manifestFileName,
   toKitId,
   type ExportFile,
@@ -111,6 +106,68 @@ export function validateKitName(name: string): string | null {
     return 'Kit name must start with a-z and use only [a-z 0-9 -]'
   }
   return null
+}
+
+/** Authoring source path below `<kit>/source/`. The selected folder is the
+ * durable source of truth, so this path must be safe and portable. */
+function normalizeKitSourceFilename(sourceFilename: string, clipName: string): string {
+  const raw = (sourceFilename || `${clipName || 'clip'}.wav`).replace(/\\/g, '/')
+  const parts = raw
+    .split('/')
+    .filter((part) => part && part !== '.' && part !== '..')
+    .map((part) => part.replace(/[\\:*?"<>|]/g, '_'))
+    .filter(Boolean)
+  return parts.join('/') || 'clip.wav'
+}
+
+function withNumericFilenameSuffix(path: string, suffix: number): string {
+  const slash = path.lastIndexOf('/')
+  const dir = slash >= 0 ? path.slice(0, slash + 1) : ''
+  const leaf = slash >= 0 ? path.slice(slash + 1) : path
+  const dot = leaf.lastIndexOf('.')
+  const stem = dot > 0 ? leaf.slice(0, dot) : leaf
+  const ext = dot > 0 ? leaf.slice(dot) : ''
+  return `${dir}${stem}_${suffix}${ext}`
+}
+
+async function fileMatchesBlob(file: File, blob: Blob): Promise<boolean> {
+  if (file.size !== blob.size) return false
+  const [left, right] = await Promise.all([file.arrayBuffer(), blob.arrayBuffer()])
+  const a = new Uint8Array(left)
+  const b = new Uint8Array(right)
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+/** Store original authoring audio without duplicating an identical file.
+ * A same-name/different-content collision receives `_2`, `_3`, ... instead
+ * of overwriting another event's source. */
+async function persistKitSourceAudio(
+  root: FileSystemDirectoryHandle,
+  kitName: string,
+  preferredFilename: string,
+  blob: Blob,
+  existingSourceFilenames: string[],
+): Promise<string> {
+  // Content identity wins over display/source naming: if this exact audio is
+  // already owned by the Kit, point the new Event at that one source file.
+  for (const existingFilename of new Set(existingSourceFilenames)) {
+    const existing = await readKitClipFile(root, kitName, 'source', existingFilename)
+    if (existing && await fileMatchesBlob(existing, blob)) return existingFilename
+  }
+
+  let candidate = preferredFilename
+  for (let suffix = 2; ; suffix++) {
+    const existing = await readKitClipFile(root, kitName, 'source', candidate)
+    if (!existing) {
+      await writeKitFolder(root, kitName, [{ path: `source/${candidate}`, blob }])
+      return candidate
+    }
+    if (await fileMatchesBlob(existing, blob)) return candidate
+    candidate = withNumericFilenameSuffix(preferredFilename, suffix)
+  }
 }
 
 /** Source tab for the library view */
@@ -286,8 +343,8 @@ interface LibraryState {
   deleteAmpPreset: (name: string) => Promise<void>
 
   getClipAudio: (id: string) => Promise<Blob | undefined>
-  /** Resolve audio for a KitEvent (independent of library — see
-   *  `saveKitEventAudio` / `KitEvent.id` IDB key). */
+  /** Resolve audio for a KitEvent from `<kit>/source/`, with generated
+   *  output folders as the migration fallback for older kits. */
   getKitEventAudio: (kitEventId: string) => Promise<Blob | undefined>
 
   // Work directory actions
@@ -323,13 +380,11 @@ interface LibraryState {
    * different amps as two distinct events).
    */
   /**
-   * Add a kit event. The caller must pass the audio blob — the store
-   * saves it into the kit-event-owned IDB slot under the new event's
-   * generated id. `null` is no longer a valid value post schema 2.0.0
-   * (clip required in both buckets); kept in the signature for the
-   * gradual call-site cleanup.
+   * Add a kit event. The caller passes the original audio; the store writes
+   * it into `<kit>/source/` before committing metadata. Identical source
+   * files are shared and same-name/different-content files are suffixed.
    */
-  addEventToKit: (kitId: string, event: Omit<KitEvent, 'id'>, audioBlob: Blob | null) => Promise<string | null>
+  addEventToKit: (kitId: string, event: Omit<KitEvent, 'id'>, audioBlob: Blob) => Promise<string | null>
   /** Remove an event by its per-kit id (not eventId — duplicates are allowed). */
   removeEventFromKit: (kitId: string, kitEventId: string) => Promise<void>
   updateKitEvent: (kitId: string, kitEventId: string, updates: Partial<KitEvent>) => Promise<void>
@@ -419,10 +474,7 @@ async function saveClipsMetaToDir(handle: FileSystemDirectoryHandle, clips: Libr
  *
  * Idempotent: re-running on an already-migrated kit is a no-op.
  *
- * Note: audio blob migration (copying `STORE_AUDIO[clipId]` to
- * `STORE_AUDIO[event.id]`) lives in `migrateKitAudioAsync` below — sync
- * vs async paths are split so this function can stay pure / cheap to
- * call from render-adjacent code paths.
+ * Audio is resolved from the selected folder, never migrated into browser storage.
  */
 function migrateKit(kit: KitDefinition, libraryClips: LibraryClip[]): KitDefinition {
   let changed = false
@@ -471,52 +523,6 @@ function migrateKit(kit: KitDefinition, libraryClips: LibraryClip[]): KitDefinit
     return next
   })
   return changed ? { ...kit, events } : kit
-}
-
-/**
- * Walk a list of (pre-migration) kits and collect the `event.id →
- * legacy clipId` map so `migrateKitAudioAsync` can copy the right blob
- * AFTER `migrateKit` has already stripped the clipId from the in-memory
- * shape. Skips entries that aren't legacy (= already migrated) so it's
- * safe to call on a mixed-state list.
- */
-function collectLegacyClipAudioMap(kits: KitDefinition[]): Map<string, string> {
-  const out = new Map<string, string>()
-  for (const k of kits) {
-    for (const e of k.events) {
-      const legacy = e as unknown as { clipId?: string; clipName?: string; id?: string }
-      if (legacy.clipName === undefined && legacy.clipId && legacy.id) {
-        out.set(legacy.id, legacy.clipId)
-      }
-    }
-  }
-  return out
-}
-
-/**
- * Best-effort async companion to `migrateKit` that copies the legacy
- * library audio blob into the kit event's own IDB slot. Called once
- * per legacy event during `loadLibrary` so previewing a migrated kit
- * works without needing to re-import the WAV from the kit folder.
- *
- * Silent / idempotent: if the destination already has a blob or the
- * source is missing, nothing happens. Failures are logged and swallowed
- * — the on-disk WAV inside the kit folder is the ultimate fallback.
- */
-async function migrateKitAudioAsync(
-  legacyClipIdByEventId: Map<string, string>,
-): Promise<void> {
-  for (const [eventId, legacyClipId] of legacyClipIdByEventId) {
-    try {
-      const existing = await loadKitEventAudio(eventId)
-      if (existing) continue
-      const sourceBlob = await loadClipAudio(legacyClipId)
-      if (!sourceBlob) continue
-      await saveKitEventAudio(eventId, sourceBlob)
-    } catch (err) {
-      console.warn('[migrateKitAudio] failed for event', eventId, err)
-    }
-  }
 }
 
 /** Save kits metadata to the local work directory */
@@ -914,10 +920,20 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const opMsg = lastOpMessage.get(kit.id)
     try {
       // exportKitAsPack returns ExportFile[] directly (no ZIP encode
-      // / decode round-trip). For unchanged audio the IDB encoded-WAV
-      // cache also skips decode + re-encode. Save Folder only adds or
-      // overwrites files; it never removes an existing file.
-      const result = await exportKitAsPack(kit)
+      // / decode round-trip). Resolve audio from the connected Kit folder.
+      // `source/` is authoritative; generated folders are only a migration
+      // fallback for older kits.
+      // Save Folder only adds or overwrites files; it never removes an
+      // existing file.
+      const resolvedSourceAudio = new Map<string, Blob>()
+      const result = await exportKitAsPack(
+        kit,
+        async (event) => {
+          const blob = await useLibraryStore.getState().getKitEventAudio(event.id)
+          if (blob) resolvedSourceAudio.set(event.id, blob)
+          return blob
+        },
+      )
 
       // Race-condition guard: kit may have been removed (× clicked)
       // while exportKitAsPack was running. Bail before any disk write.
@@ -939,6 +955,41 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       }
 
       const kitId = result.kitId
+
+      // Record the filenames actually chosen after content de-duplication.
+      // This lets a legacy/output fallback follow the manifest reference even
+      // when another Event supplied the shared filename.
+      if (result.outputFilenames) {
+        set((current) => ({
+          kits: current.kits.map((currentKit) => currentKit.id === kit.id
+            ? { ...currentKit, events: currentKit.events.map((event) => ({
+                ...event,
+                clipOutputFilenames: result.outputFilenames[event.id] ?? event.clipOutputFilenames,
+              })) }
+            : currentKit),
+        }))
+      }
+
+      // Materialise the durable authoring source for kits created before the
+      // `source/` layout. Existing source files are never overwritten. For a
+      // legacy kit, the generated 16 kHz WAV is the best recoverable source;
+      // newly-added events already have their true original copied here.
+      const sourceFiles = new Map<string, Blob>()
+      for (const event of kit.events) {
+        const sourceFilename = normalizeKitSourceFilename(event.clipSourceFilename, event.clipName)
+        const existingSource = await readKitClipFile(outRoot, kitId, 'source', sourceFilename)
+        if (!existingSource) {
+          const blob = resolvedSourceAudio.get(event.id)
+          if (blob) sourceFiles.set(`source/${sourceFilename}`, blob)
+        }
+      }
+      if (sourceFiles.size > 0) {
+        await writeKitFolder(
+          outRoot,
+          kitId,
+          [...sourceFiles].map(([path, blob]) => ({ path, blob })),
+        )
+      }
 
       // Rename: if this kit was previously written under a different
       // kitId, archive the stale folder so it stops appearing in OS
@@ -1051,6 +1102,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         )
       }
       await writeKitFolder(outRoot, kitId, filesToWrite)
+
+      // Persist authoring-only metadata inside the Kit folder so `source/`
+      // filenames and stable event ids travel with the Kit. This file is not
+      // part of ExportFile[] and therefore never enters the Deploy ZIP.
+      const authoringKit = useLibraryStore.getState().kits.find((current) => current.id === kit.id) ?? kit
+      await writeKitFolder(outRoot, kitId, [{
+        path: STUDIO_KIT_METADATA_FILENAME,
+        blob: new Blob([JSON.stringify(authoringKit, null, 2)], { type: 'application/json' }),
+      }])
 
       // Update the on-disk cache file with the CURRENT output hashes.
       // This happens every flush — even when no WAVs were written —
@@ -1273,7 +1333,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (!kit) return null
     if (validateKitName(kit.name)) return null
     try {
-      const result = await exportKitAsPack(kit)
+      const result = await exportKitAsPack(
+        kit,
+        (event) => useLibraryStore.getState().getKitEventAudio(event.id),
+      )
       // Same guard flushKitFolderNow uses: the kit may have been removed
       // while the (async) export ran.
       if (!useLibraryStore.getState().kits.some((k) => k.id === kit.id)) return null
@@ -1799,12 +1862,11 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // library rename produced a phantom duplicate (kit had the old
     // name, basename match failed, library got a new clip + new file).
     //
-    // Kit-event audio is still saved (`saveKitEventAudio(eventId, blob)`
-    // below), so previews / exports / deploys keep working without
-    // touching the library at all.
+    // Kit-event audio stays independent from the library because each Kit
+    // owns an on-disk `source/` copy. Browser storage is never the source.
 
     let importedCount = 0
-    for (const { folderName, manifestJson, clipFiles } of discovered as DiscoveredKit[]) {
+    for (const { folderName, manifestJson, authoringJson, clipFiles } of discovered as DiscoveredKit[]) {
       if (!manifestJson || typeof manifestJson !== 'object') continue
       // `name` is the only kit identifier in modern manifests; older
       // exports also carried `kit_id` which we now ignore (it always
@@ -1860,7 +1922,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         clipChannels: number
         clipSampleRate: number
         clipFileSize: number
-        clipBlob?: Blob       // raw bytes for kit-event audio store
         intensity: number
         loop: boolean
         deviceWiper: number | null
@@ -1887,7 +1948,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         }
 
         let clipDuration = 0, clipChannels = 1, clipSampleRate = 16000, clipFileSize = 0
-        let clipBlob: Blob | undefined
         if (clipFile) {
           try {
             const arrayBuffer = await clipFile.arrayBuffer()
@@ -1896,7 +1956,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
             clipChannels = decoded.numberOfChannels
             clipSampleRate = decoded.sampleRate
             clipFileSize = clipFile.size
-            clipBlob = new Blob([arrayBuffer], { type: clipFile.type || 'audio/wav' })
           } catch (err) {
             console.warn(`[importKitsFromOutputDir] decode failed for ${clipFilename}:`, err)
           }
@@ -1914,7 +1973,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           clipChannels,
           clipSampleRate,
           clipFileSize,
-          clipBlob,
           intensity: typeof params.intensity === 'number' ? params.intensity : 0.5,
           loop: params.loop ?? false,
           deviceWiper: typeof params.device_wiper === 'number' ? params.device_wiper : null,
@@ -1984,36 +2042,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       }
 
       const events: KitEvent[] = []
-      // Queue of (eventId, blob) pairs to write into STORE_AUDIO once
-      // the kit list is committed to state. Defer writes until after
-      // the loop so a mid-loop failure doesn't leave half-saved blobs.
-      const eventAudioToSave: Array<{ eventId: string; blob: Blob }> = []
-
-      // ---- Match-and-preserve against existing IDB kit ----
-      //
-      // If the user already has a kit in IDB with this kitId, we want
-      // to **preserve the existing ev.id** for any event whose wire
-      // `eventId` is the same — and crucially, **keep the existing
-      // audio blob in IDB** rather than overwriting it with whatever
-      // is currently on disk.
-      //
-      // Why this matters: on the FIRST Save Folder the source audio
-      // is the user's original drop (e.g. 44.1 kHz stereo). We encode
-      // it to 16 kHz PCM16 and write that to disk. If we later
-      // **re-import** from disk (after a hard reload / folder
-      // re-pick), the disk WAV — being already 16 kHz PCM16 — becomes
-      // the new "source" if we let it overwrite IDB. That changes
-      // sourceHash, busts the encoded-wavs cache, and produces
-      // slightly different bytes on re-encode (float ⇄ int16 round
-      // trip costs ~1 ULP per sample). Net effect: every Save Folder
-      // after a reload would rewrite every WAV even though nothing
-      // user-visible changed.
-      //
-      // By keeping IDB audio when the matched event already has audio,
-      // we keep the ORIGINAL source bytes across reloads. sourceHash
-      // stays stable, encoded-wavs cache hits, outputHash stays stable,
-      // and the disk skip-write check matches.
-      const existingKitForMatch = existingKits.find((k) => k.name === kitId)
+      // Preserve the stable event id and the `source/` filename recorded in
+      // disk metadata. Generated install/stream filenames must not replace the
+      // original authoring source identity on a refresh.
+      const embeddedKit = authoringJson
+        && typeof authoringJson === 'object'
+        && Array.isArray((authoringJson as Partial<KitDefinition>).events)
+        ? migrateKit(authoringJson as KitDefinition, updatedClips)
+        : undefined
+      const existingKitForMatch = embeddedKit ?? existingKits.find((k) => k.name === kitId)
       const existingEventByWireId = new Map<string, KitEvent>()
       if (existingKitForMatch) {
         for (const ev of existingKitForMatch.events) {
@@ -2033,18 +2070,12 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
             r.loop === group[0].loop
           )
 
-        // Look up an existing event by wire eventId to potentially
-        // preserve its ev.id and audio. If the new modes list disagrees
+        // Look up an existing event by wire eventId to preserve its id and
+        // source filename. If the new modes list disagrees
         // with the existing event (e.g. user toggled FIRE → CLIP outside
         // Studio), we still preserve ev.id; subsequent saves will reflect
         // the new modes via the manifest.
         const existingEv = existingEventByWireId.get(baseEventId)
-        const shouldKeepAudio = async (eventId: string): Promise<boolean> => {
-          try {
-            const blob = await loadKitEventAudio(eventId)
-            return !!blob
-          } catch { return false }
-        }
 
         if (mergeable) {
           const order: Record<KitEventMode, number> = { command: 0, stream_clip: 1 }
@@ -2056,8 +2087,11 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           events.push({
             id: newId,
             eventId: baseEventId,
-            clipName: seed.clipName,
-            clipSourceFilename: seed.clipFilename,
+            clipName: existingEv?.clipName ?? seed.clipName,
+            clipSourceFilename: existingEv?.clipSourceFilename ?? seed.clipFilename,
+            clipOutputFilenames: Object.fromEntries(
+              group.map((entry) => [entry.mode, entry.clipFilename]),
+            ) as Partial<Record<KitEventMode, string>>,
             clipDuration: seed.clipDuration,
             clipChannels: seed.clipChannels,
             clipSampleRate: seed.clipSampleRate,
@@ -2067,19 +2101,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
             intensity: seed.intensity,
             deviceWiper: seed.deviceWiper,
           })
-          // Only import disk audio when IDB doesn't already have one
-          // for this ev.id. Preserves the original source bytes.
-          if (seed.clipBlob && !(existingEv && await shouldKeepAudio(newId))) {
-            eventAudioToSave.push({ eventId: newId, blob: seed.clipBlob })
-          }
         } else {
           for (const r of group) {
             const newId = existingEv?.id ?? generateId()
             events.push({
               id: newId,
               eventId: r.eventId,
-              clipName: r.clipName,
-              clipSourceFilename: r.clipFilename,
+              clipName: existingEv?.clipName ?? r.clipName,
+              clipSourceFilename: existingEv?.clipSourceFilename ?? r.clipFilename,
+              clipOutputFilenames: { [r.mode]: r.clipFilename },
               clipDuration: r.clipDuration,
               clipChannels: r.clipChannels,
               clipSampleRate: r.clipSampleRate,
@@ -2089,22 +2119,11 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
               intensity: r.intensity,
               deviceWiper: r.deviceWiper,
             })
-            if (r.clipBlob && !(existingEv && await shouldKeepAudio(newId))) {
-              eventAudioToSave.push({ eventId: newId, blob: r.clipBlob })
-            }
           }
         }
       }
 
-      // Persist kit-event audio. Failures are non-fatal — the kit
-      // folder on disk still has the WAVs so a follow-up scan or
-      // manual re-import recovers them.
-      for (const { eventId, blob } of eventAudioToSave) {
-        try { await saveKitEventAudio(eventId, blob) }
-        catch (err) { console.warn('[importKitsFromOutputDir] saveKitEventAudio failed:', err) }
-      }
-
-      const existingKit = existingKits.find((k) => k.name === kitId)
+      const existingKit = existingKitForMatch
       // Author tuning context — read every supported field, drop the
       // ones that are absent so we don't leave stale numeric defaults.
       const td = m.target_device ?? {}
@@ -2258,12 +2277,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     })
     if (importedKitCount === 0 && savedKits) {
       const currentClips = get().clips
-      const legacyAudio = collectLegacyClipAudioMap(savedKits)
       const migrated = savedKits.map((k) => migrateKit(k, currentClips))
       // (Disk-as-truth) Don't mirror to IDB. State + saveKitsMetaToDir
       // (already done via syncClipsFromDir) are the persistence.
       set({ kits: migrated })
-      if (legacyAudio.size > 0) void migrateKitAudioAsync(legacyAudio)
     }
   },
 
@@ -2287,7 +2304,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       } else {
         // File was deleted from folder — remove from list
         changed = true
-        try { await deleteClip(clip.id) } catch { /* ignore */ }
       }
     }
 
@@ -2455,8 +2471,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       return false
     }
 
-    // The disk move succeeded. Now remove only Studio's cache/list entry.
-    await deleteClip(id)
+    // The disk move succeeded. Now remove the item from Studio's list.
     const newClips = clips.filter((c) => c.id !== id)
     set({ clips: newClips })
     await saveClipsMetaToDir(workDirHandle, newClips)
@@ -2466,7 +2481,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
   updateClip: async (id, updates) => {
     get().setLocalFsStatus('saving', 'clip metadata 更新中…')
-    await updateClipMeta(id, updates)
     const prev = get().clips.find((c) => c.id === id)
     const newClips = get().clips.map((c) =>
       c.id === id ? { ...c, ...updates, updatedAt: new Date().toISOString() } : c
@@ -2509,7 +2523,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // 新 filename を反映。name は拡張子を除いた実ベース名に再同期する。
       const newBase = newPath.split('/').pop()?.replace(/\.(wav|mp3|ogg|flac|aac|m4a)$/i, '') ?? clip.name
       const patch = { sourceFilename: newPath, name: newBase }
-      await updateClipMeta(id, patch)
       const updated = get().clips.map((c) =>
         c.id === id ? { ...c, ...patch, updatedAt: new Date().toISOString() } : c
       )
@@ -2563,10 +2576,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       return { ...c, libraryIntensity: Math.round(Math.max(0, Math.min(1, v)) * 100) / 100, updatedAt: new Date().toISOString() }
     })
     set({ clips: updated })
-    // Persist each changed clip
-    for (const c of updated) {
-      if (preset.values[c.id] !== undefined) await updateClipMeta(c.id, { libraryIntensity: c.libraryIntensity })
-    }
     if (workDirHandle) await saveClipsMetaToDir(workDirHandle, updated)
   },
 
@@ -2578,7 +2587,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 
   getClipAudio: async (id) => {
-    // Try work directory first, fallback to IndexedDB
+    // Library audio is disk-as-truth; an unconnected/missing file is missing.
     const { workDirHandle, clips } = get()
     if (workDirHandle) {
       const clip = clips.find((c) => c.id === id)
@@ -2587,23 +2596,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         if (file) return new Blob([await file.arrayBuffer()], { type: 'audio/wav' })
       }
     }
-    return loadClipAudio(id)
+    return undefined
   },
 
   getKitEventAudio: async (kitEventId) => {
-    // Kit-event audio lives under its own IDB key (`saveKitEventAudio`
-    // wrote it on add / migration). IDB-first because the kit folder on disk
-    // holds the *resampled* (16 kHz) version — the original bytes the user
-    // dropped are what we cached, and what previews should sound like.
-    const cached = await loadKitEventAudio(kitEventId)
-    if (cached) return cached
-
-    // Disk fallback: IDB miss (cache cleared / different browser / never
-    // populated) but the kit folder is connected → read the on-disk WAV so a
-    // clip whose file really exists still plays instead of failing silently
-    // ("ファイル実態があれば再生は問題無い"). This serves the resampled copy,
-    // not the original bytes, but a correct preview beats no sound. Repopulate
-    // IDB so the next play is fast and the IDB-first path serves it.
+    // Disk is the only source of truth. Prefer the original authoring audio in
+    // `<kit>/source/`; install/stream outputs are a migration fallback for kits
+    // created before `source/` was introduced. Never consult browser audio.
     const { kits, kitDirHandle, workDirHandle } = get()
     const outRoot = kitDirHandle ?? workDirHandle
     if (!outRoot) return undefined
@@ -2612,23 +2611,22 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       const found = k.events.find((e) => e.id === kitEventId)
       if (found) { kitName = k.name; ev = found; break }
     }
-    if (!ev || !ev.clipSourceFilename) return undefined
-    // Bare basename: a disk scan normalizes clipSourceFilename to the on-disk
-    // basename, but a meta-seeded event may still carry a path prefix
-    // (e.g. built-ins "template/foo.wav") which the File System Access API
-    // would reject in getFileHandle. Strip to the last segment.
-    const filename = ev.clipSourceFilename.split('/').pop() || ev.clipSourceFilename
-    // mode → subdir (command=install-clips / stream_clip=stream-clips). The
-    // same source basename is copied into whichever subdir(s) the event uses.
+    if (!ev) return undefined
+    const sourceFilename = normalizeKitSourceFilename(ev.clipSourceFilename, ev.clipName)
+    const sourceFile = await readKitClipFile(outRoot, kitName, 'source', sourceFilename)
+    if (sourceFile) {
+      return new Blob([await sourceFile.arrayBuffer()], { type: sourceFile.type || 'audio/wav' })
+    }
+
+    const outputFilename = kitEventOutputFilename(ev)
     const subdirs: string[] = []
     if (ev.modes.includes('command')) subdirs.push('install-clips')
     if (ev.modes.includes('stream_clip')) subdirs.push('stream-clips')
     for (const subdir of subdirs) {
-      const file = await readKitClipFile(outRoot, kitName, subdir, filename)
+      const mode: KitEventMode = subdir === 'install-clips' ? 'command' : 'stream_clip'
+      const file = await readKitClipFile(outRoot, kitName, subdir, ev.clipOutputFilenames?.[mode] ?? outputFilename)
       if (file) {
-        const blob = new Blob([await file.arrayBuffer()], { type: 'audio/wav' })
-        try { await saveKitEventAudio(kitEventId, blob) } catch { /* non-fatal */ }
-        return blob
+        return new Blob([await file.arrayBuffer()], { type: file.type || 'audio/wav' })
       }
     }
     return undefined
@@ -2716,16 +2714,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       return
     }
 
-    // Drop browser-only per-event audio + encoded-WAV cache for this kit.
-    // These are recreatable IndexedDB entries, not user files. The encoded-WAV
-    // cache was added in DB v2 so older browsers may not
+    // Drop the recreatable encoded-WAV cache for this kit. The cache was
+    // added in DB v2 so older browsers may not
     // have the store yet — wrap each in try/catch so a stale entry
     // doesn't block kit removal.
     for (const ev of kit.events) {
-      try { await deleteKitEventAudio(ev.id) } catch { /* ignore */ }
       try { await deleteEncodedWavsForEvent(ev.id) } catch { /* ignore */ }
     }
-    await deleteKit(id)
     const newKits = get().kits.filter((k) => k.id !== id)
     set({
       kits: newKits,
@@ -2758,20 +2753,41 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const kit = kits.find((k) => k.id === kitId)
     if (!kit) return null
 
-    // Independence: the new KitEvent already carries its own clipName /
-    // clipDuration / clipSourceFilename / etc (copied from the source
-    // library clip by the caller). We save the audio blob under the
-    // generated event id so future preview / export / deploy can find
-    // it WITHOUT having to look up the library entry — even if that
-    // library entry is later archived or deleted.
+    // Independence: copy the original bytes into `<kit>/source/` before the
+    // event becomes visible. The selected folder is the durable source of
+    // truth; browser storage is deliberately not involved.
+    const { kitDirHandle, workDirHandle: sourceWorkDirHandle } = get()
+    const outRoot = kitDirHandle ?? sourceWorkDirHandle
+    if (!outRoot || !audioBlob) {
+      get().setLocalFsStatus(
+        'error',
+        !outRoot
+          ? 'Kit に音声を追加するには Kit Folder を接続してください'
+          : `"${event.clipName}" の source audio がありません`,
+      )
+      return null
+    }
     const composedId = event.clipName
       ? composeKitEventId(kit.name, event.clipName)
       : event.eventId  // last resort (caller didn't set a clipName)
 
-    const newEvent: KitEvent = { id: generateId(), ...event, eventId: composedId }
-    if (audioBlob) {
-      try { await saveKitEventAudio(newEvent.id, audioBlob) }
-      catch (err) { console.error('saveKitEventAudio failed:', err) }
+    const preferredSource = normalizeKitSourceFilename(event.clipSourceFilename, event.clipName)
+    let sourceFilename: string
+    try {
+      sourceFilename = await persistKitSourceAudio(
+        outRoot,
+        kit.name,
+        preferredSource,
+        audioBlob,
+        kit.events.map((existing) => existing.clipSourceFilename),
+      )
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      get().setLocalFsStatus('error', `kit "${kit.name}" の source 保存失敗: ${msg}`)
+      return null
+    }
+    const newEvent: KitEvent = {
+      id: generateId(), ...event, eventId: composedId, clipSourceFilename: sourceFilename,
     }
     const updated = { ...kit, events: [...kit.events, newEvent], updatedAt: new Date().toISOString() }
     // (Disk-as-truth) State + kits-meta.json on disk. No IDB kit mirror.
@@ -2799,10 +2815,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const newKits = kits.map((k) => (k.id === kitId ? updated : k))
     set({ kits: newKits })
     invalidateBuiltKit(kitId)
-    // Drop the kit-owned audio blob so removed events don't leak into
-    // IDB indefinitely. Best-effort; a missing blob is fine (e.g. for
-    // events whose audio failed to import).
-    try { await deleteKitEventAudio(kitEventId) } catch { /* ignore */ }
     // Drop the encoded-WAV cache too so the removed event doesn't keep
     // a stale device-format blob around. Failure is non-fatal.
     try { await deleteEncodedWavsForEvent(kitEventId) } catch { /* ignore */ }

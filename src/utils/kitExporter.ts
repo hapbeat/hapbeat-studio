@@ -31,7 +31,6 @@ import JSZip from 'jszip'
 import type { KitDefinition, KitEvent, KitEventMode } from '@/types/library'
 import {
   loadEncodedWav,
-  loadKitEventAudio,
   saveEncodedWav,
   sha1Hex,
   type EncodedMode,
@@ -106,7 +105,7 @@ export function validateEventIds(
  *
  * Always normalised to a `.wav` extension; firmware accepts only WAV.
  */
-function eventFileName(event: KitEvent): string {
+export function kitEventOutputFilename(event: KitEvent): string {
   const candidate = event.clipName?.trim() || event.clipSourceFilename || 'clip'
   // Strip any existing extension, then re-append .wav. Sanitise stray
   // slashes / OS-illegal chars so the user-edited name can't escape
@@ -174,7 +173,11 @@ export interface ExportResult {
   kitId: string
   warnings: string[]
   errors: string[]
+  /** Actual generated filename per internal event id and manifest bucket. */
+  outputFilenames: Record<string, Partial<Record<KitEventMode, string>>>
 }
+export type KitEventAudioResolver =
+  (event: KitEvent) => Promise<Blob | undefined>
 
 /** Modes selected on a KitEvent, with a `'command'` fallback when migration
  *  left the array empty (shouldn't normally happen post-migrateKit). */
@@ -199,15 +202,19 @@ function resolveModes(ev: KitEvent): KitEventMode[] {
  * `buildKitZip(files, kitId)` を経由する遅延生成に切り替えた。
  *
  * @param kit - Kit 定義 (events は KitEvent[]、各 event が自前の clip data を保持)
+ * @param resolveEventAudio - event の音声を接続中の Kit フォルダから解決する。
+ *   `source/` が正本で、古い Kit のみ生成済み clips を fallback にする。
  * @returns 書き出すファイル列 + kitId + warnings
  */
 export async function exportKitAsPack(
-  kit: KitDefinition
+  kit: KitDefinition,
+  resolveEventAudio: KitEventAudioResolver,
 ): Promise<ExportResult> {
   const warnings: string[] = []
   const errors: string[] = []
   const kitId = toKitId(kit.name)
   const files: ExportFile[] = []
+  const outputFilenames: ExportResult['outputFilenames'] = {}
 
   // manifest に書き込む 2 bucket + install-clips metadata
   // 注: `events` bucket は command-mode 専用 (schema 2.0.0)
@@ -288,7 +295,7 @@ export async function exportKitAsPack(
     // Load source blob + compute hash up front. We always need the
     // hash (cache key) and the blob serves as decode input on cache
     // miss / fallback bytes on decode failure.
-    const sourceBlob = await loadKitEventAudio(ev.id)
+    const sourceBlob = await resolveEventAudio(ev)
     if (!sourceBlob) {
       const message = `音声データが見つかりません: "${ev.clipName}" (event ${ev.id})`
       warnings.push(message)
@@ -438,12 +445,13 @@ export async function exportKitAsPack(
 
       if (mode === 'command') {
         const claimed = claimOutputFilename(
-          eventFileName(ev),
+          kitEventOutputFilename(ev),
           outputHash,
           usedCommandNames,
           commandNameByOutputHash,
         )
         const fname = claimed.filename
+        outputFilenames[ev.id] = { ...outputFilenames[ev.id], command: fname }
         if (claimed.shouldWrite) {
           const filePath = `install-clips/${fname}`
           files.push({ path: filePath, blob: encodedBlob, outputHash, cached: cachedThisTurn })
@@ -467,12 +475,13 @@ export async function exportKitAsPack(
         }
       } else {
         const claimed = claimOutputFilename(
-          eventFileName(ev),
+          kitEventOutputFilename(ev),
           outputHash,
           usedStreamNames,
           streamNameByOutputHash,
         )
         const fname = claimed.filename
+        outputFilenames[ev.id] = { ...outputFilenames[ev.id], stream_clip: fname }
         if (claimed.shouldWrite) {
           const filePath = `stream-clips/${fname}`
           files.push({ path: filePath, blob: encodedBlob, outputHash, cached: cachedThisTurn })
@@ -542,7 +551,7 @@ export async function exportKitAsPack(
     cached: false,
   })
 
-  return { files, kitId, warnings, errors }
+  return { files, kitId, warnings, errors, outputFilenames }
 }
 
 /**

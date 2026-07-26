@@ -1,5 +1,4 @@
 import { openDB, type IDBPDatabase } from 'idb'
-import type { LibraryClip, KitDefinition } from '@/types/library'
 
 const DB_NAME = 'hapbeat-studio-library'
 const DB_VERSION = 2
@@ -39,39 +38,8 @@ async function getDb(): Promise<IDBPDatabase> {
   })
 }
 
-// ---- Clips ----
-
-export async function saveClip(clip: LibraryClip, audioBlob: Blob): Promise<void> {
-  const db = await getDb()
-  const tx = db.transaction([STORE_CLIPS, STORE_AUDIO], 'readwrite')
-  await tx.objectStore(STORE_CLIPS).put(clip)
-  await tx.objectStore(STORE_AUDIO).put(audioBlob, clip.id)
-  await tx.done
-}
-
-export async function loadClip(id: string): Promise<LibraryClip | undefined> {
-  const db = await getDb()
-  return db.get(STORE_CLIPS, id)
-}
-
-export async function loadClipAudio(id: string): Promise<Blob | undefined> {
-  const db = await getDb()
-  return db.get(STORE_AUDIO, id)
-}
-
-export async function listClips(): Promise<LibraryClip[]> {
-  const db = await getDb()
-  return db.getAll(STORE_CLIPS)
-}
-
-export async function deleteClip(id: string): Promise<void> {
-  const db = await getDb()
-  const tx = db.transaction([STORE_CLIPS, STORE_AUDIO], 'readwrite')
-  await tx.objectStore(STORE_CLIPS).delete(id)
-  await tx.objectStore(STORE_AUDIO).delete(id)
-  await tx.done
-}
-
+// `clips` / `audio` are legacy stores kept only so startup can purge rows
+// created before disk-as-truth. No runtime code reads or writes them.
 /**
  * One-time migration helper: clears all persisted clip metadata and audio
  * blobs from IndexedDB.  Called on startup after disk-as-truth migration
@@ -84,9 +52,10 @@ export async function deleteClip(id: string): Promise<void> {
 export async function clearLegacyClipStores(): Promise<void> {
   try {
     const db = await getDb()
-    const tx = db.transaction([STORE_CLIPS, STORE_AUDIO], 'readwrite')
+    const tx = db.transaction([STORE_CLIPS, STORE_AUDIO, STORE_KITS], 'readwrite')
     await tx.objectStore(STORE_CLIPS).clear()
     await tx.objectStore(STORE_AUDIO).clear()
+    await tx.objectStore(STORE_KITS).clear()
     await tx.done
   } catch (err) {
     // Non-fatal: log and continue; stale IDB data will simply accumulate
@@ -95,36 +64,6 @@ export async function clearLegacyClipStores(): Promise<void> {
   }
 }
 
-export async function updateClipMeta(id: string, updates: Partial<LibraryClip>): Promise<void> {
-  const db = await getDb()
-  const clip = await db.get(STORE_CLIPS, id)
-  if (!clip) return
-  const updated = { ...clip, ...updates, updatedAt: new Date().toISOString() }
-  await db.put(STORE_CLIPS, updated)
-}
-
-// ---- Kit-event audio ----
-// Kit events own their audio independently of the library (the
-// `clipId → library` dependency was removed so library archive
-// doesn't break kit events). The blob lives in the same STORE_AUDIO
-// table but is keyed by `event.id` rather than `clip.id`. IDs are
-// globally unique strings (`generateId()`) so the two namespaces
-// share the store without collision.
-
-export async function saveKitEventAudio(eventId: string, audioBlob: Blob): Promise<void> {
-  const db = await getDb()
-  await db.put(STORE_AUDIO, audioBlob, eventId)
-}
-
-export async function loadKitEventAudio(eventId: string): Promise<Blob | undefined> {
-  const db = await getDb()
-  return db.get(STORE_AUDIO, eventId)
-}
-
-export async function deleteKitEventAudio(eventId: string): Promise<void> {
-  const db = await getDb()
-  await db.delete(STORE_AUDIO, eventId)
-}
 
 // ---- Encoded-WAV cache ----
 //
@@ -217,21 +156,4 @@ export async function deleteEncodedWavsForEvent(eventId: string): Promise<void> 
   await tx.objectStore(STORE_ENCODED).delete(encodedCacheKey(eventId, 'command'))
   await tx.objectStore(STORE_ENCODED).delete(encodedCacheKey(eventId, 'stream_clip'))
   await tx.done
-}
-
-// ---- Kits ----
-
-export async function saveKit(kit: KitDefinition): Promise<void> {
-  const db = await getDb()
-  await db.put(STORE_KITS, kit)
-}
-
-export async function loadKit(id: string): Promise<KitDefinition | undefined> {
-  const db = await getDb()
-  return db.get(STORE_KITS, id)
-}
-
-export async function deleteKit(id: string): Promise<void> {
-  const db = await getDb()
-  await db.delete(STORE_KITS, id)
 }

@@ -112,8 +112,13 @@ For the full payload shapes of a node, see `get_info_result` (`GetInfoResult` in
 
 - **UI state:** `localStorage` (e.g. active tab key `hapbeat-studio-tab`).
 - **Kit folders / WAVs:** written to a user-picked directory via the File System
-  Access API (`<kit>/install-clips/`, `<kit>/stream-clips/`, `<kit>-manifest.json`).
-  Disk is the source of truth → recovered by re-picking the folder after a host move.
+  Access API. Original authoring audio lives in `<kit>/source/`; generated
+  16 kHz outputs live in `<kit>/install-clips/` and `<kit>/stream-clips/`, next
+  to `<kit>-manifest.json`. Disk is the source of truth → recovered by
+  re-picking the folder after a host move or browser-site-data clear.
+- **IndexedDB:** may persist directory handles and recreatable encoded-WAV
+  caches only. It must never be the authoritative store for Library or Kit
+  audio/metadata.
 - **Local-file safety invariant:** Studio never permanently deletes files or
   folders inside a user-selected directory. Save Folder is add/overwrite-only;
   it does not prune unreferenced WAVs or legacy manifests. A close/remove UI

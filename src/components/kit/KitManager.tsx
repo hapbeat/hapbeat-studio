@@ -458,8 +458,8 @@ function useAudioPreview() {
     stop()
     const blob = await getBlob()
     if (!blob) {
-      // 音声 blob が IDB に無い (フォルダ未接続 / 別ブラウザ / キャッシュ消失で
-      // メタデータだけ残っている等)。従来は無言で何もせず「クリックしても鳴らない」
+      // 接続中のフォルダに source / 生成済み WAV が無い（またはフォルダ未接続）。
+      // 従来は無言で何もせず「クリックしても鳴らない」
       // 状態だったので、原因が分かるトーストを出す。
       toast('音声が見つかりません。Library / Kit のフォルダを再接続してください', 'error')
       return
@@ -1461,9 +1461,9 @@ function KitEditor() {
     const cid = e.dataTransfer.getData(DND_TYPE_CLIP)
     if (cid) {
       const c = clips.find((x) => x.id === cid); if (!c) return
-      // Same copy-on-add semantics as `addClipToActiveKit` — the dropped
-      // clip's audio bytes get duplicated into the kit-event-owned IDB
-      // slot so the kit is independent of the library entry.
+      // Same copy-on-add semantics as `addClipToActiveKit` — original bytes
+      // are copied into the Kit's `source/` folder so the Kit remains
+      // independent of the Library entry.
       const blob = await getClipAudio(c.id)
       if (!blob) { toast(`"${c.name}" の audio data が見つかりません`, 'error'); return }
       const newId = await addEventToKit(activeKitId, {

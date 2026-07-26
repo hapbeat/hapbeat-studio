@@ -307,9 +307,16 @@ export async function readKitClipFile(
   filename: string,
 ): Promise<File | null> {
   try {
-    const kitDir = await root.getDirectoryHandle(kitName, { create: false })
-    const sub = await kitDir.getDirectoryHandle(subdir, { create: false })
-    const fileHandle = await sub.getFileHandle(filename)
+    const relativeParts = filename.replace(/\\/g, '/').split('/').filter(Boolean)
+    if (relativeParts.length === 0 || relativeParts.some((part) => part === '.' || part === '..')) {
+      return null
+    }
+    let dir = await root.getDirectoryHandle(kitName, { create: false })
+    dir = await dir.getDirectoryHandle(subdir, { create: false })
+    for (let i = 0; i < relativeParts.length - 1; i++) {
+      dir = await dir.getDirectoryHandle(relativeParts[i], { create: false })
+    }
+    const fileHandle = await dir.getFileHandle(relativeParts[relativeParts.length - 1])
     return await fileHandle.getFile()
   } catch {
     return null
@@ -488,6 +495,11 @@ export async function archiveClipFile(
  */
 export const STUDIO_CACHE_FILENAME = '.studio-cache.json'
 
+/** Authoring metadata that makes a Kit folder self-contained. It stores the
+ * stable event ids and each event's `source/` filename, and is deliberately
+ * excluded from Deploy ZIPs. */
+export const STUDIO_KIT_METADATA_FILENAME = '.studio-kit.json'
+
 /**
  * Per-kit skip-write ledger persisted as `<kitId>/.studio-cache.json`.
  *
@@ -498,12 +510,9 @@ export const STUDIO_CACHE_FILENAME = '.studio-cache.json'
  * already bit-exact what we'd write, so the disk write can be skipped.
  *
  * Why outputHash, not sourceHash:
- *   schema v1 keyed by the *source* audio's hash. That broke after a
- *   hard reload + folder re-pick, because `importKitsFromOutputDir`
- *   re-imports each event's audio from the on-disk WAV — so the
- *   "source" in IDB is the **previous save's encoded output**, not
- *   the original drop. The source hash changes between sessions even
- *   when the audio bytes on disk are unchanged. outputHash sidesteps
+ *   schema v1 keyed by a browser-cached source hash. That broke after a
+ *   hard reload + folder re-pick because browser state is not durable.
+ *   outputHash sidesteps
  *   this by comparing the encoded blob's hash against the on-disk
  *   file's hash — both are deterministic functions of the same
  *   source audio, so they match across import boundaries (provided
@@ -711,6 +720,8 @@ export async function listKitFolders(
 export interface DiscoveredKit {
   folderName: string
   manifestJson: unknown
+  /** Studio-only metadata stored inside the Kit folder. */
+  authoringJson?: unknown
   /** relPath (e.g. "clips/foo.wav" or "stream-clips/bar.wav") → File */
   clipFiles: Map<string, File>
 }
@@ -790,6 +801,13 @@ export async function scanKitOutputFolder(
       })
       continue
     }
+    let authoringJson: unknown
+    try {
+      const authoringHandle = await kitFolder.getFileHandle(STUDIO_KIT_METADATA_FILENAME)
+      authoringJson = JSON.parse(await (await authoringHandle.getFile()).text())
+    } catch {
+      // External / legacy kits legitimately have no Studio authoring metadata.
+    }
     const clipFiles = new Map<string, File>()
     for (const subName of ['install-clips', 'stream-clips'] as const) {
       try {
@@ -804,7 +822,7 @@ export async function scanKitOutputFolder(
         // このサブフォルダが無ければ単にスキップ (mode によっては片方しか存在しない)
       }
     }
-    out.push({ folderName: kitFolder.name, manifestJson, clipFiles })
+    out.push({ folderName: kitFolder.name, manifestJson, authoringJson, clipFiles })
   }
   if (skipped.length > 0) {
     console.warn(

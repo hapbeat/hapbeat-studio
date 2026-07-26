@@ -16,6 +16,7 @@ Hapbeat Studio の変更履歴。形式は [Keep a Changelog](https://keepachang
 - Save Folder が複数ファイルを書き込む途中で外部フォルダ監視により Kit ディレクトリハンドルが無効化され、最後の manifest 書込みが `InvalidStateError` になる問題を修正。各出力ファイルの直前に Kit ディレクトリを再取得するように変更
 - Studio がユーザー選択フォルダのファイルを完全削除しないよう修正。Save Folder の stale WAV / 旧 manifest 削除を撤去し、Kit / clip の閉じる操作は `_archive` への移動成功後だけ一覧から外す。source WAV 欠落時は部分 manifest の保存・Deploy を中止
 - 空または一部欠損した `sample-kit` は、既存ファイルを上書きせず、配布資産から不足している manifest / WAV だけをフォルダ再読込時に補充するよう変更
+- Kit 音声の正本を IndexedDB から選択フォルダへ移し、original を `<kit>/source/`、16 kHz 生成物を `install-clips/` / `stream-clips/` に保存するよう修正。旧 Kit は manifest が参照する生成 WAV から安全に `source/` を補完
 
 ## [0.6.0] - 2026-07-22
 

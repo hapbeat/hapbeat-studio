@@ -1,6 +1,6 @@
 /**
  * Library clip: a saved audio clip with metadata.
- * Audio data (WAV blob) is stored separately in IndexedDB.
+ * Audio data lives in the selected work folder; browser storage is not authoritative.
  */
 export interface LibraryClip {
   id: string
@@ -144,10 +144,10 @@ export interface KitDefinition {
 export type KitEventMode = 'command' | 'stream_clip'
 
 export interface KitEvent {
-  /** Stable per-kit id, generated on add. Used as the React key, the handle
-   *  for update/remove, AND the IDB key for this event's owned audio blob
-   *  (`STORE_AUDIO[event.id]`). NOT the same as eventId, which can repeat
-   *  across events within a kit (e.g. same clip added with different amps). */
+  /** Stable per-kit id, generated on add. Used as the React key and the handle
+   *  for update/remove. Audio is not keyed by this id in browser storage; it
+   *  lives under the Kit's `source/` folder. NOT the same as eventId, which
+   *  can repeat across events within a kit. */
   id: string
   /**
    * Event ID (hapbeat-contracts format). May repeat within a kit. This is
@@ -165,12 +165,16 @@ export interface KitEvent {
    */
   clipName: string
   /**
-   * Original filename of the WAV the user dropped on the kit (e.g.
-   * `impact/gunshot_01.wav`). Used as the on-disk filename inside
-   * `install-clips/` / `stream-clips/` when exporting. Owned by the kit
-   * event; library renames don't propagate.
+   * Relative filename of the original authoring audio under `<kit>/source/`
+   * (e.g. `impact/gunshot_01.wav`). Generated 16 kHz output filenames are
+   * resolved independently for `install-clips/` / `stream-clips/`. Owned by
+   * the kit event; library renames don't propagate.
    */
   clipSourceFilename: string
+  /** Generated filename last observed in each manifest bucket. Used only to
+   * recover pre-source/ kits whose manifest deduplicated several events onto
+   * one WAV. New authoring always reads `clipSourceFilename` from source/. */
+  clipOutputFilenames?: Partial<Record<KitEventMode, string>>
   /** Clip duration in seconds. Snapshot at add-time; not refreshed. */
   clipDuration: number
   /** Clip channel count (1 or 2). Snapshot at add-time. */

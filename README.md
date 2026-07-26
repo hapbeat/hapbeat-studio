@@ -10,7 +10,7 @@ Hapbeat デバイスのための Web ベース統合デザインツールです�
 | UI エディタ | OLED (128x64) のブロック配置・ページ管理・ボタン設定・LED カラー設定 |
 | Manage タブ | デバイス検出・Wi-Fi 設定・ファームウェア OTA・Kit デプロイ管理 |
 | 初期セットアップ | USB Serial 接続 → ファームウェア書き込み → Wi-Fi 設定のウィザード |
-| プロジェクト管理 | IndexedDB への自動保存・JSON インポート/エクスポート |
+| プロジェクト管理 | 選択フォルダを正本として自動保存（Kit original は `source/`、16 kHz 生成物は mode 別 clips） |
 | Helper 連携 | WebSocket 経由でデバイスへの書き込み・プレビュー（`hapbeat-helper` daemon が必要） |
 
 ## 開発環境セットアップ
@@ -114,7 +114,7 @@ Helper が起動していない場合でも、Studio の編集・エクスポー
 - **Zustand** — 状態管理
 - **react-grid-layout** — ドラッグ＆ドロップによるレイアウト編集
 - **WaveSurfer.js** — 波形表示
-- **idb** — IndexedDB ラッパー
+- **idb** — directory handle / 再生成可能 cache 用 IndexedDB ラッパー（音声の正本には使わない）
 - **JSZip** — Kit ファイルのアーカイブ
 
 ## サウンド素材クレジット

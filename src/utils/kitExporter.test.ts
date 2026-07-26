@@ -48,6 +48,29 @@ describe('validateEventIds — contracts event-id 形式', () => {
   })
 })
 
+function pcm16MonoWav(): Blob {
+  const bytes = new Uint8Array(46)
+  const view = new DataView(bytes.buffer)
+  const ascii = (offset: number, value: string) => {
+    for (let i = 0; i < value.length; i++) bytes[offset + i] = value.charCodeAt(i)
+  }
+  ascii(0, 'RIFF')
+  view.setUint32(4, 38, true)
+  ascii(8, 'WAVE')
+  ascii(12, 'fmt ')
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, 1, true)
+  view.setUint32(24, 16000, true)
+  view.setUint32(28, 32000, true)
+  view.setUint16(32, 2, true)
+  view.setUint16(34, 16, true)
+  ascii(36, 'data')
+  view.setUint32(40, 2, true)
+  view.setInt16(44, 1000, true)
+  return new Blob([bytes], { type: 'audio/wav' })
+}
+
 describe('exportKitAsPack — source audio safety', () => {
   it('reports a hard error instead of silently exporting a partial manifest', async () => {
     const kit: KitDefinition = {
@@ -73,12 +96,56 @@ describe('exportKitAsPack — source audio safety', () => {
       }],
     }
 
-    const result = await exportKitAsPack(kit)
+    const result = await exportKitAsPack(kit, async () => undefined)
 
     expect(result.errors).toHaveLength(1)
     expect(result.errors[0]).toContain('音声が設定されていません')
     expect(result.files.map((file) => file.path)).toEqual(['safe-kit-manifest.json'])
     const manifest = JSON.parse(await result.files[0].blob.text()) as { events: unknown }
     expect(manifest.events).toEqual({})
+  })
+
+  it('shares one generated WAV while keeping per-event parameters', async () => {
+    const source = pcm16MonoWav()
+    const event = (id: string, eventId: string, clipName: string, intensity: number): KitDefinition['events'][number] => ({
+      id,
+      eventId,
+      clipName,
+      clipSourceFilename: 'shared-source.wav',
+      clipDuration: 1 / 16000,
+      clipChannels: 1,
+      clipSampleRate: 16000,
+      clipFileSize: source.size,
+      modes: ['command'],
+      loop: false,
+      intensity,
+      deviceWiper: null,
+    })
+    const kit: KitDefinition = {
+      id: 'kit-shared',
+      name: 'shared-kit',
+      version: '1.0.0',
+      description: '',
+      createdAt: '2026-07-27T00:00:00.000Z',
+      updatedAt: '2026-07-27T00:00:00.000Z',
+      events: [
+        event('event-a', 'shared-kit.soft', 'soft-hit', 0.25),
+        event('event-b', 'shared-kit.hard', 'hard-hit', 0.8),
+      ],
+    }
+
+    const result = await exportKitAsPack(kit, async () => source)
+
+    expect(result.errors).toEqual([])
+    expect(result.files.filter((file) => file.path.startsWith('install-clips/'))).toHaveLength(1)
+    expect(result.files.some((file) => file.path.startsWith('source/'))).toBe(false)
+    const manifestFile = result.files.find((file) => file.path.endsWith('-manifest.json'))!
+    const manifest = JSON.parse(await manifestFile.blob.text()) as {
+      events: Record<string, { clip: string; parameters: { intensity: number } }>
+    }
+    expect(manifest.events['shared-kit.soft'].clip).toBe('soft-hit.wav')
+    expect(manifest.events['shared-kit.hard'].clip).toBe('soft-hit.wav')
+    expect(manifest.events['shared-kit.soft'].parameters.intensity).toBe(0.25)
+    expect(manifest.events['shared-kit.hard'].parameters.intensity).toBe(0.8)
   })
 })
