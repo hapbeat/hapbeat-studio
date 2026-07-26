@@ -10,6 +10,7 @@ export interface KitEventRowProps {
   playing: boolean
   showDetails: boolean
   selected: boolean
+  disabled?: boolean
   onSelect: () => void
   onTogglePlay: () => void
   onIntensityChange: (v: number) => void
@@ -108,6 +109,7 @@ export function KitEventRow({
   playing,
   showDetails,
   selected,
+  disabled = false,
   onSelect,
   onTogglePlay,
   onIntensityChange,
@@ -166,9 +168,9 @@ export function KitEventRow({
   // KitEditor passes one; standalone usage can omit it). The button
   // mirrors the library Clip card's Edit pattern so users have one
   // mental model across panels.
-  const cardActions: { label: string; onClick: () => void; title: string }[] = []
+  const cardActions: { label: string; onClick: () => void; title: string; disabled?: boolean }[] = []
   if (onStartEdit) {
-    cardActions.push({ label: 'Edit', onClick: onStartEdit, title: 'Edit name, note…' })
+    cardActions.push({ label: 'Edit', onClick: onStartEdit, title: 'Edit name, note…', disabled })
   }
 
   // Card hover tooltip: prepend the author note (if any), then the
@@ -197,6 +199,7 @@ export function KitEventRow({
         onIntensityChange={onIntensityChange}
         playing={playing}
         onTogglePlay={onTogglePlay}
+        interactionDisabled={disabled}
         selected={selected}
         onSelect={onSelect}
         dataCardId={event.id}
@@ -231,6 +234,7 @@ export function KitEventRow({
                 role="radio"
                 className={`kit-event-side-mode ${active ? 'active' : ''} ${isBoth ? 'kit-event-side-mode--both' : ''}`}
                 onClick={() => pickChoice(opt.choice)}
+                disabled={disabled}
                 title={opt.title}
                 aria-checked={active}
               >

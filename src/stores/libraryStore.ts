@@ -24,6 +24,7 @@ import {
   scanKitOutputFolder,
   archiveKitFolder,
   writeKitFolder,
+  writeKitManifestLast,
   loadKitDiskCache,
   saveKitDiskCache,
   STUDIO_KIT_METADATA_FILENAME,
@@ -210,6 +211,8 @@ interface LibraryState {
   // Kit management
   kits: KitDefinition[]
   activeKitId: string | null
+  /** Kit ids whose Pack snapshot is currently being committed to disk. */
+  kitSaveInProgress: Record<string, boolean>
 
   /**
    * Global "what's the local file system doing right now" indicator.
@@ -570,17 +573,34 @@ function invalidateBuiltKit(kitId: string): void {
 // very first Save Folder of a session.
 
 /**
- * Per-kit flush mutex. Prevents two `flushKitFolderNow` calls for the
- * same kit from interleaving — overlapping `getFileHandle` / `getFile`
- * reads against a directory another call is mid-overwrite on have been
- * seen to fail with `InvalidStateError` ("operation that depends on
- * state cached in an interface object …"). We chain new requests onto
- * the in-flight promise so each kit's writes are strictly serialized.
- * Note: serializing does not eliminate that error — it is also raised
- * when an *external* app (Unity Editor) touches the folder, which is
- * handled as `stale-handle` below.
+ * One operation queue per Kit. Authoring mutations and Pack commits share it,
+ * so an immediate "× → Save Folder" always persists the removal first and Save
+ * captures the resulting state. Mutations attempted during a save wait behind
+ * that immutable commit instead of interleaving with its filesystem writes.
+ * External folder watchers can still invalidate one existing file handle;
+ * manifest-only archive recovery is handled separately below.
  */
-const kitFlushChain = new Map<string, Promise<unknown>>()
+const kitOperationChain = new Map<string, Promise<unknown>>()
+
+function enqueueKitOperation<T>(kitId: string, operation: () => Promise<T>): Promise<T> {
+  const previous = kitOperationChain.get(kitId) ?? Promise.resolve()
+  const next = previous.catch(() => null).then(operation)
+  kitOperationChain.set(kitId, next)
+  return next.finally(() => {
+    if (kitOperationChain.get(kitId) === next) kitOperationChain.delete(kitId)
+  })
+}
+
+/** Monotonic authoring generation. A Pack commit uses one immutable revision. */
+const kitRevisions = new Map<string, number>()
+function getKitRevision(kitId: string): number {
+  return kitRevisions.get(kitId) ?? 0
+}
+function bumpKitRevision(kitId: string): number {
+  const revision = getKitRevision(kitId) + 1
+  kitRevisions.set(kitId, revision)
+  return revision
+}
 
 /**
  * Per-kit auto-retry state. When `flushKitFolderNow` fails with a
@@ -786,7 +806,8 @@ function resetKitMemory() {
   for (const t of retryTimers.values()) window.clearTimeout(t)
   retryTimers.clear()
   retryAttempts.clear()
-  kitFlushChain.clear()
+  kitOperationChain.clear()
+  kitRevisions.clear()
   lastWrittenKitId.clear()
   lastBuiltKit.clear()
   lastOpMessage.clear()
@@ -794,6 +815,7 @@ function resetKitMemory() {
   // sticky until the next SUCCESSFUL write (LocalFsStatus keeps it visible on
   // purpose), so switching away from a folder that couldn't be written left
   // the pill accusing the newly-chosen folder indefinitely.
+  useLibraryStore.setState({ kitSaveInProgress: {} })
   useLibraryStore.getState().setLocalFsStatus('idle')
 }
 
@@ -864,6 +886,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   setDemoMode: (v) => set({ demoMode: v }),
   kits: [],
   activeKitId: null,
+  kitSaveInProgress: {},
   editingClipId: null,
   activeSelection: null,
   showClipDetails: true,
@@ -895,8 +918,23 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // first then run our own (so the latest store state hits disk last).
     const doFlush = async (): Promise<{ files: ExportFile[]; kitId: string } | null> => {
     const state = get()
-    const kit = state.kits.find((k) => k.id === kitId)
-    if (!kit) return null
+    const liveKit = state.kits.find((k) => k.id === kitId)
+    if (!liveKit) return null
+    const revision = getKitRevision(kitId)
+    // One immutable authoring snapshot feeds every artifact in this commit.
+    // Zustand mutations replace Kit/Event objects, but clone nested fields too
+    // so no caller can accidentally mutate the snapshot while encoding awaits.
+    const kit: KitDefinition = {
+      ...liveKit,
+      events: liveKit.events.map((event) => ({
+        ...event,
+        modes: [...event.modes],
+        ...(event.clipOutputFilenames
+          ? { clipOutputFilenames: { ...event.clipOutputFilenames } }
+          : {}),
+      })),
+      ...(liveKit.targetDevice ? { targetDevice: { ...liveKit.targetDevice } } : {}),
+    }
     if (validateKitName(kit.name)) {
       // Invalid kit name — clear 'saving' status to avoid stuck pill.
       state.setLocalFsStatus('idle')
@@ -918,6 +956,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // confuses the user. Only error / retry surface a fallback so
     // problems are never silent.
     const opMsg = lastOpMessage.get(kit.id)
+    set((current) => ({
+      kitSaveInProgress: { ...current.kitSaveInProgress, [kit.id]: true },
+    }))
     try {
       // exportKitAsPack returns ExportFile[] directly (no ZIP encode
       // / decode round-trip). Resolve audio from the connected Kit folder.
@@ -956,16 +997,21 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
       const kitId = result.kitId
 
-      // Record the filenames actually chosen after content de-duplication.
-      // This lets a legacy/output fallback follow the manifest reference even
-      // when another Event supplied the shared filename.
+      // Record the filenames actually chosen after content de-duplication in
+      // both the immutable commit snapshot and the live authoring state.
+      const authoringKit: KitDefinition = result.outputFilenames
+        ? {
+            ...kit,
+            events: kit.events.map((event) => ({
+              ...event,
+              clipOutputFilenames: result.outputFilenames[event.id] ?? event.clipOutputFilenames,
+            })),
+          }
+        : kit
       if (result.outputFilenames) {
         set((current) => ({
           kits: current.kits.map((currentKit) => currentKit.id === kit.id
-            ? { ...currentKit, events: currentKit.events.map((event) => ({
-                ...event,
-                clipOutputFilenames: result.outputFilenames[event.id] ?? event.clipOutputFilenames,
-              })) }
+            ? authoringKit
             : currentKit),
         }))
       }
@@ -1101,12 +1147,19 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           `[kit] flush "${kit.name}": ${skippedCount} WAV(s) unchanged, skipped write`,
         )
       }
-      await writeKitFolder(outRoot, kitId, filesToWrite)
+      if (getKitRevision(kit.id) !== revision) {
+        throw new Error(`kit "${kit.name}" changed while its Pack snapshot was being built`)
+      }
 
-      // Persist authoring-only metadata inside the Kit folder so `source/`
-      // filenames and stable event ids travel with the Kit. This file is not
-      // part of ExportFile[] and therefore never enters the Deploy ZIP.
-      const authoringKit = useLibraryStore.getState().kits.find((current) => current.id === kit.id) ?? kit
+      // Commit all generated audio first. The manifest is deliberately held
+      // back as the final commit marker so external scanners never observe a
+      // new manifest pointing at files that have not landed yet.
+      const contentFiles = filesToWrite.filter((file) => file.outputHash !== null)
+      const manifestFiles = filesToWrite.filter((file) => file.outputHash === null)
+      if (contentFiles.length > 0) await writeKitFolder(outRoot, kitId, contentFiles)
+
+      // Persist authoring-only metadata from the SAME immutable snapshot used
+      // to generate the manifest. This file never enters the Deploy ZIP.
       await writeKitFolder(outRoot, kitId, [{
         path: STUDIO_KIT_METADATA_FILENAME,
         blob: new Blob([JSON.stringify(authoringKit, null, 2)], { type: 'application/json' }),
@@ -1127,6 +1180,21 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         if (f.outputHash !== null) newCache.wavs[f.path] = f.outputHash
       }
       await saveKitDiskCache(outRoot, kitId, newCache)
+
+      // Final commit marker. If only the existing manifest handle is stale,
+      // archive the old bytes under history/ before recreating the canonical
+      // path. No user file is permanently deleted.
+      for (const manifestFile of manifestFiles) {
+        const archivedPath = await writeKitManifestLast(
+          outRoot,
+          kitId,
+          manifestFile.path,
+          manifestFile.blob,
+        )
+        if (archivedPath) {
+          console.info(`[kit] stale manifest archived to ${kitId}/${archivedPath}`)
+        }
+      }
 
       // Filesystem safety invariant: Save Folder is append/overwrite only.
       // Existing manifests and unreferenced WAVs are deliberately preserved.
@@ -1264,19 +1332,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         )
       }
       return null
+    } finally {
+      set((current) => {
+        const { [kit.id]: _finished, ...rest } = current.kitSaveInProgress
+        return { kitSaveInProgress: rest }
+      })
     }
     } // end doFlush
 
-    const prev = kitFlushChain.get(kitId) ?? Promise.resolve()
-    const next = prev.catch(() => null).then(() => doFlush())
-    kitFlushChain.set(kitId, next)
-    try {
-      return await next
-    } finally {
-      // Clear only if still the latest in chain — otherwise leave it
-      // so the next pending flush waits on its predecessor.
-      if (kitFlushChain.get(kitId) === next) kitFlushChain.delete(kitId)
-    }
+    return enqueueKitOperation(kitId, doFlush)
   },
 
   requestKitFolderSave: async (kitId, opMsg) => {
@@ -2669,7 +2733,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // A flush already in progress cannot be cancelled safely. Let it finish
     // while the Kit is still visible, then clear any retry it may have queued.
     // Only after that do we move the complete folder into `_archive`.
-    const inFlight = kitFlushChain.get(id)
+    const inFlight = kitOperationChain.get(id)
     if (inFlight) await inFlight.catch(() => null)
     get().cancelKitFlush(id)
 
@@ -2748,7 +2812,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ showClipDetails: show })
   },
 
-  addEventToKit: async (kitId, event, audioBlob) => {
+  addEventToKit: (kitId, event, audioBlob) => enqueueKitOperation(kitId, async () => {
     const { kits } = get()
     const kit = kits.find((k) => k.id === kitId)
     if (!kit) return null
@@ -2793,6 +2857,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // (Disk-as-truth) State + kits-meta.json on disk. No IDB kit mirror.
     const newKits = kits.map((k) => (k.id === kitId ? updated : k))
     set({ kits: newKits })
+    bumpKitRevision(kitId)
     invalidateBuiltKit(kitId)
     const { workDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
@@ -2801,9 +2866,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // of UI lag while editing. Metadata is still flushed eagerly to
     // kits-meta.json above so the kit list survives a reload.
     return newEvent.id
-  },
+  }),
 
-  removeEventFromKit: async (kitId, kitEventId) => {
+  removeEventFromKit: (kitId, kitEventId) => enqueueKitOperation(kitId, async () => {
     const { kits } = get()
     const kit = kits.find((k) => k.id === kitId)
     if (!kit) return
@@ -2814,21 +2879,22 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // (Disk-as-truth) State + kits-meta.json. No IDB kit mirror.
     const newKits = kits.map((k) => (k.id === kitId ? updated : k))
     set({ kits: newKits })
+    bumpKitRevision(kitId)
     invalidateBuiltKit(kitId)
     // Drop the encoded-WAV cache too so the removed event doesn't keep
     // a stale device-format blob around. Failure is non-fatal.
     try { await deleteEncodedWavsForEvent(kitEventId) } catch { /* ignore */ }
     const { workDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
-    // Pack rebuild deferred to Deploy (see addEventToKit comment).
+    // Pack rebuild deferred to Save Folder / Deploy (see addEventToKit comment).
     // The removed event will disappear from install-clips/ /
     // stream-clips/ only on the next deploy — until then the kit
     // folder retains the WAV. Harmless: nothing in the kit's manifest
     // references it any more.
     void clipName
-  },
+  }),
 
-  updateKitEvent: async (kitId, kitEventId, updates) => {
+  updateKitEvent: (kitId, kitEventId, updates) => enqueueKitOperation(kitId, async () => {
     const { kits } = get()
     const kit = kits.find((k) => k.id === kitId)
     if (!kit) return
@@ -2843,6 +2909,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // (Disk-as-truth) State + kits-meta.json. No IDB kit mirror.
     const newKits = kits.map((k) => (k.id === kitId ? updated : k))
     set({ kits: newKits })
+    bumpKitRevision(kitId)
     invalidateBuiltKit(kitId)
     const { workDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
@@ -2850,12 +2917,12 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // drag / rename used to trigger a 400 ms-debounced full kit
     // re-emit (resample + write every WAV) and that was the dominant
     // source of UI lag while editing. The kit folder picks up these
-    // changes on the next Deploy — which is why the cached build has to
+    // changes on the next Save Folder / Deploy — which is why the cached build has to
     // go here, or Deploy would reuse the pre-edit manifest.
     void prevName
-  },
+  }),
 
-  updateKit: async (id, updates) => {
+  updateKit: (id, updates) => enqueueKitOperation(id, async () => {
     const { kits } = get()
     const kit = kits.find((k) => k.id === id)
     if (!kit) return
@@ -2881,6 +2948,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // (Disk-as-truth) State + kits-meta.json. No IDB kit mirror.
     const newKits = kits.map((k) => (k.id === id ? updated : k))
     set({ kits: newKits })
+    bumpKitRevision(id)
     invalidateBuiltKit(id)
     const { workDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
@@ -2889,7 +2957,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // previous folder (under the old kitId) is also left alone here;
     // it'll be archived on the next Deploy by the kitId-rename code
     // path in flushKitFolderNow.
-  },
+  }),
 
   // Tab / filter
   setActiveTab: (tab) => {

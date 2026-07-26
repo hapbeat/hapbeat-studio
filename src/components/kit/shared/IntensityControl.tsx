@@ -7,6 +7,7 @@ export interface IntensityControlProps {
   value: number
   onChange: (v: number) => void
   label?: string
+  disabled?: boolean
 }
 
 /**
@@ -25,7 +26,7 @@ export interface IntensityControlProps {
  */
 const COMPACT_THRESHOLD = 70
 
-export function IntensityControl({ value, onChange, label = 'Amp' }: IntensityControlProps) {
+export function IntensityControl({ value, onChange, label = 'Amp', disabled = false }: IntensityControlProps) {
   const { ref, width } = useElementSize<HTMLDivElement>()
   // Hysteresis: switch to compact if clearly below threshold, back to inline
   // only once clearly above. Avoids jitter right at the boundary.
@@ -39,13 +40,13 @@ export function IntensityControl({ value, onChange, label = 'Amp' }: IntensityCo
   return (
     <div ref={ref} className="intensity-control">
       {compact
-        ? <IntensityPopoverButton value={value} onChange={onChange} label={label} />
-        : <IntensityInlineSlider value={value} onChange={onChange} label={label} />}
+        ? <IntensityPopoverButton value={value} onChange={onChange} label={label} disabled={disabled} />
+        : <IntensityInlineSlider value={value} onChange={onChange} label={label} disabled={disabled} />}
     </div>
   )
 }
 
-function IntensityInlineSlider({ value, onChange, label }: { value: number; onChange: (v: number) => void; label: string }) {
+function IntensityInlineSlider({ value, onChange, label, disabled }: { value: number; onChange: (v: number) => void; label: string; disabled: boolean }) {
   const [focused, setFocused] = useState(false)
   return (
     <label
@@ -60,6 +61,7 @@ function IntensityInlineSlider({ value, onChange, label }: { value: number; onCh
         type="range"
         min={0} max={1} step={0.05}
         value={value}
+        disabled={disabled}
         draggable={false}
         onChange={(e) => onChange(Number(e.target.value))}
         onFocus={() => setFocused(true)}
@@ -70,12 +72,13 @@ function IntensityInlineSlider({ value, onChange, label }: { value: number; onCh
         value={value}
         onChange={onChange}
         className="intensity-inline-val"
+        disabled={disabled}
       />
     </label>
   )
 }
 
-function IntensityPopoverButton({ value, onChange, label }: { value: number; onChange: (v: number) => void; label: string }) {
+function IntensityPopoverButton({ value, onChange, label, disabled }: { value: number; onChange: (v: number) => void; label: string; disabled: boolean }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -93,6 +96,7 @@ function IntensityPopoverButton({ value, onChange, label }: { value: number; onC
       draggable={false}
       onMouseDown={(e) => e.stopPropagation()}>
       <button className="intensity-popover-trigger"
+        disabled={disabled}
         onClick={() => setOpen(!open)}
         title={`${label} — click to edit`}>
         <span className="intensity-popover-label">{label}</span>
@@ -100,12 +104,14 @@ function IntensityPopoverButton({ value, onChange, label }: { value: number; onC
           value={value}
           onChange={onChange}
           className="intensity-popover-val"
+          disabled={disabled}
         />
       </button>
       {open && (
         <div className="intensity-popover-panel">
           <span className="intensity-inline-label">{label}</span>
           <input type="range" min={0} max={1} step={0.05} value={value}
+            disabled={disabled}
             autoFocus
             draggable={false}
             onChange={(e) => onChange(Number(e.target.value))}
@@ -114,6 +120,7 @@ function IntensityPopoverButton({ value, onChange, label }: { value: number; onC
             value={value}
             onChange={onChange}
             className="intensity-inline-val"
+            disabled={disabled}
           />
         </div>
       )}
@@ -145,26 +152,29 @@ function IntensityPopoverButton({ value, onChange, label }: { value: number; onC
  *     (Space play / ↑↓←→ navigation) don't fire while typing
  */
 function IntensityValueEditor({
-  value, onChange, className, style,
+  value, onChange, className, style, disabled = false,
 }: {
   value: number
   onChange: (v: number) => void
   className?: string
   style?: CSSProperties
+  disabled?: boolean
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
+    if (disabled) { setEditing(false); return }
     if (editing && inputRef.current) {
       inputRef.current.focus()
       inputRef.current.select()
     }
-  }, [editing])
+  }, [editing, disabled])
 
   const startEdit = (e: React.MouseEvent) => {
     e.stopPropagation()
+    if (disabled) return
     e.preventDefault()
     setDraft(String(Math.round(value * 100)))
     setEditing(true)
@@ -207,7 +217,8 @@ function IntensityValueEditor({
   return (
     <span
       className={className}
-      style={{ cursor: 'text', ...style }}
+      aria-disabled={disabled}
+      style={{ cursor: disabled ? 'default' : 'text', ...style }}
       title="クリックで直接入力 (0-100)"
       onMouseDown={(e) => { e.stopPropagation(); e.preventDefault() }}
       onClick={startEdit}

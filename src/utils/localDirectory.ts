@@ -607,6 +607,98 @@ export async function writeKitFolder(
   }
 }
 
+/**
+ * Write the canonical Kit manifest as the final commit marker.
+ *
+ * A Chromium File System Access handle can become invalid specifically for an
+ * existing file when an external folder watcher (notably Unity AssetDatabase)
+ * has touched that entry. Creating the same path after the user manually
+ * removes it succeeds, which is why a plain root-handle retry is insufficient.
+ *
+ * Recovery remains non-destructive:
+ *   1. copy the old manifest into `<kit>/history/`,
+ *   2. verify the archive copy,
+ *   3. remove the canonical entry only as the final step of that move,
+ *   4. create the freshly generated canonical manifest.
+ *
+ * If the old file cannot be read or archived, it is left untouched and the
+ * original error is re-thrown. Studio never discards it.
+ */
+export async function writeKitManifestLast(
+  root: FileSystemDirectoryHandle,
+  kitName: string,
+  manifestPath: string,
+  blob: Blob,
+): Promise<string | null> {
+  try {
+    await writeKitFolder(root, kitName, [{ path: manifestPath, blob }])
+    return null
+  } catch (err) {
+    const name = err instanceof Error ? err.name : ''
+    if (name !== 'InvalidStateError') throw err
+
+    try {
+      // Manifests live at the Kit root. Refuse an unexpected nested path so
+      // the archive/move can never target a broader directory by mistake.
+      if (!manifestPath || manifestPath.includes('/') || manifestPath.includes('\\')) {
+        throw new Error(`invalid manifest path: ${manifestPath}`)
+      }
+
+      const kitDir = await root.getDirectoryHandle(kitName, { create: false })
+      const oldHandle = await kitDir.getFileHandle(manifestPath, { create: false })
+      const oldFile = await oldHandle.getFile()
+      const oldBlob = new Blob([await oldFile.arrayBuffer()], {
+        type: oldFile.type || 'application/json',
+      })
+
+      const historyDir = await kitDir.getDirectoryHandle('history', { create: true })
+      const dot = manifestPath.lastIndexOf('.')
+      const stem = dot > 0 ? manifestPath.slice(0, dot) : manifestPath
+      const ext = dot > 0 ? manifestPath.slice(dot) : ''
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      let archiveName = `${stem}-replaced-${stamp}${ext}`
+      for (let suffix = 2; ; suffix++) {
+        try {
+          await historyDir.getFileHandle(archiveName, { create: false })
+          archiveName = `${stem}-replaced-${stamp}-${suffix}${ext}`
+        } catch {
+          break
+        }
+      }
+
+      const archiveHandle = await historyDir.getFileHandle(archiveName, { create: true })
+      const archiveWritable = await archiveHandle.createWritable()
+      await archiveWritable.write(oldBlob)
+      await archiveWritable.close()
+
+      // Verify before moving the canonical entry out of the way. Size is
+      // sufficient here because the bytes were written from the exact Blob.
+      const archivedFile = await archiveHandle.getFile()
+      if (archivedFile.size !== oldBlob.size) {
+        throw new Error(`manifest archive verification failed: history/${archiveName}`)
+      }
+
+      // Copy-then-remove is permitted only as the implementation of an
+      // archive/move. The user's old manifest is now recoverable in history/.
+      await kitDir.removeEntry(manifestPath)
+
+      // Reacquire every handle after the move; reusing kitDir/oldHandle is the
+      // exact stale-interface failure this recovery path exists to avoid.
+      await writeKitFolder(root, kitName, [{ path: manifestPath, blob }])
+      return `history/${archiveName}`
+    } catch (recoveryErr) {
+      // Preserve the useful original InvalidStateError classification while
+      // adding the recovery failure to its message.
+      const original = err instanceof Error ? err.message : String(err)
+      const recovery = recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr)
+      const wrapped = new Error(`${original}; manifest archive recovery failed: ${recovery}`)
+      wrapped.name = 'InvalidStateError'
+      ;(wrapped as Error & { cause?: unknown }).cause = recoveryErr
+      throw wrapped
+    }
+  }
+}
+
 /** Top-level kit subdirectory used as the studio "recycle bin". When
  * a user removes a kit from the UI we move the entire folder under
  * `<root>/_archive/<kitName>/` instead of deleting it, so a true

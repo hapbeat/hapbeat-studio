@@ -854,3 +854,11 @@ body.using-keyboard .clip-card:hover {
 
 /* No @media collapses anymore — min-width: 720px on .kit-manager-wrapper
    enforces horizontal scroll instead, so each pane stays at its designed size. */
+
+/* Save/Deploy commit lock: native fieldset disabling covers every authoring control. */
+.kit-authoring-fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}

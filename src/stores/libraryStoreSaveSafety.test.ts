@@ -4,6 +4,7 @@ import type { KitDefinition } from '@/types/library'
 const mocks = vi.hoisted(() => ({
   exportKitAsPack: vi.fn(),
   writeKitFolder: vi.fn(),
+  writeKitManifestLast: vi.fn(),
   loadKitDiskCache: vi.fn(),
   saveKitDiskCache: vi.fn(),
   scanKitOutputFolder: vi.fn(),
@@ -20,6 +21,7 @@ vi.mock('@/utils/localDirectory', async () => {
   return {
     ...actual,
     writeKitFolder: mocks.writeKitFolder,
+    writeKitManifestLast: mocks.writeKitManifestLast,
     loadKitDiskCache: mocks.loadKitDiskCache,
     saveKitDiskCache: mocks.saveKitDiskCache,
     scanKitOutputFolder: mocks.scanKitOutputFolder,
@@ -42,6 +44,8 @@ const kit: KitDefinition = {
 afterEach(() => {
   mocks.exportKitAsPack.mockReset()
   mocks.writeKitFolder.mockReset()
+  mocks.writeKitManifestLast.mockReset()
+  mocks.writeKitManifestLast.mockResolvedValue(null)
   mocks.loadKitDiskCache.mockReset()
   mocks.saveKitDiskCache.mockReset()
   mocks.scanKitOutputFolder.mockReset()
@@ -187,7 +191,7 @@ describe('flushKitFolderNow — source audio resolution', () => {
       'install-clips',
       'shared.wav',
     )
-    expect(mocks.writeKitFolder).toHaveBeenCalledTimes(3)
+    expect(mocks.writeKitFolder).toHaveBeenCalledTimes(2)
     expect(mocks.writeKitFolder.mock.calls[0][2]).toEqual([
       { path: 'source/hit.wav', blob: expect.any(Blob) },
     ])
@@ -230,11 +234,87 @@ describe('flushKitFolderNow — non-destructive Save Folder', () => {
     const result = await useLibraryStore.getState().flushKitFolderNow(kit.id)
 
     expect(result?.kitId).toBe('safe-kit')
-    expect(mocks.writeKitFolder).toHaveBeenCalledTimes(2)
+    expect(mocks.writeKitFolder).toHaveBeenCalledTimes(1)
+    expect(mocks.writeKitManifestLast).toHaveBeenCalledOnce()
     expect(removeEntry).not.toHaveBeenCalled()
   })
 })
 
+describe('Kit operation ordering', () => {
+  it('applies an immediate remove before Save captures its manifest snapshot', async () => {
+    const makeEvent = (id: string, name: string): KitDefinition['events'][number] => ({
+      id,
+      eventId: `safe-kit.${name}`,
+      clipName: name,
+      clipSourceFilename: `${name}.wav`,
+      clipDuration: 1,
+      clipChannels: 1,
+      clipSampleRate: 16000,
+      clipFileSize: 4,
+      modes: ['command'],
+      loop: false,
+      intensity: 1,
+      deviceWiper: null,
+    })
+    const removed = makeEvent('remove-me', 'old')
+    const kept = makeEvent('keep-me', 'current')
+    const kitWithEvents: KitDefinition = { ...kit, events: [removed, kept] }
+    const root = { name: 'kits' } as FileSystemDirectoryHandle
+    const diskFile = {
+      name: 'current.wav',
+      size: 4,
+      type: 'audio/wav',
+      arrayBuffer: async () => new Uint8Array([1, 2, 3, 4]).buffer,
+    }
+    mocks.readKitClipFile.mockResolvedValue(diskFile)
+    mocks.loadKitDiskCache.mockResolvedValue(null)
+    mocks.saveKitDiskCache.mockResolvedValue(undefined)
+
+    let exportedEventIds: string[] = []
+    mocks.exportKitAsPack.mockImplementation(async (snapshot, resolveEventAudio) => {
+      exportedEventIds = snapshot.events.map((event: KitDefinition['events'][number]) => event.id)
+      for (const event of snapshot.events) await resolveEventAudio(event)
+      return {
+        kitId: 'safe-kit',
+        warnings: [],
+        errors: [],
+        files: [{
+          path: 'safe-kit-manifest.json',
+          blob: new Blob(['{"events":{"safe-kit.current":{}}}']),
+          outputHash: null,
+          cached: false,
+        }],
+      }
+    })
+    useLibraryStore.setState({ kits: [kitWithEvents], kitDirHandle: root })
+
+    // Deliberately do not await the remove before requesting Save. Registering
+    // both operations in the same turn reproduces the user's × → Save sequence.
+    const removing = useLibraryStore.getState().removeEventFromKit(kit.id, removed.id)
+    const saving = useLibraryStore.getState().flushKitFolderNow(kit.id)
+    const [, result] = await Promise.all([removing, saving])
+
+    expect(result?.kitId).toBe('safe-kit')
+    expect(exportedEventIds).toEqual(['keep-me'])
+    const metadataWrite = mocks.writeKitFolder.mock.calls.find(([, , files]) => (
+      files.some((file: { path: string }) => file.path === '.studio-kit.json')
+    ))
+    expect(metadataWrite).toBeTruthy()
+    const metadataBlob = metadataWrite?.[2][0].blob as Blob
+    const metadata = JSON.parse(await metadataBlob.text()) as KitDefinition
+    expect(metadata.events.map((event) => event.id)).toEqual(['keep-me'])
+    expect(mocks.writeKitManifestLast).toHaveBeenCalledWith(
+      root,
+      'safe-kit',
+      'safe-kit-manifest.json',
+      expect.any(Blob),
+    )
+    const writeOrders = mocks.writeKitFolder.mock.invocationCallOrder
+    const metadataWriteOrder = writeOrders[writeOrders.length - 1] ?? 0
+    const manifestWriteOrder = mocks.writeKitManifestLast.mock.invocationCallOrder[0] ?? 0
+    expect(manifestWriteOrder).toBeGreaterThan(metadataWriteOrder)
+  })
+})
 describe('sample-kit repair', () => {
   it('writes only missing canonical files and preserves existing ones', async () => {
     const installDir = {

@@ -48,6 +48,8 @@ export interface ClipCardProps {
   onTogglePlay: () => void
   /** Disable the play button (e.g. when there's no decodable clip blob) */
   playDisabled?: boolean
+  /** Disable every mutation-capable control while a Kit snapshot is saving. */
+  interactionDisabled?: boolean
 
   /** Optional: double-click card to trigger (edit/details) */
   onDoubleClick?: () => void
@@ -145,6 +147,7 @@ export function ClipCard({
   playing,
   onTogglePlay,
   playDisabled,
+  interactionDisabled = false,
   onDoubleClick,
   selected,
   onSelect,
@@ -230,7 +233,7 @@ export function ClipCard({
       data-card-id={dataCardId}
       title={title}
       onClick={onSelect}
-      onDoubleClick={onDoubleClick}
+      onDoubleClick={interactionDisabled ? undefined : onDoubleClick}
     >
       {/* The card is a 3-column grid: `1fr auto auto`.
           - col 1 holds the variable-width left content (play+name in
@@ -248,16 +251,17 @@ export function ClipCard({
           missing Swap doesn't shove × into col 2 by mistake. */}
       <div className="clip-card-header-left">
         <button
-          className={`clip-card-play ${playing ? 'playing' : ''} ${playDisabled ? 'disabled' : ''}`}
-          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); if (!playDisabled) onTogglePlay() }}
-          title={playDisabled ? 'No audio to preview' : (playing ? 'Stop' : 'Play')}
-          aria-disabled={playDisabled}
+          className={`clip-card-play ${playing ? 'playing' : ''} ${playDisabled || interactionDisabled ? 'disabled' : ''}`}
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); if (!playDisabled && !interactionDisabled) onTogglePlay() }}
+          title={interactionDisabled ? 'Kit を保存中です' : (playDisabled ? 'No audio to preview' : (playing ? 'Stop' : 'Play'))}
+          aria-disabled={playDisabled || interactionDisabled}
         >{playing ? '■' : '▶'}</button>
         {renaming && onRenameCommit ? (
           <input
             ref={inputRef}
             className="clip-card-name clip-card-name-input"
             value={draftName}
+            disabled={interactionDisabled}
             onChange={(e) => {
               const raw = e.target.value
               const cleaned = raw.toLowerCase().replace(/[^a-z0-9_-]/g, '')
@@ -274,7 +278,7 @@ export function ClipCard({
           <span
             className={`clip-card-name${onRenameCommit ? ' clip-card-name-editable' : ''}`}
             onClick={(e) => {
-              if (!onRenameCommit) return
+              if (!onRenameCommit || interactionDisabled) return
               e.stopPropagation()
               setRenaming(true)
             }}
@@ -296,7 +300,7 @@ export function ClipCard({
         <button
           type="button"
           className="clip-card-swap-btn clip-card-col-primary"
-          disabled={swapping || swapDisabled}
+          disabled={interactionDisabled || swapping || swapDisabled}
           title={swapTitle ?? 'Name ↔ Note を入れ替え (1-click でファイル名を切替)'}
           aria-label="Swap name and note"
           onMouseDown={(e) => { e.stopPropagation() }}
@@ -319,6 +323,7 @@ export function ClipCard({
         <button
           type="button"
           className="clip-card-close-inline clip-card-col-secondary"
+          disabled={interactionDisabled}
           onMouseDown={(e) => { e.stopPropagation() }}
           onClick={(e) => { e.stopPropagation(); onClose() }}
           title={closeTitle ?? 'Archive (Studio から非表示)'}
@@ -329,7 +334,7 @@ export function ClipCard({
       {/* Row 2, col 1 — intensity slider. */}
       <div className="clip-card-controls-left">
         {intensity !== null && onIntensityChange && (
-          <IntensityControl value={intensity} onChange={onIntensityChange} />
+          <IntensityControl value={intensity} onChange={onIntensityChange} disabled={interactionDisabled} />
         )}
       </div>
       {/* Row 2 cols 2 + 3 — action buttons. The first action goes
@@ -344,7 +349,7 @@ export function ClipCard({
           className={`clip-card-action-btn clip-card-col-primary ${actions[0].variant ?? ''}`}
           onClick={(e) => { e.stopPropagation(); actions[0]!.onClick() }}
           title={actions[0].title}
-          disabled={actions[0].disabled}
+          disabled={interactionDisabled || actions[0].disabled}
         >{actions[0].label}</button>
       )}
       {actions && actions[1] && (
@@ -353,7 +358,7 @@ export function ClipCard({
           className={`clip-card-action-btn clip-card-col-secondary ${actions[1].variant ?? ''}`}
           onClick={(e) => { e.stopPropagation(); actions[1]!.onClick() }}
           title={actions[1].title}
-          disabled={actions[1].disabled}
+          disabled={interactionDisabled || actions[1].disabled}
         >{actions[1].label}</button>
       )}
 

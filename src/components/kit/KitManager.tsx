@@ -683,6 +683,7 @@ function ClipsPanel() {
   const getClipAudio = useLibraryStore((s) => s.getClipAudio)
   const addEventToKit = useLibraryStore((s) => s.addEventToKit)
   const activeKitId = useLibraryStore((s) => s.activeKitId)
+  const activeKitSaving = useLibraryStore((s) => activeKitId ? !!s.kitSaveInProgress[activeKitId] : false)
   const editingClipId = useLibraryStore((s) => s.editingClipId)
   const setEditingClipId = useLibraryStore((s) => s.setEditingClipId)
   const showClipDetails = useLibraryStore((s) => s.showClipDetails)
@@ -768,6 +769,7 @@ function ClipsPanel() {
 
   const addClipToActiveKit = useCallback(async (clip: LibraryClip) => {
     if (!activeKitId) { toast('Select or create a Kit first', 'error'); return }
+    if (activeKitSaving) { toast('Kit を保存中です。完了後に追加してください', 'info'); return }
     // Independence: copy the library clip's metadata + audio bytes into
     // a fresh KitEvent. After this the kit owns its own snapshot — the
     // library can be archived, renamed, or deleted without affecting
@@ -795,7 +797,7 @@ function ClipsPanel() {
     }, blob)
     if (newId) toast(`Added "${clip.name}" to kit`, 'success')
     else toast('Kit not found', 'error')
-  }, [activeKitId, addEventToKit, toast, getIntensity, getClipAudio])
+  }, [activeKitId, activeKitSaving, addEventToKit, toast, getIntensity, getClipAudio])
 
   // キーボードショートカット: Space=再生、↑↓=選択移動、←→=Amp 増減
   useEffect(() => {
@@ -909,7 +911,7 @@ function ClipsPanel() {
       playingId={playingId}
       onToggle={(id, intensity) => toggle(id, () => getClipAudio(id), intensity)}
       onAddToKit={() => addClipToActiveKit(c)}
-      kitAvailable={!!activeKitId}
+      kitAvailable={!!activeKitId && !activeKitSaving}
       showDetails={showClipDetails}
       intensity={getIntensity(c.id)}
       onIntensityChange={(v) => setIntensity(c.id, v)}
@@ -1200,6 +1202,8 @@ function KitEditor() {
   const { playingId, toggle: togglePreview, stop: stopPreview, getDeviceWiper } = useAudioPreview()
 
   const [isExporting, setIsExporting] = useState(false)
+  const activeKitSaving = useLibraryStore((s) => activeKitId ? !!s.kitSaveInProgress[activeKitId] : false)
+  const editLocked = isExporting || activeKitSaving
   const [dropActive, setDropActive] = useState(false)
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
   // Page-wide single selection — see `LibraryState.activeSelection`.
@@ -1335,6 +1339,7 @@ function KitEditor() {
   // Kit 内のキーボード操作: Space=再生、↑↓=選択移動、←→=intensity ±0.05
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (editLocked) return
       const panel = kitPanelRef.current
       if (!panel || !activeKit) return
       // テキスト入力中はスキップ。range スライダー (intensity) 上では:
@@ -1434,7 +1439,7 @@ function KitEditor() {
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [activeKit, sortedEvents, selectedEventId, setSelectedEventId, activeSelection, updateKitEvent, togglePreview, stopPreview, getKitEventAudio, getDeviceWiper, removeEventFromKit])
+  }, [activeKit, sortedEvents, selectedEventId, setSelectedEventId, activeSelection, editLocked, updateKitEvent, togglePreview, stopPreview, getKitEventAudio, getDeviceWiper, removeEventFromKit])
 
   const handleCreate = useCallback(async (name?: string) => {
     // Match the same constraint applied in the rename input — strip
@@ -1456,6 +1461,7 @@ function KitEditor() {
 
   const handleKitDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault(); setDropActive(false); setDragOverIdx(null)
+    if (editLocked) return
     if (!activeKitId) { toast('Select or create a Kit first', 'error'); return }
 
     const cid = e.dataTransfer.getData(DND_TYPE_CLIP)
@@ -1497,7 +1503,7 @@ function KitEditor() {
         await updateKit(activeKitId, { events: evts })
       } catch { /* */ }
     }
-  }, [activeKitId, activeKit, clips, dragOverIdx, addEventToKit, updateKit, toast])
+  }, [activeKitId, activeKit, clips, dragOverIdx, editLocked, addEventToKit, updateKit, toast])
 
   // Kit のデバイス flash 使用量は FIRE (command) モードのイベントだけ数える。
   // CLIP はデバイスに WAV を載せず SDK 側ストリームで送るため flash を消費しない。
@@ -1554,7 +1560,7 @@ function KitEditor() {
       {/* Kit list with inline details */}
       <div className="kit-list-container"
         onDrop={handleKitDrop}
-        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setDropActive(true) }}
+        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = editLocked ? 'none' : 'copy'; if (!editLocked) setDropActive(true) }}
         onDragLeave={() => { setDropActive(false); setDragOverIdx(null) }}>
         {kits.length === 0 ? (
           <div className="kit-empty">Type a name above and press Enter.</div>
@@ -1572,6 +1578,7 @@ function KitEditor() {
                 <button
                   className="kit-list-archive"
                   onClick={(e) => { e.stopPropagation(); void archiveKit(k.id) }}
+                  disabled={isActive && editLocked}
                   title="Archive"
                 >
                   x
@@ -1581,6 +1588,7 @@ function KitEditor() {
               {/* Inline details (only for selected kit) */}
               {isThisKit && (
                 <div className={`kit-details-inline ${dropActive ? 'drop-active' : ''}`}>
+                  <fieldset className="kit-authoring-fields" disabled={editLocked}>
                   <div className="kit-meta-fields">
                     <label className="kit-meta-field">
                       <span>Name <span className="field-hint">英小文字 / 数字 / - のみ・先頭は英小文字</span></span>
@@ -1759,7 +1767,7 @@ function KitEditor() {
                     <select
                       className="kit-events-mode-bulk"
                       value=""
-                      disabled={activeKit.events.length === 0}
+                      disabled={editLocked || activeKit.events.length === 0}
                       onChange={(e) => {
                         const v = e.target.value
                         if (!v) return
@@ -1808,6 +1816,7 @@ function KitEditor() {
                           playing={playingId === ev.id}
                           showDetails={showClipDetails}
                           selected={selectedEventId === ev.id}
+                          disabled={editLocked}
                           onSelect={() => setSelectedEventId(ev.id)}
                           onTogglePlay={() => {
                             togglePreview(ev.id, () => getKitEventAudio(ev.id), ev.intensity)
@@ -1870,6 +1879,7 @@ function KitEditor() {
                         />
                       ))}
                   </div>
+                  </fieldset>
 
                   <KitExportSection kit={activeKit} isExporting={isExporting} setIsExporting={setIsExporting}
                     managerConnected={managerConnected} devices={devices} send={send} />
@@ -2080,12 +2090,9 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
   // どちらの場合も root 直下に `<kitId>/` フォルダを作る (kits/ 階層は挟まない)。
   const outRoot = kitDirHandle ?? workDirHandle
 
-  // Persistence is owned by libraryStore: every kit-mutating action
-  // (createKit / updateKit / addEventToKit / updateKitEvent /
-  //  removeEventFromKit) calls scheduleKitFlush on its own, so the
-  // <outRoot>/<kitId>/ folder stays in lockstep with the store
-  // regardless of which kit is "active" or whether KitExportSection
-  // is even mounted. This component only owns Deploy + status display.
+  // Authoring mutations persist metadata eagerly, while Pack output
+  // (generated WAVs + manifest) is committed only by Save Folder / Deploy.
+  // libraryStore serializes both through one per-Kit operation queue.
 
   // Mirror libraryStore's localFsStatus into a local label so the
   // pending → saving → saved transition shows next to Deploy.
