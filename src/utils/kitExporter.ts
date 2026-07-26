@@ -116,6 +116,34 @@ function eventFileName(event: KitEvent): string {
 }
 
 /**
+ * Resolve one emitted WAV filename.
+ *
+ * Multiple manifest events with different parameters may reference identical
+ * encoded audio. They share one WAV; only same-name files with different
+ * bytes receive `_2`, `_3`, ... suffixes.
+ */
+export function claimOutputFilename(
+  preferredName: string,
+  outputHash: string,
+  usedNames: Set<string>,
+  nameByOutputHash: Map<string, string>,
+): { filename: string; shouldWrite: boolean } {
+  const existing = nameByOutputHash.get(outputHash)
+  if (existing) return { filename: existing, shouldWrite: false }
+
+  let filename = preferredName
+  if (usedNames.has(filename)) {
+    const base = filename.replace(/\.wav$/, '')
+    let n = 2
+    while (usedNames.has(`${base}_${n}.wav`)) n++
+    filename = `${base}_${n}.wav`
+  }
+  usedNames.add(filename)
+  nameByOutputHash.set(outputHash, filename)
+  return { filename, shouldWrite: true }
+}
+
+/**
  * One file emitted by `exportKitAsPack`. The `path` is relative to
  * `<outRoot>/<kitId>/` (e.g. `install-clips/foo.wav`, `<kitId>-manifest.json`).
  *
@@ -185,16 +213,13 @@ export async function exportKitAsPack(
   const streamEvents: Record<string, unknown> = {}
   const clipsMeta: Record<string, unknown> = {}
 
-  // Per-event SHA-1 source hash — recorded as we encode so we can stamp
-  // each ExportFile with the same hash later. Keys are `${ev.id}|${mode}`
-  // to mirror the encoded-WAV cache layout, even though command and
-  // stream of the same event share the underlying source hash (the
-  // *source* audio is identical; what differs is the encoded output).
-  const fileHashByPath = new Map<string, string>()
-
   // ファイル名の重複回避（install-clips / stream-clips それぞれ独立した namespace）
   const usedCommandNames = new Set<string>()
   const usedStreamNames = new Set<string>()
+  // Encoded bytes are the output identity. Events keep independent manifest
+  // parameters while sharing the first filename emitted for identical audio.
+  const commandNameByOutputHash = new Map<string, string>()
+  const streamNameByOutputHash = new Map<string, string>()
 
   // Per-event lazy decode. When every mode of this event hits the IDB
   // encoded-WAV cache (sourceHash unchanged since the last save), the
@@ -406,17 +431,24 @@ export async function exportKitAsPack(
       }
 
       if (mode === 'command') {
-        let fname = eventFileName(ev)
-        if (usedCommandNames.has(fname)) {
-          const base = fname.replace(/\.wav$/, '')
-          let n = 2
-          while (usedCommandNames.has(`${base}_${n}.wav`)) n++
-          fname = `${base}_${n}.wav`
+        const claimed = claimOutputFilename(
+          eventFileName(ev),
+          outputHash,
+          usedCommandNames,
+          commandNameByOutputHash,
+        )
+        const fname = claimed.filename
+        if (claimed.shouldWrite) {
+          const filePath = `install-clips/${fname}`
+          files.push({ path: filePath, blob: encodedBlob, outputHash, cached: cachedThisTurn })
+
+          clipsMeta[fname] = {
+            duration_ms: round2(encodedDuration * 1000),
+            sample_rate: PACK_TARGET_SAMPLE_RATE,
+            channels: encodedChannels,
+            format: 'pcm_s16le',
+          }
         }
-        usedCommandNames.add(fname)
-        const filePath = `install-clips/${fname}`
-        files.push({ path: filePath, blob: encodedBlob, outputHash, cached: cachedThisTurn })
-        fileHashByPath.set(filePath, outputHash)
 
         events[ev.eventId] = {
           clip: fname,
@@ -427,25 +459,18 @@ export async function exportKitAsPack(
             ...(ev.deviceWiper !== null ? { device_wiper: ev.deviceWiper } : {}),
           },
         }
-
-        clipsMeta[fname] = {
-          duration_ms: round2(encodedDuration * 1000),
-          sample_rate: PACK_TARGET_SAMPLE_RATE,
-          channels: encodedChannels,
-          format: 'pcm_s16le',
-        }
       } else {
-        let fname = eventFileName(ev)
-        if (usedStreamNames.has(fname)) {
-          const base = fname.replace(/\.wav$/, '')
-          let n = 2
-          while (usedStreamNames.has(`${base}_${n}.wav`)) n++
-          fname = `${base}_${n}.wav`
+        const claimed = claimOutputFilename(
+          eventFileName(ev),
+          outputHash,
+          usedStreamNames,
+          streamNameByOutputHash,
+        )
+        const fname = claimed.filename
+        if (claimed.shouldWrite) {
+          const filePath = `stream-clips/${fname}`
+          files.push({ path: filePath, blob: encodedBlob, outputHash, cached: cachedThisTurn })
         }
-        usedStreamNames.add(fname)
-        const filePath = `stream-clips/${fname}`
-        files.push({ path: filePath, blob: encodedBlob, outputHash, cached: cachedThisTurn })
-        fileHashByPath.set(filePath, outputHash)
 
         // stream_events の parameters は SDK 側のみが参照する。device_wiper
         // は stream モードでは無意味なので含めない (schema 2.0.0 仕様)。
@@ -462,10 +487,6 @@ export async function exportKitAsPack(
       // 他 mode (旧 stream_source 等) は schema 2.0.0 で削除済。
     }
   }
-  // fileHashByPath は今は ExportFile.sourceHash で持っているので未使用。
-  // 将来 path-base de-dup ロジックを足す場合に流用するため残置。
-  void fileHashByPath
-
   // Author tuning context. We always emit firmware_version_min (the
   // schema requires it) but only keep extra hardware fields when the
   // user supplied them — keeps manifest.json clean for new kits.

@@ -1575,10 +1575,22 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (!isFileSystemAccessSupported()) return false
     const handle = await pickWorkDirectory()
     if (!handle) return false
-    // Retarget: when no dedicated kitDir is set this IS the kit outRoot, and
-    // this path doesn't go through resetKitMemory(). (See outRootEpoch.)
-    outRootEpoch++
-    set({ workDirHandle: handle, workDirName: handle.name })
+    // Without a dedicated kitDir, the work folder is also the Kit source of
+    // truth. Drop the previous folder's Kit state and pending writes before
+    // adopting the new handle. A dedicated kitDir intentionally stays active.
+    if (get().kitDirHandle) {
+      outRootEpoch++
+      set({ clips: [], workDirHandle: handle, workDirName: handle.name })
+    } else {
+      resetKitMemory()
+      set({
+        clips: [],
+        kits: [],
+        activeKitId: null,
+        workDirHandle: handle,
+        workDirName: handle.name,
+      })
+    }
 
     // One-shot rename of the pre-tilde archive folders before any
     // scan/listing runs — keeps the workdir tidy and avoids two
@@ -1586,11 +1598,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     try { await migrateLegacyArchiveFolders(handle) }
     catch (err) { console.warn('[pickWorkDir] archive migration failed:', err) }
 
-    // Reset in-memory clips before adopting the new folder.
-    // This mirrors pickKitDir's resetKitMemory()+kits:[] pattern: switching
-    // work folders must never carry over clips from the previous folder (or
-    // from stale IDB rows) into the new one.
-    set({ clips: [] })
     const existingFiles = await listClipFiles(handle)
     if (existingFiles.length > 0) {
       // Non-empty folder — disk is truth; adopt its content as-is.
@@ -1623,7 +1630,19 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
   disconnectWorkDir: async () => {
     await clearDirectoryHandle()
-    set({ workDirHandle: null, workDirName: null, ampPresets: [] })
+    if (get().kitDirHandle) {
+      set({ clips: [], workDirHandle: null, workDirName: null, ampPresets: [] })
+    } else {
+      resetKitMemory()
+      set({
+        clips: [],
+        kits: [],
+        activeKitId: null,
+        workDirHandle: null,
+        workDirName: null,
+        ampPresets: [],
+      })
+    }
   },
 
   pickKitDir: async () => {
@@ -1770,19 +1789,24 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     //      / data clears. The actual kit LIST is (re)built from the scanned
     //      disk folders below; this just supplies prior ev.ids to match.
     //   (The old IDB `listKits()` legacy seed was removed — see below.)
-    let updatedKits = [...get().kits]
-    if (updatedKits.length === 0 && workDirHandle) {
+    let existingKits = [...get().kits]
+    if (existingKits.length === 0 && workDirHandle) {
       try {
         const savedKits = await readMetadataJson<KitDefinition[]>(
           workDirHandle, KITS_META_FILE,
         )
         if (savedKits && savedKits.length > 0) {
-          updatedKits = savedKits.map((k) => migrateKit(k, updatedClips))
+          existingKits = savedKits.map((k) => migrateKit(k, updatedClips))
         }
       } catch (err) {
         console.warn('[importKitsFromOutputDir] kits-meta.json read failed:', err)
       }
     }
+    // Previous state is used only to preserve stable ids and source audio.
+    // The visible list is rebuilt exclusively from folders found by this scan,
+    // so deleted Kits and Kits from a previous work folder cannot survive.
+    const updatedKits: KitDefinition[] = []
+
     // (Removed) — the IDB `listKits()` legacy seed. It used to hydrate
     // `updatedKits` from the old `kits` IDB store when kits-meta.json was
     // absent. `saveKit` is dead code (disk-as-truth since 2026-05-26), so that
@@ -2022,7 +2046,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // we keep the ORIGINAL source bytes across reloads. sourceHash
       // stays stable, encoded-wavs cache hits, outputHash stays stable,
       // and the disk skip-write check matches.
-      const existingKitForMatch = updatedKits.find((k) => k.name === kitId)
+      const existingKitForMatch = existingKits.find((k) => k.name === kitId)
       const existingEventByWireId = new Map<string, KitEvent>()
       if (existingKitForMatch) {
         for (const ev of existingKitForMatch.events) {
@@ -2113,7 +2137,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         catch (err) { console.warn('[importKitsFromOutputDir] saveKitEventAudio failed:', err) }
       }
 
-      const existingIdx = updatedKits.findIndex((k) => k.name === kitId)
+      const existingKit = existingKits.find((k) => k.name === kitId)
       // Author tuning context — read every supported field, drop the
       // ones that are absent so we don't leave stale numeric defaults.
       const td = m.target_device ?? {}
@@ -2125,18 +2149,17 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       if (typeof td.volume_wiper === 'number') targetDevice.volume_wiper = td.volume_wiper
       if (typeof td.volume_steps === 'number') targetDevice.volume_steps = td.volume_steps
       const kit: KitDefinition = {
-        id: existingIdx >= 0 ? updatedKits[existingIdx].id : generateId(),
+        id: existingKit?.id ?? generateId(),
         // Folder name = display name. Lossless round-trip with disk.
         name: kitId,
         version: String(m.version ?? '1.0.0'),
         description: String(m.description ?? ''),
         events,
-        createdAt: existingIdx >= 0 ? updatedKits[existingIdx].createdAt : (m.created_at ?? now),
+        createdAt: existingKit?.createdAt ?? (m.created_at ?? now),
         updatedAt: now,
         targetDevice: Object.keys(targetDevice).length > 0 ? targetDevice : undefined,
       }
-      if (existingIdx >= 0) updatedKits[existingIdx] = kit
-      else updatedKits.push(kit)
+      updatedKits.push(kit)
       // (Disk-as-truth) Persistence happens via saveKitsMetaToDir at the
       // end of this function — we no longer mirror to the IDB `kits`
       // store. See top of function for rationale.
