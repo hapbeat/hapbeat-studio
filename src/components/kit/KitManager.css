@@ -575,9 +575,9 @@
 .kit-list-arrow { font-size: 15px; width: 12px; flex-shrink: 0; }
 .kit-list-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kit-list-count { font-size: 14px; font-family: var(--font-mono); color: var(--text-secondary); }
-.kit-list-delete { width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; font-size: 15px; background: none; border: none; color: var(--text-secondary); cursor: pointer; border-radius: 3px; opacity: 0.4; }
-.kit-list-item:hover .kit-list-delete { opacity: 1; }
-.kit-list-delete:hover { background: rgba(244,67,54,0.2); color: var(--error); }
+.kit-list-archive { width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; font-size: 15px; background: none; border: none; color: var(--text-secondary); cursor: pointer; border-radius: 3px; opacity: 0.4; }
+.kit-list-item:hover .kit-list-archive { opacity: 1; }
+.kit-list-archive:hover { background: rgba(255,152,0,0.16); color: var(--warning); }
 
 /* ---- Kit Details Inline ---- */
 .kit-details-inline {

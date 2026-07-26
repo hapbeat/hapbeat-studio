@@ -114,6 +114,13 @@ For the full payload shapes of a node, see `get_info_result` (`GetInfoResult` in
 - **Kit folders / WAVs:** written to a user-picked directory via the File System
   Access API (`<kit>/install-clips/`, `<kit>/stream-clips/`, `<kit>-manifest.json`).
   Disk is the source of truth → recovered by re-picking the folder after a host move.
+- **Local-file safety invariant:** Studio never permanently deletes files or
+  folders inside a user-selected directory. Save Folder is add/overwrite-only;
+  it does not prune unreferenced WAVs or legacy manifests. A close/remove UI
+  action must move the item into `_archive` successfully before hiding it from
+  Studio. If archive fails, keep it visible and report an error. Permanent
+  deletion is an OS-folder operation performed by the user, never by Studio.
+  Copy-then-remove is allowed only as the implementation of archive/rename.
 - **MQTT topic registry:** `localStorage` (`hapbeat-studio-mqtt-topics`,
   `src/stores/mqttTopicsStore.ts`). Per-origin, so the sensor-config UI offers
   JSON export/import to carry the list across an origin change.

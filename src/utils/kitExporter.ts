@@ -173,6 +173,7 @@ export interface ExportResult {
   files: ExportFile[]
   kitId: string
   warnings: string[]
+  errors: string[]
 }
 
 /** Modes selected on a KitEvent, with a `'command'` fallback when migration
@@ -204,6 +205,7 @@ export async function exportKitAsPack(
   kit: KitDefinition
 ): Promise<ExportResult> {
   const warnings: string[] = []
+  const errors: string[] = []
   const kitId = toKitId(kit.name)
   const files: ExportFile[] = []
 
@@ -277,7 +279,9 @@ export async function exportKitAsPack(
     // in both `events` and `stream_events`). Warn and skip.
     const hasClip = ev.clipName !== '' && ev.clipName !== undefined && ev.clipFileSize > 0
     if (!hasClip) {
-      warnings.push(`"${ev.clipName || ev.eventId}" に音声が設定されていません (schema 2.0.0 では clip 必須)`)
+      const message = `"${ev.clipName || ev.eventId}" に音声が設定されていません (schema 2.0.0 では clip 必須)`
+      warnings.push(message)
+      errors.push(message)
       continue
     }
 
@@ -286,7 +290,9 @@ export async function exportKitAsPack(
     // miss / fallback bytes on decode failure.
     const sourceBlob = await loadKitEventAudio(ev.id)
     if (!sourceBlob) {
-      warnings.push(`音声データが見つかりません: "${ev.clipName}" (event ${ev.id})`)
+      const message = `音声データが見つかりません: "${ev.clipName}" (event ${ev.id})`
+      warnings.push(message)
+      errors.push(message)
       continue
     }
     let sourceHash: string
@@ -536,7 +542,7 @@ export async function exportKitAsPack(
     cached: false,
   })
 
-  return { files, kitId, warnings }
+  return { files, kitId, warnings, errors }
 }
 
 /**

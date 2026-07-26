@@ -1182,7 +1182,7 @@ function KitEditor() {
   const activeKitId = useLibraryStore((s) => s.activeKitId)
   const clips = useLibraryStore((s) => s.clips)
   const createKit = useLibraryStore((s) => s.createKit)
-  const removeKit = useLibraryStore((s) => s.removeKit)
+  const archiveKit = useLibraryStore((s) => s.archiveKit)
   const setActiveKit = useLibraryStore((s) => s.setActiveKit)
   const removeEventFromKit = useLibraryStore((s) => s.removeEventFromKit)
   const updateKitEvent = useLibraryStore((s) => s.updateKitEvent)
@@ -1569,7 +1569,13 @@ function KitEditor() {
                 <span className="kit-list-arrow">{isActive ? '\u25BE' : '\u25B8'}</span>
                 <span className="kit-list-name">{k.name}</span>
                 <span className="kit-list-count">{k.events.length} events</span>
-                <button className="kit-list-delete" onClick={(e) => { e.stopPropagation(); removeKit(k.id) }} title="Delete">x</button>
+                <button
+                  className="kit-list-archive"
+                  onClick={(e) => { e.stopPropagation(); void archiveKit(k.id) }}
+                  title="Archive"
+                >
+                  x
+                </button>
               </div>
 
               {/* Inline details (only for selected kit) */}

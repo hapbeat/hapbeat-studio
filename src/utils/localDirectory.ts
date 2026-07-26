@@ -350,23 +350,13 @@ export async function writeClipFile(
   }
 }
 
-export async function deleteClipFile(
-  root: FileSystemDirectoryHandle,
-  relPath: string,
-): Promise<void> {
-  try {
-    const { dir, filename } = await resolveClipPath(root, relPath, false)
-    await dir.removeEntry(filename)
-  } catch { /* ignore */ }
-}
-
 /**
  * clips/ 配下のファイル名のみを変更する（ディレクトリは維持）。
  * 新ファイル名はベース名のみ。拡張子は元ファイルから保持する。
  *
  * 衝突時: `name_2.wav` → `name_3.wav` …と連番を付与する。
  * 実装は File System Access API の `move(name)` を使い、
- * 非対応環境では copy → delete にフォールバックする。
+ * 非対応環境では copy 完了後に source を外す move にフォールバックする。
  *
  * @returns 新しい相対パス（変更なし or 失敗時は null）
  */
@@ -402,7 +392,7 @@ export async function renameClipFile(
   if (typeof moveFn === 'function') {
     await moveFn.call(oldHandle, dest)
   } else {
-    // Fallback: copy → delete
+    // Fallback move: copy completes before the source is removed.
     const file = await oldHandle.getFile()
     const blob = new Blob([await file.arrayBuffer()], { type: file.type || 'audio/wav' })
     const newHandle = await dir.getFileHandle(dest, { create: true })
@@ -464,8 +454,12 @@ export async function archiveClipFile(
   await writable.close()
   console.info('[archiveClipFile] wrote', `clips/${ARCHIVE_CLIP_DIR}/${destName}`, blob.size, 'bytes')
 
-  await deleteClipFile(root, relPath)
-  console.info('[archiveClipFile] deleted', `clips/${relPath}`)
+  // File System Access has no universally available cross-directory move.
+  // Remove the source only after the archive copy closed successfully; this
+  // removeEntry is the final step of a move, never a hard-delete operation.
+  const { dir: sourceDir, filename: sourceName } = await resolveClipPath(root, relPath, false)
+  await sourceDir.removeEntry(sourceName)
+  console.info('[archiveClipFile] moved', `clips/${relPath}`, 'to', `clips/${ARCHIVE_CLIP_DIR}/${destName}`)
   return `${ARCHIVE_CLIP_DIR}/${destName}`
 }
 
@@ -630,8 +624,8 @@ export const ARCHIVE_KIT_DIR = '_archive'
  * the moved folder is suffixed with `-2`, `-3`, … until unique.
  *
  * Implementation note: the File System Access API has no atomic move
- * across directories yet, so we recursively copy then delete. For a
- * typical kit (a few WAVs + manifest.json) this is fast enough; for
+ * across directories yet, so we recursively copy then remove the source. For
+ * a typical kit (a few WAVs + manifest.json) this is fast enough; for
  * very large kits expect some delay.
  *
  * Returns the path under archive on success (e.g. "_archive/my-kit-2"),
@@ -696,52 +690,6 @@ async function copyDirectoryRecursive(
       const subSrc = await src.getDirectoryHandle(entry.name)
       const subDst = await dst.getDirectoryHandle(entry.name, { create: true })
       await copyDirectoryRecursive(subSrc, subDst)
-    }
-  }
-}
-
-/**
- * Recursively remove a kit folder under *root*. Hard-delete — used by
- * tests and emergency cleanup. UI flows should prefer
- * `archiveKitFolder` so the user can recover by hand.
- *
- * Best-effort: missing folder = success, no-op. All errors are
- * swallowed and returned as `false` so callers stay simple.
- */
-export async function deleteKitFolder(
-  root: FileSystemDirectoryHandle,
-  kitName: string,
-): Promise<boolean> {
-  try {
-    // `recursive: true` (Chromium-only) lets us drop the whole subtree
-    // in one call. The fallback walks and deletes per-entry.
-    const removeOpts = { recursive: true } as { recursive?: boolean }
-    try {
-      await (root as FileSystemDirectoryHandle).removeEntry(kitName, removeOpts)
-      return true
-    } catch {
-      // Manual recursion fallback
-      const dir = await root.getDirectoryHandle(kitName)
-      await emptyDirectory(dir)
-      await root.removeEntry(kitName)
-      return true
-    }
-  } catch {
-    return false
-  }
-}
-
-async function emptyDirectory(dir: FileSystemDirectoryHandle): Promise<void> {
-  const names: string[] = []
-  for await (const entry of dir.values()) names.push(entry.name)
-  for (const name of names) {
-    try {
-      const sub = await dir.getDirectoryHandle(name)
-      await emptyDirectory(sub)
-      await dir.removeEntry(name)
-    } catch {
-      // not a directory — try as file
-      try { await dir.removeEntry(name) } catch { /* ignore */ }
     }
   }
 }

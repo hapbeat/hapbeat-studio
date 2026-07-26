@@ -22,7 +22,6 @@ import {
   verifyPermission,
   listClipFiles,
   writeClipFile,
-  deleteClipFile,
   readClipFile,
   readKitClipFile,
   archiveClipFile,
@@ -209,7 +208,7 @@ interface LibraryState {
    * pop up in Explorer immediately).
    */
   scheduleKitFlush: (kitId: string, delayMs?: number) => void
-  /** Cancel any pending flush for kitId (called from removeKit so the
+  /** Cancel any pending flush for kitId (called from archiveKit so the
    *  archived folder is not recreated by a stale debounce timer). */
   cancelKitFlush: (kitId: string) => void
   /** Latest Save Folder output for a kit (file list, no ZIP). Deploy
@@ -270,9 +269,7 @@ interface LibraryState {
     sourceFilename: string
   ) => Promise<string>
   addClipFromFile: (file: File) => Promise<string>
-  removeClip: (id: string) => Promise<void>
-  /** Move a clip into clips/archive/. Preferred over removeClip — the file
-   *  is preserved on disk so the user can recover it by moving it back.
+  /** Move a clip into clips/_archive/ so the user can recover it by moving it back.
    *  Returns true on success. */
   archiveClip: (id: string) => Promise<boolean>
   updateClip: (id: string, updates: Partial<LibraryClip>) => Promise<void>
@@ -311,7 +308,7 @@ interface LibraryState {
 
   // Kit actions
   createKit: (name: string) => Promise<string>
-  removeKit: (id: string) => Promise<void>
+  archiveKit: (id: string) => Promise<void>
   setActiveKit: (id: string | null) => void
   setEditingClipId: (id: string | null) => void
   /** Page-wide single-card selection setter. Pass null to clear. */
@@ -918,13 +915,26 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     try {
       // exportKitAsPack returns ExportFile[] directly (no ZIP encode
       // / decode round-trip). For unchanged audio the IDB encoded-WAV
-      // cache also skips decode + re-encode. The remaining disk writes
-      // are pruned below by lastWrittenWavs.
+      // cache also skips decode + re-encode. Save Folder only adds or
+      // overwrites files; it never removes an existing file.
       const result = await exportKitAsPack(kit)
 
       // Race-condition guard: kit may have been removed (× clicked)
       // while exportKitAsPack was running. Bail before any disk write.
       if (!useLibraryStore.getState().kits.some((k) => k.id === kit.id)) {
+        return null
+      }
+
+      // Never write a partial kit. A folder refresh can leave an event's
+      // metadata visible while its source blob is unavailable. Missing audio
+      // is a hard stop before any filesystem write, not an event to skip.
+      if (result.errors.length > 0) {
+        const label = opMsg ?? `kit "${kit.name}" の保存`
+        const detail = result.errors.join(' / ')
+        state.setLocalFsStatus('error', `「${label}」を中止しました: ${detail}`)
+        try {
+          useLogStore.getState().push('kit', `${kit.name}: 保存中止 — ${detail}`)
+        } catch { /* logStore unavailable */ }
         return null
       }
 
@@ -1058,78 +1068,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       }
       await saveKitDiskCache(outRoot, kitId, newCache)
 
-      // One-shot migration: the manifest is now `<kitId>-manifest.json`
-      // (kitExporter writes it under that name from 2026-05-17). If a
-      // legacy `manifest.json` is still sitting in this kit folder
-      // (e.g. the kit was first exported under the old name), drop it
-      // now so SDK / Helper discovery doesn't have to pick between two
-      // copies. No backwards compat — pre-release project.
-      try {
-        const kitDirForClean = await outRoot.getDirectoryHandle(kitId, { create: false })
-        const newName = manifestFileName(kitId)
-        if (newName !== 'manifest.json') {
-          try { await kitDirForClean.removeEntry('manifest.json') } catch { /* no legacy file */ }
-        }
-      } catch { /* kit dir vanished */ }
-
-      // Prune stale WAVs in install-clips/ and stream-clips/. Kept
-      // narrow by intent: we only delete files whose basename doesn't
-      // match ANY current event of this kit — i.e. true orphans from
-      // a rename or a removed event. Files that match a current event
-      // but live in the "wrong" subfolder (e.g. left over after a
-      // FIRE → CLIP mode toggle) are LEFT IN PLACE. That stops the
-      // file churn the user would otherwise see whenever they flip a
-      // mode pill: the WAV stays put even when the manifest no longer
-      // references it.
-      //
-      // Trade-off (intentional): a mode toggle that's been bounced
-      // both ways will leave the WAV in both subfolders, ~doubling
-      // disk for that event. The device firmware still only plays
-      // what the manifest says, so the extra file just sits unused
-      // on LittleFS until the next clean kit re-export.
-      // Built from the paths exportKitAsPack ACTUALLY produced, per subfolder
-      // — not re-derived from event names. Re-deriving got the de-duplication
-      // wrong: two events resolving to the same filename are written as
-      // `foo.wav` + `foo_2.wav`, but a name-derived Set only ever contains
-      // `foo.wav`, so `foo_2.wav` was deleted moments after being written and
-      // the manifest ended up referencing a file that wasn't on disk. Using
-      // result.files makes "owned" mean exactly "we just wrote it".
-      // A UNION across subfolders, deliberately not per-subfolder: keeping a
-      // name owned anywhere is what preserves the mode-toggle tolerance
-      // described above (a FIRE→CLIP flip leaves the old subfolder's copy in
-      // place instead of churning the file).
-      const ownedBasenames = new Set<string>()
-      for (const f of result.files) {
-        const slash = f.path.lastIndexOf('/')
-        if (slash < 0) continue          // kit-root file (manifest) — not pruned here
-        const base = f.path.slice(slash + 1)
-        if (base) ownedBasenames.add(base)
-      }
-      try {
-        const kitDir = await outRoot.getDirectoryHandle(kitId)
-        for (const subName of ['install-clips', 'stream-clips'] as const) {
-          let sub: FileSystemDirectoryHandle
-          try {
-            sub = await kitDir.getDirectoryHandle(subName)
-          } catch { continue /* sub-folder doesn't exist */ }
-          const stale: string[] = []
-          for await (const entry of sub.values()) {
-            if (entry.kind !== 'file') continue
-            // ONLY ever delete .wav — never any other file we didn't write.
-            // The kit folder can legitimately live inside someone else's
-            // project: a Unity Assets/ tree keeps a `<clip>.wav.meta`
-            // sidecar next to every clip, and deleting those makes Unity
-            // reimport with fresh GUIDs, silently breaking every scene /
-            // prefab reference to that asset. Extension-scoping this keeps
-            // the prune to files this app actually owns.
-            if (!/\.wav$/i.test(entry.name)) continue
-            if (!ownedBasenames.has(entry.name)) stale.push(entry.name)
-          }
-          for (const n of stale) {
-            try { await sub.removeEntry(n) } catch { /* ignore */ }
-          }
-        }
-      } catch { /* kit dir vanished — caller will see no folder */ }
+      // Filesystem safety invariant: Save Folder is append/overwrite only.
+      // Existing manifests and unreferenced WAVs are deliberately preserved.
+      // Studio never decides that a user's file is safe to delete.
+      // Explicit close actions move content into `_archive` instead.
 
       lastWrittenKitId.set(kit.id, kitId)
       lastBuiltKit.set(kit.id, { files: result.files, kitId })
@@ -1335,6 +1277,16 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // Same guard flushKitFolderNow uses: the kit may have been removed
       // while the (async) export ran.
       if (!useLibraryStore.getState().kits.some((k) => k.id === kit.id)) return null
+      // Deploy must not package a partial kit or fall back from a failed
+      // Save Folder to a ZIP whose manifest silently omits events.
+      if (result.errors.length > 0) {
+        const detail = result.errors.join(' / ')
+        useLibraryStore.getState().setLocalFsStatus(
+          'error',
+          `kit "${kit.name}" のビルドを中止しました: ${detail}`,
+        )
+        return null
+      }
       return { files: result.files, kitId: result.kitId }
     } catch (err) {
       console.error('buildKitInMemory failed:', err)
@@ -1715,44 +1667,59 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // disappeared (folder missing / manifest filename mismatch / parse
     // failure). Skip when discovered is non-empty AND every kit has a
     // valid manifest, to keep the console quiet on the happy path.
-    if (discovered.length === 0) {
-      // Auto-materialize sample-kit when the selected folder has no kits yet.
-      // This lets users deploy and verify `sample-kit.sine_100hz` immediately
-      // after choosing a fresh folder, before authoring their own content.
-      // Idempotent: skipped when sample-kit/ folder already exists (even if
-      // its manifest is unreadable), so a corrupted folder is not overwritten.
-      let sampleKitAlreadyExists = false
+    let sampleKitFolderExists = false
+    try {
+      await outRoot.getDirectoryHandle('sample-kit', { create: false })
+      sampleKitFolderExists = true
+    } catch { /* no existing sample-kit folder */ }
+
+    // A fresh output root gets the built-in sample. If the reserved folder
+    // already exists, repair missing canonical files even alongside other Kits.
+    if (discovered.length === 0 || sampleKitFolderExists) {
+      // Auto-materialize or repair the canonical sample-kit when no readable
+      // Kit exists. Repair is strictly additive: inspect each expected file
+      // and write only the ones that are missing. Existing files are never
+      // overwritten, even if their content is invalid or customized.
       try {
-        await outRoot.getDirectoryHandle('sample-kit')
-        sampleKitAlreadyExists = true
-      } catch {
-        // folder does not exist — safe to materialise
-      }
-      if (!sampleKitAlreadyExists) {
-        try {
-          const base = import.meta.env.BASE_URL as string
-          const CLIPS = ['sine_50hz.wav', 'sine_100hz.wav', 'sine_200hz.wav'] as const
-          const [manifestRes, ...clipResults] = await Promise.all([
-            fetch(`${base}sample-kit/sample-kit-manifest.json`),
-            ...CLIPS.map((c) => fetch(`${base}sample-kit/install-clips/${c}`)),
-          ])
-          if (manifestRes.ok) {
-            const files: { path: string; blob: Blob }[] = [
-              { path: 'sample-kit-manifest.json', blob: await manifestRes.blob() },
-            ]
-            for (let i = 0; i < CLIPS.length; i++) {
-              if (clipResults[i].ok) {
-                files.push({ path: `install-clips/${CLIPS[i]}`, blob: await clipResults[i].blob() })
-              }
-            }
-            await writeKitFolder(outRoot, 'sample-kit', files)
-            console.info('[libraryStore] auto-materialized sample-kit into', outRoot.name)
-            // Re-scan so the new kit is picked up by the rest of this function.
-            discovered = await scanKitOutputFolder(outRoot)
+        const base = import.meta.env.BASE_URL as string
+        const expected = [
+          {
+            path: 'sample-kit-manifest.json',
+            url: `${base}sample-kit/sample-kit-manifest.json`,
+          },
+          ...(['sine_50hz.wav', 'sine_100hz.wav', 'sine_200hz.wav'] as const).map((name) => ({
+            path: `install-clips/${name}`,
+            url: `${base}sample-kit/install-clips/${name}`,
+          })),
+        ]
+        const missing: typeof expected = []
+        for (const file of expected) {
+          if (!(await kitFileExists(outRoot, 'sample-kit', file.path))) {
+            missing.push(file)
           }
-        } catch (err) {
-          console.warn('[libraryStore] sample-kit auto-materialize failed:', err)
         }
+
+        if (missing.length > 0) {
+          const responses = await Promise.all(missing.map((file) => fetch(file.url)))
+          if (responses.every((response) => response.ok)) {
+            const files = await Promise.all(responses.map(async (response, index) => ({
+              path: missing[index].path,
+              blob: await response.blob(),
+            })))
+            await writeKitFolder(outRoot, 'sample-kit', files)
+            console.info(
+              '[libraryStore] restored missing sample-kit files into',
+              outRoot.name,
+              files.map((file) => file.path),
+            )
+            // Re-scan so the materialized/repaired kit is picked up below.
+            discovered = await scanKitOutputFolder(outRoot)
+          } else {
+            console.warn('[libraryStore] sample-kit assets could not all be loaded; wrote nothing')
+          }
+        }
+      } catch (err) {
+        console.warn('[libraryStore] sample-kit materialize/repair failed:', err)
       }
     }
     if (discovered.length === 0) {
@@ -2445,29 +2412,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     }
   },
 
-  removeClip: async (id) => {
-    const { clips, workDirHandle } = get()
-    const clip = clips.find((c) => c.id === id)
-    const clipLabel = clip?.name || clip?.sourceFilename || id
-    get().setLocalFsStatus('saving', `clip "${clipLabel}" を削除中…`)
-    await deleteClip(id)
-    const newClips = clips.filter((c) => c.id !== id)
-    set({ clips: newClips })
-    // Remove from work directory
-    let diskErr: unknown = null
-    if (workDirHandle && clip?.sourceFilename) {
-      try { await deleteClipFile(workDirHandle, clip.sourceFilename) }
-      catch (err) { diskErr = err }
-      await saveClipsMetaToDir(workDirHandle, newClips)
-    }
-    if (diskErr) {
-      const msg = diskErr instanceof Error ? diskErr.message : String(diskErr)
-      get().setLocalFsStatus('error', `clip "${clipLabel}" の disk 削除失敗: ${msg}`)
-    } else {
-      get().setLocalFsStatus('saved', `clip "${clipLabel}" を削除`)
-    }
-  },
-
   archiveClip: async (id) => {
     const { clips, workDirHandle } = get()
     const clip = clips.find((c) => c.id === id)
@@ -2481,49 +2425,42 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const clipLabel = clip.name || clip.sourceFilename || id
     get().setLocalFsStatus('saving', `clip "${clipLabel}" を archive 移動中…`)
 
-    // Move the file into clips/_archive/. If there's no work dir, just
-    // drop the entry from the list (IndexedDB path) — there's no on-disk
-    // file to move in that case.
-    let moveErr: unknown = null
-    let movedPath: string | null = null
-    if (workDirHandle && clip.sourceFilename) {
-      try {
-        movedPath = await archiveClipFile(workDirHandle, clip.sourceFilename)
-        console.info('[archiveClip] archiveClipFile result:', movedPath ?? '(null — source not found?)')
-      } catch (err) {
-        moveErr = err
-        console.error('[archiveClip] archiveClipFile threw:', err)
-      }
-    } else if (!workDirHandle) {
-      console.warn('[archiveClip] skipping disk move — workDirHandle is null')
-    } else if (!clip.sourceFilename) {
-      console.warn('[archiveClip] skipping disk move — clip.sourceFilename is empty', clip)
+    // Closing a clip means moving it into clips/_archive/. Never hide the
+    // entry unless that move completed: Studio has no hard-delete/list-only
+    // removal operation for a file-backed clip.
+    if (!workDirHandle || !clip.sourceFilename) {
+      get().setLocalFsStatus(
+        'error',
+        `clip "${clipLabel}" を archive できません: 作業フォルダまたは元ファイル情報がありません`,
+      )
+      return false
     }
 
-    // Drop from the in-memory list and IndexedDB cache. The file lives on
-    // in clips/_archive/ — the user can move it back to recover it,
-    // which our next dir refresh will pick up as a regular clip again.
+    let movedPath: string | null
+    try {
+      movedPath = await archiveClipFile(workDirHandle, clip.sourceFilename)
+      console.info('[archiveClip] archiveClipFile result:', movedPath ?? '(source not found)')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error('[archiveClip] archiveClipFile threw:', err)
+      get().setLocalFsStatus('error', `clip "${clipLabel}" の archive 失敗: ${msg}`)
+      return false
+    }
+
+    if (!movedPath) {
+      get().setLocalFsStatus(
+        'error',
+        `clip "${clipLabel}" を archive できません: 元ファイルが見つかりません`,
+      )
+      return false
+    }
+
+    // The disk move succeeded. Now remove only Studio's cache/list entry.
     await deleteClip(id)
     const newClips = clips.filter((c) => c.id !== id)
     set({ clips: newClips })
-    if (workDirHandle) await saveClipsMetaToDir(workDirHandle, newClips)
-    // Surface the result. Status messages distinguish "moved on disk",
-    // "list-only drop (no workdir)" and "tried to move but failed" so
-    // a user staring at the footer pill can act if needed.
-    if (moveErr) {
-      const msg = moveErr instanceof Error ? moveErr.message : String(moveErr)
-      get().setLocalFsStatus('error', `clip "${clipLabel}" の archive 失敗: ${msg}`)
-    } else if (movedPath) {
-      // Don't surface the literal `_archive` folder name — it's an
-      // internal Studio-managed location the user isn't meant to
-      // think about. Just say "archived".
-      get().setLocalFsStatus('saved', `clip "${clipLabel}" を archive`)
-    } else if (workDirHandle && clip.sourceFilename) {
-      // archiveClipFile returned null = source not found on disk
-      get().setLocalFsStatus('saved', `clip "${clipLabel}" を list から削除 (disk file 不在)`)
-    } else {
-      get().setLocalFsStatus('saved', `clip "${clipLabel}" を list から削除`)
-    }
+    await saveClipsMetaToDir(workDirHandle, newClips)
+    get().setLocalFsStatus('saved', `clip "${clipLabel}" を archive`)
     return true
   },
 
@@ -2723,21 +2660,70 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     return kit.id
   },
 
-  removeKit: async (id) => {
+  archiveKit: async (id) => {
     const kit = get().kits.find((k) => k.id === id)
-    get().setLocalFsStatus('saving', `kit "${kit?.name ?? id}" を archive 移動中…`)
+    if (!kit) return
+    get().setLocalFsStatus('saving', `kit "${kit.name}" を archive 移動中…`)
     // Cancel any pending autosave so it doesn't recreate the folder
     // we're about to archive.
     get().cancelKitFlush(id)
-    // Prune per-event audio + encoded-WAV cache for this kit. The
-    // encoded-WAV cache was added in DB v2 so older browsers may not
+
+    // A flush already in progress cannot be cancelled safely. Let it finish
+    // while the Kit is still visible, then clear any retry it may have queued.
+    // Only after that do we move the complete folder into `_archive`.
+    const inFlight = kitFlushChain.get(id)
+    if (inFlight) await inFlight.catch(() => null)
+    get().cancelKitFlush(id)
+
+    // Persist the latest in-memory state before moving it. This also creates
+    // the folder for a newly-created Kit whose debounced first save had not
+    // started yet. A failed/partial export must keep the Kit visible.
+    const saved = await get().flushKitFolderNow(id)
+    if (!saved) {
+      get().cancelKitFlush(id)
+      get().setLocalFsStatus(
+        'error',
+        `kit "${kit.name}" を archive できません: 現在の内容を安全に保存できませんでした`,
+      )
+      return
+    }
+
+    // Move the on-disk folder first. Studio must never hide a Kit from its
+    // list if `_archive` could not be created and populated successfully.
+    const { workDirHandle, kitDirHandle } = get()
+    const outRoot = kitDirHandle ?? workDirHandle
+    if (!outRoot) {
+      get().setLocalFsStatus(
+        'error',
+        `kit "${kit.name}" を archive できません: Kit Folder が選択されていません`,
+      )
+      return
+    }
+    const kitId = lastWrittenKitId.get(kit.id) ?? toKitId(kit.name)
+    let archivedPath: string | null = null
+    try {
+      archivedPath = await archiveKitFolder(outRoot, kitId)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      get().setLocalFsStatus('error', `kit "${kit.name}" の archive 失敗: ${msg}`)
+      return
+    }
+    if (!archivedPath) {
+      get().setLocalFsStatus(
+        'error',
+        `kit "${kit.name}" を archive できません: 元フォルダが見つからないか移動に失敗しました`,
+      )
+      return
+    }
+
+    // Drop browser-only per-event audio + encoded-WAV cache for this kit.
+    // These are recreatable IndexedDB entries, not user files. The encoded-WAV
+    // cache was added in DB v2 so older browsers may not
     // have the store yet — wrap each in try/catch so a stale entry
     // doesn't block kit removal.
-    if (kit) {
-      for (const ev of kit.events) {
-        try { await deleteKitEventAudio(ev.id) } catch { /* ignore */ }
-        try { await deleteEncodedWavsForEvent(ev.id) } catch { /* ignore */ }
-      }
+    for (const ev of kit.events) {
+      try { await deleteKitEventAudio(ev.id) } catch { /* ignore */ }
+      try { await deleteEncodedWavsForEvent(ev.id) } catch { /* ignore */ }
     }
     await deleteKit(id)
     const newKits = get().kits.filter((k) => k.id !== id)
@@ -2745,25 +2731,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       kits: newKits,
       activeKitId: get().activeKitId === id ? null : get().activeKitId,
     })
-    const { workDirHandle, kitDirHandle } = get()
     if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
-
-    // Move the on-disk folder into `_archive/` instead of deleting
-    // it outright — the user can recover by hand from their OS file
-    // explorer. `scanKitOutputFolder` skips that folder so the kit
-    // stops appearing in the UI on the next refresh.
-    if (kit) {
-      // Archive whatever kitId we last wrote (covers the rename case
-      // where in-memory kit.name no longer matches the folder on disk).
-      const kitId = lastWrittenKitId.get(kit.id) ?? toKitId(kit.name)
-      const outRoot = kitDirHandle ?? workDirHandle
-      if (outRoot) {
-        await archiveKitFolder(outRoot, kitId)
-      }
-      lastWrittenKitId.delete(kit.id)
-      lastBuiltKit.delete(kit.id)
-    }
-    get().setLocalFsStatus('saved', `kit "${kit?.name ?? id}" を archive`)
+    lastWrittenKitId.delete(kit.id)
+    lastBuiltKit.delete(kit.id)
+    get().setLocalFsStatus('saved', `kit "${kit.name}" を archive`)
   },
 
   setActiveKit: (id) => {

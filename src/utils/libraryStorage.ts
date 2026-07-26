@@ -210,7 +210,7 @@ export async function saveEncodedWav(
 }
 
 /** Remove all cache entries for a given event (both modes). Called
- *  from removeEventFromKit / removeKit so stale entries don't leak. */
+ *  from removeEventFromKit / archiveKit so stale cache entries don't leak. */
 export async function deleteEncodedWavsForEvent(eventId: string): Promise<void> {
   const db = await getDb()
   const tx = db.transaction(STORE_ENCODED, 'readwrite')
