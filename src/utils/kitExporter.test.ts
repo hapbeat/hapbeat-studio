@@ -1,6 +1,12 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import type { KitDefinition } from '@/types/library'
-import { exportKitAsPack, toKitId, manifestFileName, validateEventIds } from './kitExporter'
+import {
+  exportKitAsPack,
+  findDuplicateEventIds,
+  manifestFileName,
+  toKitId,
+  validateEventIds,
+} from './kitExporter'
 
 describe('toKitId — kit 名 → kit_id (contracts: [a-z][a-z0-9-]*)', () => {
   it('空白→ハイフン, 大文字→小文字', () => {
@@ -27,6 +33,23 @@ describe('toKitId — kit 名 → kit_id (contracts: [a-z][a-z0-9-]*)', () => {
 describe('manifestFileName', () => {
   it('<kit-id>-manifest.json 規約', () => {
     expect(manifestFileName('my-kit')).toBe('my-kit-manifest.json')
+  })
+})
+
+describe('findDuplicateEventIds', () => {
+  it('reports one Event ID shared by distinct Kit events only once', () => {
+    const kit = {
+      events: [
+        { id: 'event-a', eventId: 'safe-kit.hit' },
+        { id: 'event-b', eventId: 'safe-kit.hit' },
+        { id: 'event-c', eventId: 'safe-kit.other' },
+        { id: 'event-d', eventId: 'safe-kit.hit' },
+        { id: 'event-empty-a', eventId: '' },
+        { id: 'event-empty-b', eventId: '' },
+      ],
+    } as KitDefinition
+
+    expect(findDuplicateEventIds(kit)).toEqual(['safe-kit.hit'])
   })
 })
 
@@ -102,6 +125,45 @@ describe('exportKitAsPack — source audio safety', () => {
     expect(result.errors[0]).toContain('音声が設定されていません')
     expect(result.files.map((file) => file.path)).toEqual(['safe-kit-manifest.json'])
     const manifest = JSON.parse(await result.files[0].blob.text()) as { events: unknown }
+    expect(manifest.events).toEqual({})
+  })
+
+  it('rejects duplicate Event IDs before one manifest entry can overwrite another', async () => {
+    const source = pcm16MonoWav()
+    const resolveAudio = vi.fn(async () => source)
+    const event = (id: string, clipName: string): KitDefinition['events'][number] => ({
+      id,
+      eventId: 'safe-kit.hit',
+      clipName,
+      clipSourceFilename: `${clipName}.wav`,
+      clipDuration: 1 / 16000,
+      clipChannels: 1,
+      clipSampleRate: 16000,
+      clipFileSize: source.size,
+      modes: ['command'],
+      loop: false,
+      intensity: 0.5,
+      deviceWiper: null,
+    })
+    const kit: KitDefinition = {
+      id: 'kit-duplicate',
+      name: 'safe-kit',
+      version: '1.0.0',
+      description: '',
+      createdAt: '2026-07-27T00:00:00.000Z',
+      updatedAt: '2026-07-27T00:00:00.000Z',
+      events: [event('event-a', 'soft-hit'), event('event-b', 'hard-hit')],
+    }
+
+    const result = await exportKitAsPack(kit, resolveAudio)
+
+    expect(result.errors).toEqual([
+      '同じ Event ID は Kit 内で複数定義できません: "safe-kit.hit"',
+    ])
+    expect(resolveAudio).not.toHaveBeenCalled()
+    expect(result.files.filter((file) => file.path.endsWith('.wav'))).toEqual([])
+    const manifestFile = result.files.find((file) => file.path.endsWith('-manifest.json'))!
+    const manifest = JSON.parse(await manifestFile.blob.text()) as { events: unknown }
     expect(manifest.events).toEqual({})
   })
 

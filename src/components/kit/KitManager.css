@@ -699,6 +699,20 @@ body.using-keyboard .kit-event-wrap:hover > .kit-event-side {
 body.using-keyboard .clip-card:hover {
   background: transparent !important;
 }
+.kit-event-id-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 2px 4px 4px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 152, 0, 0.55);
+  border-radius: var(--radius);
+  background: rgba(255, 152, 0, 0.10);
+  color: var(--warning);
+  font-size: 13px;
+  line-height: 1.35;
+}
+.kit-event-id-warning code { color: inherit; overflow-wrap: anywhere; }
 .kit-events-list { flex: 1; overflow-y: auto; padding: 2px; }
 .kit-events-list.drop-active { background: rgba(124,92,191,0.06); outline: 2px dashed rgba(124,92,191,0.4); outline-offset: -3px; }
 .kit-events-empty { padding: 10px; font-size: 16px; color: var(--text-secondary); text-align: center; }

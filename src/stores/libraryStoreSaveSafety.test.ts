@@ -114,6 +114,36 @@ describe('addEventToKit — disk source ownership', () => {
     expect(events[0].clipSourceFilename).toBe('hit.wav')
     expect(events[1].clipSourceFilename).toBe('hit.wav')
   })
+
+  it('stores already device-ready 16 kHz stereo audio under source too', async () => {
+    const root = { name: 'kits' } as FileSystemDirectoryHandle
+    const blob = new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'audio/wav' })
+    mocks.readKitClipFile.mockResolvedValue(null)
+    useLibraryStore.setState({ kits: [kit], kitDirHandle: root })
+
+    const event: Omit<KitDefinition['events'][number], 'id'> = {
+      eventId: '',
+      clipName: 'ready-stereo',
+      clipSourceFilename: 'ready-stereo.wav',
+      clipDuration: 1,
+      clipChannels: 2,
+      clipSampleRate: 16000,
+      clipFileSize: blob.size,
+      modes: ['stream_clip'],
+      loop: false,
+      intensity: 0.5,
+      deviceWiper: null,
+    }
+
+    const id = await useLibraryStore.getState().addEventToKit(kit.id, event, blob)
+
+    expect(id).toBeTruthy()
+    expect(mocks.writeKitFolder).toHaveBeenCalledWith(
+      root,
+      'safe-kit',
+      [{ path: 'source/ready-stereo.wav', blob }],
+    )
+  })
 })
 
 describe('flushKitFolderNow — missing source audio', () => {

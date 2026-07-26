@@ -4,7 +4,7 @@ import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useToast } from '@/components/common/Toast'
 import { formatFileSize } from '@/utils/wavIO'
-import { validateEventIds } from '@/utils/kitExporter'
+import { findDuplicateEventIds, validateEventIds } from '@/utils/kitExporter'
 import type { LibraryClip, LibraryViewMode, KitDefinition } from '@/types/library'
 import type { DeviceInfo } from '@/types/manager'
 import { CapacityGauge } from './CapacityGauge'
@@ -1234,6 +1234,10 @@ function KitEditor() {
   }, [toast])
 
   const activeKit = kits.find((k) => k.id === activeKitId)
+  const duplicateEventIds = useMemo(
+    () => activeKit ? findDuplicateEventIds(activeKit) : [],
+    [activeKit],
+  )
 
   // Auto-sync active kit's targetDevice with the first connected
   // device. Fires whenever the device's volume_* values change (incl.
@@ -1804,6 +1808,17 @@ function KitEditor() {
                     </select>
                   </div>
 
+                  {duplicateEventIds.length > 0 && (
+                    <div className="kit-event-id-warning" role="alert">
+                      <span aria-hidden="true">⚠</span>
+                      <span>
+                        同じ Event ID が重複しています。Save / Deploy 前に Name を変更してください:
+                        {' '}
+                        <code>{duplicateEventIds.join(', ')}</code>
+                      </span>
+                    </div>
+                  )}
+
                   <div className="kit-events-list">
                     {sortedEvents.length === 0
                       ? <div className="kit-events-empty kit-drop-zone">Drag clips here.</div>
@@ -2090,9 +2105,9 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
   // どちらの場合も root 直下に `<kitId>/` フォルダを作る (kits/ 階層は挟まない)。
   const outRoot = kitDirHandle ?? workDirHandle
 
-  // Authoring mutations persist metadata eagerly, while Pack output
-  // (generated WAVs + manifest) is committed only by Save Folder / Deploy.
-  // libraryStore serializes both through one per-Kit operation queue.
+  // Authoring state updates immediately; metadata persistence is debounced.
+  // Pack output (generated WAVs + manifest) is committed only by Save Folder /
+  // Deploy, which flushes the latest metadata before taking its snapshot.
 
   // Mirror libraryStore's localFsStatus into a local label so the
   // pending → saving → saved transition shows next to Deploy.
@@ -2140,6 +2155,16 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
       )
       return false
     }
+
+    const duplicates = findDuplicateEventIds(kit)
+    if (duplicates.length > 0) {
+      alert(
+        `同じ Event ID は Kit 内で複数定義できません。\n` +
+        `保存またはデプロイする前に、Name を変更してください:\n` +
+        duplicates.map((eventId) => `  "${eventId}"`).join('\n'),
+      )
+      return false
+    }
     return true
   }, [outRoot, managerConnected, devices, kit, toast])
 
@@ -2154,7 +2179,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
    * encode を全部 skip するので、amp / intensity / device_wiper を
    * 触っただけのケースは manifest 書き換えのみで完了する。
    *
-   * Kit メタ (kits-meta.json) は各編集アクションで自動保存されるが、
+   * Kit メタ (kits-meta.json) は編集停止後にまとめて自動保存されるが、
    * Kit フォルダ内の WAV / manifest の書き出しは明示クリック必須
    * (2026-05-25 で per-edit auto-flush を廃止)。
    */

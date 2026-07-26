@@ -9,6 +9,8 @@ Hapbeat Studio の変更履歴。形式は [Keep a Changelog](https://keepachang
 ## [Unreleased]
 
 ### Fixed（修正）
+- Kit 内で別々の Event が同じ Event ID を持つ場合、画面上に警告を表示し、後の定義が manifest で黙って上書きされる代わりに Save Folder / Deploy を中止するよう修正（1つの Event を BOTH にする場合は従来どおり有効）
+- Kit の volume / intensity 等の連続編集は画面状態と revision を即時更新し、`kits-meta.json` の書込みを操作停止後にまとめるよう変更。Save Folder / Deploy は待機中の最新値を先に確定してから同一 snapshot を保存
 - Kit 配信（Deploy）中にデバイスからの応答が 5 秒以上途絶えた場合、進捗行に「デバイスを再起動して再試行」の警告を表示するように変更（従来は無反応のまま進捗が止まって見えるだけだった）
 - Kit の Save Folder 失敗時に、原因（例外名 + メッセージ + 失敗したファイルのパス）を最初の失敗時点から表示するように変更。権限失効は再要求 1 回、ファイルロック（Unity Editor などが開いている）とワークフォルダ参照の失効（`InvalidStateError`）は 2 回で打ち切り、それぞれ対処方法を表示（従来は原因非表示のまま約 27 秒リトライし続けた）
 - 同一のエンコード済み音源を複数 Event が使う場合、WAV を複製せず manifest の各 Event から同じファイルを参照するように修正（intensity / loop 等の parameters は Event ごとに独立）

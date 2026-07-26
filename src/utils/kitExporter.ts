@@ -94,6 +94,19 @@ export function validateEventIds(
   }))
 }
 
+/** Distinct Kit rows may not define the same Event ID. A single row in BOTH
+ * mode is valid because it intentionally emits once into each manifest bucket. */
+export function findDuplicateEventIds(kit: KitDefinition): string[] {
+  const seen = new Set<string>()
+  const duplicates = new Set<string>()
+  for (const event of kit.events) {
+    if (!event.eventId) continue
+    if (seen.has(event.eventId)) duplicates.add(event.eventId)
+    else seen.add(event.eventId)
+  }
+  return [...duplicates]
+}
+
 /**
  * Resolve the kit-internal filename for a KitEvent. All data lives on
  * the event itself now (`clipName`, `clipSourceFilename`) — the kit
@@ -230,6 +243,17 @@ export async function exportKitAsPack(
   const commandNameByOutputHash = new Map<string, string>()
   const streamNameByOutputHash = new Map<string, string>()
 
+  // JSON object keys are unique: allowing two authored rows with the same
+  // Event ID would silently make the later row overwrite the earlier one.
+  // Mark the export invalid and omit every conflicting row from the preview
+  // manifest. flushKitFolderNow treats any error as a hard stop before disk I/O.
+  const duplicateEventIds = new Set(findDuplicateEventIds(kit))
+  for (const eventId of duplicateEventIds) {
+    const message = `同じ Event ID は Kit 内で複数定義できません: "${eventId}"`
+    warnings.push(message)
+    errors.push(message)
+  }
+
   // Per-event lazy decode. When every mode of this event hits the IDB
   // encoded-WAV cache (sourceHash unchanged since the last save), the
   // decoder is never touched — the dominant cost of Save Folder /
@@ -280,6 +304,7 @@ export async function exportKitAsPack(
   }
 
   for (const ev of kit.events) {
+    if (duplicateEventIds.has(ev.eventId)) continue
     const modes = resolveModes(ev)
 
     // Event without backing clip is invalid in schema 2.0.0 (clip required

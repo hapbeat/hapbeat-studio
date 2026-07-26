@@ -146,14 +146,13 @@ export type KitEventMode = 'command' | 'stream_clip'
 export interface KitEvent {
   /** Stable per-kit id, generated on add. Used as the React key and the handle
    *  for update/remove. Audio is not keyed by this id in browser storage; it
-   *  lives under the Kit's `source/` folder. NOT the same as eventId, which
-   *  can repeat across events within a kit. */
+   *  lives under the Kit's `source/` folder. Distinct from the public eventId. */
   id: string
   /**
-   * Event ID (hapbeat-contracts format). May repeat within a kit. This is
-   * the *base* eventId — when `modes.length > 1` the kit exporter appends a
-   * `.fire` / `.clip` suffix per emitted manifest entry so JSON keys stay
-   * unique. The base value here never carries the suffix.
+   * Public Event ID in hapbeat-contracts format. It must be unique across
+   * distinct rows in one Kit. One row may use BOTH mode: the same eventId is
+   * then emitted once into `events` and once into `stream_events`, which is
+   * valid schema 2.0.0 and requires no suffix.
    */
   eventId: string
   /**
