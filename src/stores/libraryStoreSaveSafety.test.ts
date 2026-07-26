@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   saveKitDiskCache: vi.fn(),
   scanKitOutputFolder: vi.fn(),
   readKitClipFile: vi.fn(),
+  writeMetadataJson: vi.fn(),
 }))
 
 vi.mock('@/utils/kitExporter', async () => {
@@ -26,6 +27,7 @@ vi.mock('@/utils/localDirectory', async () => {
     saveKitDiskCache: mocks.saveKitDiskCache,
     scanKitOutputFolder: mocks.scanKitOutputFolder,
     readKitClipFile: mocks.readKitClipFile,
+    writeMetadataJson: mocks.writeMetadataJson,
   }
 })
 
@@ -50,6 +52,9 @@ afterEach(() => {
   mocks.saveKitDiskCache.mockReset()
   mocks.scanKitOutputFolder.mockReset()
   mocks.readKitClipFile.mockReset()
+  mocks.writeMetadataJson.mockReset()
+  mocks.writeMetadataJson.mockResolvedValue(undefined)
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   useLibraryStore.setState({
     kits: [],
@@ -240,6 +245,67 @@ describe('flushKitFolderNow — non-destructive Save Folder', () => {
   })
 })
 
+describe('Kit continuous parameter editing', () => {
+  it('updates volume synchronously and coalesces kits-meta.json writes', async () => {
+    vi.useFakeTimers()
+    const root = { name: 'library' } as FileSystemDirectoryHandle
+    useLibraryStore.setState({ kits: [kit], workDirHandle: root })
+
+    const pending: Promise<void>[] = []
+    for (let volume = 1; volume <= 40; volume++) {
+      pending.push(useLibraryStore.getState().updateKit(kit.id, {
+        targetDevice: { volume_level: volume },
+      }))
+      // Controlled UI state must be visible before any Promise / disk write.
+      expect(useLibraryStore.getState().kits[0].targetDevice?.volume_level).toBe(volume)
+    }
+
+    expect(mocks.writeMetadataJson).not.toHaveBeenCalled()
+    await Promise.all(pending)
+    await vi.advanceTimersByTimeAsync(399)
+    expect(mocks.writeMetadataJson).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+
+    expect(mocks.writeMetadataJson).toHaveBeenCalledOnce()
+    const [handle, filename, savedKits] = mocks.writeMetadataJson.mock.calls[0]
+    expect(handle).toBe(root)
+    expect(filename).toBe('kits-meta.json')
+    expect((savedKits as KitDefinition[])[0].targetDevice?.volume_level).toBe(40)
+  })
+
+  it('flushes the latest debounced metadata once when Save is pressed immediately', async () => {
+    vi.useFakeTimers()
+    const root = { name: 'library' } as FileSystemDirectoryHandle
+    mocks.exportKitAsPack.mockResolvedValue({
+      kitId: 'safe-kit',
+      warnings: [],
+      errors: [],
+      files: [{
+        path: 'safe-kit-manifest.json',
+        blob: new Blob(['{}']),
+        outputHash: null,
+        cached: false,
+      }],
+    })
+    mocks.loadKitDiskCache.mockResolvedValue(null)
+    mocks.saveKitDiskCache.mockResolvedValue(undefined)
+    useLibraryStore.setState({ kits: [kit], workDirHandle: root })
+
+    await useLibraryStore.getState().updateKit(kit.id, {
+      targetDevice: { volume_level: 77 },
+    })
+    expect(mocks.writeMetadataJson).not.toHaveBeenCalled()
+
+    const saved = await useLibraryStore.getState().flushKitFolderNow(kit.id)
+    expect(saved?.kitId).toBe('safe-kit')
+    expect(mocks.writeMetadataJson).toHaveBeenCalledOnce()
+    const savedKits = mocks.writeMetadataJson.mock.calls[0][2] as KitDefinition[]
+    expect(savedKits[0].targetDevice?.volume_level).toBe(77)
+
+    await vi.advanceTimersByTimeAsync(400)
+    expect(mocks.writeMetadataJson).toHaveBeenCalledOnce()
+  })
+})
 describe('Kit operation ordering', () => {
   it('applies an immediate remove before Save captures its manifest snapshot', async () => {
     const makeEvent = (id: string, name: string): KitDefinition['events'][number] => ({

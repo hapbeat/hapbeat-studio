@@ -533,6 +533,47 @@ async function saveKitsMetaToDir(handle: FileSystemDirectoryHandle, kits: KitDef
   await writeMetadataJson(handle, KITS_META_FILE, kits)
 }
 
+// Continuous controls (intensity / target volume) can emit dozens of changes
+// per second. Their UI state + revision update synchronously; only the durable
+// authoring metadata is coalesced. This cache is never authoritative — Save /
+// Deploy flushes the latest Zustand snapshot before building the Pack.
+const KITS_META_SAVE_DEBOUNCE_MS = 400
+let kitsMetaSaveTimer: number | null = null
+let kitsMetaSaveChain: Promise<void> = Promise.resolve()
+
+function queueKitsMetaWrite(
+  handle: FileSystemDirectoryHandle,
+  kits: KitDefinition[],
+): Promise<void> {
+  const next = kitsMetaSaveChain.catch(() => undefined).then(() => saveKitsMetaToDir(handle, kits))
+  kitsMetaSaveChain = next
+  return next
+}
+
+function scheduleKitsMetaSave(): void {
+  const { workDirHandle } = useLibraryStore.getState()
+  if (!workDirHandle) return
+  if (kitsMetaSaveTimer !== null) window.clearTimeout(kitsMetaSaveTimer)
+  kitsMetaSaveTimer = window.setTimeout(() => {
+    kitsMetaSaveTimer = null
+    const { workDirHandle: currentHandle, kits } = useLibraryStore.getState()
+    if (!currentHandle) return
+    void queueKitsMetaWrite(currentHandle, kits).catch((err) => {
+      const msg = err instanceof Error ? err.message : String(err)
+      useLibraryStore.getState().setLocalFsStatus('error', `Kit metadata の保存失敗: ${msg}`)
+    })
+  }, KITS_META_SAVE_DEBOUNCE_MS)
+}
+
+async function flushPendingKitsMetaSave(): Promise<void> {
+  if (kitsMetaSaveTimer !== null) {
+    window.clearTimeout(kitsMetaSaveTimer)
+    kitsMetaSaveTimer = null
+  }
+  const { workDirHandle, kits } = useLibraryStore.getState()
+  if (workDirHandle) await queueKitsMetaWrite(workDirHandle, kits)
+}
+
 // ---- Kit folder persistence (module-level state) ------------------------
 //
 // Per-kit debounce timers, last-written kitId (for rename → archive
@@ -573,10 +614,10 @@ function invalidateBuiltKit(kitId: string): void {
 // very first Save Folder of a session.
 
 /**
- * One operation queue per Kit. Authoring mutations and Pack commits share it,
- * so an immediate "× → Save Folder" always persists the removal first and Save
- * captures the resulting state. Mutations attempted during a save wait behind
- * that immutable commit instead of interleaving with its filesystem writes.
+ * One filesystem operation queue per Kit. Pack commits and discrete source-audio
+ * imports use it; continuous parameter edits stay synchronous in browser memory.
+ * Save captures their latest revision and rejects a mid-commit revision change,
+ * instead of making sliders wait behind metadata file writes.
  * External folder watchers can still invalidate one existing file handle;
  * manifest-only archive recovery is handled separately below.
  */
@@ -801,6 +842,10 @@ function resetKitMemory() {
   // Retargeting to a different folder: invalidate any scan still in flight for
   // the old one so its (late) result can't overwrite the new folder's kits.
   outRootEpoch++
+  if (kitsMetaSaveTimer !== null) {
+    window.clearTimeout(kitsMetaSaveTimer)
+    kitsMetaSaveTimer = null
+  }
   for (const t of kitFlushTimers.values()) window.clearTimeout(t)
   kitFlushTimers.clear()
   for (const t of retryTimers.values()) window.clearTimeout(t)
@@ -960,6 +1005,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       kitSaveInProgress: { ...current.kitSaveInProgress, [kit.id]: true },
     }))
     try {
+      await flushPendingKitsMetaSave()
       // exportKitAsPack returns ExportFile[] directly (no ZIP encode
       // / decode round-trip). Resolve audio from the connected Kit folder.
       // `source/` is authoritative; generated folders are only a migration
@@ -1180,6 +1226,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         if (f.outputHash !== null) newCache.wavs[f.path] = f.outputHash
       }
       await saveKitDiskCache(outRoot, kitId, newCache)
+
+      // A programmatic mutation that bypassed the disabled UI may have landed
+      // while content files were being written. Never publish a manifest for
+      // that older revision; the next Save will commit the latest snapshot.
+      if (getKitRevision(kit.id) !== revision) {
+        throw new Error(`kit "${kit.name}" changed while its Pack snapshot was being committed`)
+      }
 
       // Final commit marker. If only the existing manifest handle is stale,
       // archive the old bytes under history/ before recreating the canonical
@@ -2859,16 +2912,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ kits: newKits })
     bumpKitRevision(kitId)
     invalidateBuiltKit(kitId)
-    const { workDirHandle } = get()
-    if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
+    scheduleKitsMetaSave()
     // Kit folder Pack rebuild (resample + install-clips/ + manifest)
-    // is deferred to the Deploy button — it was the dominant cause
-    // of UI lag while editing. Metadata is still flushed eagerly to
-    // kits-meta.json above so the kit list survives a reload.
+    // is deferred to Save Folder / Deploy. Authoring metadata is
+    // debounced so repeated controls never wait on filesystem writes.
     return newEvent.id
   }),
 
-  removeEventFromKit: (kitId, kitEventId) => enqueueKitOperation(kitId, async () => {
+  removeEventFromKit: async (kitId, kitEventId) => {
     const { kits } = get()
     const kit = kits.find((k) => k.id === kitId)
     if (!kit) return
@@ -2881,20 +2932,19 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ kits: newKits })
     bumpKitRevision(kitId)
     invalidateBuiltKit(kitId)
-    // Drop the encoded-WAV cache too so the removed event doesn't keep
-    // a stale device-format blob around. Failure is non-fatal.
-    try { await deleteEncodedWavsForEvent(kitEventId) } catch { /* ignore */ }
-    const { workDirHandle } = get()
-    if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
+    // Cache cleanup and metadata persistence are non-blocking; the current
+    // browser state is already authoritative for the next Save / Deploy.
+    void deleteEncodedWavsForEvent(kitEventId).catch(() => undefined)
+    scheduleKitsMetaSave()
     // Pack rebuild deferred to Save Folder / Deploy (see addEventToKit comment).
     // The removed event will disappear from install-clips/ /
     // stream-clips/ only on the next deploy — until then the kit
     // folder retains the WAV. Harmless: nothing in the kit's manifest
     // references it any more.
     void clipName
-  }),
+  },
 
-  updateKitEvent: (kitId, kitEventId, updates) => enqueueKitOperation(kitId, async () => {
+  updateKitEvent: async (kitId, kitEventId, updates) => {
     const { kits } = get()
     const kit = kits.find((k) => k.id === kitId)
     if (!kit) return
@@ -2911,18 +2961,15 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ kits: newKits })
     bumpKitRevision(kitId)
     invalidateBuiltKit(kitId)
-    const { workDirHandle } = get()
-    if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
-    // Metadata-only update — no Pack rebuild. Mode toggle / intensity
-    // drag / rename used to trigger a 400 ms-debounced full kit
-    // re-emit (resample + write every WAV) and that was the dominant
-    // source of UI lag while editing. The kit folder picks up these
-    // changes on the next Save Folder / Deploy — which is why the cached build has to
-    // go here, or Deploy would reuse the pre-edit manifest.
+    scheduleKitsMetaSave()
+    // Metadata-only update — no Pack rebuild. The controlled UI and
+    // revision change synchronously; kits-meta.json is coalesced in the
+    // background. invalidateBuiltKit ensures the manifest changes on the
+    // next Save Folder / Deploy instead of reusing the pre-edit build.
     void prevName
-  }),
+  },
 
-  updateKit: (id, updates) => enqueueKitOperation(id, async () => {
+  updateKit: async (id, updates) => {
     const { kits } = get()
     const kit = kits.find((k) => k.id === id)
     if (!kit) return
@@ -2950,14 +2997,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ kits: newKits })
     bumpKitRevision(id)
     invalidateBuiltKit(id)
-    const { workDirHandle } = get()
-    if (workDirHandle) await saveKitsMetaToDir(workDirHandle, newKits)
-    // Kit-level rename / metadata change — no Pack rebuild. Deploy
-    // is the explicit "publish kit to disk + device" action. The
+    scheduleKitsMetaSave()
+    // Kit-level rename / metadata change — no Pack rebuild. Save Folder /
+    // Deploy is the explicit "publish kit to disk + device" action. The
     // previous folder (under the old kitId) is also left alone here;
     // it'll be archived on the next Deploy by the kitId-rename code
     // path in flushKitFolderNow.
-  }),
+  },
 
   // Tab / filter
   setActiveTab: (tab) => {
