@@ -6,7 +6,7 @@ Hapbeat Studio の変更履歴。形式は [Keep a Changelog](https://keepachang
 - **最新版** `https://studio.hapbeat.com/` は master の package.json バージョンを表示。
 - **凍結版** `https://studio.hapbeat.com/vX.Y/` は `vX.Y.Z` タグ push 時に作成（マイナー単位）。
 
-## [Unreleased]
+## [0.7.0] - 2026-07-27
 
 ### Fixed（修正）
 - Kit 内で別々の Event が同じ Event ID を持つ場合、画面上に警告を表示し、後の定義が manifest で黙って上書きされる代わりに Save Folder / Deploy を中止するよう修正（1つの Event を BOTH にする場合は従来どおり有効）
