@@ -91,7 +91,7 @@ export interface SensorMapping {
 export interface DeviceInfo {
   name: string
   ipAddress: string
-  /** path-based device address e.g. "player_1/chest" (may be empty) */
+  /** path-based device address, e.g. "player_1/pos_chest/group_1" (may be empty) */
   address: string
   firmwareVersion: string
   /** liveness flag pushed by Helper */

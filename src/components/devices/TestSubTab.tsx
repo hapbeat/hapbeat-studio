@@ -258,7 +258,7 @@ export function TestSubTab({ device, sendTo }: Props) {
             className="form-input mono"
             value={target}
             onChange={(e) => setTarget(e.target.value)}
-            placeholder="例: player_1, */chest, 空 = 全台"
+            placeholder="例: player_1, */pos_chest, */*/group_2, 空 = 全台"
           />
           <span />
         </div>

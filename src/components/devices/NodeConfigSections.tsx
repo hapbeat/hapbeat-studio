@@ -1831,7 +1831,7 @@ export function SensorMappingSection({
               className="form-input mono"
               value={r.target}
               onChange={(e) => update(i, { target: e.target.value })}
-              placeholder="空欄 = 全台 / player_1/chest"
+              placeholder="空欄 = 全台 / player_1/pos_chest"
               disabled={!device.online}
             />
             <span />
