@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
+import {
+  CURRENT_STUDIO_VERSION,
+  DEPLOY_ROOT,
+  loadStudioVersions,
+  type VersionEntry,
+} from '@/utils/studioVersions'
 import './VersionSwitcher.css'
-
-interface VersionEntry { version: string; path: string }
-interface VersionsManifest { latest: string | null; versions: VersionEntry[]; generated?: string }
 
 /**
  * Studio バージョン表示 + ロールバック用の版切替。
@@ -13,33 +16,17 @@ interface VersionsManifest { latest: string | null; versions: VersionEntry[]; ge
  * 出ても、ユーザーは旧マイナー線へ即戻れる（URL が永続的なロールバック手段で、
  * このスイッチャはその導線）。dev / versions.json 未配信時は現在版のみ表示。
  */
-/**
- * デプロイルート (= versions.json と各凍結版 dir が並ぶ場所)。
- *
- * `import.meta.env.BASE_URL` はその「ビルドの」base なので、最新版は `/`
- * (studio.hapbeat.com) / `/studio/` (旧 devtools)、凍結版は `/vX.Y/` /
- * `/studio/vX.Y/` になる。versions.json は凍結版 dir の *中* ではなくデプロイ
- * ルート直下に 1 つだけ置かれる（凍結版からでも最新の版一覧を読めるように）。
- * よって base から末尾の `vX.Y/` セグメントを剥がした値がデプロイルート。
- *   "/"             → "/"          → /versions.json          (新・最新)
- *   "/v0.2/"        → "/"          → /versions.json          (新・凍結)
- *   "/studio/"      → "/studio/"   → /studio/versions.json   (旧・最新)
- *   "/studio/v0.2/" → "/studio/"   → /studio/versions.json   (旧・凍結)
- */
-const DEPLOY_ROOT = import.meta.env.BASE_URL.replace(/v\d+\.\d+\/$/, '')
-
 export function VersionSwitcher({ compact = false }: { compact?: boolean }) {
-  const current = import.meta.env.VITE_APP_VERSION || '0.0.0'
+  const current = CURRENT_STUDIO_VERSION
   const [versions, setVersions] = useState<VersionEntry[]>([])
 
   useEffect(() => {
     let cancelled = false
-    // デプロイルート直下の versions.json を読む。dev (root に未配信) では 404 →
-    // catch で無視し現在版バッジのみ表示。
-    fetch(`${DEPLOY_ROOT}versions.json`, { cache: 'no-store' })
-      .then((r) => (r.ok ? (r.json() as Promise<VersionsManifest>) : null))
-      .then((m) => { if (!cancelled && m?.versions) setVersions(m.versions) })
-      .catch(() => { /* dev / 未配信時は無視 */ })
+    // デプロイルート直下の versions.json (utils/studioVersions.ts が
+    // モジュール単位でキャッシュ)。dev では未配信 → null で現在版バッジのみ。
+    loadStudioVersions().then((m) => {
+      if (!cancelled && m?.versions) setVersions(m.versions)
+    })
     return () => { cancelled = true }
   }, [])
 

@@ -345,6 +345,64 @@ select.app-version-select option {
 }
 
 /* ========================================
+   Update chip (informational)
+   「使えてはいるが新しい版がある」お知らせ。ヘッダ内の横並びに置くのは、
+   縦方向のレイアウトシフトで本文の読み位置を飛ばさないため。
+   × を押した版は localStorage に記録され、より新しい版が出るまで
+   再表示しない (DEC-053 §5.1) — 版を固定して開発している人に毎回
+   閉じさせないための仕様。
+   ======================================== */
+
+.update-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-primary);
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.update-chip a,
+.update-chip-body {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.update-chip a:hover,
+.update-chip-body:hover {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+.update-chip-close {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 5px;
+  cursor: pointer;
+  border-radius: 999px;
+  opacity: 0.6;
+}
+
+.update-chip-close:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ========================================
    Header Toggle
    ======================================== */
 

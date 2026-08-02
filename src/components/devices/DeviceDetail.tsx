@@ -14,6 +14,7 @@ import { InstalledKitsSection } from './InstalledKitsSection'
 import { TestSubTab } from './TestSubTab'
 import { FirmwareSubTab } from './FirmwareSubTab'
 import { OnboardingWizard } from './OnboardingWizard'
+import { useFirmwareUpdate } from '@/utils/firmwareUpdate'
 import {
   EspNowConfigSection,
   EspNowDisplayPowerSection,
@@ -54,6 +55,41 @@ const SUB_TAB_LABEL: Record<SubTab, string> = {
   audio: '音声',
   eq: 'EQ',
   dsp: 'DSP',
+}
+
+/**
+ * 「このデバイスより新しいファームが出ている」ことを、デバイス詳細のヘッダで
+ * そっと知らせるチップ。
+ *
+ * ここは**ユーザーが能動的に開いた画面**なので dismiss 対象外で常時表示する
+ * (DEC-053 §5.2)。デバイス一覧側には出さない — 一覧は複数台を俯瞰する場所で、
+ * 台数分のバッジが並ぶと本来の状態表示 (online/offline) が読みにくくなるため。
+ *
+ * 判定できないとき (board 不明 / 候補が複数版に割れる) は null を返して黙る。
+ */
+function FirmwareUpdateChip({
+  board,
+  transport,
+  currentFw,
+  onOpen,
+}: {
+  board: string | undefined
+  transport: NodeTransport | undefined
+  currentFw: string | null | undefined
+  onOpen: () => void
+}) {
+  const latest = useFirmwareUpdate(board, transport, currentFw)
+  if (!latest) return null
+  return (
+    <button
+      type="button"
+      className="device-fw-update-chip"
+      onClick={onOpen}
+      title={`ファームウェア v${latest} が公開されています（クリックでファームウェアタブへ）`}
+    >
+      v{latest} あり
+    </button>
+  )
 }
 
 /**
@@ -656,6 +692,8 @@ export function DeviceDetail() {
   }
 
   // ---- Resolve node role / transport (default receiver/udp) ----
+  // (FirmwareUpdateChip はこの下の header で使う。hook を early-return より
+  //  後で呼べないため、子コンポーネントに切り出してある)
   const nodeRole: NodeRole = cachedInfo?.role ?? device.role ?? 'receiver'
   const nodeTransports: NodeTransport[] =
     cachedInfo?.transports
@@ -690,6 +728,12 @@ export function DeviceDetail() {
               {cachedInfo?.build && (
                 <span className="device-detail-build-sha"> ({cachedInfo.build})</span>
               )}
+              <FirmwareUpdateChip
+                board={cachedInfo?.board}
+                transport={nodeTransport}
+                currentFw={device.firmwareVersion}
+                onOpen={() => setSubTab('firmware')}
+              />
             </>
           )}
           {device.address && <> · {device.address}</>}

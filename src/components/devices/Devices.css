@@ -764,6 +764,28 @@
   opacity: 0.6;
 }
 
+/* 「新しいファームがあります」チップ。デバイス詳細 (= ユーザーが能動的に
+   開いた画面) なので常時表示・dismiss 無し。強調しすぎると「壊れている」
+   ように見えるので、accent の枠線だけの控えめな見た目にする。 */
+.device-fw-update-chip {
+  margin-left: 6px;
+  padding: 1px 7px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1.5;
+  font-family: inherit;
+  cursor: pointer;
+  vertical-align: baseline;
+}
+
+.device-fw-update-chip:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
 .selected-pill {
   background: var(--accent);
   color: #fff;

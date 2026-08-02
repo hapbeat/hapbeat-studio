@@ -13,6 +13,8 @@ import { ExternalLinkIcon } from '@/components/common/ExternalLinkIcon'
 import { HelperToastBridge } from '@/components/common/HelperToastBridge'
 import { VersionSwitcher } from '@/components/common/VersionSwitcher'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
+import { useHelperUpdate, useStudioFrozenNotice } from '@/hooks/useReleaseNotices'
+import { DEPLOY_ROOT } from '@/utils/studioVersions'
 import { MIN_HELPER_VERSION } from '@/config/helperCompat'
 import './App.css'
 
@@ -99,6 +101,11 @@ export function App() {
   // do NOT persist this to localStorage: an outdated Helper is a fix-it-now
   // problem that should remind the user every fresh Studio load.
   const [helperOutdatedDismissed, setHelperOutdatedDismissed] = useState(false)
+  // 「使えてはいるが新しい版がある」お知らせ (上の必須警告とは別)。
+  // 閉じた版は localStorage に記録され、より新しい版が出るまで再表示しない
+  // — 版を意図的に固定している人に毎回閉じさせないため (DEC-053 §5.1)。
+  const helperUpdate = useHelperUpdate(helperVersion)
+  const studioFrozen = useStudioFrozenNotice()
 
   // Auto-close modal when Helper connects
   useEffect(() => {
@@ -131,6 +138,44 @@ export function App() {
           ))}
         </div>
         <div className="header-meta">
+          {/* 更新のお知らせチップ。ヘッダ内 (横並び) に置くのは、縦方向の
+              レイアウトシフトで本文の読み位置を飛ばさないため。× で閉じると
+              その版については二度と出ない。 */}
+          {studioFrozen.visible && (
+            <span className="update-chip" role="status">
+              <a href={DEPLOY_ROOT} title="最新版の Studio を開く">
+                Studio v{studioFrozen.latest} が公開されています
+              </a>
+              <button
+                type="button"
+                className="update-chip-close"
+                aria-label="このお知らせを閉じる"
+                title="閉じる（この版については再表示しません）"
+                onClick={studioFrozen.dismiss}
+              >×</button>
+            </span>
+          )}
+          {/* 必須更新バナーが出ている間は info チップを出さない (同じ話が
+              2 箇所に出るとどちらも読まれなくなる)。バナー側が上位互換。 */}
+          {helperUpdate.visible && helperCompat !== 'outdated' && (
+            <span className="update-chip" role="status">
+              <button
+                type="button"
+                className="update-chip-body"
+                onClick={() => setHelperManageOpen(true)}
+                title="更新方法を表示"
+              >
+                Helper v{helperUpdate.product?.latest} が利用可能
+              </button>
+              <button
+                type="button"
+                className="update-chip-close"
+                aria-label="このお知らせを閉じる"
+                title="閉じる（この版については再表示しません）"
+                onClick={helperUpdate.dismiss}
+              >×</button>
+            </span>
+          )}
           <a
             className="header-docs-link"
             href={DOCS_URL}

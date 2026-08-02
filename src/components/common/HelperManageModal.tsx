@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { MIN_HELPER_VERSION, type HelperCompat } from '@/config/helperCompat'
+import { MIN_HELPER_VERSION, compareVersion, type HelperCompat } from '@/config/helperCompat'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
+import { useReleaseProduct } from '@/hooks/useReleaseNotices'
 import { VersionSwitcher } from './VersionSwitcher'
 import './HelperOnboardingModal.css'
 
@@ -42,6 +43,15 @@ function CopyableCommand({ cmd }: { cmd: string }) {
 
 export function HelperManageModal({ open, onClose, helperVersion, helperCompat }: HelperManageModalProps) {
   const outdated = helperCompat === 'outdated'
+  // 「新しい版がある」お知らせ。ここは**ユーザーが能動的に開いた画面**なので
+  // dismiss 対象外で常時表示する (DEC-053 §5.2)。必須更新 (outdated) のときは
+  // 上のセクションが同じ手順を出しているので重複させない。
+  const helperRelease = useReleaseProduct('helper')
+  const updateAvailable =
+    !outdated &&
+    !!helperVersion &&
+    !!helperRelease?.latest &&
+    compareVersion(helperVersion, helperRelease.latest) < 0
   const closeRef = useRef<HTMLButtonElement>(null)
   const { send, isConnected, lastMessage } = useHelperConnection()
   // Recovery feedback is driven by helper's actual `reset_discovery_result`
@@ -133,6 +143,28 @@ export function HelperManageModal({ open, onClose, helperVersion, helperCompat }
               <p className="helper-modal-section-desc">
                 完了後この modal を閉じて、Helper pill が緑色 (Helper 接続中) になれば OK。
               </p>
+            </section>
+          )}
+
+          {updateAvailable && (
+            <section className="helper-modal-section">
+              <h3 className="helper-modal-section-title">
+                新しい Helper があります (v{helperVersion} → v{helperRelease?.latest})
+              </h3>
+              <p className="helper-modal-section-desc">
+                いまの版でも動作しますが、更新すると修正や新機能が入ります。
+                更新は任意です。
+              </p>
+              <CopyableCommand cmd="hapbeat-helper stop" />
+              <CopyableCommand cmd={helperRelease?.upgrade ?? 'pipx upgrade hapbeat-helper'} />
+              <CopyableCommand cmd="hapbeat-helper start" />
+              {helperRelease?.notes && (
+                <p className="helper-modal-section-desc">
+                  <a href={helperRelease.notes} target="_blank" rel="noreferrer">
+                    変更履歴を見る
+                  </a>
+                </p>
+              )}
             </section>
           )}
 
