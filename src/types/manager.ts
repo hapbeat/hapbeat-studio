@@ -189,6 +189,12 @@ export interface StudioToManagerMessage {
     | 'set_beep'                // DuoWL v4 receiver — one-shot test tone, profile "full" only (§3)
     | 'set_3d'                  // DuoWL v4 receiver — per-codec 3D effect depth, profile "full" only (§4)
     | 'set_agc'                 // DuoWL v4 receiver — AGC, line-in/HP-codec ADC path (§5, no codec field)
+    // --- BandWL v4 PWM experimental firmware (band_v4_pwm build only) ---
+    | 'set_pwm_bias'            // signed DC bias: sign = direction, magnitude = force
+    | 'pwm_tone'                // diagnostic tone (hz / amp / ms)
+    | 'set_volume'              // digital pot level (0..steps-1)
+    | 'pwm_status'              // state / carrier / bias / underruns / clips
+    | 'pwm_probe'               // gate-level diagnostic; device blocks up to 3 s
   payload: Record<string, unknown>
 }
 
@@ -220,6 +226,9 @@ export interface ManagerToStudioMessage {
     | 'sensor_mapping_result'
     | 'sensor_reading_result'
     | 'reset_discovery_result'
+    // BandWL v4 PWM experimental firmware (passthrough device responses)
+    | 'pwm_status_result'
+    | 'pwm_probe_result'
     | 'error'
     | 'pong'
   payload: Record<string, unknown>

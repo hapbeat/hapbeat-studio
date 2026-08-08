@@ -201,6 +201,15 @@ interface DeviceState {
       applied_gain_l_db: number
       applied_gain_r_db: number
     }
+    /** Gate/carrier config reported ONLY by the band_v4_pwm experimental
+     *  build (the board id stays the stock band_wl_v4, so this key is what
+     *  identifies the build). */
+    haptic_pwm?: {
+      carrier_hz?: number
+      gpio_a?: number
+      gpio_b?: number
+      state?: string
+    }
   }>
 
   /** Per-IP cache of the most recent get_wifi_status response. */

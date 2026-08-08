@@ -26,6 +26,22 @@ const SERIAL_GET_CMD_TO_RESULT: Record<string, string> = {
   kit_list: 'kit_list_result',
   get_sensor_mapping: 'sensor_mapping_result',
   get_sensor_reading: 'sensor_reading_result',
+  // band_v4_pwm experimental build: both answer with a rich dict the PWM
+  // panel drains, so they belong here despite not being named `get_*`.
+  pwm_status: 'pwm_status_result',
+  pwm_probe: 'pwm_probe_result',
+}
+
+/**
+ * Per-command serial response timeout, ms, for commands the firmware answers
+ * slowly because it BLOCKS while executing them. `serialConfig.send` defaults
+ * to 2 s, which normal config commands answer within tens of ms — but
+ * `pwm_probe` drives the motor gates for up to 3 s before replying, so it
+ * would time out on every run. Overridden per command rather than raising the
+ * shared default, which exists to fail fast on an unresponsive device.
+ */
+const SERIAL_CMD_TIMEOUT_MS: Record<string, number> = {
+  pwm_probe: 5000, // firmware caps ms at 3000; +2 s for transfer/scheduling
 }
 
 /**
@@ -77,7 +93,8 @@ export function useDeviceTransport(selectedIp: string | null) {
     // Strip `ip` (helper-side routing field, not a firmware field).
     delete cmd.ip
     delete cmd.targets
-    const r = await masterSendConfigCmd(cmd)
+    const timeoutMs = SERIAL_CMD_TIMEOUT_MS[msg.type]
+    const r = await masterSendConfigCmd(cmd, timeoutMs ? { timeoutMs } : undefined)
 
     // For GET-style cmds, repackage the firmware response into the
     // helper-relayed `*_result` event shape and inject it into the

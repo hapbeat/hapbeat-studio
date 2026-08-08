@@ -29,6 +29,8 @@ import {
   DuoWlV4SettingsBackup,
   SolidTransmitterTuningSection,
   SwHapticEqSection,
+  BandWlV4PwmSection,
+  type PwmStatusReadout,
 } from './NodeConfigSections'
 import { useDeviceTransport } from '@/hooks/useDeviceTransport'
 import { useSerialMaster } from '@/stores/serialMaster'
@@ -42,6 +44,7 @@ type SubTab =
   | 'audio'     // DuoWL v4 pure espnow_stream receiver only — gain stage + A-V delay
   | 'eq'        // DuoWL v4 pure espnow_stream receiver only — per-codec EQ designer
   | 'dsp'       // DuoWL v4 pure espnow_stream receiver only — DSP profile + DRC/3D/Beep/AGC
+  | 'pwm'       // band_v4_pwm experimental build only — DC bias / tone / probe
 
 const SUB_TAB_LABEL: Record<SubTab, string> = {
   wifi: 'Wi-Fi',
@@ -55,6 +58,7 @@ const SUB_TAB_LABEL: Record<SubTab, string> = {
   audio: '音声',
   eq: 'EQ',
   dsp: 'DSP',
+  pwm: 'PWM (実験)',
 }
 
 /**
@@ -102,6 +106,19 @@ function FirmwareUpdateChip({
  * EQ (biquad bands + 1st-order IIR + profile selector) purely for tab width.
  */
 function computeSubTabs(
+  role: NodeRole,
+  transport: NodeTransport,
+  transports: NodeTransport[],
+  board: string | undefined,
+  hasPwm: boolean,
+): SubTab[] {
+  const tabs = computeRoleSubTabs(role, transport, transports, board)
+  // The band_v4_pwm experimental build reports the stock band_wl_v4 board id,
+  // so the PWM tab is keyed off get_info's `haptic_pwm` — no other build has it.
+  return hasPwm ? [...tabs, 'pwm'] : tabs
+}
+
+function computeRoleSubTabs(
   role: NodeRole,
   transport: NodeTransport,
   transports: NodeTransport[],
@@ -227,6 +244,20 @@ export function DeviceDetail() {
 
   const [globalStatus, setGlobalStatus] = useState<{ kind: 'ok' | 'err' | 'warn' | 'muted'; msg: string } | null>(null)
 
+  // band_v4_pwm experimental build (PWM tab). Kept as local state rather than
+  // in deviceStore: it's a bench-only readout with no other consumer, and it
+  // must not survive a device switch (cleared below with the caches).
+  const [pwmStatus, setPwmStatus] = useState<PwmStatusReadout | undefined>(undefined)
+  const [pwmProbeTick, setPwmProbeTick] = useState(0)
+  const [pwmVolumeSteps, setPwmVolumeSteps] = useState<number | undefined>(undefined)
+
+  // Drop the PWM readout on every device switch — it is per-device state and
+  // showing the previous device's bias/status would be actively misleading.
+  useEffect(() => {
+    setPwmStatus(undefined)
+    setPwmVolumeSteps(undefined)
+  }, [selectedIp])
+
   const clearCachesFor = useDeviceStore((s) => s.clearCachesFor)
   const prevSelectedRef = useRef<string | null>(null)
   useEffect(() => {
@@ -336,6 +367,13 @@ export function DeviceDetail() {
           applied_gain_l_db: number
           applied_gain_r_db: number
         } | undefined,
+        // band_v4_pwm experimental build only — gates the PWM sub-tab.
+        haptic_pwm: p.haptic_pwm as {
+          carrier_hz?: number
+          gpio_a?: number
+          gpio_b?: number
+          state?: string
+        } | undefined,
         // SoftAP extension fields (firmware ≥ v0.1.0)
         mode: p.mode as 'sta' | 'ap' | undefined,
         ap_ssid: p.ap_ssid as string | undefined,
@@ -404,6 +442,31 @@ export function DeviceDetail() {
         events?: Array<string | { name: string; mode?: string }>
       }> | undefined) ?? []
       setKitList(p.device, kits)
+    } else if (t === 'pwm_status_result' && typeof p.device === 'string') {
+      // Passthrough dict from the band_v4_pwm build. An error response
+      // (unknown cmd on a non-PWM build) carries no `state` — ignore it so
+      // the panel keeps its "未取得" hint instead of showing a blank table.
+      if (typeof p.state === 'string') {
+        setPwmStatus({
+          state: p.state,
+          carrier_hz: p.carrier_hz as number | undefined,
+          gpio_a: p.gpio_a as number | undefined,
+          gpio_b: p.gpio_b as number | undefined,
+          bias_ma: p.bias_ma as number | undefined,
+          bias_q15: p.bias_q15 as number | undefined,
+          // `volume` is the 0-127 wiper; `volume_level`/`volume_steps` are the
+          // slider's unit — keep all three, the panel picks the right one.
+          volume: p.volume as number | undefined,
+          volume_level: p.volume_level as number | undefined,
+          volume_steps: p.volume_steps as number | undefined,
+          underruns: p.underruns as number | undefined,
+          clips: p.clips as number | undefined,
+          tone_active: p.tone_active as boolean | undefined,
+        })
+      }
+    } else if (t === 'pwm_probe_result') {
+      // Only used to release the (disabled-while-running) probe button.
+      setPwmProbeTick((n) => n + 1)
     } else if (t === 'volume_changed') {
       // Unsolicited push from a physical volume knob/button (helper relays
       // it straight from the device's PONG/serial event). `hp_db` (DuoWL v4
@@ -441,6 +504,14 @@ export function DeviceDetail() {
       }
       const results = p.results as Array<Record<string, unknown>> | undefined
       if (Array.isArray(results)) {
+        // set_volume is the only place the device reports its step count
+        // (pwm_status doesn't carry it), so latch it from the reply.
+        if (p.cmd === 'set_volume') {
+          for (const r of results) {
+            const steps = (r.response as Record<string, unknown> | undefined)?.steps
+            if (typeof steps === 'number' && steps > 0) { setPwmVolumeSteps(steps); break }
+          }
+        }
         for (const r of results) {
           if (r.success) continue
           const ip = r.ip as string ?? '?'
@@ -666,6 +737,7 @@ export function DeviceDetail() {
         drc: masterInfo.drc,
         effect_3d: masterInfo.effect_3d,
         agc: masterInfo.agc,
+        haptic_pwm: masterInfo.haptic_pwm,
       } : undefined)
     : infoCache[selectedIp]
   const wifiStatus = transport.isSerial
@@ -704,7 +776,9 @@ export function DeviceDetail() {
   const nodeTransport: NodeTransport =
     cachedInfo?.transport ?? device.transport ?? nodeTransports[0] ?? 'udp'
 
-  const subTabs = computeSubTabs(nodeRole, nodeTransport, nodeTransports, cachedInfo?.board)
+  const subTabs = computeSubTabs(
+    nodeRole, nodeTransport, nodeTransports, cachedInfo?.board, !!cachedInfo?.haptic_pwm,
+  )
   const activeSubTab: SubTab = subTabs.includes(subTab) ? subTab : (subTabs[0] ?? 'firmware')
 
   return (
@@ -947,6 +1021,17 @@ export function DeviceDetail() {
             sendTo={sendTo}
             syncTick={cachedSyncTick}
             onReconcile={reconcileInfo}
+          />
+        )}
+
+        {activeSubTab === 'pwm' && (
+          <BandWlV4PwmSection
+            device={device}
+            cachedInfo={cachedInfo}
+            sendTo={sendTo}
+            status={pwmStatus}
+            probeTick={pwmProbeTick}
+            volumeSteps={pwmVolumeSteps}
           />
         )}
 

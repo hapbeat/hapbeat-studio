@@ -157,6 +157,16 @@ export interface NodeConfigInfo {
   }
   /** AGC config + applied-gain telemetry (§5, board === "duo_wl_v4" only). */
   agc?: AgcInfo
+  /** BandWL v4 PWM experimental build only (the MCU drives the motor-driver
+   *  gates directly; PAM8003 is off). Reported by get_info ONLY on that build,
+   *  so its presence — not the board id, which is the stock band_wl_v4 — is
+   *  what gates the PWM sub-tab. */
+  haptic_pwm?: {
+    carrier_hz?: number
+    gpio_a?: number
+    gpio_b?: number
+    state?: string
+  }
 }
 
 const ESPNOW_CHANNELS = [1, 6, 11]
@@ -5518,5 +5528,452 @@ export function EspNowStreamReadout({
         </>
       )}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------
+// BandWL v4 PWM experimental firmware (band_v4_pwm build)
+// ---------------------------------------------------------------------
+
+/** `pwm_status` response (band_v4_pwm build only). */
+export interface PwmStatusReadout {
+  state?: string
+  carrier_hz?: number
+  gpio_a?: number
+  gpio_b?: number
+  bias_ma?: number
+  bias_q15?: number
+  /** Digital-pot wiper, 0-127 — NOT the UI slider's unit. Read-only readout. */
+  volume?: number
+  /** Volume step the device currently holds, 0..volume_steps-1 (slider unit). */
+  volume_level?: number
+  /** Number of volume steps this build exposes (10 on band_v4_pwm). */
+  volume_steps?: number
+  underruns?: number
+  clips?: number
+  tone_active?: boolean
+}
+
+/** Bias slider range, % duty (firmware clamps at ±0.45). */
+const PWM_BIAS_MAX_PCT = 45
+/** Firmware's mA range at full-scale duty — used to map bias_ma back to %. */
+const PWM_BIAS_MAX_MA = 800
+/** Magnitude used by 逆転/正転 when the slider currently sits at 0. */
+const PWM_BIAS_DEFAULT_PCT = 10
+/** Last-resort step count, used only until pwm_status / set_volume report one. */
+const PWM_VOLUME_STEPS_FALLBACK = 16
+/** `pwm_probe` blocks the device — cap matches the firmware's own limit. */
+const PWM_PROBE_MAX_MS = 3000
+/** Safety-net delay before re-enabling 実行 when no probe reply arrives. */
+const PWM_PROBE_RELEASE_MARGIN_MS = 2500
+
+/**
+ * Experimental bench panel for the `band_v4_pwm` build: DC bias (string
+ * take-up tension), a diagnostic tone, volume, status and the gate-level
+ * probe. Gated on `cachedInfo.haptic_pwm` in DeviceDetail — the board id is
+ * the stock `band_wl_v4`, so only that get_info key distinguishes the build.
+ *
+ * Status is fetched on open and on demand only: polling would hold the
+ * device's single TCP client slot away from everything else.
+ */
+export function BandWlV4PwmSection({
+  device,
+  cachedInfo,
+  sendTo,
+  status,
+  probeTick,
+  volumeSteps,
+}: {
+  device: DeviceInfo
+  cachedInfo?: NodeConfigInfo
+  sendTo: (msg: ManagerMessage) => void
+  /** Latest `pwm_status_result` payload for this device, if any. */
+  status?: PwmStatusReadout
+  /** Bumped by DeviceDetail on every `pwm_probe_result` — releases the button. */
+  probeTick: number
+  /** Step count echoed by the last `set_volume` reply. */
+  volumeSteps?: number
+}) {
+  const { setAnchor } = useToast()
+  const offline = !device.online
+
+  const [biasPct, setBiasPct] = useState(0)
+  const [toneHz, setToneHz] = useState(100)
+  const [toneAmp, setToneAmp] = useState(0.5)
+  const [toneMs, setToneMs] = useState(1000)
+  const [volume, setVolume] = useState(0)
+  const [probeHz, setProbeHz] = useState(0)
+  const [probeMs, setProbeMs] = useState(500)
+  const [probing, setProbing] = useState(false)
+
+  // pwm_status carries the step count directly, so prefer it over the
+  // set_volume echo (which only arrives after the user moves the slider) —
+  // the fallback is only for a build that reports neither.
+  const steps = status?.volume_steps ?? volumeSteps ?? PWM_VOLUME_STEPS_FALLBACK
+  const maxLevel = Math.max(0, steps - 1)
+
+  // Fetch status once when the panel mounts / the device changes. Also drop a
+  // pending probe flag: its reply belongs to the previous device and would
+  // otherwise leave the button disabled forever.
+  useEffect(() => {
+    setProbing(false)
+    if (offline) return
+    sendTo({ type: 'pwm_status', payload: {} })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [device.ipAddress])
+
+  // Adopt the device's committed bias/volume whenever a status lands: it
+  // slew-limits toward the target and clamps out-of-range writes, so the
+  // device is authoritative for what the sliders show.
+  useEffect(() => {
+    if (status?.bias_ma == null) return
+    setBiasPct(Math.round((status.bias_ma / PWM_BIAS_MAX_MA) * PWM_BIAS_MAX_PCT))
+  }, [status?.bias_ma])
+  // `volume_level` (0..steps-1) is the slider's unit; `volume` is the 0-127
+  // wiper and must NOT be adopted here (it would jump the slider off-scale).
+  useEffect(() => {
+    if (status?.volume_level == null) return
+    setVolume(status.volume_level)
+  }, [status?.volume_level])
+
+  // pwm_probe blocks the device for up to 3 s; keep the button disabled until
+  // its reply lands rather than letting the user queue another. A reply can
+  // fail to arrive at all (serial timeout injects nothing), so the run also
+  // arms a safety timer — otherwise the button would stay dead until the user
+  // switches devices.
+  const probeTickRef = useRef(probeTick)
+  const probeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const clearProbeTimer = () => {
+    if (probeTimerRef.current) { clearTimeout(probeTimerRef.current); probeTimerRef.current = null }
+  }
+  useEffect(() => {
+    if (probeTick === probeTickRef.current) return
+    probeTickRef.current = probeTick
+    clearProbeTimer()
+    setProbing(false)
+  }, [probeTick])
+  useEffect(() => clearProbeTimer, [])
+
+  const sendBias = (pct: number, e?: React.SyntheticEvent<HTMLElement>) => {
+    if (e) setAnchor(e.currentTarget)
+    const clamped = Math.max(-PWM_BIAS_MAX_PCT, Math.min(PWM_BIAS_MAX_PCT, Math.round(pct)))
+    setBiasPct(clamped)
+    sendTo({ type: 'set_pwm_bias', payload: { duty: clamped / 100 } })
+  }
+
+  const flipBias = (sign: 1 | -1, e: React.MouseEvent<HTMLButtonElement>) => {
+    const magnitude = Math.abs(biasPct) || PWM_BIAS_DEFAULT_PCT
+    sendBias(sign * magnitude, e)
+  }
+
+  const playTone = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchor(e.currentTarget)
+    sendTo({ type: 'pwm_tone', payload: { hz: toneHz, amp: toneAmp, ms: toneMs } })
+  }
+  const stopTone = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchor(e.currentTarget)
+    // amp 0 / ms 0 is the firmware's documented stop form.
+    sendTo({ type: 'pwm_tone', payload: { hz: toneHz, amp: 0, ms: 0 } })
+  }
+
+  const applyVolume = (v: number, e?: React.SyntheticEvent<HTMLElement>) => {
+    if (e) setAnchor(e.currentTarget)
+    setVolume(v)
+    sendTo({ type: 'set_volume', payload: { level: v } })
+  }
+
+  const runProbe = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchor(e.currentTarget)
+    setProbing(true)
+    clearProbeTimer()
+    probeTimerRef.current = setTimeout(() => {
+      probeTimerRef.current = null
+      setProbing(false)
+    }, probeMs + PWM_PROBE_RELEASE_MARGIN_MS)
+    sendTo({ type: 'pwm_probe', payload: { hz: probeHz, ms: probeMs } })
+  }
+
+  const refreshStatus = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchor(e.currentTarget)
+    sendTo({ type: 'pwm_status', payload: {} })
+  }
+
+  const Row = ({ label, value }: { label: string; value: React.ReactNode }) => (
+    <div className="form-row" style={{ paddingBlock: 2 }}>
+      <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</label>
+      <span className="mono" style={{ fontSize: 12 }}>{value ?? '—'}</span>
+      <span />
+    </div>
+  )
+
+  return (
+    <>
+      <div className="form-section">
+        <div className="form-section-title">
+          DC バイアス（張力）
+          <span className="form-section-sub-inline"> — PWM 実験ファーム</span>
+        </div>
+
+        <div className="form-row">
+          <label>バイアス</label>
+          <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+            <input
+              type="range"
+              min={-PWM_BIAS_MAX_PCT}
+              max={PWM_BIAS_MAX_PCT}
+              step={1}
+              value={biasPct}
+              // Dragging only moves the slider; the write happens on
+              // release/blur so one drag isn't dozens of TCP commands.
+              onChange={(e) => setBiasPct(Number(e.target.value))}
+              onPointerUp={(e) => sendBias(biasPct, e)}
+              onBlur={(e) => sendBias(biasPct, e)}
+              disabled={offline}
+              style={{ flex: 1 }}
+            />
+            <span className="mono" style={{ width: 56, textAlign: 'right' }}>
+              {biasPct > 0 ? `+${biasPct}` : biasPct} %
+            </span>
+          </div>
+          <span />
+        </div>
+
+        <div className="form-action-row" style={{ marginTop: 8 }}>
+          <button
+            className="form-button-secondary"
+            onClick={(e) => flipBias(-1, e)}
+            disabled={offline}
+          >
+            ◀ 逆転
+          </button>
+          <button
+            className="form-button-secondary"
+            onClick={(e) => sendBias(0, e)}
+            disabled={offline}
+          >
+            ■ 停止 (0)
+          </button>
+          <button
+            className="form-button-secondary"
+            onClick={(e) => flipBias(1, e)}
+            disabled={offline}
+          >
+            正転 ▶
+          </button>
+        </div>
+        <div className="form-status muted" style={{ fontSize: 12 }}>
+          符号と巻き取り方向の対応は基板の結線依存です。実機で確認してください。
+          目標値を送ると、デバイス側が約 0.3 秒かけて追従します。
+        </div>
+      </div>
+
+      <div className="form-section">
+        <div className="form-section-title">診断トーン</div>
+        <div className="form-row">
+          <label>周波数</label>
+          <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+            <input
+              type="number"
+              min={10}
+              max={2000}
+              step={10}
+              value={toneHz}
+              onChange={(e) => setToneHz(Number(e.target.value))}
+              disabled={offline}
+            />
+            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Hz (10〜2000)</span>
+          </div>
+          <span />
+        </div>
+        <div className="form-row">
+          <label>振幅</label>
+          <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={toneAmp}
+              onChange={(e) => setToneAmp(Number(e.target.value))}
+              disabled={offline}
+              style={{ flex: 1 }}
+            />
+            <span className="mono" style={{ width: 48, textAlign: 'right' }}>
+              {toneAmp.toFixed(2)}
+            </span>
+          </div>
+          <span />
+        </div>
+        <div className="form-row">
+          <label>長さ</label>
+          <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+            <input
+              type="number"
+              min={0}
+              max={60000}
+              step={100}
+              value={toneMs}
+              onChange={(e) => setToneMs(Number(e.target.value))}
+              disabled={offline}
+            />
+            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>ms</span>
+          </div>
+          <span />
+        </div>
+        <div className="form-action-row" style={{ marginTop: 8 }}>
+          <button className="form-button" onClick={playTone} disabled={offline}>
+            再生
+          </button>
+          <button className="form-button-secondary" onClick={stopTone} disabled={offline}>
+            停止
+          </button>
+        </div>
+      </div>
+
+      <div className="form-section">
+        <div className="form-section-title">音量</div>
+        <div className="form-row">
+          <label>レベル</label>
+          <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+            <input
+              type="range"
+              min={0}
+              max={maxLevel}
+              step={1}
+              value={Math.min(volume, maxLevel)}
+              onChange={(e) => setVolume(Number(e.target.value))}
+              onPointerUp={(e) => applyVolume(volume, e)}
+              onBlur={(e) => applyVolume(volume, e)}
+              disabled={offline}
+              style={{ flex: 1 }}
+            />
+            <span className="mono" style={{ width: 64, textAlign: 'right' }}>
+              {volume} / {maxLevel}
+            </span>
+          </div>
+          <span />
+        </div>
+      </div>
+
+      <div className="form-section">
+        <div
+          className="form-section-title"
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+        >
+          <span>状態</span>
+          <button
+            className="form-button-secondary"
+            style={{ fontSize: 11, padding: '2px 8px' }}
+            onClick={refreshStatus}
+            disabled={offline}
+          >
+            更新
+          </button>
+        </div>
+        {/* Hint line is always present so the rows below never shift when the
+            first status lands (layout-shift rule). */}
+        <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
+          {status
+            ? '自動更新はしません。「更新」で再取得します。'
+            : '「更新」を押すと pwm_status を取得します。'}
+        </div>
+        <Row label="状態" value={status?.state} />
+        <Row
+          label="キャリア"
+          value={status?.carrier_hz != null ? `${status.carrier_hz} Hz` : undefined}
+        />
+        <Row
+          label="ゲート GPIO"
+          value={
+            status?.gpio_a != null || status?.gpio_b != null
+              ? `A=${status?.gpio_a ?? '—'} / B=${status?.gpio_b ?? '—'}`
+              : undefined
+          }
+        />
+        <Row
+          label="バイアス"
+          value={status?.bias_ma != null ? `${status.bias_ma} mA` : undefined}
+        />
+        <Row
+          label="音量"
+          value={
+            status?.volume_level != null
+              ? `${status.volume_level} / ${maxLevel}`
+                + (status.volume != null ? `（wiper ${status.volume}/127）` : '')
+              : undefined
+          }
+        />
+        <Row label="アンダーラン" value={status?.underruns} />
+        <Row label="クリップ" value={status?.clips} />
+        <Row
+          label="トーン"
+          value={status?.tone_active != null ? (status.tone_active ? '再生中' : '停止') : undefined}
+        />
+        {/* get_info carries the gate config too, so this row has a value even
+            before the first pwm_status. */}
+        <Row
+          label="get_info の申告"
+          value={
+            cachedInfo?.haptic_pwm
+              ? `${cachedInfo.haptic_pwm.state ?? '—'} / ${cachedInfo.haptic_pwm.carrier_hz ?? '—'} Hz`
+              : undefined
+          }
+        />
+      </div>
+
+      <div className="form-section">
+        <div className="form-section-title">
+          ゲート直叩き診断
+          <span className="form-section-sub-inline"> — pwm_probe</span>
+        </div>
+        <div className="form-row">
+          <label>周波数</label>
+          <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+            <input
+              type="number"
+              min={0}
+              max={200}
+              step={1}
+              value={probeHz}
+              onChange={(e) => setProbeHz(Number(e.target.value))}
+              disabled={offline || probing}
+            />
+            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+              Hz (0〜200、0 = DC 保持)
+            </span>
+          </div>
+          <span />
+        </div>
+        <div className="form-row">
+          <label>長さ</label>
+          <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+            <input
+              type="number"
+              min={0}
+              max={PWM_PROBE_MAX_MS}
+              step={100}
+              value={probeMs}
+              onChange={(e) =>
+                setProbeMs(Math.min(PWM_PROBE_MAX_MS, Math.max(0, Number(e.target.value))))
+              }
+              disabled={offline || probing}
+            />
+            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+              ms (最大 {PWM_PROBE_MAX_MS})
+            </span>
+          </div>
+          <span />
+        </div>
+        <div className="form-status warn" style={{ fontSize: 12 }}>
+          警告: LEDC をバイパスしてモーターを 100% で駆動します。実行中はデバイスが
+          応答しません（最大 {PWM_PROBE_MAX_MS} ms）。
+        </div>
+        <div className="form-action-row" style={{ marginTop: 8 }}>
+          <button className="form-button" onClick={runProbe} disabled={offline || probing}>
+            {probing ? '実行中…' : '実行'}
+          </button>
+        </div>
+      </div>
+    </>
   )
 }

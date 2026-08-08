@@ -298,6 +298,15 @@ export interface SerialDeviceInfo {
     applied_gain_l_db: number
     applied_gain_r_db: number
   }
+  /** Gate/carrier config reported ONLY by the band_v4_pwm experimental build
+   *  (its board id is the stock band_wl_v4, so this key is what identifies
+   *  the build — it gates the PWM sub-tab). */
+  haptic_pwm?: {
+    carrier_hz?: number
+    gpio_a?: number
+    gpio_b?: number
+    state?: string
+  }
 }
 
 /** Parse a firmware get_info JSON into a SerialDeviceInfo (shared by
@@ -350,6 +359,7 @@ function parseSerialInfo(r: Record<string, unknown>): SerialDeviceInfo {
     drc: r.drc as SerialDeviceInfo['drc'],
     effect_3d: r.effect_3d as SerialDeviceInfo['effect_3d'],
     agc: r.agc as SerialDeviceInfo['agc'],
+    haptic_pwm: r.haptic_pwm as SerialDeviceInfo['haptic_pwm'],
   }
 }
 
@@ -421,8 +431,14 @@ interface SerialMasterState {
   /** Close the line conn but keep the SerialPort handle (so flash can
    *  reuse the same port without a re-pick). */
   closeConfig: () => Promise<void>
-  /** Run any JSON command over the active config conn. */
-  sendConfigCmd: (cmd: Record<string, unknown>) => Promise<Record<string, unknown> | null>
+  /** Run any JSON command over the active config conn. `timeoutMs` overrides
+   *  the 2 s default for commands the firmware answers slowly because it
+   *  BLOCKS while executing them (e.g. pwm_probe drives the gates for up to
+   *  3 s before replying). */
+  sendConfigCmd: (
+    cmd: Record<string, unknown>,
+    opts?: { timeoutMs?: number },
+  ) => Promise<Record<string, unknown> | null>
   /**
    * Run the firmware flash. Closes the config conn first if open,
    * runs `flashRegions` on the held port, and after success kicks off
@@ -796,14 +812,14 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       set({ conn: null, mode: 'idle', info: null, wifiStatus: null, wifiProfiles: [] })
     },
 
-    sendConfigCmd: async (cmd) => {
+    sendConfigCmd: async (cmd, opts) => {
       const { conn, mode } = get()
       if (!conn || mode !== 'config') {
         log(`sendConfigCmd skipped: mode=${mode}, hasConn=${!!conn}`)
         return null
       }
       try {
-        return await conn.send(cmd)
+        return await conn.send(cmd, opts)
       } catch (err) {
         log(`sendConfigCmd error: ${(err as Error).message}`)
         return null
