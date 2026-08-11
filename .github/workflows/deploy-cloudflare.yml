@@ -89,7 +89,7 @@ jobs:
           echo "Freeze $tag → /v$minor/ (full version $version)"
 
       - name: Checkout tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.tag.outputs.tag }}
           fetch-depth: 0
@@ -129,7 +129,7 @@ jobs:
           GH_TOKEN: ${{ secrets.FIRMWARE_REPO_PAT }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: 'npm'
@@ -177,7 +177,7 @@ jobs:
       # root（最新）は常に master HEAD。tag push でも root は master を出す
       # （FTP の「/studio/ = 最新プレビュー」と同じ。/vX.Y/ だけが凍結）。
       - name: Checkout master (root = latest)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: master
           fetch-depth: 0
@@ -217,7 +217,7 @@ jobs:
           GH_TOKEN: ${{ secrets.FIRMWARE_REPO_PAT }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: 'npm'
@@ -251,7 +251,7 @@ jobs:
         run: node scripts/cf-assemble-versions.mjs frozen-bundles dist
 
       - name: Deploy to Cloudflare Workers (static assets)
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
