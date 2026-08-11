@@ -42,10 +42,6 @@ on:
   repository_dispatch:
     types: [firmware-released]
 
-# Node 20 deprecation 後も JS actions を Node 24 で動かす。
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 # 凍結版アセットの作成 / アップロード（GITHUB_TOKEN）に contents: write が要る。
 permissions:
   contents: write
