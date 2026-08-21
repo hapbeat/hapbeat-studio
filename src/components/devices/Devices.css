@@ -1398,18 +1398,32 @@
   background: var(--bg-hover);
 }
 
-/* Group tabs (DEC-034): Hapbeat is the common case and gets the brand
- * accent; 周辺機器 (sensor / broker / transmitter) stays deliberately
- * muted so rare node types don't compete for attention. */
-.firmware-lib-toggle-btn.variant-hapbeat.selected {
+/* Family tabs: the Hapbeat wearables (DuoWL / BandWL) are the common case
+ * and share the brand accent; 周辺機器 (sensor / broker / transmitter)
+ * and その他 stay deliberately muted so rare node types don't compete
+ * for attention. */
+.firmware-lib-toggle-btn.variant-duo.selected,
+.firmware-lib-toggle-btn.variant-band.selected {
   background: rgba(124, 92, 191, 0.18);
   color: var(--accent-light);
   border-color: var(--accent);
 }
-.firmware-lib-toggle-btn.variant-peripheral.selected {
+.firmware-lib-toggle-btn.variant-peripheral.selected,
+.firmware-lib-toggle-btn.variant-other.selected {
   background: var(--bg-surface);
   color: var(--text-primary);
   border-color: var(--border-light);
+}
+
+/* Hardware-revision row (Level 2). Same metrics as .firmware-version-row so
+ * the grid below sits at a fixed offset whichever family is selected. */
+.firmware-hw-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  min-height: 26px;
 }
 
 /* Variant list — uniform 2-column grid (equal width/height cells). */

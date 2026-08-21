@@ -30,6 +30,16 @@ import {
   type FirmwareLibraryEntry,
   type FirmwareRegion,
 } from '@/utils/firmwareLibrary'
+import {
+  entriesForSelection,
+  entryBoard,
+  FAMILY_LABEL,
+  isSelectionAvailable,
+  listAvailability,
+  resolveDefaultSelection,
+  type FirmwareFamily,
+  type HierarchySelection,
+} from '@/utils/firmwareHierarchy'
 import { chipIdForBoard, validateOtaImage, type OtaValidationResult } from '@/utils/otaImageValidation'
 import { DriverHelpLinks } from './DriverHelpLinks'
 
@@ -41,28 +51,6 @@ const ROLE_LABEL: Record<NodeRole, string> = {
   transmitter: 'ライブ送信機',
 }
 
-/**
- * Library groups: the wearable (Hapbeat) is the common case and gets top
- * billing; every other node type (sensor / broker / transmitter) is rare
- * and tucked under a single 周辺機器 tab so it doesn't crowd the UI.
- * (Exported — the onboarding wizard uses the same grouping.)
- */
-export type FirmwareGroup = 'hapbeat' | 'peripheral'
-const GROUP_ORDER: FirmwareGroup[] = ['hapbeat', 'peripheral']
-const GROUP_LABEL: Record<FirmwareGroup, string> = {
-  hapbeat: 'Hapbeat',
-  peripheral: '周辺機器',
-}
-function entryGroup(e: FirmwareLibraryEntry): FirmwareGroup {
-  // Group by the explicit `hapbeat` flag (variant.json), NOT role: a 3rd-party
-  // MQTT node can also be role=receiver, so role isn't a reliable "is Hapbeat"
-  // signal (user 2026-06-15). Fall back to board prefix when the flag is absent.
-  const hb = e.hapbeat ?? (() => {
-    const b = entryBoard(e)
-    return !!b && (b.startsWith('duo_wl') || b.startsWith('band_wl'))
-  })()
-  return hb ? 'hapbeat' : 'peripheral'
-}
 const TRANSPORT_LABEL: Record<NodeTransport, string> = {
   udp: 'Wi-Fi UDP',
   mqtt: 'MQTT',
@@ -72,11 +60,6 @@ const TRANSPORT_LABEL: Record<NodeTransport, string> = {
 /** The role a library entry implements (explicit, else inferred). */
 function entryRole(e: FirmwareLibraryEntry): NodeRole {
   return e.role ?? inferVariantFromEnv(e.env).role
-}
-
-/** The board a library entry expects (explicit manifest board, else inferred). */
-function entryBoard(e: FirmwareLibraryEntry): string | null {
-  return e.board ?? inferVariantFromEnv(e.env).board ?? null
 }
 
 /** Human label for a variant button (manifest label, else env name).
@@ -101,11 +84,12 @@ interface Props {
   /**
    * Pre-filter the firmware library to one group (Hapbeat | 周辺機器).
    * Set by the onboarding wizard once the user picks a node type, so the
-   * group toggle is hidden and only that group's variants show. When
-   * omitted, the toggle row is shown and defaults to the connected
-   * device's group (or Hapbeat).
+   * 周辺機器 tab is hidden (or is the only one) and the default selection
+   * stays inside that group. When omitted, every family tab present in
+   * the library is shown and the default follows the connected device's
+   * board.
    */
-  groupFilter?: FirmwareGroup
+  groupFilter?: 'hapbeat' | 'peripheral'
 }
 
 /**
@@ -131,17 +115,13 @@ export function FirmwareSubTab({
   const pushLog = useLogStore((s) => s.push)
   const selectedIps = useDeviceStore((s) => s.selectedIps)
 
-  // Role reported by the connected device (drives the default role chip).
-  const deviceRole = useDeviceStore((s) =>
-    device ? s.infoCache[device.ipAddress]?.role : undefined,
-  )
-
   // ---- Source selection ------------------------------------------------
   type Source = 'library' | 'local'
   const [source, setSource] = useState<Source>('library')
 
   const LIB_SELECTED_KEY = 'hapbeat-studio-firmware-lib-selected'
-  const GROUP_SELECTED_KEY = 'hapbeat-studio-firmware-group-selected'
+  const FAMILY_SELECTED_KEY = 'hapbeat-studio-firmware-family-selected'
+  const HW_SELECTED_KEY = 'hapbeat-studio-firmware-hw-selected'
   const [libEntries, setLibEntries] = useState<FirmwareLibraryEntry[]>([])
   const [libLoading, setLibLoading] = useState(false)
   const [libError, setLibError] = useState<string | null>(null)
@@ -150,12 +130,21 @@ export function FirmwareSubTab({
       return localStorage.getItem(LIB_SELECTED_KEY)
     } catch { return null }
   })
-  const [selectedGroup, setSelectedGroup] = useState<FirmwareGroup | null>(() => {
+  /** Last family/hw the user picked explicitly — the fallback used when the
+   *  connected device's board can't tell us which hardware to show. */
+  const [savedPick, setSavedPick] = useState<HierarchySelection | null>(() => {
     try {
-      const v = localStorage.getItem(GROUP_SELECTED_KEY)
-      return v === 'hapbeat' || v === 'peripheral' ? v : null
+      const family = localStorage.getItem(FAMILY_SELECTED_KEY)
+      if (family !== 'duo' && family !== 'band' && family !== 'peripheral' && family !== 'other') {
+        return null
+      }
+      return { family, hw: localStorage.getItem(HW_SELECTED_KEY) || null }
     } catch { return null }
   })
+  /** The user's pick for the device currently on screen. Cleared whenever the
+   *  device (or its board) changes so a fresh device re-derives its own
+   *  default instead of inheriting the previous device's hardware revision. */
+  const [userPick, setUserPick] = useState<HierarchySelection | null>(null)
 
   useEffect(() => {
     try {
@@ -163,12 +152,6 @@ export function FirmwareSubTab({
       else localStorage.removeItem(LIB_SELECTED_KEY)
     } catch { /* localStorage unavailable */ }
   }, [libSelected])
-
-  useEffect(() => {
-    try {
-      if (selectedGroup) localStorage.setItem(GROUP_SELECTED_KEY, selectedGroup)
-    } catch { /* localStorage unavailable */ }
-  }, [selectedGroup])
 
   // Local file state — handle is the source of truth, bytes is read on demand
   const [localHandle, setLocalHandle] = useState<FileSystemFileHandle | null>(null)
@@ -332,42 +315,54 @@ export function FirmwareSubTab({
     void refreshLibrary()
   }, [refreshLibrary])
 
-  // ---- Group / variant selection --------------------------------------
+  // ---- Family / hardware / variant selection ---------------------------
 
-  /** Groups present in the library, Hapbeat first. */
-  const groupsPresent = useMemo<FirmwareGroup[]>(() => {
-    const seen = new Set<FirmwareGroup>()
-    for (const e of libEntries) seen.add(entryGroup(e))
-    return GROUP_ORDER.filter((g) => seen.has(g))
-  }, [libEntries])
+  /** What the library offers: families present, and the hardware revisions
+   *  each one has. */
+  const availability = useMemo(() => listAvailability(libEntries), [libEntries])
 
-  /** Effective group: forced groupFilter > user pick > device role > Hapbeat. */
-  const effectiveGroup = useMemo<FirmwareGroup | null>(() => {
-    if (groupFilter) return groupFilter
-    if (selectedGroup && groupsPresent.includes(selectedGroup)) return selectedGroup
-    // Prefer the device's BOARD to classify (duo_wl_* / band_wl_* = Hapbeat),
-    // since a non-Hapbeat node can also be role=receiver. Fall back to the role
-    // heuristic only when the board is unknown.
-    if (knownBoard && knownBoard !== 'unknown') {
-      const g: FirmwareGroup = (knownBoard.startsWith('duo_wl') || knownBoard.startsWith('band_wl'))
-        ? 'hapbeat' : 'peripheral'
-      if (groupsPresent.includes(g)) return g
-    } else if (deviceRole) {
-      const g: FirmwareGroup = deviceRole === 'receiver' ? 'hapbeat' : 'peripheral'
-      if (groupsPresent.includes(g)) return g
-    }
-    if (groupsPresent.includes('hapbeat')) return 'hapbeat'
-    return groupsPresent[0] ?? null
-  }, [groupFilter, selectedGroup, deviceRole, knownBoard, groupsPresent])
+  /** Family tabs to show. `groupFilter` (onboarding) narrows them. */
+  const familiesShown = useMemo<FirmwareFamily[]>(() => {
+    const all = availability.map((a) => a.family)
+    if (groupFilter === 'hapbeat') return all.filter((f) => f !== 'peripheral')
+    if (groupFilter === 'peripheral') return all.filter((f) => f === 'peripheral')
+    return all
+  }, [availability, groupFilter])
 
-  /** Entries shown: the effective group's variants. */
-  const entriesShown = useMemo(() => {
-    if (!effectiveGroup) return []
-    return libEntries.filter((e) => entryGroup(e) === effectiveGroup)
-  }, [libEntries, effectiveGroup])
+  // Re-derive the default whenever the device (or its reported board)
+  // changes — a manual pick only applies to the device it was made on.
+  const deviceIp = device?.ipAddress
+  useEffect(() => {
+    setUserPick(null)
+  }, [deviceIp, knownBoard])
+
+  /** Effective selection: the user's pick for this device, else the
+   *  device-oriented default (board → saved → first present). */
+  const selection = useMemo<HierarchySelection | null>(() => {
+    const pool = availability.filter((a) => familiesShown.includes(a.family))
+    if (userPick && isSelectionAvailable(userPick, pool)) return userPick
+    return resolveDefaultSelection({
+      groupFilter,
+      knownBoard,
+      saved: savedPick,
+      available: availability,
+    })
+  }, [availability, familiesShown, userPick, groupFilter, knownBoard, savedPick])
+
+  /** Hardware revisions for the selected family (empty for 周辺機器). */
+  const hwShown = useMemo(
+    () => availability.find((a) => a.family === selection?.family)?.hws ?? [],
+    [availability, selection],
+  )
+
+  /** Entries shown: variants matching the selected family + hardware. */
+  const entriesShown = useMemo(
+    () => entriesForSelection(libEntries, selection),
+    [libEntries, selection],
+  )
 
   // Keep libSelected inside the shown set: if the current selection
-  // belongs to a different group, jump to the first shown variant.
+  // belongs to a different board, jump to the first shown variant.
   useEffect(() => {
     if (entriesShown.length === 0) return
     if (libSelected && entriesShown.some((e) => e.env === libSelected)) return
@@ -375,14 +370,31 @@ export function FirmwareSubTab({
     setSource('library')
   }, [entriesShown, libSelected])
 
-  const selectGroup = useCallback((group: FirmwareGroup) => {
-    setSelectedGroup(group)
-    const inGroup = libEntries.filter((e) => entryGroup(e) === group)
-    if (inGroup.length > 0) {
-      setLibSelected(inGroup[0].env)
+  /** Apply + persist an explicit family/hardware pick. */
+  const selectHierarchy = useCallback((next: HierarchySelection) => {
+    setUserPick(next)
+    setSavedPick(next)
+    try {
+      localStorage.setItem(FAMILY_SELECTED_KEY, next.family)
+      if (next.hw) localStorage.setItem(HW_SELECTED_KEY, next.hw)
+      else localStorage.removeItem(HW_SELECTED_KEY)
+    } catch { /* localStorage unavailable */ }
+    const shown = entriesForSelection(libEntries, next)
+    if (shown.length > 0) {
+      setLibSelected(shown[0].env)
       setSource('library')
     }
-  }, [libEntries])
+  }, [libEntries, FAMILY_SELECTED_KEY, HW_SELECTED_KEY])
+
+  const selectFamily = useCallback((family: FirmwareFamily) => {
+    const hws = availability.find((a) => a.family === family)?.hws ?? []
+    // Keep the current revision when the new family also has it (v4 → v4),
+    // so switching DuoWL ⇄ BandWL doesn't silently drop to the oldest board.
+    const hw = hws.length === 0
+      ? null
+      : (selection?.hw && hws.includes(selection.hw) ? selection.hw : hws[0])
+    selectHierarchy({ family, hw })
+  }, [availability, selection, selectHierarchy])
 
   // ---- Local file: restore handle from IDB on mount ------------------
 
@@ -880,28 +892,54 @@ export function FirmwareSubTab({
 
         {libEntries.length > 0 && (
           <>
-            {/* Group tabs: Hapbeat | 周辺機器 (hidden when a groupFilter is
-              * forced by the caller, or when only Hapbeat builds exist). */}
-            {!groupFilter && groupsPresent.length > 1 && (
+            {/* Level 1 — product family: DuoWL | BandWL | 周辺機器.
+              * Only families actually present are offered; a single one
+              * needs no tab row. */}
+            {familiesShown.length > 1 && (
               <div
                 className="firmware-lib-toggle"
                 role="tablist"
                 aria-label="ファームウェア種別"
               >
-                {groupsPresent.map((group) => {
-                  const isSelected = effectiveGroup === group
+                {familiesShown.map((family) => {
+                  const isSelected = selection?.family === family
                   return (
                     <button
-                      key={group}
+                      key={family}
                       type="button"
                       role="tab"
                       aria-selected={isSelected}
-                      className={`firmware-lib-toggle-btn variant-${group}${isSelected ? ' selected' : ''}`}
-                      onClick={() => selectGroup(group)}
+                      className={`firmware-lib-toggle-btn variant-${family}${isSelected ? ' selected' : ''}`}
+                      onClick={() => selectFamily(family)}
                     >
                       <span className="firmware-lib-toggle-label">
-                        {GROUP_LABEL[group]}
+                        {FAMILY_LABEL[family]}
                       </span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Level 2 — hardware revision. Always one row while a Hapbeat
+              * family is shown (even with a single revision) so switching
+              * families never shifts the grid below by a line. */}
+            {hwShown.length > 0 && selection && (
+              <div className="firmware-hw-row" role="tablist" aria-label="ハード版">
+                <span className="firmware-version-row-label">ハード版</span>
+                {hwShown.map((hw) => {
+                  const isSelected = selection.hw === hw
+                  return (
+                    <button
+                      key={hw}
+                      type="button"
+                      role="tab"
+                      aria-selected={isSelected}
+                      className={`firmware-version-chip${isSelected ? ' selected' : ''}`}
+                      onClick={() => selectHierarchy({ family: selection.family, hw })}
+                      title={`${FAMILY_LABEL[selection.family]} ${hw}`}
+                    >
+                      {hw}
                     </button>
                   )
                 })}

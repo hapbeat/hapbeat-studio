@@ -31,6 +31,7 @@ import { isMergedImage } from '@/utils/serialFlasher'
  */
 const BOARD_LABELS: Record<string, string> = {
   duo_wl_v3: 'DuoWL v3',
+  duo_wl_v4: 'DuoWL v4',
   band_wl_v2: 'BandWL v2',
   band_wl_v3: 'BandWL v3',
   band_wl_v4: 'BandWL v4',
