@@ -455,7 +455,7 @@ async function readFirmwareVersion(srcDir: string | undefined): Promise<string |
  * snapshot cache with stale versions (user 2026-07-01).
  *
  * Per DEC-033/034 the node-firmware homes are:
- *   - hapbeat-device-firmware      → receiver (udp/mqtt) + broker + sensor
+ *   - hapbeat-device-firmware      → receiver (wifi_udp/mqtt) + broker + sensor
  *   - hapbeat-transmitter-firmware → transmitter (ESP-NOW audio source)
  */
 const FIRMWARE_REPO_DIRS: Array<{ repo: string; dir: string }> = [

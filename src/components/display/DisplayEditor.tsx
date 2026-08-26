@@ -899,7 +899,7 @@ export function DisplayEditor() {
   }, [setToastAnchor])
 
   // Display 自身の deploy だけ拾うため cmd で filter する。
-  // 失敗の汎用 toast は HelperToastBridge (App.tsx 直下) が出すので
+  // 失敗の汎用 toast は HelperFailureToastListener (App.tsx 直下) が出すので
   // ここでは Display 専用の "書き込みました" / "選択なし" 系に絞る。
   useEffect(() => {
     if (!lastMessage) return
@@ -930,7 +930,7 @@ export function DisplayEditor() {
     if (!success && reason.includes('no_device')) {
       toast('デバイスが選択されていません', 'warning')
     }
-    // 成功/失敗のトーストは HelperToastBridge が write_result（実機の結果）
+    // 成功/失敗のトーストは HelperFailureToastListener が write_result（実機の結果）
     // ベースで一元的に出す（操作ではなく結果で出す方針）。ここでは進捗 UI の
     // fade のみ行い、トーストは重複させない。
   }, [lastMessage, toast])

@@ -42,20 +42,20 @@ export interface NodeConfigInfo {
   /** OLED brightness (1=low / 2=mid / 3=high). Firmware ≥ v0.1.x. */
   oled_brightness?: number
   espnow_channel?: number
-  gain?: number
-  input_level?: number
+  espnow_stream_gain?: number
+  espnow_stream_input_level?: number
   /**
    * SOLID48 (mode 9, Opus 48k stereo HP) TX-local Opus encoder complexity
    * override (DEC-046 follow-up, transmitter only). -1/undefined = unset
    * (the per-mode MODE_DEFS default is used); 0..10 = explicit override.
    */
-  opus_complexity?: number
+  espnow_stream_opus_complexity?: number
   /**
    * SOLID48 (mode 9) receiver HP jitter-buffer target, ms (DEC-046
    * follow-up, transmitter only). The TX stores this and broadcasts it to
    * the fleet as 0xAC fleet-tune param 6; only mode-9 receivers apply it.
    */
-  stream_hp_buffer_ms?: number
+  espnow_stream_hp_buffer_ms?: number
   broker_host?: string
   broker_port?: number
   topic_root?: string
@@ -79,15 +79,15 @@ export interface NodeConfigInfo {
   /** MQTT receiver subscribe topic roots (item 8). */
   recv_topics?: string[]
   /** ESP-NOW display/power policy (espnow_stream receiver, §4.19). */
-  espnow_ui?: {
+  espnow_stream_ui?: {
     auto_off_ms?: number
     wake_on_button?: boolean
     wake_on_volume?: boolean
     led_enabled?: boolean
     low_batt_pct?: number
   }
-  /** ESP-NOW audio-stream statistics (espnow_stream receiver, §4.19 get_info stream). */
-  stream?: {
+  /** ESP-NOW audio-stream statistics (espnow_stream receiver, §4.19 get_info espnow_stream). */
+  espnow_stream?: {
     received?: number
     lost?: number
     recovered?: number
@@ -188,21 +188,21 @@ export function EspNowConfigSection({
 }) {
   const [channel, setChannel] = useState<number>(cachedInfo?.espnow_channel ?? 1)
   // gain (receiver) is 0..1; input level (transmitter) is 0..100.
-  const [gain, setGain] = useState<number>(cachedInfo?.gain ?? 0.8)
-  const [inputLevel, setInputLevel] = useState<number>(cachedInfo?.input_level ?? 50)
+  const [gain, setGain] = useState<number>(cachedInfo?.espnow_stream_gain ?? 0.8)
+  const [inputLevel, setInputLevel] = useState<number>(cachedInfo?.espnow_stream_input_level ?? 50)
 
   useEffect(() => {
     if (cachedInfo?.espnow_channel != null) setChannel(cachedInfo.espnow_channel)
-    if (cachedInfo?.gain != null) setGain(cachedInfo.gain)
-    if (cachedInfo?.input_level != null) setInputLevel(cachedInfo.input_level)
-  }, [device.ipAddress, cachedInfo?.espnow_channel, cachedInfo?.gain, cachedInfo?.input_level])
+    if (cachedInfo?.espnow_stream_gain != null) setGain(cachedInfo.espnow_stream_gain)
+    if (cachedInfo?.espnow_stream_input_level != null) setInputLevel(cachedInfo.espnow_stream_input_level)
+  }, [device.ipAddress, cachedInfo?.espnow_channel, cachedInfo?.espnow_stream_gain, cachedInfo?.espnow_stream_input_level])
 
   const apply = () => {
     sendTo({ type: 'set_espnow_channel', payload: { channel } })
     if (role === 'transmitter') {
-      sendTo({ type: 'set_input_level', payload: { level: inputLevel } })
+      sendTo({ type: 'set_espnow_stream_input_level', payload: { level: inputLevel } })
     } else {
-      sendTo({ type: 'set_gain', payload: { gain } })
+      sendTo({ type: 'set_espnow_stream_gain', payload: { gain } })
     }
   }
 
@@ -307,22 +307,22 @@ export function SolidTransmitterTuningSection({
   cachedInfo?: NodeConfigInfo
   sendTo: (msg: ManagerMessage) => void
 }) {
-  const isAuto = cachedInfo?.opus_complexity == null || cachedInfo.opus_complexity < 0
+  const isAuto = cachedInfo?.espnow_stream_opus_complexity == null || cachedInfo.espnow_stream_opus_complexity < 0
   const [complexity, setComplexity] = useState<number>(
-    !isAuto ? clampOpusComplexity(cachedInfo!.opus_complexity!) : 5,
+    !isAuto ? clampOpusComplexity(cachedInfo!.espnow_stream_opus_complexity!) : 5,
   )
   const [hpBufferMs, setHpBufferMs] = useState<number>(
-    clampHpBufferMs(cachedInfo?.stream_hp_buffer_ms ?? 120),
+    clampHpBufferMs(cachedInfo?.espnow_stream_hp_buffer_ms ?? 120),
   )
 
   useEffect(() => {
-    if (cachedInfo?.opus_complexity != null && cachedInfo.opus_complexity >= 0) {
-      setComplexity(clampOpusComplexity(cachedInfo.opus_complexity))
+    if (cachedInfo?.espnow_stream_opus_complexity != null && cachedInfo.espnow_stream_opus_complexity >= 0) {
+      setComplexity(clampOpusComplexity(cachedInfo.espnow_stream_opus_complexity))
     }
-    if (cachedInfo?.stream_hp_buffer_ms != null) {
-      setHpBufferMs(clampHpBufferMs(cachedInfo.stream_hp_buffer_ms))
+    if (cachedInfo?.espnow_stream_hp_buffer_ms != null) {
+      setHpBufferMs(clampHpBufferMs(cachedInfo.espnow_stream_hp_buffer_ms))
     }
-  }, [device.ipAddress, cachedInfo?.opus_complexity, cachedInfo?.stream_hp_buffer_ms])
+  }, [device.ipAddress, cachedInfo?.espnow_stream_opus_complexity, cachedInfo?.espnow_stream_hp_buffer_ms])
 
   const { setAnchor } = useToast()
   const offline = !device.online
@@ -331,13 +331,13 @@ export function SolidTransmitterTuningSection({
     setAnchor(e.currentTarget)
     const v = clampOpusComplexity(complexity)
     setComplexity(v)
-    sendTo({ type: 'set_opus_complexity', payload: { value: v } })
+    sendTo({ type: 'set_espnow_stream_opus_complexity', payload: { value: v } })
   }
   const applyHpBuffer = (e: React.MouseEvent<HTMLElement>) => {
     setAnchor(e.currentTarget)
     const ms = clampHpBufferMs(hpBufferMs)
     setHpBufferMs(ms)
-    sendTo({ type: 'set_stream_hp_buffer', payload: { value: ms } })
+    sendTo({ type: 'set_espnow_stream_hp_buffer', payload: { value: ms } })
   }
 
   return (
@@ -374,7 +374,7 @@ export function SolidTransmitterTuningSection({
       <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
         {isAuto
           ? '現在: 自動（モード既定の complexity を使用中）。適用すると、現在アクティブなモードのエンコーダにこの値を上書きします。'
-          : `現在: ${cachedInfo!.opus_complexity} で上書き中。0=軽い（低 CPU）〜10=高品質（高 CPU、既定 5 目安）。`}
+          : `現在: ${cachedInfo!.espnow_stream_opus_complexity} で上書き中。0=軽い（低 CPU）〜10=高品質（高 CPU、既定 5 目安）。`}
       </div>
       <div className="form-action-row" style={{ marginTop: 8 }}>
         <button className="form-button" onClick={applyComplexity} disabled={offline}>
@@ -587,7 +587,7 @@ export function MqttConfigSection({
   const [port, setPort] = useState<number>(cachedInfo?.broker_port ?? 1883)
   const [qos, setQos] = useState<number>(cachedInfo?.mqtt_qos ?? 1)
   // Feedback is shown as a toast anchored to the clicked button (never shifts
-  // the surrounding rows). 書込み結果のトーストは HelperToastBridge が
+  // the surrounding rows). 書込み結果のトーストは HelperFailureToastListener が
   // write_result（実機の結果）ベースで出す。ここでは押下時に anchor だけ
   // 設定し、結果トーストがそのボタン近傍に出るようにする（操作ではなく結果で出す）。
   const { setAnchor } = useToast()
@@ -1411,7 +1411,7 @@ export function SensorMappingSection({
       }))
     sendTo({ type: 'set_sensor_mapping', payload: { mappings: clean } })
     // 「保存しました」の成功表示は出さない — 実際の書込み結果は
-    // HelperToastBridge が write_result（実機の応答）ベースで出す
+    // HelperFailureToastListener が write_result（実機の応答）ベースで出す
     // (TCP 失敗時に成功と誤表示しないため。user 2026-06-16)。
     // ここではクライアント側の助言（イベント未割当）だけ補足する。
     const noEvent = clean.filter((r) => !r.event_id).length
@@ -1961,14 +1961,14 @@ export function EspNowDisplayPowerSection({
   oledLevel: number | undefined
   sendTo: (msg: ManagerMessage) => void
 }) {
-  const ui = cachedInfo?.espnow_ui
+  const ui = cachedInfo?.espnow_stream_ui
   const [autoOffMs, setAutoOffMs] = useState<number>(ui?.auto_off_ms ?? 4000)
   const [wakeOnButton, setWakeOnButton] = useState<boolean>(ui?.wake_on_button ?? true)
   const [wakeOnVolume, setWakeOnVolume] = useState<boolean>(ui?.wake_on_volume ?? true)
   const [ledEnabled, setLedEnabled] = useState<boolean>(ui?.led_enabled ?? false)
   const [lowBattPct, setLowBattPct] = useState<number>(ui?.low_batt_pct ?? 15)
 
-  // Sync from device whenever cachedInfo.espnow_ui changes (get_info result).
+  // Sync from device whenever cachedInfo.espnow_stream_ui changes (get_info result).
   useEffect(() => {
     if (!ui) return
     if (ui.auto_off_ms != null) setAutoOffMs(ui.auto_off_ms)
@@ -1987,7 +1987,7 @@ export function EspNowDisplayPowerSection({
   const applyAll = (e: React.MouseEvent<HTMLButtonElement>) => {
     setAnchor(e.currentTarget)
     sendTo({
-      type: 'set_espnow_ui',
+      type: 'set_espnow_stream_ui',
       payload: { auto_off_ms: autoOffMs, wake_on_button: wakeOnButton,
                  wake_on_volume: wakeOnVolume, led_enabled: ledEnabled,
                  low_batt_pct: lowBattPct },
@@ -5465,7 +5465,7 @@ export function DuoWlV4SettingsBackup({
 
 // ---------------------------------------------------------------------
 // ESP-NOW: stream statistics readout (debug / field verification)
-// Read-only. Fetches from get_info.stream object. Manually refreshed
+// Read-only. Fetches from get_info.espnow_stream object. Manually refreshed
 // to avoid overloading the serial link with frequent polling.
 // ---------------------------------------------------------------------
 
@@ -5478,7 +5478,7 @@ export function EspNowStreamReadout({
   onRefresh: () => void
   disabled?: boolean
 }) {
-  const s = cachedInfo?.stream
+  const s = cachedInfo?.espnow_stream
   const total = (s?.received ?? 0) + (s?.lost ?? 0)
   const lossRate = total > 0 ? ((s?.lost ?? 0) / total) * 100 : null
 

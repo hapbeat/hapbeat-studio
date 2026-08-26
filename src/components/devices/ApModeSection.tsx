@@ -66,7 +66,7 @@ export function ApModeSection({ device, apInfo, sendTo, onRefreshApStatus }: Pro
       toast('パスワードは 8〜63 文字で入力してください', 'error')
       return
     }
-    // 成功/失敗は HelperToastBridge が write_result ベースで出す（結果ベース）。
+    // 成功/失敗は HelperFailureToastListener が write_result ベースで出す（結果ベース）。
     if (val.length === 0) {
       sendTo({ type: 'clear_ap_pass', payload: {} })  // empty → clear
     } else {

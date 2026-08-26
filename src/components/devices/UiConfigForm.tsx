@@ -46,7 +46,7 @@ export function UiConfigForm({ device, sendTo }: Props) {
       type: 'write_ui_config',
       payload: { config },
     })
-    // 書込み成功/失敗は HelperToastBridge が write_result ベースで出す。
+    // 書込み成功/失敗は HelperFailureToastListener が write_result ベースで出す。
   }
 
   return (

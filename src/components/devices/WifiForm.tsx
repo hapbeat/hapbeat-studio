@@ -23,7 +23,7 @@ export function WifiForm({ device, wifiStatus, sendTo }: Props) {
   const [ssid, setSsid] = useState('')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
-  // 書込み結果トーストは HelperToastBridge が write_result ベースで出す。
+  // 書込み結果トーストは HelperFailureToastListener が write_result ベースで出す。
   // ここは押下時の anchor 設定のみ（結果ベース）。
   const { setAnchor } = useToast()
 

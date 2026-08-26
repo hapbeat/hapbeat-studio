@@ -11,7 +11,8 @@ const WRITE_CMD_LABEL: Record<string, string> = {
   set_sensor_mapping: 'センサーマッピング', set_broker_host: 'ブローカー設定',
   set_broker_config: 'ブローカー設定', set_recv_topics: '受信トピック',
   set_alert_mode: 'アラート動作', set_espnow_channel: 'ESP-NOW ch',
-  set_gain: 'ゲイン', set_input_level: '入力レベル',
+  set_espnow_stream_gain: 'ゲイン', set_espnow_stream_input_level: '入力レベル',
+  set_espnow_stream_ui: '表示・電力設定',
   write_ui_config: 'UI 設定', set_oled_brightness: 'OLED 輝度',
   enter_ap_mode: 'AP モード切替', enter_sta_mode: 'STA モード切替',
   set_ap_pass: 'AP パスワード', clear_ap_pass: 'AP パスワード削除',
@@ -19,12 +20,12 @@ const WRITE_CMD_LABEL: Record<string, string> = {
   set_haptic_gain: '触覚ゲイン', set_dac_boost: 'DAC ブースト',
   set_headphone_volume: 'ヘッドホン音量', set_stream_buffer: 'ストリームバッファ',
   set_input_mode: '入出力モード',
-  set_opus_complexity: 'Opus complexity', set_stream_hp_buffer: 'HP ジッターバッファ',
+  set_espnow_stream_opus_complexity: 'Opus complexity', set_espnow_stream_hp_buffer: 'HP ジッターバッファ',
   set_eq_band: 'EQ バンド', set_av_delay: 'A-V ディレイ',
 }
 
 /** 即リブートして ACK を返さない可能性が高い cmd。成功トーストはパネル側の
- *  info に任せる (失敗は接続不達として有用なので bridge で出す)。 */
+ *  info に任せる (失敗は接続不達として有用なので listener で出す)。 */
 const REBOOT_CMDS = new Set(['reboot', 'enter_ap_mode', 'enter_sta_mode'])
 
 /**
@@ -43,7 +44,7 @@ const REBOOT_CMDS = new Set(['reboot', 'enter_ap_mode', 'enter_sta_mode'])
  * App root に 1 度だけマウント。anchor は直前のボタンクリックで各パネルが
  * setAnchor 済みなので、結果トーストもそのボタン近傍に出る。
  */
-export function HelperToastBridge() {
+export function HelperFailureToastListener() {
   const { lastMessage } = useHelperConnection()
   const { toast } = useToast()
 

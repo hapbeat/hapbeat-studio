@@ -192,14 +192,14 @@ export interface SerialDeviceInfo {
   transport?: NodeTransport
   transports?: NodeTransport[]
   espnow_channel?: number
-  gain?: number
-  input_level?: number
+  espnow_stream_gain?: number
+  espnow_stream_input_level?: number
   /** SOLID48 (mode 9) TX-local Opus encoder complexity override (DEC-046
    *  follow-up, transmitter only). -1/undefined = unset (mode default). */
-  opus_complexity?: number
+  espnow_stream_opus_complexity?: number
   /** SOLID48 (mode 9) receiver HP jitter-buffer target the TX broadcasts
    *  as 0xAC fleet-tune param 6 (DEC-046 follow-up, transmitter only), ms. */
-  stream_hp_buffer_ms?: number
+  espnow_stream_hp_buffer_ms?: number
   broker_host?: string
   broker_port?: number
   topic_root?: string
@@ -219,15 +219,15 @@ export interface SerialDeviceInfo {
   ack_hold_ms?: number
   recv_topics?: string[]
   /** ESP-NOW display/power policy (espnow_stream receiver, §4.19). */
-  espnow_ui?: {
+  espnow_stream_ui?: {
     auto_off_ms?: number
     wake_on_button?: boolean
     wake_on_volume?: boolean
     led_enabled?: boolean
     low_batt_pct?: number
   }
-  /** ESP-NOW audio-stream statistics (espnow_stream receiver, §4.19 get_info stream). */
-  stream?: {
+  /** ESP-NOW audio-stream statistics (espnow_stream receiver, §4.19 get_info espnow_stream). */
+  espnow_stream?: {
     received?: number
     lost?: number
     recovered?: number
@@ -326,10 +326,10 @@ function parseSerialInfo(r: Record<string, unknown>): SerialDeviceInfo {
     transport: r.transport as NodeTransport | undefined,
     transports: r.transports as NodeTransport[] | undefined,
     espnow_channel: r.espnow_channel as number | undefined,
-    gain: r.gain as number | undefined,
-    input_level: r.input_level as number | undefined,
-    opus_complexity: r.opus_complexity as number | undefined,
-    stream_hp_buffer_ms: r.stream_hp_buffer_ms as number | undefined,
+    espnow_stream_gain: r.espnow_stream_gain as number | undefined,
+    espnow_stream_input_level: r.espnow_stream_input_level as number | undefined,
+    espnow_stream_opus_complexity: r.espnow_stream_opus_complexity as number | undefined,
+    espnow_stream_hp_buffer_ms: r.espnow_stream_hp_buffer_ms as number | undefined,
     broker_host: r.broker_host as string | undefined,
     broker_port: r.broker_port as number | undefined,
     topic_root: r.topic_root as string | undefined,
@@ -348,8 +348,8 @@ function parseSerialInfo(r: Record<string, unknown>): SerialDeviceInfo {
     alert_limit: r.alert_limit as boolean | undefined,
     ack_hold_ms: r.ack_hold_ms as number | undefined,
     recv_topics: r.recv_topics as string[] | undefined,
-    espnow_ui: r.espnow_ui as SerialDeviceInfo['espnow_ui'],
-    stream: r.stream as SerialDeviceInfo['stream'],
+    espnow_stream_ui: r.espnow_stream_ui as SerialDeviceInfo['espnow_stream_ui'],
+    espnow_stream: r.espnow_stream as SerialDeviceInfo['espnow_stream'],
     audio: r.audio as SerialDeviceInfo['audio'],
     eq: r.eq as SerialDeviceInfo['eq'],
     eq_engine: r.eq_engine as string | undefined,

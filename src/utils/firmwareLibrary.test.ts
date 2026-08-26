@@ -7,7 +7,7 @@ describe('inferVariantFromEnv — env 名から role/transport/board 推定', ()
     expect(inferVariantFromEnv('atom_lite_sensor')).toMatchObject({ role: 'sensor', transport: 'mqtt' })
   })
   it('transmitter (audio tx)', () => {
-    expect(inferVariantFromEnv('m5stack_audio_tx')).toMatchObject({
+    expect(inferVariantFromEnv('m5stack_espnow_stream_source')).toMatchObject({
       role: 'transmitter', transport: 'espnow_stream',
     })
   })
@@ -17,7 +17,7 @@ describe('inferVariantFromEnv — env 名から role/transport/board 推定', ()
     })
     // necklace/duo → duo_wl_*
     expect(inferVariantFromEnv('necklace_v3')).toMatchObject({
-      role: 'receiver', transport: 'udp', board: 'duo_wl_v3',
+      role: 'receiver', transport: 'wifi_udp', board: 'duo_wl_v3',
     })
   })
   it('espnow stream receiver', () => {
@@ -25,9 +25,9 @@ describe('inferVariantFromEnv — env 名から role/transport/board 推定', ()
       role: 'receiver', transport: 'espnow_stream', board: 'duo_wl_v3',
     })
   })
-  it('既定 (素の udp receiver)', () => {
+  it('既定 (素の wifi_udp receiver)', () => {
     expect(inferVariantFromEnv('band_v2')).toMatchObject({
-      role: 'receiver', transport: 'udp', board: 'band_wl_v2',
+      role: 'receiver', transport: 'wifi_udp', board: 'band_wl_v2',
     })
   })
 })

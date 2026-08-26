@@ -79,7 +79,7 @@ interface DeviceState {
     oled_brightness?: number
     /**
      * Node role / transport (DEC-034). Absent → the device is treated
-     * as a `receiver` on `udp` (plain Wi-Fi-UDP Hapbeat) so the UI is
+     * as a `receiver` on `wifi_udp` (plain Wi-Fi-UDP Hapbeat) so the UI is
      * identical to before for the common case.
      */
     role?: NodeRole
@@ -87,14 +87,14 @@ interface DeviceState {
     transports?: NodeTransport[]
     // --- role-specific config snapshot (from get_info) ---
     espnow_channel?: number
-    gain?: number
-    input_level?: number
+    espnow_stream_gain?: number
+    espnow_stream_input_level?: number
     /** SOLID48 (mode 9) TX-local Opus encoder complexity override (DEC-046
      *  follow-up, transmitter only). -1/undefined = unset (mode default). */
-    opus_complexity?: number
+    espnow_stream_opus_complexity?: number
     /** SOLID48 (mode 9) receiver HP jitter-buffer target the TX broadcasts
      *  as 0xAC fleet-tune param 6 (DEC-046 follow-up, transmitter only), ms. */
-    stream_hp_buffer_ms?: number
+    espnow_stream_hp_buffer_ms?: number
     broker_host?: string
     broker_port?: number
     topic_root?: string
@@ -120,16 +120,16 @@ interface DeviceState {
     ack_hold_ms?: number
     /** MQTT receiver subscribe topic roots (item 8). Empty = default-topic. */
     recv_topics?: string[]
-    /** ESP-NOW display/power policy (espnow_stream receiver, §4.19 set_espnow_ui). */
-    espnow_ui?: {
+    /** ESP-NOW display/power policy (espnow_stream receiver, §4.19 set_espnow_stream_ui). */
+    espnow_stream_ui?: {
       auto_off_ms?: number
       wake_on_button?: boolean
       wake_on_volume?: boolean
       led_enabled?: boolean
       low_batt_pct?: number
     }
-    /** ESP-NOW audio-stream statistics (espnow_stream receiver, §4.19 get_info stream). */
-    stream?: {
+    /** ESP-NOW audio-stream statistics (espnow_stream receiver, §4.19 get_info espnow_stream). */
+    espnow_stream?: {
       received?: number
       lost?: number
       recovered?: number

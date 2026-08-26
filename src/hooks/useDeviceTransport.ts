@@ -118,7 +118,7 @@ export function useDeviceTransport(selectedIp: string | null) {
       } else {
         // set_* / action cmds have no dedicated *_result. Surface a
         // write_result reflecting the ACTUAL firmware response so the
-        // toast bridge reports success/failure by result, not by the act
+        // toast listener reports success/failure by result, not by the act
         // of sending (LAN path already gets write_result from helper).
         const ok = !!r && (r as Record<string, unknown>).status === 'ok'
         const err = r ? String((r as Record<string, unknown>).error ?? '') : 'no response'

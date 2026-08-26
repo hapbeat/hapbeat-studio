@@ -42,7 +42,7 @@ export function resolveLatestFirmware(
   const byBoard = entries.filter((e) => e.board && e.board === board)
   if (byBoard.length === 0) return null
 
-  // 同じ board でも transport 違いの env が並ぶ (udp / mqtt / espnow_stream)。
+  // 同じ board でも transport 違いの env が並ぶ (wifi_udp / mqtt / espnow_stream)。
   // DEC-035 で env ごとに独立採番になったため、transport が分かるなら必ず絞る。
   const byTransport = transport
     ? byBoard.filter((e) => e.transport === transport || e.transports?.includes(transport))

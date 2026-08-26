@@ -22,7 +22,7 @@ const LIB: FirmwareLibraryEntry[] = [
   entry('band_v4', { board: 'band_wl_v4', hapbeat: true }),
   entry('band_v4_pwm', { board: 'band_wl_v4', hapbeat: true }),
   entry('atom_lite_sensor', { board: 'atom_lite', hapbeat: false }),
-  entry('m5stack_audio_tx', { board: 'm5stack_basic', hapbeat: false }),
+  entry('m5stack_espnow_stream_source', { board: 'm5stack_basic', hapbeat: false }),
 ]
 
 describe('parseHapbeatBoard', () => {
@@ -87,7 +87,7 @@ describe('entriesForSelection', () => {
   })
   it('周辺機器は hw なしで全部', () => {
     const shown = entriesForSelection(LIB, { family: 'peripheral', hw: null }).map((e) => e.env)
-    expect(shown).toEqual(['atom_lite_sensor', 'm5stack_audio_tx'])
+    expect(shown).toEqual(['atom_lite_sensor', 'm5stack_espnow_stream_source'])
   })
   it('未選択は空', () => {
     expect(entriesForSelection(LIB, null)).toEqual([])

@@ -12,11 +12,11 @@ export interface ManagerMessage {
 /**
  * Node role / transport taxonomy (contracts: node-roles.md, DEC-034).
  * A node declares these in get_info; Studio gates UI on them. A node
- * that doesn't report a role is treated as a `receiver` on `udp` —
+ * that doesn't report a role is treated as a `receiver` on `wifi_udp` —
  * so plain Wi-Fi-UDP devices look exactly as before (zero UX change).
  */
 export type NodeRole = 'receiver' | 'sensor' | 'broker' | 'transmitter'
-export type NodeTransport = 'udp' | 'mqtt' | 'espnow_stream'
+export type NodeTransport = 'wifi_udp' | 'mqtt' | 'espnow_stream'
 
 /** A sensor color-match box (RGB thresholds). See mqtt-transport.md §5. */
 export interface SensorColorMatch {
@@ -106,9 +106,9 @@ export interface DeviceInfo {
   volumeSteps: number | null
   /** Node role (DEC-034). Absent → treat as `receiver`. */
   role?: NodeRole
-  /** Primary transport (DEC-034). Absent → treat as `udp`. */
+  /** Primary transport (DEC-034). Absent → treat as `wifi_udp`. */
   transport?: NodeTransport
-  /** All transports a receiver supports (e.g. ["udp","mqtt"]). */
+  /** All transports a receiver supports (e.g. ["wifi_udp","mqtt"]). */
   transports?: NodeTransport[]
 }
 
@@ -161,15 +161,15 @@ export interface StudioToManagerMessage {
     // --- node-roles config (DEC-034) ---
     | 'set_broker_host'      // receiver(mqtt) / sensor
     | 'set_espnow_channel'   // receiver(espnow_stream) / transmitter
-    | 'set_gain'             // receiver(espnow_stream)
-    | 'set_input_level'      // transmitter
+    | 'set_espnow_stream_gain' // receiver(espnow_stream)
+    | 'set_espnow_stream_input_level'      // transmitter
     | 'set_broker_config'    // broker (static_octet / port)
     | 'set_sensor_mapping'   // sensor
     | 'get_sensor_mapping'   // sensor
     | 'get_sensor_reading'   // sensor (live tuning view)
     | 'set_alert_mode'       // receiver(mqtt) — alert-loop on/off (item 10)
     | 'set_recv_topics'      // receiver(mqtt) — subscribe topic list (item 8)
-    | 'set_espnow_ui'        // receiver(espnow_stream) — display/power policy
+    | 'set_espnow_stream_ui' // receiver(espnow_stream) — display/power policy
     // --- DuoWL v4 audio stage (DEC-041) ---
     | 'set_haptic_gain'         // DuoWL v4 receiver — PAM8404 + AIC3204 line-out
     | 'set_dac_boost'           // DuoWL v4 receiver — DAC digital makeup gain
@@ -177,8 +177,8 @@ export interface StudioToManagerMessage {
     | 'set_stream_buffer'       // all UDP receivers — stream jitter buffer (ms)
     | 'set_input_mode'          // DuoWL v4 receiver — output (HP) vs line_in (jack → haptics)
     // --- SOLID48 (mode 9) transmitter tuning (DEC-046 follow-up) ---
-    | 'set_opus_complexity'     // transmitter — TX-local Opus encoder complexity override (0..10)
-    | 'set_stream_hp_buffer'    // transmitter — HP jitter-buffer target, broadcast as 0xAC param 6 (ms)
+    | 'set_espnow_stream_opus_complexity'     // transmitter — TX-local Opus encoder complexity override (0..10)
+    | 'set_espnow_stream_hp_buffer'    // transmitter — HP jitter-buffer target, broadcast as 0xAC param 6 (ms)
     // --- DuoWL v4 ESP-NOW hp48 audio-DSP config (audio-dsp-config.md) ---
     | 'set_eq_band'             // DuoWL v4 receiver — per-codec/band AIC3204 biquad coeffs (§2)
     | 'set_av_delay'            // DuoWL v4 receiver — audio-vs-haptic delay, ms (§3)
@@ -279,9 +279,9 @@ export interface GetInfoResult {
   /** ESP-NOW channel (espnow_stream receiver / transmitter). */
   espnow_channel?: number
   /** Default streaming gain 0..1 (espnow_stream receiver). */
-  gain?: number
+  espnow_stream_gain?: number
   /** Line input level 0..100 (transmitter). */
-  input_level?: number
+  espnow_stream_input_level?: number
   /** MQTT broker host ("auto" or host/IP) (receiver(mqtt) / sensor). */
   broker_host?: string
   /** MQTT connect port for manual hosts (receiver(mqtt) / sensor). */
@@ -325,16 +325,16 @@ export interface GetInfoResult {
   /** Receive topic roots the MQTT receiver subscribes to (item 8). Empty =
    *  the default channel ("default-topic"). */
   recv_topics?: string[]
-  /** ESP-NOW display/power policy (espnow_stream receiver, §4.19 set_espnow_ui). */
-  espnow_ui?: {
+  /** ESP-NOW display/power policy (espnow_stream receiver, §4.19 set_espnow_stream_ui). */
+  espnow_stream_ui?: {
     auto_off_ms?: number
     wake_on_button?: boolean
     wake_on_volume?: boolean
     led_enabled?: boolean
     low_batt_pct?: number
   }
-  /** ESP-NOW audio-stream statistics (espnow_stream receiver, §4.19 get_info stream). */
-  stream?: {
+  /** ESP-NOW audio-stream statistics (espnow_stream receiver, §4.19 get_info espnow_stream). */
+  espnow_stream?: {
     received?: number
     lost?: number
     recovered?: number

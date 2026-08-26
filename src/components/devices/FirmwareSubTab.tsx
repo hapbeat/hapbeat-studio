@@ -52,7 +52,7 @@ const ROLE_LABEL: Record<NodeRole, string> = {
 }
 
 const TRANSPORT_LABEL: Record<NodeTransport, string> = {
-  udp: 'Wi-Fi UDP',
+  wifi_udp: 'Wi-Fi UDP',
   mqtt: 'MQTT',
   espnow_stream: 'ESP-NOW',
 }

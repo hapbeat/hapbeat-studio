@@ -98,7 +98,7 @@ function FirmwareUpdateChip({
 
 /**
  * Which sub-tabs a node shows, by role/transport (DEC-034). A node
- * that doesn't report a role is a `receiver` on `udp` → the classic
+ * that doesn't report a role is a `receiver` on `wifi_udp` → the classic
  * 5-tab layout, identical to before. `board` only matters for the pure
  * espnow_stream receiver case: a DuoWL v4 unit gets three extra tabs
  * (音声 / EQ / DSP) split off from what used to be crammed into the espnow
@@ -140,14 +140,14 @@ function computeRoleSubTabs(
       // Pure ESP-NOW stream receiver: no Wi-Fi STA, no kit/event playback.
       const pureStream =
         transport === 'espnow_stream'
-        && !transports.includes('udp')
+        && !transports.includes('wifi_udp')
         && !transports.includes('mqtt')
       if (pureStream) {
         return board === 'duo_wl_v4'
           ? ['espnow', 'audio', 'eq', 'dsp', 'firmware']
           : ['espnow', 'firmware']
       }
-      // mqtt receiver gets the MQTT client tab; plain udp doesn't.
+      // mqtt receiver gets the MQTT client tab; plain wifi_udp doesn't.
       if (transports.includes('mqtt')) {
         return ['wifi', 'config', 'mqtt', 'kit', 'test', 'firmware']
       }
@@ -305,10 +305,10 @@ export function DeviceDetail() {
         transport: p.transport as NodeTransport | undefined,
         transports: p.transports as NodeTransport[] | undefined,
         espnow_channel: p.espnow_channel as number | undefined,
-        gain: p.gain as number | undefined,
-        input_level: p.input_level as number | undefined,
-        opus_complexity: p.opus_complexity as number | undefined,
-        stream_hp_buffer_ms: p.stream_hp_buffer_ms as number | undefined,
+        espnow_stream_gain: p.espnow_stream_gain as number | undefined,
+        espnow_stream_input_level: p.espnow_stream_input_level as number | undefined,
+        espnow_stream_opus_complexity: p.espnow_stream_opus_complexity as number | undefined,
+        espnow_stream_hp_buffer_ms: p.espnow_stream_hp_buffer_ms as number | undefined,
         broker_host: p.broker_host as string | undefined,
         broker_port: p.broker_port as number | undefined,
         topic_root: p.topic_root as string | undefined,
@@ -327,9 +327,9 @@ export function DeviceDetail() {
         alert_limit: p.alert_limit as boolean | undefined,
         ack_hold_ms: p.ack_hold_ms as number | undefined,
         recv_topics: p.recv_topics as string[] | undefined,
-        // ESP-NOW display/power + stream stats (espnow_stream receiver)
-        espnow_ui: p.espnow_ui as { auto_off_ms?: number; wake_on_button?: boolean; wake_on_volume?: boolean; led_enabled?: boolean; low_batt_pct?: number } | undefined,
-        stream: p.stream as { received?: number; lost?: number; recovered?: number; dropped?: number; max_gap?: number; handoffs?: number; sources?: number; locked?: boolean; locked_mac?: string; delay_ms?: number } | undefined,
+        // ESP-NOW display/power + EspNowStream stats (espnow_stream receiver)
+        espnow_stream_ui: p.espnow_stream_ui as { auto_off_ms?: number; wake_on_button?: boolean; wake_on_volume?: boolean; led_enabled?: boolean; low_batt_pct?: number } | undefined,
+        espnow_stream: p.espnow_stream as { received?: number; lost?: number; recovered?: number; dropped?: number; max_gap?: number; handoffs?: number; sources?: number; locked?: boolean; locked_mac?: string; delay_ms?: number } | undefined,
         // DuoWL v4 audio stage settings (DEC-041, board === "duo_wl_v4" only)
         audio: p.audio as {
           pam_db?: number
@@ -704,10 +704,10 @@ export function DeviceDetail() {
         transport: masterInfo.transport,
         transports: masterInfo.transports,
         espnow_channel: masterInfo.espnow_channel,
-        gain: masterInfo.gain,
-        input_level: masterInfo.input_level,
-        opus_complexity: masterInfo.opus_complexity,
-        stream_hp_buffer_ms: masterInfo.stream_hp_buffer_ms,
+        espnow_stream_gain: masterInfo.espnow_stream_gain,
+        espnow_stream_input_level: masterInfo.espnow_stream_input_level,
+        espnow_stream_opus_complexity: masterInfo.espnow_stream_opus_complexity,
+        espnow_stream_hp_buffer_ms: masterInfo.espnow_stream_hp_buffer_ms,
         broker_host: masterInfo.broker_host,
         broker_port: masterInfo.broker_port,
         topic_root: masterInfo.topic_root,
@@ -726,8 +726,8 @@ export function DeviceDetail() {
         alert_limit: masterInfo.alert_limit,
         ack_hold_ms: masterInfo.ack_hold_ms,
         recv_topics: masterInfo.recv_topics,
-        espnow_ui: masterInfo.espnow_ui,
-        stream: masterInfo.stream,
+        espnow_stream_ui: masterInfo.espnow_stream_ui,
+        espnow_stream: masterInfo.espnow_stream,
         audio: masterInfo.audio,
         eq: masterInfo.eq,
         eq_engine: masterInfo.eq_engine,
@@ -763,7 +763,7 @@ export function DeviceDetail() {
     ap_client_count: cachedInfo?.ap_client_count,
   }
 
-  // ---- Resolve node role / transport (default receiver/udp) ----
+  // ---- Resolve node role / transport (default receiver/wifi_udp) ----
   // (FirmwareUpdateChip はこの下の header で使う。hook を early-return より
   //  後で呼べないため、子コンポーネントに切り出してある)
   const nodeRole: NodeRole = cachedInfo?.role ?? device.role ?? 'receiver'
@@ -772,9 +772,9 @@ export function DeviceDetail() {
     ?? (cachedInfo?.transport ? [cachedInfo.transport] : undefined)
     ?? device.transports
     ?? (device.transport ? [device.transport] : undefined)
-    ?? ['udp']
+    ?? ['wifi_udp']
   const nodeTransport: NodeTransport =
-    cachedInfo?.transport ?? device.transport ?? nodeTransports[0] ?? 'udp'
+    cachedInfo?.transport ?? device.transport ?? nodeTransports[0] ?? 'wifi_udp'
 
   const subTabs = computeSubTabs(
     nodeRole, nodeTransport, nodeTransports, cachedInfo?.board, !!cachedInfo?.haptic_pwm,

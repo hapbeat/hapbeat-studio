@@ -17,7 +17,7 @@
  *   filenames are repo-prefixed to avoid collisions.
  *
  *   Back-compat: a legacy `{ envs: [...] }` manifest (or the dev
- *   plugin) is mapped to receiver/udp variants, with role/transport
+ *   plugin) is mapped to receiver/wifi_udp variants, with role/transport
  *   inferred from the env name as a best-effort fallback.
  */
 
@@ -135,7 +135,7 @@ export interface FirmwareLibraryEntry {
   role?: NodeRole
   /** Primary transport. */
   transport?: NodeTransport
-  /** All supported transports (receiver may be udp+mqtt). */
+  /** All supported transports (receiver may be wifi_udp+mqtt). */
   transports?: NodeTransport[]
   /** Hardware board id (for board-mismatch pre-flight). */
   board?: string
@@ -191,14 +191,14 @@ export function inferVariantFromEnv(env: string): {
 } {
   const e = env.toLowerCase()
   let role: NodeRole = 'receiver'
-  let transport: NodeTransport = 'udp'
+  let transport: NodeTransport = 'wifi_udp'
   if (/broker/.test(e)) {
     role = 'broker'
     transport = 'mqtt'
   } else if (/sensor/.test(e)) {
     role = 'sensor'
     transport = 'mqtt'
-  } else if (/(transmitter|sender|audio.*(tx|stream)|_tx\b)/.test(e)) {
+  } else if (/(transmitter|sender|espnow_stream_(source|repeater)|audio.*(tx|stream)|_tx\b)/.test(e)) {
     role = 'transmitter'
     transport = 'espnow_stream'
   } else if (/stream/.test(e) && /espnow/.test(e)) {
@@ -311,7 +311,7 @@ interface ManifestEnvV1 {
 /**
  * Fetch `manifest.json` and parse v2 (`variants`) or legacy v1
  * (`envs`) into `FirmwareLibraryEntry[]`. v2 carries role/transport/
- * board/label per variant; v1 entries are mapped to receiver/udp with
+ * board/label per variant; v1 entries are mapped to receiver/wifi_udp with
  * role inferred from the env name.
  */
 async function listFirmwareBuildsFromManifest(): Promise<FirmwareLibraryEntry[]> {

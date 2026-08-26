@@ -10,7 +10,7 @@ import { LogDrawer } from '@/components/log/LogDrawer'
 import { HelperOnboardingModal } from '@/components/common/HelperOnboardingModal'
 import { HelperManageModal } from '@/components/common/HelperManageModal'
 import { ExternalLinkIcon } from '@/components/common/ExternalLinkIcon'
-import { HelperToastBridge } from '@/components/common/HelperToastBridge'
+import { HelperFailureToastListener } from '@/components/common/HelperFailureToastListener'
 import { VersionSwitcher } from '@/components/common/VersionSwitcher'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useHelperUpdate, useStudioFrozenNotice } from '@/hooks/useReleaseNotices'
@@ -266,7 +266,7 @@ export function App() {
         </PersistentTab>
       </main>
       <LogDrawer />
-      <HelperToastBridge />
+      <HelperFailureToastListener />
     </div>
   )
 }

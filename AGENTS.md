@@ -89,7 +89,7 @@ list_wifi_profiles, connect_wifi_profile, remove_wifi_profile, get_debug_dump,
 kit_list, kit_delete, play_event, ping_device, subscribe_logs, unsubscribe_logs,
 ota_data, scan_wifi, enter_ap_mode, enter_sta_mode, set_ap_pass, clear_ap_pass,
 get_ap_status, set_oled_brightness, get_oled_brightness, ping, rescan,
-set_broker_host, set_espnow_channel, set_gain, set_input_level, set_broker_config,
+set_broker_host, set_espnow_channel, set_espnow_stream_gain, set_espnow_stream_input_level, set_broker_config,
 set_sensor_mapping, get_sensor_mapping, get_sensor_reading, set_alert_mode,
 set_recv_topics
 ```

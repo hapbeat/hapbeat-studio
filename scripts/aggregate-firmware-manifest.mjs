@@ -42,10 +42,10 @@ function repoShortFor(repoName) {
 function inferVariantFromEnv(env) {
   const e = env.toLowerCase()
   let role = 'receiver'
-  let transport = 'udp'
+  let transport = 'wifi_udp'
   if (/broker/.test(e)) { role = 'broker'; transport = 'mqtt' }
   else if (/sensor/.test(e)) { role = 'sensor'; transport = 'mqtt' }
-  else if (/(transmitter|sender|audio.*(tx|stream)|_tx\b)/.test(e)) { role = 'transmitter'; transport = 'espnow_stream' }
+  else if (/(transmitter|sender|espnow_stream_(source|repeater)|audio.*(tx|stream)|_tx\b)/.test(e)) { role = 'transmitter'; transport = 'espnow_stream' }
   else if (/stream/.test(e) && /espnow/.test(e)) { role = 'receiver'; transport = 'espnow_stream' }
   else if (/mqtt/.test(e)) { role = 'receiver'; transport = 'mqtt' }
   let board

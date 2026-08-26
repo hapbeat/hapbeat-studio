@@ -59,44 +59,44 @@ describe('resolveLatestFirmware — 曖昧なら通知しない', () => {
 
   it('board 一致の 1 件を返す', () => {
     const entries = [
-      entry({ env: 'band_v3', board: 'band_wl_v3', transport: 'udp', fwVersion: '0.3.1' }),
-      entry({ env: 'duo_v4', board: 'duo_wl_v4', transport: 'udp', fwVersion: '0.2.0' }),
+      entry({ env: 'band_v3', board: 'band_wl_v3', transport: 'wifi_udp', fwVersion: '0.3.1' }),
+      entry({ env: 'duo_v4', board: 'duo_wl_v4', transport: 'wifi_udp', fwVersion: '0.2.0' }),
     ]
-    expect(resolveLatestFirmware(entries, 'band_wl_v3', 'udp')).toBe('0.3.1')
+    expect(resolveLatestFirmware(entries, 'band_wl_v3', 'wifi_udp')).toBe('0.3.1')
   })
 
   it('先頭 v は落として正準形で返す', () => {
-    const entries = [entry({ board: 'band_wl_v3', transport: 'udp', fwVersion: 'v0.3.1' })]
-    expect(resolveLatestFirmware(entries, 'band_wl_v3', 'udp')).toBe('0.3.1')
+    const entries = [entry({ board: 'band_wl_v3', transport: 'wifi_udp', fwVersion: 'v0.3.1' })]
+    expect(resolveLatestFirmware(entries, 'band_wl_v3', 'wifi_udp')).toBe('0.3.1')
   })
 
   it('transport で絞り込む (env ごとに独立採番されるため)', () => {
     const entries = [
-      entry({ env: 'band_v3', board: 'band_wl_v3', transport: 'udp', fwVersion: '0.3.1' }),
+      entry({ env: 'band_v3', board: 'band_wl_v3', transport: 'wifi_udp', fwVersion: '0.3.1' }),
       entry({ env: 'band_v3_mqtt', board: 'band_wl_v3', transport: 'mqtt', fwVersion: '0.2.5' }),
     ]
-    expect(resolveLatestFirmware(entries, 'band_wl_v3', 'udp')).toBe('0.3.1')
+    expect(resolveLatestFirmware(entries, 'band_wl_v3', 'wifi_udp')).toBe('0.3.1')
     expect(resolveLatestFirmware(entries, 'band_wl_v3', 'mqtt')).toBe('0.2.5')
   })
 
   it('transports[] に含まれていればマッチする', () => {
     const entries = [
-      entry({ board: 'band_wl_v3', transport: 'udp', transports: ['udp', 'mqtt'], fwVersion: '0.3.1' }),
+      entry({ board: 'band_wl_v3', transport: 'wifi_udp', transports: ['wifi_udp', 'mqtt'], fwVersion: '0.3.1' }),
     ]
     expect(resolveLatestFirmware(entries, 'band_wl_v3', 'mqtt')).toBe('0.3.1')
   })
 
   it('候補が複数版に割れたら null (誤報を出さない)', () => {
     const entries = [
-      entry({ env: 'a', board: 'band_wl_v3', transport: 'udp', fwVersion: '0.3.1' }),
-      entry({ env: 'b', board: 'band_wl_v3', transport: 'udp', fwVersion: '0.2.0' }),
+      entry({ env: 'a', board: 'band_wl_v3', transport: 'wifi_udp', fwVersion: '0.3.1' }),
+      entry({ env: 'b', board: 'band_wl_v3', transport: 'wifi_udp', fwVersion: '0.2.0' }),
     ]
-    expect(resolveLatestFirmware(entries, 'band_wl_v3', 'udp')).toBeNull()
+    expect(resolveLatestFirmware(entries, 'band_wl_v3', 'wifi_udp')).toBeNull()
   })
 
   it('board 不明 / 該当なしは null', () => {
-    const entries = [entry({ board: 'band_wl_v3', transport: 'udp', fwVersion: '0.3.1' })]
-    expect(resolveLatestFirmware(entries, undefined, 'udp')).toBeNull()
-    expect(resolveLatestFirmware(entries, 'duo_wl_v4', 'udp')).toBeNull()
+    const entries = [entry({ board: 'band_wl_v3', transport: 'wifi_udp', fwVersion: '0.3.1' })]
+    expect(resolveLatestFirmware(entries, undefined, 'wifi_udp')).toBeNull()
+    expect(resolveLatestFirmware(entries, 'duo_wl_v4', 'wifi_udp')).toBeNull()
   })
 })

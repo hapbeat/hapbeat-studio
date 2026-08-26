@@ -76,7 +76,7 @@ export function WifiProfilesForm({
   // path but failed during onboarding (radio not initialized in
   // factory state), so we unified to Helper-only.
   const { send: helperSend, lastMessage } = useHelperConnection()
-  // 書込み結果トーストは HelperToastBridge が write_result ベースで出す。
+  // 書込み結果トーストは HelperFailureToastListener が write_result ベースで出す。
   const { setAnchor } = useToast()
   const [scanResults, setScanResults] = useState<SerialWifiNetwork[]>([])
   const [scanState, setScanState] = useState<'idle' | 'scanning' | 'done' | 'error'>('idle')
@@ -182,7 +182,7 @@ export function WifiProfilesForm({
     })
     exitEditMode()
     setAddOpen(false)
-    // 成功/失敗は HelperToastBridge が write_result ベースで出す（結果ベース）。
+    // 成功/失敗は HelperFailureToastListener が write_result ベースで出す（結果ベース）。
     // Refresh the profile list — the firmware doesn't push, we poll.
     setTimeout(onRefresh, 800)
   }

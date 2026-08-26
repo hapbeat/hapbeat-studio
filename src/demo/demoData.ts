@@ -182,8 +182,8 @@ export const DEMO_DEVICES: DeviceInfo[] = [
     volumeLevel: 8,
     volumeSteps: 16,
     role: 'receiver',
-    transport: 'udp',
-    transports: ['udp'],
+    transport: 'wifi_udp',
+    transports: ['wifi_udp'],
   },
   {
     name: 'Band-Demo',
@@ -196,8 +196,8 @@ export const DEMO_DEVICES: DeviceInfo[] = [
     volumeLevel: 6,
     volumeSteps: 16,
     role: 'receiver',
-    transport: 'udp',
-    transports: ['udp'],
+    transport: 'wifi_udp',
+    transports: ['wifi_udp'],
   },
 ]
 
