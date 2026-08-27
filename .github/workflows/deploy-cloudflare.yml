@@ -101,7 +101,7 @@ jobs:
             # Limit is generous: per-env namespaced tags (DEC-035) mean each env
             # releases on its own line, so several envs × a few archives need
             # covering. Raise if envs/archives outgrow this window.
-            rel_json=$(gh release list --repo "$repo" --limit 40 --json tagName,publishedAt || echo '[]')
+            rel_json=$(gh release list --repo "$repo" --limit 40 --exclude-pre-releases --json tagName,publishedAt || echo '[]')
             tags=$(echo "$rel_json" | jq -r '.[].tagName')
             if [ -z "$tags" ]; then
               echo "::warning::no releases for $repo — skipping"
@@ -189,7 +189,7 @@ jobs:
             # Limit is generous: per-env namespaced tags (DEC-035) mean each env
             # releases on its own line, so several envs × a few archives need
             # covering. Raise if envs/archives outgrow this window.
-            rel_json=$(gh release list --repo "$repo" --limit 40 --json tagName,publishedAt || echo '[]')
+            rel_json=$(gh release list --repo "$repo" --limit 40 --exclude-pre-releases --json tagName,publishedAt || echo '[]')
             tags=$(echo "$rel_json" | jq -r '.[].tagName')
             if [ -z "$tags" ]; then
               echo "::warning::no releases for $repo — skipping"
