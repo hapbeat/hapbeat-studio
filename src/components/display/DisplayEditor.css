@@ -418,7 +418,7 @@
   flex-shrink: 0;
   transition: transform 0.1s ease, filter 0.1s ease;
 }
-.device-button-label { font-size: 12px; color: var(--text-primary); font-family: var(--font-mono); white-space: nowrap; }
+.device-button-label { font-size: 12px; color: var(--text-primary); font-family: var(--font-mono); white-space: nowrap; max-width: 5.5em; overflow: hidden; text-overflow: ellipsis; }
 
 /* LED dot */
 .device-abs-led {

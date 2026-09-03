@@ -6,6 +6,8 @@ export type DeviceModel = 'duo_wl' | 'band_wl'
 export interface ButtonPosition {
   id: string
   label: string
+  /** Full accessible name / hover text. `label` may be compact in the UI. */
+  title: string
   x: number // 0-100 (左→右)
   y: number // 0-100 (上→下)
 }
@@ -60,11 +62,11 @@ export const DUO_WL_SPEC: DeviceHardwareSpec = {
   name: 'Duo WL',
   description: '五角形筐体・ボタン5個',
   buttons: [
-    { id: 'btn_1', label: '1(左上)', x: 2, y: 25 },
-    { id: 'btn_2', label: '2(左中)', x: 2, y: 60 },
-    { id: 'btn_3', label: '3(左下)', x: 2, y: 90 },
-    { id: 'btn_4', label: '4(右上)', x: 98, y: 25 },
-    { id: 'btn_5', label: '5(右下)', x: 98, y: 90 },
+    { id: 'btn_1', label: '1(左上)', title: 'ボタン 1（左上）', x: 2, y: 25 },
+    { id: 'btn_2', label: '2(左中)', title: 'ボタン 2（左中）', x: 2, y: 60 },
+    { id: 'btn_3', label: '3(左下)', title: 'ボタン 3（左下）', x: 2, y: 90 },
+    { id: 'btn_4', label: '4(右上)', title: 'ボタン 4（右上）', x: 98, y: 25 },
+    { id: 'btn_5', label: '5(右下)', title: 'ボタン 5（右下）', x: 98, y: 90 },
   ],
   led: { x: 55, y: 90 },
   volumeIcon: { x: 30, y: 90 },
@@ -99,9 +101,9 @@ export const BAND_WL_SPEC: DeviceHardwareSpec = {
     // firmware addresses these buttons by id (`btn_l`/`btn_c`/`btn_r`),
     // and the internal `idx` ordering is independent (see header
     // comment: btn_r=0, btn_l=1, btn_c=2).
-    { id: 'btn_l', label: '1(左)', x: 12, y: 10 },
-    { id: 'btn_c', label: '2(中)', x: 50, y: 10 },
-    { id: 'btn_r', label: '3(右)', x: 88, y: 10 },
+    { id: 'btn_l', label: '1(左)', title: 'ボタン 1（左）', x: 12, y: 10 },
+    { id: 'btn_c', label: '2(中)', title: 'ボタン 2（中央）', x: 50, y: 10 },
+    { id: 'btn_r', label: '3(右)', title: 'ボタン 3（右）', x: 88, y: 10 },
   ],
   led: { x: 100, y: 65 },
   volumeIcon: { x: 100, y: 85 },

@@ -166,16 +166,25 @@ select.app-version-select option {
 
 /* 右側メタ情報グループ: docs リンク + Helper 接続状態 を縦中央揃えで並べる */
 .header-meta {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 60px 38px 24px;
   align-items: center;
-  gap: 14px;
+  gap: 8px;
+  width: 360px;
+  min-width: 360px;
+}
+
+.header-update-slot {
+  min-width: 0;
+  overflow: hidden;
 }
 
 .header-docs-link {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 5px 12px;
+  justify-content: center;
+  padding: 5px 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: transparent;
@@ -221,6 +230,13 @@ select.app-version-select option {
   font-size: 15px;
   color: var(--text-secondary);
   font-family: var(--font-mono);
+}
+
+.connection-status--icon {
+  justify-content: center;
+  width: 24px;
+  height: 28px;
+  padding: 0;
 }
 
 /* helper version は常時表示せず hover tooltip で見せる。

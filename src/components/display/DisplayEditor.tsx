@@ -1343,7 +1343,7 @@ function OledSimulator({
       <div key={btn.id} className="device-button-row">
         <div
           className="device-button-dot-wrap"
-          title={btn.label}
+          title={btn.title}
           onClick={() => onSimButtonClick(btn.id)}
           onMouseDown={() => onSimButtonDown(btn.id)}
           onMouseUp={onSimButtonUp}

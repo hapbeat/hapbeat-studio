@@ -143,6 +143,7 @@ export function App() {
           {/* 更新のお知らせチップ。ヘッダ内 (横並び) に置くのは、縦方向の
               レイアウトシフトで本文の読み位置を飛ばさないため。× で閉じると
               その版については二度と出ない。 */}
+          <div className="header-update-slot">
           {studioFrozen.visible && (
             <span className="update-chip" role="status">
               <a href={DEPLOY_ROOT} title="最新版の Studio を開く">
@@ -178,6 +179,7 @@ export function App() {
               >×</button>
             </span>
           )}
+          </div>
           <a
             className="header-docs-link"
             href={DOCS_URL}
@@ -203,8 +205,9 @@ export function App() {
           {isConnected ? (
             <button
               type="button"
-              className={`connection-status connection-status--clickable connection-status--with-tip ${helperCompat === 'outdated' ? 'connection-status--outdated' : ''}`}
+              className={`connection-status connection-status--icon connection-status--clickable connection-status--with-tip ${helperCompat === 'outdated' ? 'connection-status--outdated' : ''}`}
               onClick={() => setHelperManageOpen(true)}
+              aria-label={helperCompat === 'outdated' ? 'Helper update required' : 'Open Helper management'}
               data-tip={
                 helperCompat === 'outdated'
                   ? `hapbeat-helper v${helperVersion} は古い版です — クリックして upgrade 手順を表示`
@@ -212,17 +215,16 @@ export function App() {
               }
             >
               <span className={`status-dot ${helperCompat === 'outdated' ? 'outdated' : 'connected'}`} />
-              {helperCompat === 'outdated' ? 'Helper 要更新' : 'Helper 接続中'}
             </button>
           ) : (
             <button
               type="button"
-              className="connection-status connection-status--clickable"
+              className="connection-status connection-status--icon connection-status--clickable"
               onClick={() => setHelperModalOpen(true)}
+              aria-label="Open Helper setup"
               title="クリックでセットアップ方法を表示"
             >
               <span className="status-dot disconnected" />
-              Helper 未接続
             </button>
           )}
         </div>
