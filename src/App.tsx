@@ -16,6 +16,7 @@ import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useHelperUpdate, useStudioFrozenNotice } from '@/hooks/useReleaseNotices'
 import { DEPLOY_ROOT } from '@/utils/studioVersions'
 import { MIN_HELPER_VERSION } from '@/config/helperCompat'
+import { useStudioLocale } from '@/i18n/uiLocalizer'
 import './App.css'
 
 type Tab = 'kit' | 'display' | 'devices'
@@ -69,6 +70,7 @@ function PersistentTab({
 }
 
 export function App() {
+  const [locale, setLocale] = useStudioLocale()
   const [activeTab, setActiveTab] = useState<Tab>(() => {
     const saved = localStorage.getItem('hapbeat-studio-tab')
     // 旧 'waveform' タブの localStorage 値が残っていても安全に
@@ -185,6 +187,22 @@ export function App() {
           >
             Docs <ExternalLinkIcon />
           </a>
+          <div className="language-switcher" aria-label="Language selector">
+            <button
+              type="button"
+              className={locale === 'ja' ? 'active' : ''}
+              aria-pressed={locale === 'ja'}
+              onClick={() => setLocale('ja')}
+              title="日本語に切り替え"
+            >日本語</button>
+            <button
+              type="button"
+              className={locale === 'en' ? 'active' : ''}
+              aria-pressed={locale === 'en'}
+              onClick={() => setLocale('en')}
+              title="Switch to English"
+            >EN</button>
+          </div>
           {isConnected ? (
             <button
               type="button"
