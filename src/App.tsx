@@ -187,22 +187,19 @@ export function App() {
           >
             Docs <ExternalLinkIcon />
           </a>
-          <div className="language-switcher" aria-label="Language selector">
-            <button
-              type="button"
-              className={locale === 'ja' ? 'active' : ''}
-              aria-pressed={locale === 'ja'}
-              onClick={() => setLocale('ja')}
-              title="日本語に切り替え"
-            >日本語</button>
-            <button
-              type="button"
-              className={locale === 'en' ? 'active' : ''}
-              aria-pressed={locale === 'en'}
-              onClick={() => setLocale('en')}
-              title="Switch to English"
-            >EN</button>
-          </div>
+          <button
+            type="button"
+            className="language-switcher"
+            aria-label={locale === 'ja' ? 'Switch language to English' : 'Switch language to Japanese'}
+            title={locale === 'ja' ? 'JA → EN' : 'EN → JA'}
+            onClick={() => setLocale(locale === 'ja' ? 'en' : 'ja')}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+            </svg>
+            {locale.toUpperCase()}
+          </button>
           {isConnected ? (
             <button
               type="button"

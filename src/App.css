@@ -191,38 +191,27 @@ select.app-version-select option {
   background: var(--bg-surface);
 }
 
-/* Docs と Helper status の間で、現在の表示言語を明示して切り替える。 */
+/* Homepage と同じく、現在の言語を示す小型の 1-button toggle。 */
 .language-switcher {
   display: inline-flex;
   align-items: center;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-primary);
-}
-
-.language-switcher button {
-  min-height: 30px;
-  padding: 4px 8px;
+  gap: 4px;
+  height: 28px;
+  padding: 0 7px;
   border: 0;
+  border-radius: var(--radius);
   background: transparent;
   color: var(--text-muted);
   font: 600 12px/1 var(--font-ui);
+  letter-spacing: 0.04em;
   cursor: pointer;
 }
 
-.language-switcher button + button {
-  border-left: 1px solid var(--border);
-}
+.language-switcher svg { flex: none; }
 
-.language-switcher button:hover {
+.language-switcher:hover {
   color: var(--text-primary);
   background: var(--bg-surface);
-}
-
-.language-switcher button.active {
-  color: #fff;
-  background: var(--accent);
 }
 
 .connection-status {
