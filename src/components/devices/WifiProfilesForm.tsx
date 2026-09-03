@@ -4,6 +4,7 @@ import type { WifiProfile } from '@/stores/deviceStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useToast } from '@/components/common/Toast'
 import type { SerialWifiNetwork } from '@/stores/serialMaster'
+import { useI18n } from '@/i18n/I18nProvider'
 
 interface Props {
   device: DeviceInfo
@@ -51,6 +52,7 @@ export function WifiProfilesForm({
   onBulkApply,
   configConnectedNotChecked = false,
 }: Props) {
+  const { t } = useI18n()
   const [addOpen, setAddOpen] = useState(false)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [ssid, setSsid] = useState('')
@@ -206,7 +208,7 @@ export function WifiProfilesForm({
 
   const removeProfile = (e: React.MouseEvent<HTMLButtonElement>, idx: number) => {
     const btn = e.currentTarget
-    if (!confirm(`プロファイル #${idx} を削除しますか？`)) return
+    if (!confirm(t('wifi.deleteProfileConfirm', { index: idx }))) return
     setAnchor(btn)
     sendTo({ type: 'remove_wifi_profile', payload: { index: idx } })
     setTimeout(onRefresh, 500)
@@ -214,7 +216,7 @@ export function WifiProfilesForm({
 
   const clearAll = (e: React.MouseEvent<HTMLButtonElement>) => {
     const btn = e.currentTarget
-    if (!confirm('保存済みの Wi-Fi 設定をすべて削除します。よろしいですか？')) return
+    if (!confirm(t('wifi.clearProfilesConfirm'))) return
     setAnchor(btn)
     sendTo({ type: 'clear_wifi', payload: {} })
     setTimeout(onRefresh, 500)
@@ -226,15 +228,15 @@ export function WifiProfilesForm({
         className="form-section-title"
         style={{ display: 'flex', justifyContent: 'space-between' }}
       >
-        <span>Wi-Fi 設定</span>
+        <span>{t('wifi.title')}</span>
         <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>
-          保存済み {count}/{max}
+          {t('wifi.savedCount', { count, max })}
         </span>
       </div>
 
       {wifiStatus && (
         <div className="form-status muted" style={{ marginBottom: 8 }}>
-          現在: {wifiStatus.connected ? '接続中' : '未接続'}
+          {t('wifi.current', { state: wifiStatus.connected ? t('wifi.connected') : t('wifi.disconnected') })}
           {wifiStatus.ssid && <> · SSID={wifiStatus.ssid}</>}
           {wifiStatus.ip && <> · {wifiStatus.ip}</>}
           {wifiStatus.rssi !== undefined && <> · {wifiStatus.rssi}dBm</>}
@@ -245,7 +247,7 @@ export function WifiProfilesForm({
       {/* ---- Profile list ---- */}
       {profiles.length === 0 && (
         <div className="form-status muted" style={{ marginBottom: 8 }}>
-          保存済みプロファイルなし — 「⟳ 一覧取得」を押して同期してください
+          {t('wifi.none')}
         </div>
       )}
       {profiles.map((p) => (
@@ -253,8 +255,8 @@ export function WifiProfilesForm({
           {p.active ? (
             <span
               className="wifi-profile-marker active"
-              title="このプロファイルで接続中"
-              aria-label="接続中"
+              title={t('wifi.activeTitle')}
+              aria-label={t('wifi.connected')}
             >
               ●
             </span>
@@ -268,7 +270,7 @@ export function WifiProfilesForm({
             {p.ssid || '(no SSID)'}
             {p.has_pass && (
               <span
-                title="パスワードは保存されていますが表示できません"
+                title={t('wifi.passwordSavedTitle')}
                 style={{ marginLeft: 4, opacity: 0.6, fontSize: '0.85em' }}
               >
                 🔒
@@ -276,30 +278,30 @@ export function WifiProfilesForm({
             )}
           </span>
           {p.active ? (
-            <span className="wifi-profile-badge">接続中</span>
+            <span className="wifi-profile-badge">{t('wifi.connected')}</span>
           ) : (
             <button
               className="form-button-secondary wifi-profile-btn"
               onClick={(e) => connectProfile(e, p.index)}
               disabled={!device.online}
             >
-              接続
+              {t('wifi.connect')}
             </button>
           )}
           <button
             className="form-button-secondary wifi-profile-btn"
             onClick={() => enterEditMode(p)}
             disabled={!device.online}
-            title="パスワードを更新（SSID は変更不可）"
+            title={t('wifi.editPasswordTitle')}
           >
-            編集
+            {t('wifi.edit')}
           </button>
           <button
             className="form-button-danger wifi-profile-btn"
             onClick={(e) => removeProfile(e, p.index)}
             disabled={!device.online}
           >
-            削除
+            {t('wifi.remove')}
           </button>
         </div>
       ))}
@@ -320,21 +322,21 @@ export function WifiProfilesForm({
           disabled={!device.online || (count >= max && editingIndex === null && !addOpen)}
           title={count >= max && editingIndex === null ? '最大数に達しています' : ''}
         >
-          {addOpen ? '× 閉じる' : '＋ 新規追加'}
+          {addOpen ? t('wifi.close') : t('wifi.new')}
         </button>
         <button
           className="form-button-secondary"
           onClick={onRefresh}
           disabled={!device.online}
         >
-          ⟳ 一覧取得
+          {t('wifi.refresh')}
         </button>
         <button
           className="form-button-danger"
           onClick={clearAll}
           disabled={!device.online}
         >
-          すべて削除 (clear_wifi)
+          {t('wifi.clearAll')}
         </button>
       </div>
 
@@ -372,8 +374,8 @@ export function WifiProfilesForm({
                    * dropdown is the primary picker; manual entry is
                    * the last-resort path. */
                   disabled={editingIndex !== null}
-                  aria-label="SSID 候補を開く"
-                  title="候補から選ぶ"
+                  aria-label={t('wifi.openCandidates')}
+                  title={t('wifi.chooseCandidate')}
                 >
                   ▼
                 </button>
@@ -408,7 +410,7 @@ export function WifiProfilesForm({
                 className="form-button-secondary"
                 onClick={() => void runScan()}
                 disabled={scanState === 'scanning' || editingIndex !== null}
-                title="PC 側で OS-native な Wi-Fi スキャンを実行 (Helper 経由)"
+                title={t('wifi.scanTitle')}
                 style={{ flexShrink: 0, whiteSpace: 'nowrap' }}
               >
                 {scanState === 'scanning' ? 'スキャン中…' : '⟳ スキャン'}
@@ -429,7 +431,7 @@ export function WifiProfilesForm({
             </div>
           )}
           <div className="form-row">
-            <label>パスワード</label>
+            <label>{t('wifi.password')}</label>
             <div
               className="form-row-multi"
               style={{ width: '100%', flexWrap: 'nowrap' }}
@@ -492,10 +494,10 @@ export function WifiProfilesForm({
                   className="form-button"
                   onClick={submitBulk}
                   disabled={!ssid.trim()}
-                  title="選択中の USB Serial デバイスに、この Wi-Fi 設定を 1 台ずつ順に適用します（各機は適用後に再起動。同時書き込みは再起動が重なって失敗するため順次）"
+                  title={t('wifi.bulkTitle')}
                   style={{ width: '100%' }}
                 >
-                  ⚡ 選択中の {bulkCount} 台に書き込む（順次）
+                  {t('wifi.bulkWrite', { count: bulkCount })}
                 </button>
               </div>
             </>
@@ -504,7 +506,7 @@ export function WifiProfilesForm({
       )}
 
       <div className="form-status muted" style={{ marginTop: 8 }}>
-        Wi-Fi 設定変更後はデバイスの再起動が必要です（上部の「再起動」ボタン）。
+        {t('wifi.restartNote')}
       </div>
     </div>
   )

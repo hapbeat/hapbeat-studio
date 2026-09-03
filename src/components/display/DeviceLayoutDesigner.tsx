@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from 'react'
 import type { DeviceModel } from '@/types/device'
 import { DEVICE_SPECS } from '@/types/device'
 import './DeviceLayoutDesigner.css'
+import { useI18n } from '@/i18n/I18nProvider'
 
 /**
  * デバイスレイアウトデザイナー
@@ -53,6 +54,7 @@ function initItems(model: DeviceModel): DraggableItem[] {
 }
 
 export function DeviceLayoutDesigner() {
+  const { t } = useI18n()
   const [model, setModel] = useState<DeviceModel>('duo_wl')
   const [items, setItems] = useState<DraggableItem[]>(() => initItems('duo_wl'))
   const [dragging, setDragging] = useState<string | null>(null)
@@ -121,14 +123,14 @@ export function DeviceLayoutDesigner() {
       },
     }
     navigator.clipboard.writeText(JSON.stringify(result, null, 2))
-    alert('座標 JSON をクリップボードにコピーしました')
-  }, [items, oled])
+    alert(t('layout.copied'))
+  }, [items, oled, t])
 
   return (
     <div className="layout-designer">
       {/* ツールバー */}
       <div className="layout-designer-toolbar">
-        <span className="layout-designer-title">デバイスレイアウトデザイナー</span>
+        <span className="layout-designer-title">{t('layout.title')}</span>
         <div className="layout-designer-controls">
           {(Object.keys(DEVICE_SPECS) as DeviceModel[]).map((m) => (
             <button
@@ -145,10 +147,10 @@ export function DeviceLayoutDesigner() {
               checked={snapToGrid}
               onChange={(e) => setSnapToGrid(e.target.checked)}
             />
-            スナップ ({SNAP}px)
+            {t('layout.snap', { size: SNAP })}
           </label>
           <button className="btn btn-sm" onClick={exportJson}>
-            座標をコピー
+            {t('layout.copy')}
           </button>
         </div>
       </div>
@@ -228,7 +230,7 @@ export function DeviceLayoutDesigner() {
           <thead>
             <tr>
               <th>ID</th>
-              <th>ラベル</th>
+              <th>{t('layout.label')}</th>
               <th>X (%)</th>
               <th>Y (%)</th>
               <th>px</th>

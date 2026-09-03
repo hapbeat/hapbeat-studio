@@ -1,27 +1,20 @@
 import { useEffect } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useToast } from '@/components/common/Toast'
+import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 
 /** デバイス書込みコマンド (write_result を返すもの) の日本語ラベル。
  *  結果トーストの文言に使う。未知の cmd は cmd 名そのまま。 */
-const WRITE_CMD_LABEL: Record<string, string> = {
-  set_name: '名前', set_address: 'アドレス',
-  set_wifi: 'Wi-Fi 設定', clear_wifi: 'Wi-Fi 削除',
-  connect_wifi_profile: 'Wi-Fi 接続', remove_wifi_profile: 'Wi-Fi プロファイル削除',
-  set_sensor_mapping: 'センサーマッピング', set_broker_host: 'ブローカー設定',
-  set_broker_config: 'ブローカー設定', set_recv_topics: '受信トピック',
-  set_alert_mode: 'アラート動作', set_espnow_channel: 'ESP-NOW ch',
-  set_espnow_stream_gain: 'ゲイン', set_espnow_stream_input_level: '入力レベル',
-  set_espnow_stream_ui: '表示・電力設定',
-  write_ui_config: 'UI 設定', set_oled_brightness: 'OLED 輝度',
-  enter_ap_mode: 'AP モード切替', enter_sta_mode: 'STA モード切替',
-  set_ap_pass: 'AP パスワード', clear_ap_pass: 'AP パスワード削除',
-  reboot: '再起動', kit_delete: 'Kit 削除',
-  set_haptic_gain: '触覚ゲイン', set_dac_boost: 'DAC ブースト',
-  set_headphone_volume: 'ヘッドホン音量', set_stream_buffer: 'ストリームバッファ',
-  set_input_mode: '入出力モード',
-  set_espnow_stream_opus_complexity: 'Opus complexity', set_espnow_stream_hp_buffer: 'HP ジッターバッファ',
-  set_eq_band: 'EQ バンド', set_av_delay: 'A-V ディレイ',
+const WRITE_CMD_LABEL: Record<string, MessageId> = {
+  set_name: 'toast.command.name', set_address: 'toast.command.address',
+  set_wifi: 'toast.command.wifi', clear_wifi: 'toast.command.wifiDelete',
+  connect_wifi_profile: 'toast.command.wifiConnect', remove_wifi_profile: 'toast.command.wifiProfileDelete',
+  set_sensor_mapping: 'toast.command.sensorMapping', set_broker_host: 'toast.command.broker', set_broker_config: 'toast.command.broker', set_recv_topics: 'toast.command.receiveTopics',
+  set_alert_mode: 'toast.command.alertMode', set_espnow_channel: 'toast.command.espnowChannel', set_espnow_stream_gain: 'toast.command.gain', set_espnow_stream_input_level: 'toast.command.inputLevel', set_espnow_stream_ui: 'toast.command.power',
+  write_ui_config: 'toast.command.ui', set_oled_brightness: 'toast.command.oledBrightness', enter_ap_mode: 'toast.command.apMode', enter_sta_mode: 'toast.command.apMode',
+  set_ap_pass: 'toast.command.apPassword', clear_ap_pass: 'toast.command.apPasswordDelete', reboot: 'toast.command.reboot', kit_delete: 'toast.command.kitDelete',
+  set_haptic_gain: 'toast.command.hapticGain', set_dac_boost: 'toast.command.dacBoost', set_headphone_volume: 'toast.command.headphoneVolume', set_stream_buffer: 'toast.command.streamBuffer', set_input_mode: 'toast.command.inputMode',
+  set_espnow_stream_opus_complexity: 'toast.command.opusComplexity', set_espnow_stream_hp_buffer: 'toast.command.hpJitterBuffer', set_eq_band: 'toast.command.eqBand', set_av_delay: 'toast.command.avDelay',
 }
 
 /** 即リブートして ACK を返さない可能性が高い cmd。成功トーストはパネル側の
@@ -45,6 +38,7 @@ const REBOOT_CMDS = new Set(['reboot', 'enter_ap_mode', 'enter_sta_mode'])
  * setAnchor 済みなので、結果トーストもそのボタン近傍に出る。
  */
 export function HelperFailureToastListener() {
+  const { t: translate } = useI18n()
   const { lastMessage } = useHelperConnection()
   const { toast } = useToast()
 
@@ -55,7 +49,7 @@ export function HelperFailureToastListener() {
 
     if (t === 'write_result') {
       const cmd = String(p.cmd ?? '')
-      const label = WRITE_CMD_LABEL[cmd] ?? (cmd || '設定')
+      const label = WRITE_CMD_LABEL[cmd] ? translate(WRITE_CMD_LABEL[cmd]) : (cmd || translate('toast.command.default'))
       if (p.success === false) {
         // Helper composes a multi-line summary + per-target detail.
         // Toast the headline + first detail so the most useful info is
@@ -67,18 +61,18 @@ export function HelperFailureToastListener() {
         const body = firstDetail && firstDetail !== headline
           ? `${headline} — ${firstDetail.replace(/^✗\s*/, '')}`
           : headline
-        toast(`${label}: 失敗 — ${body}`, 'error')
+        toast(translate('toast.writeFailed', { label, body }), 'error')
       } else if (!cmd) {
         // preview_event / stop は config write ではなく fire-and-forget の
         // ブロードキャスト *コマンド*。helper はログ用に write_result を返すが
         // `cmd` を持たず、device ACK も無い。これを「設定を反映しました」と
         // 出すのは誤り (bug 2026-06-24) なので「送信」と表現する。
-        toast('コマンドを送信しました', 'info')
+        toast(translate('toast.commandSent'), 'info')
       } else if (!REBOOT_CMDS.has(cmd)) {
         // 実機が受理した時だけ成功トースト (操作ではなく結果ベース)。
         // 即リブート系 (reboot / mode 切替) は ACK 前に再起動して
         // write_result が信頼できないため、パネル側の info トーストに任せる。
-        toast(`${label}を反映しました`, 'success')
+        toast(translate('toast.writeApplied', { label }), 'success')
       }
       return
     }
@@ -86,16 +80,16 @@ export function HelperFailureToastListener() {
     if (t === 'ota_result' && p.success === false) {
       const dev = String(p.device ?? '?')
       const msg = String(p.message ?? p.error ?? 'OTA failed')
-      toast(`${dev} OTA 失敗: ${msg}`, 'error')
+      toast(translate('toast.otaFailed', { device: dev, message: msg }), 'error')
       return
     }
 
     if (t === 'error') {
       const msg = String(p.message ?? 'helper error')
-      toast(`Helper: ${msg}`, 'error')
+      toast(translate('toast.helperError', { message: msg }), 'error')
       return
     }
-  }, [lastMessage, toast])
+  }, [lastMessage, toast, translate])
 
   return null
 }

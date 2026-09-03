@@ -4,6 +4,7 @@ import { MIN_HELPER_VERSION, compareVersion, type HelperCompat } from '@/config/
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useReleaseProduct } from '@/hooks/useReleaseNotices'
 import { VersionSwitcher } from './VersionSwitcher'
+import { useI18n } from '@/i18n/I18nProvider'
 import './HelperOnboardingModal.css'
 
 interface HelperManageModalProps {
@@ -16,6 +17,7 @@ interface HelperManageModalProps {
 }
 
 function CopyableCommand({ cmd }: { cmd: string }) {
+  const { t } = useI18n()
   const [copied, setCopied] = useState(false)
   const handleCopy = async () => {
     try {
@@ -33,15 +35,16 @@ function CopyableCommand({ cmd }: { cmd: string }) {
         type="button"
         className="helper-modal-copy-btn"
         onClick={handleCopy}
-        title="クリップボードにコピー"
+        title={t('common.copy')}
       >
-        {copied ? '✓ コピー済み' : 'コピー'}
+        {copied ? t('common.copied') : t('common.copy')}
       </button>
     </div>
   )
 }
 
 export function HelperManageModal({ open, onClose, helperVersion, helperCompat }: HelperManageModalProps) {
+  const { t } = useI18n()
   const outdated = helperCompat === 'outdated'
   // 「新しい版がある」お知らせ。ここは**ユーザーが能動的に開いた画面**なので
   // dismiss 対象外で常時表示する (DEC-053 §5.2)。必須更新 (outdated) のときは
@@ -98,21 +101,21 @@ export function HelperManageModal({ open, onClose, helperVersion, helperCompat }
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="Hapbeat Helper 管理"
+        aria-label={t('helper.modal.aria')}
       >
         <div className="helper-modal-header">
           <span className="helper-modal-title">
             <span className={`helper-modal-dot ${outdated ? 'outdated' : 'connected'}`} />
             {outdated
-              ? `Helper 要更新${helperVersion ? ` (v${helperVersion} → v${MIN_HELPER_VERSION}+)` : ''}`
-              : `Helper 接続中${helperVersion ? ` (v${helperVersion})` : ''}`}
+              ? t('helper.modal.outdated', { version: helperVersion ? ` (v${helperVersion} → v${MIN_HELPER_VERSION}+)` : '' })
+              : t('helper.modal.connected', { version: helperVersion ? ` (v${helperVersion})` : '' })}
           </span>
           <button
             ref={closeRef}
             type="button"
             className="helper-modal-close"
             onClick={onClose}
-            aria-label="閉じる"
+            aria-label={t('common.close')}
           >
             ✕
           </button>
@@ -121,27 +124,24 @@ export function HelperManageModal({ open, onClose, helperVersion, helperCompat }
         <div className="helper-modal-body">
           {outdated && (
             <section className="helper-modal-section helper-modal-section--warning">
-              <h3 className="helper-modal-section-title">⚠ Helper の更新が必要です</h3>
+              <h3 className="helper-modal-section-title">{t('helper.modal.required.title')}</h3>
               <p className="helper-modal-section-desc">
-                現在の Helper は <code>v{helperVersion ?? '?'}</code> です。
-                Studio はバージョン <code>v{MIN_HELPER_VERSION}</code> 以上を必要としています
-                (Kit deploy / device 情報取得などで破壊的な変更があるため)。
-                以下の手順で更新してください:
+                {t('helper.modal.required.desc', { current: helperVersion ?? '?', minimum: MIN_HELPER_VERSION })}
               </p>
               <p className="helper-modal-section-desc">
-                <strong>1. 動作中の daemon を停止:</strong>
+                <strong>{t('helper.modal.stopDaemon')}</strong>
               </p>
               <CopyableCommand cmd="hapbeat-helper stop" />
               <p className="helper-modal-section-desc">
-                <strong>2. 最新版へ更新:</strong>
+                <strong>{t('helper.modal.upgrade')}</strong>
               </p>
               <CopyableCommand cmd="pipx upgrade hapbeat-helper" />
               <p className="helper-modal-section-desc">
-                <strong>3. 再起動</strong> (Task Scheduler / launchd 経由なら自動、手動なら下記):
+                <strong>{t('helper.modal.restart')}</strong> {t('helper.modal.restart.detail')}
               </p>
               <CopyableCommand cmd="hapbeat-helper start" />
               <p className="helper-modal-section-desc">
-                完了後この modal を閉じて、Helper pill が緑色 (Helper 接続中) になれば OK。
+                {t('helper.modal.required.finish')}
               </p>
             </section>
           )}
@@ -149,11 +149,10 @@ export function HelperManageModal({ open, onClose, helperVersion, helperCompat }
           {updateAvailable && (
             <section className="helper-modal-section">
               <h3 className="helper-modal-section-title">
-                新しい Helper があります (v{helperVersion} → v{helperRelease?.latest})
+                {t('helper.modal.available.title', { current: helperVersion, latest: helperRelease?.latest })}
               </h3>
               <p className="helper-modal-section-desc">
-                いまの版でも動作しますが、更新すると修正や新機能が入ります。
-                更新は任意です。
+                {t('helper.modal.available.desc')}
               </p>
               <CopyableCommand cmd="hapbeat-helper stop" />
               <CopyableCommand cmd={helperRelease?.upgrade ?? 'pipx upgrade hapbeat-helper'} />
@@ -161,7 +160,7 @@ export function HelperManageModal({ open, onClose, helperVersion, helperCompat }
               {helperRelease?.notes && (
                 <p className="helper-modal-section-desc">
                   <a href={helperRelease.notes} target="_blank" rel="noreferrer">
-                    変更履歴を見る
+                    {t('helper.modal.releaseNotes')}
                   </a>
                 </p>
               )}
@@ -171,54 +170,51 @@ export function HelperManageModal({ open, onClose, helperVersion, helperCompat }
           {/* デバイスを見失ったときの軽量リカバリ。ターミナルでの stop/start に
               頼らず、Helper の検出層 (UDP + mDNS) だけをその場で作り直す。 */}
           <section className="helper-modal-section helper-modal-section--alt">
-            <h3 className="helper-modal-section-title">デバイスを見失ったとき</h3>
+            <h3 className="helper-modal-section-title">{t('helper.modal.recovery.title')}</h3>
             <p className="helper-modal-section-desc">
-              ファーム書き換えの直後などにデバイス一覧から消えて戻らない場合、
-              Helper の検出 (UDP / mDNS) を再初期化します。Helper の再起動や
-              ターミナル操作は不要で、この Studio の接続も切れません。
+              {t('helper.modal.recovery.desc')}
             </p>
             <button
               type="button"
               className="helper-modal-copy-btn"
               onClick={handleResetDiscovery}
               disabled={!isConnected || resetState === 'pending'}
-              title={isConnected ? undefined : 'Helper 未接続のため実行できません'}
+              title={isConnected ? undefined : t('helper.modal.recovery.unavailable')}
             >
               {resetState === 'pending'
-                ? '再初期化中…'
+                ? t('helper.modal.recovery.pending')
                 : resetState === 'ok'
-                  ? '✓ 再初期化しました'
+                  ? t('helper.modal.recovery.ok')
                   : resetState === 'fail'
-                    ? '✗ 失敗 — Helper を再起動してください'
-                    : '🔄 デバイス検出を再初期化'}
+                    ? t('helper.modal.recovery.fail')
+                    : t('helper.modal.recovery.action')}
             </button>
           </section>
 
           <p className="helper-modal-desc">
-            <code>hapbeat-helper</code> はバックグラウンドで動作中です。
-            停止・自動起動の解除・アンインストールはターミナルから以下のコマンドを実行してください。
+            {t('helper.modal.manage.desc')}
           </p>
 
           <section className="helper-modal-section">
-            <h3 className="helper-modal-section-title">一時的に停止</h3>
+            <h3 className="helper-modal-section-title">{t('helper.modal.temporaryStop.title')}</h3>
             <p className="helper-modal-section-desc">
-              現在動いている helper プロセスを停止します。OS サービスに登録されている場合は次回ログイン時に再起動します。
+              {t('helper.modal.temporaryStop.desc')}
             </p>
             <CopyableCommand cmd="hapbeat-helper stop" />
           </section>
 
           <section className="helper-modal-section">
-            <h3 className="helper-modal-section-title">自動起動を解除</h3>
+            <h3 className="helper-modal-section-title">{t('helper.modal.disableAutostart.title')}</h3>
             <p className="helper-modal-section-desc">
-              ログイン時自動起動の登録を解除します（プロセス自体は次の停止まで残ります）。
+              {t('helper.modal.disableAutostart.desc')}
             </p>
             <CopyableCommand cmd="hapbeat-helper uninstall-service" />
           </section>
 
           <section className="helper-modal-section helper-modal-section--alt">
-            <h3 className="helper-modal-section-title">完全アンインストール</h3>
+            <h3 className="helper-modal-section-title">{t('helper.modal.uninstall.title')}</h3>
             <p className="helper-modal-section-desc">
-              pipx 経由で導入している場合に helper パッケージごと削除します。
+              {t('helper.modal.uninstall.desc')}
             </p>
             <CopyableCommand cmd="hapbeat-helper uninstall-service" />
             <CopyableCommand cmd="pipx uninstall hapbeat-helper" />
@@ -226,10 +222,9 @@ export function HelperManageModal({ open, onClose, helperVersion, helperCompat }
 
           {/* Studio バージョン表示 + ロールバック用の版切替 (versions.json) */}
           <section className="helper-modal-section">
-            <h3 className="helper-modal-section-title">バージョン</h3>
+            <h3 className="helper-modal-section-title">{t('common.version')}</h3>
             <p className="helper-modal-section-desc">
-              新しい版で不具合が出た場合は、旧バージョンに切り替えて作業を続けられます
-              （各版はマイナー単位で <code>/v0.2/</code> のような固定 URL に残ります）。
+              {t('helper.modal.version.desc')}
             </p>
             <VersionSwitcher />
           </section>

@@ -1,6 +1,7 @@
 import { type DragEvent } from 'react'
 import type { KitEvent, KitEventMode } from '@/types/library'
 import { ClipCard } from '../shared/ClipCard'
+import { useI18n } from '@/i18n/I18nProvider'
 import './KitEventRow.css'
 
 const DND_TYPE_KIT_EVENT = 'application/x-hapbeat-kit-event'
@@ -121,6 +122,7 @@ export function KitEventRow({
   onStartEdit,
   onSwap,
 }: KitEventRowProps) {
+  const { t } = useI18n()
   // `modes` is normally a non-empty array post-migrateKit, but defend
   // against legacy/incomplete state so a stray empty array doesn't
   // render an all-off row that's silently un-toggleable.
@@ -222,7 +224,7 @@ export function KitEventRow({
         <div
           className="kit-event-side-mode-group"
           role="radiogroup"
-          aria-label="再生モード"
+          aria-label={t('kit.playMode')}
         >
           {MODE_OPTIONS.map((opt) => {
             const active = currentChoice === opt.choice

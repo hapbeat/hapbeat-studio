@@ -1,4 +1,5 @@
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
+import { useI18n } from '@/i18n/I18nProvider'
 
 interface Props {
   device: DeviceInfo
@@ -24,6 +25,7 @@ const LEVELS: { value: 1 | 2 | 3; label: string; hint: string }[] = [
  * misleading state.
  */
 export function OledBrightnessSection({ device, level, sendTo }: Props) {
+  const { t } = useI18n()
   const offline = !device.online
   const onPick = (v: 1 | 2 | 3) => {
     if (offline || v === level) return
@@ -32,7 +34,7 @@ export function OledBrightnessSection({ device, level, sendTo }: Props) {
 
   return (
     <div className="form-row">
-      <label>OLED 輝度</label>
+      <label>{t('ui.brightness')}</label>
       <div className="device-toggle" role="group" aria-label="OLED brightness">
         {LEVELS.map((l) => {
           const active = level === l.value

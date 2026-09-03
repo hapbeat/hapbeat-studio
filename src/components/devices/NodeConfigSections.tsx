@@ -13,6 +13,7 @@ import {
   type DuoWlV4NumericField,
 } from '@/stores/duoWlV4AudioStore'
 import { useToast } from '@/components/common/Toast'
+import { useI18n } from '@/i18n/I18nProvider'
 import { downloadTextFile } from '@/utils/download'
 import { clampOpusComplexity, clampHpBufferMs } from '@/utils/solidTransmitterTuning'
 import {
@@ -186,6 +187,7 @@ export function EspNowConfigSection({
   sendTo: (msg: ManagerMessage) => void
   role: 'receiver' | 'transmitter'
 }) {
+  const { t } = useI18n()
   const [channel, setChannel] = useState<number>(cachedInfo?.espnow_channel ?? 1)
   // gain (receiver) is 0..1; input level (transmitter) is 0..100.
   const [gain, setGain] = useState<number>(cachedInfo?.espnow_stream_gain ?? 0.8)
@@ -209,14 +211,14 @@ export function EspNowConfigSection({
   return (
     <div className="form-section">
       <div className="form-section-title">
-        ESP-NOW 設定
+        {t('node.espnow.title')}
         <span className="form-section-sub-inline">
-          {' '}— ライブ会場同報 ({role === 'transmitter' ? '送信機' : '受信機'})
+          {' '}{t('node.espnow.live', { role: role === 'transmitter' ? t('node.espnow.transmitter') : t('node.espnow.receiver') })}
         </span>
       </div>
 
       <div className="form-row">
-        <label>チャンネル</label>
+        <label>{t('node.espnow.channel')}</label>
         <div className="form-row-multi">
           {ESPNOW_CHANNELS.map((ch) => (
             <button
@@ -233,12 +235,12 @@ export function EspNowConfigSection({
         <span />
       </div>
       <div className="form-status muted">
-        送信機と全受信機で同じチャンネルにそろえてください (1 / 6 / 11)。
+        {t('node.espnow.channelHint')}
       </div>
 
       {role === 'receiver' ? (
         <div className="form-row">
-          <label>既定ゲイン</label>
+          <label>{t('node.espnow.defaultGain')}</label>
           <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
             <input
               type="range"
@@ -258,7 +260,7 @@ export function EspNowConfigSection({
         </div>
       ) : (
         <div className="form-row">
-          <label>入力レベル</label>
+          <label>{t('node.espnow.inputLevel')}</label>
           <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
             <input
               type="range"
@@ -280,7 +282,7 @@ export function EspNowConfigSection({
 
       <div className="form-action-row" style={{ marginTop: 8 }}>
         <button className="form-button" onClick={apply} disabled={!device.online}>
-          適用
+          {t('common.update')}
         </button>
       </div>
     </div>
@@ -307,6 +309,7 @@ export function SolidTransmitterTuningSection({
   cachedInfo?: NodeConfigInfo
   sendTo: (msg: ManagerMessage) => void
 }) {
+  const { t } = useI18n()
   const isAuto = cachedInfo?.espnow_stream_opus_complexity == null || cachedInfo.espnow_stream_opus_complexity < 0
   const [complexity, setComplexity] = useState<number>(
     !isAuto ? clampOpusComplexity(cachedInfo!.espnow_stream_opus_complexity!) : 5,
@@ -343,8 +346,8 @@ export function SolidTransmitterTuningSection({
   return (
     <div className="form-section">
       <div className="form-section-title">
-        SOLID48 送信チューニング
-        <span className="form-section-sub-inline"> — Opus 48k stereo HP（mode 9）向け</span>
+        {t('node.solid.title')}
+        <span className="form-section-sub-inline"> {t('node.solid.subtitle')}</span>
       </div>
 
       {/* 1. Opus encoder complexity — TX-local global override, applied to
@@ -373,19 +376,19 @@ export function SolidTransmitterTuningSection({
           (layout-shift rule). */}
       <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
         {isAuto
-          ? '現在: 自動（モード既定の complexity を使用中）。適用すると、現在アクティブなモードのエンコーダにこの値を上書きします。'
-          : `現在: ${cachedInfo!.espnow_stream_opus_complexity} で上書き中。0=軽い（低 CPU）〜10=高品質（高 CPU、既定 5 目安）。`}
+          ? t('node.solid.autoHint')
+          : t('node.solid.overrideHint', { value: cachedInfo!.espnow_stream_opus_complexity })}
       </div>
       <div className="form-action-row" style={{ marginTop: 8 }}>
         <button className="form-button" onClick={applyComplexity} disabled={offline}>
-          Complexity を適用
+          {t('node.solid.applyComplexity')}
         </button>
       </div>
 
       {/* 2. HP jitter-buffer target — TX stores + broadcasts to the fleet
           as 0xAC param 6; only mode-9 (SOLID48) receivers apply it. */}
       <div className="form-row" style={{ marginTop: 12 }}>
-        <label>HP ジッターバッファ</label>
+        <label>{t('node.solid.hpBuffer')}</label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
             type="range"
@@ -404,12 +407,11 @@ export function SolidTransmitterTuningSection({
         <span />
       </div>
       <div className="form-status muted" style={{ fontSize: 12 }}>
-        SOLID48 受信機（mode 9）の再生バッファ深さ目標を編隊全体へ配信します（既定 120ms）。
-        大きいほど ESP-NOW のゆらぎに強くなりますが、その分再生が遅れます。他モードの受信機には影響しません。
+        {t('node.solid.bufferHint')}
       </div>
       <div className="form-action-row" style={{ marginTop: 8 }}>
         <button className="form-button" onClick={applyHpBuffer} disabled={offline}>
-          バッファを適用
+          {t('node.solid.applyBuffer')}
         </button>
       </div>
     </div>
@@ -427,6 +429,7 @@ export function SolidTransmitterTuningSection({
  * exists; add a topic only when you want to split machines / groups.
  */
 function TopicRegistryEditor() {
+  const { t: translate } = useI18n()
   const topics = useMqttTopicsStore((s) => s.topics)
   const addTopic = useMqttTopicsStore((s) => s.addTopic)
   const removeTopic = useMqttTopicsStore((s) => s.removeTopic)
@@ -448,7 +451,7 @@ function TopicRegistryEditor() {
   // list across origins; import merges into the existing list (never replaces).
   const doExport = () => {
     downloadTextFile('mqtt-topics.json', exportTopics())
-    toast(`トピック ${topics.length} 件をエクスポートしました`, 'success')
+    toast(translate('node.topicsExported', { count: topics.length }), 'success')
   }
   const doImport = (file: File) => {
     const fr = new FileReader()
@@ -459,7 +462,7 @@ function TopicRegistryEditor() {
         ok ? 'success' : 'error',
       )
     }
-    fr.onerror = () => toast('ファイルの読み込みに失敗しました', 'error')
+    fr.onerror = () => toast(translate('node.fileReadFailed'), 'error')
     fr.readAsText(file)
   }
 
@@ -468,7 +471,7 @@ function TopicRegistryEditor() {
       <div className="form-section-title">
         Topic
         <span className="form-section-sub-inline">
-          {' '}— 送り先 topic の一覧（「センサー」タブで選択）
+          {' '}{translate('node.topic.subtitle')}
         </span>
       </div>
 
@@ -480,7 +483,7 @@ function TopicRegistryEditor() {
         {/* default-topic always exists (the empty selection); not removable. */}
         <div className="topic-table-row">
           <span className="topic-name mono">default-topic</span>
-          <span className="topic-builtin">既定（何も設定しない時の送り先）</span>
+          <span className="topic-builtin">{translate('node.topic.default')}</span>
         </div>
         {topics.map((t) => (
           <div className="topic-table-row" key={t}>
@@ -490,7 +493,7 @@ function TopicRegistryEditor() {
               className="btn-x-muted"
               style={{ marginLeft: 'auto' }}
               onClick={() => removeTopic(t)}
-              title="この topic を削除"
+              title={translate('node.topic.deleteTitle')}
             >
               ✕
             </button>
@@ -506,7 +509,7 @@ function TopicRegistryEditor() {
           className="form-input mono"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="topic 名 (例: ward-a)"
+          placeholder={translate('node.topic.placeholder')}
           maxLength={32}
           onKeyDown={(e) => { if (e.key === 'Enter') add() }}
           style={{ flex: 1, minWidth: 0 }}
@@ -530,18 +533,18 @@ function TopicRegistryEditor() {
           onClick={doExport}
           disabled={topics.length === 0}
           style={{ padding: '0 12px' }}
-          title="登録トピックを JSON ファイルに保存（別アドレスへの移行用バックアップ）"
+          title={translate('node.topic.exportTitle')}
         >
-          エクスポート
+          {translate('node.topic.export')}
         </button>
         <button
           type="button"
           className="form-button-secondary"
           onClick={() => fileInputRef.current?.click()}
           style={{ padding: '0 12px' }}
-          title="JSON ファイルからトピックを取り込み（既存の一覧に追加）"
+          title={translate('node.topic.importTitle')}
         >
-          インポート
+          {translate('node.topic.import')}
         </button>
         <input
           ref={fileInputRef}
@@ -557,9 +560,7 @@ function TopicRegistryEditor() {
       </div>
 
       <div className="form-status muted">
-        topic = 送り先のチャンネル名です。受信側 Hapbeat は「MQTT」タブで同じ topic を設定したものだけが
-        そのイベントを受け取ります。複数の機材やグループを分けたい時だけ追加してください
-        （何も設定しなければ default-topic で全てやり取りされます）。
+        {translate('node.topic.help')}
       </div>
     </div>
   )
@@ -581,6 +582,7 @@ export function MqttConfigSection({
   /** 'sensor' publishes; 'receiver' subscribes. Drives the topic list. */
   role: 'sensor' | 'receiver'
 }) {
+  const { t } = useI18n()
   const initialHost = cachedInfo?.broker_host ?? 'auto'
   const [auto, setAuto] = useState<boolean>(initialHost === 'auto')
   const [host, setHost] = useState<string>(initialHost === 'auto' ? '' : initialHost)
@@ -684,38 +686,38 @@ export function MqttConfigSection({
           style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
         >
           <span>
-            ブローカー設定
-            <span className="form-section-sub-inline">{' '}— どのブローカーに接続するか</span>
+            {t('node.mqtt.title')}
+            <span className="form-section-sub-inline">{' '}{t('node.mqtt.subtitle')}</span>
           </span>
           {connected != null && (
             <span className={`device-row-status ${connected ? 'online' : ''}`}
               style={connected ? undefined : { background: 'rgba(244,67,54,0.15)', color: '#f44336', border: '1px solid rgba(244,67,54,0.4)' }}
-              title={connected ? 'ブローカーに接続中' : 'ブローカーに未接続 (検出中 / 設定確認)'}
+              title={connected ? t('node.mqtt.connectedTitle') : t('node.mqtt.disconnectedTitle')}
             >
-              <span style={{ textTransform: 'none' }}>{connected ? '● ブローカー接続中' : '○ 未接続'}</span>
+              <span style={{ textTransform: 'none' }}>{connected ? t('node.mqtt.connected') : t('node.mqtt.disconnected')}</span>
             </span>
           )}
         </div>
 
         <label className="form-status muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} disabled={!device.online} />
-          ブローカー自動検出 (mDNS で同一 LAN 上の Hapbeat ブローカーを探す)
+          {t('node.mqtt.auto')}
         </label>
 
         <div className="form-row" style={{ marginTop: 6 }}>
-          <label>ホスト/IP</label>
+          <label>{t('node.mqtt.host')}</label>
           <input
             className="form-input mono"
             value={auto ? '' : host}
             onChange={(e) => setHost(e.target.value)}
-            placeholder={auto ? '自動検出 (mDNS)' : '192.168.1.10 または hapbeat-broker.local'}
+            placeholder={auto ? t('node.mqtt.autoPlaceholder') : t('node.mqtt.hostPlaceholder')}
             disabled={!device.online || auto}
             style={disabledInputStyle}
           />
           <span />
         </div>
         <div className="form-row">
-          <label>ポート</label>
+          <label>{t('node.mqtt.port')}</label>
           <input
             className="form-input short"
             type="number"
@@ -729,8 +731,7 @@ export function MqttConfigSection({
           <span />
         </div>
         <div className="form-status muted">
-          自動検出 ON の間はホスト/ポートは灰色（変更不可）— mDNS で広告された値を使います。
-          OFF にすると直接指定できます。
+          {t('node.mqtt.autoHint')}
         </div>
 
         <div className="form-row" style={{ marginTop: 6 }}>
@@ -744,30 +745,29 @@ export function MqttConfigSection({
                 onClick={() => setQos(q)}
                 disabled={!device.online}
                 title={q === 1
-                  ? 'at-least-once: ブローカーが PUBACK を返す。アラート用途の既定'
-                  : 'fire-and-forget: 再送なし。低遅延・低負荷'}
+                  ? t('node.mqtt.qos1Title')
+                  : t('node.mqtt.qos0Title')}
               >
-                QoS {q}{q === 1 ? ' (確実)' : ' (高速)'}
+                {q === 1 ? t('node.mqtt.qos1') : t('node.mqtt.qos0')}
               </button>
             ))}
           </div>
           <span />
         </div>
         <div className="form-status muted">
-          既定は QoS 1（at-least-once: ブローカーが PUBACK で確実に受領）。低遅延優先 / 取りこぼし許容
-          の場合のみ QoS 0。
+          {t('node.mqtt.qosHint')}
         </div>
 
         <div className="form-action-row" style={{ marginTop: 8 }}>
-          <button className="form-button" onClick={applyBroker} disabled={!device.online}>適用</button>
+          <button className="form-button" onClick={applyBroker} disabled={!device.online}>{t('common.update')}</button>
         </div>
       </div>
 
       {/* ── Group 2: TOPIC — receiver の購読 topic (item 8) ── */}
       {role === 'receiver' && (() => {
         const opts = Array.from(new Set(['default-topic', ...registeredTopics, ...recvTopics]))
-        const toggle = (t: string) =>
-          setRecvTopics((s) => (s.includes(t) ? s.filter((x) => x !== t) : [...s, t]))
+        const toggle = (topic: string) =>
+          setRecvTopics((s) => (s.includes(topic) ? s.filter((x) => x !== topic) : [...s, topic]))
         const addManual = () => {
           const t = sanitizeTopic(recvManual)
           if (t && !recvTopics.includes(t)) setRecvTopics((s) => [...s, t])
@@ -777,23 +777,23 @@ export function MqttConfigSection({
           <div className="form-section">
             <div className="form-section-title">
               TOPIC
-              <span className="form-section-sub-inline">{' '}— この受信機が購読する topic</span>
+              <span className="form-section-sub-inline">{' '}{t('node.mqtt.recvSubtitle')}</span>
             </div>
             <div className="form-row" style={{ marginTop: 6, alignItems: 'flex-start' }}>
-              <label>受信 topic</label>
+              <label>{t('node.mqtt.recvTopic')}</label>
               <div className="form-row-multi" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
-                {opts.map((t) => (
-                  <label key={t} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                {opts.map((topic) => (
+                  <label key={topic} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                     <input
                       type="checkbox"
-                      checked={recvTopics.includes(t)}
-                      onChange={() => toggle(t)}
+                      checked={recvTopics.includes(topic)}
+                      onChange={() => toggle(topic)}
                       disabled={!device.online}
                     />
-                    <span className="mono">{t}</span>
-                    {t === 'default-topic' && <span className="form-status muted" style={{ margin: 0 }}>（既定）</span>}
-                    {!registeredTopics.includes(t) && t !== 'default-topic' && (
-                      <span className="form-status muted" style={{ margin: 0 }}>（手動）</span>
+                    <span className="mono">{topic}</span>
+                    {topic === 'default-topic' && <span className="form-status muted" style={{ margin: 0 }}>{t('node.mqtt.default')}</span>}
+                    {!registeredTopics.includes(topic) && topic !== 'default-topic' && (
+                      <span className="form-status muted" style={{ margin: 0 }}>{t('node.mqtt.manual')}</span>
                     )}
                   </label>
                 ))}
@@ -803,7 +803,7 @@ export function MqttConfigSection({
                     value={recvManual}
                     onChange={(e) => setRecvManual(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') addManual() }}
-                    placeholder="手動で topic を追加"
+                    placeholder={t('node.mqtt.manualPlaceholder')}
                     maxLength={32}
                     disabled={!device.online}
                     style={{ flex: 1, minWidth: 0 }}
@@ -821,11 +821,10 @@ export function MqttConfigSection({
               <span />
             </div>
             <div className="form-status muted">
-              この受信機が購読する topic。センサー側で送信している topic と一致させたものだけが届きます（複数選択可）。
-              何もチェックしなければ default-topic のみ受信。チェック状態はデバイスの現在の購読設定を反映します。
+              {t('node.mqtt.recvHint')}
             </div>
             <div className="form-action-row" style={{ marginTop: 8 }}>
-              <button className="form-button" onClick={applyRecvTopics} disabled={!device.online}>適用</button>
+              <button className="form-button" onClick={applyRecvTopics} disabled={!device.online}>{t('common.update')}</button>
             </div>
           </div>
         )
@@ -835,43 +834,41 @@ export function MqttConfigSection({
       {role === 'receiver' && (
         <div className="form-section">
           <div className="form-section-title">
-            アラート動作
-            <span className="form-section-sub-inline">{' '}— 受信時の振動の挙動</span>
+            {t('node.mqtt.alertTitle')}
+            <span className="form-section-sub-inline">{' '}{t('node.mqtt.alertSubtitle')}</span>
           </div>
           <div className="form-row" style={{ marginTop: 6 }}>
-            <label>動作</label>
+            <label>{t('node.mqtt.behavior')}</label>
             <div className="form-row-multi" style={{ gap: 6 }}>
               <button
                 type="button"
                 className={`form-button${alertLoop ? '' : '-secondary'}`}
                 onClick={(e) => applyAlertLoop(e, true)}
                 disabled={!device.online}
-                title="アラートを受信したら、本体ボタンを長押しするまで振動を繰り返す"
+                title={t('node.mqtt.loopTitle')}
               >
-                ループ (ボタンで停止)
+                {t('node.mqtt.loop')}
               </button>
               <button
                 type="button"
                 className={`form-button${!alertLoop ? '' : '-secondary'}`}
                 onClick={(e) => applyAlertLoop(e, false)}
                 disabled={!device.online}
-                title="アラートを受信したら 1 回だけ振動する"
+                title={t('node.mqtt.onceTitle')}
               >
-                単発
+                {t('node.mqtt.once')}
               </button>
             </div>
             <span />
           </div>
           <div className="form-status muted">
-            「ループ」: アラート振動を、本体ボタンの長押しで止めるまで繰り返します
-            (病院アラートのように「気づいて止める」運用)。「単発」: 1 回だけ振動。
-            既定はループ。変更は次のアラートから即時反映されます。
+            {t('node.mqtt.alertHint')}
           </div>
 
           {/* 停止の長押し時間 (§6.1) — 誤操作防止のため一度離して長押しで停止。
               既定 1000ms。即時反映 (受信ごとに参照)。 */}
           <div className="form-row" style={{ marginTop: 10 }}>
-            <label>停止の長押し</label>
+            <label>{t('node.mqtt.ackHold')}</label>
             <div className="form-row-multi" style={{ gap: 6 }}>
               <input
                 className="form-input short"
@@ -885,13 +882,13 @@ export function MqttConfigSection({
               />
               <span className="form-status muted" style={{ margin: 0 }}>ms</span>
               <button className="form-button-secondary" onClick={applyAckHold} disabled={!device.online}>
-                適用
+                {t('common.update')}
               </button>
             </div>
             <span />
           </div>
           <div className="form-status muted">
-            アラートを止めるには、ボタンを一度離してからこの時間だけ長押しします（誤操作・押しっぱなし対策）。既定 1000 ms。
+            {t('node.mqtt.ackHint')}
           </div>
 
           {/* 制限モード (§6.3) — read-only。本体ボタンの limit_toggle アクション
@@ -899,7 +896,7 @@ export function MqttConfigSection({
               値は通常サイズ・明色で表示し、補足説明 (.muted) と区別する。 */}
           {cachedInfo?.alert_limit != null && (
             <div className="form-row" style={{ marginTop: 10 }}>
-              <label>受信制限</label>
+              <label>{t('node.mqtt.limit')}</label>
               <span
                 style={{
                   fontSize: 15,
@@ -908,15 +905,14 @@ export function MqttConfigSection({
                   color: cachedInfo.alert_limit ? 'var(--warning)' : 'var(--text-primary)',
                 }}
               >
-                {cachedInfo.alert_limit ? '制限モード（重要な色のみ再生）' : '全て再生'}
+                {cachedInfo.alert_limit ? t('node.mqtt.limitOn') : t('node.mqtt.limitOff')}
               </span>
               <span />
             </div>
           )}
           {cachedInfo?.alert_limit != null && (
             <div className="form-status muted">
-              受信機本体に <code>limit_toggle</code> を割り当てたボタンで切替えます（UI からは変更不可・現在値の表示のみ）。
-              「制限モード」では「重要」フラグの付いた色だけを再生します。
+              {t('node.mqtt.limitHint')}
             </div>
           )}
         </div>
@@ -941,6 +937,7 @@ export function BrokerConfigSection({
   cachedInfo?: NodeConfigInfo
   sendTo: (msg: ManagerMessage) => void
 }) {
+  const { t } = useI18n()
   const [octet, setOctet] = useState<number>(cachedInfo?.static_octet ?? 10)
   const [port, setPort] = useState<number>(cachedInfo?.mqtt_port ?? 1883)
 
@@ -964,17 +961,17 @@ export function BrokerConfigSection({
 
       <div className="form-section">
         <div className="form-section-title">
-          ブローカー設定
+          {t('node.broker.title')}
           <span className="form-section-sub-inline">
-            {' '}— 組み込み MQTT ブローカー (PC 不要)
+            {' '}{t('node.broker.subtitle')}
           </span>
         </div>
 
         {cachedInfo?.mqtt_running != null && (
           <div className={`form-status ${cachedInfo.mqtt_running ? 'ok' : 'warn'}`}>
-            ブローカー: {cachedInfo.mqtt_running ? '稼働中' : '停止中'}
+            {t('node.broker.status', { state: cachedInfo.mqtt_running ? t('node.broker.running') : t('node.broker.stopped') })}
             {cachedInfo.mqtt_clients != null && cachedInfo.mqtt_running && (
-              <> · クライアント {cachedInfo.mqtt_clients.length} 台
+              <> {t('node.broker.clients', { count: cachedInfo.mqtt_clients.length })}
                 {cachedInfo.mqtt_clients.length > 0 && (
                   <>（{cachedInfo.mqtt_clients.map((c) => c.name || c.id).join(', ')}）</>
                 )}
@@ -984,7 +981,7 @@ export function BrokerConfigSection({
         )}
 
         <div className="form-row">
-          <label>ポート</label>
+          <label>{t('node.broker.port')}</label>
           <input
             className="form-input short"
             type="number"
@@ -997,12 +994,11 @@ export function BrokerConfigSection({
           <span />
         </div>
         <div className="form-status muted">
-          MQTT の待ち受けポート (既定 1883)。変更は再起動後に反映され、mDNS で自動検出する
-          クライアントには自動で伝わります。
+          {t('node.broker.portHint')}
         </div>
 
         <div className="form-row">
-          <label>固定ホストオクテット</label>
+          <label>{t('node.broker.octet')}</label>
           <input
             className="form-input short"
             type="number"
@@ -1015,21 +1011,17 @@ export function BrokerConfigSection({
           <span />
         </div>
         <div className="form-status muted">
-          IP アドレスの末尾番号を固定するための設定です (例: ゲートウェイが 192.168.1.1 で
-          オクテット 10 → ブローカーは 192.168.1.10 を名乗る)。mDNS の自動検出が使えない
-          ネットワークで、クライアントに固定 IP を手動設定したい場合の保険です。
-          通常 (自動検出が機能する環境) は変更不要です。
+          {t('node.broker.octetHint')}
         </div>
 
         <div className="form-action-row" style={{ marginTop: 8 }}>
           <button className="form-button" onClick={apply} disabled={!device.online}>
-            適用
+            {t('common.update')}
           </button>
         </div>
 
         <div className="form-status muted" style={{ marginTop: 6 }}>
-          topic と QoS は各クライアント側で設定します（センサーの送信 topic / 受信機の受信 topic・QoS）。
-          ブローカーは全 topic をそのまま中継するため、ここでの設定は不要です。
+          {t('node.broker.clientSettings')}
         </div>
       </div>
     </>
@@ -1135,6 +1127,7 @@ export function SensorMappingSection({
   sendTo: (msg: ManagerMessage) => void
   onRefresh: () => void
 }) {
+  const { t } = useI18n()
   const [rows, setRows] = useState<SensorMapping[]>(mappings ?? [])
   const [dirty, setDirty] = useState(false)
   // Loading/error state for the initial get_sensor_mapping (the device takes a
@@ -1504,9 +1497,9 @@ export function SensorMappingSection({
     <div className="form-section">
       <div className="form-section-title" style={{ display: 'flex', justifyContent: 'space-between' }}>
         <span>
-          {sensorType ? (SENSOR_TYPE_LABEL[sensorType] ?? sensorType) : 'センサ'}
+          {sensorType ? (SENSOR_TYPE_LABEL[sensorType] ?? sensorType) : t('node.sensor.title')}
           <span className="form-section-sub-inline">
-            {' '}— 検出値ごとに発火するイベントを割り当てる
+            {' '}{t('node.sensor.subtitle')}
           </span>
         </span>
         <button
@@ -1514,9 +1507,9 @@ export function SensorMappingSection({
           onClick={reload}
           disabled={!device.online}
           style={{ fontSize: 13, padding: '2px 8px' }}
-          title="デバイスから現在のマッピングを再取得"
+          title={t('node.sensor.reloadTitle')}
         >
-          ⟳ 読み込み
+          {t('node.sensor.reload')}
         </button>
       </div>
 
@@ -1525,7 +1518,7 @@ export function SensorMappingSection({
         <span
           className="sensor-live-swatch"
           style={reading ? { background: `rgb(${reading.r}, ${reading.g}, ${reading.b})` } : undefined}
-          title="現在の検出色 (clear 正規化)"
+          title={t('node.sensor.readingTitle')}
         />
         {reading ? (
           <>
@@ -1533,26 +1526,26 @@ export function SensorMappingSection({
             <span className="sensor-live-val mono">G {reading.g}</span>
             <span className="sensor-live-val mono">B {reading.b}</span>
             {reading.clear != null && (
-              <span className="sensor-live-clear">明るさ {reading.clear}</span>
+              <span className="sensor-live-clear">{t('node.sensor.brightness', { value: reading.clear })}</span>
             )}
             {/* Editor-side match (updates live as thresholds are edited). */}
             {liveEditorKey
-              ? <span className="sensor-live-key match" title="編集中のしきい値に一致 (保存前でも判定)">▶ {liveEditorKey}</span>
-              : <span className="sensor-live-key" title="編集中のどのしきい値にも一致していません">一致なし</span>}
+              ? <span className="sensor-live-key match" title={t('node.sensor.matchTitle')}>▶ {liveEditorKey}</span>
+              : <span className="sensor-live-key" title={t('node.sensor.noMatchTitle')}>{t('node.sensor.noMatch')}</span>}
             {/* Device-side match (what the SAVED mapping fires) — only show
                 when it differs, so the user can tell edits aren't saved yet. */}
             {reading.key && reading.key !== liveEditorKey && (
               <span className="sensor-live-key" style={{ opacity: 0.7 }}
-                title="デバイスに保存済みのマッピングによる判定 (保存後に反映)">
-                保存済: {reading.key}
+                title={t('node.sensor.savedTitle')}>
+                {t('node.sensor.saved', { key: reading.key })}
               </span>
             )}
             <span
               className="form-status muted"
               style={{ margin: 0, marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4 }}
-              title="「現在値を取り込む」が min/max にセットする幅 (現在値 ± この値)"
+              title={t('node.sensor.toleranceTitle')}
             >
-              取込幅 ±
+              {t('node.sensor.tolerance')}
               <input
                 className="form-input short"
                 type="number"
@@ -1567,8 +1560,8 @@ export function SensorMappingSection({
         ) : (
           <span className="form-status muted" style={{ margin: 0 }}>
             {device.online
-              ? 'センサ値を取得中… (1 秒ごとに更新。表示されない場合: センサ未接続 / 真っ暗 / ファームが古い)'
-              : 'デバイスがオフラインです'}
+              ? t('node.sensor.readingLoading')
+              : t('node.sensor.offline')}
           </span>
         )}
       </div>
@@ -1576,7 +1569,7 @@ export function SensorMappingSection({
       {/* Card-level send topic — the whole sensor publishes here by default.
           Colors can opt into an individual topic in their row (item 6). */}
       <div className="form-row" style={{ marginTop: 8 }}>
-        <label>送信 topic</label>
+        <label>{t('node.sensor.sendTopic')}</label>
         <select
           className="form-input"
           value={cardTopic}
@@ -1584,19 +1577,18 @@ export function SensorMappingSection({
           disabled={!device.online}
           style={{ flex: '0 0 260px' }}
         >
-          <option value="">default-topic（既定）</option>
+          <option value="">{t('node.sensor.defaultTopic')}</option>
           {topics.map((t) => (
             <option key={t} value={t}>{t}</option>
           ))}
           {cardTopic && !topics.includes(cardTopic) && (
-            <option value={cardTopic}>{cardTopic}（未登録）</option>
+            <option value={cardTopic}>{t('node.sensor.unregisteredTopic', { topic: cardTopic })}</option>
           )}
         </select>
         <span />
       </div>
       <div className="form-status muted">
-        このセンサ全体の送り先です。送り先は「MQTT」タブで登録できます。色ごとに変えたい場合は、各色を開いて
-        「個別の Topic に送信する」をチェックしてください（チェックしない色はこの設定に追従します）。
+        {t('node.sensor.topicHint')}
       </div>
 
       <datalist id="sensor-mapping-event-ids">
@@ -1604,14 +1596,14 @@ export function SensorMappingSection({
       </datalist>
 
       {loading ? (
-        <div className="form-status muted">⏳ センサ設定を読み込み中…（デバイスの応答に数秒かかる場合があります）</div>
+        <div className="form-status muted">{t('node.sensor.mappingLoading')}</div>
       ) : loadError ? (
         <div className="form-status err">
-          ✗ 読み込みに失敗しました。デバイスがオンラインか確認し、「⟳ 読み込み」で再試行してください。
+          {t('node.sensor.mappingError')}
         </div>
       ) : rows.length === 0 ? (
         <div className="form-status muted">
-          マッピング未設定です。「＋ 検知色を追加」で割り当てを作成してください。
+          {t('node.sensor.empty')}
         </div>
       ) : null}
 
@@ -1638,19 +1630,19 @@ export function SensorMappingSection({
               padding: isOpen ? '0 0 6px' : '8px 10px',
               borderBottom: isOpen ? '1px solid var(--border)' : 'none',
             }}
-            title={isOpen ? '折りたたむ' : '展開して編集'}
+            title={isOpen ? t('node.sensor.collapse') : t('node.sensor.expand')}
           >
             <span style={{ color: 'var(--text-muted)', fontSize: 11, width: 12 }}>
               {isOpen ? '▼' : '▶'}
             </span>
             {isLive && (
-              <span style={{ color: 'var(--accent)', fontSize: 11 }} title="現在の検出値に一致中">●</span>
+              <span style={{ color: 'var(--accent)', fontSize: 11 }} title={t('node.sensor.live')}>●</span>
             )}
             <span className="mono" style={{ fontWeight: 600, minWidth: 70 }}>
-              {r.key || '(キー未設定)'}
+              {r.key || t('node.sensor.noKey')}
             </span>
             <span className="mono" style={{ color: 'var(--text-muted)', fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {r.event_id || '(イベント未割当)'}
+              {r.event_id || t('node.sensor.noEvent')}
             </span>
             {!isOpen && (
               <span className="mono" style={{ color: 'var(--text-muted)', fontSize: 11 }}>
@@ -1665,7 +1657,7 @@ export function SensorMappingSection({
               className="btn-x-muted"
               onClick={(e) => { e.stopPropagation(); removeRow(i) }}
               disabled={!device.online}
-              title="この検知色を削除"
+              title={t('node.sensor.remove')}
               style={{ flexShrink: 0, marginLeft: 'auto' }}
             >
               ✕
@@ -1675,12 +1667,12 @@ export function SensorMappingSection({
           {isOpen && (
           <>
           <div className="form-row" style={{ marginTop: 8 }}>
-            <label>キー</label>
+            <label>{t('node.sensor.key')}</label>
             <input
               className="form-input"
               value={r.key}
               onChange={(e) => update(i, { key: e.target.value })}
-              placeholder="例: red"
+              placeholder={t('node.sensor.keyPlaceholder')}
               disabled={!device.online}
               style={{ flex: '0 0 120px' }}
             />
@@ -1688,7 +1680,7 @@ export function SensorMappingSection({
           </div>
 
           <div className="form-row">
-            <label>色しきい値</label>
+            <label>{t('node.sensor.thresholds')}</label>
             <div className="form-row-multi" style={{ flexWrap: 'wrap', gap: 6 }}>
               {COLOR_KEYS.map((ch) => (
                 <span key={ch} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
@@ -1722,17 +1714,17 @@ export function SensorMappingSection({
                 className="form-button-secondary"
                 onClick={() => captureFromReading(i)}
                 disabled={!device.online || !reading}
-                title={`現在の検出値 ±${tolerance} をしきい値にセット`}
+                title={t('node.sensor.captureTitle', { value: tolerance })}
                 style={{ fontSize: 12, padding: '3px 8px' }}
               >
-                現在値を取り込む
+                {t('node.sensor.capture')}
               </button>
             </div>
             <span />
           </div>
 
           <div className="form-row">
-            <label>イベント</label>
+            <label>{t('node.sensor.event')}</label>
             <input
               className="form-input mono"
               value={r.event_id}
@@ -1747,26 +1739,25 @@ export function SensorMappingSection({
           {/* Per-color OLED text shown on the receiver when this color fires
               (item 9, e.g. "Red alert occured"). Empty → no message. */}
           <div className="form-row">
-            <label>受信機の表示</label>
+            <label>{t('node.sensor.oled')}</label>
             <input
               className="form-input"
               value={r.oled ?? ''}
               onChange={(e) => update(i, { oled: e.target.value || undefined })}
-              placeholder="例: <color> alert \n occured（空欄 = 表示なし・\n で改行）"
+              placeholder={t('node.sensor.oledPlaceholder')}
               maxLength={40}
               disabled={!device.online}
             />
             <span />
           </div>
           <div className="form-status muted">
-            受信機の OLED に表示する文言。<code>\n</code> で改行できます（例:
-            <code>{'<color> alert \\n occured'}</code> → 2 行表示）。空欄 = 表示なし。
+            {t('node.sensor.oledHint')}
           </div>
 
           {/* 重要フラグ (§6.3): a color marked 重要 still plays on receivers that
               are in 制限モード (restricted). */}
           <div className="form-row">
-            <label>重要</label>
+            <label>{t('node.sensor.critical')}</label>
             <label
               className="form-status muted"
               style={{ margin: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}
@@ -1777,7 +1768,7 @@ export function SensorMappingSection({
                 onChange={(e) => update(i, { critical: e.target.checked || undefined })}
                 disabled={!device.online}
               />
-              受信機が「制限モード」でもこの色は再生する（例: 赤）
+              {t('node.sensor.criticalHint')}
             </label>
             <span />
           </div>
@@ -1787,7 +1778,7 @@ export function SensorMappingSection({
               to choose one or MORE topics for this color (each gets the play).
               Multi-select writes r.topics[]; the firmware publishes to each. */}
           <div className="form-row">
-            <label>送り先</label>
+            <label>{t('node.sensor.destination')}</label>
             <div className="form-row-multi" style={{ alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <label
                 className="form-status muted"
@@ -1799,7 +1790,7 @@ export function SensorMappingSection({
                   onChange={() => toggleOverride(i)}
                   disabled={!device.online}
                 />
-                個別の Topic に送信する（複数可）
+                {t('node.sensor.individualTopic')}
               </label>
               {overrideRows.has(i) ? (
                 <div className="form-row-multi" style={{ flexWrap: 'wrap', gap: 8 }}>
@@ -1828,7 +1819,7 @@ export function SensorMappingSection({
                 </div>
               ) : (
                 <span className="form-status muted" style={{ margin: 0 }}>
-                  カード全体（{cardTopic || 'default-topic'}）に追従
+                  {t('node.sensor.followTopic', { topic: cardTopic || 'default-topic' })}
                 </span>
               )}
             </div>
@@ -1836,19 +1827,19 @@ export function SensorMappingSection({
           </div>
 
           <div className="form-row">
-            <label>ターゲット</label>
+            <label>{t('node.sensor.target')}</label>
             <input
               className="form-input mono"
               value={r.target}
               onChange={(e) => update(i, { target: e.target.value })}
-              placeholder="空欄 = 全台 / player_1/pos_chest"
+              placeholder={t('node.sensor.targetPlaceholder')}
               disabled={!device.online}
             />
             <span />
           </div>
 
           <div className="form-row">
-            <label>ゲイン</label>
+            <label>{t('node.sensor.gain')}</label>
             <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
               <input
                 type="range"
@@ -1868,7 +1859,7 @@ export function SensorMappingSection({
           </div>
 
           <div className="form-row">
-            <label>再送間隔</label>
+            <label>{t('node.sensor.resend')}</label>
             <div className="form-row-multi" style={{ alignItems: 'center', gap: 6 }}>
               <input
                 className="form-input short"
@@ -1886,9 +1877,7 @@ export function SensorMappingSection({
             <span />
           </div>
           <div className="form-status muted">
-            この色が続いている間、この間隔で同じイベントを再送します。MQTT は QoS 1 で送信→
-            ブローカーは確実に届きますが、接続断などの取りこぼしに対するバックストップとして
-            アプリ層でも再送します (アラート用途では短め、既定 4000ms)。
+            {t('node.sensor.resendHint')}
           </div>
           </>
           )}
@@ -1898,7 +1887,7 @@ export function SensorMappingSection({
 
       <div className="form-action-row" style={{ marginTop: 10, flexWrap: 'wrap' }}>
         <button className="form-button-secondary" onClick={addRow} disabled={!device.online}>
-          ＋ 検知色を追加
+          {t('node.sensor.add')}
         </button>
         <span style={{ flex: 1 }} />
         {/* JSON save/load sit next to the device-save button (not the header)
@@ -1918,25 +1907,25 @@ export function SensorMappingSection({
         <button
           className="form-button-secondary"
           onClick={(e) => { setAnchor(e.currentTarget); fileInputRef.current?.click() }}
-          title="JSON ファイルからマッピングを読み込む（「デバイスに保存」で反映）"
+          title={t('node.sensor.importTitle')}
         >
-          ⤒ JSON 読込
+          {t('node.sensor.import')}
         </button>
         <button
           className="form-button-secondary"
           onClick={(e) => { setAnchor(e.currentTarget); exportJson() }}
           disabled={rows.length === 0}
-          title="現在のマッピングを JSON ファイルに保存"
+          title={t('node.sensor.exportTitle')}
         >
-          ⤓ JSON 保存
+          {t('node.sensor.export')}
         </button>
         <button
           className="form-button"
           onClick={(e) => { setAnchor(e.currentTarget); save() }}
           disabled={!device.online || !dirty}
-          title="編集内容をデバイスに書き込む"
+          title={t('node.sensor.saveTitle')}
         >
-          デバイスに保存
+          {t('node.sensor.save')}
         </button>
       </div>
     </div>
@@ -1961,6 +1950,7 @@ export function EspNowDisplayPowerSection({
   oledLevel: number | undefined
   sendTo: (msg: ManagerMessage) => void
 }) {
+  const { t } = useI18n()
   const ui = cachedInfo?.espnow_stream_ui
   const [autoOffMs, setAutoOffMs] = useState<number>(ui?.auto_off_ms ?? 4000)
   const [wakeOnButton, setWakeOnButton] = useState<boolean>(ui?.wake_on_button ?? true)
@@ -1997,21 +1987,21 @@ export function EspNowDisplayPowerSection({
   const offline = !device.online
 
   const BRIGHTNESS_LEVELS = [
-    { value: 1 as const, label: 'Low',  hint: '暗所・夜間 (~6%)' },
-    { value: 2 as const, label: 'Mid',  hint: '通常室内 (50%)' },
-    { value: 3 as const, label: 'High', hint: '明所 (100%)' },
+    { value: 1 as const, label: 'Low',  hint: t('node.espnowUi.low') },
+    { value: 2 as const, label: 'Mid',  hint: t('node.espnowUi.mid') },
+    { value: 3 as const, label: 'High', hint: t('node.espnowUi.high') },
   ]
 
   return (
     <div className="form-section">
       <div className="form-section-title">
-        表示・電力設定
-        <span className="form-section-sub-inline"> — ESP-NOW 受信機</span>
+        {t('node.espnowUi.title')}
+        <span className="form-section-sub-inline"> {t('node.espnowUi.subtitle')}</span>
       </div>
 
       {/* OLED brightness */}
       <div className="form-row">
-        <label>OLED 輝度</label>
+        <label>{t('node.espnowUi.brightness')}</label>
         <div className="device-toggle" role="group" aria-label="OLED brightness">
           {BRIGHTNESS_LEVELS.map((l) => (
             <button
@@ -2027,13 +2017,13 @@ export function EspNowDisplayPowerSection({
           ))}
         </div>
         <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-          {oledLevel == null ? '読込中…' : BRIGHTNESS_LEVELS.find((l) => l.value === oledLevel)?.hint ?? ''}
+          {oledLevel == null ? t('node.espnowUi.loading') : BRIGHTNESS_LEVELS.find((l) => l.value === oledLevel)?.hint ?? ''}
         </span>
       </div>
 
       {/* Auto-off timeout */}
       <div className="form-row">
-        <label>自動消灯</label>
+        <label>{t('node.espnowUi.autoOff')}</label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
             type="range"
@@ -2050,13 +2040,13 @@ export function EspNowDisplayPowerSection({
           </span>
         </div>
         <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-          操作後に OLED を消灯するまでの時間
+          {t('node.espnowUi.autoOffHint')}
         </span>
       </div>
 
       {/* Wake sources */}
       <div className="form-row">
-        <label>点灯源</label>
+        <label>{t('node.espnowUi.wake')}</label>
         <div className="form-row-multi" style={{ gap: 12, alignItems: 'center' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
             <input
@@ -2065,7 +2055,7 @@ export function EspNowDisplayPowerSection({
               onChange={(e) => setWakeOnButton(e.target.checked)}
               disabled={offline}
             />
-            ボタン
+            {t('node.espnowUi.button')}
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
             <input
@@ -2074,7 +2064,7 @@ export function EspNowDisplayPowerSection({
               onChange={(e) => setWakeOnVolume(e.target.checked)}
               disabled={offline}
             />
-            ボリューム変更
+            {t('node.espnowUi.volume')}
           </label>
         </div>
         <span />
@@ -2082,7 +2072,7 @@ export function EspNowDisplayPowerSection({
 
       {/* LED */}
       <div className="form-row">
-        <label>ステータス LED</label>
+        <label>{t('node.espnowUi.statusLed')}</label>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
           <input
             type="checkbox"
@@ -2090,14 +2080,14 @@ export function EspNowDisplayPowerSection({
             onChange={(e) => setLedEnabled(e.target.checked)}
             disabled={offline}
           />
-          使用する
+          {t('node.espnowUi.enabled')}
         </label>
         <span />
       </div>
 
       {/* Low battery threshold */}
       <div className="form-row">
-        <label>低電池表示 (%)</label>
+        <label>{t('node.espnowUi.lowBattery')}</label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
             type="range"
@@ -2114,7 +2104,7 @@ export function EspNowDisplayPowerSection({
           </span>
         </div>
         <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-          バッテリー残量がこの値以下で OLED 点灯
+          {t('node.espnowUi.lowBatteryHint')}
         </span>
       </div>
 
@@ -2124,7 +2114,7 @@ export function EspNowDisplayPowerSection({
           onClick={applyAll}
           disabled={offline}
         >
-          適用
+          {t('common.update')}
         </button>
       </div>
     </div>
@@ -2507,6 +2497,7 @@ export function DuoWlV4AudioSection({
   /** Transport-correct get_info refresh, wired by DeviceDetail (finding 3). */
   onReconcile?: () => void
 }) {
+  const { t } = useI18n()
   const ip = device.ipAddress
   const audio = cachedInfo?.audio
   const { setAnchor } = useToast()
@@ -2577,18 +2568,18 @@ export function DuoWlV4AudioSection({
     <>
     <div className="form-section duo-v4-config">
       <div className="form-section-title">
-        ゲイン設定（DuoWL v4）
-        <span className="form-section-sub-inline"> — IC 別・個体差キャリブレーション</span>
+        {t('node.audio.title')}
+        <span className="form-section-sub-inline"> {t('node.audio.subtitle')}</span>
       </div>
       <div className="form-status muted" style={{ marginBottom: 6, fontSize: 12 }}>
-        信号の流れ: DAC(AIC3204) → ライン出力(AIC3204) → PAM8404 → 触覚モータ ／ 別系統: DAC → TPA6130A2 → ヘッドホン
+        {t('node.audio.signalPath')}
       </div>
 
       {/* 0. Input/output routing — output=通常のヘッドホン出力, line_in=ジャックから
           有線音声を入力して触覚に出す（DuoWL v4 専用）。discrete: クリックで
           即座に persist:true 送信（適用ボタンを待たない）。 */}
       <div className="form-row">
-        <label>入出力モード</label>
+        <label>{t('node.audio.inputMode')}</label>
         <div className="device-toggle" role="group" aria-label="input/output mode">
           <button
             type="button"
@@ -2596,7 +2587,7 @@ export function DuoWlV4AudioSection({
             onClick={(e) => { setAnchor(e.currentTarget); inputMode.commit('output') }}
             disabled={offline}
           >
-            出力（ヘッドホン）
+            {t('node.audio.output')}
           </button>
           <button
             type="button"
@@ -2604,7 +2595,7 @@ export function DuoWlV4AudioSection({
             onClick={(e) => { setAnchor(e.currentTarget); inputMode.commit('line_in') }}
             disabled={offline}
           >
-            入力（ライン入力）
+            {t('node.audio.lineIn')}
           </button>
         </div>
         <DirtyMark dirty={inputMode.dirty} deviceValue={audio?.input_mode} />
@@ -2613,14 +2604,14 @@ export function DuoWlV4AudioSection({
           the rows below when inputMode changes (layout-shift rule). */}
       <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
         {inputMode.value === 'line_in'
-          ? 'ライン入力: ジャックからの有線音声を触覚として出力します。'
-          : '出力: 通常のヘッドホン再生です。'}
+          ? t('node.audio.lineInHint')
+          : t('node.audio.outputHint')}
       </div>
 
       {/* 1. PAM8404 power amp (coarse, drives the motors). discrete: クリックで
           即座に persist:true 送信（下の適用ボタンはライン出力との一括再送用）。 */}
       <div className="form-row">
-        <label>触覚アンプ<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>PAM8404</span></label>
+        <label>{t('node.audio.hapticAmp')}<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>PAM8404</span></label>
         <div className="device-toggle" role="group" aria-label="PAM8404 gain">
           {PAM_GAIN_STEPS.map((v) => (
             <button
@@ -2636,13 +2627,13 @@ export function DuoWlV4AudioSection({
         </div>
         <DirtyMark dirty={pam.dirty} deviceValue={audio?.pam_db} format={(v) => `${v} dB`} />
       </div>
-      <div className="form-status muted" style={{ fontSize: 12 }}>パワーアンプの粗ゲイン。触覚モータを駆動（4 段）</div>
+      <div className="form-status muted" style={{ fontSize: 12 }}>{t('node.audio.hapticAmpHint')}</div>
 
       {/* 2. AIC3204 (U1) line-out driver — analog pre-amp before the PAM.
           slider: ドラッグ中は persist:false でライブプレビュー、離した瞬間
           (pointer-up/blur) に persist:true でコミット。 */}
       <div className="form-row">
-        <label>触覚ライン出力<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>AIC3204 U1</span></label>
+        <label>{t('node.audio.hapticLineout')}<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>AIC3204 U1</span></label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
             type="range"
@@ -2663,19 +2654,18 @@ export function DuoWlV4AudioSection({
         <DirtyMark dirty={lineout.dirty} deviceValue={audio?.lineout_db} format={(v) => `${v} dB`} />
       </div>
       <div className="form-status muted" style={{ fontSize: 12 }}>
-        codec のライン出力ドライバ（PAM の前段・<b>固定</b>アナログゲイン、−6〜+29 dB）。
-        ※ ボリュームノブ（var/fix）で変わる音量はこれとは別系統（DAC デジタルボリューム、debug 情報の Volume 参照）。
+        {t('node.audio.lineoutHint')}
       </div>
 
       <div className="form-action-row" style={{ marginTop: 8 }}>
         <button className="form-button" onClick={applyHapticGain} disabled={offline}>
-          触覚ゲインを適用（PAM + ライン出力）
+          {t('node.audio.applyHaptic')}
         </button>
       </div>
 
       {/* 3. AIC3204 DAC digital make-up boost (affects BOTH codecs) */}
       <div className="form-row" style={{ marginTop: 12 }}>
-        <label>DAC ブースト<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>AIC3204 DAC</span></label>
+        <label>{t('node.audio.dacBoost')}<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>AIC3204 DAC</span></label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
             type="range"
@@ -2698,12 +2688,11 @@ export function DuoWlV4AudioSection({
       {/* min-height reserved so this hint is always present — never shifts
           the action row below when boostDb changes (layout-shift rule). */}
       <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
-        DAC デジタルボリュームに一律加算（触覚・HP 両 codec）。0 = 無効（既定・0 dB 上限）。
-        0 超は 0dBFS 素材がクリップし得る（歪みが少ないのはアナログの「ライン出力」側）。
+        {t('node.audio.dacBoostHint')}
       </div>
       <div className="form-action-row" style={{ marginTop: 8 }}>
         <button className="form-button" onClick={applyBoost} disabled={offline}>
-          DAC ブーストを適用
+          {t('node.audio.applyBoost')}
         </button>
       </div>
 
@@ -2713,7 +2702,7 @@ export function DuoWlV4AudioSection({
           the adopt-when-not-dirty rule above (useDeviceBackedValue) picks
           it up automatically. */}
       <div className="form-row" style={{ marginTop: 12 }}>
-        <label>ヘッドホン音量<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>TPA6130A2</span></label>
+        <label>{t('node.audio.headphoneVolume')}<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>TPA6130A2</span></label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
             type="range"
@@ -2734,12 +2723,12 @@ export function DuoWlV4AudioSection({
         <DirtyMark dirty={hp.dirty} deviceValue={audio?.hp_db} format={(v) => `${v} dB`} />
       </div>
       <div className="form-status muted" style={{ fontSize: 12 }}>
-        HP アンプ出力（触覚音量とは独立）／本体ボタン（再生モード時: 右上 SW4=+ / 右下 SW5=−）でも操作できます。ホイールは触覚音量のみ。
+        {t('node.audio.headphoneHint')}
       </div>
 
       <div className="form-action-row" style={{ marginTop: 8 }}>
         <button className="form-button" onClick={applyHpVolume} disabled={offline}>
-          ヘッドホン音量を適用
+          {t('node.audio.applyHeadphone')}
         </button>
       </div>
     </div>
@@ -2749,11 +2738,11 @@ export function DuoWlV4AudioSection({
         read back via get_info.audio.stream_buffer_ms (was write-only). */}
     <div className="form-section duo-v4-config">
       <div className="form-section-title">
-        ストリーム再生バッファ
-        <span className="form-section-sub-inline"> — 遅延 vs 途切れ</span>
+        {t('node.audio.bufferTitle')}
+        <span className="form-section-sub-inline"> {t('node.audio.bufferSubtitle')}</span>
       </div>
       <div className="form-row">
-        <label>プリセット</label>
+        <label>{t('node.audio.preset')}</label>
         <div className="device-toggle" role="group" aria-label="stream buffer preset">
           <button
             type="button"
@@ -2761,7 +2750,7 @@ export function DuoWlV4AudioSection({
             onClick={() => buffer.commit(0)}
             disabled={offline}
           >
-            低遅延 0ms（触覚）
+            {t('node.audio.lowLatency')}
           </button>
           <button
             type="button"
@@ -2769,13 +2758,13 @@ export function DuoWlV4AudioSection({
             onClick={() => buffer.commit(120)}
             disabled={offline}
           >
-            音楽 120ms
+            {t('node.audio.music')}
           </button>
         </div>
         <DirtyMark dirty={buffer.dirty} deviceValue={audio?.stream_buffer_ms} format={(v) => `${v} ms`} />
       </div>
       <div className="form-row">
-        <label>微調整</label>
+        <label>{t('node.audio.fineTune')}</label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
             type="range"
@@ -2794,18 +2783,15 @@ export function DuoWlV4AudioSection({
           </span>
         </div>
         <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-          0=低遅延（触覚向き）。大きいほど Wi-Fi のゆらぎで途切れにくいが、その分再生が遅れる（HP 音楽向き）。
+          {t('node.audio.bufferHint')}
         </span>
       </div>
       <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
-        ※ Wi-Fi UDP では常に有効。ESP-NOW では <b>SOLID48 (mode 9) 専用</b>です —
-        SOLID48 選択中のみ既定 120ms よりこの値が優先され（送信機の fleet 設定(0xAC)があれば最優先）、
-        他のモード (0-8) はモード別の固定バッファで動作しこの設定の影響を受けません。
-        縮小も再生中に即反映されます。
+        {t('node.audio.solidHint')}
       </div>
       <div className="form-action-row" style={{ marginTop: 8 }}>
         <button className="form-button" onClick={applyBuffer} disabled={offline}>
-          バッファを適用
+          {t('node.audio.applyBuffer')}
         </button>
       </div>
     </div>
@@ -2840,6 +2826,7 @@ export function DuoWlV4EspNowAudioSection({
   syncTick?: number
   onReconcile?: () => void
 }) {
+  const { t } = useI18n()
   const ip = device.ipAddress
   const { setAnchor } = useToast()
   const offline = !device.online
@@ -2857,23 +2844,23 @@ export function DuoWlV4EspNowAudioSection({
 
   // Dynamic hint (min-height reserved — layout-shift rule, changes on drag).
   const hintText = avDelay.value < 0
-    ? `触覚を ${Math.abs(avDelay.value)}ms 遅延`
+    ? t('node.audio.avHaptic', { value: Math.abs(avDelay.value) })
     : avDelay.value > 0
-      ? `音声(HP)を ${avDelay.value}ms 遅延`
-      : 'ディレイなし'
+      ? t('node.audio.avHeadphone', { value: avDelay.value })
+      : t('node.audio.noDelay')
 
   return (
     <div className="form-section duo-v4-config">
       <div className="form-section-title">
-        A-V ディレイ（DuoWL v4）
-        <span className="form-section-sub-inline"> — 音声-触覚間ディレイ</span>
+        {t('node.audio.avTitle')}
+        <span className="form-section-sub-inline"> {t('node.audio.avSubtitle')}</span>
       </div>
 
       {/* A-V delay — SIGNED: negative delays haptic, positive delays HP audio
           (audio-dsp-config.md §3). slider: ドラッグ中は persist:false でライブ
           プレビュー、離した瞬間 (pointer-up/blur) に persist:true でコミット。 */}
       <div className="form-row">
-        <label>A-V ディレイ</label>
+        <label>{t('node.audio.avTitle')}</label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
             type="range"
@@ -2899,11 +2886,11 @@ export function DuoWlV4EspNowAudioSection({
         {hintText}
       </div>
       <div className="form-status muted" style={{ fontSize: 12 }}>
-        負の値: 触覚を音声（ヘッドホン）に対して遅らせます。正の値: 音声を触覚に対して遅らせます（モーターの反応が遅いぶん、音声側を遅らせて合わせる）。0=遅延なし。
+        {t('node.audio.avHint')}
       </div>
       <div className="form-action-row" style={{ marginTop: 8 }}>
         <button className="form-button" onClick={applyAvDelay} disabled={offline}>
-          ディレイを適用
+          {t('node.audio.applyDelay')}
         </button>
       </div>
     </div>
@@ -3124,6 +3111,7 @@ function EqBandEditor({
   onChange: (next: EqBandDraft) => void
   onApply: (e: React.MouseEvent<HTMLElement>) => void
 }) {
+  const { t } = useI18n()
   const fs = EQ_FS[codec]
   const result = useMemo(
     () => computeAic3204Eq({ ftype: draft.ftype, fs, fc: draft.fc, q: draft.q, gainDb: draft.gainDb }),
@@ -3136,7 +3124,7 @@ function EqBandEditor({
     <div
       className="form-row"
       style={{ marginTop: band === 0 ? 6 : 14, alignItems: 'flex-start', opacity: active ? 1 : 0.45 }}
-      title={active ? undefined : 'このプロファイルでは無効なバンドです（値は保存されますが再生には反映されません）'}
+      title={active ? undefined : t('node.eq.inactiveTitle')}
     >
       <label>band {band}</label>
       <div className="form-row-multi" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
@@ -3188,24 +3176,24 @@ function EqBandEditor({
             disabled={offline}
             style={{ marginLeft: 'auto', flexShrink: 0 }}
           >
-            適用
+            {t('common.update')}
           </button>
         </div>
         {/* Fixed-height status line (layout-shift rule): always present,
             only the text/color changes between off / ok / warn states. */}
         <div className="form-status muted" style={{ minHeight: 16, fontSize: 11, margin: 0 }}>
-          {!active ? 'このプロファイルでは無効（値は保存されるのみ）・ ' : ''}
+          {!active ? t('node.eq.inactive') : ''}
           {isOff
-            ? 'オフ（素通し）'
+            ? t('node.eq.off')
             : result.clamped
-              ? '⚠ 係数が上限を超えクランプされました。ゲインを下げるか別バンド/DAC ブーストで補ってください。'
+              ? t('node.eq.clamped')
               : result.overflowed
-                ? `オートプリスケール中 — 約 ${result.makeupDb.toFixed(2)}dB 分を他（DAC ブースト等）で補ってください`
+                ? t('node.eq.prescale', { value: result.makeupDb.toFixed(2) })
                 : `N0=${result.coeffs.N0} N1=${result.coeffs.N1} N2=${result.coeffs.N2} D1=${result.coeffs.D1} D2=${result.coeffs.D2}`}
         </div>
         {committed && (
           <div className="form-status muted" style={{ fontSize: 10, margin: 0, opacity: 0.7 }}>
-            実機の設定: {committed.ftype} [{committed.coeffs.join(', ')}]
+            {t('node.eq.device', { type: committed.ftype, coeffs: committed.coeffs.join(', ') })}
           </div>
         )}
       </div>
@@ -3290,6 +3278,7 @@ function EqResponseGraph({
   /** Device commit send (persist:true) — drag release / wheel settle. */
   onCommitSend: (band: number, next: EqBandDraft) => void
 }) {
+  const { t } = useI18n()
   const fMax = fs / 2
   const plotW = EQ_GRAPH_W - EQ_GRAPH_PAD.l - EQ_GRAPH_PAD.r
   const plotH = EQ_GRAPH_H - EQ_GRAPH_PAD.t - EQ_GRAPH_PAD.b
@@ -3525,7 +3514,7 @@ function EqResponseGraph({
         })}
       </svg>
       <div style={{ fontSize: 10, color: 'var(--text-muted, #adafba)', marginBottom: 8 }}>
-        ノードをドラッグ: 横=fc / 縦=gain・Q（ホイールで Q 微調整、離すと確定）
+        {t('node.eq.dragHint')}
       </div>
     </div>
   )
@@ -3558,6 +3547,7 @@ function DspProfileSelector({
   syncTick?: number
   onReconcile?: () => void
 }) {
+  const { t } = useI18n()
   const offline = !device.online
   const { setAnchor } = useToast()
   const scheduleReconcile = useReconcileScheduler(onReconcile)
@@ -3577,7 +3567,7 @@ function DspProfileSelector({
 
   return (
     <div className="form-row" style={{ marginTop: 6, alignItems: 'flex-start' }}>
-      <label>DSP プロファイル</label>
+      <label>{t('node.eq.dspProfile')}</label>
       <div className="form-row-multi" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
         <div className="device-toggle" role="group" aria-label="DSP profile">
           {DSP_PROFILE_OPTIONS.map((o) => (
@@ -3635,6 +3625,7 @@ function IirEditor({
   syncTick?: number
   onReconcile?: () => void
 }) {
+  const { t } = useI18n()
   const offline = !device.online
   const { setAnchor } = useToast()
   const scheduleReconcile = useReconcileScheduler(onReconcile)
@@ -3660,9 +3651,9 @@ function IirEditor({
     <div
       className="form-row"
       style={{ marginTop: 14, alignItems: 'flex-start', opacity: hasIir ? 1 : 0.45 }}
-      title={hasIir ? undefined : 'このプロファイルでは無効なブロックです（値は保存されるのみ）'}
+      title={hasIir ? undefined : t('node.eq.iirInactiveTitle')}
     >
-      <label>1次IIR</label>
+      <label>{t('node.eq.iirTitle')}</label>
       <div className="form-row-multi" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
@@ -3699,12 +3690,12 @@ function IirEditor({
             disabled={offline}
             style={{ marginLeft: 'auto', flexShrink: 0 }}
           >
-            適用
+            {t('common.update')}
           </button>
         </div>
         <div className="form-status muted" style={{ minHeight: 16, fontSize: 11, margin: 0 }}>
-          {!hasIir && 'このプロファイルでは無効（値は保存されるのみ）・ '}
-          raw Q1.23 int [N0,N1,D1]（H(z)=(N0+2N1z⁻¹)/(1−2D1z⁻¹) 想定・fc/Q 設計は未対応）
+          {!hasIir && t('node.eq.inactive')}
+          {t('node.eq.iirHint')}
         </div>
       </div>
       <DirtyMark dirty={iir.dirty} deviceValue={deviceIir ? `${deviceIir[0]},${deviceIir[1]},${deviceIir[2]}` : undefined} />
@@ -3968,6 +3959,7 @@ function EqPresetBar({
   const [importError, setImportError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { setAnchor, toast } = useToast()
+  const { t } = useI18n()
   const offline = !device.online
   const codecLabel = codec === 'haptic' ? '触覚' : 'ヘッドホン'
   // Actual band count for THIS block — 6 for DuoWL v4 (EQ_BAND_COUNT), 3 for
@@ -4011,14 +4003,14 @@ function EqPresetBar({
     next.sort((a, b) => a.name.localeCompare(b.name))
     persist(next)
     setSelected(trimmed)
-    toast(`プリセット「${trimmed}」を保存しました`, 'success')
+    toast(t('node.presetSaved', { name: trimmed }), 'success')
   }
 
   const handleDelete = (e: React.MouseEvent<HTMLButtonElement>) => {
     setAnchor(e.currentTarget)
     if (!selected) return
     persist(presets.filter((p) => p.name !== selected))
-    toast(`プリセット「${selected}」を削除しました`, 'success')
+    toast(t('node.presetDeleted', { name: selected }), 'success')
     setSelected('')
   }
 
@@ -4026,7 +4018,7 @@ function EqPresetBar({
     setAnchor(e.currentTarget)
     const payload = { version: 1, codec, bands: drafts }
     downloadTextFile(`hapbeat-eq-${codec}-${Date.now()}.json`, JSON.stringify(payload, null, 2))
-    toast('EQ 設定を JSON にエクスポートしました', 'success')
+    toast(t('node.eqExported'), 'success')
   }
 
   const handleImportFile = (file: File) => {
@@ -4042,7 +4034,7 @@ function EqPresetBar({
         onLoad(normalizeEqDrafts(obj.bands, codec, bandCount, allOffDefault))
         setImportError(null)
         setSelected('')
-        toast('EQ 設定を JSON から読み込みました（未適用 — 「適用」で反映）', 'success')
+        toast(t('node.eqImported'), 'success')
       } catch (e) {
         setImportError(e instanceof Error ? e.message : 'JSON を解析できません')
         setTimeout(() => setImportError(null), 6000)
@@ -4066,17 +4058,17 @@ function EqPresetBar({
         payload: { codec, band, ftype: draft.ftype, coeffs: aic3204CoeffsToArray(result.coeffs), persist: true },
       })
     })
-    toast(`${codecLabel} EQ ${bandCount} バンドをデバイスへ送信しました`, 'success')
+    toast(t('node.eqSent', { codec: codecLabel, count: bandCount }), 'success')
   }
 
   return (
     <div className="form-section duo-v4-config">
       <div className="form-section-title">
-        EQ プリセット
-        <span className="form-section-sub-inline"> — 保存・呼び出し・JSON 共有（{codecLabel} {bandCount}band）</span>
+        {t('node.eq.presetTitle')}
+        <span className="form-section-sub-inline"> {t('node.eq.presetSubtitle', { codec: codecLabel, count: bandCount })}</span>
       </div>
       <div className="form-row">
-        <label>プリセット</label>
+        <label>{t('node.eq.preset')}</label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <select
             className="form-input"
@@ -4084,13 +4076,13 @@ function EqPresetBar({
             onChange={(e) => handleSelectChange(e.target.value)}
             style={{ flex: 1 }}
           >
-            <option value="">プリセットを選択…</option>
+            <option value="">{t('node.eq.choosePreset')}</option>
             {presets.map((p) => (
               <option key={p.name} value={p.name}>{p.name}</option>
             ))}
           </select>
           <button className="form-button-secondary" onClick={handleSave} style={{ flexShrink: 0 }}>
-            保存
+            {t('node.eq.save')}
           </button>
           <button
             className="form-button-secondary"
@@ -4098,7 +4090,7 @@ function EqPresetBar({
             disabled={!selected}
             style={{ flexShrink: 0 }}
           >
-            削除
+            {t('node.eq.delete')}
           </button>
         </div>
         <span />
@@ -4126,25 +4118,25 @@ function EqPresetBar({
         <button
           className="form-button-secondary"
           onClick={(e) => { setAnchor(e.currentTarget); fileInputRef.current?.click() }}
-          title="JSON ファイルから EQ 設定を読み込む（適用ボタンで反映）"
+          title={t('node.eq.importTitle')}
         >
-          JSON インポート
+          {t('node.eq.import')}
         </button>
         <button
           className="form-button-secondary"
           onClick={handleExport}
-          title={`現在の${codecLabel} EQ 設定を JSON ファイルに保存`}
+          title={t('node.eq.exportTitle', { codec: codecLabel })}
         >
-          JSON エクスポート
+          {t('node.eq.export')}
         </button>
         <span style={{ flex: 1 }} />
         <button
           className="form-button"
           onClick={applyAll}
           disabled={offline}
-          title={`${codecLabel} の ${bandCount} バンドをまとめてデバイスへ送信`}
+          title={t('node.eq.applyTitle', { codec: codecLabel, count: bandCount })}
         >
-          適用
+          {t('common.update')}
         </button>
       </div>
     </div>
@@ -4167,6 +4159,7 @@ export function DuoWlV4EqSection({
   /** Transport-correct get_info refresh, wired by DeviceDetail. */
   onReconcile?: () => void
 }) {
+  const { t } = useI18n()
   const ip = device.ipAddress
 
   // Local-only design state (fc/Q/gain aren't recoverable from the device) —
@@ -4191,7 +4184,7 @@ export function DuoWlV4EqSection({
           preset/save/load/JSON are fully independent. */}
       <DuoWlV4EqCodecBlock
         codec="haptic"
-        title="触覚 EQ"
+        title={t('node.eq.haptic')}
         fsLabel="16kHz"
         device={device}
         cachedInfo={cachedInfo}
@@ -4204,7 +4197,7 @@ export function DuoWlV4EqSection({
       />
       <DuoWlV4EqCodecBlock
         codec="hp"
-        title="ヘッドホン EQ"
+        title={t('node.eq.headphone')}
         fsLabel="48kHz"
         device={device}
         cachedInfo={cachedInfo}
@@ -4266,6 +4259,7 @@ export function SwHapticEqSection({
   syncTick?: number
   onReconcile?: () => void
 }) {
+  const { t } = useI18n()
   const ip = device.ipAddress
 
   // Same store as DuoWL v4 (keyed per device IP, EqBandDraft[] shape is
@@ -4288,9 +4282,9 @@ export function SwHapticEqSection({
   return (
     <DuoWlV4EqCodecBlock
       codec="haptic"
-      title="触覚 EQ"
+      title={t('node.eq.haptic')}
       fsLabel="16kHz"
-      subtitle={`ソフトウェア biquad（ミキサー段）×${SW_HAPTIC_EQ_BAND_COUNT}band（16kHz）`}
+      subtitle={t('node.eq.swSubtitle', { count: SW_HAPTIC_EQ_BAND_COUNT })}
       device={device}
       cachedInfo={cachedInfo}
       committed={cachedInfo?.eq?.haptic}
@@ -4424,6 +4418,7 @@ function DrcPanel({
   syncTick?: number
   onReconcile?: () => void
 }) {
+  const { t } = useI18n()
   const offline = !device.online
   const { setAnchor } = useToast()
   const scheduleReconcile = useReconcileScheduler(onReconcile)
@@ -4470,13 +4465,13 @@ function DrcPanel({
     <div className="form-section duo-v4-config">
       <div className="form-section-title">
         {title}
-        <span className="form-section-sub-inline"> — DRC（コンプレッサ／リミッタ）</span>
+        <span className="form-section-sub-inline"> {t('node.dsp.drcSubtitle')}</span>
       </div>
       {/* Fixed-height status line (layout-shift rule): always present. */}
       <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
         {caps.has_drc
-          ? '現在のプロファイルで有効です。'
-          : `⚠ 現在のプロファイルは DRC 非対応です（eq6_drc / full を選択してください）。値は保存され、対応プロファイルに切り替えると反映されます。`}
+          ? t('node.dsp.active')
+          : t('node.dsp.drcInactive')}
       </div>
 
       {/* Dim (not disable) when the profile lacks DRC — same "still
@@ -4485,7 +4480,7 @@ function DrcPanel({
           above. */}
       <div style={{ opacity: caps.has_drc ? 1 : 0.6 }}>
       <div className="form-row">
-        <label>有効</label>
+        <label>{t('node.dsp.enabled')}</label>
         <div className="device-toggle" role="group" aria-label="DRC enable L/R">
           <button
             type="button"
@@ -4508,7 +4503,7 @@ function DrcPanel({
       </div>
 
       <div className="form-row">
-        <label>しきい値</label>
+        <label>{t('node.dsp.threshold')}</label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
             type="range"
@@ -4528,7 +4523,7 @@ function DrcPanel({
       </div>
 
       <div className="form-row">
-        <label>ヒステリシス</label>
+        <label>{t('node.dsp.hysteresis')}</label>
         <div className="device-toggle" role="group" aria-label="DRC hysteresis">
           {DRC_HYSTERESIS_STEPS.map((step) => (
             <button
@@ -4546,7 +4541,7 @@ function DrcPanel({
       </div>
 
       <div className="form-row">
-        <label>ホールド<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>raw code 0-15</span></label>
+        <label>{t('node.dsp.hold')}<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>raw code 0-15</span></label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
             type="range"
@@ -4568,7 +4563,7 @@ function DrcPanel({
       </div>
 
       <div className="form-row">
-        <label>アタック<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>raw code 0-15</span></label>
+        <label>{t('node.dsp.attack')}<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>raw code 0-15</span></label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
             type="range"
@@ -4590,7 +4585,7 @@ function DrcPanel({
       </div>
 
       <div className="form-row">
-        <label>ディケイ<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>raw code 0-15</span></label>
+        <label>{t('node.dsp.decay')}<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>raw code 0-15</span></label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
             type="range"
@@ -4613,14 +4608,14 @@ function DrcPanel({
       </div>
 
       <div className="form-row">
-        <label>圧縮中</label>
+        <label>{t('node.dsp.compressing')}</label>
         <span className="mono" style={{ fontSize: 12 }}>
-          L: {deviceDrcInfo?.compressing_l ? '● 圧縮中' : '－'} ／ R: {deviceDrcInfo?.compressing_r ? '● 圧縮中' : '－'}
+          L: {deviceDrcInfo?.compressing_l ? t('node.dsp.compressingNow') : '－'} ／ R: {deviceDrcInfo?.compressing_r ? t('node.dsp.compressingNow') : '－'}
         </span>
         <span />
       </div>
       <div className="form-status muted" style={{ fontSize: 11 }}>
-        ※ get_info 取得時点のスナップショットです（連続読み出しは未対応・「デバイスから読み込み」で更新）。
+        {t('node.dsp.snapshot')}
       </div>
     </div>
   )
@@ -4646,6 +4641,7 @@ function Effect3dPanel({
   syncTick?: number
   onReconcile?: () => void
 }) {
+  const { t } = useI18n()
   const offline = !device.online
   const { setAnchor } = useToast()
   const caps = useDspProfileCaps(ip, codec, cachedInfo)
@@ -4664,18 +4660,18 @@ function Effect3dPanel({
     <div className="form-section duo-v4-config">
       <div className="form-section-title">
         {title}
-        <span className="form-section-sub-inline"> — 3D エフェクト</span>
+        <span className="form-section-sub-inline"> {t('node.dsp.effectSubtitle')}</span>
       </div>
       <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
         {caps.has_3d
-          ? '現在のプロファイルで有効です。'
-          : '⚠ 現在のプロファイルは 3D 非対応です（full を選択してください）。値は保存され、full に切り替えると反映されます。'}
+          ? t('node.dsp.active')
+          : t('node.dsp.effectInactive')}
       </div>
       {/* Dim (not disable) when the profile lacks 3D — see DrcPanel's
           identical comment. */}
       <div style={{ opacity: caps.has_3d ? 1 : 0.6 }}>
       <div className="form-row">
-        <label>深さ</label>
+        <label>{t('node.dsp.depth')}</label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
             type="range"
@@ -4699,7 +4695,7 @@ function Effect3dPanel({
           onClick={(e) => { setAnchor(e.currentTarget); depth.commit() }}
           disabled={disabled}
         >
-          深さを適用
+          {t('node.dsp.applyDepth')}
         </button>
       </div>
       </div>
@@ -4725,6 +4721,7 @@ function BeepPanel({
   cachedInfo?: NodeConfigInfo
   sendTo: (msg: ManagerMessage) => void
 }) {
+  const { t } = useI18n()
   const offline = !device.online
   const { setAnchor, toast } = useToast()
   const caps = useDspProfileCaps(ip, codec, cachedInfo)
@@ -4740,22 +4737,22 @@ function BeepPanel({
       type: 'set_beep',
       payload: { codec, freq_hz: beep.freqHz, volume_db: beep.volumeDb, length_ms: beep.lengthMs, enable: true },
     })
-    toast(`${title}: テストトーンを再生しました`, 'success')
+    toast(t('node.tonePlayed', { title }), 'success')
   }
 
   return (
     <div className="form-section duo-v4-config">
       <div className="form-section-title">
         {title}
-        <span className="form-section-sub-inline"> — Beep（テストトーン）</span>
+        <span className="form-section-sub-inline"> {t('node.dsp.beepSubtitle')}</span>
       </div>
       <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
         {caps.has_beep
-          ? '一発鳴動（NVS には保存されません）。'
-          : '⚠ 現在のプロファイルは Beep 非対応です（full を選択してください）。'}
+          ? t('node.dsp.beepActive')
+          : t('node.dsp.beepInactive')}
       </div>
       <div className="form-row">
-        <label>周波数</label>
+        <label>{t('node.dsp.frequency')}</label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 4 }}>
           <EqNumberField
             value={beep.freqHz}
@@ -4768,7 +4765,7 @@ function BeepPanel({
         <span />
       </div>
       <div className="form-row">
-        <label>音量</label>
+        <label>{t('node.dsp.volume')}</label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
             type="range"
@@ -4785,7 +4782,7 @@ function BeepPanel({
         <span />
       </div>
       <div className="form-row">
-        <label>長さ</label>
+        <label>{t('node.dsp.length')}</label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 4 }}>
           <EqNumberField
             value={beep.lengthMs}
@@ -4799,7 +4796,7 @@ function BeepPanel({
       </div>
       <div className="form-action-row" style={{ marginTop: 8 }}>
         <button className="form-button" onClick={play} disabled={disabled}>
-          ▶ 再生
+          {t('node.dsp.play')}
         </button>
       </div>
     </div>
@@ -4827,6 +4824,7 @@ function AgcPanel({
   syncTick?: number
   onReconcile?: () => void
 }) {
+  const { t } = useI18n()
   const offline = !device.online
   const { setAnchor } = useToast()
   const scheduleReconcile = useReconcileScheduler(onReconcile)
@@ -4852,15 +4850,15 @@ function AgcPanel({
   return (
     <div className="form-section duo-v4-config">
       <div className="form-section-title">
-        AGC（ライン入力）
-        <span className="form-section-sub-inline"> — 自動ゲイン制御・HP codec ADC 経路</span>
+        {t('node.dsp.agcTitle')}
+        <span className="form-section-sub-inline"> {t('node.dsp.agcSubtitle')}</span>
       </div>
       <div className="form-status muted" style={{ fontSize: 12 }}>
-        ライン入力（HP codec の ADC 経路）に適用されます。入出力モードで「入力（ライン入力）」を選んでいる時のみ音声経路に乗ります。
+        {t('node.dsp.agcHint')}
       </div>
 
       <div className="form-row">
-        <label>有効</label>
+        <label>{t('node.dsp.enabled')}</label>
         <div className="device-toggle" role="group" aria-label="AGC enable">
           <button
             type="button"
@@ -4868,7 +4866,7 @@ function AgcPanel({
             onClick={(e) => { setAnchor(e.currentTarget); agc.commit({ ...v, enable: false }) }}
             disabled={disabled}
           >
-            無効
+            {t('node.dsp.disabled')}
           </button>
           <button
             type="button"
@@ -4876,14 +4874,14 @@ function AgcPanel({
             onClick={(e) => { setAnchor(e.currentTarget); agc.commit({ ...v, enable: true }) }}
             disabled={disabled}
           >
-            有効
+            {t('node.dsp.enabled')}
           </button>
         </div>
         <DirtyMark dirty={agc.dirty} />
       </div>
 
       <div className="form-row">
-        <label>目標レベル</label>
+        <label>{t('node.dsp.targetLevel')}</label>
         <div className="device-toggle" role="group" aria-label="AGC target level" style={{ flexWrap: 'wrap' }}>
           {AGC_TARGET_LEVELS_DB.map((lv) => (
             <button
@@ -4901,7 +4899,7 @@ function AgcPanel({
       </div>
 
       <div className="form-row">
-        <label>最大ゲイン</label>
+        <label>{t('node.dsp.maxGain')}</label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
             type="range"
@@ -4921,7 +4919,7 @@ function AgcPanel({
       </div>
 
       <div className="form-row">
-        <label>アタック<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>raw code 0-255</span></label>
+        <label>{t('node.dsp.attack')}<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>raw code 0-255</span></label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
             type="range"
@@ -4941,7 +4939,7 @@ function AgcPanel({
       </div>
 
       <div className="form-row">
-        <label>ディケイ<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>raw code 0-255</span></label>
+        <label>{t('node.dsp.decay')}<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>raw code 0-255</span></label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
             type="range"
@@ -4961,7 +4959,7 @@ function AgcPanel({
       </div>
 
       <div className="form-row">
-        <label>ノイズゲート</label>
+        <label>{t('node.dsp.noiseGate')}</label>
         <div className="device-toggle" role="group" aria-label="AGC noise gate">
           <button
             type="button"
@@ -4969,7 +4967,7 @@ function AgcPanel({
             onClick={() => agc.commit({ ...v, noiseThresholdDb: 0 })}
             disabled={disabled}
           >
-            無効
+            {t('node.dsp.disabled')}
           </button>
           <button
             type="button"
@@ -4984,7 +4982,7 @@ function AgcPanel({
             onClick={() => agc.commit({ ...v, noiseThresholdDb: v.noiseThresholdDb !== 0 ? v.noiseThresholdDb : -60 })}
             disabled={disabled}
           >
-            有効
+            {t('node.dsp.enabled')}
           </button>
         </div>
         <span />
@@ -4992,7 +4990,7 @@ function AgcPanel({
       {/* min-height reserved so this hint/slider row is always present
           (layout-shift rule) — dims instead of disappearing when disabled. */}
       <div className="form-row" style={{ opacity: v.noiseThresholdDb === 0 ? 0.45 : 1 }}>
-        <label>しきい値</label>
+        <label>{t('node.dsp.threshold')}</label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
             type="range"
@@ -5007,14 +5005,14 @@ function AgcPanel({
             style={{ flex: 1 }}
           />
           <span className="mono" style={{ width: 56, textAlign: 'right' }}>
-            {v.noiseThresholdDb === 0 ? '無効' : `${v.noiseThresholdDb} dB`}
+            {v.noiseThresholdDb === 0 ? t('node.dsp.disabled') : `${v.noiseThresholdDb} dB`}
           </span>
         </div>
         <span />
       </div>
 
       <div className="form-row">
-        <label>ヒステリシス</label>
+        <label>{t('node.dsp.hysteresis')}</label>
         <div className="device-toggle" role="group" aria-label="AGC hysteresis">
           {AGC_HYSTERESIS_OPTIONS.map((hy) => (
             <button
@@ -5024,7 +5022,7 @@ function AgcPanel({
               onClick={() => agc.commit({ ...v, hysteresisDb: hy })}
               disabled={disabled}
             >
-              {hy === 0 ? '無効' : `${hy.toFixed(1)} dB`}
+              {hy === 0 ? t('node.dsp.disabled') : `${hy.toFixed(1)} dB`}
             </button>
           ))}
         </div>
@@ -5032,7 +5030,7 @@ function AgcPanel({
       </div>
 
       <div className="form-row">
-        <label>適用ゲイン</label>
+        <label>{t('node.dsp.appliedGain')}</label>
         <span className="mono" style={{ fontSize: 12 }}>
           L: {deviceAgcInfo?.applied_gain_l_db != null ? `${deviceAgcInfo.applied_gain_l_db.toFixed(1)} dB` : '—'}
           {' '}／ R: {deviceAgcInfo?.applied_gain_r_db != null ? `${deviceAgcInfo.applied_gain_r_db.toFixed(1)} dB` : '—'}
@@ -5040,7 +5038,7 @@ function AgcPanel({
         <span />
       </div>
       <div className="form-status muted" style={{ fontSize: 11 }}>
-        ※ get_info 取得時点のスナップショットです（「デバイスから読み込み」で更新）。
+        {t('node.dsp.snapshotSimple')}
       </div>
     </div>
   )
@@ -5062,14 +5060,15 @@ export function DuoWlV4DspSection({
   onReconcile?: () => void
 }) {
   const ip = device.ipAddress
+  const { t } = useI18n()
   return (
     <>
-      <DrcPanel ip={ip} codec="haptic" title="触覚 DRC" device={device} cachedInfo={cachedInfo} sendTo={sendTo} syncTick={syncTick} onReconcile={onReconcile} />
-      <DrcPanel ip={ip} codec="hp" title="ヘッドホン DRC" device={device} cachedInfo={cachedInfo} sendTo={sendTo} syncTick={syncTick} onReconcile={onReconcile} />
-      <Effect3dPanel ip={ip} codec="haptic" title="触覚 3D" device={device} cachedInfo={cachedInfo} sendTo={sendTo} syncTick={syncTick} onReconcile={onReconcile} />
-      <Effect3dPanel ip={ip} codec="hp" title="ヘッドホン 3D" device={device} cachedInfo={cachedInfo} sendTo={sendTo} syncTick={syncTick} onReconcile={onReconcile} />
-      <BeepPanel ip={ip} codec="haptic" title="触覚 Beep" device={device} cachedInfo={cachedInfo} sendTo={sendTo} />
-      <BeepPanel ip={ip} codec="hp" title="ヘッドホン Beep" device={device} cachedInfo={cachedInfo} sendTo={sendTo} />
+      <DrcPanel ip={ip} codec="haptic" title={t('node.dsp.hapticDrc')} device={device} cachedInfo={cachedInfo} sendTo={sendTo} syncTick={syncTick} onReconcile={onReconcile} />
+      <DrcPanel ip={ip} codec="hp" title={t('node.dsp.headphoneDrc')} device={device} cachedInfo={cachedInfo} sendTo={sendTo} syncTick={syncTick} onReconcile={onReconcile} />
+      <Effect3dPanel ip={ip} codec="haptic" title={t('node.dsp.haptic3d')} device={device} cachedInfo={cachedInfo} sendTo={sendTo} syncTick={syncTick} onReconcile={onReconcile} />
+      <Effect3dPanel ip={ip} codec="hp" title={t('node.dsp.headphone3d')} device={device} cachedInfo={cachedInfo} sendTo={sendTo} syncTick={syncTick} onReconcile={onReconcile} />
+      <BeepPanel ip={ip} codec="haptic" title={t('node.dsp.hapticBeep')} device={device} cachedInfo={cachedInfo} sendTo={sendTo} />
+      <BeepPanel ip={ip} codec="hp" title={t('node.dsp.headphoneBeep')} device={device} cachedInfo={cachedInfo} sendTo={sendTo} />
       <AgcPanel ip={ip} device={device} cachedInfo={cachedInfo} sendTo={sendTo} syncTick={syncTick} onReconcile={onReconcile} />
     </>
   )
@@ -5171,6 +5170,7 @@ export function DuoWlV4SettingsBackup({
   cachedInfo?: NodeConfigInfo
   sendTo: (msg: ManagerMessage) => void
 }) {
+  const { t } = useI18n()
   const ip = device.ipAddress
   const draft = useDuoWlV4AudioStore((s) => s.draftFor(ip))
   const loadSnapshot = useDuoWlV4AudioStore((s) => s.loadSnapshot)
@@ -5245,7 +5245,7 @@ export function DuoWlV4SettingsBackup({
       agc: effectiveAgc,
     }
     downloadTextFile(`hapbeat-duowlv4-audio-${Date.now()}.json`, JSON.stringify(snapshot, null, 2))
-    toast('DuoWL v4 設定を JSON にエクスポートしました', 'success')
+    toast(t('node.backup.exported'), 'success')
   }
 
   const handleImportFile = (file: File) => {
@@ -5406,22 +5406,22 @@ export function DuoWlV4SettingsBackup({
   return (
     <div className="form-section duo-v4-config">
       <div className="form-section-title">
-        設定のバックアップ
-        <span className="form-section-sub-inline"> — 音声・A-V ディレイ・EQ・DSP（プロファイル/IIR/DRC/3D/AGC）を JSON でまとめて保存/復元</span>
+        {t('node.backup.title')}
+        <span className="form-section-sub-inline"> {t('node.backup.subtitle')}</span>
       </div>
       {/* EQ readback caveat (finding 1): the device only reports the committed
           ftype + raw coeffs, not the fc/Q/gain they were designed from — so an
           exported EQ reflects the Studio-side design, which may not match the
           device's actual on-codec EQ. Always-present muted note. */}
       <div className="form-status muted" style={{ fontSize: 12 }}>
-        ※ EQ の fc/Q/gain はデバイスから読み戻せません。エクスポートされる EQ は Studio 側の設計値で、デバイスの現在値と一致しない場合があります。「読み込んだ設定を書き込む」は各項目（EQ/1次IIR/DRC/3D/DSP プロファイル/AGC）を編集済み・読込済み・またはそれを含む JSON を読み込んだ場合のみ、その項目を送信します（音声設定は常に送信）。
+        {t('node.backup.caveat')}
       </div>
       {/* Fixed-height status line (layout-shift rule): reserved even when idle
           so an import error never shifts the action row below. */}
       <div className="form-status muted" style={{ minHeight: 16, fontSize: 12 }}>
         {importError
-          ? `⚠ インポート失敗: ${importError}`
-          : '保存・読込は draft のみ変更します（デバイスへは各「適用」または右の書き込みボタンで反映）。'}
+          ? t('node.backup.importFailed', { message: importError })
+          : t('node.backup.idle')}
       </div>
       <div className="form-action-row" style={{ marginTop: 8 }}>
         <input
@@ -5438,25 +5438,25 @@ export function DuoWlV4SettingsBackup({
         <button
           className="form-button-secondary"
           onClick={(e) => { setAnchor(e.currentTarget); fileInputRef.current?.click() }}
-          title="JSON ファイルから DuoWL v4 の全設定を読み込む"
+          title={t('node.backup.importTitle')}
         >
-          設定を JSON 読込
+          {t('node.backup.import')}
         </button>
         <button
           className="form-button-secondary"
           onClick={handleExport}
-          title="現在の DuoWL v4 全設定を JSON ファイルに保存"
+          title={t('node.backup.exportTitle')}
         >
-          設定を JSON 保存
+          {t('node.backup.export')}
         </button>
         <span style={{ flex: 1 }} />
         <button
           className="form-button"
           onClick={applyAll}
           disabled={offline}
-          title="読み込んだ（または編集中の）設定をすべてデバイスへ書き込みます"
+          title={t('node.backup.applyTitle')}
         >
-          読み込んだ設定を書き込む
+          {t('node.backup.apply')}
         </button>
       </div>
     </div>
@@ -5478,6 +5478,7 @@ export function EspNowStreamReadout({
   onRefresh: () => void
   disabled?: boolean
 }) {
+  const { t } = useI18n()
   const s = cachedInfo?.espnow_stream
   const total = (s?.received ?? 0) + (s?.lost ?? 0)
   const lossRate = total > 0 ? ((s?.lost ?? 0) / total) * 100 : null
@@ -5493,38 +5494,38 @@ export function EspNowStreamReadout({
   return (
     <div className="form-section">
       <div className="form-section-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span>ストリーム統計（デバッグ用）</span>
+        <span>{t('node.stream.title')}</span>
         <button
           className="form-button-secondary"
           style={{ fontSize: 11, padding: '2px 8px' }}
           onClick={onRefresh}
           disabled={disabled}
         >
-          更新
+          {t('common.refresh')}
         </button>
       </div>
       {s == null ? (
         <div className="form-status muted">
-          「更新」を押すと get_info からストリーム統計を取得します。
+          {t('node.stream.refreshHint')}
         </div>
       ) : (
         <>
           <Row
-            label="損失率（電波強度目安）"
+            label={t('node.stream.lossRate')}
             value={lossRate != null ? `${lossRate.toFixed(1)} %` : '—'}
           />
-          <Row label="受信" value={s.received} />
-          <Row label="ロスト" value={s.lost} />
-          <Row label="回復（piggyback）" value={s.recovered} />
-          <Row label="ドロップ" value={s.dropped} />
-          <Row label="最大連続欠落" value={s.max_gap} />
-          <Row label="送信元切替" value={s.handoffs} />
-          <Row label="生存送信元数" value={s.sources} />
-          <Row label="ロック中" value={s.locked != null ? (s.locked ? 'はい' : 'いいえ') : undefined} />
+          <Row label={t('node.stream.received')} value={s.received} />
+          <Row label={t('node.stream.lost')} value={s.lost} />
+          <Row label={t('node.stream.recovered')} value={s.recovered} />
+          <Row label={t('node.stream.dropped')} value={s.dropped} />
+          <Row label={t('node.stream.maxGap')} value={s.max_gap} />
+          <Row label={t('node.stream.handoffs')} value={s.handoffs} />
+          <Row label={t('node.stream.sources')} value={s.sources} />
+          <Row label={t('node.stream.locked')} value={s.locked != null ? (s.locked ? t('common.yes') : t('common.no')) : undefined} />
           {s.locked && s.locked_mac && (
-            <Row label="ロック先 MAC" value={<span style={{ fontSize: 10 }}>{s.locked_mac}</span>} />
+            <Row label={t('node.stream.lockedMac')} value={<span style={{ fontSize: 10 }}>{s.locked_mac}</span>} />
           )}
-          <Row label="推定遅延" value={s.delay_ms != null ? `${s.delay_ms} ms` : undefined} />
+          <Row label={t('node.stream.delay')} value={s.delay_ms != null ? `${s.delay_ms} ms` : undefined} />
         </>
       )}
     </div>
@@ -5595,6 +5596,7 @@ export function BandWlV4PwmSection({
   volumeSteps?: number
 }) {
   const { setAnchor } = useToast()
+  const { t } = useI18n()
   const offline = !device.online
 
   const [biasPct, setBiasPct] = useState(0)
@@ -5710,12 +5712,12 @@ export function BandWlV4PwmSection({
     <>
       <div className="form-section">
         <div className="form-section-title">
-          DC バイアス（張力）
-          <span className="form-section-sub-inline"> — PWM 実験ファーム</span>
+          {t('node.pwm.biasTitle')}
+          <span className="form-section-sub-inline"> {t('node.pwm.experimental')}</span>
         </div>
 
         <div className="form-row">
-          <label>バイアス</label>
+          <label>{t('node.pwm.bias')}</label>
           <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
             <input
               type="range"
@@ -5744,33 +5746,32 @@ export function BandWlV4PwmSection({
             onClick={(e) => flipBias(-1, e)}
             disabled={offline}
           >
-            ◀ 逆転
+            {t('node.pwm.reverse')}
           </button>
           <button
             className="form-button-secondary"
             onClick={(e) => sendBias(0, e)}
             disabled={offline}
           >
-            ■ 停止 (0)
+            {t('node.pwm.stop')}
           </button>
           <button
             className="form-button-secondary"
             onClick={(e) => flipBias(1, e)}
             disabled={offline}
           >
-            正転 ▶
+            {t('node.pwm.forward')}
           </button>
         </div>
         <div className="form-status muted" style={{ fontSize: 12 }}>
-          符号と巻き取り方向の対応は基板の結線依存です。実機で確認してください。
-          目標値を送ると、デバイス側が約 0.3 秒かけて追従します。
+          {t('node.pwm.orientationHint')}
         </div>
       </div>
 
       <div className="form-section">
-        <div className="form-section-title">診断トーン</div>
+        <div className="form-section-title">{t('node.pwm.tone')}</div>
         <div className="form-row">
-          <label>周波数</label>
+          <label>{t('node.pwm.frequency')}</label>
           <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
             <input
               type="number"
@@ -5781,12 +5782,12 @@ export function BandWlV4PwmSection({
               onChange={(e) => setToneHz(Number(e.target.value))}
               disabled={offline}
             />
-            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Hz (10〜2000)</span>
+            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Hz (10–2000)</span>
           </div>
           <span />
         </div>
         <div className="form-row">
-          <label>振幅</label>
+          <label>{t('node.pwm.amplitude')}</label>
           <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
             <input
               type="range"
@@ -5805,7 +5806,7 @@ export function BandWlV4PwmSection({
           <span />
         </div>
         <div className="form-row">
-          <label>長さ</label>
+          <label>{t('node.pwm.duration')}</label>
           <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
             <input
               type="number"
@@ -5822,18 +5823,18 @@ export function BandWlV4PwmSection({
         </div>
         <div className="form-action-row" style={{ marginTop: 8 }}>
           <button className="form-button" onClick={playTone} disabled={offline}>
-            再生
+            {t('common.play')}
           </button>
           <button className="form-button-secondary" onClick={stopTone} disabled={offline}>
-            停止
+            {t('node.pwm.stopped')}
           </button>
         </div>
       </div>
 
       <div className="form-section">
-        <div className="form-section-title">音量</div>
+        <div className="form-section-title">{t('node.pwm.volume')}</div>
         <div className="form-row">
-          <label>レベル</label>
+          <label>{t('node.pwm.level')}</label>
           <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
             <input
               type="range"
@@ -5860,30 +5861,30 @@ export function BandWlV4PwmSection({
           className="form-section-title"
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
         >
-          <span>状態</span>
+          <span>{t('node.pwm.status')}</span>
           <button
             className="form-button-secondary"
             style={{ fontSize: 11, padding: '2px 8px' }}
             onClick={refreshStatus}
             disabled={offline}
           >
-            更新
+            {t('common.refresh')}
           </button>
         </div>
         {/* Hint line is always present so the rows below never shift when the
             first status lands (layout-shift rule). */}
         <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
           {status
-            ? '自動更新はしません。「更新」で再取得します。'
-            : '「更新」を押すと pwm_status を取得します。'}
+            ? t('node.pwm.refreshActive')
+            : t('node.pwm.refreshIdle')}
         </div>
-        <Row label="状態" value={status?.state} />
+        <Row label={t('node.pwm.status')} value={status?.state} />
         <Row
-          label="キャリア"
+          label={t('node.pwm.carrier')}
           value={status?.carrier_hz != null ? `${status.carrier_hz} Hz` : undefined}
         />
         <Row
-          label="ゲート GPIO"
+          label={t('node.pwm.gateGpio')}
           value={
             status?.gpio_a != null || status?.gpio_b != null
               ? `A=${status?.gpio_a ?? '—'} / B=${status?.gpio_b ?? '—'}`
@@ -5891,11 +5892,11 @@ export function BandWlV4PwmSection({
           }
         />
         <Row
-          label="バイアス"
+          label={t('node.pwm.bias')}
           value={status?.bias_ma != null ? `${status.bias_ma} mA` : undefined}
         />
         <Row
-          label="音量"
+          label={t('node.pwm.volume')}
           value={
             status?.volume_level != null
               ? `${status.volume_level} / ${maxLevel}`
@@ -5903,16 +5904,16 @@ export function BandWlV4PwmSection({
               : undefined
           }
         />
-        <Row label="アンダーラン" value={status?.underruns} />
-        <Row label="クリップ" value={status?.clips} />
+        <Row label={t('node.pwm.underruns')} value={status?.underruns} />
+        <Row label={t('node.pwm.clips')} value={status?.clips} />
         <Row
-          label="トーン"
-          value={status?.tone_active != null ? (status.tone_active ? '再生中' : '停止') : undefined}
+          label={t('node.pwm.toneState')}
+          value={status?.tone_active != null ? (status.tone_active ? t('node.pwm.playing') : t('node.pwm.stopped')) : undefined}
         />
         {/* get_info carries the gate config too, so this row has a value even
             before the first pwm_status. */}
         <Row
-          label="get_info の申告"
+          label={t('node.pwm.infoState')}
           value={
             cachedInfo?.haptic_pwm
               ? `${cachedInfo.haptic_pwm.state ?? '—'} / ${cachedInfo.haptic_pwm.carrier_hz ?? '—'} Hz`
@@ -5923,11 +5924,11 @@ export function BandWlV4PwmSection({
 
       <div className="form-section">
         <div className="form-section-title">
-          ゲート直叩き診断
+          {t('node.pwm.probe')}
           <span className="form-section-sub-inline"> — pwm_probe</span>
         </div>
         <div className="form-row">
-          <label>周波数</label>
+          <label>{t('node.pwm.frequency')}</label>
           <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
             <input
               type="number"
@@ -5939,13 +5940,13 @@ export function BandWlV4PwmSection({
               disabled={offline || probing}
             />
             <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-              Hz (0〜200、0 = DC 保持)
+              {t('node.pwm.probeHzHint')}
             </span>
           </div>
           <span />
         </div>
         <div className="form-row">
-          <label>長さ</label>
+          <label>{t('node.pwm.duration')}</label>
           <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
             <input
               type="number"
@@ -5959,18 +5960,17 @@ export function BandWlV4PwmSection({
               disabled={offline || probing}
             />
             <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-              ms (最大 {PWM_PROBE_MAX_MS})
+              {t('node.pwm.probeMsHint', { max: PWM_PROBE_MAX_MS })}
             </span>
           </div>
           <span />
         </div>
         <div className="form-status warn" style={{ fontSize: 12 }}>
-          警告: LEDC をバイパスしてモーターを 100% で駆動します。実行中はデバイスが
-          応答しません（最大 {PWM_PROBE_MAX_MS} ms）。
+          {t('node.pwm.probeWarning', { max: PWM_PROBE_MAX_MS })}
         </div>
         <div className="form-action-row" style={{ marginTop: 8 }}>
           <button className="form-button" onClick={runProbe} disabled={offline || probing}>
-            {probing ? '実行中…' : '実行'}
+            {probing ? t('node.pwm.running') : t('common.run')}
           </button>
         </div>
       </div>

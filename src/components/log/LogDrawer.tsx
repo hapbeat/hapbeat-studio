@@ -3,6 +3,7 @@ import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useLogStore } from '@/stores/logStore'
 import { LocalFsStatus } from '@/components/common/LocalFsStatus'
+import { useI18n } from '@/i18n/I18nProvider'
 import './LogDrawer.css'
 
 const HEIGHT_KEY = 'hapbeat-studio-log-drawer-height'
@@ -20,6 +21,7 @@ const HARD_MAX_HEIGHT = 5000 // sanity cap for absurd persisted values (corrupti
  * - Auto-scrolls to bottom unless the user scrolled up manually.
  */
 export function LogDrawer() {
+  const { t } = useI18n()
   const { lastMessage, send, isConnected } = useHelperConnection()
   const selectedIp = useDeviceStore((s) => s.selectedIp)
   const entries = useLogStore((s) => s.entries)
@@ -202,32 +204,32 @@ export function LogDrawer() {
           onPointerMove={onDragMove}
           onPointerUp={onDragEnd}
           onPointerCancel={onDragEnd}
-          title="ドラッグでログ高さを調整"
+          title={t('log.resize')}
           role="separator"
           aria-orientation="horizontal"
-          aria-label="ログ高さリサイズ"
+          aria-label={t('log.resizeAria')}
         />
       )}
       <div className="log-drawer-header">
         <button
           className="log-drawer-toggle"
           onClick={() => setVisible(!visible)}
-          title={visible ? 'ログを隠す' : 'ログを表示'}
+          title={visible ? t('log.hide') : t('log.show')}
         >
-          {visible ? '▼' : '▲'} ログ
+          {visible ? '▼' : '▲'} {t('log.label')}
         </button>
         <span className="log-drawer-count">
-          {entries.length} 行{subscribedIp ? ` · ${subscribedIp} 購読中` : ''}
+          {t('log.count', { count: entries.length, subscription: subscribedIp ? t('log.subscription', { ip: subscribedIp }) : '' })}
         </span>
         <span style={{ flex: 1 }} />
         <LocalFsStatus />
-        <button className="log-drawer-clear" onClick={clear}>クリア</button>
+        <button className="log-drawer-clear" onClick={clear}>{t('common.clear')}</button>
       </div>
       {visible && (
         <div className="log-drawer-body" ref={bodyRef} onScroll={onScroll}>
           {entries.length === 0 ? (
             <div className="log-drawer-empty">
-              （まだログはありません）
+              {t('log.empty')}
             </div>
           ) : (
             entries.map((e) => (

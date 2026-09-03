@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import './ClipModeInfoModal.css'
+import { useI18n } from '@/i18n/I18nProvider'
 
 export interface ClipModeInfoModalProps {
   onClose: () => void
@@ -12,6 +13,7 @@ export interface ClipModeInfoModalProps {
  * ラベルと先頭記号は KitEventRow の MODE_OPTIONS と揃えること。
  */
 export function ClipModeInfoModal({ onClose }: ClipModeInfoModalProps) {
+  const { t } = useI18n()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKey)
@@ -22,28 +24,21 @@ export function ClipModeInfoModal({ onClose }: ClipModeInfoModalProps) {
     <div className="clip-mode-info-backdrop" onClick={onClose}>
       <div className="clip-mode-info-modal" onClick={(e) => e.stopPropagation()} role="dialog">
         <div className="clip-mode-info-header">
-          <h3>再生モードの種類</h3>
+          <h3>{t('kit.modeInfo.title')}</h3>
           <button className="clip-mode-info-close" onClick={onClose} aria-label="Close">×</button>
         </div>
 
         <div className="clip-mode-info-body">
           <p className="clip-mode-info-intro">
-            Kit の各イベントには 3 つの再生モードがあります。
-            Event ID は同じでも、Hapbeat デバイス側の扱いが変わります。
+            {t('kit.modeInfo.intro')}
           </p>
 
           <div className="clip-mode-info-row">
             <div className="clip-mode-info-badge fire"><span className="sym">&gt;</span>FIRE</div>
             <div className="clip-mode-info-text">
-              <div className="clip-mode-info-title">デバイス内蔵ファイルを再生</div>
-              <p>
-                SDK は Event ID と強度だけを小さな UDP コマンドで送ります。
-                デバイスは Kit で flash に書き込んだ WAV を自分で再生します。
-              </p>
+              <div className="clip-mode-info-title">{t('kit.modeInfo.fire.title')}</div><p>{t('kit.modeInfo.fire.body')}</p>
               <ul className="clip-mode-info-pros">
-                <li>低遅延・低帯域</li>
-                <li>オフラインで動作</li>
-                <li>Kit の事前デプロイが必要</li>
+                <li>{t('kit.modeInfo.fire.one')}</li><li>{t('kit.modeInfo.fire.two')}</li><li>{t('kit.modeInfo.fire.three')}</li>
               </ul>
             </div>
           </div>
@@ -51,15 +46,9 @@ export function ClipModeInfoModal({ onClose }: ClipModeInfoModalProps) {
           <div className="clip-mode-info-row">
             <div className="clip-mode-info-badge clip"><span className="sym">♪</span>CLIP</div>
             <div className="clip-mode-info-text">
-              <div className="clip-mode-info-title">SDK が WAV をストリーム</div>
-              <p>
-                SDK が Kit の WAV を 16 kHz PCM に変換しながら UDP でデバイスに送ります。
-                デバイスは受信した音をそのまま鳴らします。
-              </p>
+              <div className="clip-mode-info-title">{t('kit.modeInfo.clip.title')}</div><p>{t('kit.modeInfo.clip.body')}</p>
               <ul className="clip-mode-info-pros">
-                <li>flash 書き換え不要でクリップ差し替え可</li>
-                <li>Wi-Fi 帯域とレイテンシに影響</li>
-                <li>SDK 側のランタイム処理で強度変更も可能</li>
+                <li>{t('kit.modeInfo.clip.one')}</li><li>{t('kit.modeInfo.clip.two')}</li><li>{t('kit.modeInfo.clip.three')}</li>
               </ul>
             </div>
           </div>
@@ -67,16 +56,9 @@ export function ClipModeInfoModal({ onClose }: ClipModeInfoModalProps) {
           <div className="clip-mode-info-row">
             <div className="clip-mode-info-badge live"><span className="sym">&gt;♪</span>BOTH</div>
             <div className="clip-mode-info-text">
-              <div className="clip-mode-info-title">FIRE と CLIP を両方出力</div>
-              <p>
-                FIRE と CLIP の両 entry を manifest に出力します（<code>events</code> と{' '}
-                <code>stream_events</code> に同じ base eventId で並存）。
-                主に開発段階で両モードを試したいときに使うモードです。
-              </p>
+              <div className="clip-mode-info-title">{t('kit.modeInfo.both.title')}</div><p>{t('kit.modeInfo.both.body')}</p>
               <ul className="clip-mode-info-pros">
-                <li>FIRE・CLIP どちらの挙動も同じ Event ID で試せる</li>
-                <li>Kit ファイルサイズ・帯域は両方の合算になる</li>
-                <li>Kit を出荷する際は通常どちらか一方に絞る</li>
+                <li>{t('kit.modeInfo.both.one')}</li><li>{t('kit.modeInfo.both.two')}</li><li>{t('kit.modeInfo.both.three')}</li>
               </ul>
             </div>
           </div>

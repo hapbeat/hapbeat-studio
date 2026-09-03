@@ -2,12 +2,14 @@ import { useState, useEffect, useCallback } from 'react'
 import type WaveSurfer from 'wavesurfer.js'
 import { formatDuration } from '@/utils/wavIO'
 import { useWaveformStore } from '@/stores/waveformStore'
+import { useI18n } from '@/i18n/I18nProvider'
 
 interface TransportBarProps {
   wavesurfer: WaveSurfer | null
 }
 
 export function TransportBar({ wavesurfer }: TransportBarProps) {
+  const { t } = useI18n()
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const clip = useWaveformStore((s) => s.clip)
@@ -64,7 +66,7 @@ export function TransportBar({ wavesurfer }: TransportBarProps) {
           className="transport-btn"
           onClick={handleSkipStart}
           disabled={!clip}
-          title="先頭へ"
+          title={t('wave.start')}
         >
           ⏮
         </button>
@@ -72,7 +74,7 @@ export function TransportBar({ wavesurfer }: TransportBarProps) {
           className="transport-btn play-btn"
           onClick={handlePlayPause}
           disabled={!clip}
-          title={isPlaying ? '一時停止' : '再生'}
+          title={isPlaying ? t('wave.pause') : t('wave.play')}
         >
           {isPlaying ? '⏸' : '▶'}
         </button>
@@ -80,7 +82,7 @@ export function TransportBar({ wavesurfer }: TransportBarProps) {
           className="transport-btn"
           onClick={handleStop}
           disabled={!clip}
-          title="停止"
+          title={t('wave.stop')}
         >
           ⏹
         </button>
@@ -88,7 +90,7 @@ export function TransportBar({ wavesurfer }: TransportBarProps) {
           className="transport-btn"
           onClick={handleSkipEnd}
           disabled={!clip}
-          title="末尾へ"
+          title={t('wave.end')}
         >
           ⏭
         </button>

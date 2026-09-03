@@ -6,6 +6,7 @@ import {
   type VersionEntry,
 } from '@/utils/studioVersions'
 import './VersionSwitcher.css'
+import { useI18n } from '@/i18n/I18nProvider'
 
 /**
  * Studio バージョン表示 + ロールバック用の版切替。
@@ -17,6 +18,7 @@ import './VersionSwitcher.css'
  * このスイッチャはその導線）。dev / versions.json 未配信時は現在版のみ表示。
  */
 export function VersionSwitcher({ compact = false }: { compact?: boolean }) {
+  const { t } = useI18n()
   const current = CURRENT_STUDIO_VERSION
   const [versions, setVersions] = useState<VersionEntry[]>([])
 
@@ -40,7 +42,7 @@ export function VersionSwitcher({ compact = false }: { compact?: boolean }) {
   // そのまま選択式にする。versions.json が無い (dev) 時は静的バッジ。
   if (compact) {
     if (versions.length === 0) {
-      return <span className="app-version-badge" title="Studio バージョン">v{current}</span>
+      return <span className="app-version-badge" title={t('version.badgeTitle')}>v{current}</span>
     }
     // If the running build isn't one of the listed frozen releases (e.g. a
     // master/dev build whose version is ahead of the latest tag), a bare
@@ -64,8 +66,8 @@ export function VersionSwitcher({ compact = false }: { compact?: boolean }) {
         className="app-version-badge app-version-select"
         value={currentValue}
         onChange={onPick}
-        aria-label="Studio バージョンを切り替え"
-        title="バージョンを選んで切替（旧版にロールバック）"
+        aria-label={t('version.switch.aria')}
+        title={t('version.switch.title')}
       >
         {options.map((v) => (
           <option key={v.version} value={v.path}>
@@ -83,12 +85,12 @@ export function VersionSwitcher({ compact = false }: { compact?: boolean }) {
       </span>
       {versions.length > 0 && (
         <label className="version-switcher-pick">
-          版を切替:
-          <select value="" onChange={onPick} aria-label="Studio バージョンを切り替え">
-            <option value="" disabled>選択…</option>
+          {t('version.switch.label')}
+          <select value="" onChange={onPick} aria-label={t('version.switch.aria')}>
+            <option value="" disabled>{t('version.switch.choose')}</option>
             {versions.map((v) => (
               <option key={v.version} value={v.path}>
-                v{v.version}{v.version === current ? '（現在）' : ''}
+                v{v.version}{v.version === current ? t('version.current') : ''}
               </option>
             ))}
           </select>

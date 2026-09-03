@@ -1,8 +1,10 @@
 import { useCallback, useRef } from 'react'
 import type { SampleRate } from '@/types/waveform'
 import { useWaveformStore } from '@/stores/waveformStore'
+import { useI18n } from '@/i18n/I18nProvider'
 
 export function WaveformToolbar() {
+  const { t } = useI18n()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const clip = useWaveformStore((s) => s.clip)
@@ -35,12 +37,12 @@ export function WaveformToolbar() {
       try {
         await loadFile(file)
       } catch {
-        alert('音声ファイルの読み込みに失敗しました。WAV / MP3 ファイルを選択してください。')
+        alert(t('wave.loadFailed'))
       }
       // Reset input so same file can be reloaded
       e.target.value = ''
     },
-    [loadFile]
+    [loadFile, t]
   )
 
   const handleExport = useCallback(async () => {
@@ -53,9 +55,9 @@ export function WaveformToolbar() {
       a.click()
       URL.revokeObjectURL(url)
     } catch (err) {
-      alert(`エクスポートに失敗しました: ${err instanceof Error ? err.message : err}`)
+      alert(t('wave.exportFailed', { message: err instanceof Error ? err.message : String(err) }))
     }
-  }, [exportWav, clip?.name])
+  }, [exportWav, clip?.name, t])
 
   const handleSampleRateChange = useCallback(
     (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -115,7 +117,7 @@ export function WaveformToolbar() {
           className="toolbar-btn"
           onClick={cropToRegion}
           disabled={!selectedRegion || isProcessing}
-          title="選択範囲でクロップ"
+          title={t('wave.crop')}
         >
           Crop
         </button>
@@ -123,7 +125,7 @@ export function WaveformToolbar() {
           className="toolbar-btn"
           onClick={deleteRegion}
           disabled={!selectedRegion || isProcessing}
-          title="選択範囲を削除"
+          title={t('wave.delete')}
         >
           Delete
         </button>
@@ -131,7 +133,7 @@ export function WaveformToolbar() {
           className="toolbar-btn"
           onClick={revertToOriginal}
           disabled={!clip || isProcessing}
-          title="元に戻す"
+          title={t('wave.revert')}
         >
           Revert
         </button>

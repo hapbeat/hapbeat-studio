@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useMemo, useState, useRef, type MouseEvent as ReactMouseEvent } from 'react'
 import { useLibraryStore, validateKitName, composeKitEventId } from '@/stores/libraryStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
+import { useI18n } from '@/i18n/I18nProvider'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useToast } from '@/components/common/Toast'
 import { formatFileSize } from '@/utils/wavIO'
@@ -63,6 +64,7 @@ function useResizeHandle(dir: 'horizontal' | 'vertical', initialPct: number) {
 // ============================================================
 
 export function KitManager() {
+  const { t } = useI18n()
   const isLoading = useLibraryStore((s) => s.isLoading)
   const loadLibrary = useLibraryStore((s) => s.loadLibrary)
   const viewMode = useLibraryStore((s) => s.viewMode)
@@ -108,7 +110,7 @@ export function KitManager() {
     <div className="kit-manager-wrapper">
       {isLoading && (
         <div className="kit-loading-badge">
-          <span className="kit-loading-spinner" /> ライブラリ読込中…
+          <span className="kit-loading-spinner" /> {t('kit.loadingLibrary')}
         </div>
       )}
       {!workDirSupported && (
@@ -149,6 +151,7 @@ function defaultPresetName(): string {
 }
 
 function AmpPresetBar() {
+  const { t } = useI18n()
   const clips = useLibraryStore((s) => s.clips)
   const presets = useLibraryStore((s) => s.ampPresets)
   const savePreset = useLibraryStore((s) => s.saveAmpPreset)
@@ -211,17 +214,17 @@ function AmpPresetBar() {
 
   return (
     <div className="amp-preset-bar">
-      <span className="amp-preset-label" title="Library 側の amp プリセット。選択すると即適用。">Amp Preset:</span>
+      <span className="amp-preset-label" title={t('kit.ampPreset.title')}>Amp Preset:</span>
       <select
         className="amp-preset-select"
         value={selected}
         onChange={(e) => void onSelectChange(e.target.value)}
-        title="(new) = 全クリップ amp を 0.5 に戻す。保存済みプリセットを選ぶと即適用。"
+        title={t('kit.ampPreset.newTitle')}
       >
         <option value={NEW_PRESET_VALUE}>(new)</option>
         {presets.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
       </select>
-      <button className="library-btn" onClick={onSaveClick} title="現在の amp 設定を新しいプリセットとして保存">Save as…</button>
+      <button className="library-btn" onClick={onSaveClick} title={t('kit.ampPreset.saveTitle')}>Save as…</button>
       <button className="library-btn danger" onClick={onDeleteClick} disabled={!hasRealSelection}
         title={hasRealSelection ? `プリセット "${selected}" を削除` : '削除するプリセットを選択'}>Delete</button>
 
@@ -230,7 +233,7 @@ function AmpPresetBar() {
           <div className="amp-preset-dialog" onClick={(e) => e.stopPropagation()}>
             {dialog === 'save' && (
               <>
-                <div className="amp-preset-dialog-title">新規プリセット名</div>
+                <div className="amp-preset-dialog-title">{t('kit.ampPreset.newName')}</div>
                 <input
                   type="text" autoFocus
                   value={nameInput}
@@ -250,7 +253,7 @@ function AmpPresetBar() {
             )}
             {dialog === 'confirm-overwrite' && (
               <>
-                <div className="amp-preset-dialog-title">"{nameInput.trim()}" を上書きしますか？</div>
+                <div className="amp-preset-dialog-title">{t('kit.ampPreset.overwrite', { name: nameInput.trim() })}</div>
                 <div className="amp-preset-dialog-actions">
                   <button className="library-btn" onClick={close}>Cancel</button>
                   <button className="library-btn primary" onClick={onConfirmOverwrite}>Overwrite</button>
@@ -259,7 +262,7 @@ function AmpPresetBar() {
             )}
             {dialog === 'confirm-delete' && (
               <>
-                <div className="amp-preset-dialog-title">プリセット "{selected}" を削除しますか？</div>
+                <div className="amp-preset-dialog-title">{t('kit.ampPreset.delete', { name: selected })}</div>
                 <div className="amp-preset-dialog-actions">
                   <button className="library-btn" onClick={close}>Cancel</button>
                   <button className="library-btn danger" onClick={onConfirmDelete}>Delete</button>
@@ -282,6 +285,7 @@ function AmpPresetBar() {
  * トップバー配置用ヘルプ。Library と Kit の両方のパネルの操作を同時に示す。
  */
 function ShortcutHelp() {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLSpanElement>(null)
 
@@ -301,40 +305,39 @@ function ShortcutHelp() {
       <button
         className="shortcut-help-btn labeled"
         onClick={() => setOpen((o) => !o)}
-        title="マウス/キーボード操作の一覧を開く"
-        aria-label="操作説明"
-      ><span className="shortcut-help-btn-icon">?</span>操作説明</button>
+        title={t('kit.help.open')}
+        aria-label={t('kit.help.aria')}
+      ><span className="shortcut-help-btn-icon">?</span>{t('kit.help.title')}</button>
       {open && (
         <div className="shortcut-help-panel" role="dialog">
-          <div className="shortcut-help-title">マウス操作 (Library)</div>
+          <div className="shortcut-help-title">{t('kit.help.library')}</div>
           <ul className="shortcut-help-list">
-            <li><span className="shortcut-help-key">クリック</span>カードを選択</li>
-            <li><span className="shortcut-help-key">▶</span>再生 / 停止</li>
-            <li><span className="shortcut-help-key">☰ ドラッグ</span>Kit にドロップして追加</li>
-            <li><span className="shortcut-help-key">Amp スライダー</span>強度 (0–100%)</li>
-            <li><span className="shortcut-help-key">Edit ボタン</span>名前 / Event ID / タグ編集</li>
-            <li><span className="shortcut-help-key">+ Kit ボタン</span>選択中の Kit に追加</li>
+            <li><span className="shortcut-help-key">{t('kit.help.click')}</span>{t('kit.help.select')}</li>
+            <li><span className="shortcut-help-key">▶</span>{t('kit.help.playStop')}</li>
+            <li><span className="shortcut-help-key">{t('kit.help.drag')}</span>{t('kit.help.addToKit')}</li>
+            <li><span className="shortcut-help-key">{t('kit.help.amp')}</span>{t('kit.help.intensity')}</li>
+            <li><span className="shortcut-help-key">{t('kit.help.edit')}</span>{t('kit.help.editFields')}</li>
+            <li><span className="shortcut-help-key">{t('kit.help.addButton')}</span>{t('kit.help.addSelected')}</li>
           </ul>
 
-          <div className="shortcut-help-title">マウス操作 (Kit)</div>
+          <div className="shortcut-help-title">{t('kit.help.kit')}</div>
           <ul className="shortcut-help-list">
-            <li><span className="shortcut-help-key">☰ ドラッグ</span>Kit 内で並び替え</li>
-            <li><span className="shortcut-help-key">FIRE / CLIP / BOTH</span>再生モード切替 (ヘッダーの「モード説明」参照)</li>
-            <li><span className="shortcut-help-key">×</span>Kit から削除</li>
+            <li><span className="shortcut-help-key">{t('kit.help.drag')}</span>{t('kit.help.reorder')}</li>
+            <li><span className="shortcut-help-key">FIRE / CLIP / BOTH</span>{t('kit.help.mode')}</li>
+            <li><span className="shortcut-help-key">×</span>{t('kit.help.remove')}</li>
           </ul>
 
-          <div className="shortcut-help-title">キーボード（選択中）</div>
+          <div className="shortcut-help-title">{t('kit.help.keyboard')}</div>
           <ul className="shortcut-help-list">
-            <li><span className="shortcut-help-key">↑ / ↓</span>選択を上下に移動</li>
-            <li><span className="shortcut-help-key">← / →</span>Amp を ±5%</li>
-            <li><span className="shortcut-help-key">Space</span>再生 / 停止</li>
-            <li><span className="shortcut-help-key">Enter</span>アクティブ Kit に追加 (Library 側)</li>
-            <li><span className="shortcut-help-key">Delete / Backspace</span>Kit から削除 (Kit 側)</li>
+            <li><span className="shortcut-help-key">↑ / ↓</span>{t('kit.help.move')}</li>
+            <li><span className="shortcut-help-key">← / →</span>{t('kit.help.ampKeys')}</li>
+            <li><span className="shortcut-help-key">Space</span>{t('kit.help.playStop')}</li>
+            <li><span className="shortcut-help-key">Enter</span>{t('kit.help.addActive')}</li>
+            <li><span className="shortcut-help-key">Delete / Backspace</span>{t('kit.help.removeKit')}</li>
           </ul>
 
           <div className="shortcut-help-note">
-            パネル内にカーソルがある / フォーカスしているときだけ反応します。
-            テキスト入力中は無効。Amp スライダーの矢印キーはスライダー自身の微調整が優先されます。
+            {t('kit.help.note')}
           </div>
         </div>
       )}
@@ -390,6 +393,7 @@ function FolderChip({
 }
 
 function WorkDirBar() {
+  const { t } = useI18n()
   const viewMode = useLibraryStore((s) => s.viewMode)
   const setViewMode = useLibraryStore((s) => s.setViewMode)
   const showClipDetails = useLibraryStore((s) => s.showClipDetails)
@@ -426,7 +430,7 @@ function WorkDirBar() {
       {volumeWiper !== null && (
         <>
           <span className="workdir-divider" />
-          <span className="workdir-vol" title="Connected Hapbeat device volume (MCP4018 wiper 0–127, 128段階)">Vol {volumeWiper}/128 ({Math.round((volumeWiper / 127) * 100)}%)</span>
+          <span className="workdir-vol" title={t('kit.volumeTitle')}>Vol {volumeWiper}/128 ({Math.round((volumeWiper / 127) * 100)}%)</span>
         </>
       )}
     </div>
@@ -438,6 +442,7 @@ function WorkDirBar() {
 // ============================================================
 
 function useAudioPreview() {
+  const { t } = useI18n()
   const [playingId, setPlayingId] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -461,7 +466,7 @@ function useAudioPreview() {
       // 接続中のフォルダに source / 生成済み WAV が無い（またはフォルダ未接続）。
       // 従来は無言で何もせず「クリックしても鳴らない」
       // 状態だったので、原因が分かるトーストを出す。
-      toast('音声が見つかりません。Library / Kit のフォルダを再接続してください', 'error')
+      toast(t('kit.audioMissing'), 'error')
       return
     }
 
@@ -508,7 +513,7 @@ function useAudioPreview() {
       // device is offline / not a playback device). Fall back to browser
       // audio rather than broadcasting to every device.
       if (hasDevice && selectedIps.length > 0) {
-        toast('選択中の再生デバイスがオフラインです。ブラウザ音声で再生します', 'info')
+        toast(t('kit.offlineBrowserAudio'), 'info')
       }
       const url = URL.createObjectURL(blob)
       const audio = new Audio(url)
@@ -517,7 +522,7 @@ function useAudioPreview() {
       audio.onended = () => { setPlayingId(null); URL.revokeObjectURL(url); audioRef.current = null }
       audio.play()
     }
-  }, [playingId, stop, hasDevice, devices, send, toast])
+  }, [playingId, stop, hasDevice, devices, send, toast, t])
 
   /** Get current device wiper value (null if unavailable) */
   const getDeviceWiper = useCallback((): number | null => {
@@ -661,6 +666,7 @@ function ImportProgressBanner({ progress }: { progress: { current: number; total
 type ClipListMode = 'flat' | 'tree'
 
 function ClipsPanel() {
+  const { t } = useI18n()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
   const clips = useLibraryStore((s) => s.clips)
@@ -769,14 +775,14 @@ function ClipsPanel() {
 
   const addClipToActiveKit = useCallback(async (clip: LibraryClip) => {
     if (!activeKitId) { toast('Select or create a Kit first', 'error'); return }
-    if (activeKitSaving) { toast('Kit を保存中です。完了後に追加してください', 'info'); return }
+    if (activeKitSaving) { toast(t('kit.saving'), 'info'); return }
     // Independence: copy the library clip's metadata + audio bytes into
     // a fresh KitEvent. After this the kit owns its own snapshot — the
     // library can be archived, renamed, or deleted without affecting
     // this row. The audio blob is read once and saved under the new
     // event id inside `addEventToKit`.
     const blob = await getClipAudio(clip.id)
-    if (!blob) { toast(`"${clip.name}" の audio data が見つかりません`, 'error'); return }
+    if (!blob) { toast(t('kit.clipAudioMissing', { name: clip.name }), 'error'); return }
     const newId = await addEventToKit(activeKitId, {
       eventId: '',
       clipName: clip.name,
@@ -1056,14 +1062,14 @@ function ClipsPanel() {
             const [sortBy, sortOrder] = e.target.value.split(':') as ['name' | 'date' | 'duration', 'asc' | 'desc']
             setFilter({ sortBy, sortOrder })
           }}
-          title="並び順"
+          title={t('kit.sortTitle')}
         >
-          <option value="name:asc">名前 ↑</option>
-          <option value="name:desc">名前 ↓</option>
-          <option value="date:desc">更新日時 (新しい順)</option>
-          <option value="date:asc">更新日時 (古い順)</option>
-          <option value="duration:asc">長さ (短い順)</option>
-          <option value="duration:desc">長さ (長い順)</option>
+          <option value="name:asc">{t('kit.sortNameAsc')}</option>
+          <option value="name:desc">{t('kit.sortNameDesc')}</option>
+          <option value="date:desc">{t('kit.sortDateDesc')}</option>
+          <option value="date:asc">{t('kit.sortDateAsc')}</option>
+          <option value="duration:asc">{t('kit.sortDurationAsc')}</option>
+          <option value="duration:desc">{t('kit.sortDurationDesc')}</option>
         </select>
         <input ref={fileInputRef} type="file" accept=".wav,.mp3,.ogg,.flac,.aac,.m4a,audio/*" multiple
           onChange={(e) => e.target.files && handleImport(e.target.files)} style={{ display: 'none' }} />
@@ -1180,6 +1186,7 @@ function ClipRow({
 // ============================================================
 
 function KitEditor() {
+  const { t } = useI18n()
   const kits = useLibraryStore((s) => s.kits)
   const activeKitId = useLibraryStore((s) => s.activeKitId)
   const clips = useLibraryStore((s) => s.clips)
@@ -1229,9 +1236,9 @@ function KitEditor() {
   const flagKitNameInvalid = useCallback(() => {
     if (!kitNameWarnArmedRef.current) return
     kitNameWarnArmedRef.current = false
-    toast('英小文字 / 数字 / - のみ使用できます (先頭は英小文字)', 'warning')
+    toast(t('kit.invalidId'), 'warning')
     window.setTimeout(() => { kitNameWarnArmedRef.current = true }, 1200)
-  }, [toast])
+  }, [toast, t])
 
   const activeKit = kits.find((k) => k.id === activeKitId)
   const duplicateEventIds = useMemo(
@@ -1456,12 +1463,12 @@ function KitEditor() {
     // Drop leading non-letters — kit_id must start with a-z.
     cleaned = cleaned.replace(/^[^a-z]+/, '')
     if (!cleaned) {
-      toast('Kit 名は英小文字 / 数字 / - のみ・先頭は英小文字', 'error')
+      toast(t('kit.invalidName'), 'error')
       return
     }
     await createKit(cleaned)
     placeholderName.current = randomKitName()
-  }, [createKit, toast])
+  }, [createKit, toast, t])
 
   const handleKitDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault(); setDropActive(false); setDragOverIdx(null)
@@ -1475,7 +1482,7 @@ function KitEditor() {
       // are copied into the Kit's `source/` folder so the Kit remains
       // independent of the Library entry.
       const blob = await getClipAudio(c.id)
-      if (!blob) { toast(`"${c.name}" の audio data が見つかりません`, 'error'); return }
+      if (!blob) { toast(t('kit.clipAudioMissing', { name: c.name }), 'error'); return }
       const newId = await addEventToKit(activeKitId, {
         eventId: '',
         clipName: c.name,
@@ -1595,7 +1602,7 @@ function KitEditor() {
                   <fieldset className="kit-authoring-fields" disabled={editLocked}>
                   <div className="kit-meta-fields">
                     <label className="kit-meta-field">
-                      <span>Name <span className="field-hint">英小文字 / 数字 / - のみ・先頭は英小文字</span></span>
+                      <span>Name <span className="field-hint">{t('kit.nameHint')}</span></span>
                       <input
                         type="text"
                         value={activeKit.name}
@@ -1613,7 +1620,7 @@ function KitEditor() {
                         }}
                         maxLength={64}
                         pattern="[a-z][a-z0-9-]*"
-                        title={validateKitName(activeKit.name) ?? '英小文字 / 数字 / - のみ・先頭は英小文字'}
+                        title={validateKitName(activeKit.name) ?? t('kit.nameHint')}
                         style={validateKitName(activeKit.name) ? { borderColor: 'var(--error)' } : undefined}
                       />
                       {validateKitName(activeKit.name) && (
@@ -1630,12 +1637,12 @@ function KitEditor() {
                     <summary>
                       Target Device
                       <span className="field-hint">
-                        Kit 作者が調整したハードウェア / 設定を manifest に記録（任意）
+                        {t('kit.manifestHardware')}
                       </span>
                     </summary>
                     <div className="kit-meta-fields">
                       <label className="kit-meta-field">
-                        <span>Board <span className="field-hint">例: duo_wl_v3</span></span>
+                        <span>Board <span className="field-hint">{t('kit.boardExample')}</span></span>
                         <input
                           type="text"
                           value={activeKit.targetDevice?.board ?? ''}
@@ -1724,7 +1731,7 @@ function KitEditor() {
                       className="library-btn"
                       style={{ marginTop: 6 }}
                       disabled={!devices[0]?.online}
-                      title="現在選択中のデバイスから wiper / volume を取得して反映"
+                      title={t('kit.loadDeviceTitle')}
                       onClick={() => {
                         const dev = devices[0]
                         if (!dev) return
@@ -1737,14 +1744,14 @@ function KitEditor() {
                           },
                         })
                       }}
-                    >⟳ デバイスから取り込む</button>
+                    >{t('kit.loadDevice')}</button>
                   </details>
 
                   <CapacityGauge kitSize={kitSize} managerConnected={managerConnected} devices={devices} send={send} />
 
                   <div className="kit-events-header">
                     <span>Events ({activeKit.events.length})</span>
-                    <span className="kit-size-label" title="FIRE (command) モードのクリップだけがデバイス flash に載る容量">{formatFileSize(kitSize)}</span>
+                    <span className="kit-size-label" title={t('kit.fireCapacityTitle')}>{formatFileSize(kitSize)}</span>
                     <select
                       className="library-sort"
                       value={`${kitSort.by}:${kitSort.order}`}
@@ -1752,22 +1759,22 @@ function KitEditor() {
                         const [by, order] = e.target.value.split(':') as [KitSortBy, KitSortOrder]
                         setKitSort({ by, order })
                       }}
-                      title="並び順"
+                      title={t('kit.sortTitle')}
                     >
-                      <option value="name:asc">名前 ↑</option>
-                      <option value="name:desc">名前 ↓</option>
-                      <option value="date:desc">更新日時 (新しい順)</option>
-                      <option value="date:asc">更新日時 (古い順)</option>
-                      <option value="duration:asc">長さ (短い順)</option>
-                      <option value="duration:desc">長さ (長い順)</option>
-                      <option value="order:asc">追加順</option>
-                      <option value="order:desc">追加順 (逆)</option>
+                      <option value="name:asc">{t('kit.sortNameAsc')}</option>
+                      <option value="name:desc">{t('kit.sortNameDesc')}</option>
+                      <option value="date:desc">{t('kit.sortDateDesc')}</option>
+                      <option value="date:asc">{t('kit.sortDateAsc')}</option>
+                      <option value="duration:asc">{t('kit.sortDurationAsc')}</option>
+                      <option value="duration:desc">{t('kit.sortDurationDesc')}</option>
+                      <option value="order:asc">{t('kit.sortOrderAsc')}</option>
+                      <option value="order:desc">{t('kit.sortOrderDesc')}</option>
                     </select>
                     <button
                       className="kit-events-mode-help-btn"
                       onClick={() => setModeInfoOpen(true)}
-                      title="FIRE / CLIP の各モードとデバイス側の挙動を説明"
-                    ><span className="kit-events-mode-help-icon">?</span>モード説明</button>
+                      title={t('kit.modeHelpTitle')}
+                    ><span className="kit-events-mode-help-icon">?</span>{t('kit.modeHelp')}</button>
                     <select
                       className="kit-events-mode-bulk"
                       value=""
@@ -1799,12 +1806,12 @@ function KitEditor() {
                         })
                         void updateKit(activeKit.id, { events: nextEvents })
                       }}
-                      title="Kit 内の全イベントを選択したモードに一括変更"
+                      title={t('kit.bulkModeTitle')}
                     >
-                      <option value="" disabled>一括変更…</option>
-                      <option value="command">&gt; FIRE — 全て</option>
-                      <option value="stream_clip">♪ CLIP — 全て</option>
-                      <option value="both">&gt;♪ BOTH — 全て (command + stream 両 bucket)</option>
+                      <option value="" disabled>{t('kit.changeAll')}</option>
+                      <option value="command">{t('kit.changeAllFire')}</option>
+                      <option value="stream_clip">{t('kit.changeAllClip')}</option>
+                      <option value="both">{t('kit.changeAllBoth')}</option>
                     </select>
                   </div>
 
@@ -1812,7 +1819,7 @@ function KitEditor() {
                     <div className="kit-event-id-warning" role="alert">
                       <span aria-hidden="true">⚠</span>
                       <span>
-                        同じ Event ID が重複しています。Save / Deploy 前に Name を変更してください:
+                        {t('kit.duplicateEvent')}
                         {' '}
                         <code>{duplicateEventIds.join(', ')}</code>
                       </span>
@@ -2005,6 +2012,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
   devices: import('@/types/manager').DeviceInfo[]
   send: (msg: import('@/types/manager').ManagerMessage) => void
 }) {
+  const { t } = useI18n()
   const { toast } = useToast()
   const { lastMessage } = useHelperConnection()
   const selectedIps = useDeviceStore((s) => s.selectedIps)
@@ -2032,9 +2040,9 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
 
   useEffect(() => {
     if (!lastMessage) return
-    const t = lastMessage.type
+    const messageType = lastMessage.type
     const p = lastMessage.payload as Record<string, unknown>
-    if (t === 'deploy_progress' && typeof p.ip === 'string') {
+    if (messageType === 'deploy_progress' && typeof p.ip === 'string') {
       setProgressByIp((cur) => ({
         ...cur,
         [p.ip as string]: {
@@ -2046,7 +2054,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
           stuck: false,
         },
       }))
-    } else if (t === 'deploy_result' && typeof p.ip === 'string') {
+    } else if (messageType === 'deploy_result' && typeof p.ip === 'string') {
       // Per-device finish (helper sends one of these per target after
       // its run). We only mark done for the one that finished.
       const ip = p.ip as string
@@ -2069,9 +2077,9 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
       // shows the same message but the user often misses it. Helper
       // already includes the "TCP 7701 connect failed → power-cycle
       // the device" hint in its message text.
-      if (!ok) toast(`${ip} 配信失敗: ${msg}`, 'error')
+      if (!ok) toast(t('kit.deliveryFailed', { ip, message: msg }), 'error')
     }
-  }, [lastMessage, toast])
+  }, [lastMessage, toast, t])
 
   // Stuck detection (same shape as OtaController's watchdog): a row that
   // has started transferring but got neither `deploy_progress` nor
@@ -2124,7 +2132,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
    */
   const preflightKit = useCallback((requireDevices: boolean): boolean => {
     if (!outRoot) {
-      toast('Library / Kit Folder を選択してください', 'error')
+      toast(t('kit.selectFolder'), 'error')
       return false
     }
     if (requireDevices && (!managerConnected || devices.length === 0)) {
@@ -2166,7 +2174,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
       return false
     }
     return true
-  }, [outRoot, managerConnected, devices, kit, toast])
+  }, [outRoot, managerConnected, devices, kit, toast, t])
 
   /**
    * Save Folder = Kit メタ + manifest + WAV を kit フォルダに書き出す。
@@ -2201,12 +2209,12 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
         // pushed an error / retrying pill — toast a top-level summary
         // so the user sees something even if they're not watching the
         // footer.
-        toast('フォルダ保存に失敗しました (詳細はステータス表示)', 'error')
+        toast(t('kit.folderSaveFailed'), 'error')
       }
     } catch (err) {
       toast(`Save failed: ${err instanceof Error ? err.message : err}`, 'error')
     } finally { setIsExporting(false) }
-  }, [kit, preflightKit, setIsExporting, toast])
+  }, [kit, preflightKit, setIsExporting, toast, t])
 
   const handleDeploy = useCallback(async () => {
     if (!preflightKit(true)) return
@@ -2249,7 +2257,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
         // progress row replaces this kit's save-status text while it runs, so
         // the footer pill would otherwise be the only hint that the folder
         // copy is now out of date.
-        if (built) toast('フォルダへの保存に失敗しました（デバイスへの送信は続行します）', 'warning')
+        if (built) toast(t('kit.folderSaveWarning'), 'warning')
       }
       if (!built) { toast('Build failed', 'error'); return }
       const { buildKitZip } = await import('@/utils/kitExporter')
@@ -2263,7 +2271,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
       toast(`Sending "${built.kitId}" to ${targetIps.length} device(s)…`, 'info')
     } catch (err) { toast(`Deploy failed: ${err instanceof Error ? err.message : err}`, 'error') }
     finally { setIsExporting(false) }
-  }, [kit, deployTargets, selectedIps, send, preflightKit, setIsExporting, toast])
+  }, [kit, deployTargets, selectedIps, send, preflightKit, setIsExporting, toast, t])
 
   // Status copy shown beside the Deploy button. Save Folder / Deploy
   // both push their `saving → saved` transition through the store's
@@ -2309,7 +2317,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
           className="library-btn primary"
           disabled={deployBlocked}
           onClick={handleDeploy}
-          title="Kit folder をビルド後、Helper 経由でデバイスに転送する"
+          title={t('kit.deployTitle')}
         >Deploy</button>
         <button
           className="library-btn"
@@ -2334,7 +2342,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
                   "デバイスが見つかりません" message would lie about what's
                   actually happening. */}
               {!outRoot
-                ? 'Library または Kit Folder を選択してください'
+                ? t('kit.selectFolder')
                 : saveStatusLabel
                   ? saveStatusLabel
                   : !managerConnected ? 'Helper offline'

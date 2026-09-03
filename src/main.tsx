@@ -3,16 +3,19 @@ import ReactDOM from 'react-dom/client'
 import { App } from './App'
 import { ToastProvider } from '@/components/common/Toast'
 import { HelperConnectionProvider } from '@/hooks/useHelperConnection'
+import { I18nProvider } from '@/i18n/I18nProvider'
 import { isDemoMode } from '@/demo/isDemoMode'
 
 function renderApp(): void {
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
-      <HelperConnectionProvider>
-        <ToastProvider>
-          <App />
-        </ToastProvider>
-      </HelperConnectionProvider>
+      <I18nProvider>
+        <HelperConnectionProvider>
+          <ToastProvider>
+            <App />
+          </ToastProvider>
+        </HelperConnectionProvider>
+      </I18nProvider>
     </React.StrictMode>,
   )
 }

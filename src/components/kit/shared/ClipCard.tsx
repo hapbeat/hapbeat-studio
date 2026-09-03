@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { IntensityControl } from './IntensityControl'
 import { WiperBadge } from './WiperBadge'
 import { useToast } from '@/components/common/Toast'
+import { useI18n } from '@/i18n/I18nProvider'
 import './ClipCard.css'
 
 export interface ClipCardAction {
@@ -173,6 +174,7 @@ export function ClipCard({
   const [draftName, setDraftName] = useState(name)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const { toast } = useToast()
+  const { t } = useI18n()
   // Throttle the sanitize warning so a paste of "Hello World" doesn't
   // fire one toast per character. We re-arm 1.2s after the last invalid
   // input, which is long enough to feel like "one warning per attempt"
@@ -182,7 +184,7 @@ export function ClipCard({
   const flagInvalid = () => {
     if (!warnArmedRef.current) return
     warnArmedRef.current = false
-    toast('英小文字 / 数字 / -, _ のみ使用できます', 'warning')
+    toast(t('clip.invalidName'), 'warning')
     if (warnRef.current !== null) window.clearTimeout(warnRef.current)
     warnRef.current = window.setTimeout(() => { warnArmedRef.current = true }, 1200)
   }
@@ -272,7 +274,7 @@ export function ClipCard({
             onMouseDown={(e) => e.stopPropagation()}
             onBlur={commitRename}
             onKeyDown={onRenameKey}
-            title="英小文字 / 数字 / -, _ のみ"
+            title={t('kit.validName')}
           />
         ) : (
           <span

@@ -3,13 +3,9 @@ import type { LedConfig, LedConditionGroup, LedConditionMeta, LedRule } from '@/
 import { LED_CONDITION_METAS } from '@/types/display'
 import { BRIGHTNESS_STEPS, rawToStep, stepToRaw } from '@/utils/ledBrightness'
 import './LedConfigModal.css'
+import { useI18n } from '@/i18n/I18nProvider'
 
-const GROUP_ORDER: { group: LedConditionGroup; label: string; note?: string }[] = [
-  { group: 'warning',  label: '警告',
-    note: 'どんな状況でも最優先で点灯。色は「異常を伝える」ためのもの' },
-  { group: 'state',    label: 'アプリ接続状態',
-    note: '警告が無いときに表示。アプリの接続有無に応じて 2 状態を行き来する' },
-]
+const GROUP_ORDER: LedConditionGroup[] = ['warning', 'state']
 
 interface LedConfigModalProps {
   ledConfig: LedConfig
@@ -31,6 +27,7 @@ function hexToRgb(hex: string): [number, number, number] {
 // (UI 設定モーダルの「変化色の明るさ」スライダと同じ感覚で輝度を選べる)。
 
 export function LedConfigModal({ ledConfig, onLedChange, onClose }: LedConfigModalProps) {
+  const { t } = useI18n()
   const globalBrightness = ledConfig.globalBrightness ?? 255
 
   const updateRule = (id: string, patch: Partial<LedRule>) => {
@@ -51,7 +48,7 @@ export function LedConfigModal({ ledConfig, onLedChange, onClose }: LedConfigMod
       <div className="modal-overlay" onClick={onClose} />
       <div className="led-config-modal is-narrow">
         <div className="modal-header">
-          <h3>LED 設定</h3>
+          <h3>{t('led.modal.title')}</h3>
           <button className="modal-close" onClick={onClose}>x</button>
         </div>
 
@@ -59,7 +56,7 @@ export function LedConfigModal({ ledConfig, onLedChange, onClose }: LedConfigMod
           {/* Global Brightness */}
           <div className="led-global-brightness">
             <div className="led-global-brightness-header">
-              <span className="led-global-brightness-label">全体の明るさ</span>
+              <span className="led-global-brightness-label">{t('led.globalBrightness')}</span>
               <span className="led-global-brightness-value">{globalStep} / {BRIGHTNESS_STEPS}</span>
             </div>
             <input
@@ -70,12 +67,14 @@ export function LedConfigModal({ ledConfig, onLedChange, onClose }: LedConfigMod
               className="led-brightness-slider"
             />
             <span className="led-setting-hint">
-              各項目で個別に設定されていない場合、この値が適用されます
+              {t('led.globalHint')}
             </span>
           </div>
 
           <div className="led-rules">
-            {GROUP_ORDER.map(({ group, label, note }) => {
+            {GROUP_ORDER.map((group) => {
+              const label = group === 'warning' ? t('led.warning') : t('led.state')
+              const note = group === 'warning' ? t('led.warningNote') : t('led.stateNote')
               const groupMetas = LED_CONDITION_METAS.filter((m) => m.group === group)
               if (groupMetas.length === 0) return null
               return (
@@ -86,9 +85,7 @@ export function LedConfigModal({ ledConfig, onLedChange, onClose }: LedConfigMod
                   {/* state グループには遷移図を出して双方向に行き来することを示す */}
                   {group === 'state' && (
                     <div className="led-state-flow">
-                      <b>待機</b>
-                      <span className="arrow" aria-label="アプリ接続/切断で行き来">⇄</span>
-                      <b>アプリ接続中</b>
+                      <b>{t('led.idle')}</b><span className="arrow" aria-label={t('led.flowAria')}>⇄</span><b>{t('led.connected')}</b>
                     </div>
                   )}
 
@@ -108,7 +105,7 @@ export function LedConfigModal({ ledConfig, onLedChange, onClose }: LedConfigMod
                               checked={rule.enabled}
                               onChange={(e) => updateRule(rule.id, { enabled: e.target.checked })}
                             />
-                            <span className="led-rule-priority" title={`優先度 ${rule.priority} — 数値が小さいほど先に発火`}>
+                            <span className="led-rule-priority" title={t('led.priority', { priority: rule.priority })}>
                               #{rule.priority}
                             </span>
                             <span className="led-rule-name">{meta.label}</span>
@@ -118,7 +115,7 @@ export function LedConfigModal({ ledConfig, onLedChange, onClose }: LedConfigMod
                         {rule.enabled && (
                           <div className="led-rule-settings">
                             <label className="led-setting led-setting-color">
-                              <span>色</span>
+                              <span>{t('led.color')}</span>
                               <input
                                 type="color"
                                 value={rgbToHex(...rule.color)}
@@ -126,8 +123,7 @@ export function LedConfigModal({ ledConfig, onLedChange, onClose }: LedConfigMod
                               />
                             </label>
                             <div className="led-setting led-setting-brightness">
-                              <span>明るさ</span>
-                              <label className="led-brightness-override-toggle" title="個別設定を有効にする">
+                              <span>{t('led.brightness')}</span><label className="led-brightness-override-toggle" title={t('led.enableOverride')}>
                                 <input
                                   type="checkbox"
                                   checked={hasOverride}
@@ -139,7 +135,7 @@ export function LedConfigModal({ ledConfig, onLedChange, onClose }: LedConfigMod
                                     }
                                   }}
                                 />
-                                <span className="led-setting-hint">個別</span>
+                                <span className="led-setting-hint">{t('led.individual')}</span>
                               </label>
                               <input
                                 type="range"
@@ -152,23 +148,23 @@ export function LedConfigModal({ ledConfig, onLedChange, onClose }: LedConfigMod
                               <span className="led-brightness-num">{effectiveStep}</span>
                             </div>
                             <label className="led-setting">
-                              <span>点滅 (秒)</span>
+                              <span>{t('led.blink')}</span>
                               <input
                                 type="number"
                                 min={0} max={10} step={0.1}
                                 value={rule.blink_sec}
                                 onChange={(e) => updateRule(rule.id, { blink_sec: parseFloat(e.target.value) || 0 })}
                               />
-                              <span className="led-setting-hint">{rule.blink_sec === 0 ? '常灯' : `${rule.blink_sec}s`}</span>
+                              <span className="led-setting-hint">{rule.blink_sec === 0 ? t('led.steady') : `${rule.blink_sec}s`}</span>
                             </label>
                             <label className="led-setting">
-                              <span>フェード</span>
+                              <span>{t('led.fade')}</span>
                               <input
                                 type="checkbox"
                                 checked={rule.fade}
                                 onChange={(e) => updateRule(rule.id, { fade: e.target.checked })}
                               />
-                              <span className="led-setting-hint">{rule.fade ? 'なめらか' : '瞬時'}</span>
+                              <span className="led-setting-hint">{rule.fade ? t('led.smooth') : t('led.instant')}</span>
                             </label>
                           </div>
                         )}

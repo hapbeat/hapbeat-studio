@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useLibraryStore } from '@/stores/libraryStore'
+import { useI18n } from '@/i18n/I18nProvider'
 import './LocalFsStatus.css'
 
 /**
@@ -12,6 +13,7 @@ import './LocalFsStatus.css'
  * Errors stay visible until the next successful write supersedes them.
  */
 export function LocalFsStatus() {
+  const { t } = useI18n()
   const status = useLibraryStore((s) => s.localFsStatus)
   const msg = useLibraryStore((s) => s.localFsLastMsg)
   const ts = useLibraryStore((s) => s.localFsLastTs)
@@ -33,10 +35,10 @@ export function LocalFsStatus() {
       title={msg || status}>
       <span className="localfs-status-dot" aria-hidden="true" />
       <span className="localfs-status-label">
-        {status === 'saving' && '保存中…'}
-        {status === 'saved' && '✓ 保存済み'}
-        {status === 'retrying' && '⟳ リトライ中'}
-        {status === 'error' && '✗ 保存失敗'}
+        {status === 'saving' && t('localFs.saving')}
+        {status === 'saved' && t('localFs.saved')}
+        {status === 'retrying' && t('localFs.retrying')}
+        {status === 'error' && t('localFs.failed')}
       </span>
       {msg && <span className="localfs-status-msg">{msg}</span>}
     </div>

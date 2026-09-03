@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { useI18n } from '@/i18n/I18nProvider'
 import './ConfirmDialog.css'
 
 export interface ConfirmDialogProps {
@@ -29,11 +30,12 @@ export function ConfirmDialog({
   title,
   message,
   confirmLabel = 'OK',
-  cancelLabel = 'キャンセル',
+  cancelLabel,
   danger = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const { t } = useI18n()
   const confirmRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -69,7 +71,7 @@ export function ConfirmDialog({
             className="form-button-secondary"
             onClick={onCancel}
           >
-            {cancelLabel}
+            {cancelLabel ?? t('common.confirmCancel')}
           </button>
           <button
             ref={confirmRef}

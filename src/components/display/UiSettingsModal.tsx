@@ -4,6 +4,7 @@ import type { ManagerMessage } from '@/types/manager'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { BRIGHTNESS_STEPS, rawToStep, stepToRaw } from '@/utils/ledBrightness'
+import { useI18n } from '@/i18n/I18nProvider'
 import './LedConfigModal.css'
 
 interface UiSettingsModalProps {
@@ -18,10 +19,10 @@ interface UiSettingsModalProps {
   onClose: () => void
 }
 
-const BRIGHTNESS_LEVELS: { value: 1 | 2 | 3; label: string; hint: string }[] = [
-  { value: 1, label: 'Low',  hint: '暗所・夜間 (~6%)' },
-  { value: 2, label: 'Mid',  hint: '通常室内 (50%)' },
-  { value: 3, label: 'High', hint: '明所・展示 (100%)' },
+const BRIGHTNESS_LEVELS: { value: 1 | 2 | 3; label: string; hint: 'ui.brightness.low' | 'ui.brightness.mid' | 'ui.brightness.high' }[] = [
+  { value: 1, label: 'Low',  hint: 'ui.brightness.low' },
+  { value: 2, label: 'Mid',  hint: 'ui.brightness.mid' },
+  { value: 3, label: 'High', hint: 'ui.brightness.high' },
 ]
 
 const HOLD_PRESETS = [600, 800, 1000, 1200, 1500, 2000]
@@ -32,6 +33,7 @@ export function UiSettingsModal({
   managerSend,
   onClose,
 }: UiSettingsModalProps) {
+  const { t } = useI18n()
   const selectedIps = useDeviceStore((s) => s.selectedIps)
   const { devices } = useHelperConnection()
   const onlineSelected = devices.filter(
@@ -84,14 +86,14 @@ export function UiSettingsModal({
       <div className="modal-overlay" onClick={onClose} />
       <div className="led-config-modal is-narrow">
         <div className="modal-header">
-          <h3>UI 設定 (OLED / ボタン)</h3>
+          <h3>{t('ui.modal.title')}</h3>
           <button className="modal-close" onClick={onClose}>x</button>
         </div>
 
         <div className="modal-body">
           {/* OLED 輝度 — 即時反映 */}
           <div className="ui-settings-section">
-            <div className="ui-settings-section-title">OLED 輝度</div>
+            <div className="ui-settings-section-title">{t('ui.brightness')}</div>
             <div className="ui-settings-row">
               <div className="device-toggle" role="group" aria-label="OLED brightness">
                 {BRIGHTNESS_LEVELS.map((l) => (
@@ -100,7 +102,7 @@ export function UiSettingsModal({
                     type="button"
                     className={`btn btn-sm device-toggle-btn ${uiSettings.oled_brightness === l.value ? 'active' : ''}`}
                     onClick={() => handleBrightness(l.value)}
-                    title={l.hint}
+                    title={t(l.hint)}
                   >
                     {l.label}
                   </button>
@@ -108,18 +110,18 @@ export function UiSettingsModal({
               </div>
               <span className="ui-settings-hint">
                 {selectedIps.length === 0
-                  ? '※ デバイス未選択 — Deploy 後に反映'
-                  : `${onlineSelected.length}/${selectedIps.length} デバイスへ即時送信`}
+                  ? t('ui.noDevice')
+                  : t('ui.sendNow', { online: onlineSelected.length, selected: selectedIps.length })}
               </span>
             </div>
             <div className="ui-settings-hint-block">
-              {BRIGHTNESS_LEVELS.find((l) => l.value === uiSettings.oled_brightness)?.hint}
+              {t(BRIGHTNESS_LEVELS.find((l) => l.value === uiSettings.oled_brightness)?.hint ?? 'ui.brightness.mid')}
             </div>
           </div>
 
           {/* Hold タイミング — Deploy 後反映 */}
           <div className="ui-settings-section">
-            <div className="ui-settings-section-title">Hold タイミング</div>
+            <div className="ui-settings-section-title">{t('ui.holdTiming')}</div>
 
             {/* タイムライン: feedback_start → hold_ms 発火 */}
             <HoldTimeline
@@ -130,7 +132,7 @@ export function UiSettingsModal({
             />
 
             <div className="ui-settings-row" style={{ marginTop: 6 }}>
-              <span className="ui-settings-row-label">発火時間</span>
+              <span className="ui-settings-row-label">{t('ui.fireAt')}</span>
               <input
                 type="range"
                 min={300} max={3000} step={50}
@@ -161,7 +163,7 @@ export function UiSettingsModal({
             </div>
 
             <div className="ui-settings-row" style={{ marginTop: 10 }}>
-              <span className="ui-settings-row-label">色変化開始</span>
+              <span className="ui-settings-row-label">{t('ui.feedbackStart')}</span>
               <input
                 type="range"
                 min={0}
@@ -184,13 +186,13 @@ export function UiSettingsModal({
             </div>
 
             <div className="ui-settings-row" style={{ marginTop: 6 }}>
-              <span className="ui-settings-row-label">変化色</span>
+              <span className="ui-settings-row-label">{t('ui.feedbackColor')}</span>
               <input
                 type="color"
                 value={colorToHex(uiSettings.hold_feedback_color)}
                 onChange={(e) => handleFeedbackColor(e.target.value)}
                 className="ui-settings-color"
-                title="Hold 開始予告の色 (純色を指定し、輝度は別途調整)"
+                title={t('ui.feedbackColorTitle')}
               />
               <input
                 type="text"
@@ -202,7 +204,7 @@ export function UiSettingsModal({
             </div>
 
             <div className="ui-settings-row" style={{ marginTop: 6 }}>
-              <span className="ui-settings-row-label">変化色の明るさ</span>
+              <span className="ui-settings-row-label">{t('ui.feedbackBrightness')}</span>
               <input
                 type="range"
                 min={0} max={BRIGHTNESS_STEPS} step={1}
@@ -215,18 +217,10 @@ export function UiSettingsModal({
               </span>
             </div>
             <div className="ui-settings-hint-block">
-              押し始めはここで設定した色 + 明るさで点灯し、発火時間に向かって
-              線形に 0 まで暗くなります (= 押している進捗の可視化)。
-              暗くなりすぎると変化が見えづらいので、必要に応じて明るさを上げて
-              ください (LED 設定と同じ 10 段階、ただし設定は独立)。
+              {t('ui.feedbackExplanation')}
             </div>
             <div className="ui-settings-hint-block">
-              押下から「色変化開始」までは短押し扱い。色が変わってから「発火時間」
-              までの間に離せば短押し相当 (action なし)、その間 hold し続けると
-              hold アクションが実行されます。
-              <br />
-              色変化開始を 0ms にすると押した瞬間から色が変わり、hold 中の感触は
-              出ますが短押しの視覚区別が無くなります。
+              {t('ui.holdExplanation')}
             </div>
 
             <label className="ui-settings-checkbox">
@@ -237,17 +231,15 @@ export function UiSettingsModal({
                   onUiSettingsChange({ ...uiSettings, hold_show_oled_indicator: e.target.checked })
                 }
               />
-              <span>Hold 中に OLED へ "Hold..." を表示</span>
+              <span>{t('ui.showHold')}</span>
             </label>
             <div className="ui-settings-hint-block">
-              無効の場合、Hold 中は LED 色変化のみで知らせます (短押し時の
-              位置/グループ表示が隠されないように既定 OFF)。
+              {t('ui.showHoldHint')}
             </div>
           </div>
 
           <div className="ui-settings-footer-note">
-            ※ ここでの設定はモーダルを閉じても **Deploy** を押すまで本体に
-            書き込まれません (OLED 輝度のスライダー操作は除く)。
+            {t('ui.deployNote')}
           </div>
         </div>
       </div>
@@ -275,6 +267,7 @@ function HoldTimeline({
   feedbackColor: [number, number, number]
   feedbackBrightness: number
 }) {
+  const { t } = useI18n()
   const total = Math.max(fireAt, feedbackStart) || 1
   const tapPct = (feedbackStart / total) * 100
   const pendPct = ((fireAt - feedbackStart) / total) * 100
@@ -292,23 +285,23 @@ function HoldTimeline({
         <div
           className="hold-timeline-seg hold-timeline-tap"
           style={{ width: `${tapPct}%` }}
-          title={`短押し範囲: 0〜${feedbackStart}ms`}
+          title={t('ui.tapRange', { ms: feedbackStart })}
         >
           {tapLabelVisible && (
-            <span className="hold-timeline-seg-label">短押し 0-{feedbackStart}ms</span>
+            <span className="hold-timeline-seg-label">{t('ui.tapLabel', { ms: feedbackStart })}</span>
           )}
         </div>
         <div
           className="hold-timeline-seg hold-timeline-pending"
           style={{ width: `${pendPct}%`, background: fadeBg }}
-          title={`発火予告: ${feedbackStart}〜${fireAt}ms (色 → fade out)`}
+          title={t('ui.pendingRange', { start: feedbackStart, end: fireAt })}
         >
           {pendLabelVisible && (
             <span className="hold-timeline-seg-label">
-              予告 {feedbackStart}-{fireAt}ms (fade)
+              {t('ui.pendingLabel', { start: feedbackStart, end: fireAt })}
             </span>
           )}
-          <span className="hold-timeline-fire" aria-hidden="true">▾発火</span>
+          <span className="hold-timeline-fire" aria-hidden="true">{t('ui.trigger')}</span>
         </div>
       </div>
     </div>

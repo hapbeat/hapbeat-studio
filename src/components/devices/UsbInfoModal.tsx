@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useI18n } from '@/i18n/I18nProvider'
 
 export interface UsbInfoModalProps {
   onClose: () => void
@@ -14,6 +15,7 @@ export interface UsbInfoModalProps {
  * target, ⚙ 設定 = config-connect, ↻ 識別 = probe, ✕ = close card).
  */
 export function UsbInfoModal({ onClose }: UsbInfoModalProps) {
+  const { t } = useI18n()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', onKey)
@@ -22,52 +24,49 @@ export function UsbInfoModal({ onClose }: UsbInfoModalProps) {
 
   return (
     <div className="usb-info-backdrop" onClick={onClose}>
-      <div className="usb-info-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="USB カードの見方">
+      <div className="usb-info-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={t('usb.info.aria')}>
         <div className="usb-info-header">
-          <h3>USB Serial カードの見方</h3>
+          <h3>{t('usb.info.title')}</h3>
           <button className="usb-info-close" onClick={onClose} aria-label="Close">×</button>
         </div>
 
         <div className="usb-info-body">
           <p className="usb-info-intro">
-            USB カードには「書き込み対象の選択」と「設定接続」という 2 つの独立した操作があります。
-            COM ポート名はブラウザから取得できないため、<b>#番号</b> と識別結果でカードを区別します。
+            {t('usb.info.intro')}
           </p>
 
           <div className="usb-info-row">
-            <span className="usb-info-chip select">☑ チェック</span>
+            <span className="usb-info-chip select">{t('usb.info.selectChip')}</span>
             <div>
-              <b>書き込み対象</b>に選ぶ操作。複数チェックできます（Firmware タブで一斉書き込み）。
-              <span className="usb-info-note">書き込みはこのチェックだけで OK — 「⚙ 設定」接続は不要です。</span>
+              <b>{t('usb.info.flashLabel')}</b>{t('usb.info.flashBody')}
+              <span className="usb-info-note">{t('usb.info.flashNote')}</span>
             </div>
           </div>
 
           <div className="usb-info-row">
-            <span className="usb-info-chip conn">⚙ 設定</span>
+            <span className="usb-info-chip conn">{t('usb.info.configChip')}</span>
             <div>
-              <b>設定接続</b>（get_info / Wi-Fi 設定など）。<b>1 台ずつ</b>で、接続中はカード枠が<b>緑</b>になります。
-              別のカードを設定 ON にすると、前のカードは自動で OFF になります。
+              <b>{t('usb.info.configLabel')}</b>{t('usb.info.configBody')}
             </div>
           </div>
 
           <div className="usb-info-row">
-            <span className="usb-info-chip probe">↻ 識別</span>
+            <span className="usb-info-chip probe">{t('usb.info.probeChip')}</span>
             <div>
-              情報取得（get_info）だけを実行します。<b>USB を繋ぐと自動でも走ります</b>ので、通常は押す必要はありません。
+              {t('usb.info.probeBody')}
             </div>
           </div>
 
           <div className="usb-info-row">
             <span className="usb-info-chip close">✕</span>
             <div>
-              カードを閉じます（COM ポートの許可を取り消し）。通常は不要 — <b>抜けば消えます</b>。
-              Hapbeat 以外の COM を誤って追加したときの削除用です。
+              {t('usb.info.closeBody')}
             </div>
           </div>
         </div>
 
         <div className="usb-info-footer">
-          <button className="form-button" onClick={onClose}>閉じる</button>
+          <button className="form-button" onClick={onClose}>{t('common.close')}</button>
         </div>
       </div>
     </div>

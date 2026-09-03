@@ -4,6 +4,7 @@ import type { KitEvent } from '@/types/library'
 // (header / fields / footer) so users get a consistent dialog look
 // across the Clips and Kit panels.
 import '../shared/ClipEditModal.css'
+import { useI18n } from '@/i18n/I18nProvider'
 
 export interface KitEventEditModalProps {
   event: KitEvent
@@ -29,6 +30,7 @@ export interface KitEventEditModalProps {
  * are tuned inline on the kit row, not in this dialog.
  */
 export function KitEventEditModal({ event, onClose, onUpdate, onRemove }: KitEventEditModalProps) {
+  const { t } = useI18n()
   // Escape / click-outside dismiss — mirrors ClipEditModal.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -64,25 +66,25 @@ export function KitEventEditModal({ event, onClose, onUpdate, onRemove }: KitEve
 
         <div className="clip-edit-fields">
           <label className="clip-edit-field">
-            <span>Name <span className="field-hint">英小文字 / 数字 / -, _ のみ — kit 内のクリップ表示名 + eventId に使用</span></span>
+            <span>Name <span className="field-hint">{t('kit.event.nameHint')}</span></span>
             <input
               type="text"
               value={event.clipName}
               autoFocus
               maxLength={64}
               pattern="[a-z0-9_-]+"
-              title="英小文字 / 数字 / -, _ のみ"
+              title={t('kit.event.nameTitle')}
               onChange={(e) => updateClipName(e.target.value)}
             />
           </label>
 
           <label className="clip-edit-field">
             <span>
-              Note <span className="field-hint">(optional — カード hover で表示)</span>
+              Note <span className="field-hint">{t('kit.event.noteHint')}</span>
               <button
                 type="button"
                 className="clip-edit-swap-btn"
-                title="Name ↔ Note を入れ替え (Name 側は拡張子除去 + 英数字に sanitize)"
+                title={t('kit.event.swapTitle')}
                 disabled={swapping || !event.note?.trim()}
                 onClick={async () => {
                   // Same shape as the library ClipEditModal swap:
@@ -115,13 +117,13 @@ export function KitEventEditModal({ event, onClose, onUpdate, onRemove }: KitEve
             <textarea
               rows={3}
               value={event.note ?? ''}
-              placeholder="この event の用途・調整意図など、author 向けメモ"
+              placeholder={t('kit.event.notePlaceholder')}
               onChange={(e) => updateNote(e.target.value)}
             />
           </label>
 
           <div className="clip-edit-field">
-            <span>Event ID <span className="field-hint">(自動: kit name × name)</span></span>
+            <span>Event ID <span className="field-hint">{t('kit.event.idHint')}</span></span>
             <code className="kit-event-edit-eventid">{event.eventId || '(空 — Name を入力してください)'}</code>
           </div>
         </div>
@@ -129,9 +131,9 @@ export function KitEventEditModal({ event, onClose, onUpdate, onRemove }: KitEve
         <div className="clip-edit-modal-footer">
           <button
             className="library-btn danger"
-            title="Remove this event from the kit (元のライブラリ clip は影響なし)"
+            title={t('kit.event.removeTitle')}
             onClick={async () => {
-              if (!confirm(`"${event.clipName}" を kit から除外しますか？\n\nライブラリのオリジナルクリップは残ります。`)) return
+              if (!confirm(t('kit.removeConfirm', { name: event.clipName }))) return
               await onRemove()
               onClose()
             }}

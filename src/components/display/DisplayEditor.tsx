@@ -40,6 +40,7 @@ import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useToast } from '@/components/common/Toast'
 import { useConfirm } from '@/components/common/useConfirm'
+import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { LedConfigModal } from './LedConfigModal'
 import { VolumeConfigModal } from './VolumeConfigModal'
 import { DevicePill } from '@/components/devices/DevicePill'
@@ -197,7 +198,7 @@ function buildActionGroups(pages: DisplayPage[], deviceModel: DeviceModel): Acti
   groups.push({
     label: 'System',
     items: [
-      { value: 'wifi_select', label: 'Wi-Fi \u9078\u629e\u30e2\u30fc\u30c9' },
+      { value: 'wifi_select', label: 'Wi-Fi select' },
     ],
   })
 
@@ -330,6 +331,7 @@ function saveTo(state: SavedState) {
 // ========================================
 
 export function DisplayEditor() {
+  const { t } = useI18n()
   const saved = useRef(loadSaved()).current
   // OLED レイアウトはモデル別に独立保持 (2026-05-09 ユーザ要望)。
   // 表示用に一旦 derived `layout` に展開するが、編集は `setLayout` 経由で
@@ -928,12 +930,12 @@ export function DisplayEditor() {
     const success = lastMessage.payload.success as boolean
     const reason = (lastMessage.payload.error ?? lastMessage.payload.message ?? '') as string
     if (!success && reason.includes('no_device')) {
-      toast('デバイスが選択されていません', 'warning')
+      toast(t('display.noDevice'), 'warning')
     }
     // 成功/失敗のトーストは HelperFailureToastListener が write_result（実機の結果）
     // ベースで一元的に出す（操作ではなく結果で出す方針）。ここでは進捗 UI の
     // fade のみ行い、トーストは重複させない。
-  }, [lastMessage, toast])
+  }, [lastMessage, toast, t])
 
   // --- エクスポート / インポート / デバイス書き込み ---
 
@@ -943,7 +945,7 @@ export function DisplayEditor() {
 
   const handleDeploy = useCallback(() => {
     if (!managerConnected) {
-      toast('Hapbeat Manager を起動してください', 'error')
+      toast(t('display.helperRequired'), 'error')
       return
     }
     // Honor the Devices tab's selection so Display deploys to only
@@ -957,7 +959,7 @@ export function DisplayEditor() {
       ? selectedIps
       : (selectedIp ? [selectedIp] : [])
     if (rawTargets.length === 0) {
-      toast('Devices タブで対象デバイスを選択してください', 'error')
+      toast(t('display.selectDevice'), 'error')
       return
     }
     // Drop serial: IPs silently (Display deploy は TCP 7701 専用、
@@ -965,7 +967,7 @@ export function DisplayEditor() {
     // 未実装)。Serial-only 選択時だけ案内 toast。
     const lanTargets = rawTargets.filter((ip) => !ip.startsWith('serial:'))
     if (lanTargets.length === 0) {
-      toast('Serial 接続では Display 書込みは未対応 — Wi-Fi に乗せてから再試行してください', 'error')
+      toast(t('display.serialUnsupported'), 'error')
       return
     }
     // Helper の現在のデバイス一覧と突き合わせて、オンラインの IP だけを
@@ -975,7 +977,7 @@ export function DisplayEditor() {
     const onlineSet = new Set(devices.filter((d) => d.online).map((d) => d.ipAddress))
     const targets = lanTargets.filter((ip) => onlineSet.has(ip))
     if (targets.length === 0) {
-      toast('選択中のデバイスが現在オフラインです', 'error')
+      toast(t('display.offline'), 'error')
       return
     }
     if (targets.length < lanTargets.length) {
@@ -995,11 +997,11 @@ export function DisplayEditor() {
     // board は get_info（infoCache）由来。未取得は安全側で対象に残す。
     const hapbeatTargets = targets.filter((ip) => !isKnownNonHapbeatBoard(infoCache[ip]?.board))
     if (hapbeatTargets.length === 0) {
-      toast('UI 設定は Hapbeat 本体のみ対象です（選択中に Hapbeat 機器がありません）', 'error')
+      toast(t('display.hapbeatOnly'), 'error')
       return
     }
     if (hapbeatTargets.length < targets.length) {
-      toast(`非 Hapbeat 機器 ${targets.length - hapbeatTargets.length} 台は対象外にしました`, 'warning')
+      toast(t('display.excludedTargets', { count: targets.length - hapbeatTargets.length }), 'warning')
     }
     setIsDeploying(true)
     // Pre-seed progress so the UI shows immediately ("sending" for each
@@ -1019,12 +1021,12 @@ export function DisplayEditor() {
       type: 'write_ui_config',
       payload: { config: uiConfig, targets: hapbeatTargets },
     })
-  }, [managerConnected, managerSend, buildSavedState, toast, devices])
+  }, [managerConnected, managerSend, buildSavedState, toast, devices, t])
 
   const handleExport = useCallback(() => {
     exportDisplayLayout(buildSavedState())
-    toast('ui-config.json をダウンロードしました', 'success')
-  }, [buildSavedState, toast])
+    toast(t('display.downloaded'), 'success')
+  }, [buildSavedState, toast, t])
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -1054,12 +1056,12 @@ export function DisplayEditor() {
       if (imported.uiSettings) setUiSettings(imported.uiSettings)
       setActivePageIndex(0)
       setPopupPos(null)
-      toast('レイアウトを読み込みました', 'success')
+      toast(t('display.layoutLoaded'), 'success')
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'インポートに失敗しました', 'error')
+      toast(err instanceof Error ? err.message : t('display.importFailed'), 'error')
     }
     e.target.value = ''
-  }, [deviceModel])
+  }, [deviceModel, t])
 
   const handlePerButtonActionChange = useCallback(
     (buttonId: string, field: keyof SingleButtonAction, value: ButtonActionType) => {
@@ -1290,6 +1292,28 @@ export function DisplayEditor() {
 // OledSimulator
 // ========================================
 
+function buttonMessageId(id: string): MessageId {
+  const ids: Record<string, MessageId> = {
+    btn_1: 'display.button.upperLeft',
+    btn_2: 'display.button.middleLeft',
+    btn_3: 'display.button.lowerLeft',
+    btn_4: 'display.button.upperRight',
+    btn_5: 'display.button.lowerRight',
+    btn_l: 'display.button.left',
+    btn_c: 'display.button.center',
+    btn_r: 'display.button.right',
+  }
+  return ids[id] ?? 'display.button.center'
+}
+
+function buttonShortLabel(id: string): string {
+  const labels: Record<string, string> = {
+    btn_1: '1 ↖', btn_2: '2 ←', btn_3: '3 ↙', btn_4: '4 ↗', btn_5: '5 ↘',
+    btn_l: '1 ←', btn_c: '2 •', btn_r: '3 →',
+  }
+  return labels[id] ?? id
+}
+
 interface OledSimulatorProps {
   deviceSpec: DeviceHardwareSpec
   isFlipped: boolean
@@ -1324,6 +1348,7 @@ function OledSimulator({
   onDeleteElement, onEditCustomText, onPopupSelect, onPopupClose, onSimButtonClick, onSimButtonDown, onSimButtonUp,
   pages, perButtonActions, onActionChange, onLedClick, onVolumeClick, onUiSettingsClick,
 }: OledSimulatorProps) {
+  const { t } = useI18n()
   // ボタンをグリッドエリアに振り分け
   const leftBtns = deviceSpec.model === 'duo_wl'
     ? deviceSpec.buttons.filter((b) => ['btn_1', 'btn_2', 'btn_3'].includes(b.id))
@@ -1343,14 +1368,14 @@ function OledSimulator({
       <div key={btn.id} className="device-button-row">
         <div
           className="device-button-dot-wrap"
-          title={btn.title}
+          title={t(buttonMessageId(btn.id))}
           onClick={() => onSimButtonClick(btn.id)}
           onMouseDown={() => onSimButtonDown(btn.id)}
           onMouseUp={onSimButtonUp}
           onMouseLeave={onSimButtonUp}
         >
           <div className="device-button-dot" />
-          <span className="device-button-label">{btn.label}</span>
+          <span className="device-button-label">{buttonShortLabel(btn.id)}</span>
         </div>
         <InlineButtonConfig
           action={act} allItems={allItems}
@@ -1415,7 +1440,7 @@ function OledSimulator({
                           className="grid-element-delete"
                           onMouseDown={(e) => { e.stopPropagation(); e.preventDefault() }}
                           onClick={(e) => { e.stopPropagation(); onDeleteElement(item.el.id) }}
-                          title="削除"
+                  title={t('display.deleteTitle')}
                         >×</button>
                       </div>
                     )
@@ -1471,17 +1496,17 @@ function OledSimulator({
             <path d="M10,4 Q13,7 10,10" fill="none" stroke="currentColor" strokeWidth="1.5" />
             <path d="M12,2 Q16,7 12,12" fill="none" stroke="currentColor" strokeWidth="1.2" />
           </svg>
-          <span className="device-config-label">Volume 設定</span>
+          <span className="device-config-label">{t('display.volume')}</span>
         </div>
 
         {/* LED 設定 — grid-area: led */}
         <div className="device-grid-led" onClick={onLedClick}>
           <div className="device-abs-led" />
-          <span className="device-config-label">LED 設定</span>
+          <span className="device-config-label">{t('display.led')}</span>
         </div>
 
         {/* UI 設定 (OLED 輝度 / Hold 時間) — grid-area: ui */}
-        <div className="device-grid-ui" onClick={onUiSettingsClick} title="OLED 輝度・Hold 時間">
+        <div className="device-grid-ui" onClick={onUiSettingsClick} title={t('display.settingsTitle')}>
           <svg className="device-config-ui-icon" viewBox="0 0 16 14" width="14" height="12">
             <circle cx="8" cy="7" r="2.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
             <g stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
@@ -1495,7 +1520,7 @@ function OledSimulator({
               <line x1="11.8" y1="3.2" x2="13.2" y2="1.8" />
             </g>
           </svg>
-          <span className="device-config-label">UI 設定</span>
+          <span className="device-config-label">{t('display.settings')}</span>
         </div>
       </div>
     </div>
@@ -1586,6 +1611,7 @@ function ControlBar({
   onDeviceModelChange, onResetToDefault, onToggleOrientation,
   onExport, onImport, onDeploy, managerConnected, isDeploying, isSerialOnlySelected, deployBtnRef,
 }: ControlBarProps) {
+  const { t } = useI18n()
   // ページ名のインライン編集状態。null = 編集中なし、{idx, draft} = idx 番目を
   // 編集中で draft が現在の入力中文字列。double-click でモード突入、Enter or
   // blur で commit、Escape で cancel。
@@ -1627,14 +1653,14 @@ function ControlBar({
                   else if (e.key === 'Escape') { e.preventDefault(); cancelRename() }
                 }}
                 maxLength={32}
-                title="Enter で確定、Esc でキャンセル"
+                title={t('display.renameTitle')}
               />
             ) : (
               <button
                 className={`page-tab ${idx === activePageIndex ? 'active' : ''}`}
                 onClick={() => onPageChange(idx)}
                 onDoubleClick={() => setRenaming({ idx, draft: page.name })}
-                title="ダブルクリックで rename"
+                title={t('display.doubleClickRename')}
               >{page.name}</button>
             )}
             {pages.length > 1 && renaming?.idx !== idx && (
@@ -1642,18 +1668,18 @@ function ControlBar({
             )}
           </div>
         ))}
-        <button className="btn btn-sm" onClick={onAddPage} title="空ページを追加">+ Page</button>
+        <button className="btn btn-sm" onClick={onAddPage} title={t('display.addPage')}>+ Page</button>
         <select
           className="select select-sm preset-select"
           defaultValue=""
-          title="プリセットからページを追加"
+          title={t('display.presetTitle')}
           onChange={(e) => {
             const i = parseInt(e.target.value, 10)
             if (!isNaN(i)) onInsertPagePreset(i)
             e.target.value = ''
           }}
         >
-          <option value="" disabled>プリセット…</option>
+          <option value="" disabled>{t('display.preset')}</option>
           {/* preset リストは deviceModel に応じて切替 (Duo: main/exhibit/debug/empty,
               Band: main/debug/empty)。handleInsertPagePreset 側も同じ
               `getPagePresetsFor(deviceModel)` で index 解決するため整合する。 */}
@@ -1685,19 +1711,19 @@ function ControlBar({
         type="button"
         className="btn btn-sm btn-reset"
         onClick={onResetToDefault}
-        title="ページ・ボタン設定を初期レイアウトに戻す (確認あり)"
+        title={t('display.resetTitle')}
       >
-        ⟲ 初期化
+        {t('display.reset')}
       </button>
       <button className={`btn btn-sm ${isFlipped ? 'active' : ''}`} onClick={onToggleOrientation}>
-        {isFlipped ? '\u21bb 180\u00b0' : '\u21bb \u901a\u5e38'}
+        {isFlipped ? '\u21bb 180\u00b0' : t('display.normal')}
       </button>
       <div className="control-separator" />
-      <button className="btn btn-sm" onClick={onExport} title="display-layout.json をダウンロード">
-        保存
+      <button className="btn btn-sm" onClick={onExport} title={t('display.exportTitle')}>
+        {t('display.save')}
       </button>
-      <button className="btn btn-sm" onClick={onImport} title="display-layout.json を読み込み">
-        読込
+      <button className="btn btn-sm" onClick={onImport} title={t('display.importTitle')}>
+        {t('display.load')}
       </button>
       <div className="control-separator" />
       {/* Shared DevicePill — Kit tab の WorkDirBar と共通。
@@ -1713,13 +1739,13 @@ function ControlBar({
           onClick={onDeploy}
           disabled={!managerConnected || isDeploying || isSerialOnlySelected}
         >
-          {isDeploying ? '書込中...' : 'デバイスに書込'}
+          {isDeploying ? t('display.writing') : t('display.write')}
         </button>
         {!managerConnected && (
-          <span className="tooltip-text">Hapbeat Manager を起動してください</span>
+          <span className="tooltip-text">{t('display.helperRequired')}</span>
         )}
         {managerConnected && isSerialOnlySelected && (
-          <span className="tooltip-text">Display 書込みは LAN 接続デバイスのみ対応（Serial は未対応）</span>
+          <span className="tooltip-text">{t('display.lanOnly')}</span>
         )}
       </span>
     </div>
@@ -1740,6 +1766,7 @@ interface InlineButtonConfigProps {
 }
 
 function InlineButtonConfig({ action, allItems, actionGroups, holdGroups, btnId, onActionChange }: InlineButtonConfigProps) {
+  const { t } = useI18n()
   const [openField, setOpenField] = useState<keyof SingleButtonAction | null>(null)
   const [menuPos, setMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
   const btnRefs = useRef<Record<string, HTMLButtonElement | null>>({})
@@ -1817,7 +1844,7 @@ function InlineButtonConfig({ action, allItems, actionGroups, holdGroups, btnId,
                         >
                           Tmp
                         </button>
-                        <span className="tooltip-text">押している間だけ実行。離すと元に戻る</span>
+                        <span className="tooltip-text">{t('display.momentaryHint')}</span>
                       </div>
                       <div className="tooltip-wrap">
                         <button
@@ -1826,7 +1853,7 @@ function InlineButtonConfig({ action, allItems, actionGroups, holdGroups, btnId,
                         >
                           Exec
                         </button>
-                        <span className="tooltip-text">Press と同じ挙動。離しても戻らない</span>
+                        <span className="tooltip-text">{t('display.latchHint')}</span>
                       </div>
                     </div>
                   )}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { LibraryClip } from '@/types/library'
+import { useI18n } from '@/i18n/I18nProvider'
 import './ClipEditModal.css'
 
 export interface ClipEditModalProps {
@@ -20,6 +21,7 @@ export interface ClipEditModalProps {
  * library-side metadata for organisation and filtering.
  */
 export function ClipEditModal({ clip, onClose, onUpdate, onArchive, onCommitRename }: ClipEditModalProps) {
+  const { t } = useI18n()
   const [tagInput, setTagInput] = useState('')
 
   // Lock for the Name ↔ Note swap. The swap reads the current
@@ -59,14 +61,14 @@ export function ClipEditModal({ clip, onClose, onUpdate, onArchive, onCommitRena
 
         <div className="clip-edit-fields">
           <label className="clip-edit-field">
-            <span>Name <span className="field-hint">英小文字 / 数字 / -, _ のみ</span></span>
+            <span>Name <span className="field-hint">{t('kit.validName')}</span></span>
             <input
               type="text"
               value={clip.name}
               autoFocus
               maxLength={64}
               pattern="[a-z0-9_-]+"
-              title="英小文字 / 数字 / -, _ のみ"
+              title={t('kit.validName')}
               onChange={(e) => {
                 const cleaned = e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, '')
                 if (cleaned !== clip.name) onUpdate(clip.id, { name: cleaned })
@@ -77,11 +79,11 @@ export function ClipEditModal({ clip, onClose, onUpdate, onArchive, onCommitRena
 
           <label className="clip-edit-field">
             <span>
-              Note <span className="field-hint">(optional — hover で表示。Import 時は原ファイル名が自動セット)</span>
+              Note <span className="field-hint">{t('kit.noteHint')}</span>
               <button
                 type="button"
                 className="clip-edit-swap-btn"
-                title="Name ↔ Note を入れ替え (Name 側は拡張子除去 + 英数字に sanitize)"
+                title={t('kit.swapTitle')}
                 disabled={swapping || !clip.note?.trim()}
                 onClick={async () => {
                   // Swap the two strings. `name` side sanitises to the
@@ -123,7 +125,7 @@ export function ClipEditModal({ clip, onClose, onUpdate, onArchive, onCommitRena
             <textarea
               rows={3}
               value={clip.note ?? ''}
-              placeholder="任意のメモ。例: 用途、サイドノート、注意事項…"
+              placeholder={t('kit.notePlaceholder')}
               onChange={(e) => onUpdate(clip.id, { note: e.target.value })}
             />
           </label>
@@ -171,7 +173,7 @@ export function ClipEditModal({ clip, onClose, onUpdate, onArchive, onCommitRena
             className="library-btn danger"
             title="Hide this clip from Studio. The file is moved to a managed archive directory on disk so you can recover it later."
             onClick={async () => {
-              if (!confirm(`Archive "${clip.name}"?\n\nStudio から非表示になります (元ファイルは管理ディレクトリに退避され、戻すことで復活できます)。`)) return
+              if (!confirm(t('clip.archiveConfirm', { name: clip.name }))) return
               await onArchive(clip.id)
               onClose()
             }}

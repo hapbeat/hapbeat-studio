@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ExternalLinkIcon } from './ExternalLinkIcon'
+import { useI18n } from '@/i18n/I18nProvider'
 import './HelperOnboardingModal.css'
 
 type OsTab = 'mac' | 'win'
@@ -18,6 +19,7 @@ function detectOs(): OsTab {
 }
 
 function CopyableCommand({ cmd }: { cmd: string }) {
+  const { t } = useI18n()
   const [copied, setCopied] = useState(false)
 
   const handleCopy = async () => {
@@ -37,9 +39,9 @@ function CopyableCommand({ cmd }: { cmd: string }) {
         type="button"
         className="helper-modal-copy-btn"
         onClick={handleCopy}
-        title="クリップボードにコピー"
+        title={t('helper.setup.copy')}
       >
-        {copied ? '✓ コピー済み' : 'コピー'}
+        {copied ? t('common.copied') : t('common.copy')}
       </button>
     </div>
   )
@@ -50,6 +52,7 @@ export function HelperOnboardingModal({
   onClose,
   onRetry,
 }: HelperOnboardingModalProps) {
+  const { t } = useI18n()
   const [activeTab, setActiveTab] = useState<OsTab>(detectOs)
   const closeRef = useRef<HTMLButtonElement>(null)
 
@@ -72,20 +75,20 @@ export function HelperOnboardingModal({
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="Hapbeat Helper セットアップ"
+        aria-label={t('helper.setup.aria')}
       >
         {/* Header */}
         <div className="helper-modal-header">
           <span className="helper-modal-title">
             <span className="helper-modal-dot disconnected" />
-            Helper が未接続です
+            {t('helper.setup.disconnected')}
           </span>
           <button
             ref={closeRef}
             type="button"
             className="helper-modal-close"
             onClick={onClose}
-            aria-label="閉じる"
+            aria-label={t('common.close')}
           >
             ✕
           </button>
@@ -94,18 +97,16 @@ export function HelperOnboardingModal({
         {/* Body */}
         <div className="helper-modal-body">
           <p className="helper-modal-desc">
-            Hapbeat Studio はローカルデーモン <code>hapbeat-helper</code> 経由で
-            デバイスと通信します。
-            Helper が起動していないか、ポート <code>7703</code> が塞がっています。
+            {t('helper.setup.description')}
           </p>
 
           {/* Recommended: auto-start service */}
           <section className="helper-modal-section">
             <h3 className="helper-modal-section-title">
-              推奨 — ログイン時自動起動（1 回のみ）
+              {t('helper.setup.recommendedTitle')}
             </h3>
             <p className="helper-modal-section-desc">
-              OS サービスとして登録すると、以降はターミナル操作が不要になります。
+              {t('helper.setup.recommendedDescription')}
             </p>
 
             {/* OS tabs */}
@@ -126,7 +127,7 @@ export function HelperOnboardingModal({
               <div className="helper-modal-tab-body">
                 <CopyableCommand cmd="hapbeat-helper install-service" />
                 <p className="helper-modal-hint">
-                  launchd 経由でログイン時に自動起動します。ログを確認するには:<br />
+                  {t('helper.setup.macHint')}<br />
                   <code>tail -f ~/Library/Logs/hapbeat-helper.log</code>
                 </p>
               </div>
@@ -136,7 +137,7 @@ export function HelperOnboardingModal({
               <div className="helper-modal-tab-body">
                 <CopyableCommand cmd="hapbeat-helper install-service" />
                 <p className="helper-modal-hint">
-                  タスク スケジューラに登録されます。コンソールウィンドウは表示されません。
+                  {t('helper.setup.windowsHint')}
                 </p>
               </div>
             )}
@@ -145,11 +146,11 @@ export function HelperOnboardingModal({
           {/* Alternative: foreground */}
           <section className="helper-modal-section helper-modal-section--alt">
             <h3 className="helper-modal-section-title">
-              今だけ起動（フォアグラウンド）
+              {t('helper.setup.foregroundTitle')}
             </h3>
             <CopyableCommand cmd="hapbeat-helper start" />
             <p className="helper-modal-hint">
-              未インストールの場合は先に:{' '}
+              {t('helper.setup.installHint')}{' '}
               <code>pipx install hapbeat-helper</code>
             </p>
           </section>
@@ -163,14 +164,14 @@ export function HelperOnboardingModal({
             target="_blank"
             rel="noreferrer"
           >
-            Helper のドキュメント <ExternalLinkIcon />
+            {t('helper.setup.docs')} <ExternalLinkIcon />
           </a>
           <button
             type="button"
             className="form-button-secondary"
             onClick={onRetry}
           >
-            接続を再試行
+            {t('helper.setup.retry')}
           </button>
         </div>
       </div>

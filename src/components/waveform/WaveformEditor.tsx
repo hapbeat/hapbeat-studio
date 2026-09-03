@@ -5,11 +5,12 @@ import { TransportBar } from './TransportBar'
 import { StatusBar } from './StatusBar'
 import { EffectsPanel } from './EffectsPanel'
 import { useWaveformStore } from '@/stores/waveformStore'
+import { useI18n } from '@/i18n/I18nProvider'
 import './WaveformEditor.css'
 
 /** Error boundary to prevent full-page crash */
 class EditorErrorBoundary extends Component<
-  { children: ReactNode },
+  { children: ReactNode; errorTitle: string; retryLabel: string },
   { error: Error | null }
 > {
   state: { error: Error | null } = { error: null }
@@ -26,13 +27,13 @@ class EditorErrorBoundary extends Component<
     if (this.state.error) {
       return (
         <div className="waveform-error-boundary">
-          <div className="error-title">エラーが発生しました</div>
+          <div className="error-title">{this.props.errorTitle}</div>
           <div className="error-message">{this.state.error.message}</div>
           <button
             className="toolbar-btn"
             onClick={() => this.setState({ error: null })}
           >
-            再試行
+            {this.props.retryLabel}
           </button>
         </div>
       )
@@ -42,14 +43,16 @@ class EditorErrorBoundary extends Component<
 }
 
 export function WaveformEditor() {
+  const { t } = useI18n()
   return (
-    <EditorErrorBoundary>
+    <EditorErrorBoundary errorTitle={t('wave.error')} retryLabel={t('wave.retry')}>
       <WaveformEditorInner />
     </EditorErrorBoundary>
   )
 }
 
 function WaveformEditorInner() {
+  const { t } = useI18n()
   const displayRef = useRef<WaveformDisplayHandle>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -130,9 +133,9 @@ function WaveformEditorInner() {
         {!clip && (
           <div className="waveform-empty">
             <div className="empty-icon">~</div>
-            <div className="empty-message">音声ファイルをドラッグ＆ドロップ</div>
+            <div className="empty-message">{t('wave.drop')}</div>
             <div className="empty-hint">
-              または上部の「Load Audio」ボタンからファイルを選択（WAV / MP3 等）
+              {t('wave.dropHint')}
             </div>
           </div>
         )}
@@ -150,7 +153,7 @@ function WaveformEditorInner() {
       {isProcessing && (
         <div className="processing-overlay">
           <div className="processing-spinner" />
-          <span>処理中...</span>
+          <span>{t('wave.processing')}</span>
         </div>
       )}
     </div>

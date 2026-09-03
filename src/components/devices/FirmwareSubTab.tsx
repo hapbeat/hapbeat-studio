@@ -5,6 +5,7 @@ import { useDeviceStore } from '@/stores/deviceStore'
 import { useOtaStore, OTA_DEFAULT } from '@/stores/otaStore'
 import type { DeviceInfo, ManagerMessage, NodeRole, NodeTransport } from '@/types/manager'
 import { useConfirm } from '@/components/common/useConfirm'
+import { useI18n } from '@/i18n/I18nProvider'
 import { serialEntryLabel, useSerialMaster } from '@/stores/serialMaster'
 import {
   assertMergedImage,
@@ -55,6 +56,37 @@ const TRANSPORT_LABEL: Record<NodeTransport, string> = {
   wifi_udp: 'Wi-Fi UDP',
   mqtt: 'MQTT',
   espnow_stream: 'ESP-NOW',
+}
+
+type StoredHierarchyPick = Record<string, HierarchySelection>
+
+function readDeviceHierarchyPick(deviceIp: string | null): HierarchySelection | null {
+  if (!deviceIp) return null
+  try {
+    const raw = localStorage.getItem('hapbeat-studio-firmware-device-hierarchy-selected')
+    if (!raw) return null
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    const pick = (parsed as StoredHierarchyPick)[deviceIp]
+    if (!pick || !['duo', 'band', 'peripheral', 'other'].includes(pick.family)) return null
+    return { family: pick.family, hw: typeof pick.hw === 'string' ? pick.hw : null }
+  } catch {
+    return null
+  }
+}
+
+function saveDeviceHierarchyPick(deviceIp: string | null, next: HierarchySelection): void {
+  if (!deviceIp) return
+  try {
+    const key = 'hapbeat-studio-firmware-device-hierarchy-selected'
+    const raw = localStorage.getItem(key)
+    const parsed: unknown = raw ? JSON.parse(raw) : {}
+    const saved: StoredHierarchyPick = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as StoredHierarchyPick
+      : {}
+    saved[deviceIp] = next
+    localStorage.setItem(key, JSON.stringify(saved))
+  } catch { /* localStorage unavailable */ }
 }
 
 /** The role a library entry implements (explicit, else inferred). */
@@ -110,6 +142,7 @@ export function FirmwareSubTab({
   serialOnly = false,
   groupFilter,
 }: Props) {
+  const { t } = useI18n()
   const showOta = !serialOnly && !!device && !!sendTo
   const { send: helperSend, devices } = useHelperConnection()
   const pushLog = useLogStore((s) => s.push)
@@ -122,6 +155,7 @@ export function FirmwareSubTab({
   const LIB_SELECTED_KEY = 'hapbeat-studio-firmware-lib-selected'
   const FAMILY_SELECTED_KEY = 'hapbeat-studio-firmware-family-selected'
   const HW_SELECTED_KEY = 'hapbeat-studio-firmware-hw-selected'
+  const VERSION_SELECTED_KEY = 'hapbeat-studio-firmware-version-selected'
   const [libEntries, setLibEntries] = useState<FirmwareLibraryEntry[]>([])
   const [libLoading, setLibLoading] = useState(false)
   const [libError, setLibError] = useState<string | null>(null)
@@ -141,9 +175,9 @@ export function FirmwareSubTab({
       return { family, hw: localStorage.getItem(HW_SELECTED_KEY) || null }
     } catch { return null }
   })
-  /** The user's pick for the device currently on screen. Cleared whenever the
-   *  device (or its board) changes so a fresh device re-derives its own
-   *  default instead of inheriting the previous device's hardware revision. */
+  /** The user's pick for the device currently on screen. Stored per IP so a
+   *  page reload restores this device's last firmware hierarchy, while a
+   *  different device continues to default from its reported board. */
   const [userPick, setUserPick] = useState<HierarchySelection | null>(null)
 
   useEffect(() => {
@@ -216,11 +250,44 @@ export function FirmwareSubTab({
   )
 
   // Archive support: the user can pick an older published version of the
-  // selected variant (null = latest). Reset when switching variants.
-  const [selectedVersionFw, setSelectedVersionFw] = useState<string | null>(null)
+  // selected variant (null = latest). Persist it together with the selected
+  // library entry so reopening Firmware restores the exact build the user was
+  // inspecting, but never applies an archive selection to a different env.
+  const [selectedVersionFw, setSelectedVersionFw] = useState<string | null>(() => {
+    try {
+      const raw = localStorage.getItem(VERSION_SELECTED_KEY)
+      if (!raw) return null
+      const saved = JSON.parse(raw) as { env?: unknown; version?: unknown }
+      return saved.env === localStorage.getItem(LIB_SELECTED_KEY) && typeof saved.version === 'string'
+        ? saved.version
+        : null
+    } catch {
+      return null
+    }
+  })
   useEffect(() => {
-    setSelectedVersionFw(null)
-  }, [libSelected])
+    try {
+      const raw = localStorage.getItem(VERSION_SELECTED_KEY)
+      const saved = raw ? JSON.parse(raw) as { env?: unknown; version?: unknown } : null
+      setSelectedVersionFw(
+        saved?.env === libSelected && typeof saved.version === 'string' ? saved.version : null,
+      )
+    } catch {
+      setSelectedVersionFw(null)
+    }
+  }, [libSelected, VERSION_SELECTED_KEY])
+  useEffect(() => {
+    try {
+      if (!libSelected || !selectedVersionFw) {
+        localStorage.removeItem(VERSION_SELECTED_KEY)
+        return
+      }
+      localStorage.setItem(
+        VERSION_SELECTED_KEY,
+        JSON.stringify({ env: libSelected, version: selectedVersionFw }),
+      )
+    } catch { /* localStorage unavailable */ }
+  }, [libSelected, selectedVersionFw, VERSION_SELECTED_KEY])
 
   // Resolved entry: artifacts/fwVersion swapped to the chosen version so all
   // downstream consumers (OTA / Serial / verify) need no version awareness.
@@ -235,6 +302,15 @@ export function FirmwareSubTab({
       publishedAt: v.publishedAt,
       appOta: v.appOta,
       fullSerial: v.fullSerial,
+    }
+  }, [baseEntry, selectedVersionFw])
+
+  // A release can disappear from a refreshed library. Fall back to Latest
+  // rather than retaining a stale persisted archive version in the UI.
+  useEffect(() => {
+    if (!selectedVersionFw || !baseEntry?.versions) return
+    if (!baseEntry.versions.some((version) => version.fwVersion === selectedVersionFw)) {
+      setSelectedVersionFw(null)
     }
   }, [baseEntry, selectedVersionFw])
 
@@ -329,12 +405,12 @@ export function FirmwareSubTab({
     return all
   }, [availability, groupFilter])
 
-  // Re-derive the default whenever the device (or its reported board)
-  // changes — a manual pick only applies to the device it was made on.
+  // Restore the manual pick only for this exact device. A new device starts
+  // from its reported board rather than inheriting another device's revision.
   const deviceIp = device?.ipAddress
   useEffect(() => {
-    setUserPick(null)
-  }, [deviceIp, knownBoard])
+    setUserPick(readDeviceHierarchyPick(deviceIp ?? null))
+  }, [deviceIp])
 
   /** Effective selection: the user's pick for this device, else the
    *  device-oriented default (board → saved → first present). */
@@ -374,6 +450,7 @@ export function FirmwareSubTab({
   const selectHierarchy = useCallback((next: HierarchySelection) => {
     setUserPick(next)
     setSavedPick(next)
+    saveDeviceHierarchyPick(deviceIp ?? null, next)
     try {
       localStorage.setItem(FAMILY_SELECTED_KEY, next.family)
       if (next.hw) localStorage.setItem(HW_SELECTED_KEY, next.hw)
@@ -384,7 +461,7 @@ export function FirmwareSubTab({
       setLibSelected(shown[0].env)
       setSource('library')
     }
-  }, [libEntries, FAMILY_SELECTED_KEY, HW_SELECTED_KEY])
+  }, [libEntries, deviceIp, FAMILY_SELECTED_KEY, HW_SELECTED_KEY])
 
   const selectFamily = useCallback((family: FirmwareFamily) => {
     const hws = availability.find((a) => a.family === family)?.hws ?? []
@@ -866,7 +943,7 @@ export function FirmwareSubTab({
               onChange={() => setSource('library')}
               style={{ marginRight: 6, verticalAlign: 'middle' }}
             />
-            ファームウェア ライブラリ
+            {t('firmware.library')}
           </span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
             <button
@@ -875,7 +952,7 @@ export function FirmwareSubTab({
               disabled={libLoading}
               style={{ fontSize: 13, padding: '2px 8px' }}
             >
-              {libLoading ? '更新中…' : '⟳ 更新'}
+              {libLoading ? t('firmware.refreshing') : t('ap.refresh')}
             </button>
           </span>
         </div>
@@ -886,7 +963,7 @@ export function FirmwareSubTab({
 
         {!libError && libEntries.length === 0 && !libLoading && (
           <div className="form-status muted">
-            ファームウェアが見つかりません。
+            {t('firmware.none')}
           </div>
         )}
 
@@ -899,7 +976,7 @@ export function FirmwareSubTab({
               <div
                 className="firmware-lib-toggle"
                 role="tablist"
-                aria-label="ファームウェア種別"
+                aria-label={t('firmware.familyAria')}
               >
                 {familiesShown.map((family) => {
                   const isSelected = selection?.family === family
@@ -913,7 +990,7 @@ export function FirmwareSubTab({
                       onClick={() => selectFamily(family)}
                     >
                       <span className="firmware-lib-toggle-label">
-                        {FAMILY_LABEL[family]}
+                        {family === 'peripheral' ? t('firmware.peripheral') : FAMILY_LABEL[family]}
                       </span>
                     </button>
                   )
@@ -925,8 +1002,8 @@ export function FirmwareSubTab({
               * family is shown (even with a single revision) so switching
               * families never shifts the grid below by a line. */}
             {hwShown.length > 0 && selection && (
-              <div className="firmware-hw-row" role="tablist" aria-label="ハード版">
-                <span className="firmware-version-row-label">ハード版</span>
+              <div className="firmware-hw-row" role="tablist" aria-label={t('firmware.hardware')}>
+                <span className="firmware-hw-label">{t('firmware.hardware')}</span>
                 {hwShown.map((hw) => {
                   const isSelected = selection.hw === hw
                   return (
@@ -935,9 +1012,9 @@ export function FirmwareSubTab({
                       type="button"
                       role="tab"
                       aria-selected={isSelected}
-                      className={`firmware-version-chip${isSelected ? ' selected' : ''}`}
+                      className={`firmware-version-chip firmware-hw-chip${isSelected ? ' selected' : ''}`}
                       onClick={() => selectHierarchy({ family: selection.family, hw })}
-                      title={`${FAMILY_LABEL[selection.family]} ${hw}`}
+                      title={`${selection.family === 'peripheral' ? t('firmware.peripheral') : FAMILY_LABEL[selection.family]} ${hw}`}
                     >
                       {hw}
                     </button>
@@ -951,7 +1028,7 @@ export function FirmwareSubTab({
               <div
                 className="firmware-variant-grid"
                 role="listbox"
-                aria-label="ファームウェア"
+                aria-label={t('firmware.aria')}
               >
                 {entriesShown.map((e) => {
                   const isSelected = source === 'library' && libSelected === e.env
@@ -996,7 +1073,7 @@ export function FirmwareSubTab({
                         whiteSpace: 'nowrap',
                         flexShrink: 0,
                       }}
-                      title="ファームウェアバージョン (FIRMWARE_VERSION)。OTA 完了後の起動バージョン照合に使用。"
+                      title={t('firmware.versionTitle')}
                     >
                       v{normalizeVersion(selectedEntry.fwVersion)}
                     </span>
@@ -1012,10 +1089,9 @@ export function FirmwareSubTab({
                   * serving the last snapshot — flag that it may be stale. */}
                 {selectedEntry.source === 'cache' && (
                   <div className="form-status warn" style={{ marginTop: 4 }}>
-                    キャッシュ版を表示中
+                    {t('firmware.cached')}
                     {selectedEntry.cachedAt ? `（${formatMtime(selectedEntry.cachedAt)} 時点）` : ''}
-                    {' '}— このビルド成果物は現在 .pio/build に無いため、最後に
-                    ビルドしたスナップショットを提示しています。再ビルドすると最新に戻ります。
+                      {' '}{t('firmware.cacheNote')}
                   </div>
                 )}
 
@@ -1023,7 +1099,7 @@ export function FirmwareSubTab({
                   * downloadable so users can roll back anytime). */}
                 {baseEntry?.versions && baseEntry.versions.length > 1 && (
                   <div className="firmware-version-row">
-                    <span className="firmware-version-row-label">バージョン</span>
+                    <span className="firmware-version-row-label">{t('firmware.version')}</span>
                     {baseEntry.versions.map((v, i) => {
                       const activeFw = selectedVersionFw ?? baseEntry.versions![0].fwVersion
                       const isActive = activeFw === v.fwVersion
@@ -1036,7 +1112,7 @@ export function FirmwareSubTab({
                           title={`${v.tag ?? `v${normalizeVersion(v.fwVersion)}`}${v.publishedAt ? ` · ${formatDate(v.publishedAt)} リリース` : ''}`}
                         >
                           v{normalizeVersion(v.fwVersion)}
-                          {i === 0 && <span className="firmware-version-chip-latest"> 最新</span>}
+                           {i === 0 && <span className="firmware-version-chip-latest"> {t('firmware.latest')}</span>}
                         </button>
                       )
                     })}
@@ -1068,7 +1144,7 @@ export function FirmwareSubTab({
                   * no release date so the per-artifact build time is kept. */}
                 {selectedEntry.publishedAt ? (
                   <div className="form-section-sub-inline" style={{ marginTop: 4, fontSize: 12 }}>
-                    リリース日: {formatDate(selectedEntry.publishedAt)}
+                    {t('firmware.releaseDate')} {formatDate(selectedEntry.publishedAt)}
                   </div>
                 ) : null}
                 <div
@@ -1113,20 +1189,20 @@ export function FirmwareSubTab({
             style={{ marginRight: 6, verticalAlign: 'middle' }}
             disabled={!localHandle}
           />
-          ローカル .bin
+          {t('firmware.local')}
           <span className="form-section-sub-inline">
-            {' '}— 任意の .bin ファイルを直接指定して書き込む
+            {' '}{t('firmware.localDesc')}
           </span>
         </div>
         <div className="form-row">
-          <label>ファイル</label>
+          <label>{t('uiconfig.file')}</label>
           <div className="form-row-multi" style={{ width: '100%' }}>
             <button
               type="button"
               className="form-button-secondary"
               onClick={onPickLocal}
             >
-              参照…
+              {t('common.browse')}
             </button>
             <span
               className="form-input mono"
@@ -1139,7 +1215,7 @@ export function FirmwareSubTab({
               }}
               title={localMeta?.name || ''}
             >
-              {localMeta?.name ?? '未選択'}
+              {localMeta?.name ?? t('uiconfig.none')}
             </span>
             {localMeta && (
               <span style={{ color: 'var(--text-muted)', fontSize: 13, fontFamily: 'var(--font-mono)' }}>
@@ -1151,7 +1227,7 @@ export function FirmwareSubTab({
         </div>
         {localPermissionDenied && (
           <div className="form-status warn" style={{ padding: '0 4px' }}>
-            ファイル読み取り権限がありません。「参照…」で再選択してください。
+            {t('firmware.permission')}
           </div>
         )}
       </div>
@@ -1160,9 +1236,9 @@ export function FirmwareSubTab({
       {showOta && (
       <div className="form-section">
         <div className="form-section-title">
-          Wi-Fi OTA 書き込み
+          {t('firmware.otaTitle')}
           <span className="form-section-sub-inline">
-            {' '}— LAN 経由で選択中ファームを上書き (デバイスは自動再起動)
+            {' '}{t('firmware.otaDesc')}
           </span>
         </div>
         {(() => {
@@ -1173,7 +1249,7 @@ export function FirmwareSubTab({
           if (onlineLan > 1) {
             return (
               <div className="form-section-sub-inline" style={{ opacity: 0.85 }}>
-                サイドバーで {onlineLan} 台選択中 — 順番に書き込みます
+                {t('firmware.multiOta', { count: onlineLan })}
               </div>
             )
           }
@@ -1185,14 +1261,14 @@ export function FirmwareSubTab({
             onClick={submit}
             disabled={!haveSelection || !device?.online || running}
           >
-            {running ? '送信中…' : (() => {
+            {running ? t('firmware.sending') : (() => {
               const lan = selectedIps.filter((ip) => !ip.startsWith('serial:'))
               const onlineLan = lan
                 .map((ip) => devices.find((d) => d.ipAddress === ip))
                 .filter((d) => !!d && d.online).length
               return onlineLan > 1
-                ? `OTA 書き込み (${onlineLan} 台)`
-                : 'OTA 書き込み'
+                ? t('firmware.multiOtaButton', { count: onlineLan })
+                : t('firmware.ota')
             })()}
           </button>
           {running && otaStuck && (
@@ -1200,12 +1276,12 @@ export function FirmwareSubTab({
               type="button"
               className="form-button-secondary"
               onClick={cancelStuckOta}
-              title="3 秒以上進捗が無いため UI を解放します。helper 側の TCP セッションは drain します"
+               title={t('firmware.abortTitle')}
             >
-              中止する
+              {t('firmware.abort')}
             </button>
           )}
-          {!device?.online && <span className="form-status muted">デバイスがオフラインです</span>}
+          {!device?.online && <span className="form-status muted">{t('firmware.offline')}</span>}
         </div>
 
         {progress && (
@@ -1221,9 +1297,7 @@ export function FirmwareSubTab({
             </div>
             {otaStuck && (
               <div className="form-status warn">
-                ⚠ OTA の進捗が 3 秒以上途絶えています。デバイスの再起動（電源 OFF/ON）を試してください。
-                Wi-Fi 接続が切れた、デバイスがフリーズしている、TCP セッションが詰まっている等の
-                可能性があります。それでも改善しなければUSB Serial 経由での書込を推奨します。
+                 {t('firmware.otaStuck')}
               </div>
             )}
           </>
@@ -1240,14 +1314,14 @@ export function FirmwareSubTab({
       {/* --------- USB Serial write ------------------------------------- */}
       <div className="form-section">
         <div className="form-section-title">
-          USB Serial 書き込み
+          {t('firmware.serialTitle')}
           <span className="form-section-sub-inline">
-            {' '}— USB ケーブル直結で書き込む (Wi-Fi 不要)
+            {' '}{t('firmware.serialDesc')}
           </span>
         </div>
         {!isWebSerialSupported() && (
           <div className="form-status err">
-            このブラウザは Web Serial API 非対応です (Chrome / Edge を使用してください)。
+             {t('firmware.webSerialUnsupported')}
           </div>
         )}
         {/* Always-rendered selection status — a fixed one-line slot so
@@ -1264,15 +1338,14 @@ export function FirmwareSubTab({
           style={{ marginTop: 4 }}
         >
           {serialTargets.length === 0
-            ? '⚠ 書き込み対象が未選択です — 左の USB Serial カードで ✔ を入れてください'
+            ? t('firmware.noTargets')
             : configConnectedNotChecked
               ? '※ 設定中のデバイスは書込対象（✔）に含まれていません'
               : `書き込み対象 (${serialTargets.length} 台): ${serialTargets.map((e) => serialEntryLabel(e)).join(' / ')}`}
         </div>
         {serialTargets.length > 0 && (
           <div className="form-section-sub-inline" style={{ opacity: 0.85, marginTop: 2 }}>
-            ※ 別のファームを別デバイスへ同時に書きたい場合は、片方を選んで書き込みを開始した後、
-            もう片方のファームを選び直して別デバイスを選択 → もう一度書き込めば並行して走ります。
+            {t('firmware.parallelFlashHint')}
           </div>
         )}
         <div className="form-action-row">
@@ -1286,15 +1359,15 @@ export function FirmwareSubTab({
               ? '送信中…'
               : serialTargets.length > 0
                 ? `選択中の ${serialTargets.length} 台に書き込む`
-                : 'Serial 書き込み'}
+                : t('firmware.serial')}
           </button>
           <button
             className="form-button-secondary"
             onClick={onSerialErase}
             disabled={serialRunning || !isWebSerialSupported()}
-            title="Flash 全消去 (chip erase)"
+             title={t('firmware.eraseTitle')}
           >
-            Flash 消去
+            {t('firmware.erase')}
           </button>
           <label
             className="form-status muted"
@@ -1306,7 +1379,7 @@ export function FirmwareSubTab({
               onChange={(e) => setEraseAll(e.target.checked)}
               disabled={serialRunning}
             />
-            書き込み前に Flash を全消去する
+             {t('firmware.eraseBefore')}
           </label>
           <button
             className="form-button-secondary"
@@ -1316,14 +1389,14 @@ export function FirmwareSubTab({
             }}
             disabled={serialRunning}
             style={{ marginLeft: 12, fontSize: 13, padding: '4px 10px' }}
-            title="別の Hapbeat に書き込み先を切り替える"
+             title={t('firmware.repickTitle')}
           >
-            COM ポート再選択
+            {t('firmware.repick')}
           </button>
         </div>
         {eraseAll && (
           <div className="form-status warn" style={{ marginTop: 4 }}>
-            ⚠ 全消去すると Wi-Fi 設定・デバイス名などもすべて消えます。
+             {t('firmware.eraseWarning')}
           </div>
         )}
 
@@ -1390,7 +1463,7 @@ export function FirmwareSubTab({
 
         {serialRunning && (
           <div className="form-status warn" style={{ marginTop: 4 }}>
-            ⚠ 書き込み中はタブを切り替えないでください。
+             {t('firmware.dontSwitchTab')}
           </div>
         )}
 

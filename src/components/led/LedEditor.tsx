@@ -1,15 +1,14 @@
 import { useState } from 'react'
 import type { LedPattern } from '@/types/project'
 import './LedEditor.css'
+import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 
-const LED_PATTERNS: { value: LedPattern; label: string; description: string }[] = [
-  { value: 'solid', label: '常時点灯', description: '一定の色で点灯し続けます' },
-  { value: 'breathe', label: '呼吸', description: 'ゆっくり明滅を繰り返します' },
-  { value: 'pulse', label: 'パルス', description: '短い間隔で点滅します' },
-  { value: 'off', label: 'オフ', description: 'LED を消灯します' },
+const LED_PATTERNS: { value: LedPattern; label: MessageId; description: MessageId }[] = [
+  { value: 'solid', label: 'legacyLed.solid', description: 'legacyLed.solidDesc' }, { value: 'breathe', label: 'legacyLed.breathe', description: 'legacyLed.breatheDesc' }, { value: 'pulse', label: 'legacyLed.pulse', description: 'legacyLed.pulseDesc' }, { value: 'off', label: 'legacyLed.off', description: 'legacyLed.offDesc' },
 ]
 
 export function LedEditor() {
+  const { t } = useI18n()
   const [idleColor, setIdleColor] = useState('#333333')
   const [idlePattern, setIdlePattern] = useState<LedPattern>('breathe')
 
@@ -17,11 +16,11 @@ export function LedEditor() {
     <div className="led-editor">
       <div className="led-editor-main">
         <div className="panel">
-          <div className="panel-title">LED 設定</div>
+          <div className="panel-title">{t('legacyLed.title')}</div>
 
           {/* プレビュー */}
           <div className="led-preview-section">
-            <div className="led-preview-label">プレビュー</div>
+            <div className="led-preview-label">{t('legacyLed.preview')}</div>
             <div className="led-preview-container">
               <div
                 className={`led-preview-dot ${idlePattern}`}
@@ -33,7 +32,7 @@ export function LedEditor() {
           {/* 待機色 */}
           <div className="led-config-section">
             <div className="config-field">
-              <label className="label">待機色</label>
+              <label className="label">{t('legacyLed.idleColor')}</label>
               <div className="led-color-input">
                 <input
                   type="color"
@@ -53,7 +52,7 @@ export function LedEditor() {
 
             {/* パターン選択 */}
             <div className="config-field">
-              <label className="label">パターン</label>
+              <label className="label">{t('legacyLed.pattern')}</label>
               <div className="led-pattern-options">
                 {LED_PATTERNS.map((p) => (
                   <button
@@ -61,8 +60,7 @@ export function LedEditor() {
                     className={`led-pattern-btn ${idlePattern === p.value ? 'active' : ''}`}
                     onClick={() => setIdlePattern(p.value)}
                   >
-                    <span className="led-pattern-name">{p.label}</span>
-                    <span className="led-pattern-desc">{p.description}</span>
+                    <span className="led-pattern-name">{t(p.label)}</span><span className="led-pattern-desc">{t(p.description)}</span>
                   </button>
                 ))}
               </div>
@@ -72,11 +70,11 @@ export function LedEditor() {
 
         {/* イベント連動 */}
         <div className="panel">
-          <div className="panel-title">イベント連動 LED</div>
+          <div className="panel-title">{t('legacyLed.eventTitle')}</div>
           <div className="led-event-placeholder">
-            イベントごとの LED 色設定は、イベント定義後に利用可能になります。
+            {t('legacyLed.eventHint')}
             <br />
-            「Pack」タブでイベントを追加してください。
+            {t('legacyLed.eventAction')}
           </div>
         </div>
       </div>

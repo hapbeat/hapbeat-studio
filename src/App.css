@@ -110,7 +110,8 @@ body {
    ======================================== */
 
 .app-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   justify-content: space-between;
   padding: 12px 24px;
@@ -127,6 +128,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  justify-self: start;
 }
 
 /* バージョンをタイトル横にタグ表示 (Manage で旧版へ切替可) */
@@ -166,17 +168,10 @@ select.app-version-select option {
 
 /* 右側メタ情報グループ: docs リンク + Helper 接続状態 を縦中央揃えで並べる */
 .header-meta {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 60px 38px 24px;
+  display: flex;
   align-items: center;
   gap: 8px;
-  width: 360px;
-  min-width: 360px;
-}
-
-.header-update-slot {
-  min-width: 0;
-  overflow: hidden;
+  justify-self: end;
 }
 
 .header-docs-link {
@@ -233,8 +228,8 @@ select.app-version-select option {
 }
 
 .connection-status--icon {
-  justify-content: center;
-  width: 24px;
+  justify-content: flex-start;
+  width: 64px;
   height: 28px;
   padding: 0;
 }
@@ -481,9 +476,9 @@ select.app-version-select option {
  * 隠して main 1 行に collapse する (≤ 720px)。
  */
 .header-toggle-tabs {
-  flex: 1;
-  max-width: 560px;
-  margin: 0 24px;          /* h1 ロゴおよび docs リンクとの間隔 */
+  grid-column: 2;
+  width: 430px;
+  margin: 0;
   align-self: stretch;     /* header の高さに合わせる */
   align-items: stretch;
   gap: 0;                  /* タブ境界に | を挿入するため gap を 0 に */

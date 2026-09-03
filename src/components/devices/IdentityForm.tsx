@@ -3,6 +3,7 @@ import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import { useConfirm } from '@/components/common/useConfirm'
 import { useToast } from '@/components/common/Toast'
 import { useInputHistory } from '@/hooks/useInputHistory'
+import { useI18n } from '@/i18n/I18nProvider'
 import {
   POSITION_NAMES,
   positionLabel,
@@ -27,6 +28,7 @@ interface Props {
  * which point the full set_* command is sent to Helper.
  */
 export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
+  const { t } = useI18n()
   const [name, setName] = useState(device.name)
 
   const initial = parseAddress(device.address)
@@ -86,23 +88,23 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
   const submitReboot = async (e: React.MouseEvent<HTMLButtonElement>) => {
     const btn = e.currentTarget // capture before await (event is reused after)
     const ok = await ask({
-      title: '再起動',
-      message: 'デバイスを再起動しますか？',
-      confirmLabel: '再起動する',
+      title: t('common.restart'),
+      message: t('identity.restartPrompt'),
+      confirmLabel: t('common.restart'),
     })
     if (!ok) return
     setAnchor(btn)
     sendTo({ type: 'reboot', payload: {} })
-    toast('再起動コマンドを送信しました', 'info')
+    toast(t('identity.restartSent'), 'info')
   }
 
   return (
     <div className="form-section">
       {confirmDialog}
-      <div className="form-section-title">デバイス識別</div>
+      <div className="form-section-title">{t('identity.title')}</div>
 
       <div className="form-row">
-        <label>名前</label>
+        <label>{t('identity.name')}</label>
         <input
           className="form-input"
           value={name}
@@ -120,18 +122,18 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
           onClick={submitName}
           disabled={!device.online || !name.trim()}
         >
-          変更
+          {t('identity.change')}
         </button>
       </div>
 
       <div className="form-row">
-        <label>アドレス</label>
+        <label>{t('identity.address')}</label>
         <div className="form-row-multi">
           <input
             className="form-input"
             value={prefix}
             onChange={(e) => setPrefix(e.target.value)}
-            placeholder="prefix (任意)"
+            placeholder={t('identity.prefixPlaceholder')}
             disabled={!device.online}
             style={{ flex: '1 1 100px' }}
             list={prefixHistory.historyId}
@@ -173,7 +175,7 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
               if (Number.isFinite(n)) setGroup(Math.max(1, Math.min(99, Math.round(n))))
             }}
             disabled={!device.online}
-            title="1〜99 で指定 (既定 1)"
+            title={t('identity.numberTitle')}
           />
         </div>
         <button
@@ -181,12 +183,12 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
           onClick={submitAddress}
           disabled={!device.online}
         >
-          設定
+          {t('manage.tab.settings')}
         </button>
       </div>
 
       <div className="form-status muted">
-        現在: <code className="form-input mono" style={{ background: 'transparent', border: 'none', padding: 0, width: 'auto', color: 'var(--text-secondary)' }}>{device.address || '(未設定)'}</code>
+        {t('identity.current')} <code className="form-input mono" style={{ background: 'transparent', border: 'none', padding: 0, width: 'auto', color: 'var(--text-secondary)' }}>{device.address || t('identity.unset')}</code>
       </div>
 
       <div className="form-action-row" style={{ marginTop: 8 }}>
@@ -194,9 +196,9 @@ export function IdentityForm({ device, cachedInfo, sendTo, onChanged }: Props) {
           className="form-button-secondary"
           onClick={submitReboot}
           disabled={!device.online}
-          title="set_* コマンドの一部は再起動後に有効になる"
+          title={t('identity.restartNote')}
         >
-          再起動
+          {t('common.restart')}
         </button>
       </div>
     </div>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useElementSize } from '../hooks/useElementSize'
+import { useI18n } from '@/i18n/I18nProvider'
 import './IntensityControl.css'
 
 export interface IntensityControlProps {
@@ -47,6 +48,7 @@ export function IntensityControl({ value, onChange, label = 'Amp', disabled = fa
 }
 
 function IntensityInlineSlider({ value, onChange, label, disabled }: { value: number; onChange: (v: number) => void; label: string; disabled: boolean }) {
+  const { t } = useI18n()
   const [focused, setFocused] = useState(false)
   return (
     <label
@@ -54,7 +56,7 @@ function IntensityInlineSlider({ value, onChange, label, disabled }: { value: nu
       draggable={false}
       onMouseDown={(e) => e.stopPropagation()}
       onDragStart={(e) => { e.preventDefault(); e.stopPropagation() }}
-      title="スライダで 5% step / 数字をクリックで直接入力"
+      title={t('kit.intensitySliderTitle')}
     >
       <span className="intensity-inline-label">{label}</span>
       <input
@@ -160,6 +162,7 @@ function IntensityValueEditor({
   style?: CSSProperties
   disabled?: boolean
 }) {
+  const { t } = useI18n()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
@@ -219,7 +222,7 @@ function IntensityValueEditor({
       className={className}
       aria-disabled={disabled}
       style={{ cursor: disabled ? 'default' : 'text', ...style }}
-      title="クリックで直接入力 (0-100)"
+      title={t('kit.intensityValueTitle')}
       onMouseDown={(e) => { e.stopPropagation(); e.preventDefault() }}
       onClick={startEdit}
     >

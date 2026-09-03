@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import type { DeviceInfo, ManagerMessage, SpaceResult } from '@/types/manager'
 import { formatFileSize } from '@/utils/wavIO'
+import { useI18n } from '@/i18n/I18nProvider'
 
 const DEFAULT_CAPACITY = 4 * 1024 * 1024 // 4MB
 
@@ -12,6 +13,7 @@ interface CapacityGaugeProps {
 }
 
 export function CapacityGauge({ kitSize, managerConnected, devices, send }: CapacityGaugeProps) {
+  const { t } = useI18n()
   const [space, setSpace] = useState<SpaceResult | null>(null)
   const [queried, setQueried] = useState(false)
 
@@ -71,7 +73,7 @@ export function CapacityGauge({ kitSize, managerConnected, devices, send }: Capa
         )}
         <span title="Remaining device storage">Free: {formatFileSize(freeBytes)}</span>
         {devices.length > 0 && devices[0].volumeWiper != null && (
-          <span className="capacity-vol" title="Connected Hapbeat device volume (MCP4018 wiper 0–127, 128段階)">
+          <span className="capacity-vol" title={t('kit.volumeWiperTitle')}>
             Vol {devices[0].volumeWiper}/128 ({Math.round((devices[0].volumeWiper / 127) * 100)}%)
           </span>
         )}

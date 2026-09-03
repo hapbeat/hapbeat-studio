@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { DisplayElementMeta, DisplayElementType } from '@/types/display'
 import { getElementSize } from '@/types/display'
 import { setCurrentDragType, setCurrentDragVariant } from '@/components/display/DisplayEditor'
+import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import './ElementPalette.css'
 
 // ============================================================================
@@ -110,6 +111,14 @@ export const PALETTE_SECTIONS: PaletteSection[] = [
   },
 ]
 
+const PALETTE_COPY: Array<{ title: MessageId; hint: MessageId; descriptions: MessageId[] }> = [
+  { title: 'palette.status.title', hint: 'palette.status.hint', descriptions: ['palette.status.volume', 'palette.status.volume', 'palette.status.batteryPercent', 'palette.status.batteryBar', 'palette.status.connection', 'palette.status.mqtt', 'palette.status.alert'] },
+  { title: 'palette.controls.title', hint: 'palette.controls.hint', descriptions: ['palette.controls.player', 'palette.controls.group', 'palette.controls.page'] },
+  { title: 'palette.identity.title', hint: 'palette.identity.hint', descriptions: ['palette.identity.host', 'palette.identity.host', 'palette.identity.app', 'palette.identity.position', 'palette.identity.text'] },
+  { title: 'palette.network.title', hint: 'palette.network.hint', descriptions: ['palette.network.hint', 'palette.network.ssid', 'palette.network.ip'] },
+  { title: 'palette.meta.title', hint: 'palette.meta.hint', descriptions: ['palette.meta.version'] },
+]
+
 // ============================================================================
 // 既存 export 互換: フラットな elementMetas / getElementMeta は OledSimulator や
 // PopupPalette が要素の label / icon 引きに使っている。セクション再編後も
@@ -172,6 +181,7 @@ interface ElementPaletteProps {
 }
 
 export function ElementPalette({ selectedType, onSelectType, usedTypes }: ElementPaletteProps) {
+  const { t } = useI18n()
   // size variant (S/M/L) の選択状態を type 単位で保持。デフォルトは 'standard'。
   // type をまたぐ集約 state: { 'address': 'wide', 'app_name': 'compact', ... }
   const [variantByType, setVariantByType] = useState<Record<string, string>>({})
@@ -179,22 +189,23 @@ export function ElementPalette({ selectedType, onSelectType, usedTypes }: Elemen
   return (
     <div className="element-palette">
       <div className="palette-header">
-        <div className="panel-title">要素パレット</div>
+        <div className="panel-title">{t('palette.title')}</div>
         <div className="palette-hint">
-          OLED 上をクリック or パレットからドラッグ
+          {t('palette.hint')}
         </div>
         <div className="palette-hint palette-hint-secondary">
-          サイズボタンの数字 = 文字幅
+          {t('palette.sizeHint')}
         </div>
       </div>
-      {PALETTE_SECTIONS.map((sec) => (
+      {PALETTE_SECTIONS.map((sec, sectionIndex) => (
         <section key={sec.title} className="palette-section">
           <header className="palette-section-header">
-            <span className="palette-section-title">{sec.title}</span>
-            <span className="palette-section-hint">{sec.hint}</span>
+            <span className="palette-section-title">{t(PALETTE_COPY[sectionIndex].title)}</span>
+            <span className="palette-section-hint">{t(PALETTE_COPY[sectionIndex].hint)}</span>
           </header>
           <div className="palette-grid">
-            {sec.items.map((item) => {
+            {sec.items.map((item, itemIndex) => {
+              const description = t(PALETTE_COPY[sectionIndex].descriptions[itemIndex])
               const selectedVariant = item.variants
                 ? (variantByType[item.type] ?? 'standard')
                 : item.variant
@@ -239,7 +250,7 @@ export function ElementPalette({ selectedType, onSelectType, usedTypes }: Elemen
                     setCurrentDragType(item.type)
                     setCurrentDragVariant(effectiveVariant)
                   }}
-                  title={item.description}
+                  title={description}
                 >
                   <div className="palette-info">
                     <div className="palette-row-1">
@@ -273,7 +284,7 @@ export function ElementPalette({ selectedType, onSelectType, usedTypes }: Elemen
                         })}
                       </div>
                     </div>
-                    <span className="palette-desc">{item.description}</span>
+                    <span className="palette-desc">{description}</span>
                   </div>
                 </button>
               )

@@ -3,6 +3,7 @@ import { useHelperConnection } from '@/hooks/useHelperConnection'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import { useToast } from '@/components/common/Toast'
 import { StreamingTestSection } from './StreamingTestSection'
+import { useI18n } from '@/i18n/I18nProvider'
 
 const HISTORY_KEY = 'hapbeat-studio-test-event-history'
 const TARGET_KEY = 'hapbeat-studio-test-target'
@@ -39,6 +40,7 @@ interface Props {
  * source of truth.
  */
 export function TestSubTab({ device, sendTo }: Props) {
+  const { t } = useI18n()
   const { lastMessage, send } = useHelperConnection()
   const { toast, setAnchor } = useToast()
 
@@ -134,7 +136,7 @@ export function TestSubTab({ device, sendTo }: Props) {
     pingBtnRef.current = e.currentTarget
     setAnchor(e.currentTarget)
     sendTo({ type: 'ping_device', payload: {} })
-    toast('Ping 送信…', 'info')
+    toast(t('manage.fire.pingSent'), 'info')
     // Local watchdog: helper waits up to 2 s for the PONG, plus tiny
     // round-trip overhead. If nothing arrives in 3 s, it's a helper-or-
     // network problem the user should know about. Replace any prior
@@ -186,9 +188,9 @@ export function TestSubTab({ device, sendTo }: Props) {
       <div className="form-section">
         <div className="form-section-title">
           <span className="mode-prefix mode-prefix-fire">&gt;&nbsp;FIRE</span>
-          コマンド送信テスト
+          {t('manage.fire.title')}
           <span className="form-section-sub-inline">
-            {' '}— Event ID を投げて Kit が再生する FIRE モードのイベントを試す
+            {' '}{t('manage.fire.description')}
           </span>
         </div>
 
@@ -208,9 +210,9 @@ export function TestSubTab({ device, sendTo }: Props) {
         </div>
 
         <div className="form-status muted" style={{ padding: '0 4px 6px' }}>
-          履歴 ({history.length}/{MAX_HISTORY}):
+          {t('manage.fire.history', { count: history.length, max: MAX_HISTORY })}
           {history.length === 0 ? (
-            <em> （履歴なし）</em>
+            <em> {t('manage.fire.noHistory')}</em>
           ) : (
             <ul className="event-history-list">
               {history.map((h) => (
@@ -228,7 +230,7 @@ export function TestSubTab({ device, sendTo }: Props) {
         </div>
 
         <div className="form-action-row">
-          <span className="form-action-label">選択デバイス</span>
+          <span className="form-action-label">{t('manage.fire.selected')}</span>
           <button
             className="form-button"
             onClick={playSelected}
@@ -258,12 +260,12 @@ export function TestSubTab({ device, sendTo }: Props) {
             className="form-input mono"
             value={target}
             onChange={(e) => setTarget(e.target.value)}
-            placeholder="例: player_1, */pos_chest, */*/group_2, 空 = 全台"
+            placeholder={t('manage.fire.targetPlaceholder')}
           />
           <span />
         </div>
         <div className="form-action-row">
-          <span className="form-action-label">ブロードキャスト</span>
+          <span className="form-action-label">{t('manage.fire.broadcast')}</span>
           <button
             className="form-button"
             onClick={playAll}

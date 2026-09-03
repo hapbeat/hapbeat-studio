@@ -4,6 +4,7 @@ import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useMqttFlowStore } from '@/stores/mqttFlowStore'
 import { useDeviceStore } from '@/stores/deviceStore'
 import type { DeviceInfo, MqttClientEntry } from '@/types/manager'
+import { useI18n } from '@/i18n/I18nProvider'
 
 /**
  * MQTT 通信フロー — sensors → broker → receivers, with live publish stats.
@@ -200,6 +201,7 @@ export function useMqttFlowData(): MqttFlowData {
 // --- pure SVG --------------------------------------------------------------
 
 function MqttFlowChartSvg(props: MqttFlowData) {
+  const { t } = useI18n()
   const {
     brokerName, port, running, left, right, pubCount,
     lastTopic, lastFrom, lastEventId, lastTarget, lastKey, lastAt, receiverCount,
@@ -308,7 +310,7 @@ function MqttFlowChartSvg(props: MqttFlowData) {
         style={{ width: '100%', display: 'block' }}
         preserveAspectRatio="xMidYMid meet"
         role="img"
-        aria-label="MQTT 通信フロー図"
+        aria-label={t('mqtt.chart.aria')}
       >
         <defs>
           <marker id="mqtt-arrow" viewBox="0 0 8 8" refX="7" refY="4"
@@ -354,7 +356,7 @@ function MqttFlowChartSvg(props: MqttFlowData) {
         })}
         {left.length === 0 && (
           <text x={leftX + BW / 2} y={centerY + 4} textAnchor="middle" fontSize={11}
-            fill="var(--text-muted, #777)">(なし)</text>
+            fill="var(--text-muted, #777)">{t('mqtt.none')}</text>
         )}
 
         {/* receivers: ONE connection line per subscribed topic (1 line = 1
@@ -391,7 +393,7 @@ function MqttFlowChartSvg(props: MqttFlowData) {
         })}
         {right.length === 0 && (
           <text x={rightX + BW / 2} y={centerY + 4} textAnchor="middle" fontSize={11}
-            fill="var(--text-muted, #777)">(なし)</text>
+            fill="var(--text-muted, #777)">{t('mqtt.none')}</text>
         )}
       </svg>
 
@@ -401,19 +403,19 @@ function MqttFlowChartSvg(props: MqttFlowData) {
       {(lastTopic || pubCount != null) && (
         <div className="mqtt-flow-info">
           <div className="mqtt-flow-info-title">
-            最終イベント{pubCount != null ? `（broker 受信 ${pubCount} 件）` : ''}
+            {t('mqtt.lastEvent')}{pubCount != null ? ` (broker received ${pubCount})` : ''}
           </div>
           {lastTopic ? (
             <div className="mqtt-flow-info-grid">
-              {lastAt != null && (<><span>時刻</span><span className="mono">{new Date(lastAt).toLocaleTimeString()}</span></>)}
-              {lastFrom && (<><span>送信元</span><span className="mono">{lastFrom}</span></>)}
-              {lastKey && (<><span>キー（色）</span><span className="mono">{lastKey}</span></>)}
-              {lastEventId && (<><span>イベント</span><span className="mono">{lastEventId}</span></>)}
+              {lastAt != null && (<><span>{t('mqtt.time')}</span><span className="mono">{new Date(lastAt).toLocaleTimeString()}</span></>)}
+              {lastFrom && (<><span>{t('mqtt.source')}</span><span className="mono">{lastFrom}</span></>)}
+              {lastKey && (<><span>{t('mqtt.key')}</span><span className="mono">{lastKey}</span></>)}
+              {lastEventId && (<><span>{t('mqtt.event')}</span><span className="mono">{lastEventId}</span></>)}
               <><span>topic</span><span className="mono">{lastTopic.replace(/\/(play|stop)$/, '')}</span></>
-              <><span>ターゲット</span><span className="mono">{lastTarget || '（全台）'}</span></>
+              <><span>{t('mqtt.target')}</span><span className="mono">{lastTarget || t('mqtt.allTargets')}</span></>
             </div>
           ) : (
-            <div className="form-status muted" style={{ margin: 0 }}>まだイベントは届いていません。</div>
+            <div className="form-status muted" style={{ margin: 0 }}>{t('mqtt.noEvents')}</div>
           )}
         </div>
       )}
@@ -424,8 +426,7 @@ function MqttFlowChartSvg(props: MqttFlowData) {
           implying a "待機" queue that MQTT doesn't provide. */}
       {running && receiverCount === 0 && (
         <div className="form-status warn" style={{ marginTop: 4 }}>
-          受信機 (Hapbeat) が接続していません。QoS 1 が保証するのは「送信元 → ブローカー」の到達までで、
-          受信機が居ない間のイベントはブローカーに保持されず届きません。受信機を MQTT で接続してください。
+          {t('mqtt.noReceiver')}
         </div>
       )}
     </div>
@@ -435,6 +436,7 @@ function MqttFlowChartSvg(props: MqttFlowData) {
 // --- inline panel (rendered in each MQTT tab) ------------------------------
 
 export function MqttFlowPanel() {
+  const { t } = useI18n()
   const data = useMqttFlowData()
   const popout = useMqttFlowStore((s) => s.popout)
   const openPopout = useMqttFlowStore((s) => s.openPopout)
@@ -457,9 +459,9 @@ export function MqttFlowPanel() {
         style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
       >
         <span>
-          通信フロー
+          {t('mqtt.flow.title')}
           <span className="form-section-sub-inline">
-            {' '}— 検知 → ブローカー → Hapbeat (2 秒ごとに更新・全デバイス共通)
+            {' '}{t('mqtt.flow.subtitle')}
           </span>
         </span>
         <button
@@ -467,30 +469,29 @@ export function MqttFlowPanel() {
           className="form-button-secondary"
           style={{ fontSize: 12, padding: '2px 10px' }}
           onClick={openPopout}
-          title="通信フローを別ウィンドウで開く（デバイスを切り替えても保持されます）"
+          title={t('mqtt.flow.popoutTitle')}
         >
-          ⤢ {popout ? '別窓を前面に' : 'ポップアウト'}
+          ⤢ {popout ? t('mqtt.flow.focusPopout') : t('mqtt.flow.popout')}
         </button>
       </div>
 
       {data.noBroker ? (
         <div className="form-status muted">
-          ブローカー (role=broker) がネットワーク上に見つかりません。AtomS3 ブローカーの電源と Wi-Fi を確認してください。
+          {t('mqtt.flow.noBroker')}
         </div>
       ) : popout ? (
-        <div className="form-status muted">別ウィンドウで表示中（閉じるとここに戻ります）。</div>
+        <div className="form-status muted">{t('mqtt.flow.inPopout')}</div>
       ) : (
         <MqttFlowChartSvg {...data} />
       )}
 
       {hasGhost && !data.noBroker && (
         <div className="form-status warn" style={{ marginTop: 4 }}>
-          破線の「未接続」ノードは、ネットワーク上には居る（mDNS で検出済み）がブローカーに MQTT 接続できていない
-          デバイスです。センサ側の「MQTT」タブでブローカー自動検出 / topic root を確認してください。
+          {t('mqtt.flow.ghost')}
         </div>
       )}
       <div className="form-status muted" style={{ marginTop: 0 }}>
-        クライアント名は各ノードが接続時に publish する presence 情報 (デバイス名) です。
+        {t('mqtt.flow.presence')}
       </div>
     </div>
   )
@@ -505,6 +506,7 @@ export function MqttFlowPanel() {
  * no visible DOM in the main document.
  */
 export function MqttFlowController() {
+  const { t } = useI18n()
   const { devices, send, lastMessage } = useHelperConnection()
   const data = useMqttFlowData()
   const popout = useMqttFlowStore((s) => s.popout)
@@ -584,7 +586,7 @@ export function MqttFlowController() {
   if (!popout || popout.closed) return null
   return createPortal(
     <div>
-      <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600 }}>MQTT 通信フロー</h3>
+      <h3 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600 }}>{t('mqtt.flowTitle')}</h3>
       <MqttFlowChartSvg {...data} />
     </div>,
     popout.document.body,

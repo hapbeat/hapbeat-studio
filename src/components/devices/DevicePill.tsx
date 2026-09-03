@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { DevicesModal } from './DevicesModal'
+import { useI18n } from '@/i18n/I18nProvider'
 import './DevicePill.css'
 
 /**
@@ -19,6 +20,7 @@ import './DevicePill.css'
  * surfaces show the same selection summary and open the same modal.
  */
 export function DevicePill({ hapbeatOnly }: { hapbeatOnly?: boolean } = {}) {
+  const { t } = useI18n()
   const { isConnected: helperConnected, devices } = useHelperConnection()
   const selectedIps = useDeviceStore((s) => s.selectedIps)
   const [open, setOpen] = useState(false)
@@ -43,7 +45,7 @@ export function DevicePill({ hapbeatOnly }: { hapbeatOnly?: boolean } = {}) {
           title={
             selectedDevices
               .map((d) => `${d.name || '(unnamed)'} (${d.ipAddress})${d.online ? '' : ' [offline]'}`)
-              .join('\n') + '\n\nクリックで Devices を開く'
+              .join('\n') + `\n\n${t('device.pill.open')}`
           }
         >
           <span
@@ -62,7 +64,7 @@ export function DevicePill({ hapbeatOnly }: { hapbeatOnly?: boolean } = {}) {
           type="button"
           className="device-pill muted"
           onClick={() => setOpen(true)}
-          title="クリックで Devices を開いてデバイスを選択"
+          title={t('device.pill.open')}
         >
           <span className="device-pill-dot offline" aria-hidden="true" />
           no device

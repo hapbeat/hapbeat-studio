@@ -9,8 +9,10 @@ import {
 } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore } from '@/stores/deviceStore'
+import { useI18n } from '@/i18n/I18nProvider'
 import type { DeviceInfo } from '@/types/manager'
 import { streamClip } from '@/utils/audioStreamer'
+import { QUICK_TEST_TONE, createQuickTestToneBlob } from '@/utils/testTone'
 import {
   isFileSystemAccessSupported,
   loadDirectoryHandle,
@@ -92,6 +94,7 @@ export function StreamingTestSection({
   onIntensityChange,
 }: Props) {
   const { send } = useHelperConnection()
+  const { t } = useI18n()
   const abortRef = useRef<AbortController | null>(null)
 
   // Folder navigation. `navStack` is the path from the picked root
@@ -166,7 +169,7 @@ export function StreamingTestSection({
           }
         }
       } catch (err) {
-        return { entries: [], error: `フォルダ読込失敗: ${String((err as Error).message ?? err)}` }
+        return { entries: [], error: t('manage.stream.status.directoryReadFailed', { error: String((err as Error).message ?? err) }) }
       }
       dirs.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }))
       files.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }))
@@ -178,12 +181,12 @@ export function StreamingTestSection({
       // a parent handle to JS, so this is the closest analog to the
       // Manager's "climb up to filesystem root" behavior.
       if (stack.length >= 1) {
-        out.push({ label: '📁 .. (親フォルダ)', id: '__parent__', kind: 'parent' })
+        out.push({ label: t('manage.stream.parentFolder'), id: '__parent__', kind: 'parent' })
       }
       out.push(...dirs, ...files)
       return { entries: out, error: null }
     },
-    [],
+    [t],
   )
 
   const refreshEntries = useCallback(
@@ -336,26 +339,19 @@ export function StreamingTestSection({
       await refreshEntries(stack)
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
-      setStatus({ kind: 'err', msg: `フォルダ選択失敗: ${String(err)}` })
+      setStatus({ kind: 'err', msg: t('manage.stream.status.folderFailed', { error: String(err) }) })
     }
-  }, [navStack, refreshEntries])
+  }, [navStack, refreshEntries, t])
 
-  const startStreamFromHandle = useCallback(
-    async (fileHandle: FileSystemFileHandle) => {
+  const startStream = useCallback(
+    async (blob: Blob, name: string) => {
       // Auto-replace any in-flight stream — abort then await briefly so
       // STREAM_END from the old run lands before STREAM_BEGIN of the new.
       abortRef.current?.abort()
       await delay(20)
 
-      let blob: File
-      try {
-        blob = await fileHandle.getFile()
-      } catch (err) {
-        setStatus({ kind: 'err', msg: `ファイル読込失敗: ${String(err)}` })
-        return
-      }
-      setNowPlaying(blob.name)
-      setStatus({ kind: 'muted', msg: 'デコード + リサンプリング中…' })
+      setNowPlaying(name)
+      setStatus({ kind: 'muted', msg: t('manage.stream.status.decoding') })
       setPaused(false)
       pausedRef.current = false
       seekRequestRef.current = null
@@ -382,8 +378,8 @@ export function StreamingTestSection({
         setStatus({
           kind: 'muted',
           msg: targets.length > 1
-            ? `ストリーミング送信中… (${targets.length} 台へ同時配信)`
-            : 'ストリーミング送信中…',
+            ? t('manage.stream.status.sendingMany', { count: targets.length })
+            : t('manage.stream.status.sendingOne'),
         })
         await streamClip(blob, sendForStream, {
           signal: ctrl.signal,
@@ -399,12 +395,12 @@ export function StreamingTestSection({
               setProgress({ current, total, sr }),
           },
         })
-        setStatus({ kind: 'ok', msg: '完了' })
+        setStatus({ kind: 'ok', msg: t('common.done') })
       } catch (err) {
         if ((err as Error).name === 'AbortError') {
-          setStatus({ kind: 'muted', msg: '停止しました' })
+          setStatus({ kind: 'muted', msg: t('manage.stream.status.stopped') })
         } else {
-          setStatus({ kind: 'err', msg: `エラー: ${String(err)}` })
+          setStatus({ kind: 'err', msg: t('manage.stream.status.error', { error: String(err) }) })
         }
       } finally {
         if (abortRef.current === ctrl) {
@@ -413,8 +409,24 @@ export function StreamingTestSection({
         }
       }
     },
-    [device.ipAddress, intensityRef, send],
+    [device.ipAddress, intensityRef, send, t],
   )
+
+  const startStreamFromHandle = useCallback(
+    async (fileHandle: FileSystemFileHandle) => {
+      try {
+        const file = await fileHandle.getFile()
+        await startStream(file, file.name)
+      } catch (err) {
+        setStatus({ kind: 'err', msg: t('manage.stream.status.readFailed', { error: String(err) }) })
+      }
+    },
+    [startStream, t],
+  )
+
+  const startQuickTest = useCallback(() => {
+    void startStream(createQuickTestToneBlob(), QUICK_TEST_TONE.fileName)
+  }, [startStream])
 
   const activateEntry = useCallback(
     async (entry: DirEntry) => {
@@ -437,7 +449,7 @@ export function StreamingTestSection({
     if (!isFileSystemAccessSupported()) {
       setStatus({
         kind: 'err',
-        msg: 'お使いのブラウザは File System Access API をサポートしていません (Chrome / Edge を推奨)',
+        msg: t('manage.stream.status.browserUnsupported'),
       })
       return
     }
@@ -453,9 +465,9 @@ export function StreamingTestSection({
       setNavStack(stack)
       await refreshEntries(stack)
     } catch (err) {
-      setStatus({ kind: 'err', msg: `フォルダ選択失敗: ${String(err)}` })
+      setStatus({ kind: 'err', msg: t('manage.stream.status.folderFailed', { error: String(err) }) })
     }
-  }, [refreshEntries])
+  }, [refreshEntries, t])
 
   const stopStream = useCallback(() => {
     abortRef.current?.abort()
@@ -507,11 +519,11 @@ export function StreamingTestSection({
       }
     }
     if (!candidate) {
-      setStatus({ kind: 'muted', msg: 'リストから音源ファイルを選んでください' })
+      setStatus({ kind: 'muted', msg: t('manage.stream.status.chooseAudio') })
       return
     }
     void startStreamFromHandle(candidate)
-  }, [streaming, stopStream, entries, selectedId, startStreamFromHandle])
+  }, [streaming, stopStream, entries, selectedId, startStreamFromHandle, t])
 
   /** Slider drag / click → request seek on every value change.
    *  `consumeSeek` is polled per chunk so rapid drags coalesce into
@@ -637,17 +649,29 @@ export function StreamingTestSection({
     <div className="form-section">
       <div className="form-section-title">
         <span className="mode-prefix mode-prefix-clip">♪&nbsp;CLIP</span>
-        ストリーミングテスト
+        {t('manage.stream.title')}
       </div>
       <div
         className="form-section-sub-inline"
         style={{ marginBottom: 6, paddingLeft: 4 }}
       >
-        Space 再生/一時停止 / ↑↓←→ 選択移動 / Enter フォルダ侵入・再生
+        {t('manage.stream.keys')}
+      </div>
+
+      <div className="form-action-row" style={{ marginTop: 0 }}>
+        <span className="form-action-label">{t('manage.stream.quickTest')}</span>
+        <button
+          className="form-button-secondary"
+          onClick={startQuickTest}
+          disabled={!device.online}
+          title={t('manage.stream.quickTestTitle')}
+        >
+          {t('manage.stream.quickTestButton')}
+        </button>
       </div>
 
       <div className="form-row">
-        <label>📁 フォルダ</label>
+        <label>{t('manage.stream.folder')}</label>
         <div className="form-row-multi" style={{ width: '100%' }}>
           <span
             className="form-input mono"
@@ -661,20 +685,20 @@ export function StreamingTestSection({
             }}
             title={
               breadcrumb
-                ? `${breadcrumb}\n（ブラウザはセキュリティ上、OS のフルパスを公開しません。表示はピックしたフォルダから現在位置までの相対パスです）`
+                ? t('manage.stream.folderTitle', { path: breadcrumb })
                 : ''
             }
           >
-            {breadcrumb || '音源フォルダを選択（参照... ボタン）'}
+            {breadcrumb || t('manage.stream.folderPlaceholder')}
           </span>
           <button
             type="button"
             className="form-button-secondary"
             onClick={onBrowseDir}
             disabled={streaming}
-            title="音源フォルダを選択"
+            title={t('manage.stream.folderPlaceholder')}
           >
-            参照…
+            {t('common.browse')}
           </button>
         </div>
         <span />
@@ -685,7 +709,7 @@ export function StreamingTestSection({
         className="stream-grid"
         tabIndex={0}
         role="listbox"
-        aria-label="ストリーミング音源リスト"
+        aria-label={t('manage.stream.audioList')}
         onKeyDown={onGridKeyDown}
         onDragOver={onDragOver}
         onDrop={onDrop}
@@ -695,14 +719,14 @@ export function StreamingTestSection({
       >
         {!supports && (
           <div className="stream-grid-empty">
-            このブラウザでは File System Access API が使えません。Chrome / Edge を使ってください。
+            {t('manage.stream.unsupported')}
           </div>
         )}
         {supports && entries.length === 0 && !scanError && (
           <div className="stream-grid-empty">
             {rootName
-              ? '（このフォルダに音源ファイルもサブフォルダもありません）'
-              : 'まずは「参照…」で音源フォルダを選んでください。フォルダごとドラッグ&ドロップしても OK。'}
+              ? t('manage.stream.emptyDirectory')
+              : t('manage.stream.chooseDirectory')}
           </div>
         )}
         {scanError && <div className="stream-grid-empty">{scanError}</div>}
@@ -730,7 +754,7 @@ export function StreamingTestSection({
       </div>
 
       <div className="form-row">
-        <label>再生中</label>
+        <label>{t('manage.stream.playing')}</label>
         <span
           className="form-input mono"
           style={{
@@ -748,7 +772,7 @@ export function StreamingTestSection({
       </div>
 
       <div className="form-row">
-        <label>再生位置</label>
+        <label>{t('manage.stream.position')}</label>
         <div className="form-row-multi" style={{ width: '100%' }}>
           <input
             type="range"
@@ -783,7 +807,7 @@ export function StreamingTestSection({
             value={intensityPct}
             onChange={(e) => onIntensityChange(Number(e.target.value))}
             style={{ flex: 1 }}
-            aria-label="ストリーミング Intensity (CLIP のみ)"
+            aria-label={t('manage.stream.intensity.aria')}
           />
           <span
             className="form-input mono short"
@@ -795,8 +819,7 @@ export function StreamingTestSection({
         <span />
       </div>
       <div className="form-status muted" style={{ padding: '0 4px', marginTop: -4 }}>
-        ※ Intensity はストリーミング (CLIP) 専用。FIRE は Kit deploy 時の
-        manifest intensity が適用されるため、ここで変更しても反映されません。
+        {t('manage.stream.intensity.info')}
       </div>
 
       <div className="form-action-row">
@@ -809,7 +832,7 @@ export function StreamingTestSection({
           // that watching the button shrink mid-playback is distracting.
           style={{ minWidth: 132, textAlign: 'center' }}
         >
-          {streaming ? '■ 停止' : '▶ 再生 (stream)'}
+          {streaming ? t('manage.stream.stopButton') : t('manage.stream.playButton')}
         </button>
         <button
           className="form-button-secondary"
@@ -817,7 +840,7 @@ export function StreamingTestSection({
           disabled={!streaming}
           aria-pressed={paused}
         >
-          {paused ? '▶ 再開' : '⏸ 一時停止'}
+          {paused ? `▶ ${t('common.resume')}` : `⏸ ${t('common.pause')}`}
         </button>
         {status && (
           <span className={`form-status ${status.kind}`} style={{ alignSelf: 'center' }}>
@@ -827,7 +850,7 @@ export function StreamingTestSection({
       </div>
 
       <div className="form-status muted" style={{ marginTop: 6 }}>
-        ステレオ素材は LR 両方が送信されます (デバイスがステレオ対応の場合のみ意味あり)。
+        {t('manage.stream.stereo')}
       </div>
     </div>
   )

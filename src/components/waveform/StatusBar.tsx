@@ -1,14 +1,16 @@
 import { useWaveformStore } from '@/stores/waveformStore'
+import { useI18n } from '@/i18n/I18nProvider'
 import { validateWavForExport, estimateWavSize, formatFileSize } from '@/utils/wavIO'
 
 export function StatusBar() {
+  const { t } = useI18n()
   const clip = useWaveformStore((s) => s.clip)
   const exportAsMono = useWaveformStore((s) => s.exportAsMono)
 
   if (!clip) {
     return (
       <div className="status-bar">
-        <span className="status-item">WAV ファイルを読み込んでください</span>
+        <span className="status-item">{t('wave.emptyStatus')}</span>
       </div>
     )
   }

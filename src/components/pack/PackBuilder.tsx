@@ -1,8 +1,10 @@
 import { useState, useCallback } from 'react'
 import type { EventDefinition } from '@/types/project'
 import './PackBuilder.css'
+import { useI18n } from '@/i18n/I18nProvider'
 
 export function PackBuilder() {
+  const { t } = useI18n()
   const [events, setEvents] = useState<EventDefinition[]>([])
   const [newEventId, setNewEventId] = useState('')
   const [newIntensity, setNewIntensity] = useState(1.0)
@@ -10,7 +12,7 @@ export function PackBuilder() {
   const handleAddEvent = useCallback(() => {
     if (!newEventId.trim()) return
     if (events.some((e) => e.eventId === newEventId.trim())) {
-      alert('同じ Event ID は登録できません。')
+      alert(t('pack.duplicate'))
       return
     }
     const event: EventDefinition = {
@@ -21,7 +23,7 @@ export function PackBuilder() {
     setEvents((prev) => [...prev, event])
     setNewEventId('')
     setNewIntensity(1.0)
-  }, [newEventId, newIntensity, events])
+  }, [newEventId, newIntensity, events, t])
 
   const handleDeleteEvent = useCallback((eventId: string) => {
     setEvents((prev) => prev.filter((e) => e.eventId !== eventId))
@@ -35,19 +37,19 @@ export function PackBuilder() {
 
   const handleExport = useCallback(() => {
     if (events.length === 0) {
-      alert('エクスポートするイベントがありません。')
+      alert(t('pack.noExportEvents'))
       return
     }
     // Kit ビルドは将来的に JSZip で実装
-    alert('Kit エクスポート機能は準備中です。')
-  }, [events])
+    alert(t('pack.exportPending'))
+  }, [events, t])
 
   return (
     <div className="pack-builder">
       <div className="pack-builder-main">
         {/* イベント一覧 */}
         <div className="panel">
-          <div className="panel-title">イベント定義</div>
+          <div className="panel-title">{t('pack.title')}</div>
 
           {/* 追加フォーム */}
           <div className="event-add-form">
@@ -56,7 +58,7 @@ export function PackBuilder() {
               <input
                 type="text"
                 className="input mono"
-                placeholder="例: hit_strong"
+                placeholder={t('pack.exampleId')}
                 value={newEventId}
                 onChange={(e) => setNewEventId(e.target.value)}
                 onKeyDown={(e) => {
@@ -77,7 +79,7 @@ export function PackBuilder() {
               />
             </div>
             <button className="btn btn-primary" onClick={handleAddEvent}>
-              追加
+              {t('pack.add')}
             </button>
           </div>
 
@@ -87,9 +89,7 @@ export function PackBuilder() {
               <div className="event-list-header">
                 <span className="event-col-id">Event ID</span>
                 <span className="event-col-gain">Intensity</span>
-                <span className="event-col-loop">ループ</span>
-                <span className="event-col-clip">クリップ</span>
-                <span className="event-col-actions">操作</span>
+                <span className="event-col-loop">{t('pack.loop')}</span><span className="event-col-clip">{t('pack.clip')}</span><span className="event-col-actions">{t('pack.actions')}</span>
               </div>
               {events.map((event) => (
                 <div key={event.eventId} className="event-row">
@@ -104,7 +104,7 @@ export function PackBuilder() {
                     </button>
                   </span>
                   <span className="event-col-clip mono">
-                    {event.clipFile ?? '(未設定)'}
+                    {event.clipFile ?? t('pack.unset')}
                   </span>
                   <span className="event-col-actions">
                     <button
@@ -112,7 +112,7 @@ export function PackBuilder() {
                       style={{ color: 'var(--error)' }}
                       onClick={() => handleDeleteEvent(event.eventId)}
                     >
-                      削除
+                      {t('pack.delete')}
                     </button>
                   </span>
                 </div>
@@ -120,24 +120,23 @@ export function PackBuilder() {
             </div>
           ) : (
             <div className="event-empty">
-              イベントが定義されていません。上のフォームからイベントを追加してください。
+              {t('pack.empty')}
             </div>
           )}
         </div>
 
         {/* エクスポート */}
         <div className="panel">
-          <div className="panel-title">Kit エクスポート</div>
+          <div className="panel-title">{t('pack.exportTitle')}</div>
           <div className="pack-export-section">
             <div className="pack-export-info">
-              定義されたイベントと設定を Hapbeat Kit ファイル (.hapbeat-kit)
-              としてエクスポートします。
+              {t('pack.exportInfo')}
             </div>
             <div className="pack-export-stats mono">
-              イベント数: {events.length}
+              {t('pack.count', { count: events.length })}
             </div>
             <button className="btn btn-primary" onClick={handleExport}>
-              Kit をエクスポート
+              {t('pack.export')}
             </button>
           </div>
         </div>

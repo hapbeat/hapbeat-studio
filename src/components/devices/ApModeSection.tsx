@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import { useToast } from '@/components/common/Toast'
+import { useI18n } from '@/i18n/I18nProvider'
 
 interface ApInfo {
   mode?: 'sta' | 'ap'
@@ -26,6 +27,7 @@ interface Props {
  *   Phase 3 — AP→Wi-Fi設定→STA フロー案内
  */
 export function ApModeSection({ device, apInfo, sendTo, onRefreshApStatus }: Props) {
+  const { t } = useI18n()
   const [apPass, setApPass] = useState('')
   const [showApPass, setShowApPass] = useState(false)
   const { toast, setAnchor } = useToast()
@@ -35,35 +37,25 @@ export function ApModeSection({ device, apInfo, sendTo, onRefreshApStatus }: Pro
 
   const switchToAp = (e: React.MouseEvent<HTMLButtonElement>) => {
     const btn = e.currentTarget
-    if (!confirm(
-      'デバイスを AP モードに切り替えます。\n' +
-      '現在の Wi-Fi 接続が切断され、\n' +
-      `Hapbeat-XXXXXX という SSID で\n` +
-      '直接接続できるようになります。\n\n' +
-      '切り替えますか？'
-    )) return
+    if (!confirm(t('ap.confirmEnter'))) return
     setAnchor(btn)
     sendTo({ type: 'enter_ap_mode', payload: {} })
-    toast('AP モードに切り替えます（再起動）', 'info')
+    toast(t('ap.toastEnter'), 'info')
   }
 
   const switchToSta = (e: React.MouseEvent<HTMLButtonElement>) => {
     const btn = e.currentTarget
-    if (!confirm(
-      'デバイスを通常モード（STA）に戻します。\n' +
-      '再起動後、設定済みの Wi-Fi に接続します。\n\n' +
-      '切り替えますか？'
-    )) return
+    if (!confirm(t('ap.confirmLeave'))) return
     setAnchor(btn)
     sendTo({ type: 'enter_sta_mode', payload: {} })
-    toast('通常モード（STA）に戻します（再起動）', 'info')
+    toast(t('ap.toastLeave'), 'info')
   }
 
   const submitApPass = (e: React.MouseEvent<HTMLButtonElement>) => {
     setAnchor(e.currentTarget)
     const val = apPass.trim()
     if (val.length > 0 && (val.length < 8 || val.length > 63)) {
-      toast('パスワードは 8〜63 文字で入力してください', 'error')
+      toast(t('ap.passwordValidation'), 'error')
       return
     }
     // 成功/失敗は HelperFailureToastListener が write_result ベースで出す（結果ベース）。
@@ -88,7 +80,7 @@ export function ApModeSection({ device, apInfo, sendTo, onRefreshApStatus }: Pro
         style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
       >
         <span>
-          Wi-Fi モード
+          {t('ap.title')}
           {isAp && (
             <span className="ap-mode-badge" style={{ marginLeft: 10 }}>
               AP MODE
@@ -100,9 +92,9 @@ export function ApModeSection({ device, apInfo, sendTo, onRefreshApStatus }: Pro
           style={{ fontSize: 13, padding: '2px 8px' }}
           onClick={onRefreshApStatus}
           disabled={!online}
-          title="get_ap_status を取得"
+          title={t('ap.statusTitle')}
         >
-          ⟳ 更新
+          {t('ap.refresh')}
         </button>
       </div>
 
@@ -119,7 +111,7 @@ export function ApModeSection({ device, apInfo, sendTo, onRefreshApStatus }: Pro
           }}
         >
           <div style={{ fontWeight: 600, color: '#d649d6', marginBottom: 4 }}>
-            ⚡ AP モードで動作中
+            {t('ap.active')}
           </div>
           {apInfo.ap_ssid && (
             <div style={{ fontSize: 15, marginBottom: 2 }}>
@@ -132,10 +124,10 @@ export function ApModeSection({ device, apInfo, sendTo, onRefreshApStatus }: Pro
             </div>
           )}
           <div style={{ fontSize: 15, marginBottom: 2 }}>
-            クライアント: {apInfo.ap_client_count ?? 0} 台接続中
+            {t('ap.clients', { count: apInfo.ap_client_count ?? 0 })}
           </div>
           <div style={{ fontSize: 14, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.6 }}>
-            クライアント未接続が 10 分続くと自動で STA モードに戻ります。
+            {t('ap.autoSta')}
           </div>
         </div>
       )}
@@ -155,15 +147,15 @@ export function ApModeSection({ device, apInfo, sendTo, onRefreshApStatus }: Pro
           }}
         >
           <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
-            Wi-Fi 設定して通常モードに戻す手順
+            {t('ap.guide.title')}
           </div>
           <ol style={{ margin: '0 0 0 18px', padding: 0 }}>
-            <li>「設定」タブ → 「Wi-Fi 設定」で SSID と Password を追加</li>
-            <li>下の「通常モード（STA）に戻す」ボタンを押す</li>
-            <li>デバイスが再起動し、設定した Wi-Fi に接続します</li>
+            <li>{t('ap.guide.one')}</li>
+            <li>{t('ap.guide.two')}</li>
+            <li>{t('ap.guide.three')}</li>
           </ol>
           <div style={{ marginTop: 6, color: 'var(--text-muted)', fontSize: 13 }}>
-            ※ AP モード中も Wi-Fi プロファイルの登録は可能です（NVS に保存され、STA 切替時に使われます）
+            {t('ap.guide.note')}
           </div>
         </div>
       )}
@@ -175,30 +167,30 @@ export function ApModeSection({ device, apInfo, sendTo, onRefreshApStatus }: Pro
             className="form-button-secondary"
             onClick={switchToAp}
             disabled={!online}
-            title="SoftAP モードに切り替え（デバイスが再起動します）"
+            title={t('ap.enterTitle')}
           >
-            AP モードに切り替え
+            {t('ap.enter')}
           </button>
         ) : (
           <button
             className="form-button"
             onClick={switchToSta}
             disabled={!online}
-            title="通常 Wi-Fi STA モードに戻す（デバイスが再起動します）"
+            title={t('ap.leaveTitle')}
           >
-            通常モード（STA）に戻す
+            {t('ap.leave')}
           </button>
         )}
         {apInfo.mode === undefined && (
           <span className="form-status muted" style={{ alignSelf: 'center', marginTop: 0 }}>
-            get_info で mode フィールド未取得（firmware ≥ v0.1.0 が必要）
+            {t('ap.modeUnknown')}
           </span>
         )}
       </div>
 
       {/* ---- AP password ---- */}
       <div className="form-section-title" style={{ fontSize: 13, marginBottom: 6 }}>
-        AP パスワード
+        {t('ap.password')}
       </div>
       <div className="form-row">
         <label>Password</label>
@@ -210,8 +202,8 @@ export function ApModeSection({ device, apInfo, sendTo, onRefreshApStatus }: Pro
             onChange={(e) => setApPass(e.target.value)}
             placeholder={
               apInfo.ap_has_pass
-                ? '変更する場合のみ入力。空欄で Clear ボタンを押すとオープンに戻る'
-                : '設定しない場合はオープン AP（誰でも接続可）'
+                ? t('ap.passwordChangeHint')
+                : t('ap.passwordOpenHint')
             }
             disabled={!online}
             autoComplete="off"
@@ -223,14 +215,14 @@ export function ApModeSection({ device, apInfo, sendTo, onRefreshApStatus }: Pro
             type="button"
             style={{ flexShrink: 0, whiteSpace: 'nowrap' }}
           >
-            {showApPass ? '隠す' : '表示'}
+            {showApPass ? t('ap.hide') : t('ap.show')}
           </button>
         </div>
         <button
           className="form-button"
           onClick={submitApPass}
           disabled={!online}
-          title="AP パスワードを設定（8〜63 文字）"
+          title={t('ap.passwordSetTitle')}
         >
           Set
         </button>
@@ -241,19 +233,19 @@ export function ApModeSection({ device, apInfo, sendTo, onRefreshApStatus }: Pro
           className="form-button-secondary"
           onClick={clearApPass}
           disabled={!online}
-          title="AP パスワードを削除してオープン AP に戻す"
+          title={t('ap.passwordClearTitle')}
         >
-          Clear（オープン AP）
+          {t('ap.clear')}
         </button>
         {apInfo.ap_has_pass !== undefined && (
           <span className="form-status muted" style={{ alignSelf: 'center', marginTop: 0 }}>
-            現在: {apInfo.ap_has_pass ? '🔒 パスワード設定済み' : '🔓 オープン AP'}
+            {t('ap.currentPassword', { state: apInfo.ap_has_pass ? t('ap.passwordProtected') : t('ap.passwordOpen') })}
           </span>
         )}
       </div>
 
       <div className="form-status muted" style={{ marginTop: 8 }}>
-        ⚠️ オープン AP では誰でも接続してデバイスを操作できます。公共 LAN ではパスワードを推奨します。
+        {t('ap.security')}
       </div>
     </div>
   )

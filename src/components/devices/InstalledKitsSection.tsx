@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import { useToast } from '@/components/common/Toast'
+import { useI18n } from '@/i18n/I18nProvider'
 
 /**
  * Event entry shape inside a `kit_list_result` payload.
@@ -90,6 +91,7 @@ const KIT_LIST_PARAMS_MIN_FW = '0.1.3'
  * by the device's installed-clips audio engine.
  */
 export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Props) {
+  const { t } = useI18n()
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const { toast } = useToast()
 
@@ -97,7 +99,7 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
   // be pasted into a sensor mapping's event field (user workflow 2026-06-13).
   const copyId = (id: string) => {
     void navigator.clipboard?.writeText(id)
-    toast(`コピー: ${id}`, 'info')
+    toast(t('kits.copy', { id }), 'info')
   }
 
   // Detect "old firmware" by checking whether ANY event in the
@@ -129,7 +131,7 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
   const refresh = () => sendTo({ type: 'kit_list', payload: {} })
 
   const remove = (kit_id: string) => {
-    if (!confirm(`Kit "${kit_id}" をデバイスから削除しますか？`)) return
+    if (!confirm(t('kits.deleteConfirm', { id: kit_id }))) return
     sendTo({ type: 'kit_delete', payload: { kit_id } })
     setTimeout(refresh, 600)
   }
@@ -140,14 +142,14 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
         className="form-section-title"
         style={{ display: 'flex', justifyContent: 'space-between' }}
       >
-        <span>インストール済み Kit</span>
+        <span>{t('kits.installed')}</span>
         <button
           className="form-button-secondary"
           onClick={refresh}
           disabled={!device.online}
           style={{ fontSize: 13, padding: '2px 8px' }}
         >
-          ⟳ 一覧取得
+          {t('kits.refresh')}
         </button>
       </div>
 
@@ -168,15 +170,15 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
             `Manage → Firmware から更新してください。`
           }
         >
-          ⚠ amp 値は firmware v{KIT_LIST_PARAMS_MIN_FW} 以上で取得できます (現在 "amp ?" 表示)
+          {t('kits.ampOld', { version: KIT_LIST_PARAMS_MIN_FW })}
         </div>
       )}
       {!kits ? (
         <div className="form-status muted">
-          「⟳ 一覧取得」を押してデバイスから Kit 一覧を読み込んでください。
+          {t('kits.loadHint')}
         </div>
       ) : kits.length === 0 ? (
-        <div className="form-status muted">（インストール済み Kit はありません）</div>
+        <div className="form-status muted">{t('kits.none')}</div>
       ) : (
         <div className="installed-kits-list">
           {kits.map((k) => {
@@ -208,7 +210,7 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
                     onClick={() => remove(k.kit_id)}
                     disabled={!device.online}
                   >
-                    削除
+                    {t('kits.delete')}
                   </button>
                 </div>
 
@@ -246,7 +248,7 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
                                   className="installed-kit-event-copy"
                                   onClick={() => copyId(ev.id)}
                                   title={`イベント ID をコピー: ${ev.id}`}
-                                  aria-label="イベント ID をコピー"
+                                  aria-label={t('kits.copyEvent')}
                                 >
                                   ⎘
                                 </button>
@@ -263,7 +265,7 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
                           <span className="mode-prefix mode-prefix-clip">♪&nbsp;CLIP</span>
                           stream-clips ({clipEvents.length})
                           <span className="installed-kit-group-hint">
-                            {' '}— SDK のストリーム経由でのみ再生されるため、ここからは送信不可
+                            {' '}{t('kits.streamOnly')}
                           </span>
                         </div>
                         <ul className="installed-kit-events">
@@ -290,7 +292,7 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
                                   className="installed-kit-event-copy"
                                   onClick={() => copyId(ev.id)}
                                   title={`イベント ID をコピー: ${ev.id}`}
-                                  aria-label="イベント ID をコピー"
+                                  aria-label={t('kits.copyEvent')}
                                 >
                                   ⎘
                                 </button>
@@ -303,7 +305,7 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
 
                     {events.length === 0 && (
                       <div className="form-status muted" style={{ paddingLeft: 22 }}>
-                        （events なし）
+                        {t('kits.noEvents')}
                       </div>
                     )}
                   </>

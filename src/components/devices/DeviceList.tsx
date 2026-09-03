@@ -12,6 +12,7 @@ import { isHapbeatBoard, isKnownNonHapbeatBoard } from '@/utils/hapbeatBoard'
 import { useOtaStore, OTA_DEFAULT } from '@/stores/otaStore'
 import { UsbInfoModal } from './UsbInfoModal'
 import type { ManagerMessage } from '@/types/manager'
+import { useI18n } from '@/i18n/I18nProvider'
 
 /**
  * Wi-Fi OTA progress for a LAN device card. Mirrors the USB serial card's
@@ -21,6 +22,7 @@ import type { ManagerMessage } from '@/types/manager'
  * the sidebar card even while the user is looking at another device.
  */
 function OtaCardProgress({ ip, online }: { ip: string; online: boolean }) {
+  const { t } = useI18n()
   const st = useOtaStore((s) => s.byIp[ip] ?? OTA_DEFAULT)
   const clearResult = useOtaStore((s) => s.clearResult)
   const { progress, running, result, stuck } = st
@@ -49,12 +51,12 @@ function OtaCardProgress({ ip, online }: { ip: string; online: boolean }) {
           <div className="device-row-ota-bar">
             <div className={`device-row-ota-fill${stuck ? ' stuck' : ''}`} style={{ width: `${pct}%` }} />
           </div>
-          {stuck && <div className="device-row-ota-note warn">⚠ 3 秒進捗なし — Helper 再起動を検討</div>}
+          {stuck && <div className="device-row-ota-note warn">{t('devices.ota.stuck')}</div>}
         </>
       )}
       {!running && result && (
         <div className={`device-row-ota-note ${result.ok ? 'ok' : 'err'}`}>
-          {result.ok ? '✓ OTA 完了 — 再起動中…' : `✗ OTA 失敗: ${(result.message || '').slice(0, 40)}`}
+          {result.ok ? t('devices.ota.done') : t('devices.ota.failed', { message: (result.message || '').slice(0, 40) })}
         </div>
       )}
     </div>
@@ -87,6 +89,7 @@ export const SERIAL_DEVICE_PREFIX = 'serial:'
  * if no device state actually changes.
  */
 function RefreshButton({ send }: { send: (msg: ManagerMessage) => void }) {
+  const { t } = useI18n()
   const [spinning, setSpinning] = useState(false)
   const clearAllOtaResults = useOtaStore((s) => s.clearAllResults)
   const onClick = useCallback(() => {
@@ -100,8 +103,8 @@ function RefreshButton({ send }: { send: (msg: ManagerMessage) => void }) {
       type="button"
       className={`devices-sidebar-refresh${spinning ? ' spinning' : ''}`}
       onClick={onClick}
-      title="デバイス検索を再実行"
-      aria-label="再スキャン"
+      title={t('devices.rescan.title')}
+      aria-label={t('devices.rescan.aria')}
     >
       ⟳
     </button>
@@ -120,6 +123,7 @@ function RefreshButton({ send }: { send: (msg: ManagerMessage) => void }) {
  * Helper — renders even when the daemon is down.
  */
 function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds: string[] }) {
+  const { t } = useI18n()
   const activePortId = useSerialMaster((s) => s.activePortId)
   const mode = useSerialMaster((s) => s.mode)
   const selectedPortIds = useSerialMaster((s) => s.selectedPortIds)
@@ -144,7 +148,7 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
   return (
     <div
       className={`device-row usb${checked ? ' checked' : ''}${isPrimary ? ' primary' : ''}${isActive ? ' config-active' : ''}`}
-      title="クリック=書き込み(フラッシュ)対象に選択 / Ctrl+クリック=追加選択 / Shift+クリック=範囲選択　※選択だけで接続はしません。設定・Wi-Fi は「接続」ボタンから"
+      title={t('devices.usb.selectTitle')}
       onClick={(e) => {
         const target = e.target as HTMLElement
         if (target.closest('button')) return
@@ -193,7 +197,7 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
         <button
           type="button"
           className="btn-x-muted usb-card-close"
-          title="このカードを閉じる（COM ポートの許可を取り消す）。通常は不要 — 抜けば消えます。Hapbeat 以外の COM を誤って追加したときの削除用です。再追加は「＋」から"
+          title={t('devices.usb.closeTitle')}
           onClick={(e) => { e.stopPropagation(); void forgetPort(entry.id) }}
           aria-label={`${serialEntryLabel(entry)} を閉じる`}
         >
@@ -204,7 +208,7 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
         {entry.info && (() => {
           const role = entry.info.role ?? 'receiver'
           return (
-            <span className={`device-row-roletag ${role}`} title={`ノード役割: ${role}`}>
+            <span className={`device-row-roletag ${role}`} title={t('devices.roleTitle', { role })}>
               {roleBadge(role)}
             </span>
           )
@@ -216,7 +220,7 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
           </span>
         )}
         {entry.info?.fw && <span>fw {entry.info.fw}</span>}
-        {entry.probe === 'failed' && <span title="get_info 無応答 — ファーム未書込の可能性">未書込?</span>}
+        {entry.probe === 'failed' && <span title={t('devices.usb.unflashedTitle')}>{t('devices.usb.unflashed')}</span>}
       </div>
       {/* Per-card badges for these two states were removed (user feedback
           2026-07-20: redundant) — 設定接続 is already visible via the green
@@ -225,22 +229,22 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
           header's legend below still spells out what ☑ means. */}
       {f.state !== 'idle' && (
         <div className="device-row-meta" style={{ marginTop: 2 }}>
-          {f.state === 'waiting' && <span>⏳ 書き込み待機中…</span>}
+          {f.state === 'waiting' && <span>{t('devices.usb.flashWaiting')}</span>}
           {f.state === 'flashing' && (
             <span>⚡ {f.progress ? `[${f.progress.phase}] ${f.progress.percent}%` : '書き込み中…'}</span>
           )}
-          {f.state === 'done' && <span>✓ 書き込み完了 — 電源 OFF→ON してください</span>}
-          {f.state === 'error' && <span title={f.message}>✗ 失敗: {f.message?.slice(0, 40)}</span>}
+          {f.state === 'done' && <span>{t('devices.usb.flashDone')}</span>}
+          {f.state === 'error' && <span title={f.message}>{t('devices.usb.failed', { message: f.message?.slice(0, 40) })}</span>}
         </div>
       )}
       {/* Bulk config apply state (bulkConfigCmd) — parallel to the flash line. */}
       {entry.config && entry.config.state !== 'idle' && (
         <div className="device-row-meta" style={{ marginTop: 2 }}>
-          {entry.config.state === 'connecting' && <span>⏳ 設定接続中…</span>}
-          {entry.config.state === 'sending' && <span>⚙ 設定送信中…</span>}
-          {entry.config.state === 'done' && <span>✓ 設定 {entry.config.message}</span>}
+          {entry.config.state === 'connecting' && <span>{t('devices.usb.connecting')}</span>}
+          {entry.config.state === 'sending' && <span>{t('devices.usb.sending')}</span>}
+          {entry.config.state === 'done' && <span>{t('devices.usb.applied', { message: entry.config.message })}</span>}
           {entry.config.state === 'error' && (
-            <span title={entry.config.message}>✗ 設定失敗: {entry.config.message?.slice(0, 30)}</span>
+            <span title={entry.config.message}>{t('devices.usb.applyFailed', { message: entry.config.message?.slice(0, 30) })}</span>
           )}
         </div>
       )}
@@ -267,7 +271,7 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
               ? '設定接続 ON（1 台だけ）。クリックで OFF（切断）。緑の枠が接続中の印。別カードを ON にすると自動で OFF になります'
               : '設定接続を ON（get_info / Wi-Fi 等の設定用・1 台ずつ）。書き込みは左のチェックだけでOK（設定接続は不要）'}
           >
-            ⚙ 設定
+            {t('devices.usb.settings')}
           </button>
           <button
             type="button"
@@ -275,7 +279,7 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
             style={{ fontSize: 12, padding: '3px 10px' }}
             onClick={(e) => { e.stopPropagation(); void probePort(entry.id) }}
             disabled={probing}
-            title="get_info でデバイス情報を取得 (名前/fw 等)。書き込み完了表示もクリア。※ S3 (DuoWL v3/v4) は USB 切断時に必ず再起動します (S3 の USB-Serial-JTAG 仕様・回避不可・実害なし)"
+            title={t('devices.usb.probeTitle')}
           >
             {probing ? '識別中…' : '↻ 識別'}
           </button>
@@ -286,6 +290,7 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
 }
 
 function UsbPortsSection() {
+  const { t } = useI18n()
   const knownPorts = useSerialMaster((s) => s.knownPorts)
   const selectedPortIds = useSerialMaster((s) => s.selectedPortIds)
   const addPort = useSerialMaster((s) => s.addPort)
@@ -312,16 +317,16 @@ function UsbPortsSection() {
               one implicit piece of info: what ☑ actually does. */}
           <span
             className="devices-usb-legend"
-            title="各カードのチェックボックス ☑ は Serial 書き込み・一括設定の対象（書込対象）を選びます"
+            title={t('manage.usb.legendTitle')}
           >
-            ☑ = 書込対象（フラッシュ・一括設定に適用）
+            {t('manage.usb.legend')}
           </span>
           <span className="devices-sidebar-count">
             {knownPorts.length}
             {selectedPortIds.length > 0 && (
               <>
                 {' '}
-                <span className="devices-sidebar-checked">({selectedPortIds.length}選択)</span>
+                <span className="devices-sidebar-checked">{t('manage.devices.selectionCount', { count: selectedPortIds.length })}</span>
               </>
             )}
           </span>
@@ -334,8 +339,8 @@ function UsbPortsSection() {
             className="devices-sidebar-refresh"
             style={{ fontSize: 13, width: 'auto', padding: '0 7px' }}
             onClick={() => setShowInfo(true)}
-            title="USB カードの見方（説明）"
-            aria-label="説明"
+            title={t('devices.usb.infoTitle')}
+            aria-label={t('devices.usb.infoAria')}
           >
             ⓘ
           </button>
@@ -356,8 +361,8 @@ function UsbPortsSection() {
             type="button"
             className="devices-sidebar-refresh"
             onClick={() => void addPort()}
-            title="USB Serial デバイスを追加（初回のみブラウザの選択ダイアログ。一度許可すれば次回以降は自動で表示されます）"
-            aria-label="USB デバイス追加"
+            title={t('devices.usb.addTitle')}
+            aria-label={t('devices.usb.addAria')}
           >
             ＋
           </button>
@@ -366,10 +371,10 @@ function UsbPortsSection() {
       {showInfo && <UsbInfoModal onClose={() => setShowInfo(false)} />}
       {knownPorts.length === 0 ? (
         <div className="devices-empty" style={{ padding: '6px 10px', fontSize: 12 }}>
-          ＋ で USB デバイスを追加
+          {t('devices.usb.add')}
           <br />
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            初回は 1 台ずつブラウザの許可が必要（ブラウザ仕様）。一度許可すれば次回から自動表示されます。
+            {t('manage.usb.addHint')}
           </span>
         </div>
       ) : (
@@ -397,6 +402,7 @@ function UsbPortsSection() {
  * is populated without an extra click.
  */
 export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = {}) {
+  const { t } = useI18n()
   const { isConnected, devices, send } = useHelperConnection()
   const selectedIp = useDeviceStore((s) => s.selectedIp)
   const selectedIps = useDeviceStore((s) => s.selectedIps)
@@ -518,7 +524,7 @@ export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = 
           <span className="devices-sidebar-title">Devices</span>
         </div>
         <div className="devices-empty">
-          Helper 未接続<br />
+          {t('devices.helperDisconnected')}<br />
           <code>hapbeat-helper start</code>
         </div>
         {/* USB Serial は Helper 不要 — daemon が落ちていても焼ける */}
@@ -538,7 +544,7 @@ export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = 
           {checkedSet.size > 0 && (
             <>
               {' '}
-              <span className="devices-sidebar-checked">({checkedSet.size}選択)</span>
+              <span className="devices-sidebar-checked">{t('manage.devices.selectionCount', { count: checkedSet.size })}</span>
             </>
           )}
         </span>
@@ -555,8 +561,8 @@ export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = 
       <div className="devices-sidebar-list">
         {visibleDevices.length === 0 ? (
           <div className="devices-empty">
-            検出中…<br />
-            デバイスを Wi-Fi に接続してください
+            {t('devices.discovering')}<br />
+            {t('devices.connectWifi')}
           </div>
         ) : (
           visibleDevices.map((dev) => {
@@ -590,12 +596,12 @@ export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = 
                 className={`device-row${checked ? ' checked' : ''}${isPrimary ? ' primary' : ''}${dev.online ? '' : ' offline'}${blocked ? ' blocked' : ''}`}
                 onClick={onCardClick}
                 aria-selected={isPrimary}
-                title={blocked ? 'UI 設定は Hapbeat 本体のみ — 非 Hapbeat は選択できません' : undefined}
+                title={blocked ? t('devices.hapbeatOnly') : undefined}
               >
                 <div className="device-row-top">
                   <label
                     className="device-row-checkbox"
-                    title={blocked ? 'Hapbeat 本体のみ選択可' : (checked ? '選択解除' : '選択')}
+                    title={blocked ? t('devices.hapbeatOnlyShort') : (checked ? t('devices.deselect') : t('devices.select'))}
                     onClick={(e) => e.stopPropagation()}
                   >
                     <input
@@ -604,7 +610,7 @@ export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = 
                       checked={checked}
                       disabled={blocked}
                       onChange={() => toggleSelect(dev.ipAddress)}
-                      aria-label={`${dev.name || dev.ipAddress} を選択`}
+                      aria-label={t('devices.selectAria', { name: dev.name || dev.ipAddress })}
                     />
                   </label>
                   <span className="device-row-name">{dev.name || '(unnamed)'}</span>
@@ -612,17 +618,17 @@ export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = 
                       just a dot + 接続/未接続 state label. Offline = red ✕
                       dismiss (user feedback 2026-06-13). */}
                   {dev.online ? (
-                    <ConnIndicator online title="Wi-Fi 接続中" />
+                    <ConnIndicator online title={t('devices.wifiConnected')} />
                   ) : (
                     <button
                       type="button"
                       className="device-row-dismiss"
-                      title="この未接続デバイスをリストから消す (再接続時に自動で復活します)"
+                      title={t('devices.dismissOffline')}
                       onClick={(e) => {
                         e.stopPropagation()
                         dismissDevice(dev.ipAddress)
                       }}
-                      aria-label={`未接続デバイス ${dev.name || dev.ipAddress} をリストから消す`}
+                      aria-label={t('devices.dismissAria', { name: dev.name || dev.ipAddress })}
                     >
                       ✕
                     </button>
@@ -632,7 +638,7 @@ export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = 
                   {(() => {
                     const role = dev.role ?? 'receiver'
                     return (
-                      <span className={`device-row-roletag ${role}`} title={`ノード役割: ${role}`}>
+                      <span className={`device-row-roletag ${role}`} title={t('devices.roleTitle', { role })}>
                         {roleBadge(role)}
                       </span>
                     )
@@ -640,10 +646,10 @@ export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = 
                   {/* Hapbeat 本体 (duo_wl_* / band_wl_*) は role タグの隣に
                       Hapbeat タグも出す — 非 Hapbeat の receiver と区別する。 */}
                   {isHapbeat(dev.ipAddress) && (
-                    <span className="device-row-roletag hapbeat" title="Hapbeat 本体">Hapbeat</span>
+                    <span className="device-row-roletag hapbeat" title={t('devices.hapbeatTitle')}>Hapbeat</span>
                   )}
                   {isApMode && (
-                    <span className="device-row-roletag ap" title="SoftAP モードで動作中">AP</span>
+                    <span className="device-row-roletag ap" title={t('devices.apTitle')}>AP</span>
                   )}
                   <span className="device-row-meta-ip">{dev.ipAddress || '—'}</span>
                   {dev.address && <span>{dev.address}</span>}

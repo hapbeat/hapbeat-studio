@@ -1,6 +1,7 @@
 import { useRef, useState, type ChangeEvent } from 'react'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import { useToast } from '@/components/common/Toast'
+import { useI18n } from '@/i18n/I18nProvider'
 
 interface Props {
   device: DeviceInfo
@@ -15,6 +16,7 @@ interface Props {
  * picker has no themable surface in our dark Studio palette).
  */
 export function UiConfigForm({ device, sendTo }: Props) {
+  const { t } = useI18n()
   const inputRef = useRef<HTMLInputElement | null>(null)
   const [filename, setFilename] = useState<string>('')
   const [config, setConfig] = useState<unknown | null>(null)
@@ -29,13 +31,13 @@ export function UiConfigForm({ device, sendTo }: Props) {
       try {
         const parsed = JSON.parse(String(reader.result))
         setConfig(parsed)
-        toast('読み込みました — 「書込」を押してください', 'success')
+        toast(t('uiConfig.loaded'), 'success')
       } catch (err) {
         setConfig(null)
-        toast(`JSON パース失敗: ${err}`, 'error')
+        toast(t('uiConfig.parseFailed', { message: String(err) }), 'error')
       }
     }
-    reader.onerror = () => toast('ファイル読み込み失敗', 'error')
+    reader.onerror = () => toast(t('uiConfig.fileReadFailed'), 'error')
     reader.readAsText(file)
   }
 
@@ -53,7 +55,7 @@ export function UiConfigForm({ device, sendTo }: Props) {
     <div className="form-section">
       <div className="form-section-title">UI Config (display layout)</div>
       <div className="form-row">
-        <label>ファイル</label>
+        <label>{t('uiconfig.file')}</label>
         <div className="form-row-multi" style={{ width: '100%' }}>
           {/* Hidden native input — triggered by the styled button below */}
           <input
@@ -70,7 +72,7 @@ export function UiConfigForm({ device, sendTo }: Props) {
             onClick={(e) => { setAnchor(e.currentTarget); inputRef.current?.click() }}
             disabled={!device.online}
           >
-            参照…
+            {t('common.browse')}
           </button>
           <span
             className="form-input mono"
@@ -84,7 +86,7 @@ export function UiConfigForm({ device, sendTo }: Props) {
             }}
             title={filename || ''}
           >
-            {filename || '未選択'}
+            {filename || t('uiconfig.none')}
           </span>
         </div>
         <button
@@ -92,11 +94,11 @@ export function UiConfigForm({ device, sendTo }: Props) {
           onClick={submit}
           disabled={!device.online || !config}
         >
-          書込
+          {t('uiconfig.write')}
         </button>
       </div>
       <div className="form-status muted" style={{ marginTop: 6 }}>
-        Display エディタからの直接デプロイは「Display」タブの書込ボタンが便利です。
+        {t('uiconfig.note')}
       </div>
     </div>
   )

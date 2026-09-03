@@ -4,6 +4,7 @@ import { EFFECT_LABELS } from '@/types/waveform'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { applyEffect } from '@/utils/audioDsp'
 import { EffectParamEditor } from './EffectParamEditor'
+import { useI18n } from '@/i18n/I18nProvider'
 
 const EFFECT_TYPES: EffectType[] = [
   'pitch-shift',
@@ -50,6 +51,7 @@ function getEffectSummary(params: import('@/types/waveform').EffectParams): stri
 }
 
 export function EffectsPanel() {
+  const { t } = useI18n()
   const [selectedEffectId, setSelectedEffectId] = useState<string | null>(null)
   const [addEffectType, setAddEffectType] = useState<EffectType>('lpf')
 
@@ -89,11 +91,11 @@ export function EffectsPanel() {
       }
     } catch (err) {
       console.error('エフェクト適用エラー:', err)
-      alert(`エフェクト適用に失敗しました: ${err instanceof Error ? err.message : err}`)
+      alert(t('wave.effectApplyFailed', { message: err instanceof Error ? err.message : String(err) }))
     } finally {
       setProcessing(false)
     }
-  }, [clip, effects, replaceBuffer, setProcessing])
+  }, [clip, effects, replaceBuffer, setProcessing, t])
 
   const handleClear = useCallback(() => {
     const store = useWaveformStore.getState()
@@ -192,9 +194,7 @@ export function EffectsPanel() {
           />
         ) : (
           <div className="effect-params-empty">
-            {effects.length === 0
-              ? 'エフェクトを追加してください'
-              : 'エフェクトを選択してパラメータを調整'}
+            {effects.length === 0 ? t('wave.addEffect') : t('wave.selectEffect')}
           </div>
         )}
       </div>

@@ -1,4 +1,5 @@
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
+import { useI18n } from '@/i18n/I18nProvider'
 
 interface Props {
   device: DeviceInfo
@@ -11,6 +12,7 @@ interface Props {
  * `get_debug_dump`, then a formatted multi-line readout.
  */
 export function DebugDumpSection({ device, dump, sendTo }: Props) {
+  const { t } = useI18n()
   const fetchDump = () => {
     sendTo({ type: 'get_debug_dump', payload: {} })
   }
@@ -21,14 +23,14 @@ export function DebugDumpSection({ device, dump, sendTo }: Props) {
         className="form-section-title"
         style={{ display: 'flex', justifyContent: 'space-between' }}
       >
-        <span>デバッグ情報</span>
+        <span>{t('debug.title')}</span>
         <button
           className="form-button-secondary"
           onClick={fetchDump}
           disabled={!device.online}
           style={{ fontSize: 13, padding: '2px 8px' }}
         >
-          取得
+          {t('debug.fetch')}
         </button>
       </div>
 
@@ -36,7 +38,7 @@ export function DebugDumpSection({ device, dump, sendTo }: Props) {
         <pre className="debug-dump-pre">{formatDump(dump)}</pre>
       ) : (
         <div className="form-status muted">
-          「取得」を押すとデバイスから get_debug_dump 結果を表示します。
+          {t('debug.empty')}
         </div>
       )}
     </div>

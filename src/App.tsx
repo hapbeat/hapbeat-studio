@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 // Wave Editor は WIP のため初回公開では非表示にする (2026-05-07)。
 // 再有効化する時は Tab union / TABS / TAB_LABELS / PersistentTab block / import を
 // 一括で復活させるだけで OK。コンポーネント本体 (components/waveform/) は
@@ -10,36 +10,18 @@ import { LogDrawer } from '@/components/log/LogDrawer'
 import { HelperOnboardingModal } from '@/components/common/HelperOnboardingModal'
 import { HelperManageModal } from '@/components/common/HelperManageModal'
 import { ExternalLinkIcon } from '@/components/common/ExternalLinkIcon'
+import { useToast } from '@/components/common/Toast'
 import { HelperFailureToastListener } from '@/components/common/HelperFailureToastListener'
 import { VersionSwitcher } from '@/components/common/VersionSwitcher'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useHelperUpdate, useStudioFrozenNotice } from '@/hooks/useReleaseNotices'
-import { DEPLOY_ROOT } from '@/utils/studioVersions'
 import { MIN_HELPER_VERSION } from '@/config/helperCompat'
-import { useStudioLocale } from '@/i18n/uiLocalizer'
+import { useI18n } from '@/i18n/I18nProvider'
 import './App.css'
 
 type Tab = 'kit' | 'display' | 'devices'
 
 const TABS: Tab[] = ['kit', 'display', 'devices']
-
-const TAB_LABELS: Record<Tab, { main: string; sub: string }> = {
-  // 上部タブは「主タイトル + サブタイトル」の 2 行構成。
-  //
-  // 'devices' → 'Manage' へリネーム (2026-05-08)。Wi-Fi 設定 / ファーム
-  // 書込み / 各種テストなど「複数台のデバイスを統合管理する」位置付けが
-  // 実態に近いため。Hardware は物理寄り、Setup は初期設定寄りで却下、
-  // Console / Admin は技術色が強すぎるため不採用。
-  //
-  // サブタイトルは英語で統一 (2026-05-08 改訂)。
-  // - Kit  / Vibration Clips: クリップという呼称が UI 全体で使われており直観的
-  // - UI   / Display etc.   : OLED 配置以外にも LED / ボタン / 輝度 / Hold 時間
-  //                            などを含むため "etc." で包括性を示す
-  // - Manage / Config       : Wi-Fi / ファーム / 各種設定。dev tool らしく短く
-  kit:     { main: 'Kit',    sub: 'Vibration Clips' },
-  display: { main: 'UI',     sub: 'Display etc.' },
-  devices: { main: 'Manage', sub: 'Config' },
-}
 
 const DEFAULT_TAB: Tab = 'kit'
 
@@ -70,7 +52,12 @@ function PersistentTab({
 }
 
 export function App() {
-  const [locale, setLocale] = useStudioLocale()
+  const { locale, setLocale, t } = useI18n()
+  const tabLabels: Record<Tab, { main: string; sub: string }> = {
+    kit: { main: t('tabs.kit.main'), sub: t('tabs.kit.sub') },
+    display: { main: t('tabs.ui.main'), sub: t('tabs.ui.sub') },
+    devices: { main: t('tabs.manage.main'), sub: t('tabs.manage.sub') },
+  }
   const [activeTab, setActiveTab] = useState<Tab>(() => {
     const saved = localStorage.getItem('hapbeat-studio-tab')
     // 旧 'waveform' タブの localStorage 値が残っていても安全に
@@ -97,6 +84,7 @@ export function App() {
     })
   }, [activeTab])
   const { isConnected, helperVersion, helperCompat, send } = useHelperConnection()
+  const { toast } = useToast()
   const [helperModalOpen, setHelperModalOpen] = useState(false)
   const [helperManageOpen, setHelperManageOpen] = useState(false)
   // Top-of-app banner suppressing — opt-in per session only. We deliberately
@@ -108,6 +96,28 @@ export function App() {
   // — 版を意図的に固定している人に毎回閉じさせないため (DEC-053 §5.1)。
   const helperUpdate = useHelperUpdate(helperVersion)
   const studioFrozen = useStudioFrozenNotice()
+  const announcedUpdates = useRef(new Set<string>())
+
+  // Informational release notices are transient: keeping them in the header
+  // would move the centered primary navigation whenever one becomes visible.
+  useEffect(() => {
+    const version = helperUpdate.product?.latest
+    if (!helperUpdate.visible || helperCompat === 'outdated' || !version) return
+    const key = `helper:${version}`
+    if (announcedUpdates.current.has(key)) return
+    announcedUpdates.current.add(key)
+    toast(t('header.helperUpdate', { version }), 'info')
+    helperUpdate.dismiss()
+  }, [helperUpdate, helperCompat, t, toast])
+
+  useEffect(() => {
+    if (!studioFrozen.visible || !studioFrozen.latest) return
+    const key = `studio:${studioFrozen.latest}`
+    if (announcedUpdates.current.has(key)) return
+    announcedUpdates.current.add(key)
+    toast(t('header.studioUpdate', { version: studioFrozen.latest }), 'info')
+    studioFrozen.dismiss()
+  }, [studioFrozen, t, toast])
 
   // Auto-close modal when Helper connects
   useEffect(() => {
@@ -124,7 +134,7 @@ export function App() {
     <div className="app">
       <header className="app-header">
         <h1>
-          Hapbeat Studio
+          {t('common.brand')}
           <VersionSwitcher compact />
         </h1>
         <div className="header-toggle header-toggle-tabs">
@@ -134,65 +144,25 @@ export function App() {
               className={`toggle-btn tab-btn-stacked ${activeTab === tab ? 'active' : ''}`}
               onClick={() => setActiveTab(tab)}
             >
-              <span className="tab-btn-main">{TAB_LABELS[tab].main}</span>
-              <span className="tab-btn-sub">{TAB_LABELS[tab].sub}</span>
+              <span className="tab-btn-main">{tabLabels[tab].main}</span>
+              <span className="tab-btn-sub">{tabLabels[tab].sub}</span>
             </button>
           ))}
         </div>
         <div className="header-meta">
-          {/* 更新のお知らせチップ。ヘッダ内 (横並び) に置くのは、縦方向の
-              レイアウトシフトで本文の読み位置を飛ばさないため。× で閉じると
-              その版については二度と出ない。 */}
-          <div className="header-update-slot">
-          {studioFrozen.visible && (
-            <span className="update-chip" role="status">
-              <a href={DEPLOY_ROOT} title="最新版の Studio を開く">
-                Studio v{studioFrozen.latest} が公開されています
-              </a>
-              <button
-                type="button"
-                className="update-chip-close"
-                aria-label="このお知らせを閉じる"
-                title="閉じる（この版については再表示しません）"
-                onClick={studioFrozen.dismiss}
-              >×</button>
-            </span>
-          )}
-          {/* 必須更新バナーが出ている間は info チップを出さない (同じ話が
-              2 箇所に出るとどちらも読まれなくなる)。バナー側が上位互換。 */}
-          {helperUpdate.visible && helperCompat !== 'outdated' && (
-            <span className="update-chip" role="status">
-              <button
-                type="button"
-                className="update-chip-body"
-                onClick={() => setHelperManageOpen(true)}
-                title="更新方法を表示"
-              >
-                Helper v{helperUpdate.product?.latest} が利用可能
-              </button>
-              <button
-                type="button"
-                className="update-chip-close"
-                aria-label="このお知らせを閉じる"
-                title="閉じる（この版については再表示しません）"
-                onClick={helperUpdate.dismiss}
-              >×</button>
-            </span>
-          )}
-          </div>
           <a
             className="header-docs-link"
             href={DOCS_URL}
             target="_blank"
             rel="noreferrer"
-            title="Hapbeat Studio docs を新しいタブで開く"
+            title={t('header.docs.title')}
           >
-            Docs <ExternalLinkIcon />
+            {t('common.docs')} <ExternalLinkIcon />
           </a>
           <button
             type="button"
             className="language-switcher"
-            aria-label={locale === 'ja' ? 'Switch language to English' : 'Switch language to Japanese'}
+            aria-label={locale === 'ja' ? t('header.language.toEnglish') : t('header.language.toJapanese')}
             title={locale === 'ja' ? 'JA → EN' : 'EN → JA'}
             onClick={() => setLocale(locale === 'ja' ? 'en' : 'ja')}
           >
@@ -207,24 +177,26 @@ export function App() {
               type="button"
               className={`connection-status connection-status--icon connection-status--clickable connection-status--with-tip ${helperCompat === 'outdated' ? 'connection-status--outdated' : ''}`}
               onClick={() => setHelperManageOpen(true)}
-              aria-label={helperCompat === 'outdated' ? 'Helper update required' : 'Open Helper management'}
+              aria-label={helperCompat === 'outdated' ? t('header.helper.outdated') : t('header.helper.manage')}
               data-tip={
                 helperCompat === 'outdated'
-                  ? `hapbeat-helper v${helperVersion} は古い版です — クリックして upgrade 手順を表示`
-                  : (helperVersion ? `hapbeat-helper v${helperVersion} (クリックで管理)` : 'helper version 不明 (クリックで管理)')
+                  ? t('header.helper.tooltip.outdated', { version: helperVersion })
+                  : (helperVersion ? t('header.helper.tooltip.connected', { version: helperVersion }) : t('header.helper.tooltip.unknown'))
               }
-            >
+              >
               <span className={`status-dot ${helperCompat === 'outdated' ? 'outdated' : 'connected'}`} />
+              {t('common.helper')}
             </button>
           ) : (
             <button
               type="button"
               className="connection-status connection-status--icon connection-status--clickable"
               onClick={() => setHelperModalOpen(true)}
-              aria-label="Open Helper setup"
-              title="クリックでセットアップ方法を表示"
+              aria-label={t('header.helper.setup')}
+              title={t('header.helper.setup')}
             >
               <span className="status-dot disconnected" />
+              {t('common.helper')}
             </button>
           )}
         </div>
@@ -238,10 +210,10 @@ export function App() {
         <div className="helper-outdated-banner" role="alert">
           <span className="helper-outdated-banner-icon" aria-hidden>⚠</span>
           <div className="helper-outdated-banner-body">
-            <strong>hapbeat-helper の更新が必要です</strong>
+            <strong>{t('header.outdated.title')}</strong>
             <span className="helper-outdated-banner-detail">
               {' '}
-              現在 v{helperVersion ?? '?'} / 必要 v{MIN_HELPER_VERSION} 以上 — 一部の Kit deploy / device 操作が失敗する可能性があります。
+              {t('header.outdated.detail', { current: helperVersion ?? '?', minimum: MIN_HELPER_VERSION })}
             </span>
           </div>
           <button
@@ -249,13 +221,13 @@ export function App() {
             className="helper-outdated-banner-action"
             onClick={() => setHelperManageOpen(true)}
           >
-            更新手順を表示
+            {t('header.showUpdate')}
           </button>
           <button
             type="button"
             className="helper-outdated-banner-close"
-            aria-label="このセッション中は非表示"
-            title="このセッション中は非表示"
+            aria-label={t('header.outdated.hideSession')}
+            title={t('header.outdated.hideSession')}
             onClick={() => setHelperOutdatedDismissed(true)}
           >×</button>
         </div>

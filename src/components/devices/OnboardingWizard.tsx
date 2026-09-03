@@ -4,6 +4,7 @@ import { useSerialMaster } from '@/stores/serialMaster'
 import { isWebSerialSupported } from '@/utils/serialConfig'
 import { FirmwareSubTab } from './FirmwareSubTab'
 import { DriverHelpLinks } from './DriverHelpLinks'
+import { useI18n } from '@/i18n/I18nProvider'
 import './OnboardingWizard.css'
 
 const SERIAL_DEVICE_PREFIX = 'serial:'
@@ -22,6 +23,7 @@ type Step = 'probe' | 'flash' | 'configure'
  *   configure       → finish (sidebar pickup) or back to probe
  */
 export function OnboardingWizard() {
+  const { t } = useI18n()
   const mode = useSerialMaster((s) => s.mode)
   const probeStatus = useSerialMaster((s) => s.probeStatus)
   const probeMessage = useSerialMaster((s) => s.probeMessage)
@@ -95,20 +97,20 @@ export function OnboardingWizard() {
   return (
     <section className="onboarding-wizard">
       <header className="onboarding-wizard-header">
-        <div className="onboarding-wizard-title">Hapbeat 初期セットアップ</div>
+        <div className="onboarding-wizard-title">{t('onboarding.title')}</div>
         <div className="onboarding-wizard-subtitle">
-          USB ケーブル経由でデバイスを 3 ステップで初期設定します。
+          {t('onboarding.subtitle')}
         </div>
       </header>
 
       <ol className="onboarding-stepper">
-        <StepPill index={1} label="デバイス選択" state={stepStateFor('probe', step)}
+        <StepPill index={1} label={t('onboarding.step.select')} state={stepStateFor('probe', step)}
           onClick={() => setStep('probe')} />
         <StepArrow />
-        <StepPill index={2} label="ファーム書き込み" state={stepStateFor('flash', step)}
+        <StepPill index={2} label={t('onboarding.step.flash')} state={stepStateFor('flash', step)}
           onClick={() => setStep('flash')} />
         <StepArrow />
-        <StepPill index={3} label="Wi-Fi 設定" state={stepStateFor('configure', step)}
+        <StepPill index={3} label={t('onboarding.step.wifi')} state={stepStateFor('configure', step)}
           onClick={() => setStep('configure')}
           /* conn 無しでも Step 3 を開けるようにする (再接続 UI を出すため) */ />
       </ol>
@@ -116,8 +118,7 @@ export function OnboardingWizard() {
       {!isWebSerialSupported() && (
         <div className="form-section">
           <div className="form-status err">
-            このブラウザは Web Serial API をサポートしていません。
-            Chrome / Edge を使ってください (HTTPS または http://localhost のみ動作)。
+            {t('onboarding.unsupported')}
           </div>
         </div>
       )}
@@ -156,6 +157,7 @@ function ProbeStep({
   probeStatus: string
   probeMessage: string | null
 }) {
+  const { t } = useI18n()
   // 初回セットアップの主動線は「カードをチェック → 自動で書き込み」。書き込みは
   // チェック（書き込み対象の選択）だけで成立し、設定接続（⚙ 設定）は不要
   // (ユーザ要望 2026-07-10)。このステップは操作案内に徹し、チェックが入ると
@@ -163,23 +165,20 @@ function ProbeStep({
   // したい場合の「⚙ 設定」接続 → Step 3 直行も probeStatus 監視で残している。
   return (
     <div className="form-section onboarding-step">
-      <div className="form-section-title">Step 1 — USB デバイスを選ぶ</div>
+      <div className="form-section-title">{t('onboarding.probe.title')}</div>
       <div className="onboarding-step-body">
         <p>
-          デバイスを USB ケーブルで PC に繋ぎ、
-          <strong>左の「USB Serial」欄</strong>で選びます:
+          {t('onboarding.probe.intro')}
         </p>
         <ol className="onboarding-substeps">
-          <li><strong>＋</strong> ボタンで USB 機器を追加（COM ポート選択ダイアログ）</li>
-          <li>表示されたカードの<strong>チェックボックス ☑</strong> を入れる（書き込み対象に選択）</li>
+          <li>{t('onboarding.probe.add')}</li>
+          <li>{t('onboarding.probe.choose')}</li>
         </ol>
         <p className="onboarding-step-routing-hint">
-          チェックを入れると <strong>自動で Step 2（ファーム書き込み）</strong> へ進みます。
-          複数チェックすれば同時書き込みもできます。
+          {t('onboarding.probe.route')}
         </p>
         <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-          ※「⚙ 設定」ボタンは<strong>書き込み後の Wi-Fi 設定用</strong>です（初回書き込みには不要）。
-          既にファーム入りのデバイスを設定だけしたいときは「⚙ 設定」で接続すると Step 3 へ直行します。
+          {t('onboarding.probe.note')}
         </p>
         {probeMessage && (
           <div className={`form-status ${
@@ -198,23 +197,21 @@ function ProbeStep({
 }
 
 function FlashStep({ onBack }: { onBack: () => void }) {
+  const { t } = useI18n()
   return (
     <>
       <div className="form-section onboarding-step">
-        <div className="form-section-title">Step 2 — ファームウェア書き込み</div>
+        <div className="form-section-title">{t('onboarding.flash.title')}</div>
         <div className="onboarding-step-body">
           <p>
-            下のファームウェアライブラリで <strong>ノードの種類（Hapbeat / 周辺機器）</strong>
-            のタブを選び、書き込むファームウェアを選んで「Serial 書き込み」を押してください。
+            {t('onboarding.flash.intro')}
           </p>
           <div className="form-status muted">
-            👉 書き込み完了後、自動で Step 3 (Wi-Fi 設定) に進みます。
-            その後デバイスの<strong> 電源を一度 OFF→ON </strong>してから、
-            左の USB Serial カードの<strong>「⚙ 設定」ボタン</strong>で設定接続してください。
+            {t('onboarding.flash.next')}
           </div>
           <div className="form-action-row" style={{ marginTop: 8 }}>
             <button className="form-button-secondary" onClick={onBack}>
-              ← Step 1 に戻る
+              {t('onboarding.backToStep1')}
             </button>
           </div>
         </div>
@@ -238,21 +235,20 @@ function ConfigureStep({
   probeMessage: string | null
   onDisconnect: () => void
 }) {
+  const { t } = useI18n()
   // 接続なし: post-flash / cable 抜け / set_wifi 後 reboot のいずれかで
   // conn が外れた状態。Step 1 に戻さず、ここで電源 OFF→ON + 再接続を促す。
   // 再接続も左サイドバーの USB Serial カードの「接続」ボタンで。
   if (!hasConn) {
     return (
       <div className="form-section onboarding-step">
-        <div className="form-section-title">Step 3 — Wi-Fi 設定 (再接続待ち)</div>
+        <div className="form-section-title">{t('onboarding.configure.waitTitle')}</div>
         <div className="onboarding-step-body">
           <p>
-            ファーム書き込みが完了しました。<strong>デバイスの電源を一度 OFF→ON</strong> してから、
-            <strong>左の USB Serial カードの「⚙ 設定」ボタンで</strong>設定接続してください
-            （接続中はカード枠が緑になります）。
+            {t('onboarding.configure.waitIntro')}
           </p>
           <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-            設定接続できたら設定タブの Wi-Fi セクションで SSID / パスワードを入力できます。
+            {t('onboarding.configure.waitNote')}
           </p>
           {probeMessage && (
             <div className={`form-status ${
@@ -278,24 +274,21 @@ function ConfigureStep({
   }
   return (
     <div className="form-section onboarding-step">
-      <div className="form-section-title">Step 3 — Wi-Fi 設定へ進む</div>
+      <div className="form-section-title">{t('onboarding.configure.title')}</div>
       <div className="onboarding-step-body">
         <p style={{ marginTop: 0 }}>
-          シリアル接続できました。下のボタンで <strong>Wi-Fi 設定タブ</strong> に進み、
-          SSID とパスワードを登録してください。Wi-Fi 接続が確立するとデバイスが
-          LAN 上に表示され、設定タブから残りの項目 (デバイス識別 / UI Config / Debug Dump)
-          にアクセスできます。
+          {t('onboarding.configure.intro')}
         </p>
         <div className="form-action-row">
           <button
             className="form-button onboarding-cta"
             onClick={handleFinish}
-            title="DeviceDetail の Wi-Fi タブを開きます"
+            title={t('onboarding.configure.openTitle')}
           >
-            Wi-Fi 設定タブへ進む →
+            {t('onboarding.configure.open')}
           </button>
           <button className="form-button-secondary" onClick={onDisconnect}>
-            切断して Step 1 に戻る
+            {t('onboarding.configure.disconnect')}
           </button>
         </div>
       </div>
@@ -339,6 +332,7 @@ function StepPill({
    *  the title tooltip. Used for Step 3 before probe success. */
   disabledReason?: string | null
 }) {
+  const { t } = useI18n()
   const disabled = !!disabledReason || !onClick
   return (
     <li className="onboarding-step-pill-li">
@@ -347,7 +341,7 @@ function StepPill({
         className={`onboarding-step-pill state-${state}${disabled ? ' is-disabled' : ''}`}
         onClick={disabled ? undefined : onClick}
         disabled={disabled}
-        title={disabledReason ?? `Step ${index} へ移動`}
+        title={disabledReason ?? t('onboarding.goToStep', { step: index })}
       >
         <span className="onboarding-step-pill-num">{state === 'done' ? '✓' : index}</span>
         <span className="onboarding-step-pill-label">

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import { useToast } from '@/components/common/Toast'
+import { useI18n } from '@/i18n/I18nProvider'
 
 interface Props {
   device: DeviceInfo
@@ -20,6 +21,7 @@ interface Props {
  * Phase 2 lands we can add it back if real users hit the limit.
  */
 export function WifiForm({ device, wifiStatus, sendTo }: Props) {
+  const { t } = useI18n()
   const [ssid, setSsid] = useState('')
   const [password, setPassword] = useState('')
   const [showPass, setShowPass] = useState(false)
@@ -43,18 +45,18 @@ export function WifiForm({ device, wifiStatus, sendTo }: Props) {
 
   const clear = (e: React.MouseEvent<HTMLButtonElement>) => {
     const btn = e.currentTarget
-    if (!confirm('保存済みの Wi-Fi 設定をすべて削除します。よろしいですか？')) return
+    if (!confirm(t('wifi.clearConfirm'))) return
     setAnchor(btn)
     sendTo({ type: 'clear_wifi', payload: {} })
   }
 
   return (
     <div className="form-section">
-      <div className="form-section-title">Wi-Fi 設定</div>
+      <div className="form-section-title">{t('wifi.legacyTitle')}</div>
 
       {wifiStatus && (
         <div className="form-status muted" style={{ marginBottom: 8 }}>
-          現在: {wifiStatus.connected ? '接続中' : '未接続'}
+          {t('wifi.currentShort')} {wifiStatus.connected ? t('wifi.connected') : t('wifi.disconnected')}
           {wifiStatus.ssid && <> · SSID={wifiStatus.ssid}</>}
           {wifiStatus.ip && <> · {wifiStatus.ip}</>}
           {wifiStatus.rssi !== undefined && <> · {wifiStatus.rssi}dBm</>}
@@ -75,14 +77,14 @@ export function WifiForm({ device, wifiStatus, sendTo }: Props) {
       </div>
 
       <div className="form-row">
-        <label>パスワード</label>
+        <label>{t('wifi.password')}</label>
         <div className="form-row-multi" style={{ width: '100%' }}>
           <input
             className="form-input"
             type={showPass ? 'text' : 'password'}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="Wi-Fi パスワード（保存後は確認できなくなります）"
+            placeholder={t('wifi.passwordPlaceholder')}
             disabled={!device.online}
             autoComplete="off"
           />
@@ -99,7 +101,7 @@ export function WifiForm({ device, wifiStatus, sendTo }: Props) {
           onClick={submit}
           disabled={!device.online || !ssid.trim()}
         >
-          設定
+          {t('wifi.apply')}
         </button>
       </div>
 
@@ -109,12 +111,12 @@ export function WifiForm({ device, wifiStatus, sendTo }: Props) {
           onClick={clear}
           disabled={!device.online}
         >
-          すべて削除 (clear_wifi)
+          {t('wifi.clearLegacy')}
         </button>
       </div>
 
       <div className="form-status muted" style={{ marginTop: 8 }}>
-        Wi-Fi 設定変更後はデバイスの再起動が必要です（上部の「再起動」ボタン）。
+        {t('wifi.restartLegacy')}
       </div>
     </div>
   )

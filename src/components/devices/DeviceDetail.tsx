@@ -35,6 +35,7 @@ import {
 import { useDeviceTransport } from '@/hooks/useDeviceTransport'
 import { useSerialMaster } from '@/stores/serialMaster'
 import { roleBadge } from '@/utils/roleLabels'
+import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 
 type SubTab =
   | 'wifi' | 'config' | 'kit' | 'test' | 'firmware' | 'espnow'
@@ -46,19 +47,19 @@ type SubTab =
   | 'dsp'       // DuoWL v4 pure espnow_stream receiver only — DSP profile + DRC/3D/Beep/AGC
   | 'pwm'       // band_v4_pwm experimental build only — DC bias / tone / probe
 
-const SUB_TAB_LABEL: Record<SubTab, string> = {
+const SUB_TAB_LABEL: Record<SubTab, MessageId | 'Wi-Fi' | 'Kit' | 'ESP-NOW' | 'MQTT' | 'EQ' | 'DSP'> = {
   wifi: 'Wi-Fi',
-  config: '設定',
+  config: 'manage.tab.settings',
   kit: 'Kit',
-  test: '再生テスト',
-  firmware: 'ファームウェア',
+  test: 'manage.tab.test',
+  firmware: 'manage.tab.firmware',
   espnow: 'ESP-NOW',
   mqtt: 'MQTT',
-  mapping: 'センサー',
-  audio: '音声',
+  mapping: 'manage.tab.sensor',
+  audio: 'manage.tab.audio',
   eq: 'EQ',
   dsp: 'DSP',
-  pwm: 'PWM (実験)',
+  pwm: 'manage.tab.experimental',
 }
 
 /**
@@ -82,6 +83,7 @@ function FirmwareUpdateChip({
   currentFw: string | null | undefined
   onOpen: () => void
 }) {
+  const { t } = useI18n()
   const latest = useFirmwareUpdate(board, transport, currentFw)
   if (!latest) return null
   return (
@@ -89,9 +91,9 @@ function FirmwareUpdateChip({
       type="button"
       className="device-fw-update-chip"
       onClick={onOpen}
-      title={`ファームウェア v${latest} が公開されています（クリックでファームウェアタブへ）`}
+      title={t('manage.firmware.availableTitle', { version: latest })}
     >
-      v{latest} あり
+      {t('manage.firmware.available', { version: latest })}
     </button>
   )
 }
@@ -162,6 +164,7 @@ const SUBTAB_KEY = 'hapbeat-studio-devices-subtab'
  * Right-hand pane: per-device tabs, gated by the node's role/transport.
  */
 export function DeviceDetail() {
+  const { t } = useI18n()
   const { devices, lastMessage, send, injectMessage } = useHelperConnection()
   const pushLog = useLogStore((s) => s.push)
   const selectedIp = useDeviceStore((s) => s.selectedIp)
@@ -818,17 +821,17 @@ export function DeviceDetail() {
             className="form-button-secondary"
             onClick={refreshInfo}
             disabled={!device.online}
-            title="デバイスから get_info / get_wifi_status / list_wifi_profiles を取得"
+            title={t('manage.device.loadTitle')}
           >
-            ⟳ デバイスから読み込み
+            {t('manage.device.load')}
           </button>
           <button
             className="form-button-secondary"
             onClick={() => sendTo({ type: 'reboot', payload: {} })}
             disabled={!device.online}
-            title="デバイスを再起動"
+            title={t('manage.device.restartTitle')}
           >
-            再起動
+            {t('common.restart')}
           </button>
           {globalStatus && (
             <span className={`form-status ${globalStatus.kind}`} style={{ alignSelf: 'center' }}>
@@ -845,7 +848,7 @@ export function DeviceDetail() {
             className={`device-subtab-btn${activeSubTab === id ? ' active' : ''}`}
             onClick={() => setSubTab(id)}
           >
-            {SUB_TAB_LABEL[id]}
+            {SUB_TAB_LABEL[id].includes('.') ? t(SUB_TAB_LABEL[id] as MessageId) : SUB_TAB_LABEL[id]}
           </button>
         ))}
       </div>

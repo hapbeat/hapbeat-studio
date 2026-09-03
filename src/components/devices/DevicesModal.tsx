@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { DeviceList } from './DeviceList'
 import './DevicesModal.css'
+import { useI18n } from '@/i18n/I18nProvider'
 
 interface Props {
   open: boolean
@@ -27,6 +28,7 @@ interface Props {
  * reliably escapes that.
  */
 export function DevicesModal({ open, onClose, hapbeatOnly }: Props) {
+  const { t } = useI18n()
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -59,8 +61,8 @@ export function DevicesModal({ open, onClose, hapbeatOnly }: Props) {
             type="button"
             className="devices-modal-close"
             onClick={onClose}
-            aria-label="閉じる"
-            title="閉じる (Esc)"
+            aria-label={t('common.close')}
+            title={`${t('common.close')} (Esc)`}
           >
             ✕
           </button>
