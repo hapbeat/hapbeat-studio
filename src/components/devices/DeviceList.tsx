@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
-import { useDeviceStore } from '@/stores/deviceStore'
+import { useDeviceStore, type DeviceSelectionScope } from '@/stores/deviceStore'
 import {
   serialEntryLabel,
   useSerialMaster,
@@ -401,21 +401,53 @@ function UsbPortsSection() {
  * Auto-selects the first device on first non-empty list so detail pane
  * is populated without an extra click.
  */
-export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = {}) {
+interface DeviceListProps {
+  hapbeatOnly?: boolean
+  /** Manage owns its detail-pane selection. Kit and UI own independent
+   * target sets, so opening their picker must not alter Manage. */
+  selectionScope?: DeviceSelectionScope
+}
+
+export function DeviceList({ hapbeatOnly = false, selectionScope = 'manage' }: DeviceListProps = {}) {
   const { t } = useI18n()
   const { isConnected, devices, send } = useHelperConnection()
-  const selectedIp = useDeviceStore((s) => s.selectedIp)
-  const selectedIps = useDeviceStore((s) => s.selectedIps)
+  const selectedIp = useDeviceStore((s) => selectionScope === 'kit'
+    ? s.kitSelectedIp
+    : selectionScope === 'display' ? s.displaySelectedIp : s.selectedIp)
+  const selectedIps = useDeviceStore((s) => selectionScope === 'kit'
+    ? s.kitSelectedIps
+    : selectionScope === 'display' ? s.displaySelectedIps : s.selectedIps)
   const dismissedIps = useDeviceStore((s) => s.dismissedIps)
   const infoCache = useDeviceStore((s) => s.infoCache)
-  const selectDevice = useDeviceStore((s) => s.selectDevice)
-  const toggleSelect = useDeviceStore((s) => s.toggleSelect)
-  const selectExclusive = useDeviceStore((s) => s.selectExclusive)
-  const selectRange = useDeviceStore((s) => s.selectRange)
+  const selectManageDevice = useDeviceStore((s) => s.selectDevice)
+  const toggleManageSelect = useDeviceStore((s) => s.toggleSelect)
+  const selectManageExclusive = useDeviceStore((s) => s.selectExclusive)
+  const selectManageRange = useDeviceStore((s) => s.selectRange)
+  const selectScopedDevice = useDeviceStore((s) => s.selectScopedDevice)
+  const toggleScopedSelect = useDeviceStore((s) => s.toggleScopedSelect)
+  const selectScopedExclusive = useDeviceStore((s) => s.selectScopedExclusive)
+  const selectScopedRange = useDeviceStore((s) => s.selectScopedRange)
   const dismissDevice = useDeviceStore((s) => s.dismissDevice)
   const syncOnlineDevices = useDeviceStore((s) => s.syncOnlineDevices)
   const markOnlineness = useDeviceStore((s) => s.markOnlineness)
   const pruneStaleOffline = useDeviceStore((s) => s.pruneStaleOffline)
+  const isManageScope = selectionScope === 'manage'
+  const selectDevice = useCallback((ip: string | null) => {
+    if (selectionScope === 'manage') selectManageDevice(ip)
+    else selectScopedDevice(selectionScope, ip)
+  }, [selectionScope, selectManageDevice, selectScopedDevice])
+  const toggleSelect = useCallback((ip: string) => {
+    if (selectionScope === 'manage') toggleManageSelect(ip)
+    else toggleScopedSelect(selectionScope, ip)
+  }, [selectionScope, toggleManageSelect, toggleScopedSelect])
+  const selectExclusive = useCallback((ip: string) => {
+    if (selectionScope === 'manage') selectManageExclusive(ip)
+    else selectScopedExclusive(selectionScope, ip)
+  }, [selectionScope, selectManageExclusive, selectScopedExclusive])
+  const selectRange = useCallback((ip: string, orderedIps: string[]) => {
+    if (selectionScope === 'manage') selectManageRange(ip, orderedIps)
+    else selectScopedRange(selectionScope, ip, orderedIps)
+  }, [selectionScope, selectManageRange, selectScopedRange])
 
   // Hapbeat = duo_wl_* / band_wl_* board (from get_info). Used for the card
   // badge and, in `hapbeatOnly` mode (UI/Display tab picker), to disable
@@ -511,11 +543,13 @@ export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = 
     // (selections are mutually exclusive across transports), an automatic
     // LAN pick would clear it. Skip WITHOUT latching the ref so the
     // convenience still kicks in once the USB selection is cleared.
-    const usb = useSerialMaster.getState()
-    if (usb.selectedPortIds.length > 0 || usb.selectedPortId) return
+    if (isManageScope) {
+      const usb = useSerialMaster.getState()
+      if (usb.selectedPortIds.length > 0 || usb.selectedPortId) return
+    }
     didAutoSelectRef.current = true
     if (!selectedIp) selectDevice(visibleDevices[0].ipAddress)
-  }, [visibleDevices, selectedIp, selectDevice])
+  }, [visibleDevices, selectedIp, selectDevice, isManageScope])
 
   if (!isConnected) {
     return (
@@ -527,8 +561,8 @@ export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = 
           {t('devices.helperDisconnected')}<br />
           <code>hapbeat-helper start</code>
         </div>
-        {/* USB Serial は Helper 不要 — daemon が落ちていても焼ける */}
-        <UsbPortsSection />
+        {/* USB Serial belongs to Manage; Kit/UI target pickers are LAN-only. */}
+        {isManageScope && <UsbPortsSection />}
       </aside>
     )
   }
@@ -619,7 +653,7 @@ export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = 
                       dismiss (user feedback 2026-06-13). */}
                   {dev.online ? (
                     <ConnIndicator online title={t('devices.wifiConnected')} />
-                  ) : (
+                  ) : isManageScope ? (
                     <button
                       type="button"
                       className="device-row-dismiss"
@@ -632,6 +666,10 @@ export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = 
                     >
                       ✕
                     </button>
+                  ) : (
+                    <span className="device-row-dismiss" aria-hidden="true">
+                      ✕
+                    </span>
                   )}
                 </div>
                 <div className="device-row-meta">
@@ -660,7 +698,7 @@ export function DeviceList({ hapbeatOnly = false }: { hapbeatOnly?: boolean } = 
             )
           })
         )}
-        <UsbPortsSection />
+      {isManageScope && <UsbPortsSection />}
       </div>
     </aside>
   )

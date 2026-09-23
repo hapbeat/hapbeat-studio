@@ -90,6 +90,10 @@ function seedDeviceStore(): void {
     kitListCache,
     selectedIp: DEMO_NECKLACE_IP,
     selectedIps: [DEMO_NECKLACE_IP, DEMO_BAND_IP],
+    kitSelectedIp: DEMO_NECKLACE_IP,
+    kitSelectedIps: [DEMO_NECKLACE_IP, DEMO_BAND_IP],
+    displaySelectedIp: DEMO_NECKLACE_IP,
+    displaySelectedIps: [DEMO_NECKLACE_IP, DEMO_BAND_IP],
     dismissedIps: [],
   })
 }

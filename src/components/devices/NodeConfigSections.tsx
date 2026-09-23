@@ -16,6 +16,7 @@ import { useToast } from '@/components/common/Toast'
 import { useI18n } from '@/i18n/I18nProvider'
 import { downloadTextFile } from '@/utils/download'
 import { clampOpusComplexity, clampHpBufferMs } from '@/utils/solidTransmitterTuning'
+import { alignPwmBiasSigns, clampPwmBiasPct, parsePwmBiasPctText, PWM_BIAS_MAX_PCT } from '@/utils/pwmBias'
 import {
   computeAic3204Eq,
   aic3204CoeffsToArray,
@@ -167,6 +168,8 @@ export interface NodeConfigInfo {
     gpio_a?: number
     gpio_b?: number
     state?: string
+    bias_enabled?: boolean
+    output_mode?: 'pwm' | 'pam'
   }
 }
 
@@ -5539,11 +5542,25 @@ export function EspNowStreamReadout({
 /** `pwm_status` response (band_v4_pwm build only). */
 export interface PwmStatusReadout {
   state?: string
+  /** Active haptic audio path in the hybrid experimental firmware. */
+  output_mode?: 'pwm' | 'pam'
+  /** False in PAM mode because the AC-coupled amplifier path cannot apply DC. */
+  bias_available?: boolean
   carrier_hz?: number
   gpio_a?: number
   gpio_b?: number
   bias_ma?: number
   bias_q15?: number
+  /** Slew-limited bias physically applied by the PWM ISR. */
+  bias_current_q15?: number
+  idle_bias_q15?: number
+  play_bias_q15?: number
+  /** Persisted PAM8003-compensation gain (0..24 dB). */
+  playback_gain_db?: number
+  /** Persisted delay before playback bias returns to standing bias. */
+  post_play_hold_ms?: number
+  /** Persisted time for the post-hold playback-to-standing bias ramp. */
+  post_play_return_ms?: number
   /** Digital-pot wiper, 0-127 — NOT the UI slider's unit. Read-only readout. */
   volume?: number
   /** Volume step the device currently holds, 0..volume_steps-1 (slider unit). */
@@ -5553,20 +5570,38 @@ export interface PwmStatusReadout {
   underruns?: number
   clips?: number
   tone_active?: boolean
+  playback_active?: boolean
+  post_play_hold_active?: boolean
+  post_play_return_active?: boolean
+  local_playback_active?: boolean
+  stream_playback_active?: boolean
+  rewind_active?: boolean
+  /** Persisted global gate for saved standing/playback DC profiles. */
+  bias_enabled?: boolean
+  /** Bench-only manual selection of the configured playback-bias target. */
+  manual_bias_active?: boolean
+  /** True while the pointer-hold watchdog is being refreshed. */
+  manual_bias_hold?: boolean
+  /** Saved-profile selector used by the active manual bench test. */
+  manual_bias_profile?: 'idle' | 'play'
 }
 
-/** Bias slider range, % duty (firmware clamps at ±0.45). */
-const PWM_BIAS_MAX_PCT = 45
-/** Firmware's mA range at full-scale duty — used to map bias_ma back to %. */
-const PWM_BIAS_MAX_MA = 800
 /** Magnitude used by 逆転/正転 when the slider currently sits at 0. */
 const PWM_BIAS_DEFAULT_PCT = 10
+/** A manual winding pulse is bounded by firmware at 10 s. */
+const PWM_REWIND_MAX_MS = 10000
 /** Last-resort step count, used only until pwm_status / set_volume report one. */
 const PWM_VOLUME_STEPS_FALLBACK = 16
 /** `pwm_probe` blocks the device — cap matches the firmware's own limit. */
 const PWM_PROBE_MAX_MS = 3000
 /** Safety-net delay before re-enabling 実行 when no probe reply arrives. */
 const PWM_PROBE_RELEASE_MARGIN_MS = 2500
+/** Send the hold keepalive well inside the firmware's 750 ms watchdog. */
+const PWM_BIAS_HOLD_HEARTBEAT_MS = 250
+/** Maximum PAM8003-equivalent digital gain exposed by the experimental build. */
+const PWM_PLAYBACK_GAIN_MAX_DB = 24
+/** Device config bounds for the playback-bias tail. */
+const PWM_POST_PLAY_HOLD_MAX_MS = 2000
 
 /**
  * Experimental bench panel for the `band_v4_pwm` build: DC bias (string
@@ -5584,6 +5619,7 @@ export function BandWlV4PwmSection({
   status,
   probeTick,
   volumeSteps,
+  configTick,
 }: {
   device: DeviceInfo
   cachedInfo?: NodeConfigInfo
@@ -5594,25 +5630,50 @@ export function BandWlV4PwmSection({
   probeTick: number
   /** Step count echoed by the last `set_volume` reply. */
   volumeSteps?: number
+  /** Bumped only after a PWM write/action succeeds; re-reads device config. */
+  configTick: number
 }) {
   const { setAnchor } = useToast()
   const { t } = useI18n()
   const offline = !device.online
 
-  const [biasPct, setBiasPct] = useState(0)
+  const [idleBiasText, setIdleBiasText] = useState('')
+  const [playBiasText, setPlayBiasText] = useState('')
+  const [playbackGainDb, setPlaybackGainDb] = useState(PWM_PLAYBACK_GAIN_MAX_DB)
+  const [postPlayHoldMs, setPostPlayHoldMs] = useState(500)
+  const [postPlayReturnMs, setPostPlayReturnMs] = useState(500)
+  const [rewindBiasPct, setRewindBiasPct] = useState(PWM_BIAS_DEFAULT_PCT)
+  const [rewindMs, setRewindMs] = useState(1000)
   const [toneHz, setToneHz] = useState(100)
+  const [toneWave, setToneWave] = useState<'sine' | 'square'>('sine')
   const [toneAmp, setToneAmp] = useState(0.5)
   const [toneMs, setToneMs] = useState(1000)
   const [volume, setVolume] = useState(0)
   const [probeHz, setProbeHz] = useState(0)
   const [probeMs, setProbeMs] = useState(500)
   const [probing, setProbing] = useState(false)
+  const [biasDraftDirty, setBiasDraftDirty] = useState(false)
 
   // pwm_status carries the step count directly, so prefer it over the
   // set_volume echo (which only arrives after the user moves the slider) —
   // the fallback is only for a build that reports neither.
   const steps = status?.volume_steps ?? volumeSteps ?? PWM_VOLUME_STEPS_FALLBACK
   const maxLevel = Math.max(0, steps - 1)
+  const savedIdleBiasPct = status?.idle_bias_q15 == null
+    ? null
+    : Math.round((status.idle_bias_q15 * 100) / 32767)
+  const savedPlayBiasPct = status?.play_bias_q15 == null
+    ? 0
+    : Math.round((status.play_bias_q15 * 100) / 32767)
+  const savedBiasText = savedIdleBiasPct == null
+    ? '—'
+    : `${t('node.pwm.idleBias')} ${savedIdleBiasPct}% / ${t('node.pwm.playBias')} ${savedPlayBiasPct}% / ${t('node.pwm.postPlayHold')} ${status?.post_play_hold_ms ?? 500} ms / ${t('node.pwm.postPlayReturn')} ${status?.post_play_return_ms ?? 500} ms`
+  const appliedBiasQ15 = status?.bias_current_q15 ?? status?.bias_q15
+  const effectiveBiasText = appliedBiasQ15 == null
+    ? '—'
+    : `${Math.round((appliedBiasQ15 * 100) / 32767)}%`
+  const outputMode = status?.output_mode ?? cachedInfo?.haptic_pwm?.output_mode
+  const pwmRuntimeEnabled = outputMode !== 'pam'
 
   // Fetch status once when the panel mounts / the device changes. Also drop a
   // pending probe flag: its reply belongs to the previous device and would
@@ -5624,19 +5685,47 @@ export function BandWlV4PwmSection({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [device.ipAddress])
 
-  // Adopt the device's committed bias/volume whenever a status lands: it
-  // slew-limits toward the target and clamps out-of-range writes, so the
-  // device is authoritative for what the sliders show.
+  // Adopt both device-config profiles. These are persisted target settings,
+  // not measured current; a nonzero standing target is restored after reboot.
   useEffect(() => {
-    if (status?.bias_ma == null) return
-    setBiasPct(Math.round((status.bias_ma / PWM_BIAS_MAX_MA) * PWM_BIAS_MAX_PCT))
-  }, [status?.bias_ma])
+    if (status?.idle_bias_q15 == null || status?.play_bias_q15 == null) return
+    if (biasDraftDirty) return
+    // Legacy experimental firmware/config could contain opposite signs.
+    // Normalize the draft immediately, but leave the read-only saved-value
+    // row truthful until the user explicitly writes the corrected pair.
+    const aligned = alignPwmBiasSigns(
+      'idle',
+      Math.round((status.idle_bias_q15 * 100) / 32767),
+      Math.round((status.play_bias_q15 * 100) / 32767),
+    )
+    setIdleBiasText(String(aligned.idle))
+    setPlayBiasText(String(aligned.play))
+  }, [status?.idle_bias_q15, status?.play_bias_q15, biasDraftDirty])
+  useEffect(() => {
+    if (status?.playback_gain_db == null) return
+    setPlaybackGainDb(status.playback_gain_db)
+  }, [status?.playback_gain_db])
+  useEffect(() => {
+    if (status?.post_play_hold_ms == null) return
+    if (!biasDraftDirty) setPostPlayHoldMs(status.post_play_hold_ms)
+  }, [status?.post_play_hold_ms, biasDraftDirty])
+  useEffect(() => {
+    if (status?.post_play_return_ms == null) return
+    if (!biasDraftDirty) setPostPlayReturnMs(status.post_play_return_ms)
+  }, [status?.post_play_return_ms, biasDraftDirty])
   // `volume_level` (0..steps-1) is the slider's unit; `volume` is the 0-127
   // wiper and must NOT be adopted here (it would jump the slider off-scale).
   useEffect(() => {
     if (status?.volume_level == null) return
     setVolume(status.volume_level)
   }, [status?.volume_level])
+
+  const configTickRef = useRef(configTick)
+  useEffect(() => {
+    if (configTick === configTickRef.current) return
+    configTickRef.current = configTick
+    if (!offline) sendTo({ type: 'pwm_status', payload: {} })
+  }, [configTick, offline, sendTo])
 
   // pwm_probe blocks the device for up to 3 s; keep the button disabled until
   // its reply lands rather than letting the user queue another. A reply can
@@ -5656,26 +5745,133 @@ export function BandWlV4PwmSection({
   }, [probeTick])
   useEffect(() => clearProbeTimer, [])
 
-  const sendBias = (pct: number, e?: React.SyntheticEvent<HTMLElement>) => {
-    if (e) setAnchor(e.currentTarget)
-    const clamped = Math.max(-PWM_BIAS_MAX_PCT, Math.min(PWM_BIAS_MAX_PCT, Math.round(pct)))
-    setBiasPct(clamped)
-    sendTo({ type: 'set_pwm_bias', payload: { duty: clamped / 100 } })
+  const holdTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const holdingRef = useRef(false)
+  const sendToRef = useRef(sendTo)
+  sendToRef.current = sendTo
+  const stopManualHold = () => {
+    if (!holdingRef.current) return
+    holdingRef.current = false
+    if (holdTimerRef.current) {
+      clearInterval(holdTimerRef.current)
+      holdTimerRef.current = null
+    }
+    sendToRef.current({ type: 'pwm_bias_test', payload: { enabled: false, mode: 'hold', profile: 'play' } })
+  }
+  // Do not cancel the toggle when this panel unmounts — it is deliberately
+  // latched until the user turns it off. A pointer hold is different: ensure
+  // it is released immediately on tab/device changes in addition to the
+  // firmware watchdog.
+  useEffect(() => () => {
+    if (holdingRef.current) stopManualHold()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const setBiasDraft = (profile: 'idle' | 'play', text: string) => {
+    if (profile === 'idle') setIdleBiasText(text)
+    else setPlayBiasText(text)
+    setBiasDraftDirty(true)
+
+    const edited = parsePwmBiasPctText(text)
+    const other = parsePwmBiasPctText(profile === 'idle' ? playBiasText : idleBiasText)
+    if (edited == null || other == null) return
+    const aligned = alignPwmBiasSigns(
+      profile,
+      profile === 'idle' ? edited : other,
+      profile === 'play' ? edited : other,
+    )
+    setIdleBiasText(String(aligned.idle))
+    setPlayBiasText(String(aligned.play))
   }
 
-  const flipBias = (sign: 1 | -1, e: React.MouseEvent<HTMLButtonElement>) => {
-    const magnitude = Math.abs(biasPct) || PWM_BIAS_DEFAULT_PCT
-    sendBias(sign * magnitude, e)
+  const parsedIdleBias = parsePwmBiasPctText(idleBiasText)
+  const parsedPlayBias = parsePwmBiasPctText(playBiasText)
+  const biasDraftValid = parsedIdleBias != null && parsedPlayBias != null
+  // Keep the range inputs usable while a text field is temporarily blank or
+  // sign-only. Moving a slider restores a valid, aligned pair without sending
+  // anything until the user explicitly saves the configuration.
+  const idleBiasSliderValue = parsedIdleBias ?? savedIdleBiasPct ?? 0
+  const playBiasSliderValue = parsedPlayBias ?? savedPlayBiasPct
+
+  const setBiasFromSlider = (profile: 'idle' | 'play', value: number) => {
+    const edited = clampPwmBiasPct(value)
+    const other = profile === 'idle'
+      ? (parsePwmBiasPctText(playBiasText) ?? savedPlayBiasPct)
+      : (parsePwmBiasPctText(idleBiasText) ?? savedIdleBiasPct ?? 0)
+    const aligned = alignPwmBiasSigns(
+      profile,
+      profile === 'idle' ? edited : other,
+      profile === 'play' ? edited : other,
+    )
+    setIdleBiasText(String(aligned.idle))
+    setPlayBiasText(String(aligned.play))
+    setBiasDraftDirty(true)
+  }
+
+  const saveBiasConfig = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchor(e.currentTarget)
+    // Standing bias is the direction source at the final boundary too. This
+    // repairs a legacy/opposite-sign config when Save is pressed without an
+    // intervening edit.
+    if (parsedIdleBias == null || parsedPlayBias == null) return
+    const aligned = alignPwmBiasSigns('idle', parsedIdleBias, parsedPlayBias)
+    const idle = aligned.idle
+    const play = aligned.play
+    const holdMs = Math.max(0, Math.min(PWM_POST_PLAY_HOLD_MAX_MS, Math.round(postPlayHoldMs)))
+    const returnMs = Math.max(0, Math.min(PWM_POST_PLAY_HOLD_MAX_MS, Math.round(postPlayReturnMs)))
+    setIdleBiasText(String(idle))
+    setPlayBiasText(String(play))
+    setPostPlayHoldMs(holdMs)
+    setPostPlayReturnMs(returnMs)
+    setBiasDraftDirty(false)
+    // These are device-config writes only. They never turn a manual test on.
+    sendTo({ type: 'set_pwm_bias', payload: { idle_duty: idle / 100 } })
+    sendTo({ type: 'set_pwm_play_bias', payload: { duty: play / 100 } })
+    sendTo({ type: 'set_pwm_post_play_hold', payload: { ms: holdMs } })
+    sendTo({ type: 'set_pwm_post_play_return', payload: { ms: returnMs } })
+  }
+
+  const sendPlaybackGain = (db: number, e?: React.SyntheticEvent<HTMLElement>) => {
+    if (e) setAnchor(e.currentTarget)
+    const clamped = Math.max(0, Math.min(PWM_PLAYBACK_GAIN_MAX_DB, Math.round(db)))
+    setPlaybackGainDb(clamped)
+    sendTo({ type: 'set_pwm_playback_gain', payload: { db: clamped } })
+  }
+
+  const toggleBiasEnabled = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchor(e.currentTarget)
+    if (holdingRef.current) stopManualHold()
+    const enabled = status?.bias_enabled !== false
+    sendTo({ type: 'set_pwm_bias_enabled', payload: { enabled: !enabled } })
+  }
+
+  const startManualHold = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (offline || holdingRef.current) return
+    setAnchor(e.currentTarget)
+    holdingRef.current = true
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+    const tick = () => sendToRef.current({ type: 'pwm_bias_test', payload: { enabled: true, mode: 'hold', profile: 'play' } })
+    tick()
+    holdTimerRef.current = setInterval(tick, PWM_BIAS_HOLD_HEARTBEAT_MS)
+  }
+
+  const runRewind = (e: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchor(e.currentTarget)
+    const duty = Math.max(-PWM_BIAS_MAX_PCT, Math.min(PWM_BIAS_MAX_PCT, Math.round(rewindBiasPct)))
+    const ms = Math.max(1, Math.min(PWM_REWIND_MAX_MS, Math.round(rewindMs)))
+    setRewindBiasPct(duty)
+    setRewindMs(ms)
+    sendTo({ type: 'pwm_rewind', payload: { duty: duty / 100, ms } })
   }
 
   const playTone = (e: React.MouseEvent<HTMLButtonElement>) => {
     setAnchor(e.currentTarget)
-    sendTo({ type: 'pwm_tone', payload: { hz: toneHz, amp: toneAmp, ms: toneMs } })
+    sendTo({ type: 'pwm_tone', payload: { hz: toneHz, amp: toneAmp, ms: toneMs, wave: toneWave } })
   }
   const stopTone = (e: React.MouseEvent<HTMLButtonElement>) => {
     setAnchor(e.currentTarget)
     // amp 0 / ms 0 is the firmware's documented stop form.
-    sendTo({ type: 'pwm_tone', payload: { hz: toneHz, amp: 0, ms: 0 } })
+    sendTo({ type: 'pwm_tone', payload: { hz: toneHz, amp: 0, ms: 0, wave: toneWave } })
   }
 
   const applyVolume = (v: number, e?: React.SyntheticEvent<HTMLElement>) => {
@@ -5700,6 +5896,14 @@ export function BandWlV4PwmSection({
     sendTo({ type: 'pwm_status', payload: {} })
   }
 
+  const setOutputMode = (
+    mode: 'pwm' | 'pam',
+    e: React.MouseEvent<HTMLButtonElement>,
+  ) => {
+    setAnchor(e.currentTarget)
+    sendTo({ type: 'set_haptic_output_mode', payload: { mode } })
+  }
+
   const Row = ({ label, value }: { label: string; value: React.ReactNode }) => (
     <div className="form-row" style={{ paddingBlock: 2 }}>
       <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>{label}</label>
@@ -5712,75 +5916,240 @@ export function BandWlV4PwmSection({
     <>
       <div className="form-section">
         <div className="form-section-title">
+          {t('node.pwm.outputPath')}
+          <span className="form-section-sub-inline"> {t('node.pwm.experimental')}</span>
+        </div>
+        <div className="form-action-row" style={{ marginTop: 8 }}>
+          <button
+            type="button"
+            className={outputMode === 'pwm' ? 'form-button' : 'form-button-secondary'}
+            onClick={(e) => setOutputMode('pwm', e)}
+            disabled={offline}
+          >
+            {t('node.pwm.outputPwm')}
+          </button>
+          <button
+            type="button"
+            className={outputMode === 'pam' ? 'form-button' : 'form-button-secondary'}
+            onClick={(e) => setOutputMode('pam', e)}
+            disabled={offline}
+          >
+            {t('node.pwm.outputPam')}
+          </button>
+        </div>
+        <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
+          {outputMode === 'pam'
+            ? t('node.pwm.outputPamHint')
+            : t('node.pwm.outputPwmHint')}
+        </div>
+      </div>
+
+      <div className="form-section">
+        <div className="form-section-title">
           {t('node.pwm.biasTitle')}
           <span className="form-section-sub-inline"> {t('node.pwm.experimental')}</span>
         </div>
 
         <div className="form-row">
-          <label>{t('node.pwm.bias')}</label>
+          <label>{t('node.pwm.idleBias')}</label>
           <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
             <input
               type="range"
               min={-PWM_BIAS_MAX_PCT}
               max={PWM_BIAS_MAX_PCT}
               step={1}
-              value={biasPct}
-              // Dragging only moves the slider; the write happens on
-              // release/blur so one drag isn't dozens of TCP commands.
-              onChange={(e) => setBiasPct(Number(e.target.value))}
-              onPointerUp={(e) => sendBias(biasPct, e)}
-              onBlur={(e) => sendBias(biasPct, e)}
+              value={idleBiasSliderValue}
+              aria-label={t('node.pwm.idleBias')}
+              onChange={(e) => setBiasFromSlider('idle', Number(e.target.value))}
               disabled={offline}
-              style={{ flex: 1 }}
+              style={{ flex: 1, minWidth: 120 }}
             />
-            <span className="mono" style={{ width: 56, textAlign: 'right' }}>
-              {biasPct > 0 ? `+${biasPct}` : biasPct} %
-            </span>
+            <input
+              className="form-input short mono"
+              type="text"
+              value={idleBiasText}
+              aria-invalid={parsePwmBiasPctText(idleBiasText) == null}
+              onChange={(e) => setBiasDraft('idle', e.target.value)}
+              disabled={offline}
+            />
+            <span>%</span>
           </div>
           <span />
         </div>
 
+        <div className="form-row" style={{ marginTop: 8 }}>
+          <label>{t('node.pwm.playBias')}</label>
+          <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+            <input
+              type="range"
+              min={-PWM_BIAS_MAX_PCT}
+              max={PWM_BIAS_MAX_PCT}
+              step={1}
+              value={playBiasSliderValue}
+              aria-label={t('node.pwm.playBias')}
+              onChange={(e) => setBiasFromSlider('play', Number(e.target.value))}
+              disabled={offline}
+              style={{ flex: 1, minWidth: 120 }}
+            />
+            <input
+              className="form-input short mono"
+              type="text"
+              value={playBiasText}
+              aria-invalid={parsePwmBiasPctText(playBiasText) == null}
+              onChange={(e) => setBiasDraft('play', e.target.value)}
+              disabled={offline}
+            />
+            <span>%</span>
+          </div>
+          <span />
+        </div>
+        <div className="form-row" style={{ marginTop: 8 }}>
+          <label>{t('node.pwm.postPlayHold')}</label>
+          <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+            <input
+              className="form-input short mono"
+              type="number"
+              min={0}
+              max={PWM_POST_PLAY_HOLD_MAX_MS}
+              step={50}
+              value={postPlayHoldMs}
+              onChange={(e) => {
+                setPostPlayHoldMs(Number(e.target.value))
+                setBiasDraftDirty(true)
+              }}
+              disabled={offline}
+            />
+            <span>ms</span>
+          </div>
+          <span />
+        </div>
+        <div className="form-row" style={{ marginTop: 8 }}>
+          <label>{t('node.pwm.postPlayReturn')}</label>
+          <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+            <input
+              className="form-input short mono"
+              type="number"
+              min={0}
+              max={PWM_POST_PLAY_HOLD_MAX_MS}
+              step={50}
+              value={postPlayReturnMs}
+              onChange={(e) => {
+                setPostPlayReturnMs(Number(e.target.value))
+                setBiasDraftDirty(true)
+              }}
+              disabled={offline}
+            />
+            <span>ms</span>
+          </div>
+          <span />
+        </div>
         <div className="form-action-row" style={{ marginTop: 8 }}>
-          <button
-            className="form-button-secondary"
-            onClick={(e) => flipBias(-1, e)}
-            disabled={offline}
-          >
-            {t('node.pwm.reverse')}
-          </button>
-          <button
-            className="form-button-secondary"
-            onClick={(e) => sendBias(0, e)}
-            disabled={offline}
-          >
-            {t('node.pwm.stop')}
-          </button>
-          <button
-            className="form-button-secondary"
-            onClick={(e) => flipBias(1, e)}
-            disabled={offline}
-          >
-            {t('node.pwm.forward')}
+          <button className="form-button" onClick={saveBiasConfig} disabled={offline || !biasDraftValid}>
+            {t('node.pwm.saveBiasConfig')}
           </button>
         </div>
         <div className="form-status muted" style={{ fontSize: 12 }}>
-          {t('node.pwm.orientationHint')}
+          {t('node.pwm.savedConfig')}: {savedBiasText}
+          {' · '}{t('node.pwm.effectiveBias')}: {effectiveBiasText}
+        </div>
+
+        <div className="form-section-title" style={{ marginTop: 14 }}>
+          {t('node.pwm.fixedBias')}
+          <span className="form-section-sub-inline"> {t('node.pwm.experimental')}</span>
+        </div>
+        <div className="form-action-row" style={{ marginTop: 8 }}>
+          <button
+            type="button"
+            className={status?.bias_enabled !== false ? 'form-button' : 'form-button-secondary'}
+            onClick={toggleBiasEnabled}
+            disabled={offline || !pwmRuntimeEnabled}
+          >
+            {status?.bias_enabled !== false ? t('node.pwm.fixedBiasDisable') : t('node.pwm.fixedBiasEnable')}
+          </button>
+          <button
+            type="button"
+            className="form-button-secondary"
+            onPointerDown={startManualHold}
+            onPointerUp={stopManualHold}
+            onPointerCancel={stopManualHold}
+            onLostPointerCapture={stopManualHold}
+            disabled={offline || !pwmRuntimeEnabled}
+          >
+            {t('node.pwm.manualHold')}
+          </button>
+        </div>
+        <div className="form-status muted" style={{ fontSize: 12 }}>
+          {t('node.pwm.fixedBiasHint')}
+        </div>
+      </div>
+
+      <div className="form-section">
+        <div className="form-section-title">{t('node.pwm.rewind')}</div>
+        <div className="form-row">
+          <label>{t('node.pwm.rewindBias')}</label>
+          <input
+            className="form-input short mono"
+            type="number"
+            min={-PWM_BIAS_MAX_PCT}
+            max={PWM_BIAS_MAX_PCT}
+            step={1}
+            value={rewindBiasPct}
+            onChange={(e) => setRewindBiasPct(Number(e.target.value))}
+            disabled={offline || !pwmRuntimeEnabled}
+          />
+          <span>%</span>
+        </div>
+        <div className="form-row">
+          <label>{t('node.pwm.duration')}</label>
+          <input
+            className="form-input short mono"
+            type="number"
+            min={1}
+            max={PWM_REWIND_MAX_MS}
+            step={100}
+            value={rewindMs}
+            onChange={(e) => setRewindMs(Number(e.target.value))}
+            disabled={offline || !pwmRuntimeEnabled}
+          />
+          <span>ms</span>
+        </div>
+        <div className="form-action-row" style={{ marginTop: 8 }}>
+          <button className="form-button-secondary" onClick={runRewind} disabled={offline || !pwmRuntimeEnabled}>
+            {t('node.pwm.rewindRun')}
+          </button>
+        </div>
+        <div className="form-status muted" style={{ fontSize: 12 }}>
+          {t('node.pwm.rewindHint')}
         </div>
       </div>
 
       <div className="form-section">
         <div className="form-section-title">{t('node.pwm.tone')}</div>
         <div className="form-row">
+          <label>{t('node.pwm.waveform')}</label>
+          <select
+            className="form-select"
+            value={toneWave}
+            onChange={(e) => setToneWave(e.target.value as 'sine' | 'square')}
+            disabled={offline || !pwmRuntimeEnabled}
+          >
+            <option value="sine">{t('node.pwm.sine')}</option>
+            <option value="square">{t('node.pwm.square')}</option>
+          </select>
+          <span />
+        </div>
+        <div className="form-row">
           <label>{t('node.pwm.frequency')}</label>
           <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
             <input
+              className="form-input short mono"
               type="number"
               min={10}
               max={2000}
               step={10}
               value={toneHz}
               onChange={(e) => setToneHz(Number(e.target.value))}
-              disabled={offline}
+              disabled={offline || !pwmRuntimeEnabled}
             />
             <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Hz (10–2000)</span>
           </div>
@@ -5796,7 +6165,7 @@ export function BandWlV4PwmSection({
               step={0.05}
               value={toneAmp}
               onChange={(e) => setToneAmp(Number(e.target.value))}
-              disabled={offline}
+              disabled={offline || !pwmRuntimeEnabled}
               style={{ flex: 1 }}
             />
             <span className="mono" style={{ width: 48, textAlign: 'right' }}>
@@ -5809,25 +6178,57 @@ export function BandWlV4PwmSection({
           <label>{t('node.pwm.duration')}</label>
           <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
             <input
+              className="form-input short mono"
               type="number"
               min={0}
               max={60000}
               step={100}
               value={toneMs}
               onChange={(e) => setToneMs(Number(e.target.value))}
-              disabled={offline}
+              disabled={offline || !pwmRuntimeEnabled}
             />
             <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>ms</span>
           </div>
           <span />
         </div>
         <div className="form-action-row" style={{ marginTop: 8 }}>
-          <button className="form-button" onClick={playTone} disabled={offline}>
+          <button className="form-button" onClick={playTone} disabled={offline || !pwmRuntimeEnabled}>
             {t('common.play')}
           </button>
-          <button className="form-button-secondary" onClick={stopTone} disabled={offline}>
+          <button className="form-button-secondary" onClick={stopTone} disabled={offline || !pwmRuntimeEnabled}>
             {t('node.pwm.stopped')}
           </button>
+        </div>
+      </div>
+
+      <div className="form-section">
+        <div className="form-section-title">
+          {t('node.pwm.playbackGain')}
+          <span className="form-section-sub-inline"> {t('node.pwm.experimental')}</span>
+        </div>
+        <div className="form-row">
+          <label>{t('node.pwm.gain')}</label>
+          <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+            <input
+              type="range"
+              min={0}
+              max={PWM_PLAYBACK_GAIN_MAX_DB}
+              step={1}
+              value={playbackGainDb}
+              onChange={(e) => setPlaybackGainDb(Number(e.target.value))}
+              onPointerUp={(e) => sendPlaybackGain(playbackGainDb, e)}
+              onBlur={(e) => sendPlaybackGain(playbackGainDb, e)}
+              disabled={offline}
+              style={{ flex: 1 }}
+            />
+            <span className="mono" style={{ width: 56, textAlign: 'right' }}>
+              +{playbackGainDb} dB
+            </span>
+          </div>
+          <span />
+        </div>
+        <div className="form-status muted" style={{ fontSize: 12 }}>
+          {t('node.pwm.playbackGainHint')}
         </div>
       </div>
 
@@ -5880,6 +6281,20 @@ export function BandWlV4PwmSection({
         </div>
         <Row label={t('node.pwm.status')} value={status?.state} />
         <Row
+          label={t('node.pwm.outputPath')}
+          value={outputMode === 'pam'
+            ? t('node.pwm.outputPam')
+            : outputMode === 'pwm'
+              ? t('node.pwm.outputPwm')
+              : undefined}
+        />
+        <Row
+          label={t('node.pwm.biasAvailable')}
+          value={status?.bias_available != null
+            ? (status.bias_available ? t('common.yes') : t('common.no'))
+            : undefined}
+        />
+        <Row
           label={t('node.pwm.carrier')}
           value={status?.carrier_hz != null ? `${status.carrier_hz} Hz` : undefined}
         />
@@ -5892,8 +6307,24 @@ export function BandWlV4PwmSection({
           }
         />
         <Row
-          label={t('node.pwm.bias')}
-          value={status?.bias_ma != null ? `${status.bias_ma} mA` : undefined}
+          label={t('node.pwm.idleBias')}
+          value={status?.idle_bias_q15 != null ? `${Math.round((status.idle_bias_q15 * 100) / 32767)} %` : undefined}
+        />
+        <Row
+          label={t('node.pwm.playBias')}
+          value={status?.play_bias_q15 != null ? `${Math.round((status.play_bias_q15 * 100) / 32767)} %` : undefined}
+        />
+        <Row
+          label={t('node.pwm.playbackGain')}
+          value={status?.playback_gain_db != null ? `+${status.playback_gain_db} dB` : undefined}
+        />
+        <Row
+          label={t('node.pwm.postPlayHold')}
+          value={status?.post_play_hold_ms != null ? `${status.post_play_hold_ms} ms` : undefined}
+        />
+        <Row
+          label={t('node.pwm.postPlayReturn')}
+          value={status?.post_play_return_ms != null ? `${status.post_play_return_ms} ms` : undefined}
         />
         <Row
           label={t('node.pwm.volume')}
@@ -5910,13 +6341,37 @@ export function BandWlV4PwmSection({
           label={t('node.pwm.toneState')}
           value={status?.tone_active != null ? (status.tone_active ? t('node.pwm.playing') : t('node.pwm.stopped')) : undefined}
         />
+        <Row
+          label={t('node.pwm.playbackState')}
+          value={status?.playback_active != null ? (status.playback_active ? t('node.pwm.playing') : t('node.pwm.stopped')) : undefined}
+        />
+        <Row
+          label={t('node.pwm.postPlayHoldState')}
+          value={status?.post_play_hold_active != null ? (status.post_play_hold_active ? t('node.pwm.running') : t('node.pwm.stopped')) : undefined}
+        />
+        <Row
+          label={t('node.pwm.postPlayReturnState')}
+          value={status?.post_play_return_active != null ? (status.post_play_return_active ? t('node.pwm.running') : t('node.pwm.stopped')) : undefined}
+        />
+        <Row
+          label={t('node.pwm.rewind')}
+          value={status?.rewind_active != null ? (status.rewind_active ? t('node.pwm.running') : t('node.pwm.stopped')) : undefined}
+        />
+        <Row
+          label={t('node.pwm.manualTest')}
+          value={status?.manual_bias_active != null
+            ? (status.manual_bias_active
+              ? (status.manual_bias_hold ? t('node.pwm.manualHolding') : t('node.pwm.manualActive'))
+              : t('node.pwm.stopped'))
+            : undefined}
+        />
         {/* get_info carries the gate config too, so this row has a value even
             before the first pwm_status. */}
         <Row
           label={t('node.pwm.infoState')}
           value={
             cachedInfo?.haptic_pwm
-              ? `${cachedInfo.haptic_pwm.state ?? '—'} / ${cachedInfo.haptic_pwm.carrier_hz ?? '—'} Hz`
+              ? `${cachedInfo.haptic_pwm.output_mode ?? '—'} / ${cachedInfo.haptic_pwm.state ?? '—'} / ${cachedInfo.haptic_pwm.carrier_hz ?? '—'} Hz`
               : undefined
           }
         />
@@ -5937,7 +6392,7 @@ export function BandWlV4PwmSection({
               step={1}
               value={probeHz}
               onChange={(e) => setProbeHz(Number(e.target.value))}
-              disabled={offline || probing}
+              disabled={offline || probing || !pwmRuntimeEnabled}
             />
             <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
               {t('node.pwm.probeHzHint')}
@@ -5957,7 +6412,7 @@ export function BandWlV4PwmSection({
               onChange={(e) =>
                 setProbeMs(Math.min(PWM_PROBE_MAX_MS, Math.max(0, Number(e.target.value))))
               }
-              disabled={offline || probing}
+              disabled={offline || probing || !pwmRuntimeEnabled}
             />
             <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
               {t('node.pwm.probeMsHint', { max: PWM_PROBE_MAX_MS })}
@@ -5969,7 +6424,7 @@ export function BandWlV4PwmSection({
           {t('node.pwm.probeWarning', { max: PWM_PROBE_MAX_MS })}
         </div>
         <div className="form-action-row" style={{ marginTop: 8 }}>
-          <button className="form-button" onClick={runProbe} disabled={offline || probing}>
+          <button className="form-button" onClick={runProbe} disabled={offline || probing || !pwmRuntimeEnabled}>
             {probing ? t('node.pwm.running') : t('common.run')}
           </button>
         </div>

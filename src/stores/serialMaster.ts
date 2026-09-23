@@ -306,6 +306,7 @@ export interface SerialDeviceInfo {
     gpio_a?: number
     gpio_b?: number
     state?: string
+    output_mode?: 'pwm' | 'pam'
   }
 }
 

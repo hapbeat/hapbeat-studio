@@ -30,6 +30,9 @@ interface HelperConnectionValue {
   helperCompat: HelperCompat
   devices: DeviceInfo[]
   lastMessage: ManagerMessage | null
+  /** Receive every Helper message synchronously, including bursts that React
+   * may coalesce in the legacy `lastMessage` state channel. */
+  subscribe: (listener: (message: ManagerMessage) => void) => () => void
   send: (message: ManagerMessage) => void
   /**
    * Push a synthetic `ManagerMessage` into the `lastMessage` channel as
@@ -55,6 +58,7 @@ export function HelperConnectionProvider({ children }: { children: ReactNode }) 
   const [helperVersion, setHelperVersion] = useState<string | null>(null)
   const [devices, setDevices] = useState<DeviceInfo[]>([])
   const [lastMessage, setLastMessage] = useState<ManagerMessage | null>(null)
+  const messageListenersRef = useRef(new Set<(message: ManagerMessage) => void>())
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reconnectAttemptRef = useRef(0)
@@ -102,6 +106,11 @@ export function HelperConnectionProvider({ children }: { children: ReactNode }) 
       if (wsRef.current !== ws) return
       try {
         const message: ManagerMessage = JSON.parse(event.data)
+        for (const listener of messageListenersRef.current) {
+          try { listener(message) } catch (err) {
+            console.error('[Helper] メッセージ購読処理に失敗:', err)
+          }
+        }
         setLastMessage(message)
         if (message.type === 'device_list' && Array.isArray(message.payload.devices)) {
           setDevices(message.payload.devices as DeviceInfo[])
@@ -154,7 +163,17 @@ export function HelperConnectionProvider({ children }: { children: ReactNode }) 
   }, [])
 
   const injectMessage = useCallback((message: ManagerMessage) => {
+    for (const listener of messageListenersRef.current) {
+      try { listener(message) } catch (err) {
+        console.error('[Helper] メッセージ購読処理に失敗:', err)
+      }
+    }
     setLastMessage(message)
+  }, [])
+
+  const subscribe = useCallback((listener: (message: ManagerMessage) => void) => {
+    messageListenersRef.current.add(listener)
+    return () => { messageListenersRef.current.delete(listener) }
   }, [])
 
   useEffect(() => {
@@ -194,7 +213,7 @@ export function HelperConnectionProvider({ children }: { children: ReactNode }) 
   const helperCompat = checkHelperCompat(helperVersion)
 
   return (
-    <HelperConnectionContext.Provider value={{ isConnected, helperVersion, helperCompat, devices, lastMessage, send, injectMessage }}>
+    <HelperConnectionContext.Provider value={{ isConnected, helperVersion, helperCompat, devices, lastMessage, subscribe, send, injectMessage }}>
       {children}
     </HelperConnectionContext.Provider>
   )

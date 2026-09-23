@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { DeviceList } from './DeviceList'
+import type { DeviceSelectionScope } from '@/stores/deviceStore'
 import './DevicesModal.css'
 import { useI18n } from '@/i18n/I18nProvider'
 
@@ -10,6 +11,7 @@ interface Props {
   /** Restrict the picker to Hapbeat wearables (grey + disable non-Hapbeat).
    *  Set from the UI/Display tab, where the config only applies to Hapbeat. */
   hapbeatOnly?: boolean
+  selectionScope?: DeviceSelectionScope
 }
 
 /**
@@ -27,7 +29,7 @@ interface Props {
  * `position: fixed` — only `createPortal(..., document.body)`
  * reliably escapes that.
  */
-export function DevicesModal({ open, onClose, hapbeatOnly }: Props) {
+export function DevicesModal({ open, onClose, hapbeatOnly, selectionScope = 'manage' }: Props) {
   const { t } = useI18n()
   useEffect(() => {
     if (!open) return
@@ -68,7 +70,7 @@ export function DevicesModal({ open, onClose, hapbeatOnly }: Props) {
           </button>
         </div>
         <div className="devices-modal-body">
-          <DeviceList hapbeatOnly={hapbeatOnly} />
+          <DeviceList hapbeatOnly={hapbeatOnly} selectionScope={selectionScope} />
         </div>
       </div>
     </div>

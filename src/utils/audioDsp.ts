@@ -19,8 +19,7 @@ function createBuffer(
   channelData: Float32Array[],
   sampleRate: number
 ): AudioBuffer {
-  const ctx = new AudioContext()
-  const buffer = ctx.createBuffer(channelData.length, channelData[0].length, sampleRate)
+  const buffer = new AudioBuffer({ numberOfChannels: channelData.length, length: channelData[0].length, sampleRate })
   for (let ch = 0; ch < channelData.length; ch++) {
     buffer.copyToChannel(channelData[ch] as Float32Array<ArrayBuffer>, ch)
   }
@@ -135,7 +134,7 @@ export async function applyFilter(
   return renderThroughGraph(buffer, (ctx, source) => {
     const filter = ctx.createBiquadFilter()
     filter.type = type
-    filter.frequency.value = frequency
+    filter.frequency.value = Math.min(frequency, buffer.sampleRate / 2 - 1)
     filter.Q.value = Q
     source.connect(filter)
     return filter
@@ -156,7 +155,7 @@ export async function applyEq(
     for (const band of bands) {
       const filter = ctx.createBiquadFilter()
       filter.type = 'peaking'
-      filter.frequency.value = band.frequency
+      filter.frequency.value = Math.min(band.frequency, buffer.sampleRate / 2 - 1)
       filter.gain.value = band.gain
       filter.Q.value = band.Q
       lastNode.connect(filter)
@@ -183,7 +182,7 @@ export function applyEnvelope(
     let ptIdx = 0
 
     for (let i = 0; i < length; i++) {
-      const t = i / length // normalized time 0-1
+      const t = i / Math.max(1, length - 1) // normalized time 0-1
 
       // Advance to the correct segment
       while (ptIdx < points.length - 2 && t >= points[ptIdx + 1].time) {
@@ -263,7 +262,7 @@ export function fadeIn(buffer: AudioBuffer, durationMs: number): AudioBuffer {
 
   for (const ch of data) {
     for (let i = 0; i < fadeSamples; i++) {
-      ch[i] *= i / fadeSamples
+      ch[i] *= i / Math.max(1, fadeSamples - 1)
     }
   }
 
@@ -283,7 +282,7 @@ export function fadeOut(buffer: AudioBuffer, durationMs: number): AudioBuffer {
   for (const ch of data) {
     const start = ch.length - fadeSamples
     for (let i = 0; i < fadeSamples; i++) {
-      ch[start + i] *= 1 - i / fadeSamples
+      ch[start + i] *= 1 - i / Math.max(1, fadeSamples - 1)
     }
   }
 
@@ -341,8 +340,8 @@ export function cropBuffer(
   startSec: number,
   endSec: number
 ): AudioBuffer {
-  const startSample = Math.floor(startSec * buffer.sampleRate)
-  const endSample = Math.floor(endSec * buffer.sampleRate)
+  const startSample = Math.max(0, Math.min(buffer.length, Math.floor(startSec * buffer.sampleRate)))
+  const endSample = Math.max(startSample, Math.min(buffer.length, Math.floor(endSec * buffer.sampleRate)))
   const length = endSample - startSample
 
   if (length <= 0) return buffer
@@ -364,8 +363,8 @@ export function deleteRegion(
   startSec: number,
   endSec: number
 ): AudioBuffer {
-  const startSample = Math.floor(startSec * buffer.sampleRate)
-  const endSample = Math.floor(endSec * buffer.sampleRate)
+  const startSample = Math.max(0, Math.min(buffer.length, Math.floor(startSec * buffer.sampleRate)))
+  const endSample = Math.max(startSample, Math.min(buffer.length, Math.floor(endSec * buffer.sampleRate)))
   const newLength = buffer.length - (endSample - startSample)
 
   if (newLength <= 0) return buffer
@@ -414,6 +413,15 @@ export async function applyEffect(
   params: EffectParams
 ): Promise<AudioBuffer> {
   switch (params.type) {
+    case 'trim': case 'cut': {
+      const end = Math.min(buffer.duration, params.end)
+      if (!Number.isFinite(params.start) || !Number.isFinite(params.end) || params.start < 0 || params.start >= end || (params.type === 'cut' && params.start === 0 && end === buffer.duration)) throw new Error('Edit range is outside the current waveform. Adjust or remove the Trim / Cut step.')
+      return params.type === 'trim' ? cropBuffer(buffer, params.start, end) : deleteRegion(buffer, params.start, end)
+    }
+    case 'repitch':
+      return repitch(buffer, params.semitones)
+    case 'noise-gate':
+      return noiseGate(buffer, params.thresholdDb, params.attackMs, params.releaseMs)
     case 'pitch-shift':
       return pitchShift(buffer, params.semitones)
     case 'time-stretch':
@@ -441,4 +449,34 @@ export async function applyEffect(
     case 'mono-convert':
       return monoConvert(buffer, params.method)
   }
+}
+
+/** Resampling pitch preserves the transient; length intentionally changes. */
+export async function repitch(buffer: AudioBuffer, semitones: number): Promise<AudioBuffer> {
+  if (semitones === 0) return buffer
+  const rate = 2 ** (semitones / 12)
+  return renderThroughGraph(buffer, (_ctx, source) => {
+    source.playbackRate.value = rate
+    return source
+  }, Math.max(1, Math.ceil(buffer.length / rate)))
+}
+
+/** Linked stereo gate: preserve channel balance and smooth gate transitions. */
+export function noiseGate(buffer: AudioBuffer, thresholdDb: number, attackMs: number, releaseMs: number): AudioBuffer {
+  const data = cloneChannelData(buffer)
+  const threshold = 10 ** (thresholdDb / 20)
+  const attack = Math.exp(-1 / Math.max(1, attackMs * buffer.sampleRate / 1000))
+  const release = Math.exp(-1 / Math.max(1, releaseMs * buffer.sampleRate / 1000))
+  let envelope = 0
+  let gain = 0
+  for (let i = 0; i < buffer.length; i++) {
+    let peak = 0
+    for (const channel of data) peak = Math.max(peak, Math.abs(channel[i]))
+    envelope = Math.max(peak, envelope * release)
+    const target = envelope >= threshold ? 1 : 0
+    const coefficient = target > gain ? attack : release
+    gain = target + coefficient * (gain - target)
+    for (const channel of data) channel[i] *= gain
+  }
+  return createBuffer(data, buffer.sampleRate)
 }

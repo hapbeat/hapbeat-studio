@@ -1,194 +1,38 @@
-import { useCallback, useRef } from 'react'
+import { useState } from 'react'
 import type { SampleRate } from '@/types/waveform'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { useI18n } from '@/i18n/I18nProvider'
 
-export function WaveformToolbar() {
+export function WaveformToolbar({ original, preview = false, durationOverride }: {original: boolean; preview?: boolean; durationOverride?: number}) {
   const { t } = useI18n()
-  const fileInputRef = useRef<HTMLInputElement>(null)
-
-  const clip = useWaveformStore((s) => s.clip)
-  const undoStack = useWaveformStore((s) => s.undoStack)
-  const redoStack = useWaveformStore((s) => s.redoStack)
-  const isProcessing = useWaveformStore((s) => s.isProcessing)
-  const selectedRegion = useWaveformStore((s) => s.selectedRegion)
-  const exportAsMono = useWaveformStore((s) => s.exportAsMono)
-
-  const loadFile = useWaveformStore((s) => s.loadFile)
-  const undo = useWaveformStore((s) => s.undo)
-  const redo = useWaveformStore((s) => s.redo)
-  const setClipName = useWaveformStore((s) => s.setClipName)
-  const setExportSampleRate = useWaveformStore((s) => s.setExportSampleRate)
-  const setEventId = useWaveformStore((s) => s.setEventId)
-  const setExportAsMono = useWaveformStore((s) => s.setExportAsMono)
-  const exportWav = useWaveformStore((s) => s.exportWav)
-  const cropToRegion = useWaveformStore((s) => s.cropToRegion)
-  const deleteRegion = useWaveformStore((s) => s.deleteRegion)
-  const revertToOriginal = useWaveformStore((s) => s.revertToOriginal)
-
-  const handleLoadClick = useCallback(() => {
-    fileInputRef.current?.click()
-  }, [])
-
-  const handleFileChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0]
-      if (!file) return
-      try {
-        await loadFile(file)
-      } catch {
-        alert(t('wave.loadFailed'))
-      }
-      // Reset input so same file can be reloaded
-      e.target.value = ''
-    },
-    [loadFile, t]
-  )
-
-  const handleExport = useCallback(async () => {
-    try {
-      const blob = await exportWav()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${clip?.name ?? 'clip'}.wav`
-      a.click()
-      URL.revokeObjectURL(url)
-    } catch (err) {
-      alert(t('wave.exportFailed', { message: err instanceof Error ? err.message : String(err) }))
-    }
-  }, [exportWav, clip?.name, t])
-
-  const handleSampleRateChange = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      setExportSampleRate(Number(e.target.value) as SampleRate)
-    },
-    [setExportSampleRate]
-  )
-
-  return (
-    <div className="waveform-toolbar">
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".wav,.mp3,.ogg,.flac,.aac,.m4a,audio/*"
-        onChange={handleFileChange}
-        style={{ display: 'none' }}
-      />
-
-      <div className="toolbar-group">
-        <button className="toolbar-btn" onClick={handleLoadClick} disabled={isProcessing}>
-          Load Audio
-        </button>
-        <button
-          className="toolbar-btn"
-          onClick={handleExport}
-          disabled={!clip || isProcessing}
-        >
-          Export
-        </button>
-      </div>
-
-      <div className="toolbar-separator" />
-
-      <div className="toolbar-group">
-        <button
-          className="toolbar-btn"
-          onClick={undo}
-          disabled={undoStack.length === 0 || isProcessing}
-          title="Undo (Ctrl+Z)"
-        >
-          Undo
-        </button>
-        <button
-          className="toolbar-btn"
-          onClick={redo}
-          disabled={redoStack.length === 0 || isProcessing}
-          title="Redo (Ctrl+Shift+Z)"
-        >
-          Redo
-        </button>
-      </div>
-
-      <div className="toolbar-separator" />
-
-      <div className="toolbar-group">
-        <button
-          className="toolbar-btn"
-          onClick={cropToRegion}
-          disabled={!selectedRegion || isProcessing}
-          title={t('wave.crop')}
-        >
-          Crop
-        </button>
-        <button
-          className="toolbar-btn"
-          onClick={deleteRegion}
-          disabled={!selectedRegion || isProcessing}
-          title={t('wave.delete')}
-        >
-          Delete
-        </button>
-        <button
-          className="toolbar-btn"
-          onClick={revertToOriginal}
-          disabled={!clip || isProcessing}
-          title={t('wave.revert')}
-        >
-          Revert
-        </button>
-      </div>
-
-      {clip && (
-        <>
-          <div className="toolbar-separator" />
-
-          <div className="toolbar-group toolbar-meta">
-            <label className="toolbar-field">
-              <span>Name</span>
-              <input
-                type="text"
-                value={clip.name}
-                onChange={(e) => setClipName(e.target.value)}
-                className="toolbar-input"
-              />
-            </label>
-
-            <label className="toolbar-field">
-              <span>Rate</span>
-              <select
-                value={clip.exportSampleRate}
-                onChange={handleSampleRateChange}
-                className="toolbar-select"
-              >
-                <option value={44100}>44.1 kHz</option>
-                <option value={24000}>24 kHz</option>
-                <option value={16000}>16 kHz</option>
-              </select>
-            </label>
-
-            <label className="toolbar-field">
-              <span>Event ID</span>
-              <input
-                type="text"
-                value={clip.eventId ?? ''}
-                onChange={(e) => setEventId(e.target.value)}
-                placeholder="impact.hit"
-                className="toolbar-input"
-              />
-            </label>
-
-            <label className="toolbar-field toolbar-checkbox">
-              <input
-                type="checkbox"
-                checked={exportAsMono}
-                onChange={(e) => setExportAsMono(e.target.checked)}
-              />
-              <span>Mono Export</span>
-            </label>
-          </div>
-        </>
-      )}
+  const s = useWaveformStore()
+  const [exported, setExported] = useState('')
+  const region = s.selectedRegion
+  const duration = durationOverride ?? (original ? s.clip?.originalBuffer : s.clip?.buffer)?.duration ?? 0
+  return <div className="waveform-toolbar">
+    <div className="toolbar-group">
+      <button className="toolbar-btn editor-extract" onClick={s.extractSelection} disabled={!region || preview}>✂ {t('editor.extract')}</button>
+      <button className="toolbar-btn" onClick={s.undo} disabled={preview || original || !s.undoStack.length} title="Ctrl+Z">{t('editor.undo')}</button>
+      <button className="toolbar-btn" onClick={s.redo} disabled={preview || original || !s.redoStack.length} title="Ctrl+Shift+Z">{t('editor.redo')}</button>
+      <button className="toolbar-btn" onClick={s.cropToRegion} disabled={preview || original || !region}>{t('editor.trim')}</button>
+      <button className="toolbar-btn" onClick={s.deleteRegion} disabled={preview || original || !region || (region.start === 0 && region.end === s.clip?.buffer.duration)}>{t('editor.cut')}</button>
+      <button className="toolbar-btn" onClick={s.revertToOriginal} disabled={!s.clip}>{t('editor.restore')}</button>
     </div>
-  )
+    <div className="toolbar-group">
+      <label className="toolbar-field">{t('editor.from')}<input className="editor-time-input" aria-label={t('editor.from')} type="number" min={0} max={duration} step={.001} disabled={!s.clip}
+        value={region?.start ?? 0} onChange={e => s.setSelectedRegion({ start: Number(e.target.value), end: region?.end ?? duration }, original, duration)} /></label>
+      <label className="toolbar-field">{t('editor.to')}<input className="editor-time-input" aria-label={t('editor.to')} type="number" min={0} max={duration} step={.001} disabled={!s.clip}
+        value={region?.end ?? duration} onChange={e => s.setSelectedRegion({ start: region?.start ?? 0, end: Number(e.target.value) }, original, duration)} /></label>
+      <button className="toolbar-btn" disabled={!region} onClick={() => s.setSelectedRegion(null)}>{t('editor.deselect')}</button>
+    </div>
+    <div className="toolbar-group toolbar-meta">
+      <label className="toolbar-field">{t('editor.name')}<input className="toolbar-input" value={s.clip?.name ?? ''} disabled={!s.clip} onChange={e => s.setClipName(e.target.value)} /></label>
+      <label className="toolbar-field">WAV <select value={s.clip?.exportSampleRate ?? 48000} disabled={!s.clip} onChange={e => s.setExportSampleRate(Number(e.target.value) as SampleRate)}>
+        <option value={16000}>16 kHz</option><option value={24000}>24 kHz</option><option value={44100}>44.1 kHz</option><option value={48000}>48 kHz</option>
+      </select></label>
+      <label className="toolbar-field"><input type="checkbox" disabled={!s.clip} checked={s.exportAsMono} onChange={e => s.setExportAsMono(e.target.checked)} />Mono</label>
+      <button className="toolbar-btn" disabled={!s.clip || preview} onClick={() => { void s.exportWav().then(setExported).catch(s.setError) }}>{t('editor.export')}</button>
+    </div>
+    <div className="editor-export-status" title={exported} role="status">{t('editor.exportTarget')} · {exported ? `exports/${exported}` : t('editor.exportHint')}</div>
+  </div>
 }

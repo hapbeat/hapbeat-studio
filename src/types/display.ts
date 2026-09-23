@@ -29,6 +29,10 @@ export type DisplayElementType =
   | 'custom_text'
   | 'alert_limit_mode'
   | 'mqtt_status'
+  | 'pwm_bias_state'
+  | 'pwm_bias_value'
+  | 'average_power'
+  | 'estimated_runtime'
 
 export interface DisplayPage {
   name: string
@@ -54,6 +58,10 @@ export type ButtonActionType =
   | 'eq_preset_toggle'
   | 'hp_vol_up'
   | 'hp_vol_down'
+  /** BandWL v4 MCU-PWM experiment: enable/disable the saved DC profiles. */
+  | 'pwm_bias_toggle'
+  /** BandWL v4 MCU-PWM experiment: apply the playback bias while held. */
+  | 'pwm_bias_hold'
 
 /** Hold 動作モード: momentary=離したら戻す, latch=1回押しと同じ */
 export type HoldMode = 'momentary' | 'latch'
@@ -302,6 +310,10 @@ export const ELEMENT_FIXED_SIZES: Record<DisplayElementType, [number, number]> =
   custom_text: [8, 1],       // 任意の固定テキスト (element.text)。S/M/L = 4/8/16
   alert_limit_mode: [10, 1], // 制限モード/全て再生 (受信機)。standard=10 / compact=4
   mqtt_status: [4, 1],       // "[OK]"/"[NG]" 4文字。ブローカー接続時のみ OK (受信機)
+  pwm_bias_state: [8, 1],    // "Bias:OFF" 8文字。compact は "B:--" 4文字 (Band Wireless PWM実験)
+  pwm_bias_value: [8, 1],    // "Bias:10%" 8文字。compact は "10%" 4文字 (Band Wireless PWM実験)
+  average_power: [8, 1],     // "P~1.2W"。compact は "1.2W" 4文字
+  estimated_runtime: [8, 1], // "T~245m"。compact は "245m" 4文字
 }
 
 /** Get element size considering variant. Battery "bar" variant is wider. */
@@ -374,6 +386,24 @@ export function getElementSize(type: DisplayElementType, variant?: string): [num
     // standard = 制限モード/全て再生 (最長 5 全角=10 セル)。
     if (variant === 'compact') return [4, 1]
     return [10, 1]
+  }
+  if (type === 'pwm_bias_state') {
+    // 固定バイアスの手動トグル／ホールド状態。compact=4 / standard=8。
+    if (variant === 'compact') return [4, 1]
+    return [8, 1]
+  }
+  if (type === 'pwm_bias_value') {
+    // 実効バイアス。compact は数値 + % のみ、standard は Bias: 接頭辞付き。
+    if (variant === 'compact') return [4, 1]
+    return [8, 1]
+  }
+  if (type === 'average_power') {
+    if (variant === 'compact') return [4, 1]
+    return [8, 1]
+  }
+  if (type === 'estimated_runtime') {
+    if (variant === 'compact') return [4, 1]
+    return [8, 1]
   }
   return ELEMENT_FIXED_SIZES[type]
 }

@@ -186,6 +186,18 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
       return padClipToCells(txt, w)
     }
     case 'mqtt_status': return '[NG]'  // 4文字。ブローカー未接続 (既定) を表示
+    case 'pwm_bias_state':
+      // Studio の静的プレビューは固定バイアス OFF。実機は保存済みの
+      // bias_enabled 設定を参照して即時に ON/OFF を更新する。
+      return variant === 'compact' ? 'B:--' : 'Bias:OFF'
+    case 'pwm_bias_value':
+      // Static layout preview. The device replaces this with its currently
+      // selected effective idle/playback/manual profile value.
+      return variant === 'compact' ? '10% ' : 'Bias:10%'
+    case 'average_power':
+      return variant === 'compact' ? '1.2W' : 'P~1.2W  '
+    case 'estimated_runtime':
+      return variant === 'compact' ? '245m' : 'T~245m  '
   }
 }
 
@@ -210,5 +222,9 @@ export function getElementDescription(type: DisplayElementType): string {
     case 'custom_text':       return 'テキスト'
     case 'alert_limit_mode':  return '制限/全て'
     case 'mqtt_status':       return '[OK]/[NG]'
+    case 'pwm_bias_state':    return '固定Bias ON/OFF'
+    case 'pwm_bias_value':    return '適用Bias%'
+    case 'average_power':     return '平均電力（推定）'
+    case 'estimated_runtime': return '残り時間（推定）'
   }
 }

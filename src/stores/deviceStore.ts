@@ -5,6 +5,10 @@ import { isDemoMode } from '@/demo/isDemoMode'
 
 const STORAGE_KEY_SELECTED = 'hapbeat-studio-selected-device'
 const STORAGE_KEY_SELECTED_SET = 'hapbeat-studio-selected-devices'
+const STORAGE_KEY_KIT_SELECTED = 'hapbeat-studio-kit-selected-device'
+const STORAGE_KEY_KIT_SELECTED_SET = 'hapbeat-studio-kit-selected-devices'
+const STORAGE_KEY_DISPLAY_SELECTED = 'hapbeat-studio-display-selected-device'
+const STORAGE_KEY_DISPLAY_SELECTED_SET = 'hapbeat-studio-display-selected-devices'
 const STORAGE_KEY_DISMISSED = 'hapbeat-studio-dismissed-devices'
 const STORAGE_KEY_LAST_FLASHED_BOARD = 'hapbeat-studio-last-flashed-board'
 
@@ -17,6 +21,11 @@ export interface WifiProfile {
   active?: boolean
 }
 
+/** Selection is deliberately local to each authoring surface. Manage's
+ * selection controls the detail pane; Kit and UI selections control only
+ * their own deploy / preview targets. */
+export type DeviceSelectionScope = 'manage' | 'kit' | 'display'
+
 interface DeviceState {
   /** IP of the device currently focused in the Devices pane.
    *  Mirrors the most-recently-checked entry from `selectedIps` so
@@ -27,6 +36,14 @@ interface DeviceState {
    *  Manager parity: clicking a card toggles its checkbox here, and
    *  batch operations (broadcast PLAY ALL, etc.) target all of them. */
   selectedIps: string[]
+
+  /** Dedicated Kit target selection. It must never be changed by Manage. */
+  kitSelectedIp: string | null
+  kitSelectedIps: string[]
+
+  /** Dedicated UI/Display target selection. It must never be changed by Manage. */
+  displaySelectedIp: string | null
+  displaySelectedIps: string[]
 
   /** Client-side dismissed list for offline cards. The × button on
    *  an offline card adds the IP here; the sidebar then hides that
@@ -209,6 +226,7 @@ interface DeviceState {
       gpio_a?: number
       gpio_b?: number
       state?: string
+      output_mode?: 'pwm' | 'pam'
     }
   }>
 
@@ -265,6 +283,11 @@ interface DeviceState {
   selectExclusive: (ip: string) => void
   /** Shift+click — contiguous range from the primary, in display order. */
   selectRange: (ip: string, orderedIps: string[]) => void
+  /** Scope-aware counterparts used by the Kit and UI target pickers. */
+  selectScopedDevice: (scope: Exclude<DeviceSelectionScope, 'manage'>, ip: string | null) => void
+  toggleScopedSelect: (scope: Exclude<DeviceSelectionScope, 'manage'>, ip: string) => void
+  selectScopedExclusive: (scope: Exclude<DeviceSelectionScope, 'manage'>, ip: string) => void
+  selectScopedRange: (scope: Exclude<DeviceSelectionScope, 'manage'>, ip: string, orderedIps: string[]) => void
   /** Clear the LAN multi-select set (`selectedIps`) only — leaves the
    *  detail-pane primary (`selectedIp`) alone. Used to keep the USB and
    *  Wi-Fi selections mutually exclusive: serialMaster calls this when the
@@ -377,6 +400,40 @@ const initialSelectedIps = (() => {
   return arr
 })()
 
+const readSelected = (key: string): string | null => {
+  try {
+    const value = localStorage.getItem(key)
+    return value && !isSerialId(value) ? value : null
+  } catch {
+    return null
+  }
+}
+
+const hasStoredValue = (key: string): boolean => {
+  try {
+    return localStorage.getItem(key) !== null
+  } catch {
+    return false
+  }
+}
+
+/** First release of scoped selections: copy the prior shared selection once,
+ * so an upgrade does not silently remove an established Kit/UI target. */
+const initialScopedSelection = (singleKey: string, setKey: string) => {
+  const selected = readSelected(singleKey)
+  const stored = readJsonArray(setKey).filter((ip) => !isSerialId(ip))
+  // An explicit [] is meaningful: don't resurrect the legacy selection after
+  // a user deliberately cleared this surface's targets.
+  const ips = hasStoredValue(setKey) ? stored : initialSelectedIps
+  return {
+    selectedIp: selected ?? ips[0] ?? initialSelected,
+    selectedIps: ips,
+  }
+}
+
+const initialKitSelection = initialScopedSelection(STORAGE_KEY_KIT_SELECTED, STORAGE_KEY_KIT_SELECTED_SET)
+const initialDisplaySelection = initialScopedSelection(STORAGE_KEY_DISPLAY_SELECTED, STORAGE_KEY_DISPLAY_SELECTED_SET)
+
 const initialDismissed = readJsonArray(STORAGE_KEY_DISMISSED)
 
 const persist = (key: string, value: string[] | string | null) => {
@@ -437,6 +494,10 @@ function clearUsbSelectionIfAny() {
 export const useDeviceStore = create<DeviceState>((set) => ({
   selectedIp: initialSelected,
   selectedIps: initialSelectedIps,
+  kitSelectedIp: initialKitSelection.selectedIp,
+  kitSelectedIps: initialKitSelection.selectedIps,
+  displaySelectedIp: initialDisplaySelection.selectedIp,
+  displaySelectedIps: initialDisplaySelection.selectedIps,
   dismissedIps: initialDismissed,
   offlineSince: {},
   infoCache: {},
@@ -534,6 +595,68 @@ export const useDeviceStore = create<DeviceState>((set) => ({
       return { selectedIps: arr, selectedIp: ip }
     }),
 
+  selectScopedDevice: (scope, ip) =>
+    set((s) => {
+      const isKit = scope === 'kit'
+      const current = isKit ? s.kitSelectedIps : s.displaySelectedIps
+      const next = new Set(current)
+      if (ip) next.add(ip)
+      const ips = [...next]
+      persist(isKit ? STORAGE_KEY_KIT_SELECTED : STORAGE_KEY_DISPLAY_SELECTED, ip)
+      persist(isKit ? STORAGE_KEY_KIT_SELECTED_SET : STORAGE_KEY_DISPLAY_SELECTED_SET, ips)
+      return isKit
+        ? { kitSelectedIp: ip, kitSelectedIps: ips }
+        : { displaySelectedIp: ip, displaySelectedIps: ips }
+    }),
+
+  toggleScopedSelect: (scope, ip) =>
+    set((s) => {
+      const isKit = scope === 'kit'
+      const current = isKit ? s.kitSelectedIps : s.displaySelectedIps
+      const currentPrimary = isKit ? s.kitSelectedIp : s.displaySelectedIp
+      const next = new Set(current)
+      let primary: string | null
+      if (next.has(ip)) {
+        next.delete(ip)
+        primary = currentPrimary === ip ? (next.values().next().value ?? null) : currentPrimary
+      } else {
+        next.add(ip)
+        primary = ip
+      }
+      const ips = [...next]
+      persist(isKit ? STORAGE_KEY_KIT_SELECTED : STORAGE_KEY_DISPLAY_SELECTED, primary)
+      persist(isKit ? STORAGE_KEY_KIT_SELECTED_SET : STORAGE_KEY_DISPLAY_SELECTED_SET, ips)
+      return isKit
+        ? { kitSelectedIp: primary, kitSelectedIps: ips }
+        : { displaySelectedIp: primary, displaySelectedIps: ips }
+    }),
+
+  selectScopedExclusive: (scope, ip) =>
+    set(() => {
+      const isKit = scope === 'kit'
+      persist(isKit ? STORAGE_KEY_KIT_SELECTED : STORAGE_KEY_DISPLAY_SELECTED, ip)
+      persist(isKit ? STORAGE_KEY_KIT_SELECTED_SET : STORAGE_KEY_DISPLAY_SELECTED_SET, [ip])
+      return isKit
+        ? { kitSelectedIp: ip, kitSelectedIps: [ip] }
+        : { displaySelectedIp: ip, displaySelectedIps: [ip] }
+    }),
+
+  selectScopedRange: (scope, ip, orderedIps) =>
+    set((s) => {
+      const isKit = scope === 'kit'
+      const anchor = isKit ? s.kitSelectedIp : s.displaySelectedIp
+      const ai = anchor ? orderedIps.indexOf(anchor) : -1
+      const bi = orderedIps.indexOf(ip)
+      const ips = ai < 0 || bi < 0
+        ? [ip]
+        : orderedIps.slice(Math.min(ai, bi), Math.max(ai, bi) + 1)
+      persist(isKit ? STORAGE_KEY_KIT_SELECTED : STORAGE_KEY_DISPLAY_SELECTED, ip)
+      persist(isKit ? STORAGE_KEY_KIT_SELECTED_SET : STORAGE_KEY_DISPLAY_SELECTED_SET, ips)
+      return isKit
+        ? { kitSelectedIp: ip, kitSelectedIps: ips }
+        : { displaySelectedIp: ip, displaySelectedIps: ips }
+    }),
+
   clearSelectedIps: () =>
     set((s) => {
       if (s.selectedIps.length === 0) return {}
@@ -561,10 +684,22 @@ export const useDeviceStore = create<DeviceState>((set) => ({
         ? (selArr[0] ?? null)
         : s.selectedIp
       persist(STORAGE_KEY_SELECTED, primary)
+      const kitIps = s.kitSelectedIps.filter((selected) => selected !== ip)
+      const kitPrimary = s.kitSelectedIp === ip ? (kitIps[0] ?? null) : s.kitSelectedIp
+      const displayIps = s.displaySelectedIps.filter((selected) => selected !== ip)
+      const displayPrimary = s.displaySelectedIp === ip ? (displayIps[0] ?? null) : s.displaySelectedIp
+      persist(STORAGE_KEY_KIT_SELECTED_SET, kitIps)
+      persist(STORAGE_KEY_KIT_SELECTED, kitPrimary)
+      persist(STORAGE_KEY_DISPLAY_SELECTED_SET, displayIps)
+      persist(STORAGE_KEY_DISPLAY_SELECTED, displayPrimary)
       return {
         dismissedIps: arr,
         selectedIps: selArr,
         selectedIp: primary,
+        kitSelectedIps: kitIps,
+        kitSelectedIp: kitPrimary,
+        displaySelectedIps: displayIps,
+        displaySelectedIp: displayPrimary,
       }
     }),
 
@@ -640,10 +775,25 @@ export const useDeviceStore = create<DeviceState>((set) => ({
       const primary = primaryHidden ? (selArr[0] ?? null) : s.selectedIp
       if (primaryHidden) persist(STORAGE_KEY_SELECTED, primary)
 
+      const keep = (ips: string[]) => ips.filter((ip) => !hideSet.has(ip))
+      const kitIps = keep(s.kitSelectedIps)
+      const kitPrimary = s.kitSelectedIp && hideSet.has(s.kitSelectedIp)
+        ? (kitIps[0] ?? null) : s.kitSelectedIp
+      const displayIps = keep(s.displaySelectedIps)
+      const displayPrimary = s.displaySelectedIp && hideSet.has(s.displaySelectedIp)
+        ? (displayIps[0] ?? null) : s.displaySelectedIp
+      persist(STORAGE_KEY_KIT_SELECTED_SET, kitIps)
+      persist(STORAGE_KEY_KIT_SELECTED, kitPrimary)
+      persist(STORAGE_KEY_DISPLAY_SELECTED_SET, displayIps)
+      persist(STORAGE_KEY_DISPLAY_SELECTED, displayPrimary)
       return {
         dismissedIps: dismissedArr,
         selectedIps: selArr,
         selectedIp: primary,
+        kitSelectedIps: kitIps,
+        kitSelectedIp: kitPrimary,
+        displaySelectedIps: displayIps,
+        displaySelectedIp: displayPrimary,
       }
     }),
 
@@ -656,12 +806,31 @@ export const useDeviceStore = create<DeviceState>((set) => ({
       const isStale = (ip: string) => !ip.startsWith('serial:') && !known.has(ip)
       const nextSelectedIps = s.selectedIps.filter((ip) => !isStale(ip))
       const nextSelectedIp = s.selectedIp && isStale(s.selectedIp) ? null : s.selectedIp
+      const nextKitSelectedIps = s.kitSelectedIps.filter((ip) => !isStale(ip))
+      const nextKitSelectedIp = s.kitSelectedIp && isStale(s.kitSelectedIp) ? null : s.kitSelectedIp
+      const nextDisplaySelectedIps = s.displaySelectedIps.filter((ip) => !isStale(ip))
+      const nextDisplaySelectedIp = s.displaySelectedIp && isStale(s.displaySelectedIp) ? null : s.displaySelectedIp
       const setChanged = nextSelectedIps.length !== s.selectedIps.length
       const primaryChanged = nextSelectedIp !== s.selectedIp
-      if (!setChanged && !primaryChanged) return {}
+      const kitSetChanged = nextKitSelectedIps.length !== s.kitSelectedIps.length
+      const kitPrimaryChanged = nextKitSelectedIp !== s.kitSelectedIp
+      const displaySetChanged = nextDisplaySelectedIps.length !== s.displaySelectedIps.length
+      const displayPrimaryChanged = nextDisplaySelectedIp !== s.displaySelectedIp
+      if (!setChanged && !primaryChanged && !kitSetChanged && !kitPrimaryChanged && !displaySetChanged && !displayPrimaryChanged) return {}
       if (setChanged) persist(STORAGE_KEY_SELECTED_SET, nextSelectedIps)
       if (primaryChanged) persist(STORAGE_KEY_SELECTED, nextSelectedIp)
-      return { selectedIps: nextSelectedIps, selectedIp: nextSelectedIp }
+      if (kitSetChanged) persist(STORAGE_KEY_KIT_SELECTED_SET, nextKitSelectedIps)
+      if (kitPrimaryChanged) persist(STORAGE_KEY_KIT_SELECTED, nextKitSelectedIp)
+      if (displaySetChanged) persist(STORAGE_KEY_DISPLAY_SELECTED_SET, nextDisplaySelectedIps)
+      if (displayPrimaryChanged) persist(STORAGE_KEY_DISPLAY_SELECTED, nextDisplaySelectedIp)
+      return {
+        selectedIps: nextSelectedIps,
+        selectedIp: nextSelectedIp,
+        kitSelectedIps: nextKitSelectedIps,
+        kitSelectedIp: nextKitSelectedIp,
+        displaySelectedIps: nextDisplaySelectedIps,
+        displaySelectedIp: nextDisplaySelectedIp,
+      }
     }),
 
   setInfo: (ip, info) =>

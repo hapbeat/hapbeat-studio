@@ -19,54 +19,6 @@ export async function decodeAudioFile(arrayBuffer: ArrayBuffer): Promise<AudioBu
   return ctx.decodeAudioData(arrayBuffer.slice(0))
 }
 
-/** @deprecated Use decodeAudioFile instead */
-export const decodeWavFile = decodeAudioFile
-
-/**
- * Validate WAV constraints from hapbeat-contracts.
- */
-export function validateWavForExport(
-  buffer: AudioBuffer,
-  sampleRate: SampleRate
-): {
-  valid: boolean
-  warnings: string[]
-  errors: string[]
-  estimatedSizeBytes: number
-} {
-  const warnings: string[] = []
-  const errors: string[] = []
-  const estimatedSize = estimateWavSize(buffer.duration, sampleRate, buffer.numberOfChannels)
-
-  if (estimatedSize > 1024 * 1024) {
-    errors.push(`推定ファイルサイズ (${formatFileSize(estimatedSize)}) が 1MB を超えています`)
-  }
-
-  if (buffer.numberOfChannels > 2) {
-    errors.push(`チャンネル数 ${buffer.numberOfChannels} は非対応です（モノラルまたはステレオのみ）`)
-  }
-
-  if (buffer.numberOfChannels === 2) {
-    warnings.push('ステレオファイルです。デバイスでは左チャンネルのみ再生されます')
-  }
-
-  if (buffer.duration > 10) {
-    warnings.push('クリップが 10 秒を超えています。短いクリップ（数百ms〜数秒）を推奨します')
-  }
-
-  const validRates: SampleRate[] = [16000, 24000, 44100]
-  if (!validRates.includes(sampleRate)) {
-    errors.push(`サンプルレート ${sampleRate} Hz は非対応です (16000 / 24000 / 44100 Hz)`)
-  }
-
-  return {
-    valid: errors.length === 0,
-    warnings,
-    errors,
-    estimatedSizeBytes: estimatedSize,
-  }
-}
-
 /**
  * Encode AudioBuffer to PCM WAV Blob (16-bit).
  * Preserves channel count (mono or stereo).
@@ -189,15 +141,6 @@ export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
-}
-
-/**
- * Format duration for display (mm:ss.mmm).
- */
-export function formatDuration(seconds: number): string {
-  const mins = Math.floor(seconds / 60)
-  const secs = seconds % 60
-  return `${mins}:${secs.toFixed(3).padStart(6, '0')}`
 }
 
 /**

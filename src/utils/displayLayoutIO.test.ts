@@ -67,6 +67,21 @@ describe('toFirmwareFormat (Studio → firmware)', () => {
     expect(fw.volume).toBeDefined()
     expect(fw.ui).toBeDefined()
   })
+  it('Band の PWM バイアス操作をボタン設定としてそのまま送る', () => {
+    const state = makeState()
+    state.perButtonActions = {
+      btn_l: {
+        short_press: 'pwm_bias_toggle', long_press: 'none',
+        hold_tmp: 'pwm_bias_hold', hold_latch: 'none', hold_mode: 'momentary',
+      },
+    }
+    expect(toFirmwareFormat(state).display.button_actions.btn_l).toEqual({
+      short_press: 'pwm_bias_toggle',
+      long_press: 'none',
+      hold: 'pwm_bias_hold',
+      hold_mode: 'momentary',
+    })
+  })
 })
 
 describe('fromFirmwareFormat (firmware → Studio)', () => {

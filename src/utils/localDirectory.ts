@@ -27,7 +27,7 @@ const HANDLE_STORE = 'handles'
 /** IDB key for each persisted handle. `workdir` = clip library root,
  *  `kitdir` = optional separate kit output root (e.g. Unity Assets),
  *  `streamdir` = streaming-test source folder (browseable WAV/MP3 root). */
-export type DirectoryHandleKey = 'workdir' | 'kitdir' | 'streamdir'
+export type DirectoryHandleKey = 'workdir' | 'kitdir' | 'streamdir' | 'editordir'
 
 /** IDB key for individual *file* handles (separate from directory handles
  *  so a stale `firmwarefile` doesn't override a `workdir`). */

@@ -17,9 +17,10 @@ export function EnvelopeCanvas({ points, onChange }: EnvelopeCanvasProps) {
     if (!ctx) return
 
     const rect = canvas.getBoundingClientRect()
-    canvas.width = rect.width * window.devicePixelRatio
-    canvas.height = rect.height * window.devicePixelRatio
-    ctx.scale(window.devicePixelRatio, window.devicePixelRatio)
+    const ratio = canvas.ownerDocument.defaultView?.devicePixelRatio ?? 1
+    canvas.width = rect.width * ratio
+    canvas.height = rect.height * ratio
+    ctx.scale(ratio, ratio)
 
     const w = rect.width
     const h = rect.height
@@ -128,6 +129,13 @@ export function EnvelopeCanvas({ points, onChange }: EnvelopeCanvasProps) {
       const hit = getPointAt(e.clientX, e.clientY)
       if (!hit) return
 
+      if (e.button !== 0) return
+      const sameTime = points.findIndex(p => Math.abs(p.time - hit.time) < 0.000001)
+      if (hit.index < 0 && sameTime >= 0) {
+        onChange(points.map((p, i) => i === sameTime ? { ...p, value: hit.value } : p))
+        draggingRef.current = sameTime
+        return
+      }
       if (hit.index >= 0) {
         draggingRef.current = hit.index
       } else {
@@ -161,7 +169,7 @@ export function EnvelopeCanvas({ points, onChange }: EnvelopeCanvasProps) {
       // First and last points: lock time to 0 and 1
       const newPoints = points.map((p, i) => {
         if (i !== idx) return p
-        const newTime = i === 0 ? 0 : i === points.length - 1 ? 1 : time
+        const newTime = i === 0 ? 0 : i === points.length - 1 ? 1 : Math.max(points[i - 1].time + 0.0000001, Math.min(points[i + 1].time - 0.0000001, time))
         return { time: newTime, value }
       })
       newPoints.sort((a, b) => a.time - b.time)

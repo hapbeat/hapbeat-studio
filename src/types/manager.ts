@@ -190,8 +190,17 @@ export interface StudioToManagerMessage {
     | 'set_3d'                  // DuoWL v4 receiver — per-codec 3D effect depth, profile "full" only (§4)
     | 'set_agc'                 // DuoWL v4 receiver — AGC, line-in/HP-codec ADC path (§5, no codec field)
     // --- BandWL v4 PWM experimental firmware (band_v4_pwm build only) ---
-    | 'set_pwm_bias'            // signed DC bias: sign = direction, magnitude = force
-    | 'pwm_tone'                // diagnostic tone (hz / amp / ms)
+    | 'set_pwm_bias'            // persist standing DC bias in device config
+    | 'set_pwm_play_bias'       // persist DC bias selected while audio/tone is active
+    | 'set_pwm_bias_enabled'    // persistently gate saved bias profiles; OFF = zero DC target
+    | 'set_pwm_playback_gain'   // persisted 0..24 dB PAM8003 compensation (PWM experiment)
+    | 'set_pwm_post_play_hold'  // persisted 0..2000 ms playback-bias tail
+    | 'set_pwm_post_play_return' // persisted 0..2000 ms play->standing-bias ramp
+    | 'set_haptic_output_mode'  // persisted runtime output path: pwm direct | pam amp
+    | 'pwm_bias_test'           // bench-only manual activation of the standing/playback profile
+    | 'pwm_rewind'              // bounded manual string take-up pulse
+    | 'pwm_bias_off'            // persistently gate DC bias off; saved profiles remain intact
+    | 'pwm_tone'                // diagnostic tone (hz / amp / ms / wave=sine|square)
     | 'set_volume'              // digital pot level (0..steps-1)
     | 'pwm_status'              // state / carrier / bias / underruns / clips
     | 'pwm_probe'               // gate-level diagnostic; device blocks up to 3 s

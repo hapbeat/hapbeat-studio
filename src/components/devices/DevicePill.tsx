@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
-import { useDeviceStore } from '@/stores/deviceStore'
+import { useDeviceStore, type DeviceSelectionScope } from '@/stores/deviceStore'
 import { DevicesModal } from './DevicesModal'
 import { useI18n } from '@/i18n/I18nProvider'
 import './DevicePill.css'
@@ -8,7 +8,7 @@ import './DevicePill.css'
 /**
  * Selected-device indicator + Devices-modal trigger.
  *
- * The pill displays the user's *current Devices-tab selection*, NOT
+ * The pill displays the selection belonging to its own surface, NOT
  * "what's discovered on the LAN" — switching what the pill shows is
  * the user's job (via the Devices modal / tab), not auto-magic.
  *
@@ -19,10 +19,15 @@ import './DevicePill.css'
  * Shared between Kit (WorkDirBar) and Display (ControlBar) — both
  * surfaces show the same selection summary and open the same modal.
  */
-export function DevicePill({ hapbeatOnly }: { hapbeatOnly?: boolean } = {}) {
+interface DevicePillProps {
+  hapbeatOnly?: boolean
+  selectionScope: Exclude<DeviceSelectionScope, 'manage'>
+}
+
+export function DevicePill({ hapbeatOnly, selectionScope }: DevicePillProps) {
   const { t } = useI18n()
   const { isConnected: helperConnected, devices } = useHelperConnection()
-  const selectedIps = useDeviceStore((s) => s.selectedIps)
+  const selectedIps = useDeviceStore((s) => selectionScope === 'kit' ? s.kitSelectedIps : s.displaySelectedIps)
   const [open, setOpen] = useState(false)
 
   // Resolve selectedIps → DeviceInfo (skip ones that have dropped off
@@ -72,7 +77,7 @@ export function DevicePill({ hapbeatOnly }: { hapbeatOnly?: boolean } = {}) {
       ) : null}
       {/* "Devices ▸" 個別ボタンは header の Devices タブと冗長なので削除済み。
           pill 自体クリックでモーダルを開く。 */}
-      <DevicesModal open={open} onClose={() => setOpen(false)} hapbeatOnly={hapbeatOnly} />
+      <DevicesModal open={open} onClose={() => setOpen(false)} hapbeatOnly={hapbeatOnly} selectionScope={selectionScope} />
     </>
   )
 }

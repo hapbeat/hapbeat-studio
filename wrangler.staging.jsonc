@@ -1,0 +1,12 @@
+{
+  // Public staging URL approved by the user. Production uses wrangler.jsonc.
+  "name": "hapbeat-studio-staging",
+  "account_id": "9b9f28bf4d3cd2ce7a7b32ff693ddedd",
+  "compatibility_date": "2026-09-15",
+  "workers_dev": true,
+  "preview_urls": false,
+  "routes": [],
+  "assets": {
+    "directory": "./dist"
+  }
+}

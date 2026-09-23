@@ -1,8 +1,5 @@
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
-// Wave Editor は WIP のため初回公開では非表示にする (2026-05-07)。
-// 再有効化する時は Tab union / TABS / TAB_LABELS / PersistentTab block / import を
-// 一括で復活させるだけで OK。コンポーネント本体 (components/waveform/) は
-// 削除せず保持してある。
+import { WaveformEditor } from '@/components/waveform/WaveformEditor'
 import { DisplayEditor } from '@/components/display/DisplayEditor'
 import { KitManager } from '@/components/kit/KitManager'
 import { Devices } from '@/components/devices/Devices'
@@ -18,10 +15,11 @@ import { useHelperUpdate, useStudioFrozenNotice } from '@/hooks/useReleaseNotice
 import { MIN_HELPER_VERSION } from '@/config/helperCompat'
 import { useI18n } from '@/i18n/I18nProvider'
 import './App.css'
+import { handlePlaybackShortcut } from '@/utils/playbackShortcut'
 
-type Tab = 'kit' | 'display' | 'devices'
+type Tab = 'editor' | 'kit' | 'display' | 'devices'
 
-const TABS: Tab[] = ['kit', 'display', 'devices']
+const TABS: Tab[] = ['editor', 'kit', 'display', 'devices']
 
 const DEFAULT_TAB: Tab = 'kit'
 
@@ -54,14 +52,13 @@ function PersistentTab({
 export function App() {
   const { locale, setLocale, t } = useI18n()
   const tabLabels: Record<Tab, { main: string; sub: string }> = {
+    editor: { main: t('tabs.editor.main'), sub: t('tabs.editor.sub') },
     kit: { main: t('tabs.kit.main'), sub: t('tabs.kit.sub') },
     display: { main: t('tabs.ui.main'), sub: t('tabs.ui.sub') },
     devices: { main: t('tabs.manage.main'), sub: t('tabs.manage.sub') },
   }
   const [activeTab, setActiveTab] = useState<Tab>(() => {
     const saved = localStorage.getItem('hapbeat-studio-tab')
-    // 旧 'waveform' タブの localStorage 値が残っていても安全に
-    // DEFAULT_TAB へフォールバックさせる (TABS に含まれない値は無視)。
     return (TABS as string[]).includes(saved ?? '') ? (saved as Tab) : DEFAULT_TAB
   })
 
@@ -82,6 +79,11 @@ export function App() {
       next.add(activeTab)
       return next
     })
+  }, [activeTab])
+  useEffect(() => {
+    const handleSpace = (event: KeyboardEvent) => handlePlaybackShortcut(event, activeTab, event => window.dispatchEvent(event))
+    window.addEventListener('keydown', handleSpace, true)
+    return () => window.removeEventListener('keydown', handleSpace, true)
   }, [activeTab])
   const { isConnected, helperVersion, helperCompat, send } = useHelperConnection()
   const { toast } = useToast()
@@ -133,10 +135,10 @@ export function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>
-          {t('common.brand')}
+        <div className="header-title">
+          <span className="header-brand"><span className="header-brand-full">Hapbeat </span>Studio</span>
           <VersionSwitcher compact />
-        </h1>
+        </div>
         <div className="header-toggle header-toggle-tabs">
           {TABS.map((tab) => (
             <button
@@ -145,6 +147,7 @@ export function App() {
               onClick={() => setActiveTab(tab)}
             >
               <span className="tab-btn-main">{tabLabels[tab].main}</span>
+              {tab === 'editor' && <span className="tab-beta-badge" aria-label={t('editor.beta')}>BETA</span>}
               <span className="tab-btn-sub">{tabLabels[tab].sub}</span>
             </button>
           ))}
@@ -185,7 +188,7 @@ export function App() {
               }
               >
               <span className={`status-dot ${helperCompat === 'outdated' ? 'outdated' : 'connected'}`} />
-              {t('common.helper')}
+              <span className="connection-status-label">{t('common.helper')}</span>
             </button>
           ) : (
             <button
@@ -196,7 +199,7 @@ export function App() {
               title={t('header.helper.setup')}
             >
               <span className="status-dot disconnected" />
-              {t('common.helper')}
+              <span className="connection-status-label">{t('common.helper')}</span>
             </button>
           )}
         </div>
@@ -243,7 +246,10 @@ export function App() {
         helperVersion={helperVersion}
         helperCompat={helperCompat}
       />
-      <main className="tab-content">
+      <main className={`tab-content ${activeTab === 'editor' ? 'tab-content-editor' : ''}`}>
+        <PersistentTab active={activeTab === 'editor'} visited={visitedTabs.has('editor')}>
+          <WaveformEditor active={activeTab === 'editor'} />
+        </PersistentTab>
         <PersistentTab active={activeTab === 'kit'} visited={visitedTabs.has('kit')}>
           <KitManager />
         </PersistentTab>

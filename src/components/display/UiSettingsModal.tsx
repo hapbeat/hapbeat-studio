@@ -34,7 +34,7 @@ export function UiSettingsModal({
   onClose,
 }: UiSettingsModalProps) {
   const { t } = useI18n()
-  const selectedIps = useDeviceStore((s) => s.selectedIps)
+  const selectedIps = useDeviceStore((s) => s.displaySelectedIps)
   const { devices } = useHelperConnection()
   const onlineSelected = devices.filter(
     (d) => d.online && selectedIps.includes(d.ipAddress),

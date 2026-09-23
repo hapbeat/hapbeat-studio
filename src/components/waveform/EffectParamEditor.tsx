@@ -12,6 +12,7 @@ import type {
   MonoConvertParams,
   EqBand,
 } from '@/types/waveform'
+import { useI18n } from '@/i18n/I18nProvider'
 import { EnvelopeCanvas } from './EnvelopeCanvas'
 
 interface EffectParamEditorProps {
@@ -21,6 +22,9 @@ interface EffectParamEditorProps {
 
 export function EffectParamEditor({ params, onChange }: EffectParamEditorProps) {
   switch (params.type) {
+    case 'trim': case 'cut': return <div className="editor-range-params">{(['start', 'end'] as const).map(key => <label key={key}>{key}<input type="number" min={0} step={.001} value={params[key]} onChange={event => onChange({...params, [key]: Number(event.target.value)})} /></label>)}</div>
+    case 'repitch': return <PitchShiftEditor params={{ type: 'pitch-shift', semitones: params.semitones }} onChange={p => { if (p.type === 'pitch-shift') onChange({ type: 'repitch', semitones: p.semitones }) }} />
+    case 'noise-gate': return <NoiseGateEditor params={params} onChange={onChange} />
     case 'pitch-shift':
       return <PitchShiftEditor params={params} onChange={onChange} />
     case 'time-stretch':
@@ -143,7 +147,7 @@ function FilterEditor({
           max={20}
           step={0.1}
           value={params.Q}
-          onChange={(e) => onChange({ ...params, Q: Number(e.target.value) })}
+          onChange={(e) => onChange({ ...params, Q: Math.max(.1, Math.min(20, Number(e.target.value))) })}
         />
       </div>
     </>
@@ -193,7 +197,7 @@ function EqEditor({
               value={band.frequency}
               min={20}
               max={20000}
-              onChange={(e) => updateBand(i, { frequency: Number(e.target.value) })}
+              onChange={(e) => updateBand(i, { frequency: Math.max(20, Math.min(20000, Number(e.target.value))) })}
             />
           </div>
           <div className="eq-band-field">
@@ -204,7 +208,7 @@ function EqEditor({
               min={-24}
               max={24}
               step={0.5}
-              onChange={(e) => updateBand(i, { gain: Number(e.target.value) })}
+              onChange={(e) => updateBand(i, { gain: Math.max(-24, Math.min(24, Number(e.target.value))) })}
             />
           </div>
           <div className="eq-band-field">
@@ -215,7 +219,7 @@ function EqEditor({
               min={0.1}
               max={20}
               step={0.1}
-              onChange={(e) => updateBand(i, { Q: Number(e.target.value) })}
+              onChange={(e) => updateBand(i, { Q: Math.max(.1, Math.min(20, Number(e.target.value))) })}
             />
           </div>
           <button className="eq-band-remove" onClick={() => removeBand(i)} title="Remove band">
@@ -366,4 +370,18 @@ function MonoConvertEditor({
       </select>
     </div>
   )
+}
+
+function NoiseGateEditor({ params, onChange }: { params: Extract<EffectParams, {type: 'noise-gate'}>; onChange: (p: EffectParams) => void }) {
+  const { t } = useI18n()
+  return <div className="effect-param-group">
+    <p>{t('editor.gateHint')}</p>
+    {([
+      ['thresholdDb', 'Threshold (dB)', -80, 0, 1],
+      ['attackMs', 'Attack (ms)', .1, 100, .1],
+      ['releaseMs', 'Release (ms)', 1, 1000, 1],
+    ] as const).map(([key, label, min, max, step]) => <label key={key} className="editor-gate-param">{label} <span>{params[key]}</span>
+      <input type="range" min={min} max={max} step={step} value={params[key]} onChange={e => onChange({ ...params, [key]: Number(e.target.value) })} />
+    </label>)}
+  </div>
 }

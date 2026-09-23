@@ -253,12 +253,16 @@ export function DeviceDetail() {
   const [pwmStatus, setPwmStatus] = useState<PwmStatusReadout | undefined>(undefined)
   const [pwmProbeTick, setPwmProbeTick] = useState(0)
   const [pwmVolumeSteps, setPwmVolumeSteps] = useState<number | undefined>(undefined)
+  // A completed PWM config/action write is the right time to query the device
+  // again. This avoids presenting a browser draft as if it were saved in NVS.
+  const [pwmConfigTick, setPwmConfigTick] = useState(0)
 
   // Drop the PWM readout on every device switch — it is per-device state and
   // showing the previous device's bias/status would be actively misleading.
   useEffect(() => {
     setPwmStatus(undefined)
     setPwmVolumeSteps(undefined)
+    setPwmConfigTick(0)
   }, [selectedIp])
 
   const clearCachesFor = useDeviceStore((s) => s.clearCachesFor)
@@ -376,6 +380,8 @@ export function DeviceDetail() {
           gpio_a?: number
           gpio_b?: number
           state?: string
+          bias_enabled?: boolean
+          output_mode?: 'pwm' | 'pam'
         } | undefined,
         // SoftAP extension fields (firmware ≥ v0.1.0)
         mode: p.mode as 'sta' | 'ap' | undefined,
@@ -452,11 +458,20 @@ export function DeviceDetail() {
       if (typeof p.state === 'string') {
         setPwmStatus({
           state: p.state,
+          output_mode: p.output_mode as 'pwm' | 'pam' | undefined,
+          bias_available: p.bias_available as boolean | undefined,
           carrier_hz: p.carrier_hz as number | undefined,
           gpio_a: p.gpio_a as number | undefined,
           gpio_b: p.gpio_b as number | undefined,
           bias_ma: p.bias_ma as number | undefined,
           bias_q15: p.bias_q15 as number | undefined,
+          idle_bias_q15: p.idle_bias_q15 as number | undefined,
+          play_bias_q15: p.play_bias_q15 as number | undefined,
+          playback_gain_db: p.playback_gain_db as number | undefined,
+          post_play_hold_ms: p.post_play_hold_ms as number | undefined,
+          post_play_hold_active: p.post_play_hold_active as boolean | undefined,
+          post_play_return_ms: p.post_play_return_ms as number | undefined,
+          post_play_return_active: p.post_play_return_active as boolean | undefined,
           // `volume` is the 0-127 wiper; `volume_level`/`volume_steps` are the
           // slider's unit — keep all three, the panel picks the right one.
           volume: p.volume as number | undefined,
@@ -465,6 +480,13 @@ export function DeviceDetail() {
           underruns: p.underruns as number | undefined,
           clips: p.clips as number | undefined,
           tone_active: p.tone_active as boolean | undefined,
+          playback_active: p.playback_active as boolean | undefined,
+          local_playback_active: p.local_playback_active as boolean | undefined,
+          stream_playback_active: p.stream_playback_active as boolean | undefined,
+          rewind_active: p.rewind_active as boolean | undefined,
+          manual_bias_active: p.manual_bias_active as boolean | undefined,
+          manual_bias_hold: p.manual_bias_hold as boolean | undefined,
+          manual_bias_profile: p.manual_bias_profile as 'idle' | 'play' | undefined,
         })
       }
     } else if (t === 'pwm_probe_result') {
@@ -506,6 +528,13 @@ export function DeviceDetail() {
         pushLog('helper', `${tag} ${line}`)
       }
       const results = p.results as Array<Record<string, unknown>> | undefined
+      if (ok && typeof p.cmd === 'string' && [
+        'set_pwm_bias', 'set_pwm_play_bias', 'set_pwm_bias_enabled', 'pwm_bias_test', 'pwm_rewind',
+        'pwm_bias_off', 'pwm_tone', 'set_pwm_playback_gain', 'set_pwm_post_play_hold', 'set_pwm_post_play_return',
+        'set_haptic_output_mode',
+      ].includes(p.cmd)) {
+        setPwmConfigTick((n) => n + 1)
+      }
       if (Array.isArray(results)) {
         // set_volume is the only place the device reports its step count
         // (pwm_status doesn't carry it), so latch it from the reply.
@@ -1035,6 +1064,7 @@ export function DeviceDetail() {
             status={pwmStatus}
             probeTick={pwmProbeTick}
             volumeSteps={pwmVolumeSteps}
+            configTick={pwmConfigTick}
           />
         )}
 

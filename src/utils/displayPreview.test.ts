@@ -73,4 +73,31 @@ describe('getElementPreviewText — セル幅 = 要素幅 の不変条件', () =
     expect(getElementPreviewText('mqtt_status')).toBe('[NG]')
     expect(textCells(getElementPreviewText('mqtt_status'))).toBe(4)
   })
+  it('pwm_bias_state は standard=8 / compact=4 セルで既定 OFF', () => {
+    expect(getElementPreviewText('pwm_bias_state')).toBe('Bias:OFF')
+    expect(textCells(getElementPreviewText('pwm_bias_state'))).toBe(8)
+    expect(getElementPreviewText('pwm_bias_state', undefined, 'compact')).toBe('B:--')
+    expect(textCells(getElementPreviewText('pwm_bias_state', undefined, 'compact'))).toBe(4)
+  })
+
+  it('pwm_bias_value は standard=8 / compact=4 セルで実効バイアスを表す', () => {
+    expect(getElementPreviewText('pwm_bias_value')).toBe('Bias:10%')
+    expect(textCells(getElementPreviewText('pwm_bias_value'))).toBe(8)
+    expect(getElementPreviewText('pwm_bias_value', undefined, 'compact')).toBe('10% ')
+    expect(textCells(getElementPreviewText('pwm_bias_value', undefined, 'compact'))).toBe(4)
+  })
+
+  it('average_power は standard=8 / compact=4 セルで推定値と分かる表示にする', () => {
+    expect(getElementPreviewText('average_power')).toBe('P~1.2W  ')
+    expect(textCells(getElementPreviewText('average_power'))).toBe(8)
+    expect(getElementPreviewText('average_power', undefined, 'compact')).toBe('1.2W')
+    expect(textCells(getElementPreviewText('average_power', undefined, 'compact'))).toBe(4)
+  })
+
+  it('estimated_runtime は standard=8 / compact=4 セルで分単位の推定値を表示する', () => {
+    expect(getElementPreviewText('estimated_runtime')).toBe('T~245m  ')
+    expect(textCells(getElementPreviewText('estimated_runtime'))).toBe(8)
+    expect(getElementPreviewText('estimated_runtime', undefined, 'compact')).toBe('245m')
+    expect(textCells(getElementPreviewText('estimated_runtime', undefined, 'compact'))).toBe(4)
+  })
 })

@@ -120,7 +120,7 @@ body {
   flex-shrink: 0;
 }
 
-.app-header h1 {
+.header-title {
   font-size: 20px;
   font-weight: 600;
   color: var(--accent-light);
@@ -129,6 +129,14 @@ body {
   align-items: center;
   gap: 8px;
   justify-self: start;
+}
+
+/* Preserve navigation space on narrow windows; show branding when it fits. */
+.header-title {
+  white-space: nowrap;
+}
+.header-brand {
+  display: none;
 }
 
 /* バージョンをタイトル横にタグ表示 (Manage で旧版へ切替可) */
@@ -232,6 +240,12 @@ select.app-version-select option {
   width: 64px;
   height: 28px;
   padding: 0;
+}
+
+.connection-status-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* helper version は常時表示せず hover tooltip で見せる。
@@ -519,6 +533,33 @@ select.app-version-select option {
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.02em;
+  max-width: 4.5em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.header-toggle-tabs .tab-btn-stacked .tab-beta-badge {
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: #ba6d16;
+  color: #fff;
+  font-size: 7px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: .03em;
+}
+.editor-beta-label {
+  flex: 0 0 auto;
+  border-radius: 4px;
+  padding: 3px 6px;
+  background: #ba6d16;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .06em;
 }
 .header-toggle-tabs .tab-btn-stacked .tab-btn-sub {
   font-size: 10.5px;
@@ -533,14 +574,77 @@ select.app-version-select option {
   opacity: 0.85;
 }
 
-/* Narrow viewport: 副題は隠して main のみ表示。
- * sub が短い 1 語に縮んだので、breakpoint を 720px まで下げる
- * (= ほとんどの実用幅で sub を維持できる)。 */
-@media (max-width: 720px) {
-  .header-toggle-tabs {
-    margin: 0 12px;
+/* Header compaction order (highest priority first): tabs → Helper → version
+ * selector → language → Docs. Keep every item in the same, single header row:
+ * the version picker stays in the left slot where it originally belonged. */
+@media (max-width: 900px) {
+  .app-header {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    column-gap: 8px;
   }
+
+  .header-toggle-tabs {
+    grid-column: 2;
+    justify-self: stretch;
+    width: auto;
+  }
+
+  .header-meta {
+    grid-column: 3;
+  }
+}
+
+/* First utility to disappear after the brand. */
+@media (max-width: 760px) {
+  .header-docs-link {
+    display: none;
+  }
+}
+
+/* Tabs retain their primary 3–4-character label; only the subtitle goes. */
+@media (max-width: 720px) {
   .header-toggle-tabs .tab-btn-stacked .tab-btn-sub {
+    display: none;
+  }
+
+  .header-toggle-tabs .tab-btn-stacked {
+    padding-inline: 6px;
+  }
+}
+
+@media (max-width: 660px) {
+  .language-switcher {
+    display: none;
+  }
+}
+
+@media (max-width: 550px) {
+  .app-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .header-title {
+    display: none;
+  }
+
+  .header-toggle-tabs {
+    grid-column: 1;
+  }
+
+  .header-meta {
+    grid-column: 2;
+  }
+}
+
+/* The Helper remains operable even at phone widths.  Its status dot and
+ * aria-label communicate the same state after the text label is removed. */
+@media (max-width: 390px) {
+  .connection-status--icon {
+    justify-content: center;
+    width: 28px;
+  }
+
+  .connection-status-label {
     display: none;
   }
 }
@@ -752,3 +856,6 @@ select.app-version-select option {
     padding: 16px;
   }
 }
+
+@media (min-width: 1050px) { .header-brand { display: inline; } .header-brand-full { display: none; } }
+@media (min-width: 1300px) { .header-brand-full { display: inline; } }

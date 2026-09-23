@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { DisplayElementMeta, DisplayElementType } from '@/types/display'
 import { getElementSize } from '@/types/display'
+import type { DeviceModel } from '@/types/device'
 import { setCurrentDragType, setCurrentDragVariant } from '@/components/display/DisplayEditor'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import './ElementPalette.css'
@@ -32,6 +33,8 @@ export interface PaletteItemDef {
   variant?: string
   /** S/M/L picker を出す場合の variant 候補 (compact/standard/wide パターン) */
   variants?: VariantOption[]
+  /** このデバイスモデルでだけ要素カードを表示する。未指定は全モデル。 */
+  models?: DeviceModel[]
 }
 
 export interface PaletteSection {
@@ -66,6 +69,10 @@ export const PALETTE_SECTIONS: PaletteSection[] = [
     items: [
       { type: 'volume',            label: 'Volume',     description: '音量',        icon: '♪' },
       { type: 'volume_mode',       label: 'Vol Mode',   description: 'Fix/Var',     icon: 'M' },
+      { type: 'pwm_bias_state',    label: 'Fixed Bias', description: '固定バイアス ON/OFF', icon: 'B', variants: sizeVariantsSM, models: ['band_wl'] },
+      { type: 'pwm_bias_value',    label: 'Bias Value', description: '現在適用中のバイアス%', icon: '%', variants: sizeVariantsSM, models: ['band_wl'] },
+      { type: 'average_power',     label: 'Avg Power',  description: '平均消費電力（推定）', icon: 'W', variants: sizeVariantsSM, models: ['band_wl'] },
+      { type: 'estimated_runtime', label: 'Runtime',    description: '推定残り稼働時間（分）', icon: 'T', variants: sizeVariantsSM, models: ['band_wl'] },
       { type: 'battery',                                   label: 'Battery %',   description: '残量%',     icon: '⚡' },
       { type: 'battery', variant: 'bar',                   label: 'Battery Bar', description: '残量バー',   icon: '█' },
       { type: 'connection_status', label: 'Status',     description: 'Wi-Fi+アプリ', icon: '◉' },
@@ -112,7 +119,7 @@ export const PALETTE_SECTIONS: PaletteSection[] = [
 ]
 
 const PALETTE_COPY: Array<{ title: MessageId; hint: MessageId; descriptions: MessageId[] }> = [
-  { title: 'palette.status.title', hint: 'palette.status.hint', descriptions: ['palette.status.volume', 'palette.status.volume', 'palette.status.batteryPercent', 'palette.status.batteryBar', 'palette.status.connection', 'palette.status.mqtt', 'palette.status.alert'] },
+  { title: 'palette.status.title', hint: 'palette.status.hint', descriptions: ['palette.status.volume', 'palette.status.volume', 'palette.status.bias', 'palette.status.biasValue', 'palette.status.averagePower', 'palette.status.runtime', 'palette.status.batteryPercent', 'palette.status.batteryBar', 'palette.status.connection', 'palette.status.mqtt', 'palette.status.alert'] },
   { title: 'palette.controls.title', hint: 'palette.controls.hint', descriptions: ['palette.controls.player', 'palette.controls.group', 'palette.controls.page'] },
   { title: 'palette.identity.title', hint: 'palette.identity.hint', descriptions: ['palette.identity.host', 'palette.identity.host', 'palette.identity.app', 'palette.identity.position', 'palette.identity.text'] },
   { title: 'palette.network.title', hint: 'palette.network.hint', descriptions: ['palette.network.hint', 'palette.network.ssid', 'palette.network.ip'] },
@@ -178,9 +185,10 @@ interface ElementPaletteProps {
   selectedType: DisplayElementType | null
   onSelectType: (type: DisplayElementType | null) => void
   usedTypes: Set<DisplayElementType>
+  deviceModel: DeviceModel
 }
 
-export function ElementPalette({ selectedType, onSelectType, usedTypes }: ElementPaletteProps) {
+export function ElementPalette({ selectedType, onSelectType, usedTypes, deviceModel }: ElementPaletteProps) {
   const { t } = useI18n()
   // size variant (S/M/L) の選択状態を type 単位で保持。デフォルトは 'standard'。
   // type をまたぐ集約 state: { 'address': 'wide', 'app_name': 'compact', ... }
@@ -205,6 +213,7 @@ export function ElementPalette({ selectedType, onSelectType, usedTypes }: Elemen
           </header>
           <div className="palette-grid">
             {sec.items.map((item, itemIndex) => {
+              if (item.models && !item.models.includes(deviceModel)) return null
               const description = t(PALETTE_COPY[sectionIndex].descriptions[itemIndex])
               const selectedVariant = item.variants
                 ? (variantByType[item.type] ?? 'standard')

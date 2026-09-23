@@ -426,7 +426,7 @@ function WorkDirBar() {
           DevicePill stays layout-neutral so this divider takes the
           push instead. */}
       <span className="workdir-divider" style={{ marginLeft: 'auto' }} />
-      <DevicePill />
+      <DevicePill selectionScope="kit" />
       {volumeWiper !== null && (
         <>
           <span className="workdir-divider" />
@@ -444,6 +444,8 @@ function WorkDirBar() {
 function useAudioPreview() {
   const { t } = useI18n()
   const [playingId, setPlayingId] = useState<string | null>(null)
+  const playingIdRef = useRef<string | null>(null)
+  const runIdRef = useRef(0)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const { isConnected, devices, send } = useHelperConnection()
@@ -452,25 +454,31 @@ function useAudioPreview() {
   const hasDevice = isConnected && devices.length > 0
 
   const stop = useCallback(() => {
+    runIdRef.current += 1
     if (audioRef.current) { audioRef.current.pause(); audioRef.current = null }
     if (abortRef.current) { abortRef.current.abort(); abortRef.current = null }
+    playingIdRef.current = null
     setPlayingId(null)
   }, [])
 
   /** Toggle play/stop. intensity (0.0-1.0) is applied to PCM before streaming. */
   const toggle = useCallback(async (id: string, getBlob: () => Promise<Blob | undefined>, intensity = 1.0) => {
-    if (playingId === id) { stop(); return }
+    if (playingIdRef.current === id) { stop(); return }
     stop()
+    const runId = runIdRef.current
+    playingIdRef.current = id
+    setPlayingId(id)
     const blob = await getBlob()
+    if (runIdRef.current !== runId) return
     if (!blob) {
       // 接続中のフォルダに source / 生成済み WAV が無い（またはフォルダ未接続）。
       // 従来は無言で何もせず「クリックしても鳴らない」
       // 状態だったので、原因が分かるトーストを出す。
       toast(t('kit.audioMissing'), 'error')
+      playingIdRef.current = null
+      setPlayingId(null)
       return
     }
-
-    setPlayingId(id)
 
     // Resolve playback targets exactly like Deploy does (KitManager
     // `deployTargets`): online playback devices (receivers / no-role),
@@ -479,12 +487,12 @@ function useAudioPreview() {
     // `targets`, so Helper's `_resolve_targets` broadcast it to every
     // known device and clips played on devices the user never selected
     // (bug report 2026-06-24).
-    const { selectedIps } = useDeviceStore.getState()
+    const { kitSelectedIps } = useDeviceStore.getState()
     const isPlayback = (d: DeviceInfo) => !d.role || d.role === 'receiver'
     const onlinePlayback = devices.filter((d) => d.online && isPlayback(d))
-    const targetIps = (selectedIps.length === 0
+    const targetIps = (kitSelectedIps.length === 0
       ? onlinePlayback
-      : onlinePlayback.filter((d) => selectedIps.includes(d.ipAddress))
+      : onlinePlayback.filter((d) => kitSelectedIps.includes(d.ipAddress))
     ).map((d) => d.ipAddress)
 
     if (hasDevice && targetIps.length > 0) {
@@ -494,35 +502,48 @@ function useAudioPreview() {
       const sendToTargets = (msg: import('@/types/manager').ManagerMessage) =>
         send({ type: msg.type, payload: { ...msg.payload, targets: targetIps } })
 
-      // Query wiper from a selected device (targeted, not broadcast).
-      sendToTargets({ type: 'query_volume', payload: {} })
-
-      const { streamClip } = await import('@/utils/audioStreamer')
       const controller = new AbortController()
       abortRef.current = controller
+      const { streamClip } = await import('@/utils/audioStreamer')
+      if (runIdRef.current !== runId) return
       try {
-        await streamClip(blob, sendToTargets, { signal: controller.signal, intensity })
+        await streamClip(blob, sendToTargets, {
+          signal: controller.signal,
+          intensity,
+          cacheKey: `kit-preview:${id}`,
+        })
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') { /* cancelled */ }
         else console.error('Streaming failed:', err)
+      } finally {
+        if (runIdRef.current === runId) {
+          playingIdRef.current = null
+          setPlayingId(null)
+          if (abortRef.current === controller) abortRef.current = null
+        }
       }
-      setPlayingId(null)
-      abortRef.current = null
     } else {
       // No online playback target (not connected, or the selected
       // device is offline / not a playback device). Fall back to browser
       // audio rather than broadcasting to every device.
-      if (hasDevice && selectedIps.length > 0) {
+      if (hasDevice && kitSelectedIps.length > 0) {
         toast(t('kit.offlineBrowserAudio'), 'info')
       }
       const url = URL.createObjectURL(blob)
       const audio = new Audio(url)
       audio.volume = Math.min(1, Math.max(0, intensity))
       audioRef.current = audio
-      audio.onended = () => { setPlayingId(null); URL.revokeObjectURL(url); audioRef.current = null }
+      audio.onended = () => {
+        if (runIdRef.current === runId) {
+          playingIdRef.current = null
+          setPlayingId(null)
+          audioRef.current = null
+        }
+        URL.revokeObjectURL(url)
+      }
       audio.play()
     }
-  }, [playingId, stop, hasDevice, devices, send, toast, t])
+  }, [stop, hasDevice, devices, send, toast, t])
 
   /** Get current device wiper value (null if unavailable) */
   const getDeviceWiper = useCallback((): number | null => {
@@ -805,11 +826,17 @@ function ClipsPanel() {
     else toast('Kit not found', 'error')
   }, [activeKitId, activeKitSaving, addEventToKit, toast, getIntensity, getClipAudio])
 
+  useEffect(() => {
+    const playSelected = () => { if (activeSelection?.panel === 'library' && selectedId) void toggle(selectedId, () => getClipAudio(selectedId), getIntensity(selectedId)) }
+    window.addEventListener('studio:kit-playback', playSelected)
+    return () => window.removeEventListener('studio:kit-playback', playSelected)
+  }, [activeSelection, selectedId, toggle, getClipAudio, getIntensity])
+
   // キーボードショートカット: Space=再生、↑↓=選択移動、←→=Amp 増減
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const panel = panelRef.current
-      if (!panel) return
+      if (!panel || panel.getClientRects().length === 0) return
       // テキスト入力中はスキップ。range スライダー (intensity) 上では:
       //   - ←→ は native の value adjust に任せる (既存挙動)
       //   - ↑↓ は card 切替に振る (panel handler で扱う + e.preventDefault で
@@ -1347,12 +1374,22 @@ function KitEditor() {
     if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   }, [selectedEventId])
 
+  useEffect(() => {
+    const playSelected = () => {
+      if (editLocked || activeSelection?.panel !== 'kit') return
+      const event = sortedEvents.find(item => item.id === selectedEventId)
+      if (event) void togglePreview(event.id, () => getKitEventAudio(event.id), event.intensity)
+    }
+    window.addEventListener('studio:kit-playback', playSelected)
+    return () => window.removeEventListener('studio:kit-playback', playSelected)
+  }, [editLocked, activeSelection, sortedEvents, selectedEventId, togglePreview, getKitEventAudio])
+
   // Kit 内のキーボード操作: Space=再生、↑↓=選択移動、←→=intensity ±0.05
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (editLocked) return
       const panel = kitPanelRef.current
-      if (!panel || !activeKit) return
+      if (!panel || panel.getClientRects().length === 0 || !activeKit) return
       // テキスト入力中はスキップ。range スライダー (intensity) 上では:
       //   - ←→ は native の value adjust に任せる (既存挙動)
       //   - ↑↓ は card 切替に振る (panel handler で扱う + e.preventDefault で
@@ -2014,8 +2051,8 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
 }) {
   const { t } = useI18n()
   const { toast } = useToast()
-  const { lastMessage } = useHelperConnection()
-  const selectedIps = useDeviceStore((s) => s.selectedIps)
+  const { subscribe } = useHelperConnection()
+  const selectedIps = useDeviceStore((s) => s.kitSelectedIps)
   const workDirHandle = useLibraryStore((s) => s.workDirHandle)
 
   // Kits only go to PLAYBACK devices (receivers / no-role legacy). A
@@ -2038,10 +2075,9 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
   // mirroring otaStore.lastProgressAt / OtaController's watchdog.
   const [progressByIp, setProgressByIp] = useState<Record<string, DeployProgressState>>({})
 
-  useEffect(() => {
-    if (!lastMessage) return
-    const messageType = lastMessage.type
-    const p = lastMessage.payload as Record<string, unknown>
+  useEffect(() => subscribe((message) => {
+    const messageType = message.type
+    const p = message.payload as Record<string, unknown>
     if (messageType === 'deploy_progress' && typeof p.ip === 'string') {
       setProgressByIp((cur) => ({
         ...cur,
@@ -2079,7 +2115,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
       // the device" hint in its message text.
       if (!ok) toast(t('kit.deliveryFailed', { ip, message: msg }), 'error')
     }
-  }, [lastMessage, toast, t])
+  }), [subscribe, toast, t])
 
   // Stuck detection (same shape as OtaController's watchdog): a row that
   // has started transferring but got neither `deploy_progress` nor

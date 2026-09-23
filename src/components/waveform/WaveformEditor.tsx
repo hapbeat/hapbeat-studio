@@ -1,161 +1,198 @@
-import { useRef, useCallback, useEffect, Component, type ReactNode } from 'react'
-import { WaveformDisplay, type WaveformDisplayHandle } from './WaveformDisplay'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { WaveformDisplay } from './WaveformDisplay'
 import { WaveformToolbar } from './WaveformToolbar'
 import { TransportBar } from './TransportBar'
 import { StatusBar } from './StatusBar'
+import { WaveformThumbnail } from './WaveformThumbnail'
 import { EffectsPanel } from './EffectsPanel'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { useI18n } from '@/i18n/I18nProvider'
+import { useHelperConnection } from '@/hooks/useHelperConnection'
+import { EditorPlayback } from '@/utils/editorPlayback'
+import { cropBuffer } from '@/utils/audioDsp'
+import { encodeWavBlob } from '@/utils/wavIO'
+import type { SampleRate } from '@/types/waveform'
 import './WaveformEditor.css'
+import { EditorDock } from './EditorDock'
+import { useEditorSettings } from '@/stores/editorSettings'
+import { EditorBufferPlayer } from '@/utils/editorBufferPlayer'
+import { useEditorPreview } from '@/hooks/useEditorPreview'
+import { sourceGroup } from '@/utils/editorWaveform'
 
-/** Error boundary to prevent full-page crash */
-class EditorErrorBoundary extends Component<
-  { children: ReactNode; errorTitle: string; retryLabel: string },
-  { error: Error | null }
-> {
-  state: { error: Error | null } = { error: null }
-
-  static getDerivedStateFromError(error: Error) {
-    return { error }
-  }
-
-  componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error('WaveformEditor error:', error, info)
-  }
-
-  render() {
-    if (this.state.error) {
-      return (
-        <div className="waveform-error-boundary">
-          <div className="error-title">{this.props.errorTitle}</div>
-          <div className="error-message">{this.state.error.message}</div>
-          <button
-            className="toolbar-btn"
-            onClick={() => this.setState({ error: null })}
-          >
-            {this.props.retryLabel}
-          </button>
-        </div>
-      )
+export function WaveformEditor({ active }: { active: boolean }) {
+  const { t } = useI18n()
+  const s = useWaveformStore()
+  const layout = useEditorSettings(s => s.layout)
+  const columns = useEditorSettings(s => s.columns)
+  const [original, setOriginal] = useState(false)
+  const [showAllSources, setShowAllSources] = useState(false)
+  useEffect(() => { setShowAllSources(false) }, [s.documents.length, s.folder])
+  const activeGroup = s.clip ? sourceGroup(s.clip) : null
+  const sourceGroups = useMemo(() => {
+    const groups = new Map<string, typeof s.documents>()
+    for (const doc of s.documents) {
+      const key = sourceGroup(doc.clip)
+      const group = groups.get(key) ?? []
+      group.push(doc); groups.set(key, group)
     }
-    return this.props.children
-  }
-}
-
-export function WaveformEditor() {
-  const { t } = useI18n()
-  return (
-    <EditorErrorBoundary errorTitle={t('wave.error')} retryLabel={t('wave.retry')}>
-      <WaveformEditorInner />
-    </EditorErrorBoundary>
-  )
-}
-
-function WaveformEditorInner() {
-  const { t } = useI18n()
-  const displayRef = useRef<WaveformDisplayHandle>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
-
-  const clip = useWaveformStore((s) => s.clip)
-  const isProcessing = useWaveformStore((s) => s.isProcessing)
-  const loadFile = useWaveformStore((s) => s.loadFile)
-
-  // Drag and drop file loading
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    e.dataTransfer.dropEffect = 'copy'
-  }, [])
-
-  const handleDrop = useCallback(
-    async (e: React.DragEvent) => {
-      e.preventDefault()
-      e.stopPropagation()
-
-      const file = e.dataTransfer.files[0]
-      if (!file) return
-
-      const ext = file.name.toLowerCase().split('.').pop()
-      const supportedFormats = ['wav', 'mp3', 'ogg', 'flac', 'aac', 'm4a']
-      if (!ext || !supportedFormats.includes(ext)) return
-
-      try {
-        await loadFile(file)
-      } catch (err) {
-        console.error('File load error:', err)
-      }
-    },
-    [loadFile]
-  )
-
-  // Keyboard shortcuts
+    return [...groups.entries()]
+  }, [s.documents])
+  const visibleDocuments = showAllSources ? s.documents : s.documents.filter(doc => sourceGroup(doc.clip) === activeGroup)
+  const [muted, setMuted] = useState(false)
+  const [previewEnabled, setPreviewEnabled] = useState(false)
+  const preview = useEditorPreview(s.clip, s.effects, previewEnabled && !original)
+  const [clipView, setClipView] = useState(() => localStorage.getItem('hapbeat-editor-clip-view') ?? 'cards')
+  useEffect(() => { void useWaveformStore.getState().restoreFolder() }, [])
+  const { isConnected, devices, send } = useHelperConnection()
+  const [selectedTargets, setSelectedTargets] = useState<string[] | null>(() => {
+    try { const saved = JSON.parse(localStorage.getItem('hapbeat-editor-targets') ?? 'null'); return Array.isArray(saved) && saved.every(item => typeof item === 'string') ? saved : null } catch { return null }
+  })
+  const playbackDevices = devices.filter(device => !device.role || device.role === 'receiver')
+  const targets = isConnected ? playbackDevices.filter(device => device.online && (selectedTargets === null || selectedTargets.includes(device.ipAddress))).map(device => device.ipAddress) : []
+  const targetKey = targets.join(',')
+  const audioBuffer = original ? s.clip?.originalBuffer : previewEnabled ? (preview.buffer ?? s.clip?.buffer) : s.clip?.buffer
+  const player = useMemo(() => new EditorBufferPlayer(null, undefined, s.setError), [s.clip?.id, original])
+  useEffect(() => {player.activate(); return () => player.dispose()}, [player])
+  player.setBuffer(audioBuffer ?? null)
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement
-      if (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA') {
-        return
-      }
+    const selection = useWaveformStore.getState().selectedRegion
+    if (selection && audioBuffer) useWaveformStore.getState().setSelectedRegion(selection, original, audioBuffer.duration)
+  }, [audioBuffer, original])
+  const [pending, setPending] = useState(false)
+  const playback = useMemo(() => {
+    let cached: {buffer: AudioBuffer; start: number; end: number; blob: Promise<Blob>} | null = null
+    const keys = new WeakMap<Blob, string>()
+    return new EditorPlayback(player, (start, end) => {
+      const buffer = player.getBuffer()
+      if (!buffer) return Promise.reject(new Error('Select a clip first'))
+      if (!cached || cached.buffer !== buffer || cached.start !== start || cached.end !== end) cached = {buffer, start, end, blob: encodeWavBlob(start === 0 && end === buffer.duration ? buffer : cropBuffer(buffer, start, end), buffer.sampleRate as SampleRate)}
+      return cached.blob
+    }, targetKey ? targetKey.split(',') : [], send, async (blob, route, options) => {
+      let key = keys.get(blob); if (!key) {key = crypto.randomUUID(); keys.set(blob, key)}
+      await (await import('@/utils/audioStreamer')).streamClip(blob, route, {...options, cacheKey: key})
+    }, setPending, s.setError)
+  }, [player, targetKey, send, s.setError])
+  useEffect(() => () => playback?.stop(), [playback])
+  useEffect(() => { if (!active) playback?.stop() }, [active, playback])
+  useEffect(() => {
+    if (!playback) return
+    const unsubs = [player.on('pause', () => playback.paused()), player.on('finish', () => playback.paused()), player.on('timeupdate', time => playback.timeUpdated(time)), player.on('seeking', time => playback.seek(time))]
+    return () => unsubs.forEach(unsub => unsub())
+  }, [player, playback])
+  useEffect(() => {
+    const toggle = () => { if (active && !useWaveformStore.getState().isProcessing) void playback?.toggle().catch(s.setError) }
+    window.addEventListener('studio:editor-playback', toggle)
+    return () => window.removeEventListener('studio:editor-playback', toggle)
+  }, [active, playback, s.setError])
+  const chooseTargets = (value: string[] | null) => { setSelectedTargets(value); localStorage.setItem('hapbeat-editor-targets', JSON.stringify(value)) }
+  const input = useRef<HTMLInputElement>(null)
+  useEffect(() => { player.setMuted(muted) }, [player, muted])
+  useEffect(() => { setOriginal(false) }, [s.clip?.id])
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      const state = useWaveformStore.getState()
+      if (state.isProcessing || ['pending', 'saving', 'error'].includes(state.saveStatus)) { event.preventDefault(); event.returnValue = '' }
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [])
+  useEffect(() => {
+    if (!active) return
+    const keydown = (event: KeyboardEvent) => {
+      const element = event.target as HTMLElement
+      if (element.closest('input, select, textarea, [contenteditable=true]') || (element.closest('button') && !element.closest('.editor-clip'))) return
+      const state = useWaveformStore.getState()
+      if (state.isProcessing) return
 
-      const ws = displayRef.current?.wavesurfer
-      const store = useWaveformStore.getState()
-
-      if (e.key === ' ' && ws) {
-        e.preventDefault()
-        ws.playPause()
-      } else if (e.key === 'z' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
-        e.preventDefault()
-        store.redo()
-      } else if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault()
-        store.undo()
-      } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (store.selectedRegion) {
-          e.preventDefault()
-          store.deleteRegion()
-        }
+      if (original || previewEnabled) return
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? state.redo() : state.undo() }
+      if (event.key === 'Delete' && state.selectedRegion) { event.preventDefault(); state.deleteRegion() }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        const docs = showAllSources ? state.documents : state.documents.filter(doc => state.clip && sourceGroup(doc.clip) === sourceGroup(state.clip))
+        const index = docs.findIndex(d => d.clip.id === state.clip?.id)
+        const next = docs[index + (event.key === 'ArrowDown' ? 1 : -1)]
+        if (next) { event.preventDefault(); state.selectClip(next.clip.id) }
       }
     }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
-
-  return (
-    <div
-      ref={containerRef}
-      className="waveform-editor"
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
-    >
-      <WaveformToolbar />
-
-      <div className="waveform-main">
-        {!clip && (
-          <div className="waveform-empty">
-            <div className="empty-icon">~</div>
-            <div className="empty-message">{t('wave.drop')}</div>
-            <div className="empty-hint">
-              {t('wave.dropHint')}
-            </div>
-          </div>
-        )}
-        <div style={{ display: clip ? 'block' : 'none' }}>
-          <WaveformDisplay ref={displayRef} />
-        </div>
-      </div>
-
-      <TransportBar wavesurfer={displayRef.current?.wavesurfer ?? null} />
-
-      {clip && <EffectsPanel />}
-
-      <StatusBar />
-
-      {isProcessing && (
-        <div className="processing-overlay">
-          <div className="processing-spinner" />
-          <span>{t('wave.processing')}</span>
-        </div>
-      )}
+    window.addEventListener('keydown', keydown)
+    return () => window.removeEventListener('keydown', keydown)
+  }, [active, original, previewEnabled, showAllSources])
+  const folderName = s.folder?.root.name ?? s.rememberedFolder?.name
+  return <div className="waveform-editor" onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' }}
+    onDrop={e => { e.preventDefault(); if (s.folder) void s.loadFiles(Array.from(e.dataTransfer.files)); else s.setError(t('editor.chooseFirst')) }}>
+    <div className="editor-folder-bar">
+      <span className="editor-beta-label" title={t('editor.betaHint')}>BETA</span>
+      <button className="toolbar-btn" onClick={() => void s.openFolder()} disabled={s.isProcessing || !('showDirectoryPicker' in window)}>▱ {t('editor.folder')}</button>
+      <div className="editor-folder-name" title={t('editor.pathHint')}><strong>{folderName ? `${folderName}/` : t('editor.chooseFirst')}</strong></div>
+      {!s.folder && s.rememberedFolder && <button className="toolbar-btn" disabled={s.isProcessing} onClick={() => void s.reconnectFolder()}>{t('editor.reconnect')}</button>}
+      <span className={`editor-save-state ${s.saveStatus}`} role="status">{t(`editor.save.${s.saveStatus}`)}</span>
+      <button className="toolbar-btn" disabled={!s.folder || s.isProcessing || s.saveStatus === 'saving'} onClick={() => void s.save().catch(() => {})}>{t('editor.saveNow')}</button>
     </div>
-  )
+    <div className="editor-notice" role="status">{s.error ?? t('editor.workflow')}</div>
+    <div className={`editor-content layout-${layout}`}>
+    <section className="editor-track">
+      <div className="editor-comparison">
+        <strong className="editor-active-name">{s.clip?.name ?? t('editor.clips')}</strong>
+        <button className={`toolbar-btn ${!original && !previewEnabled ? 'selected' : ''}`} disabled={!s.clip || s.isProcessing} aria-pressed={!original && !previewEnabled} onClick={() => {if (original) s.setSelectedRegion(null); setOriginal(false); setPreviewEnabled(false)}}>∿ {t('editor.edited')}</button>
+        <button className={`toolbar-btn ${original ? 'selected' : ''}`} disabled={!s.clip || s.isProcessing} aria-pressed={original} onClick={() => {s.setSelectedRegion(null); setOriginal(true)}}>↩ {t('editor.original')}</button>
+        <button className={`toolbar-btn ${previewEnabled && !original ? 'selected' : ''}`} disabled={!s.clip || s.isProcessing} aria-pressed={previewEnabled && !original} onClick={() => {setOriginal(false); setPreviewEnabled(true)}}>{t('editor.preview')}</button>
+        <span>{original ? t('editor.originalHint') : t('editor.selectionHint')}</span>
+      </div>
+      <div className="editor-preview-status" role="status">{previewEnabled && !original ? (preview.error || t(preview.status === 'rendering' ? 'editor.previewRendering' : 'editor.previewHint')) : t('editor.committedHint')}</div>
+      <div className="waveform-main">
+        {!s.clip && <div className="waveform-empty"><div className="empty-icon">∿</div><div className="empty-message">{t('wave.drop')}</div><div className="empty-hint">{t('editor.emptyHint')}</div></div>}
+        <WaveformDisplay original={original} bufferOverride={audioBuffer} player={player} />
+      </div>
+      <TransportBar player={player} available={!!audioBuffer} playback={playback} pending={pending} muted={muted} onMutedChange={setMuted} />
+      <div className="editor-targets">
+        <strong>{t('editor.hapticTargets')}</strong>
+        <button className="toolbar-btn" onClick={() => chooseTargets(null)}>{t('editor.allTargets')}</button>
+        <button className="toolbar-btn" onClick={() => chooseTargets([])}>{t('editor.noTargets')}</button>
+        <span className="editor-target-status">{isConnected ? `${targets.length} ${t('editor.targetCount')}` : t('editor.helperDisconnected')}</span>
+        {playbackDevices.map(device => <label key={device.ipAddress} title={device.ipAddress}>
+          <input type="checkbox" checked={selectedTargets === null || selectedTargets.includes(device.ipAddress)} onChange={event => {
+            const current = selectedTargets ?? playbackDevices.map(item => item.ipAddress)
+            chooseTargets(event.target.checked ? [...current, device.ipAddress] : current.filter(ip => ip !== device.ipAddress))
+          }} />{device.name || device.ipAddress}{!device.online && ' (offline)'}
+        </label>)}
+      </div>
+      <fieldset className="editor-edit-controls" disabled={s.isProcessing}><WaveformToolbar original={original} preview={previewEnabled && !original} durationOverride={audioBuffer?.duration} /></fieldset>
+    </section>
+    <EditorDock active={active}><div className="editor-workspace">
+      <aside className="editor-clips">
+        <div className="editor-clips-heading">{t('editor.clips')} <span>{s.documents.length}</span></div>
+        <div className="editor-view-switch">
+          <label>{t('editor.columns')}<select value={columns} onChange={e => useEditorSettings.getState().update({columns: Number(e.target.value)})}><option value={0}>Auto</option><option value={1}>1</option><option value={2}>2</option><option value={3}>3</option></select></label>
+          {(['text','cards','large'] as const).map(view => <button className={`toolbar-btn ${clipView === view ? 'selected' : ''}`} key={view} aria-pressed={clipView === view} onClick={() => { setClipView(view); localStorage.setItem('hapbeat-editor-clip-view', view) }}>{t(`editor.view.${view}`)}</button>)}
+        </div>
+        <input ref={input} type="file" multiple accept="audio/*,.wav,.mp3,.ogg,.flac,.aac,.m4a" hidden onChange={e => { void s.loadFiles(Array.from(e.target.files ?? [])); e.target.value = '' }} />
+        <button className="toolbar-btn" disabled={!s.folder || s.isProcessing} onClick={() => input.current?.click()}>{t('editor.import')}</button>
+        <nav className="editor-source-groups" aria-label={t('editor.sourceGroups')}>
+          <button className={`toolbar-btn ${showAllSources ? 'selected' : ''}`} aria-pressed={showAllSources} onClick={() => setShowAllSources(!showAllSources)}>{t('editor.allSources')} ({s.documents.length})</button>
+          {sourceGroups.map(([key, docs]) => <button key={key} className={`toolbar-btn ${!showAllSources && activeGroup === key ? 'selected' : ''}`} aria-pressed={!showAllSources && activeGroup === key} disabled={s.isProcessing}
+            title={docs[0].clip.sourceFileName ?? docs[0].clip.name} onClick={() => {setShowAllSources(false); if (activeGroup !== key) s.selectClip(docs[0].clip.id)}}>
+            <span>▱ {docs[0].clip.sourceFileName ?? docs[0].clip.name}</span><small>{docs.length}</small>
+          </button>)}
+        </nav>
+        <div className={`editor-clip-list view-${clipView}`} style={columns && clipView !== 'text' ? {gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`} : undefined} aria-label={t('editor.clips')}>
+          {visibleDocuments.map((doc, index) => <div className="editor-material" key={doc.clip.id}><button className={`editor-clip ${doc.clip.id === s.clip?.id ? 'selected' : ''}`} disabled={s.isProcessing}
+            onClick={() => s.selectClip(doc.clip.id)} aria-pressed={doc.clip.id === s.clip?.id} title={doc.clip.name}>
+            <span>{String(index + 1).padStart(2, '0')}</span><strong>{doc.clip.name}</strong><small>{doc.clip.buffer.duration.toFixed(3)} s · {doc.clip.buffer.numberOfChannels === 1 ? 'Mono' : 'Stereo'}</small>
+            {clipView !== 'text' && <WaveformThumbnail buffer={doc.clip.buffer} />}
+          </button>
+          <div className="editor-material-meta">
+            <input aria-label={`${t('editor.name')}: ${doc.clip.name}`} value={doc.clip.name} disabled={s.isProcessing} onChange={e => s.updateClipInfo(doc.clip.id, {name: e.target.value})} />
+            <input aria-label={`${t('editor.description')}: ${doc.clip.name}`} placeholder={t('editor.description')} value={doc.clip.description ?? ''} disabled={s.isProcessing} onChange={e => s.updateClipInfo(doc.clip.id, {description: e.target.value})} />
+            {doc.clip.sourceFileName && <small title={doc.clip.sourceFileName}>{t('editor.sourceFile')}: {doc.clip.sourceFileName}</small>}
+          </div></div>)}
+        </div>
+        <button className="toolbar-btn" disabled={!s.clip || s.isProcessing} onClick={s.duplicateClip}>⧉ {t('editor.variant')}</button>
+        <p className="editor-help">{t('editor.shortcuts')}</p>
+      </aside>
+      <fieldset className="editor-edit-controls" disabled={!s.clip || original || s.isProcessing}><EffectsPanel preview={previewEnabled} onPreviewChange={setPreviewEnabled} /></fieldset>
+    </div>
+    </EditorDock></div>
+    <StatusBar />
+    {s.isProcessing && <div className="processing-overlay"><div className="processing-spinner" /><span>{t('wave.processing')}</span></div>}
+  </div>
 }

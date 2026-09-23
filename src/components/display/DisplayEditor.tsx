@@ -180,6 +180,16 @@ function buildActionGroups(pages: DisplayPage[], deviceModel: DeviceModel): Acti
         { value: 'volume_down', label: 'Volume -' },
       ],
     })
+    // This is intentionally scoped to BandWL. The action is meaningful only
+    // on the experimental band_v4_pwm firmware, where the MCU owns the MOSFET
+    // gates the saved DC-bias profiles. ON restores the normal idle/playback
+    // lifecycle; OFF keeps their values but selects a zero DC target.
+    groups.push({
+      label: 'PWM Bias (Band experimental)',
+      items: [
+        { value: 'pwm_bias_toggle', label: 'Fixed bias ON/OFF' },
+      ],
+    })
   }
 
   // HP volume: DuoWL v4 のみ実装 (in-codec AIC3204 段)。deviceModel では
@@ -235,6 +245,12 @@ function buildHoldActionGroups(pages: DisplayPage[], holdMode: import('@/types/d
     }))
     return [
       { label: 'Page', items: pageItems },
+      ...(deviceModel === 'band_wl' ? [{
+        label: 'PWM Bias (Band experimental)',
+        // `pwm_bias_hold` is offered only in Tmp mode. It starts after the
+        // configured hold threshold and the firmware clears it on release.
+        items: [{ value: 'pwm_bias_hold', label: 'Playback bias while held' }],
+      }] : []),
       {
         label: 'Toggle',
         items: [
@@ -891,9 +907,8 @@ export function DisplayEditor() {
   } | null>(null)
   // Serial-only selection → deploy button disabled (write_ui_config is
   // TCP-only; Serial path is not implemented in firmware serial_config.cpp)
-  const selectedIps = useDeviceStore((s) => s.selectedIps)
-  const selectedIp = useDeviceStore((s) => s.selectedIp)
-  const effectiveTargets = selectedIps.length > 0 ? selectedIps : (selectedIp ? [selectedIp] : [])
+  const selectedIps = useDeviceStore((s) => s.displaySelectedIps)
+  const effectiveTargets = selectedIps
   const isSerialOnlySelected =
     effectiveTargets.length > 0 && effectiveTargets.every((ip) => ip.startsWith('serial:'))
   const deployBtnRef = useCallback((el: HTMLButtonElement | null) => {
@@ -954,10 +969,8 @@ export function DisplayEditor() {
     // previous behavior of broadcasting to all devices made multi-
     // device studios dangerous to edit. Empty selection → toast +
     // abort rather than fall back to broadcast.
-    const { selectedIps, selectedIp, infoCache } = useDeviceStore.getState()
-    const rawTargets = selectedIps.length > 0
-      ? selectedIps
-      : (selectedIp ? [selectedIp] : [])
+    const { displaySelectedIps, infoCache } = useDeviceStore.getState()
+    const rawTargets = displaySelectedIps
     if (rawTargets.length === 0) {
       toast(t('display.selectDevice'), 'error')
       return
@@ -1252,7 +1265,7 @@ export function DisplayEditor() {
       )}
 
       {/* 3. パレット */}
-      <ElementPalette selectedType={null} onSelectType={() => {}} usedTypes={usedTypes} />
+      <ElementPalette selectedType={null} onSelectType={() => {}} usedTypes={usedTypes} deviceModel={deviceModel} />
 
       {/* LED 設定モーダル */}
       {ledModalOpen && (
@@ -1469,6 +1482,7 @@ function OledSimulator({
                 screenX={popupPos.screenX} screenY={popupPos.screenY}
                 gridCol={popupPos.col} gridRow={popupPos.row}
                 page={activePage} usedTypes={usedTypes}
+                deviceModel={deviceSpec.model}
                 onSelect={onPopupSelect} onClose={onPopupClose}
               />
             )}
@@ -1536,11 +1550,12 @@ interface PopupPaletteProps {
   gridCol: number; gridRow: number
   page: DisplayPage | undefined
   usedTypes: Set<DisplayElementType>
+  deviceModel: DeviceModel
   onSelect: (type: DisplayElementType) => void
   onClose: () => void
 }
 
-function PopupPalette({ screenX, screenY, gridCol, gridRow, page, usedTypes, onSelect, onClose }: PopupPaletteProps) {
+function PopupPalette({ screenX, screenY, gridCol, gridRow, page, usedTypes, deviceModel, onSelect, onClose }: PopupPaletteProps) {
   const popupW = 400
   const clampedX = screenX + popupW > window.innerWidth ? window.innerWidth - popupW - 8 : screenX
   return createPortal(
@@ -1554,6 +1569,7 @@ function PopupPalette({ screenX, screenY, gridCol, gridRow, page, usedTypes, onS
             title={`${sec.title} — ${sec.hint}`}
           >
             {sec.items.map((item) => {
+              if (item.models && !item.models.includes(deviceModel)) return null
               const used = usedTypes.has(item.type)
               const noSpace = page ? !canPlace(page, item.type, [gridCol, gridRow], undefined, item.variant) : true
               const disabled = used || noSpace
@@ -1730,7 +1746,7 @@ function ControlBar({
           pill 自体クリックで Devices モーダルを開く。
           以前あった "Devices ▸" 補助ボタンは header の Devices タブと
           冗長なため削除済み。 */}
-      <DevicePill hapbeatOnly />
+      <DevicePill hapbeatOnly selectionScope="display" />
       <div className="control-separator" />
       <span className="tooltip-wrap">
         <button

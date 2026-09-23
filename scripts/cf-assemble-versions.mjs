@@ -20,7 +20,7 @@
  * standalone build script（Workflow ツールのスクリプトではない）なので Date / execSync 可。
  */
 import { execFileSync } from 'node:child_process'
-import { readdirSync, mkdirSync, writeFileSync, existsSync } from 'node:fs'
+import { readdirSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const bundlesDir = process.argv[2]
@@ -69,7 +69,9 @@ for (const p of chosen) {
   console.log(`[cf-assemble] /v${p.minorKey}/ ← ${p.version}`)
 }
 
-const latest = versions[0]?.version ?? null
+// Root is built from master and can be ahead of the newest frozen tag. The
+// notice shown by an older frozen build must point to the actual root version.
+const latest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
 writeFileSync(
   join(outDir, 'versions.json'),
   JSON.stringify({ latest, versions, generated: new Date().toISOString() }, null, 2) + '\n',

@@ -1,26 +1,32 @@
-/** Supported output sample rates per hapbeat-contracts */
-export type SampleRate = 16000 | 24000 | 44100
+/** Wave editor export rates; Kit conversion owns device format constraints. */
+export type SampleRate = 16000 | 24000 | 44100 | 48000
 
 /** A loaded audio clip in working memory */
 export interface WaveformClip {
   id: string
   /** User-visible name (derived from filename or "Untitled") */
   name: string
+  sourceFileName?: string
+  /** Shared by an imported source and all its extracted/duplicated clips. */
+  sourceGroupId?: string
+  description?: string
   /** The current working AudioBuffer (post-edits, pre-export) */
   buffer: AudioBuffer
   /** Original imported buffer (never mutated, for revert) */
   originalBuffer: AudioBuffer
-  /** Blob for WaveSurfer display (updated when buffer changes) */
-  displayBlob: Blob
   /** Target sample rate for export */
   exportSampleRate: SampleRate
-  /** Target Event ID this clip is assigned to (optional) */
-  eventId?: string
+  /** Last rendered chain, retained independently of pending parameter edits. */
+  renderedEffects?: EffectEntry[]
 }
 
 // ---- Effect types ----
 
 export type EffectType =
+  | 'trim'
+  | 'cut'
+  | 'repitch'
+  | 'noise-gate'
   | 'pitch-shift'
   | 'time-stretch'
   | 'lpf'
@@ -98,7 +104,13 @@ export interface MonoConvertParams {
   method: MonoConvertMethod
 }
 
+export interface RepitchParams { type: 'repitch'; semitones: number }
+export interface NoiseGateParams { type: 'noise-gate'; thresholdDb: number; attackMs: number; releaseMs: number }
+
 export type EffectParams =
+  | { type: 'trim' | 'cut'; start: number; end: number }
+  | RepitchParams
+  | NoiseGateParams
   | PitchShiftParams
   | TimeStretchParams
   | FilterParams
@@ -115,6 +127,8 @@ export interface EffectEntry {
   id: string
   params: EffectParams
   enabled: boolean
+  /** Matches the latest rendered chain. Settings remain editable. */
+  applied?: boolean
 }
 
 /** Region selection on the waveform */
@@ -123,18 +137,13 @@ export interface WaveformRegion {
   end: number // seconds
 }
 
-/** Undo history snapshot */
-export interface UndoSnapshot {
-  /** Channel data arrays (supports mono and stereo) */
-  channelData: Float32Array[]
-  sampleRate: number
-  numberOfChannels: number
-  label: string
-}
-
 /** Effect display info for UI */
 export const EFFECT_LABELS: Record<EffectType, string> = {
-  'pitch-shift': 'Pitch Shift',
+  'trim': 'Trim',
+  'cut': 'Cut',
+  'repitch': 'Pitch / speed',
+  'noise-gate': 'Noise gate',
+  'pitch-shift': 'Pitch (keep duration)',
   'time-stretch': 'Time Stretch',
   'lpf': 'Low Pass Filter',
   'hpf': 'High Pass Filter',
@@ -152,6 +161,9 @@ export const EFFECT_LABELS: Record<EffectType, string> = {
 /** Default parameters for each effect type */
 export function getDefaultParams(type: EffectType): EffectParams {
   switch (type) {
+    case 'trim': case 'cut': return {type, start: 0, end: 1}
+    case 'repitch': return { type, semitones: 0 }
+    case 'noise-gate': return { type, thresholdDb: -40, attackMs: 2, releaseMs: 60 }
     case 'pitch-shift':
       return { type: 'pitch-shift', semitones: 0 }
     case 'time-stretch':

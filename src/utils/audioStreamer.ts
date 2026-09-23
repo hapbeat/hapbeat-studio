@@ -25,6 +25,21 @@ import type { ManagerMessage } from '@/types/manager'
  *    stereo (4B/frame) → 256 frames
  *  Manager 側 (main_window.py の file streamer) と同じポリシー。 */
 const MAX_PAYLOAD_BYTES = 1024
+const PCM_CACHE_MAX_BYTES = 16 * 1024 * 1024
+
+interface PreparedAudio {
+  pcm16: Int16Array
+  channels: number
+}
+
+interface PreparedCacheEntry {
+  promise: Promise<PreparedAudio>
+  bytes: number
+}
+
+const preparedPcmCache = new Map<string, PreparedCacheEntry>()
+let preparedPcmCacheBytes = 0
+let streamIdCounter = 0
 
 /**
  * Live control surface for an in-flight stream. All hooks are pulled
@@ -57,6 +72,8 @@ export interface StreamOptions {
   signal?: AbortSignal
   /** Pause / seek / progress hooks */
   control?: StreamControl
+  /** Stable logical source key. When supplied, decoded/resampled PCM is cached. */
+  cacheKey?: string
 }
 
 /**
@@ -76,16 +93,19 @@ export async function streamClip(
   const targetChannels = 2
   const intensity = options?.intensity ?? 1.0
   const control = options?.control
+  const streamId = createStreamId()
 
-  // Decode audio blob
+  throwIfAborted(signal)
   const arrayBuffer = await audioBlob.arrayBuffer()
-  const ctx = new OfflineAudioContext(1, 1, 44100)
-  const decoded = await ctx.decodeAudioData(arrayBuffer)
-
-  // Resample to target rate AND force channels to 2 (stereo) で session 統一。
-  const resampled = await resample(decoded, targetRate, targetChannels)
-  const channels = resampled.numberOfChannels
-  const pcm16 = audioBufferToPcm16Interleaved(resampled)
+  throwIfAborted(signal)
+  const prepared = await getPreparedAudio(
+    arrayBuffer,
+    targetRate,
+    targetChannels,
+    options?.cacheKey,
+  )
+  throwIfAborted(signal)
+  const { channels, pcm16 } = prepared
 
   // Intensity is applied per-chunk inside the loop so a live slider
   // can boost / cut the haptic level mid-stream. The static
@@ -101,6 +121,7 @@ export async function streamClip(
   send({
     type: 'stream_begin',
     payload: {
+      stream_id: streamId,
       sample_rate: targetRate,
       channels: channels,
       format: 'pcm16',
@@ -120,8 +141,8 @@ export async function streamClip(
   let frameOffset = 0
   while (frameOffset < totalFrames) {
     if (signal?.aborted) {
-      send({ type: 'stream_end', payload: {} })
-      throw new DOMException('Streaming aborted', 'AbortError')
+      send({ type: 'stream_end', payload: { stream_id: streamId } })
+      throw abortError()
     }
 
     // Pause: spin in 50 ms increments. On resume, re-anchor pacing so
@@ -168,6 +189,7 @@ export async function streamClip(
     send({
       type: 'stream_data',
       payload: {
+        stream_id: streamId,
         offset: byteOffset,
         data: base64,
       },
@@ -185,10 +207,104 @@ export async function streamClip(
   }
 
   // Send STREAM_END
-  send({ type: 'stream_end', payload: {} })
+  send({ type: 'stream_end', payload: { stream_id: streamId } })
 }
 
 // ---- Helpers ----
+
+function createStreamId(): string {
+  streamIdCounter = (streamIdCounter + 1) >>> 0
+  return `studio-${Date.now().toString(36)}-${streamIdCounter.toString(36)}`
+}
+
+function abortError(): DOMException {
+  return new DOMException('Streaming aborted', 'AbortError')
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortError()
+}
+
+async function getPreparedAudio(
+  arrayBuffer: ArrayBuffer,
+  targetRate: number,
+  targetChannels: number,
+  sourceKey?: string,
+): Promise<PreparedAudio> {
+  if (!sourceKey) return prepareAudio(arrayBuffer, targetRate, targetChannels)
+
+  // Include a content digest so replacing a clip under the same event ID can
+  // never reuse stale PCM. Reading the Blob remains necessary, but the costly
+  // Web Audio decode + offline resample is skipped on subsequent previews.
+  const digest = await digestArrayBuffer(arrayBuffer)
+  const key = `${sourceKey}:${targetRate}:${targetChannels}:${digest}`
+  const cached = preparedPcmCache.get(key)
+  if (cached) {
+    preparedPcmCache.delete(key)
+    preparedPcmCache.set(key, cached)
+    return cached.promise
+  }
+
+  const entry: PreparedCacheEntry = {
+    promise: prepareAudio(arrayBuffer, targetRate, targetChannels),
+    bytes: 0,
+  }
+  preparedPcmCache.set(key, entry)
+  try {
+    const prepared = await entry.promise
+    if (preparedPcmCache.get(key) === entry) {
+      entry.bytes = prepared.pcm16.byteLength
+      preparedPcmCacheBytes += entry.bytes
+      trimPreparedPcmCache()
+    }
+    return prepared
+  } catch (error) {
+    if (preparedPcmCache.get(key) === entry) preparedPcmCache.delete(key)
+    throw error
+  }
+}
+
+async function prepareAudio(
+  arrayBuffer: ArrayBuffer,
+  targetRate: number,
+  targetChannels: number,
+): Promise<PreparedAudio> {
+  const ctx = new OfflineAudioContext(1, 1, 44100)
+  const decoded = await ctx.decodeAudioData(arrayBuffer)
+  // Force channels to 2 so all Studio streams share one firmware session format.
+  const resampled = await resample(decoded, targetRate, targetChannels)
+  return {
+    channels: resampled.numberOfChannels,
+    pcm16: audioBufferToPcm16Interleaved(resampled),
+  }
+}
+
+function trimPreparedPcmCache(): void {
+  while (preparedPcmCacheBytes > PCM_CACHE_MAX_BYTES && preparedPcmCache.size > 1) {
+    const oldest = preparedPcmCache.entries().next().value as
+      | [string, PreparedCacheEntry]
+      | undefined
+    if (!oldest) break
+    preparedPcmCache.delete(oldest[0])
+    preparedPcmCacheBytes -= oldest[1].bytes
+  }
+}
+
+async function digestArrayBuffer(buffer: ArrayBuffer): Promise<string> {
+  if (globalThis.crypto?.subtle) {
+    const digest = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', buffer))
+    return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  }
+
+  // Web Crypto is available in supported browsers. This deterministic
+  // fallback keeps local/non-secure development contexts functional.
+  let hash = 0x811c9dc5
+  for (const byte of new Uint8Array(buffer)) {
+    hash ^= byte
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
 
 function audioBufferToPcm16Interleaved(buffer: AudioBuffer): Int16Array {
   const channels = buffer.numberOfChannels
