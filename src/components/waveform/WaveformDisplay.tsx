@@ -11,7 +11,8 @@ import { WaveformThumbnail } from './WaveformThumbnail'
 import { useEditorSettings } from '@/stores/editorSettings'
 import type { EditorBufferPlayer } from '@/utils/editorBufferPlayer'
 
-export function WaveformDisplay({ original, bufferOverride, player }: { original: boolean; bufferOverride?: AudioBuffer; player: EditorBufferPlayer }) {
+/** `viewKey` identifies what is shown (defaults to the clip id); a new key re-fits the zoom. */
+export function WaveformDisplay({ original, bufferOverride, player, viewKey }: { original: boolean; bufferOverride?: AudioBuffer; player: EditorBufferPlayer; viewKey?: string }) {
   const { t } = useI18n()
   const height = useEditorSettings(s => s.height)
   const surface = useRef<HTMLDivElement>(null)
@@ -31,6 +32,7 @@ export function WaveformDisplay({ original, bufferOverride, player }: { original
   const processing = useWaveformStore(s => s.isProcessing)
   const buffer = bufferOverride ?? (original ? clip?.originalBuffer : clip?.buffer)
   const loadedClip = useRef<string>()
+  const viewId = viewKey ?? clip?.id
   const duration = buffer?.duration ?? 0
   useEffect(() => {
     if (!container.current) return
@@ -46,7 +48,7 @@ export function WaveformDisplay({ original, bufferOverride, player }: { original
     const instance = ws.current
     if (!instance) return
     let cancelled = false
-    const sameClip = loadedClip.current === clip?.id
+    const sameClip = loadedClip.current === viewId
     const scroll = instance.getScroll() / Math.max(1, useWaveformStore.getState().zoom)
     instance.pause(); setReady(false); anchor.current = 0
     regions.current?.clearRegions()
@@ -57,13 +59,13 @@ export function WaveformDisplay({ original, bufferOverride, player }: { original
       await instance.loadBlob(blob, Array.from({ length: buffer.numberOfChannels }, (_, ch) => buffer.getChannelData(ch)), buffer.duration)
       if (!cancelled) {
         if (!sameClip) useWaveformStore.getState().setZoom(Math.max(1, ((container.current?.clientWidth ?? 800) - 4) / buffer.duration))
-        loadedClip.current = clip?.id
+        loadedClip.current = viewId
         instance.zoom(useWaveformStore.getState().zoom); instance.setScrollTime(sameClip ? scroll : 0)
         setViewport({start: sameClip ? scroll : 0, end: buffer.duration}); setReady(true)
       }
     })().catch(error => { if (!cancelled) useWaveformStore.getState().setError(error) })
     return () => { cancelled = true; instance.pause() }
-  }, [buffer, clip?.id])
+  }, [buffer, viewId])
   useEffect(() => {
     const plugin = regions.current
     if (!plugin || !ready) return

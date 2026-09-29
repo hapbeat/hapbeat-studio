@@ -139,7 +139,22 @@ Computed on the mono signal (candidates: the rendered 48 kHz audio; catalog: eac
 
 ## Generating source audio
 
-If you synthesize material (Python, ElevenLabs sound effects, …) save it as WAV under \`hapbeat-agent/sources/\` and reference it with \`{ "kind": "file" }\`. API keys belong to the user's environment variables; Studio does not handle them.
+If you synthesize material (Python, ElevenLabs sound effects, …) save it as WAV (or MP3) under \`hapbeat-agent/sources/\` and reference it with \`{ "kind": "file" }\`. API keys belong to the user's environment variables; Studio does not handle them.
+
+### Using ElevenLabs sound effects (optional)
+
+\`\`\`
+POST https://api.elevenlabs.io/v1/sound-generation
+xi-api-key: $ELEVENLABS_API_KEY
+Content-Type: application/json
+
+{ "text": "stiff canvas rubbing, close up", "duration_seconds": 1.5, "prompt_influence": 0.3, "loop": false }
+\`\`\`
+
+- \`duration_seconds\` is optional (0.5–30; omit to let the model choose). \`prompt_influence\` is 0–1 (default 0.3).
+- Save the response body as MP3 (or WAV) under \`hapbeat-agent/sources/\`; Studio decodes MP3 fine.
+- Cost (checked on 2026-09-29, may change — check ElevenLabs' pricing page): about 40 credits per second when \`duration_seconds\` is set, 200 credits per generation when it is automatic. The free plan (10,000 credits/month) is NOT licensed for commercial use and requires attribution; Starter and above allow commercial use. Tell the user before spending credits.
+- Generated sound effects usually carry little energy below ~100 Hz. Plan to add low end (for example \`freq-shift\` down or \`lpf\`; candidates cannot mix two sources, so a \`recipe\` candidate is the way to build the low end separately) and check \`bandEnergy\` of the rendered candidate.
 
 ## Rules
 

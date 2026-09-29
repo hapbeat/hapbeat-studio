@@ -7,6 +7,7 @@ import { cropBuffer, applyEffect } from '@/utils/audioDsp'
 import { loadDirectoryHandle, saveDirectoryHandle } from '@/utils/localDirectory'
 import { EditorFolder, type EditorDocument } from '@/utils/editorFolder'
 import { renderRecipe, type Recipe } from '@/utils/recipe'
+import { derivedEffectChain } from '@/utils/agentTrialUi'
 
 interface History { buffer: AudioBuffer; effects: EffectEntry[]; label: string }
 interface EditorState {
@@ -32,6 +33,8 @@ interface EditorState {
   loadFiles: (files: File[]) => Promise<void>
   /** Renders `recipe` into a new clip (never modifies existing clips). */
   addRecipeClip: (recipe: Recipe, name: string, sourceFileName: string) => void
+  /** Adds a clip built on `clip.originalBuffer` with `effects` as a not-yet-applied chain (never modifies existing clips). */
+  addDerivedClip: (clip: Pick<WaveformClip, 'name' | 'originalBuffer' | 'exportSampleRate'> & Partial<Pick<WaveformClip, 'description' | 'sourceFileName' | 'sourceGroupId' | 'recipe'>>, effects: EffectParams[]) => void
   selectClip: (id: string) => void
   duplicateClip: () => void
   extractSelection: () => void
@@ -167,6 +170,14 @@ export const useWaveformStore = create<EditorState>((set, get) => {
         if (get().clip) histories.set(get().clip!.id, { undoStack: get().undoStack, redoStack: get().redoStack })
         dirty({ documents: [...get().documents, { clip, effects: [], exportAsMono: false }], clip, effects: [], exportAsMono: false, selectedRegion: null, undoStack: [], redoStack: [] })
       } catch (error) { get().setError(error) }
+    },
+    addDerivedClip: (source, effects) => {
+      if (!get().folder || get().isProcessing) return
+      const id = crypto.randomUUID()
+      const clip: WaveformClip = { ...source, id, sourceGroupId: source.sourceGroupId ?? id, buffer: source.originalBuffer, renderedEffects: [] }
+      const chain = derivedEffectChain(effects)
+      if (get().clip) histories.set(get().clip!.id, { undoStack: get().undoStack, redoStack: get().redoStack })
+      dirty({ documents: [...get().documents, { clip, effects: chain, exportAsMono: false }], clip, effects: chain, exportAsMono: false, selectedRegion: null, undoStack: [], redoStack: [] })
     },
     selectClip: id => {
       if (get().isProcessing || get().clip?.id === id) return

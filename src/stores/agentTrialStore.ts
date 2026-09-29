@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { useWaveformStore } from '@/stores/waveformStore'
+import { sourceGroup } from '@/utils/editorWaveform'
 import { applyEffect, resample } from '@/utils/audioDsp'
 import { decodeAudioFile } from '@/utils/wavIO'
 import { renderRecipe, type Recipe } from '@/utils/recipe'
@@ -30,6 +31,8 @@ interface AgentTrialState {
   writeCatalog: () => Promise<void>
   saveRating: (trialId: string, rating: RatingBody) => Promise<void>
   loadCandidateAudio: (trialId: string, candidateId: string) => Promise<AudioBuffer>
+  /** Creates a new editor clip from a candidate: its source as the original, its effects as a not-yet-applied chain. */
+  adoptCandidate: (trialId: string, candidateId: string) => Promise<void>
 }
 
 let pollTimer: ReturnType<typeof setInterval> | undefined
@@ -134,6 +137,28 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
       const folder = get().folder, record = get().trials.find(r => r.trial.id === trialId)
       if (!folder || !record) throw new Error(`Trial "${trialId}" is not loaded`)
       return decodeAudioFile(await folder.readCandidateAudio(record.month, trialId, candidateId))
+    },
+    adoptCandidate: async (trialId, candidateId) => {
+      const folder = get().folder, record = get().trials.find(r => r.trial.id === trialId)
+      if (!folder || !record) throw new Error(`Trial "${trialId}" is not loaded`)
+      const requested = record.trial.candidates.find(c => c.id === candidateId)
+      const spec = record.candidates.find(c => c.id === candidateId)?.spec ?? requested
+      if (!requested || !spec) throw new Error(`Candidate "${candidateId}" is not in trial "${trialId}"`)
+      const base = { name: requested.label, description: `trial:${trialId}/${candidateId}` }
+      const source = spec.source
+      if (source.kind === 'clip') {
+        const clip = useWaveformStore.getState().documents.find(d => d.clip.id === source.clipId)?.clip
+        if (!clip) throw new Error(`Source clip "${source.clipId}" is no longer in the editor`)
+        useWaveformStore.getState().addDerivedClip({ ...base, originalBuffer: source.use === 'working' ? clip.buffer : clip.originalBuffer, exportSampleRate: clip.exportSampleRate, sourceFileName: clip.sourceFileName, sourceGroupId: sourceGroup(clip) }, spec.effects)
+      } else if (source.kind === 'file') {
+        const buffer = await decodeAudioFile(await (await folder.readAgentFile(source.path)).arrayBuffer())
+        if (buffer.numberOfChannels > 2) throw new Error(`${source.path}: only mono / stereo audio is supported`)
+        useWaveformStore.getState().addDerivedClip({ ...base, originalBuffer: buffer, exportSampleRate: 48000, sourceFileName: source.path.split('/').pop() }, spec.effects)
+      } else {
+        const recipe = source.recipe as Recipe
+        const { data, sampleRate } = renderRecipe(recipe)
+        useWaveformStore.getState().addDerivedClip({ ...base, originalBuffer: monoBuffer(data, sampleRate), exportSampleRate: recipe.sampleRate, sourceFileName: `recipe:${trialId}/${candidateId}`, recipe }, spec.effects)
+      }
     },
   }
 })

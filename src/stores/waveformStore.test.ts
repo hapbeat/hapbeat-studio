@@ -203,3 +203,16 @@ describe('editor session state', () => {
     expect(store.getState().documents).toHaveLength(2)
   })
 })
+describe('derived clips', () => {
+  it('adds a new clip on the given original with an unapplied effect chain', () => {
+    const source = seed()
+    store.setState({folder: {save: vi.fn()} as unknown as EditorFolder})
+    store.getState().addDerivedClip({name: 'A', description: 'trial:t1/A', originalBuffer: source.originalBuffer, exportSampleRate: 48000, sourceGroupId: source.id}, [{type: 'gain', gainDb: -3}])
+    const {clip, effects, documents} = store.getState()
+    expect(documents).toHaveLength(3)
+    expect(clip).toMatchObject({name: 'A', description: 'trial:t1/A', sourceGroupId: source.id, renderedEffects: []})
+    expect(clip?.buffer).toBe(source.originalBuffer)
+    expect(effects).toMatchObject([{params: {type: 'gain', gainDb: -3}, enabled: true, applied: false}])
+    expect(documents[0].clip).toBe(source)
+  })
+})
