@@ -1,0 +1,50 @@
+import { describe, expect, it } from 'vitest'
+import { isSafeAgentPath, normalizeTerm, parseTrialRequest, ratingError, termSlug, type RatingBody, type TrialRequest } from './agentProtocol'
+
+const request = (patch: Record<string, unknown> = {}, candidate: Record<string, unknown> = {}) => JSON.stringify({
+  format: 'hapbeat-trial@1', id: 't-01', intent: 'modify', prompt: 'もっとゴワゴワに', terms: ['ごわごわ'],
+  candidates: [{ id: 'A', label: 'LPF', source: { kind: 'clip', clipId: 'c1' }, effects: [{ type: 'lpf', frequency: 200, Q: 0.7 }], ...candidate }],
+  ...patch,
+})
+
+describe('agentProtocol', () => {
+  it('accepts a valid request', () => {
+    const result = parseTrialRequest(request(), 't-01')
+    expect(result.ok).toBe(true)
+  })
+
+  it('rejects with readable reasons', () => {
+    const error = (text: string, id = 't-01') => { const r = parseTrialRequest(text, id); return r.ok ? null : r.error }
+    expect(error('{')).toMatch(/Invalid JSON/)
+    expect(error(request(), 'other')).toMatch(/file name/)
+    expect(error(request({ format: 'x' }))).toMatch(/format/)
+    expect(error(request({ terms: [] }))).toMatch(/terms/)
+    expect(error(request({ candidates: [] }))).toMatch(/1-6/)
+    expect(error(request({}, { effects: [{ type: 'lpf', frequency: 5, Q: 0.7 }] }))).toMatch(/effects\[0\]/)
+    expect(error(request({}, { effects: [{ type: 'explode' }] }))).toMatch(/effects\[0\]/)
+    expect(error(request({}, { source: { kind: 'file', path: '../secret.wav' } }))).toMatch(/relative path/)
+    expect(error(request({}, { source: { kind: 'recipe', recipe: { format: 'nope' } } }))).toMatch(/recipe/)
+    expect(error(request({ candidates: [JSON.parse(request()).candidates[0], JSON.parse(request()).candidates[0]] }))).toMatch(/duplicated/)
+  })
+
+  it('validates file paths', () => {
+    expect(isSafeAgentPath('sources/rain.wav')).toBe(true)
+    for (const bad of ['/abs.wav', 'C:/x.wav', 'a\\b.wav', 'sources/../x.wav', './x.wav', 'a//b.wav', '']) expect(isSafeAgentPath(bad)).toBe(false)
+  })
+
+  it('normalizes vocabulary', () => {
+    expect(normalizeTerm(' ゴワゴワ ')).toBe('ごわごわ')
+    expect(normalizeTerm('ｺﾞﾜｺﾞﾜ')).toBe('ごわごわ')
+    expect(termSlug('a/b:c')).toBe('a_b_c')
+    expect(termSlug('...')).toBe('_')
+  })
+
+  it('validates ratings against the trial', () => {
+    const trial = JSON.parse(request()) as TrialRequest
+    const rating: RatingBody = { format: 'hapbeat-rating@1', trialId: 't-01', ratedAt: '2026-09-29T15:42:00+09:00', best: 'A', candidates: { A: { overall: 4, termMatch: { ごわごわ: 0 }, directions: { roughness: 1 } } } }
+    expect(ratingError(rating, trial, ['roughness'])).toBeNull()
+    expect(ratingError({ ...rating, best: 'Z' }, trial, ['roughness'])).toMatch(/best/)
+    expect(ratingError({ ...rating, candidates: { A: { overall: 6 } } }, trial, [])).toMatch(/overall/)
+    expect(ratingError({ ...rating, candidates: { A: { overall: 3, directions: { weight: 1 } } } }, trial, ['roughness'])).toMatch(/direction/)
+  })
+})
