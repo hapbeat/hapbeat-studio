@@ -6,6 +6,7 @@ import { decodeAudioFile, encodeWavBlob, encodeMonoWavBlob } from '@/utils/wavIO
 import { cropBuffer, applyEffect } from '@/utils/audioDsp'
 import { loadDirectoryHandle, saveDirectoryHandle } from '@/utils/localDirectory'
 import { EditorFolder, type EditorDocument } from '@/utils/editorFolder'
+import { renderRecipe, type Recipe } from '@/utils/recipe'
 
 interface History { buffer: AudioBuffer; effects: EffectEntry[]; label: string }
 interface EditorState {
@@ -29,6 +30,8 @@ interface EditorState {
   openFolder: () => Promise<void>
   save: () => Promise<void>
   loadFiles: (files: File[]) => Promise<void>
+  /** Renders `recipe` into a new clip (never modifies existing clips). */
+  addRecipeClip: (recipe: Recipe, name: string, sourceFileName: string) => void
   selectClip: (id: string) => void
   duplicateClip: () => void
   extractSelection: () => void
@@ -153,6 +156,18 @@ export const useWaveformStore = create<EditorState>((set, get) => {
       } catch (error) { get().setError(error) }
       finally { set({ isProcessing: false }) }
     },
+    addRecipeClip: (recipe, name, sourceFileName) => {
+      if (!get().folder || get().isProcessing) return
+      try {
+        const { data, sampleRate } = renderRecipe(recipe)
+        const buffer = new AudioBuffer({ numberOfChannels: 1, length: data.length, sampleRate })
+        buffer.copyToChannel(data as Float32Array<ArrayBuffer>, 0)
+        const id = crypto.randomUUID()
+        const clip: WaveformClip = { id, name, sourceFileName, sourceGroupId: id, buffer, originalBuffer: buffer, exportSampleRate: recipe.sampleRate, recipe }
+        if (get().clip) histories.set(get().clip!.id, { undoStack: get().undoStack, redoStack: get().redoStack })
+        dirty({ documents: [...get().documents, { clip, effects: [], exportAsMono: false }], clip, effects: [], exportAsMono: false, selectedRegion: null, undoStack: [], redoStack: [] })
+      } catch (error) { get().setError(error) }
+    },
     selectClip: id => {
       if (get().isProcessing || get().clip?.id === id) return
       const doc = get().documents.find(d => d.clip.id === id)
@@ -174,7 +189,7 @@ export const useWaveformStore = create<EditorState>((set, get) => {
       const buffer = cropBuffer(source, selectedRegion.start, selectedRegion.end)
       if (!buffer || Math.floor(selectedRegion.end * source.sampleRate) <= Math.floor(selectedRegion.start * source.sampleRate)) return
       histories.set(clip.id, {undoStack: get().undoStack, redoStack: get().redoStack})
-      const extracted: WaveformClip = { ...clip, sourceGroupId: sourceGroup(clip), id: crypto.randomUUID(), name: `${clip.name} [${selectedRegion.start.toFixed(3)}–${selectedRegion.end.toFixed(3)}s]`, buffer, originalBuffer: buffer, renderedEffects: [] }
+      const extracted: WaveformClip = { ...clip, sourceGroupId: sourceGroup(clip), id: crypto.randomUUID(), name: `${clip.name} [${selectedRegion.start.toFixed(3)}–${selectedRegion.end.toFixed(3)}s]`, buffer, originalBuffer: buffer, renderedEffects: [], recipe: undefined }
       dirty({clip: extracted, effects: [], documents: [...get().documents, {clip: extracted, effects: [], exportAsMono}], selectedRegion: null, undoStack: [], redoStack: []})
     },
     updateClipInfo: (id, patch) => {

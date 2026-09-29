@@ -11,8 +11,14 @@ import type {
   FadeParams,
   MonoConvertParams,
   EqBand,
+  AmParams,
+  NoiseMixParams,
+  FreqShiftParams,
+  CompressorParams,
+  SaturateParams,
 } from '@/types/waveform'
 import { useI18n } from '@/i18n/I18nProvider'
+import { AM_SHAPES, EFFECT_RANGES, NOISE_COLORS, SATURATE_MODES, SEED_RANGE, type ParamRange } from '@/utils/effectRanges'
 import { EnvelopeCanvas } from './EnvelopeCanvas'
 
 interface EffectParamEditorProps {
@@ -48,6 +54,16 @@ export function EffectParamEditor({ params, onChange }: EffectParamEditorProps) 
       return <ReverseEditor />
     case 'mono-convert':
       return <MonoConvertEditor params={params} onChange={onChange} />
+    case 'am':
+      return <AmEditor params={params} onChange={onChange} />
+    case 'noise-mix':
+      return <NoiseMixEditor params={params} onChange={onChange} />
+    case 'freq-shift':
+      return <FreqShiftEditor params={params} onChange={onChange} />
+    case 'compressor':
+      return <CompressorEditor params={params} onChange={onChange} />
+    case 'saturate':
+      return <SaturateEditor params={params} onChange={onChange} />
   }
 }
 
@@ -384,4 +400,154 @@ function NoiseGateEditor({ params, onChange }: { params: Extract<EffectParams, {
       <input type="range" min={min} max={max} step={step} value={params[key]} onChange={e => onChange({ ...params, [key]: Number(e.target.value) })} />
     </label>)}
   </div>
+}
+
+// ---- Texture effects (ranges from EFFECT_RANGES) ----
+
+/** Slider bound to a ParamRange; `log` maps the slider logarithmically (range min must be > 0). */
+function RangeSlider({ label, value, range, log = false, format, onChange }: {
+  label: string
+  value: number
+  range: ParamRange
+  log?: boolean
+  format?: (value: number) => string
+  onChange: (value: number) => void
+}) {
+  const min = range.min ?? 0, max = range.max ?? 1, step = range.step ?? 1
+  const clamp = (v: number) => Math.max(min, Math.min(max, Number((Math.round(v / step) * step).toFixed(6))))
+  const shown = format ? format(value) : `${Number(value.toFixed(3))}${range.unit ? ` ${range.unit}` : ''}`
+  return (
+    <div className="effect-param-group">
+      <div className="effect-param-label">
+        <span>{label}</span>
+        <span className="effect-param-value">{shown}</span>
+      </div>
+      <input
+        type="range"
+        className="effect-param-slider"
+        min={log ? Math.log(min) : min}
+        max={log ? Math.log(max) : max}
+        step={log ? 0.01 : step}
+        value={log ? Math.log(value) : value}
+        onChange={(e) => onChange(clamp(log ? Math.exp(Number(e.target.value)) : Number(e.target.value)))}
+      />
+    </div>
+  )
+}
+
+function EnumSelect<T extends string>({ label, value, options, format, onChange }: {
+  label: string
+  value: T
+  options: readonly T[]
+  format?: (option: T) => string
+  onChange: (value: T) => void
+}) {
+  return (
+    <div className="effect-param-group">
+      <div className="effect-param-label">
+        <span>{label}</span>
+      </div>
+      <select className="effect-param-select" value={value} onChange={(e) => onChange(e.target.value as T)}>
+        {options.map(option => <option key={option} value={option}>{format ? format(option) : option}</option>)}
+      </select>
+    </div>
+  )
+}
+
+function SeedInput({ value, onChange }: { value: number; onChange: (value: number) => void }) {
+  const min = SEED_RANGE.min ?? 0, max = SEED_RANGE.max ?? 0
+  return (
+    <div className="effect-param-group">
+      <div className="effect-param-label">
+        <span>Seed</span>
+      </div>
+      <input
+        type="number"
+        className="effect-param-input"
+        min={min}
+        max={max}
+        step={1}
+        value={value}
+        onChange={(e) => onChange(Math.max(min, Math.min(max, Math.trunc(Number(e.target.value) || 0))))}
+      />
+    </div>
+  )
+}
+
+const hz = (value: number) => value >= 1000 ? `${(value / 1000).toFixed(2)} kHz` : `${Number(value.toFixed(1))} Hz`
+const signedDb = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(1)} dB`
+
+function AmEditor({ params, onChange }: { params: AmParams; onChange: (p: EffectParams) => void }) {
+  const { t } = useI18n()
+  const r = EFFECT_RANGES.am
+  return (
+    <>
+      <p className="effect-param-hint">{t('editor.amHint')}</p>
+      <RangeSlider label="Rate" value={params.rateHz} range={r.rateHz} log format={hz} onChange={rateHz => onChange({ ...params, rateHz })} />
+      <RangeSlider label="Depth" value={params.depth} range={r.depth} onChange={depth => onChange({ ...params, depth })} />
+      <EnumSelect label="Shape" value={params.shape} options={AM_SHAPES} format={shape => shape === 'random' ? `random (${t('editor.experimental')})` : shape} onChange={shape => onChange({ ...params, shape })} />
+      <RangeSlider label="Jitter" value={params.jitter} range={r.jitter} onChange={jitter => onChange({ ...params, jitter })} />
+      <SeedInput value={params.seed} onChange={seed => onChange({ ...params, seed })} />
+    </>
+  )
+}
+
+function NoiseMixEditor({ params, onChange }: { params: NoiseMixParams; onChange: (p: EffectParams) => void }) {
+  const { t } = useI18n()
+  const r = EFFECT_RANGES['noise-mix']
+  const lowMin = r.lowHz.min ?? 0, highMax = r.highHz.max ?? 0
+  return (
+    <>
+      <p className="effect-param-hint">{t('editor.noiseMixHint')}</p>
+      <RangeSlider label="Level (vs input RMS)" value={params.levelDb} range={r.levelDb} format={signedDb} onChange={levelDb => onChange({ ...params, levelDb })} />
+      <RangeSlider label="Low cut" value={params.lowHz} range={r.lowHz} log format={hz} onChange={lowHz => onChange({ ...params, lowHz, highHz: Math.max(params.highHz, Math.min(highMax, lowHz + 1)) })} />
+      <RangeSlider label="High cut" value={params.highHz} range={r.highHz} log format={hz} onChange={highHz => onChange({ ...params, highHz, lowHz: Math.min(params.lowHz, Math.max(lowMin, highHz - 1)) })} />
+      <EnumSelect label="Color" value={params.color} options={NOISE_COLORS} onChange={color => onChange({ ...params, color })} />
+      <label className="effect-param-group effect-param-check">
+        <input type="checkbox" checked={params.follow} onChange={(e) => onChange({ ...params, follow: e.target.checked })} />
+        {t('editor.noiseFollow')}
+      </label>
+      <SeedInput value={params.seed} onChange={seed => onChange({ ...params, seed })} />
+    </>
+  )
+}
+
+function FreqShiftEditor({ params, onChange }: { params: FreqShiftParams; onChange: (p: EffectParams) => void }) {
+  const { t } = useI18n()
+  return (
+    <>
+      <p className="effect-param-hint">{t('editor.freqShiftHint')}</p>
+      <RangeSlider label="Shift" value={params.shiftHz} range={EFFECT_RANGES['freq-shift'].shiftHz} format={v => `${v > 0 ? '+' : ''}${v} Hz`} onChange={shiftHz => onChange({ ...params, shiftHz })} />
+    </>
+  )
+}
+
+function CompressorEditor({ params, onChange }: { params: CompressorParams; onChange: (p: EffectParams) => void }) {
+  const { t } = useI18n()
+  const r = EFFECT_RANGES.compressor
+  return (
+    <>
+      <p className="effect-param-hint">{t('editor.compressorHint')}</p>
+      <RangeSlider label="Threshold" value={params.thresholdDb} range={r.thresholdDb} format={signedDb} onChange={thresholdDb => onChange({ ...params, thresholdDb })} />
+      <RangeSlider label="Ratio" value={params.ratio} range={r.ratio} format={v => `${v.toFixed(1)}:1`} onChange={ratio => onChange({ ...params, ratio })} />
+      <RangeSlider label="Attack" value={params.attackMs} range={r.attackMs} log onChange={attackMs => onChange({ ...params, attackMs })} />
+      <RangeSlider label="Release" value={params.releaseMs} range={r.releaseMs} log onChange={releaseMs => onChange({ ...params, releaseMs })} />
+      <RangeSlider label="Knee" value={params.kneeDb} range={r.kneeDb} onChange={kneeDb => onChange({ ...params, kneeDb })} />
+      <RangeSlider label="Makeup" value={params.makeupDb} range={r.makeupDb} format={signedDb} onChange={makeupDb => onChange({ ...params, makeupDb })} />
+    </>
+  )
+}
+
+function SaturateEditor({ params, onChange }: { params: SaturateParams; onChange: (p: EffectParams) => void }) {
+  const { t } = useI18n()
+  const r = EFFECT_RANGES.saturate
+  return (
+    <>
+      <p className="effect-param-hint">{t('editor.saturateHint')}</p>
+      <RangeSlider label="Drive" value={params.driveDb} range={r.driveDb} format={signedDb} onChange={driveDb => onChange({ ...params, driveDb })} />
+      <EnumSelect label="Mode" value={params.mode} options={SATURATE_MODES} onChange={mode => onChange({ ...params, mode })} />
+      <RangeSlider label="Mix" value={params.mix} range={r.mix} format={v => `${Math.round(v * 100)}%`} onChange={mix => onChange({ ...params, mix })} />
+      <RangeSlider label="Output" value={params.outputDb} range={r.outputDb} format={signedDb} onChange={outputDb => onChange({ ...params, outputDb })} />
+    </>
+  )
 }

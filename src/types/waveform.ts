@@ -1,6 +1,8 @@
 /** Wave editor export rates; Kit conversion owns device format constraints. */
 export type SampleRate = 16000 | 24000 | 44100 | 48000
 
+import type { Recipe } from '@/utils/recipe'
+
 /** A loaded audio clip in working memory */
 export interface WaveformClip {
   id: string
@@ -18,6 +20,8 @@ export interface WaveformClip {
   exportSampleRate: SampleRate
   /** Last rendered chain, retained independently of pending parameter edits. */
   renderedEffects?: EffectEntry[]
+  /** Generator recipe the original buffer was rendered from (recipe clips only). */
+  recipe?: Recipe
 }
 
 // ---- Effect types ----
@@ -40,6 +44,11 @@ export type EffectType =
   | 'gain'
   | 'reverse'
   | 'mono-convert'
+  | 'am'
+  | 'noise-mix'
+  | 'freq-shift'
+  | 'compressor'
+  | 'saturate'
 
 export interface PitchShiftParams {
   type: 'pitch-shift'
@@ -104,6 +113,52 @@ export interface MonoConvertParams {
   method: MonoConvertMethod
 }
 
+export type AmShape = 'sine' | 'square' | 'triangle' | 'random'
+export type NoiseColor = 'white' | 'pink' | 'brown'
+export type SaturateMode = 'soft' | 'hard' | 'fold'
+
+export interface AmParams {
+  type: 'am'
+  rateHz: number
+  depth: number // 0 to 1
+  shape: AmShape
+  jitter: number // 0 to 1
+  seed: number // integer
+}
+
+export interface NoiseMixParams {
+  type: 'noise-mix'
+  levelDb: number // relative to input RMS
+  lowHz: number
+  highHz: number
+  color: NoiseColor
+  follow: boolean
+  seed: number // integer
+}
+
+export interface FreqShiftParams {
+  type: 'freq-shift'
+  shiftHz: number
+}
+
+export interface CompressorParams {
+  type: 'compressor'
+  thresholdDb: number
+  ratio: number
+  attackMs: number
+  releaseMs: number
+  kneeDb: number
+  makeupDb: number
+}
+
+export interface SaturateParams {
+  type: 'saturate'
+  driveDb: number
+  mode: SaturateMode
+  mix: number // 0 to 1
+  outputDb: number
+}
+
 export interface RepitchParams { type: 'repitch'; semitones: number }
 export interface NoiseGateParams { type: 'noise-gate'; thresholdDb: number; attackMs: number; releaseMs: number }
 
@@ -121,6 +176,11 @@ export type EffectParams =
   | FadeParams
   | ReverseParams
   | MonoConvertParams
+  | AmParams
+  | NoiseMixParams
+  | FreqShiftParams
+  | CompressorParams
+  | SaturateParams
 
 /** A queued or applied effect */
 export interface EffectEntry {
@@ -156,7 +216,15 @@ export const EFFECT_LABELS: Record<EffectType, string> = {
   'gain': 'Gain',
   'reverse': 'Reverse',
   'mono-convert': 'Mono Convert',
+  'am': 'Amplitude Mod (AM)',
+  'noise-mix': 'Noise Mix',
+  'freq-shift': 'Frequency Shift',
+  'compressor': 'Compressor',
+  'saturate': 'Saturate',
 }
+
+/** Effects whose haptic usefulness is not yet backed by research; shown with a badge. */
+export const EXPERIMENTAL_EFFECTS: ReadonlySet<EffectType> = new Set<EffectType>(['saturate'])
 
 /** Default parameters for each effect type */
 export function getDefaultParams(type: EffectType): EffectParams {
@@ -196,5 +264,15 @@ export function getDefaultParams(type: EffectType): EffectParams {
       return { type: 'reverse' }
     case 'mono-convert':
       return { type: 'mono-convert', method: 'average' }
+    case 'am':
+      return { type, rateHz: 20, depth: 0.5, shape: 'sine', jitter: 0, seed: 1 }
+    case 'noise-mix':
+      return { type, levelDb: -12, lowHz: 40, highHz: 400, color: 'white', follow: true, seed: 1 }
+    case 'freq-shift':
+      return { type, shiftHz: 0 }
+    case 'compressor':
+      return { type, thresholdDb: -24, ratio: 4, attackMs: 5, releaseMs: 100, kneeDb: 6, makeupDb: 0 }
+    case 'saturate':
+      return { type, driveDb: 6, mode: 'soft', mix: 1, outputDb: 0 }
   }
 }

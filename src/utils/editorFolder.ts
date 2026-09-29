@@ -1,5 +1,7 @@
-import type { EffectEntry, SampleRate, WaveformClip } from '@/types/waveform'
+import type { EffectEntry, EffectParams, EffectType, SampleRate, WaveformClip } from '@/types/waveform'
 import { getDefaultParams, EFFECT_LABELS } from '@/types/waveform'
+import { EFFECT_RANGES, inRange, isEnvelope, isRecord } from './effectRanges'
+import { validateRecipe, type Recipe } from './recipe'
 
 export interface EditorDocument {
   clip: WaveformClip
@@ -10,6 +12,7 @@ interface DiskClip {
   id: string; name: string; original: string; working: string
   sourceFileName?: string; sourceGroupId?: string; description?: string
   renderedEffects?: EffectEntry[]
+  recipe?: Recipe
   effects: EffectEntry[]; exportSampleRate: SampleRate; exportAsMono: boolean
 }
 interface ProjectIndex { version: 1; revision: string; clips: DiskClip[] }
@@ -47,38 +50,37 @@ export function decodeEditorBuffer(bytes: ArrayBuffer): AudioBuffer {
   }
   return buffer
 }
-function validateEffects(value: unknown): value is EffectEntry[] {
+/** Validates one `EffectParams` object (no id / enabled) against EFFECT_RANGES. */
+export function validateEffectParams(value: unknown): value is EffectParams {
+  if (!isRecord(value)) return false
+  const p = value
+  if (typeof p.type !== 'string' || !Object.prototype.hasOwnProperty.call(EFFECT_LABELS, p.type)) return false
+  const type = p.type as EffectType
+  const ranges = EFFECT_RANGES[type]
+  for (const [key, fallback] of Object.entries(getDefaultParams(type))) {
+    if (key === 'type' || typeof fallback === 'object') continue
+    const range = ranges[key]
+    if (!range || !inRange(p[key], range)) return false
+  }
+  switch (type) {
+    case 'trim': case 'cut': return (p.end as number) > (p.start as number)
+    case 'normalize': return (p.targetPeak as number) > 0
+    case 'noise-mix': return (p.highHz as number) > (p.lowHz as number)
+    case 'eq': return Array.isArray(p.bands) && p.bands.every((b: unknown) => isRecord(b) && (['frequency', 'gain', 'Q'] as const).every(k => inRange(b[k], ranges[k])))
+    case 'envelope': return isEnvelope(p.points)
+    default: return true
+  }
+}
+export function validateEffects(value: unknown): value is EffectEntry[] {
   if (!Array.isArray(value)) return false
-  return value.every(e => {
-    if (!e || typeof e.id !== 'string' || typeof e.enabled !== 'boolean' || (e.applied !== undefined && typeof e.applied !== 'boolean') || !e.params || !Object.prototype.hasOwnProperty.call(EFFECT_LABELS, e.params.type)) return false
-    const defaults = getDefaultParams(e.params.type)
-    for (const [key, fallback] of Object.entries(defaults)) {
-      const field = e.params[key]
-      if (typeof fallback === 'number' && (!Number.isFinite(field) || Math.abs(field) > 1e6)) return false
-    }
-    const p = e.params
-    switch (p.type) {
-      case 'trim': case 'cut': return p.start >= 0 && p.end > p.start
-      case 'repitch': case 'pitch-shift': return Math.abs(p.semitones) <= 24
-      case 'time-stretch': return p.rate >= .25 && p.rate <= 4
-      case 'lpf': case 'hpf': case 'bpf': return p.frequency >= 20 && p.frequency <= 20000 && p.Q >= .1 && p.Q <= 20
-      case 'noise-gate': return p.thresholdDb >= -80 && p.thresholdDb <= 0 && p.attackMs >= .1 && p.attackMs <= 100 && p.releaseMs >= 1 && p.releaseMs <= 1000
-      case 'gain': return p.gainDb >= -60 && p.gainDb <= 20
-      case 'normalize': return p.targetPeak > 0 && p.targetPeak <= 1
-      case 'fade-in': case 'fade-out': return p.durationMs >= 0 && p.durationMs <= 600000
-      case 'mono-convert': return ['average', 'left', 'right'].includes(p.method)
-      case 'eq': return Array.isArray(p.bands) && p.bands.every((b: {frequency: number; gain: number; Q: number}) => Number.isFinite(b.frequency) && b.frequency >= 20 && b.frequency <= 20000 && Number.isFinite(b.gain) && Math.abs(b.gain) <= 24 && Number.isFinite(b.Q) && b.Q >= .1 && b.Q <= 20)
-      case 'envelope': return Array.isArray(p.points) && p.points.length >= 2 && p.points[0].time === 0 && p.points.at(-1).time === 1 && p.points.every((v: {time: number; value: number}, i: number) => Number.isFinite(v.time) && Number.isFinite(v.value) && v.value >= 0 && v.value <= 1 && (i === 0 || v.time > p.points[i-1].time))
-      default: return p.type === 'reverse'
-    }
-  })
+  return value.every(e => !!e && typeof e.id === 'string' && typeof e.enabled === 'boolean' && (e.applied === undefined || typeof e.applied === 'boolean') && validateEffectParams(e.params))
 }
 export function parseEditorIndex(text: string): ProjectIndex {
   const data = JSON.parse(text)
   if (data?.version !== 1 || typeof data.revision !== 'string' || !Array.isArray(data.clips)) throw new Error('Unsupported or damaged editor project')
   const ids = new Set<string>()
   for (const c of data.clips) {
-    if (!c || typeof c.id !== 'string' || ids.has(c.id) || typeof c.name !== 'string' || (c.sourceFileName !== undefined && typeof c.sourceFileName !== 'string') || (c.sourceGroupId !== undefined && typeof c.sourceGroupId !== 'string') || (c.description !== undefined && typeof c.description !== 'string') || !safePath(c.original) || !safePath(c.working) || ![16000,24000,44100,48000].includes(c.exportSampleRate) || typeof c.exportAsMono !== 'boolean' || !validateEffects(c.effects) || (c.renderedEffects !== undefined && !validateEffects(c.renderedEffects))) throw new Error('Invalid editor project clip')
+    if (!c || typeof c.id !== 'string' || ids.has(c.id) || typeof c.name !== 'string' || (c.sourceFileName !== undefined && typeof c.sourceFileName !== 'string') || (c.sourceGroupId !== undefined && typeof c.sourceGroupId !== 'string') || (c.description !== undefined && typeof c.description !== 'string') || !safePath(c.original) || !safePath(c.working) || ![16000,24000,44100,48000].includes(c.exportSampleRate) || typeof c.exportAsMono !== 'boolean' || !validateEffects(c.effects) || (c.renderedEffects !== undefined && !validateEffects(c.renderedEffects)) || (c.recipe !== undefined && validateRecipe(c.recipe) !== null)) throw new Error('Invalid editor project clip')
     ids.add(c.id)
   }
   return data
@@ -132,7 +134,7 @@ export class EditorFolder {
     const documents: EditorDocument[] = []
     for (const c of index?.clips ?? []) {
       const originalBuffer = await load(c.original), buffer = await load(c.working)
-      documents.push({ clip: { id: c.id, name: c.name, sourceFileName: c.sourceFileName, sourceGroupId: c.sourceGroupId, description: c.description, buffer, originalBuffer, exportSampleRate: c.exportSampleRate, renderedEffects: c.renderedEffects }, effects: c.effects, exportAsMono: c.exportAsMono })
+      documents.push({ clip: { id: c.id, name: c.name, sourceFileName: c.sourceFileName, sourceGroupId: c.sourceGroupId, description: c.description, buffer, originalBuffer, exportSampleRate: c.exportSampleRate, renderedEffects: c.renderedEffects, recipe: c.recipe }, effects: c.effects, exportAsMono: c.exportAsMono })
     }
     return { folder, documents }
   }
@@ -150,7 +152,7 @@ export class EditorFolder {
       }
       const clips: DiskClip[] = []
       for (const { clip, effects, exportAsMono } of documents) clips.push({
-        id: clip.id, name: clip.name, sourceFileName: clip.sourceFileName, sourceGroupId: clip.sourceGroupId, description: clip.description, original: await storeBuffer(clip.originalBuffer), working: await storeBuffer(clip.buffer), renderedEffects: clip.renderedEffects, effects, exportSampleRate: clip.exportSampleRate, exportAsMono,
+        id: clip.id, name: clip.name, sourceFileName: clip.sourceFileName, sourceGroupId: clip.sourceGroupId, description: clip.description, original: await storeBuffer(clip.originalBuffer), working: await storeBuffer(clip.buffer), renderedEffects: clip.renderedEffects, recipe: clip.recipe, effects, exportSampleRate: clip.exportSampleRate, exportAsMono,
       })
       const index: ProjectIndex = { version: 1, revision: crypto.randomUUID(), clips }
       const text = JSON.stringify(index, null, 2)

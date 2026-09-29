@@ -18,6 +18,9 @@ import { useEditorSettings } from '@/stores/editorSettings'
 import { EditorBufferPlayer } from '@/utils/editorBufferPlayer'
 import { useEditorPreview } from '@/hooks/useEditorPreview'
 import { sourceGroup } from '@/utils/editorWaveform'
+import type { Recipe } from '@/utils/recipe'
+import type { MessageId } from '@/i18n/I18nProvider'
+import { RecipeDialog } from './RecipeDialog'
 
 export function WaveformEditor({ active }: { active: boolean }) {
   const { t } = useI18n()
@@ -86,6 +89,12 @@ export function WaveformEditor({ active }: { active: boolean }) {
   }, [active, playback, s.setError])
   const chooseTargets = (value: string[] | null) => { setSelectedTargets(value); localStorage.setItem('hapbeat-editor-targets', JSON.stringify(value)) }
   const input = useRef<HTMLInputElement>(null)
+  const [recipeDialog, setRecipeDialog] = useState<{ container: HTMLElement; initial?: Recipe } | null>(null)
+  const openRecipe = (anchor: HTMLElement, initial?: Recipe) => setRecipeDialog({ container: anchor.ownerDocument.body, initial })
+  const createRecipeClip = (recipe: Recipe, presetId: string | null) => {
+    s.addRecipeClip(recipe, presetId ? t(`editor.recipe.preset.${presetId}` as MessageId) : t('editor.recipe.clipName'), `recipe:${presetId ?? 'custom'}`)
+    setRecipeDialog(null)
+  }
   useEffect(() => { player.setMuted(muted) }, [player, muted])
   useEffect(() => { setOriginal(false) }, [s.clip?.id])
   useEffect(() => {
@@ -167,6 +176,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
         </div>
         <input ref={input} type="file" multiple accept="audio/*,.wav,.mp3,.ogg,.flac,.aac,.m4a" hidden onChange={e => { void s.loadFiles(Array.from(e.target.files ?? [])); e.target.value = '' }} />
         <button className="toolbar-btn" disabled={!s.folder || s.isProcessing} onClick={() => input.current?.click()}>{t('editor.import')}</button>
+        <button className="toolbar-btn" disabled={!s.folder || s.isProcessing} onClick={e => openRecipe(e.currentTarget)}>{t('editor.recipe.create')}</button>
         <nav className="editor-source-groups" aria-label={t('editor.sourceGroups')}>
           <button className={`toolbar-btn ${showAllSources ? 'selected' : ''}`} aria-pressed={showAllSources} onClick={() => setShowAllSources(!showAllSources)}>{t('editor.allSources')} ({s.documents.length})</button>
           {sourceGroups.map(([key, docs]) => <button key={key} className={`toolbar-btn ${!showAllSources && activeGroup === key ? 'selected' : ''}`} aria-pressed={!showAllSources && activeGroup === key} disabled={s.isProcessing}
@@ -184,6 +194,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
             <input aria-label={`${t('editor.name')}: ${doc.clip.name}`} value={doc.clip.name} disabled={s.isProcessing} onChange={e => s.updateClipInfo(doc.clip.id, {name: e.target.value})} />
             <input aria-label={`${t('editor.description')}: ${doc.clip.name}`} placeholder={t('editor.description')} value={doc.clip.description ?? ''} disabled={s.isProcessing} onChange={e => s.updateClipInfo(doc.clip.id, {description: e.target.value})} />
             {doc.clip.sourceFileName && <small title={doc.clip.sourceFileName}>{t('editor.sourceFile')}: {doc.clip.sourceFileName}</small>}
+            {doc.clip.recipe && <button className="toolbar-btn" disabled={!s.folder || s.isProcessing} onClick={e => openRecipe(e.currentTarget, doc.clip.recipe)}>{t('editor.recipe.edit')}</button>}
           </div></div>)}
         </div>
         <button className="toolbar-btn" disabled={!s.clip || s.isProcessing} onClick={s.duplicateClip}>⧉ {t('editor.variant')}</button>
@@ -193,6 +204,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
     </div>
     </EditorDock></div>
     <StatusBar />
+    {recipeDialog && <RecipeDialog container={recipeDialog.container} initial={recipeDialog.initial} onCreate={createRecipeClip} onClose={() => setRecipeDialog(null)} />}
     {s.isProcessing && <div className="processing-overlay"><div className="processing-spinner" /><span>{t('wave.processing')}</span></div>}
   </div>
 }

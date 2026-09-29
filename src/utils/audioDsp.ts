@@ -12,6 +12,14 @@ import type {
   EqBand,
   MonoConvertMethod,
 } from '@/types/waveform'
+import {
+  applyAm,
+  applyEnvelopeInPlace,
+  compress,
+  frequencyShift,
+  noiseMix,
+  saturate,
+} from './textureDsp'
 
 // ---- Helper: create a new AudioBuffer from channel data ----
 
@@ -175,30 +183,7 @@ export function applyEnvelope(
   if (points.length < 2) return buffer
 
   const data = cloneChannelData(buffer)
-  const length = buffer.length
-
-  for (let ch = 0; ch < data.length; ch++) {
-    const channelData = data[ch]
-    let ptIdx = 0
-
-    for (let i = 0; i < length; i++) {
-      const t = i / Math.max(1, length - 1) // normalized time 0-1
-
-      // Advance to the correct segment
-      while (ptIdx < points.length - 2 && t >= points[ptIdx + 1].time) {
-        ptIdx++
-      }
-
-      // Linear interpolation between points
-      const p0 = points[ptIdx]
-      const p1 = points[ptIdx + 1]
-      const segLen = p1.time - p0.time
-      const frac = segLen > 0 ? (t - p0.time) / segLen : 0
-      const gain = p0.value + (p1.value - p0.value) * frac
-
-      channelData[i] *= gain
-    }
-  }
+  for (const channelData of data) applyEnvelopeInPlace(channelData, points)
 
   return createBuffer(data, buffer.sampleRate)
 }
@@ -448,7 +433,22 @@ export async function applyEffect(
       return reverse(buffer)
     case 'mono-convert':
       return monoConvert(buffer, params.method)
+    case 'am':
+      return mapChannels(buffer, data => applyAm(data, buffer.sampleRate, params, params.seed))
+    case 'noise-mix':
+      return mapChannels(buffer, data => noiseMix(data, buffer.sampleRate, params))
+    case 'freq-shift':
+      return mapChannels(buffer, data => frequencyShift(data, buffer.sampleRate, params.shiftHz))
+    case 'compressor':
+      return mapChannels(buffer, data => compress(data, buffer.sampleRate, params))
+    case 'saturate':
+      return mapChannels(buffer, data => saturate(data, params.driveDb, params.mode, params.mix, params.outputDb))
   }
+}
+
+/** Thin AudioBuffer wrapper around the pure channel-array DSP in textureDsp. */
+function mapChannels(buffer: AudioBuffer, process: (data: Float32Array[]) => Float32Array[]): AudioBuffer {
+  return createBuffer(process(cloneChannelData(buffer)), buffer.sampleRate)
 }
 
 /** Resampling pitch preserves the transient; length intentionally changes. */
