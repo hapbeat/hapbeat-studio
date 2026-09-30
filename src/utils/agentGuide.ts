@@ -15,6 +15,10 @@ export function guideMarkdown(studioVersion: string): string {
 
 > 日本語要約: このフォルダは Hapbeat Studio の波形エディタ用フォルダです。AI エージェントは \`hapbeat-agent/inbox/\` に試行リクエスト（JSON）を置き、ユーザーが Studio で各候補を Hapbeat で触って評価します。評価は \`haptic-knowledge/\` に蓄積されるので、次の提案前に必ず読んでください。Studio は LLM を呼びません。
 
+## MCP tools or files
+
+If a \`hapbeat\` MCP server is available (\`hapbeat-helper mcp\`), prefer its tools: \`get_guide\` → \`get_knowledge\` → \`submit_trial\` → \`wait_for_rating\`. They use the same formats and knowledge base as the files described below. Without it, do the same through the files (\`hapbeat-agent/inbox/\`).
+
 ## Purpose
 
 You help the user design vibration (haptic) clips for Hapbeat, a wearable vibrotactile device, from verbal descriptions such as onomatopoeia ("ごわごわ", "ざらざら"). You cannot feel vibration; the user can. So you propose small sets of candidates, the user rates them on the device in Hapbeat Studio, and the ratings accumulate as a knowledge base that you must read before proposing again.
@@ -166,6 +170,13 @@ Content-Type: application/json
 `
 }
 
+/** `get_guide` over MCP: the same guide, prefixed with how the tools replace the inbox. */
+export function mcpGuideMarkdown(studioVersion: string): string {
+  return `> You are connected through the \`hapbeat\` MCP server: use \`submit_trial\` instead of writing to \`hapbeat-agent/inbox/\`, \`get_knowledge\` instead of reading \`haptic-knowledge/\`, \`get_catalog\` instead of \`catalog.json\`, \`wait_for_rating\` / \`get_trial\` for ratings and \`propose_insight\` to append to "Proposed" in insights.md.
+
+${guideMarkdown(studioVersion)}`
+}
+
 export function knowledgeReadme(studioVersion: string): string {
   return `${header(studioVersion)}
 # haptic-knowledge
@@ -187,7 +198,7 @@ Derived files can always be rebuilt from trials/ and dimensions.json. See \`../h
 export function insightsTemplate(): string {
   return `# Haptic insights
 
-Human-curated findings about Hapbeat vibration and vocabulary. Studio never edits this file after creating it.
+Human-curated findings about Hapbeat vibration and vocabulary. Studio only appends agent proposals (MCP \`propose_insight\`) to the end of "Proposed"; it never edits other parts.
 
 ## Confirmed
 

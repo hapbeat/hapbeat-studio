@@ -33,8 +33,8 @@ interface EditorState {
   loadFiles: (files: File[]) => Promise<void>
   /** Renders `recipe` into a new clip (never modifies existing clips). */
   addRecipeClip: (recipe: Recipe, name: string, sourceFileName: string) => void
-  /** Adds a clip built on `clip.originalBuffer` with `effects` as a not-yet-applied chain (never modifies existing clips). */
-  addDerivedClip: (clip: Pick<WaveformClip, 'name' | 'originalBuffer' | 'exportSampleRate'> & Partial<Pick<WaveformClip, 'description' | 'sourceFileName' | 'sourceGroupId' | 'recipe'>>, effects: EffectParams[]) => void
+  /** Adds a clip built on `clip.originalBuffer` with `effects` as a not-yet-applied chain (never modifies existing clips). Returns its id, or null when no folder is open or the editor is busy. */
+  addDerivedClip: (clip: Pick<WaveformClip, 'name' | 'originalBuffer' | 'exportSampleRate'> & Partial<Pick<WaveformClip, 'description' | 'sourceFileName' | 'sourceGroupId' | 'recipe'>>, effects: EffectParams[]) => string | null
   selectClip: (id: string) => void
   duplicateClip: () => void
   extractSelection: () => void
@@ -172,12 +172,13 @@ export const useWaveformStore = create<EditorState>((set, get) => {
       } catch (error) { get().setError(error) }
     },
     addDerivedClip: (source, effects) => {
-      if (!get().folder || get().isProcessing) return
+      if (!get().folder || get().isProcessing) return null
       const id = crypto.randomUUID()
       const clip: WaveformClip = { ...source, id, sourceGroupId: source.sourceGroupId ?? id, buffer: source.originalBuffer, renderedEffects: [] }
       const chain = derivedEffectChain(effects)
       if (get().clip) histories.set(get().clip!.id, { undoStack: get().undoStack, redoStack: get().redoStack })
       dirty({ documents: [...get().documents, { clip, effects: chain, exportAsMono: false }], clip, effects: chain, exportAsMono: false, selectedRegion: null, undoStack: [], redoStack: [] })
+      return id
     },
     selectClip: id => {
       if (get().isProcessing || get().clip?.id === id) return

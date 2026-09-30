@@ -12,7 +12,7 @@ export const TRIAL_FORMAT = 'hapbeat-trial@1'
 export const RATING_FORMAT = 'hapbeat-rating@1'
 export const CANDIDATE_FORMAT = 'hapbeat-candidate@1'
 export const TRIAL_ID = /^[A-Za-z0-9_-]{1,80}$/
-const CANDIDATE_ID = /^[A-Za-z0-9_-]{1,16}$/
+export const CANDIDATE_ID = /^[A-Za-z0-9_-]{1,16}$/
 
 export type CandidateSource =
   | { kind: 'clip'; clipId: string; use?: 'original' | 'working' }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CandidateFile, TrialFile } from './agentProtocol'
-import { encodePcm16Wav, normalizeOverPeak, processInbox, SETTLE_MS, type InboxDeps } from './agentInbox'
+import { encodePcm16Wav, normalizeOverPeak, processInbox, SETTLE_MS, submitTrialRequest, type InboxDeps } from './agentInbox'
 import { KnowledgeFolder } from './hapticKnowledge'
 import { MemoryDirectory } from './memoryDirectory.testutil'
 
@@ -106,6 +106,41 @@ describe('processInbox', () => {
     root.put('hapbeat-agent/inbox/t-02.json', request('t-02'), NOW.getTime() - SETTLE_MS / 2)
     expect(await processInbox(folder, deps())).toEqual({ accepted: [], rejected: [] })
     expect(root.has('hapbeat-agent/inbox/t-02.json')).toBe(true)
+  })
+})
+
+describe('submitTrialRequest', () => {
+  /** Every file below the trial folder, as text (WAV bytes compared through their length). */
+  async function trialFiles(root: MemoryDirectory, id: string) {
+    const base = `haptic-knowledge/trials/2026-09/${id}`
+    const out: Record<string, string | number> = {}
+    for (const path of ['trial.json', 'request.json', ...['A', 'B', 'C', 'D', 'E'].flatMap(c => [`candidates/${c}.json`, `audio/${c}.wav`])])
+      if (root.has(`${base}/${path}`)) out[path] = path.endsWith('.wav') ? root.size(`${base}/${path}`) : JSON.stringify(await root.json(`${base}/${path}`))
+    return out
+  }
+
+  it('records the same trial as the inbox, without touching inbox/', async () => {
+    const viaInbox = new MemoryDirectory('root'), direct = new MemoryDirectory('root')
+    for (const root of [viaInbox, direct]) root.put('hapbeat-agent/sources/rain.wav', 'RIFF')
+    viaInbox.put('hapbeat-agent/inbox/t-01.json', request('t-01'))
+    await processInbox(await KnowledgeFolder.open(viaInbox.asHandle()), deps())
+    const result = await submitTrialRequest(await KnowledgeFolder.open(direct.asHandle()), JSON.parse(request('t-01')), deps())
+    expect(result.ok && result.month).toBe('2026-09')
+    expect(result.ok && result.candidates.map(c => [c.id, !!c.error])).toEqual([['A', false], ['B', false], ['C', false], ['D', true], ['E', false]])
+    const expected = await trialFiles(viaInbox, 't-01')
+    expect(Object.keys(expected)).toHaveLength(2 + 5 + 4)
+    expect(await trialFiles(direct, 't-01')).toEqual(expected)
+    expect(direct.has('hapbeat-agent/inbox/_rejected/t-01.json')).toBe(false)
+  })
+
+  it('returns validation and duplicate errors without writing', async () => {
+    const root = new MemoryDirectory('root')
+    const folder = await KnowledgeFolder.open(root.asHandle())
+    expect(await submitTrialRequest(folder, { ...JSON.parse(request('t-02')), intent: 'x' }, deps())).toEqual({ ok: false, error: 'intent must be "modify" or "create"' })
+    expect(root.has('haptic-knowledge/trials/2026-09')).toBe(false)
+    const valid = { ...JSON.parse(request('t-02')), candidates: [JSON.parse(request('t-02')).candidates[4]] }
+    expect((await submitTrialRequest(folder, valid, deps())).ok).toBe(true)
+    expect(await submitTrialRequest(folder, valid, deps())).toEqual({ ok: false, error: 'Trial id "t-02" already exists; submit under a new id' })
   })
 })
 

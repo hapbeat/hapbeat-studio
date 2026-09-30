@@ -4,7 +4,7 @@
  * operations are injected (InboxDeps) so the flow is testable in Node.
  */
 import type { EffectParams } from '@/types/waveform'
-import { parseTrialRequest, CANDIDATE_FORMAT, type CandidateFile, type CandidateSource, type TrialCandidate, type TrialFile } from '@/utils/agentProtocol'
+import { parseTrialRequest, trialRequestError, CANDIDATE_FORMAT, type CandidateFile, type CandidateSource, type TrialCandidate, type TrialFile, type TrialRequest } from '@/utils/agentProtocol'
 import { computeFeatures, mixToMono } from '@/utils/hapticFeatures'
 import { localIsoString, monthOf, type KnowledgeFolder } from '@/utils/hapticKnowledge'
 
@@ -83,6 +83,40 @@ export async function renderCandidate(candidate: TrialCandidate, folder: Knowled
   return { data, resolved, autoNormalizedDb: gainDb }
 }
 
+export type AcceptResult = { ok: true; trialId: string; month: string; candidates: CandidateFile[] } | { ok: false; error: string }
+
+/**
+ * Records and renders one validated request. Shared by the inbox and submitTrialRequest (MCP)
+ * so both produce the same trial folder; `storeRequest` writes request.json last.
+ */
+export async function acceptTrial(folder: KnowledgeFolder, request: TrialRequest, deps: InboxDeps, storeRequest: (month: string) => Promise<void>): Promise<AcceptResult> {
+  const state = await folder.trialState(request.id)
+  if (state.state === 'complete') return { ok: false, error: `Trial id "${request.id}" already exists; submit under a new id` }
+  const now = deps.now()
+  // An incomplete trial (Studio stopped mid-import) is re-rendered in place.
+  const month = state.state === 'incomplete' ? state.month : monthOf(now)
+  const trial: TrialFile = { ...request, receivedAt: localIsoString(now), studioVersion: deps.studioVersion }
+  await folder.writeTrial(month, trial)
+  const candidates: CandidateFile[] = []
+  for (const candidate of trial.candidates) {
+    const base = { format: CANDIDATE_FORMAT, trialId: trial.id, id: candidate.id, label: candidate.label, hypothesis: candidate.hypothesis, spec: { source: candidate.source, effects: candidate.effects } } as const
+    let record: CandidateFile, wav: Blob | null = null
+    try {
+      const rendered = await renderCandidate(candidate, folder, deps)
+      wav = deps.encodeWav(rendered.data, OUTPUT_RATE)
+      record = { ...base, resolved: rendered.resolved, audio: `audio/${candidate.id}.wav`, sampleRate: OUTPUT_RATE,
+        ...(rendered.autoNormalizedDb === null ? {} : { autoNormalizedDb: rendered.autoNormalizedDb }),
+        features: computeFeatures(rendered.data, OUTPUT_RATE), renderedAt: localIsoString(deps.now()) }
+    } catch (e) {
+      record = { ...base, features: null, error: e instanceof Error ? e.message : String(e), renderedAt: localIsoString(deps.now()) }
+    }
+    await folder.writeCandidate(month, record, wav)
+    candidates.push(record)
+  }
+  await storeRequest(month)
+  return { ok: true, trialId: trial.id, month, candidates }
+}
+
 export async function processInbox(folder: KnowledgeFolder, deps: InboxDeps): Promise<InboxResult> {
   const result: InboxResult = { accepted: [], rejected: [] }
   const now = deps.now()
@@ -90,33 +124,21 @@ export async function processInbox(folder: KnowledgeFolder, deps: InboxDeps): Pr
     if (now.getTime() - file.lastModified < SETTLE_MS) continue
     const id = name.replace(/\.json$/i, '')
     const parsed = parseTrialRequest(await file.text(), id)
-    const state = parsed.ok ? await folder.trialState(id) : null
-    if (!parsed.ok || state?.state === 'complete') {
-      const error = parsed.ok ? `Trial id "${id}" already exists; submit under a new id` : parsed.error
-      await folder.rejectInbox(name, error)
-      result.rejected.push({ file: name, error })
+    const accepted = parsed.ok ? await acceptTrial(folder, parsed.trial, deps, month => folder.finishInbox(name, month, id)) : parsed
+    if (!accepted.ok) {
+      await folder.rejectInbox(name, accepted.error)
+      result.rejected.push({ file: name, error: accepted.error })
       continue
     }
-    // An incomplete trial (Studio stopped mid-import) is re-rendered in place.
-    const month = state?.state === 'incomplete' ? state.month : monthOf(now)
-    const trial: TrialFile = { ...parsed.trial, receivedAt: localIsoString(now), studioVersion: deps.studioVersion }
-    await folder.writeTrial(month, trial)
-    for (const candidate of trial.candidates) {
-      const base = { format: CANDIDATE_FORMAT, trialId: trial.id, id: candidate.id, label: candidate.label, hypothesis: candidate.hypothesis, spec: { source: candidate.source, effects: candidate.effects } } as const
-      let record: CandidateFile, wav: Blob | null = null
-      try {
-        const rendered = await renderCandidate(candidate, folder, deps)
-        wav = deps.encodeWav(rendered.data, OUTPUT_RATE)
-        record = { ...base, resolved: rendered.resolved, audio: `audio/${candidate.id}.wav`, sampleRate: OUTPUT_RATE,
-          ...(rendered.autoNormalizedDb === null ? {} : { autoNormalizedDb: rendered.autoNormalizedDb }),
-          features: computeFeatures(rendered.data, OUTPUT_RATE), renderedAt: localIsoString(deps.now()) }
-      } catch (e) {
-        record = { ...base, features: null, error: e instanceof Error ? e.message : String(e), renderedAt: localIsoString(deps.now()) }
-      }
-      await folder.writeCandidate(month, record, wav)
-    }
-    await folder.finishInbox(name, month, trial.id)
-    result.accepted.push(trial.id)
+    result.accepted.push(accepted.trialId)
   }
   return result
+}
+
+/** Direct submission (MCP `submit_trial`): same validation and rendering as the inbox, request.json written from the object. */
+export async function submitTrialRequest(folder: KnowledgeFolder, data: unknown, deps: InboxDeps): Promise<AcceptResult> {
+  const error = trialRequestError(data)
+  if (error) return { ok: false, error }
+  const request = data as TrialRequest
+  return acceptTrial(folder, request, deps, month => folder.writeRequest(month, request.id, request))
 }

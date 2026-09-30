@@ -21,8 +21,9 @@ import { sourceGroup } from '@/utils/editorWaveform'
 import type { Recipe } from '@/utils/recipe'
 import type { MessageId } from '@/i18n/I18nProvider'
 import { RecipeDialog } from './RecipeDialog'
-import { AgentTrialsPanel, type AuditionTarget } from './AgentTrialsPanel'
+import { AgentTrialsPanel } from './AgentTrialsPanel'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
+import { useAgentEndpoint } from '@/hooks/useAgentEndpoint'
 
 export function WaveformEditor({ active }: { active: boolean }) {
   const { t } = useI18n()
@@ -45,16 +46,19 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const visibleDocuments = showAllSources ? s.documents : s.documents.filter(doc => sourceGroup(doc.clip) === activeGroup)
   const [muted, setMuted] = useState(false)
   const [previewEnabled, setPreviewEnabled] = useState(false)
-  /** AI trial candidate shown / played instead of the clip. Editing is disabled meanwhile. */
-  const [audition, setAudition] = useState<(AuditionTarget & { buffer: AudioBuffer }) | null>(null)
+  /** AI trial candidate shown / played instead of the clip (agentTrialStore). Editing is disabled meanwhile. */
+  const audition = useAgentTrialStore(state => state.audition)
   const auditionKey = audition ? `${audition.trialId}/${audition.candidateId}` : null
   const [sideTab, setSideTab] = useState<'effects' | 'agent'>('effects')
   const unratedTrials = useAgentTrialStore(state => state.trials.filter(r => !r.rating).length)
+  const focusRequest = useAgentTrialStore(state => state.focusRequest)
+  useEffect(() => { if (focusRequest) setSideTab('agent') }, [focusRequest])
   useEffect(() => {
     if (!active || !s.folder) return
     useAgentTrialStore.getState().startPolling()
     return () => useAgentTrialStore.getState().stopPolling()
   }, [active, s.folder])
+  useAgentEndpoint(active && !!s.folder, s.folder?.root.name ?? null)
   const preview = useEditorPreview(s.clip, s.effects, previewEnabled && !original && !audition)
   const [clipView, setClipView] = useState(() => localStorage.getItem('hapbeat-editor-clip-view') ?? 'cards')
   useEffect(() => { void useWaveformStore.getState().restoreFolder() }, [])
@@ -108,8 +112,14 @@ export function WaveformEditor({ active }: { active: boolean }) {
     setRecipeDialog(null)
   }
   useEffect(() => { player.setMuted(muted) }, [player, muted])
-  useEffect(() => { setOriginal(false); setAudition(null) }, [s.clip?.id])
-  const startAudition = (target: AuditionTarget, buffer: AudioBuffer) => { s.setSelectedRegion(null); setAudition({ ...target, buffer }) }
+  useEffect(() => { setOriginal(false); useAgentTrialStore.getState().clearAudition() }, [s.clip?.id])
+  // MCP `audition` with play: true — the usual playback path (selected haptic targets, PC audio per the mute toggle).
+  const playRequested = useAgentTrialStore(state => state.playRequested)
+  useEffect(() => {
+    if (!playRequested || !audition) return
+    useAgentTrialStore.getState().clearPlayRequest()
+    if (active && !useWaveformStore.getState().isProcessing) void playback.play().catch(s.setError)
+  }, [playRequested, audition, playback, active, s.setError])
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
       const state = useWaveformStore.getState()
@@ -158,7 +168,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
         <button className={`toolbar-btn ${!original && !previewEnabled ? 'selected' : ''}`} disabled={!s.clip || s.isProcessing || !!audition} aria-pressed={!original && !previewEnabled} onClick={() => {if (original) s.setSelectedRegion(null); setOriginal(false); setPreviewEnabled(false)}}>∿ {t('editor.edited')}</button>
         <button className={`toolbar-btn ${original ? 'selected' : ''}`} disabled={!s.clip || s.isProcessing || !!audition} aria-pressed={original} onClick={() => {s.setSelectedRegion(null); setOriginal(true)}}>↩ {t('editor.original')}</button>
         <button className={`toolbar-btn ${previewEnabled && !original ? 'selected' : ''}`} disabled={!s.clip || s.isProcessing || !!audition} aria-pressed={previewEnabled && !original} onClick={() => {setOriginal(false); setPreviewEnabled(true)}}>{t('editor.preview')}</button>
-        {audition ? <span><button className="toolbar-btn" onClick={() => setAudition(null)}>{t('editor.agent.backToClip')}</button></span>
+        {audition ? <span><button className="toolbar-btn" onClick={() => useAgentTrialStore.getState().clearAudition()}>{t('editor.agent.backToClip')}</button></span>
           : <span>{original ? t('editor.originalHint') : t('editor.selectionHint')}</span>}
       </div>
       <div className="editor-preview-status" role="status">{audition ? t('editor.agent.auditionHint') : previewEnabled && !original ? (preview.error || t(preview.status === 'rendering' ? 'editor.previewRendering' : 'editor.previewHint')) : t('editor.committedHint')}</div>
@@ -221,7 +231,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
             {t('editor.agent.tab')}<span className="agent-badge unrated" style={{visibility: unratedTrials ? 'visible' : 'hidden'}}>{t('editor.agent.unratedBadge', {count: unratedTrials})}</span></button>
         </div>
         <fieldset className="editor-edit-controls" hidden={sideTab !== 'effects'} disabled={!s.clip || original || s.isProcessing || !!audition}><EffectsPanel preview={previewEnabled} onPreviewChange={setPreviewEnabled} /></fieldset>
-        <AgentTrialsPanel hidden={sideTab !== 'agent'} audition={audition} onAudition={startAudition} deviceNames={[...new Set(playbackDevices.map(device => device.name).filter(Boolean))]} />
+        <AgentTrialsPanel hidden={sideTab !== 'agent'} deviceNames={[...new Set(playbackDevices.map(device => device.name).filter(Boolean))]} />
       </div>
     </div>
     </EditorDock></div>

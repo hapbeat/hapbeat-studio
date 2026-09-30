@@ -1,13 +1,13 @@
 import { useEffect, useId, useState } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
-import { useAgentTrialStore } from '@/stores/agentTrialStore'
+import { useAgentTrialStore, type AuditionTarget } from '@/stores/agentTrialStore'
+import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { localIsoString, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
 import type { HapticFeatures } from '@/utils/hapticFeatures'
 import { formToRating, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, type CandidateRatingForm, type Direction, type RatingForm } from '@/utils/agentTrialUi'
 import { WaveformThumbnail } from './WaveformThumbnail'
 
-export interface AuditionTarget { trialId: string; candidateId: string }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 const num = (v: number | null, digits: number, unit = '') => v === null ? '—' : `${v.toFixed(digits)}${unit}`
 
@@ -15,10 +15,9 @@ const num = (v: number | null, digits: number, unit = '') => v === null ? '—' 
  * "AI trials": trials that a local agent dropped into hapbeat-agent/inbox/, their
  * candidates (audition / adopt) and the rating form. Polling is driven by WaveformEditor.
  * Kept mounted while hidden so selection and unsaved ratings survive tab switches.
+ * Selection and audition live in agentTrialStore so MCP requests can drive them too.
  */
-export function AgentTrialsPanel({ hidden, audition, onAudition, deviceNames }: {
-  hidden: boolean; audition: AuditionTarget | null; onAudition: (target: AuditionTarget, buffer: AudioBuffer) => void; deviceNames: string[]
-}) {
+export function AgentTrialsPanel({ hidden, deviceNames }: { hidden: boolean; deviceNames: string[] }) {
   const { t } = useI18n()
   const trials = useAgentTrialStore(s => s.trials)
   const folder = useAgentTrialStore(s => s.folder)
@@ -26,17 +25,22 @@ export function AgentTrialsPanel({ hidden, audition, onAudition, deviceNames }: 
   const lastResult = useAgentTrialStore(s => s.lastResult)
   const dimensions = useAgentTrialStore(s => s.dimensions)
   const storeError = useAgentTrialStore(s => s.error)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const selectedId = useAgentTrialStore(s => s.selectedTrialId)
+  const setSelectedId = useAgentTrialStore(s => s.selectTrial)
+  const audition = useAgentTrialStore(s => s.audition)
+  const onAudition = useAgentTrialStore(s => s.startAudition)
+  const { isConnected } = useHelperConnection()
   // lastResult only covers the latest poll, so rejections are kept until dismissed.
   const [rejected, setRejected] = useState<{ file: string; error: string }[]>([])
   useEffect(() => {
     const fresh = lastResult?.rejected ?? []
     if (fresh.length) setRejected(list => [...list, ...fresh.filter(r => !list.some(o => o.file === r.file && o.error === r.error))])
   }, [lastResult])
-  useEffect(() => { setSelectedId(null); setRejected([]) }, [folder])
+  useEffect(() => { setRejected([]) }, [folder])
   const record = trials.find(r => r.trial.id === selectedId) ?? null
   return <div className="agent-panel" hidden={hidden}>
     <div className={`agent-status ${storeError ? 'error' : ''}`} role="status">{storeError ?? t(!folder ? 'editor.agent.noFolder' : polling ? 'editor.agent.watching' : 'editor.agent.paused')}</div>
+    <div className={`agent-mcp-status ${isConnected && folder ? 'ready' : ''}`} title={t('editor.agent.mcpHint')}>{t(!isConnected ? 'editor.agent.mcpHelperOff' : folder ? 'editor.agent.mcpReady' : 'editor.agent.mcpNoFolder')}</div>
     <div className="agent-trial-list" aria-label={t('editor.agent.tab')}>
       {trials.length === 0 && rejected.length === 0 && <p className="agent-muted">{t('editor.agent.empty')}</p>}
       {trials.map(r => <button key={r.trial.id} className={`agent-trial-item ${r.trial.id === selectedId ? 'selected' : ''}`} aria-pressed={r.trial.id === selectedId} onClick={() => setSelectedId(r.trial.id)}>

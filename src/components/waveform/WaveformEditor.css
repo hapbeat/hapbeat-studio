@@ -892,6 +892,8 @@
 .agent-panel[hidden] { display: none; }
 .agent-status, .agent-notice { height: 36px; overflow: auto; font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
 .agent-notice { height: 20px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.agent-mcp-status { height: 18px; font-size: 12px; color: var(--text-secondary); white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.agent-mcp-status.ready { color: var(--success); }
 .agent-status.error, .agent-thumb .error, .agent-save-status.error { color: #f08a8a; }
 .agent-muted { margin: 0; color: var(--text-muted); font-size: 12px; }
 .agent-trial-list { height: 190px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; border: 1px solid var(--border); border-radius: 6px; padding: 6px; }

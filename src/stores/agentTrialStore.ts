@@ -6,12 +6,14 @@ import { decodeAudioFile } from '@/utils/wavIO'
 import { renderRecipe, type Recipe } from '@/utils/recipe'
 import { CURRENT_STUDIO_VERSION } from '@/utils/studioVersions'
 import { ratingError, type RatingBody } from '@/utils/agentProtocol'
-import { processInbox, encodePcm16Wav, type InboxDeps, type InboxResult } from '@/utils/agentInbox'
+import { processInbox, submitTrialRequest, encodePcm16Wav, type AcceptResult, type InboxDeps, type InboxResult } from '@/utils/agentInbox'
 import { buildCatalog } from '@/utils/agentGuide'
 import { KnowledgeFolder, localIsoString, trialSlugs, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
 
 const POLL_MS = 2000
 const CATALOG_DEBOUNCE_MS = 2000
+
+export interface AuditionTarget { trialId: string; candidateId: string }
 
 interface AgentTrialState {
   /** Knowledge / agent folders of the editor folder currently open in useWaveformStore. */
@@ -22,6 +24,14 @@ interface AgentTrialState {
   polling: boolean
   lastResult: InboxResult | null
   error: string | null
+  /** Trial shown in the AI trials panel. */
+  selectedTrialId: string | null
+  /** AI trial candidate shown / played in the editor instead of the clip (UI or MCP `audition`). */
+  audition: (AuditionTarget & { buffer: AudioBuffer }) | null
+  /** Incremented when the AI trials tab should come to the front (MCP `audition`). */
+  focusRequest: number
+  /** Set by requestAudition(…, play = true); WaveformEditor starts the usual playback and clears it. */
+  playRequested: boolean
   /** Binds to the open editor folder, imports inbox requests and reloads trials. */
   refresh: () => Promise<void>
   /** Polls every 2 s (skipped while the page is hidden) and keeps catalog.json in sync with editor documents. */
@@ -32,13 +42,30 @@ interface AgentTrialState {
   saveRating: (trialId: string, rating: RatingBody) => Promise<void>
   loadCandidateAudio: (trialId: string, candidateId: string) => Promise<AudioBuffer>
   /** Creates a new editor clip from a candidate: its source as the original, its effects as a not-yet-applied chain. */
-  adoptCandidate: (trialId: string, candidateId: string) => Promise<void>
+  adoptCandidate: (trialId: string, candidateId: string) => Promise<{ clipId: string; name: string }>
+  selectTrial: (trialId: string | null) => void
+  startAudition: (target: AuditionTarget, buffer: AudioBuffer) => void
+  clearAudition: () => void
+  /** Loads a rendered candidate, selects its trial and auditions it; the editor brings the AI trials tab to the front. */
+  requestAudition: (trialId: string, candidateId: string, play: boolean) => Promise<void>
+  clearPlayRequest: () => void
+  /** Accepts one hapbeat-trial@1 object immediately (MCP `submit_trial`) with the same processing as the inbox. */
+  submitTrial: (trial: unknown) => Promise<AcceptResult>
+  /** Appends an agent proposal to the "Proposed" section of insights.md. */
+  appendInsight: (statement: string, evidence: string[]) => Promise<void>
 }
 
 let pollTimer: ReturnType<typeof setInterval> | undefined
 let catalogTimer: ReturnType<typeof setTimeout> | undefined
 let unsubscribeDocuments: (() => void) | undefined
 let running: Promise<void> | null = null
+/** Serializes inbox imports and direct submissions (both write trials/ and the derived files). */
+let queue: Promise<unknown> = Promise.resolve()
+function exclusive<T>(job: () => Promise<T>): Promise<T> {
+  const next = queue.then(job)
+  queue = next.catch(() => {})
+  return next
+}
 
 function monoBuffer(data: Float32Array, sampleRate: number): AudioBuffer {
   const buffer = new AudioBuffer({ numberOfChannels: 1, length: data.length, sampleRate })
@@ -66,11 +93,12 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
   const bind = async (): Promise<KnowledgeFolder | null> => {
     const root = useWaveformStore.getState().folder?.root ?? null
     const current = get().folder
-    if (!root) { if (current) set({ folder: null, trials: [], dimensions: null }); return null }
+    const reset = { trials: [], dimensions: null, selectedTrialId: null, audition: null, playRequested: false }
+    if (!root) { if (current) set({ folder: null, ...reset }); return null }
     if (current?.root === root) return current
     const folder = await KnowledgeFolder.open(root)
     await folder.writeScaffold(CURRENT_STUDIO_VERSION)
-    set({ folder, trials: [], dimensions: null })
+    set({ folder, ...reset })
     await get().writeCatalog()
     return folder
   }
@@ -78,11 +106,17 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
     try { return await folder.readDimensions() }
     catch (error) { set({ error: error instanceof Error ? error.message : String(error) }); return null }
   }
+  const openFolder = async () => {
+    const folder = await bind()
+    if (!folder) throw new Error('No editor folder is open')
+    return folder
+  }
   return {
     folder: null, trials: [], dimensions: null, polling: false, lastResult: null, error: null,
+    selectedTrialId: null, audition: null, focusRequest: 0, playRequested: false,
     refresh: async () => {
       if (running) return running
-      running = (async () => {
+      running = exclusive(async () => {
         try {
           const folder = await bind()
           if (!folder) return
@@ -96,7 +130,7 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
           set({ trials: newestFirst(records), dimensions: dimensions ?? get().dimensions, lastResult, ...(dimensions ? { error: null } : {}) })
         } catch (error) { set({ error: error instanceof Error ? error.message : String(error) }) }
         finally { running = null }
-      })()
+      })
       return running
     },
     startPolling: () => {
@@ -146,19 +180,53 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
       if (!requested || !spec) throw new Error(`Candidate "${candidateId}" is not in trial "${trialId}"`)
       const base = { name: requested.label, description: `trial:${trialId}/${candidateId}` }
       const source = spec.source
+      let clipId: string | null
       if (source.kind === 'clip') {
         const clip = useWaveformStore.getState().documents.find(d => d.clip.id === source.clipId)?.clip
         if (!clip) throw new Error(`Source clip "${source.clipId}" is no longer in the editor`)
-        useWaveformStore.getState().addDerivedClip({ ...base, originalBuffer: source.use === 'working' ? clip.buffer : clip.originalBuffer, exportSampleRate: clip.exportSampleRate, sourceFileName: clip.sourceFileName, sourceGroupId: sourceGroup(clip) }, spec.effects)
+        clipId = useWaveformStore.getState().addDerivedClip({ ...base, originalBuffer: source.use === 'working' ? clip.buffer : clip.originalBuffer, exportSampleRate: clip.exportSampleRate, sourceFileName: clip.sourceFileName, sourceGroupId: sourceGroup(clip) }, spec.effects)
       } else if (source.kind === 'file') {
         const buffer = await decodeAudioFile(await (await folder.readAgentFile(source.path)).arrayBuffer())
         if (buffer.numberOfChannels > 2) throw new Error(`${source.path}: only mono / stereo audio is supported`)
-        useWaveformStore.getState().addDerivedClip({ ...base, originalBuffer: buffer, exportSampleRate: 48000, sourceFileName: source.path.split('/').pop() }, spec.effects)
+        clipId = useWaveformStore.getState().addDerivedClip({ ...base, originalBuffer: buffer, exportSampleRate: 48000, sourceFileName: source.path.split('/').pop() }, spec.effects)
       } else {
         const recipe = source.recipe as Recipe
         const { data, sampleRate } = renderRecipe(recipe)
-        useWaveformStore.getState().addDerivedClip({ ...base, originalBuffer: monoBuffer(data, sampleRate), exportSampleRate: recipe.sampleRate, sourceFileName: `recipe:${trialId}/${candidateId}`, recipe }, spec.effects)
+        clipId = useWaveformStore.getState().addDerivedClip({ ...base, originalBuffer: monoBuffer(data, sampleRate), exportSampleRate: recipe.sampleRate, sourceFileName: `recipe:${trialId}/${candidateId}`, recipe }, spec.effects)
       }
+      if (!clipId) throw new Error('The editor is busy or has no folder open; try again')
+      return { clipId, name: base.name }
     },
+    selectTrial: selectedTrialId => set({ selectedTrialId }),
+    startAudition: (target, buffer) => {
+      useWaveformStore.getState().setSelectedRegion(null)
+      set({ audition: { ...target, buffer }, playRequested: false })
+    },
+    clearAudition: () => { if (get().audition || get().playRequested) set({ audition: null, playRequested: false }) },
+    requestAudition: async (trialId, candidateId, play) => {
+      const record = get().trials.find(r => r.trial.id === trialId)
+      const candidate = record?.candidates.find(c => c.id === candidateId)
+      if (!record) throw new Error(`Trial "${trialId}" is not loaded`)
+      if (!candidate) throw new Error(`Candidate "${candidateId}" is not in trial "${trialId}"`)
+      if (!candidate.audio || candidate.error) throw new Error(`Candidate "${candidateId}" has no rendered audio${candidate.error ? `: ${candidate.error}` : ''}`)
+      const buffer = await get().loadCandidateAudio(trialId, candidateId)
+      useWaveformStore.getState().setSelectedRegion(null)
+      set({ audition: { trialId, candidateId, buffer }, selectedTrialId: trialId, focusRequest: get().focusRequest + 1, playRequested: play })
+    },
+    clearPlayRequest: () => set({ playRequested: false }),
+    submitTrial: trial => exclusive(async () => {
+      const folder = await openFolder()
+      const result = await submitTrialRequest(folder, trial, inboxDeps())
+      if (!result.ok) return result
+      const records = await folder.listTrials()
+      const dimensions = await readDimensions(folder)
+      const accepted = records.find(r => r.trial.id === result.trialId)
+      if (dimensions && accepted) await folder.regenerate(records, dimensions, trialSlugs(accepted.trial, dimensions))
+      set({ trials: newestFirst(records), dimensions: dimensions ?? get().dimensions })
+      return result
+    }),
+    appendInsight: (statement, evidence) => exclusive(async () => {
+      await (await openFolder()).appendInsight(statement, evidence, localIsoString(new Date()))
+    }),
   }
 })

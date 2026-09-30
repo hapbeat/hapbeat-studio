@@ -173,6 +173,20 @@ export function localIsoString(date: Date): string {
 }
 export const monthOf = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 
+/**
+ * Appends `- <statement> (evidence: a/b, …) — proposed <at>` to the end of the "## Proposed"
+ * section of insights.md (created at the end when missing). Other sections are untouched.
+ */
+export function appendProposedInsight(markdown: string, statement: string, evidence: string[], at: string): string {
+  const bullet = `- ${statement.trim().replace(/\s+/g, ' ')} (evidence: ${evidence.join(', ')}) — proposed ${at}`
+  const heading = /^## Proposed[ \t]*$/m.exec(markdown)
+  if (!heading) return `${markdown.trimEnd()}${markdown.trim() ? '\n\n' : ''}## Proposed\n\n${bullet}\n`
+  const bodyStart = heading.index + heading[0].length
+  const next = /^## /m.exec(markdown.slice(bodyStart))
+  const end = next ? bodyStart + next.index : markdown.length
+  return `${markdown.slice(0, end).trimEnd()}\n${bullet}\n${next ? `\n${markdown.slice(end)}` : ''}`
+}
+
 // ---- File system layer ----
 
 const json = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`
@@ -278,6 +292,12 @@ export class KnowledgeFolder {
   /** Final step of accepting: the request file moves verbatim into the trial as request.json. */
   async finishInbox(name: string, month: string, id: string) {
     await moveFile(await this.agent.getDirectoryHandle('inbox'), name, await this.trialDir(month, id), 'request.json')
+  }
+  /** request.json for a trial submitted directly (not through the inbox). */
+  async writeRequest(month: string, id: string, request: unknown) { await writeEditorFile(await this.trialDir(month, id), 'request.json', json(request)) }
+  async readInsights(): Promise<string> { return await readText(this.knowledge, 'insights.md') ?? insightsTemplate() }
+  async appendInsight(statement: string, evidence: string[], at: string) {
+    await writeEditorFile(this.knowledge, 'insights.md', appendProposedInsight(await this.readInsights(), statement, evidence, at))
   }
   async listTrials(): Promise<TrialRecord[]> {
     const trials = await this.knowledge.getDirectoryHandle('trials', { create: true })

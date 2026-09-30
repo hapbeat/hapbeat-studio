@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { CandidateFile, RatingFile, TrialFile } from './agentProtocol'
 import type { HapticFeatures } from './hapticFeatures'
-import { aggregateTerm, buildIndex, canonicalTerm, KnowledgeFolder, knownSlugs, parseDimensions, SEED_DIMENSIONS, type TrialRecord } from './hapticKnowledge'
+import { aggregateTerm, appendProposedInsight, buildIndex, canonicalTerm, KnowledgeFolder, knownSlugs, parseDimensions, SEED_DIMENSIONS, type TrialRecord } from './hapticKnowledge'
 import { MemoryDirectory } from './memoryDirectory.testutil'
+import { insightsTemplate } from './agentGuide'
 
 const features = (centroidHz: number): HapticFeatures => ({
   durationSec: 1, peakDb: -1, rmsDb: -10, crestDb: 9,
@@ -105,5 +106,26 @@ describe('KnowledgeFolder', () => {
     expect(term.good.n).toBe(1)
     expect((await root.json<{ trials: unknown[] }>('haptic-knowledge/index.json')).trials).toHaveLength(1)
     expect(await new Response(await folder.readCandidateAudio('2026-09', 't1', 'A')).text()).toBe('wav')
+  })
+})
+
+describe('appendProposedInsight', () => {
+  const at = '2026-10-01T12:00:00+09:00'
+  const bullet = '- AM depth matters (evidence: t1/A, t2/B) — proposed 2026-10-01T12:00:00+09:00'
+  it('appends to the end of the Proposed section and leaves Confirmed alone', () => {
+    const template = insightsTemplate()
+    const once = appendProposedInsight(template, 'AM depth\n  matters ', ['t1/A', 't2/B'], at)
+    expect(once).toBe(`${template.trimEnd()}\n${bullet}\n`)
+    const confirmed = (md: string) => md.slice(md.indexOf('## Confirmed'), md.indexOf('## Proposed'))
+    expect(confirmed(once)).toBe(confirmed(template))
+    expect(appendProposedInsight(once, 'second', ['t3/C'], at).endsWith(`${bullet}\n- second (evidence: t3/C) — proposed ${at}\n`)).toBe(true)
+  })
+  it('inserts before a following section', () => {
+    const md = '# X\n\n## Proposed\n\n- old\n\n## Confirmed\n\n- keep\n'
+    expect(appendProposedInsight(md, 'AM depth matters', ['t1/A', 't2/B'], at)).toBe(`# X\n\n## Proposed\n\n- old\n${bullet}\n\n## Confirmed\n\n- keep\n`)
+  })
+  it('creates the section at the end when missing', () => {
+    expect(appendProposedInsight('# X\n\n## Confirmed\n\n- keep\n\n', 'AM depth matters', ['t1/A', 't2/B'], at)).toBe(`# X\n\n## Confirmed\n\n- keep\n\n## Proposed\n\n${bullet}\n`)
+    expect(appendProposedInsight('', 'AM depth matters', ['t1/A', 't2/B'], at)).toBe(`## Proposed\n\n${bullet}\n`)
   })
 })
