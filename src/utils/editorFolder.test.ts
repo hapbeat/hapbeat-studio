@@ -222,4 +222,11 @@ describe('editor lossless local project', () => {
     const broken = {...index, clips: [{...index.clips[0], effects: [{id:'x',enabled:true,params:{type:'time-stretch',rate:0}}]}]}
     expect(() => parseEditorIndex(JSON.stringify(broken))).toThrow()
   })
+  it('accepts optional material provenance fields and rejects malformed ones', () => {
+    const clip = {id:'a',name:'a',original:'good.f32',working:'x.f32',exportSampleRate:48000,exportAsMono:false,effects:[]}
+    const withProvenance = {...clip, sourceSha256: 'a'.repeat(64), provenance: {kind: 'material', site: 'maou.audio', referrerUrl: null, license: {id: 'CC-BY-4.0', name: 'CC BY 4.0', creditText: null}, needsReview: false}}
+    expect(parseEditorIndex(JSON.stringify({version: 1, revision: 'r', clips: [withProvenance]})).clips[0].sourceSha256).toBe('a'.repeat(64))
+    expect(() => parseEditorIndex(JSON.stringify({version: 1, revision: 'r', clips: [{...clip, sourceSha256: 'A'.repeat(64)}]}))).toThrow()
+    expect(() => parseEditorIndex(JSON.stringify({version: 1, revision: 'r', clips: [{...withProvenance, provenance: {kind: 'material'}}]}))).toThrow()
+  })
 })

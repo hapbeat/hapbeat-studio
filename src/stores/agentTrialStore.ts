@@ -3,6 +3,7 @@ import { useWaveformStore } from '@/stores/waveformStore'
 import { sourceGroup } from '@/utils/editorWaveform'
 import { applyEffect, resample } from '@/utils/audioDsp'
 import { decodeAudioFile } from '@/utils/wavIO'
+import { sha256Hex } from '@/utils/sha256'
 import { renderRecipe, type Recipe } from '@/utils/recipe'
 import { CURRENT_STUDIO_VERSION } from '@/utils/studioVersions'
 import { ratingError, type RatingBody } from '@/utils/agentProtocol'
@@ -184,11 +185,14 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
       if (source.kind === 'clip') {
         const clip = useWaveformStore.getState().documents.find(d => d.clip.id === source.clipId)?.clip
         if (!clip) throw new Error(`Source clip "${source.clipId}" is no longer in the editor`)
-        clipId = useWaveformStore.getState().addDerivedClip({ ...base, originalBuffer: source.use === 'working' ? clip.buffer : clip.originalBuffer, exportSampleRate: clip.exportSampleRate, sourceFileName: clip.sourceFileName, sourceGroupId: sourceGroup(clip) }, spec.effects)
+        clipId = useWaveformStore.getState().addDerivedClip({ ...base, originalBuffer: source.use === 'working' ? clip.buffer : clip.originalBuffer, exportSampleRate: clip.exportSampleRate, sourceFileName: clip.sourceFileName, sourceGroupId: sourceGroup(clip), sourceSha256: clip.sourceSha256, provenance: clip.provenance }, spec.effects)
       } else if (source.kind === 'file') {
-        const buffer = await decodeAudioFile(await (await folder.readAgentFile(source.path)).arrayBuffer())
+        const bytes = await (await folder.readAgentFile(source.path)).arrayBuffer()
+        // Hash before decoding: decodeAudioData may detach the buffer.
+        const sourceSha256 = await sha256Hex(bytes)
+        const buffer = await decodeAudioFile(bytes)
         if (buffer.numberOfChannels > 2) throw new Error(`${source.path}: only mono / stereo audio is supported`)
-        clipId = useWaveformStore.getState().addDerivedClip({ ...base, originalBuffer: buffer, exportSampleRate: 48000, sourceFileName: source.path.split('/').pop() }, spec.effects)
+        clipId = useWaveformStore.getState().addDerivedClip({ ...base, originalBuffer: buffer, exportSampleRate: 48000, sourceFileName: source.path.split('/').pop(), sourceSha256 }, spec.effects)
       } else {
         const recipe = source.recipe as Recipe
         const { data, sampleRate } = renderRecipe(recipe)

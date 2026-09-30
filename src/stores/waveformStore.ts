@@ -8,6 +8,9 @@ import { loadDirectoryHandle, saveDirectoryHandle } from '@/utils/localDirectory
 import { EditorFolder, type EditorDocument } from '@/utils/editorFolder'
 import { renderRecipe, type Recipe } from '@/utils/recipe'
 import { derivedEffectChain } from '@/utils/agentTrialUi'
+import { sha256Hex } from '@/utils/sha256'
+import { getActiveHelperChannel } from '@/utils/helperRequest'
+import { registerExportedDerived, type MaterialProvenance } from '@/utils/materials'
 
 interface History { buffer: AudioBuffer; effects: EffectEntry[]; label: string }
 interface EditorState {
@@ -34,11 +37,13 @@ interface EditorState {
   /** Renders `recipe` into a new clip (never modifies existing clips). */
   addRecipeClip: (recipe: Recipe, name: string, sourceFileName: string) => void
   /** Adds a clip built on `clip.originalBuffer` with `effects` as a not-yet-applied chain (never modifies existing clips). Returns its id, or null when no folder is open or the editor is busy. */
-  addDerivedClip: (clip: Pick<WaveformClip, 'name' | 'originalBuffer' | 'exportSampleRate'> & Partial<Pick<WaveformClip, 'description' | 'sourceFileName' | 'sourceGroupId' | 'recipe'>>, effects: EffectParams[]) => string | null
+  addDerivedClip: (clip: Pick<WaveformClip, 'name' | 'originalBuffer' | 'exportSampleRate'> & Partial<Pick<WaveformClip, 'description' | 'sourceFileName' | 'sourceGroupId' | 'sourceSha256' | 'provenance' | 'recipe'>>, effects: EffectParams[]) => string | null
   selectClip: (id: string) => void
   duplicateClip: () => void
   extractSelection: () => void
   updateClipInfo: (id: string, patch: {name?: string; description?: string}) => void
+  /** Applies helper lookup results to every clip whose `sourceSha256` is in `found`; saves only when something changed. */
+  setProvenance: (found: Map<string, MaterialProvenance>) => void
   setClipName: (name: string) => void
   setExportSampleRate: (rate: SampleRate) => void
   setExportAsMono: (mono: boolean) => void
@@ -147,11 +152,14 @@ export const useWaveformStore = create<EditorState>((set, get) => {
       set({ isProcessing: true, error: null })
       try {
         for (const file of files) {
-          const buffer = await decodeAudioFile(await file.arrayBuffer())
+          const bytes = await file.arrayBuffer()
+          // Hash before decoding: decodeAudioData may detach the buffer.
+          const sourceSha256 = await sha256Hex(bytes)
+          const buffer = await decodeAudioFile(bytes)
           if (buffer.numberOfChannels > 2) throw new Error(`${file.name}: only mono / stereo audio is supported`)
           const id = crypto.randomUUID()
           await folder.keepImport(id, file)
-          const clip: WaveformClip = { id, name: file.name.replace(/\.[^.]+$/, ''), sourceFileName: file.name, sourceGroupId: id, buffer, originalBuffer: buffer, exportSampleRate: 48000 }
+          const clip: WaveformClip = { id, name: file.name.replace(/\.[^.]+$/, ''), sourceFileName: file.name, sourceGroupId: id, sourceSha256, buffer, originalBuffer: buffer, exportSampleRate: 48000 }
           if (get().clip) histories.set(get().clip!.id, { undoStack: get().undoStack, redoStack: get().redoStack })
           dirty({ documents: [...get().documents, { clip, effects: [], exportAsMono: false }], clip, effects: [], exportAsMono: false, selectedRegion: null, undoStack: [], redoStack: [] })
         }
@@ -208,6 +216,16 @@ export const useWaveformStore = create<EditorState>((set, get) => {
       if (get().isProcessing) return
       const documents = get().documents.map(doc => doc.clip.id === id ? {...doc, clip: {...doc.clip, ...patch}} : doc)
       dirty({documents, clip: documents.find(doc => doc.clip.id === get().clip?.id)?.clip ?? get().clip})
+    },
+    setProvenance: found => {
+      let changed = false
+      const documents = get().documents.map(doc => {
+        const next = doc.clip.sourceSha256 ? found.get(doc.clip.sourceSha256) : undefined
+        if (!next || JSON.stringify(next) === JSON.stringify(doc.clip.provenance)) return doc
+        changed = true
+        return {...doc, clip: {...doc.clip, provenance: next}}
+      })
+      if (changed) dirty({documents, clip: documents.find(doc => doc.clip.id === get().clip?.id)?.clip ?? get().clip})
     },
     setClipName: name => { if (get().clip && !get().isProcessing) dirty({ clip: { ...get().clip!, name } }) },
     setExportSampleRate: exportSampleRate => { if (get().clip && !get().isProcessing) dirty({ clip: { ...get().clip!, exportSampleRate } }) },
@@ -274,7 +292,11 @@ export const useWaveformStore = create<EditorState>((set, get) => {
       try {
         await get().save()
         const blob = await (exportAsMono ? encodeMonoWavBlob : encodeWavBlob)(clip.buffer, clip.exportSampleRate)
-        return await folder.export(clip.name, blob)
+        const filename = await folder.export(clip.name, blob)
+        // Ledger record is best effort: the WAV is already on disk.
+        void registerExportedDerived(getActiveHelperChannel(), { blob, parentSha256: clip.sourceSha256, name: clip.name, effects: clip.renderedEffects })
+          .catch(error => console.warn('[editor] material_register_derived failed', error))
+        return filename
       } finally { set({ isProcessing: false }) }
     },
     revertToOriginal: () => {

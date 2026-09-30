@@ -216,3 +216,32 @@ describe('derived clips', () => {
     expect(documents[0].clip).toBe(source)
   })
 })
+describe('material provenance', () => {
+  const sha = 'b'.repeat(64)
+  const provenance = {kind: 'material' as const, site: 'maou.audio', referrerUrl: 'https://maou.audio/se/', license: {id: 'CC-BY-4.0', name: 'CC BY 4.0', creditText: '魔王魂'}, needsReview: false}
+  it('inherits the source hash and provenance into duplicated, extracted and derived clips', () => {
+    const source = {...makeClip('first'), sourceSha256: sha, provenance}
+    store.setState({clip: source, documents: [{clip: source, effects: [], exportAsMono: false}], folder: {save: vi.fn()} as unknown as EditorFolder})
+    store.getState().duplicateClip()
+    expect(store.getState().clip).toMatchObject({sourceSha256: sha, provenance})
+    vi.mocked(cropBuffer).mockReturnValueOnce(makeBuffer(4000))
+    store.getState().setSelectedRegion({start: 0, end: .25})
+    store.getState().extractSelection()
+    expect(store.getState().clip).toMatchObject({sourceSha256: sha, provenance})
+    store.getState().addDerivedClip({name: 'A', originalBuffer: source.originalBuffer, exportSampleRate: 48000, sourceSha256: sha, provenance}, [])
+    expect(store.getState().clip).toMatchObject({sourceSha256: sha, provenance})
+  })
+  it('applies lookup results only to clips with a matching source hash and skips unchanged results', () => {
+    const first = {...makeClip('first'), sourceSha256: sha}, second = makeClip('second')
+    store.setState({clip: first, documents: [first, second].map(clip => ({clip, effects: [], exportAsMono: false})), saveStatus: 'saved'})
+    store.getState().setProvenance(new Map([[sha, provenance]]))
+    expect(store.getState().documents[0].clip.provenance).toEqual(provenance)
+    expect(store.getState().clip?.provenance).toEqual(provenance)
+    expect(store.getState().documents[1].clip.provenance).toBeUndefined()
+    store.setState({saveStatus: 'saved'})
+    const documents = store.getState().documents
+    store.getState().setProvenance(new Map([[sha, {...provenance}]]))
+    expect(store.getState().documents).toBe(documents)
+    expect(store.getState().saveStatus).toBe('saved')
+  })
+})

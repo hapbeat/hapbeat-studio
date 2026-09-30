@@ -24,6 +24,9 @@ import { RecipeDialog } from './RecipeDialog'
 import { AgentTrialsPanel } from './AgentTrialsPanel'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useAgentEndpoint } from '@/hooks/useAgentEndpoint'
+import { isDemoMode } from '@/demo/isDemoMode'
+import { lookupMaterials, provenanceLine } from '@/utils/materials'
+import type { WaveformClip } from '@/types/waveform'
 
 export function WaveformEditor({ active }: { active: boolean }) {
   const { t } = useI18n()
@@ -62,7 +65,23 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const preview = useEditorPreview(s.clip, s.effects, previewEnabled && !original && !audition)
   const [clipView, setClipView] = useState(() => localStorage.getItem('hapbeat-editor-clip-view') ?? 'cards')
   useEffect(() => { void useWaveformStore.getState().restoreFolder() }, [])
-  const { isConnected, devices, send } = useHelperConnection()
+  const { isConnected, devices, send, subscribe } = useHelperConnection()
+  // Refresh provenance from the helper ledger on connect and when sources change;
+  // the result is stored in project.json so it also shows without the helper.
+  const sourceShaKey = useMemo(() => [...new Set(s.documents.map(doc => doc.clip.sourceSha256).filter(Boolean))].sort().join(','), [s.documents])
+  useEffect(() => {
+    if (!isConnected || !sourceShaKey || s.isProcessing || isDemoMode()) return
+    let cancelled = false
+    void lookupMaterials({ send, subscribe }, sourceShaKey.split(','))
+      .then(found => { if (!cancelled) useWaveformStore.getState().setProvenance(found) })
+      .catch(error => console.warn('[editor] material_lookup failed', error))
+    return () => { cancelled = true }
+  }, [isConnected, sourceShaKey, s.isProcessing, send, subscribe])
+  const provenanceText = (clip: WaveformClip) => {
+    const line = provenanceLine(clip)
+    if (line.key === 'known') return t('editor.provenance.known', { site: line.site, license: line.license }) + (line.needsReview ? t('editor.provenance.review') : '')
+    return line.key === 'none' ? '' : t(`editor.provenance.${line.key}`)
+  }
   const [selectedTargets, setSelectedTargets] = useState<string[] | null>(() => {
     try { const saved = JSON.parse(localStorage.getItem('hapbeat-editor-targets') ?? 'null'); return Array.isArray(saved) && saved.every(item => typeof item === 'string') ? saved : null } catch { return null }
   })
@@ -218,6 +237,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
             <input aria-label={`${t('editor.name')}: ${doc.clip.name}`} value={doc.clip.name} disabled={s.isProcessing} onChange={e => s.updateClipInfo(doc.clip.id, {name: e.target.value})} />
             <input aria-label={`${t('editor.description')}: ${doc.clip.name}`} placeholder={t('editor.description')} value={doc.clip.description ?? ''} disabled={s.isProcessing} onChange={e => s.updateClipInfo(doc.clip.id, {description: e.target.value})} />
             {doc.clip.sourceFileName && <small title={doc.clip.sourceFileName}>{t('editor.sourceFile')}: {doc.clip.sourceFileName}</small>}
+            <small className="editor-provenance" title={doc.clip.provenance?.referrerUrl ?? undefined}>{provenanceText(doc.clip)}</small>
             {doc.clip.recipe && <button className="toolbar-btn" disabled={!s.folder || s.isProcessing} onClick={e => openRecipe(e.currentTarget, doc.clip.recipe)}>{t('editor.recipe.edit')}</button>}
           </div></div>)}
         </div>

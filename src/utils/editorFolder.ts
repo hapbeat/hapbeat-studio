@@ -2,6 +2,8 @@ import type { EffectEntry, EffectParams, EffectType, SampleRate, WaveformClip } 
 import { getDefaultParams, EFFECT_LABELS } from '@/types/waveform'
 import { EFFECT_RANGES, inRange, isEnvelope, isRecord } from './effectRanges'
 import { validateRecipe, type Recipe } from './recipe'
+import { isSha256Hex } from './sha256'
+import { validateProvenance, type MaterialProvenance } from './materials'
 
 export interface EditorDocument {
   clip: WaveformClip
@@ -11,6 +13,7 @@ export interface EditorDocument {
 interface DiskClip {
   id: string; name: string; original: string; working: string
   sourceFileName?: string; sourceGroupId?: string; description?: string
+  sourceSha256?: string; provenance?: MaterialProvenance
   renderedEffects?: EffectEntry[]
   recipe?: Recipe
   effects: EffectEntry[]; exportSampleRate: SampleRate; exportAsMono: boolean
@@ -80,7 +83,7 @@ export function parseEditorIndex(text: string): ProjectIndex {
   if (data?.version !== 1 || typeof data.revision !== 'string' || !Array.isArray(data.clips)) throw new Error('Unsupported or damaged editor project')
   const ids = new Set<string>()
   for (const c of data.clips) {
-    if (!c || typeof c.id !== 'string' || ids.has(c.id) || typeof c.name !== 'string' || (c.sourceFileName !== undefined && typeof c.sourceFileName !== 'string') || (c.sourceGroupId !== undefined && typeof c.sourceGroupId !== 'string') || (c.description !== undefined && typeof c.description !== 'string') || !safePath(c.original) || !safePath(c.working) || ![16000,24000,44100,48000].includes(c.exportSampleRate) || typeof c.exportAsMono !== 'boolean' || !validateEffects(c.effects) || (c.renderedEffects !== undefined && !validateEffects(c.renderedEffects)) || (c.recipe !== undefined && validateRecipe(c.recipe) !== null)) throw new Error('Invalid editor project clip')
+    if (!c || typeof c.id !== 'string' || ids.has(c.id) || typeof c.name !== 'string' || (c.sourceFileName !== undefined && typeof c.sourceFileName !== 'string') || (c.sourceGroupId !== undefined && typeof c.sourceGroupId !== 'string') || (c.description !== undefined && typeof c.description !== 'string') || (c.sourceSha256 !== undefined && !isSha256Hex(c.sourceSha256)) || (c.provenance !== undefined && !validateProvenance(c.provenance)) || !safePath(c.original) || !safePath(c.working) || ![16000,24000,44100,48000].includes(c.exportSampleRate) || typeof c.exportAsMono !== 'boolean' || !validateEffects(c.effects) || (c.renderedEffects !== undefined && !validateEffects(c.renderedEffects)) || (c.recipe !== undefined && validateRecipe(c.recipe) !== null)) throw new Error('Invalid editor project clip')
     ids.add(c.id)
   }
   return data
@@ -134,7 +137,7 @@ export class EditorFolder {
     const documents: EditorDocument[] = []
     for (const c of index?.clips ?? []) {
       const originalBuffer = await load(c.original), buffer = await load(c.working)
-      documents.push({ clip: { id: c.id, name: c.name, sourceFileName: c.sourceFileName, sourceGroupId: c.sourceGroupId, description: c.description, buffer, originalBuffer, exportSampleRate: c.exportSampleRate, renderedEffects: c.renderedEffects, recipe: c.recipe }, effects: c.effects, exportAsMono: c.exportAsMono })
+      documents.push({ clip: { id: c.id, name: c.name, sourceFileName: c.sourceFileName, sourceGroupId: c.sourceGroupId, sourceSha256: c.sourceSha256, provenance: c.provenance, description: c.description, buffer, originalBuffer, exportSampleRate: c.exportSampleRate, renderedEffects: c.renderedEffects, recipe: c.recipe }, effects: c.effects, exportAsMono: c.exportAsMono })
     }
     return { folder, documents }
   }
@@ -152,7 +155,7 @@ export class EditorFolder {
       }
       const clips: DiskClip[] = []
       for (const { clip, effects, exportAsMono } of documents) clips.push({
-        id: clip.id, name: clip.name, sourceFileName: clip.sourceFileName, sourceGroupId: clip.sourceGroupId, description: clip.description, original: await storeBuffer(clip.originalBuffer), working: await storeBuffer(clip.buffer), renderedEffects: clip.renderedEffects, recipe: clip.recipe, effects, exportSampleRate: clip.exportSampleRate, exportAsMono,
+        id: clip.id, name: clip.name, sourceFileName: clip.sourceFileName, sourceGroupId: clip.sourceGroupId, sourceSha256: clip.sourceSha256, provenance: clip.provenance, description: clip.description, original: await storeBuffer(clip.originalBuffer), working: await storeBuffer(clip.buffer), renderedEffects: clip.renderedEffects, recipe: clip.recipe, effects, exportSampleRate: clip.exportSampleRate, exportAsMono,
       })
       const index: ProjectIndex = { version: 1, revision: crypto.randomUUID(), clips }
       const text = JSON.stringify(index, null, 2)

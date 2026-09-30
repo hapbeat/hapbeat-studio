@@ -954,3 +954,6 @@
 .agent-save { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; }
 .agent-save-status { height: 34px; overflow: auto; font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; }
 .agent-save-status.saved { color: #8dd5b1; }
+
+/* Provenance line keeps its height whether or not the helper has answered yet. */
+.editor-material-meta small.editor-provenance { display: block; height: 15px; line-height: 15px; }

@@ -2,6 +2,7 @@
 export type SampleRate = 16000 | 24000 | 44100 | 48000
 
 import type { Recipe } from '@/utils/recipe'
+import type { MaterialProvenance } from '@/utils/materials'
 
 /** A loaded audio clip in working memory */
 export interface WaveformClip {
@@ -11,6 +12,10 @@ export interface WaveformClip {
   sourceFileName?: string
   /** Shared by an imported source and all its extracted/duplicated clips. */
   sourceGroupId?: string
+  /** SHA-256 of the imported source file bytes (material ledger key). Inherited by derived clips. */
+  sourceSha256?: string
+  /** Last helper `material_lookup` summary for `sourceSha256`. */
+  provenance?: MaterialProvenance
   description?: string
   /** The current working AudioBuffer (post-edits, pre-export) */
   buffer: AudioBuffer

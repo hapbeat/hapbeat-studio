@@ -10,6 +10,7 @@ import {
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import { checkHelperCompat, type HelperCompat } from '@/config/helperCompat'
 import { isDemoMode } from '@/demo/isDemoMode'
+import { setActiveHelperChannel } from '@/utils/helperRequest'
 
 const HELPER_WS_URL = 'ws://localhost:7703'
 const RECONNECT_INTERVAL_BASE = 2000
@@ -209,6 +210,14 @@ export function HelperConnectionProvider({ children }: { children: ReactNode }) 
       }
     }
   }, [connect, clearReconnectTimer])
+
+  // Publish the live channel to stores (Kit CREDITS.md, editor export ledger).
+  // Demo mode fakes `isConnected` without a socket, so it never publishes.
+  useEffect(() => {
+    if (!isConnected || isDemoMode()) return
+    setActiveHelperChannel({ send, subscribe })
+    return () => setActiveHelperChannel(null)
+  }, [isConnected, send, subscribe])
 
   const helperCompat = checkHelperCompat(helperVersion)
 

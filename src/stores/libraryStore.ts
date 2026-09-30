@@ -41,6 +41,15 @@ import {
   toKitId,
   type ExportFile,
 } from '@/utils/kitExporter'
+import { getActiveHelperChannel } from '@/utils/helperRequest'
+import { KIT_CREDITS_FILENAME, writeKitCredits } from '@/utils/materials'
+import { formatMessage, messages, type MessageId, type MessageParams } from '@/i18n/messages'
+
+/** Store-side copy for the log drawer; follows the locale the I18nProvider set on <html lang>. */
+function storeMessage(id: MessageId, params?: MessageParams): string {
+  const locale = typeof document !== 'undefined' && document.documentElement.lang === 'en' ? 'en' : 'ja'
+  return formatMessage(messages[id][locale], params)
+}
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -1249,6 +1258,26 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         }
       }
 
+      // CREDITS.md (kit-format §3): regenerated from the helper material
+      // ledger on every save; never part of the manifest or Deploy files.
+      // Without the helper an existing CREDITS.md is left untouched. A failure
+      // here must not fail (and retry) an otherwise committed Kit save.
+      let creditsNote: string | null = null
+      try {
+        const outcome = await writeKitCredits({
+          channel: getActiveHelperChannel(),
+          sources: [...resolvedSourceAudio.values()],
+          write: (markdown) => writeKitFolder(outRoot, kitId, [{
+            path: KIT_CREDITS_FILENAME,
+            blob: new Blob([markdown], { type: 'text/markdown' }),
+          }]),
+        })
+        if (outcome === 'no-helper') creditsNote = storeMessage('kit.credits.noHelper')
+      } catch (err) {
+        console.warn('[kit] CREDITS.md generation failed', err)
+        creditsNote = storeMessage('kit.credits.failed', { detail: describeError(err) })
+      }
+
       // Filesystem safety invariant: Save Folder is append/overwrite only.
       // Existing manifests and unreferenced WAVs are deliberately preserved.
       // Studio never decides that a user's file is safe to delete.
@@ -1308,6 +1337,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // even when the pill doesn't surface anything.
       try {
         useLogStore.getState().push('kit', `${kit.name}: ${summary}`)
+        if (creditsNote) useLogStore.getState().push('kit', `${kit.name}: ${creditsNote}`)
       } catch { /* logStore unavailable shouldn't break the flush */ }
       return { files: result.files, kitId }
     } catch (err) {
