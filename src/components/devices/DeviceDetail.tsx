@@ -76,15 +76,18 @@ function FirmwareUpdateChip({
   board,
   transport,
   currentFw,
+  hapticPwm,
   onOpen,
 }: {
   board: string | undefined
   transport: NodeTransport | undefined
   currentFw: string | null | undefined
+  /** get_info reports `haptic_pwm` (band_v4_pwm build) — see resolveLatestFirmware. */
+  hapticPwm: boolean
   onOpen: () => void
 }) {
   const { t } = useI18n()
-  const latest = useFirmwareUpdate(board, transport, currentFw)
+  const latest = useFirmwareUpdate(board, transport, currentFw, hapticPwm)
   if (!latest) return null
   return (
     <button
@@ -838,6 +841,7 @@ export function DeviceDetail() {
                 board={cachedInfo?.board}
                 transport={nodeTransport}
                 currentFw={device.firmwareVersion}
+                hapticPwm={!!cachedInfo?.haptic_pwm}
                 onOpen={() => setSubTab('firmware')}
               />
             </>

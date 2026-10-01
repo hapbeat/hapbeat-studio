@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useLogStore } from '@/stores/logStore'
 import { useDeviceStore } from '@/stores/deviceStore'
@@ -26,6 +26,7 @@ import {
   formatDate,
   formatMtime,
   inferVariantFromEnv,
+  isPwmEntry,
   listFirmwareBuilds,
   normalizeVersion,
   type FirmwareLibraryEntry,
@@ -35,8 +36,10 @@ import {
   entriesForSelection,
   entryBoard,
   FAMILY_LABEL,
+  hapticOutputFlashWarning,
   isSelectionAvailable,
   listAvailability,
+  pickDefaultEntry,
   resolveDefaultSelection,
   type FirmwareFamily,
   type HierarchySelection,
@@ -242,6 +245,14 @@ export function FirmwareSubTab({
     return key ? s.lastFlashedBoard[key] : undefined
   })
   const knownBoard = lanBoard ?? serialMasterBoard ?? lastFlashedBoardForIp ?? null
+  // Does the device run the PWM-output build (get_info `haptic_pwm`)? Same
+  // source precedence as knownBoard: LAN get_info when it has reported, else
+  // the serial-connected device. Unknown => false (never offer the PWM image).
+  const lanHapticPwm = useDeviceStore((s) =>
+    device ? s.infoCache[device.ipAddress]?.haptic_pwm : undefined,
+  )
+  const serialMasterHapticPwm = useSerialMaster((s) => s.info?.haptic_pwm)
+  const knownPwm = lanBoard !== undefined ? !!lanHapticPwm : !!serialMasterHapticPwm
 
   // The currently-selected library entry (before version resolution).
   const baseEntry = useMemo(
@@ -346,6 +357,30 @@ export function FirmwareSubTab({
     }
     return ok
   }, [source, selectedEntry, knownBoard, ask, pushLog])
+
+  /**
+   * Pre-flight: the PWM-output image (band_v4_pwm) shares the stock board id,
+   * so the board check above can't catch it. Confirm before writing it onto
+   * a target not known to report `haptic_pwm`, and before writing a plain
+   * image onto a target that does (it removes PWM drive).
+   */
+  const checkHapticOutputMatch = useCallback(async (
+    targetsPwm: boolean[],
+  ): Promise<boolean> => {
+    if (source !== 'library' || !selectedEntry) return true
+    const warning = hapticOutputFlashWarning(selectedEntry, targetsPwm)
+    if (!warning) return true
+    const ok = await ask({
+      title: t(warning === 'pwm-image' ? 'firmware.pwmFlashTitle' : 'firmware.pwmRemoveTitle'),
+      message: t(warning === 'pwm-image' ? 'firmware.pwmFlashMessage' : 'firmware.pwmRemoveMessage'),
+      confirmLabel: t('firmware.pwmConfirm'),
+      danger: true,
+    })
+    if (!ok) {
+      pushLog('firmware', `flash aborted — haptic output mismatch (env=${selectedEntry.env}, ${warning})`)
+    }
+    return ok
+  }, [source, selectedEntry, ask, pushLog, t])
   const [localError, setLocalError] = useState<string | null>(null)
 
   // ---- Library: refresh on mount + on demand --------------------------
@@ -360,6 +395,8 @@ export function FirmwareSubTab({
         const ra = ROLE_ORDER.indexOf(entryRole(a))
         const rb = ROLE_ORDER.indexOf(entryRole(b))
         if (ra !== rb) return ra - rb
+        // The experimental PWM-output image goes after the normal builds.
+        if (isPwmEntry(a) !== isPwmEntry(b)) return isPwmEntry(a) ? 1 : -1
         return a.env.localeCompare(b.env)
       })
       setLibEntries(entries)
@@ -375,7 +412,11 @@ export function FirmwareSubTab({
       setLibSelected((prev) => {
         if (prev && entries.some((e) => e.env === prev)) return prev
         if (entries.length === 0) return null
-        return [...entries].sort((a, b) => entryMtime(b) - entryMtime(a))[0].env
+        // Never default to the PWM image; the selection effect below
+        // switches to it when the device reports haptic_pwm.
+        const plain = entries.filter((e) => !isPwmEntry(e))
+        const pool = plain.length > 0 ? plain : entries
+        return [...pool].sort((a, b) => entryMtime(b) - entryMtime(a))[0].env
       })
     } catch (err) {
       const msg = (err as Error).message ?? String(err)
@@ -437,14 +478,25 @@ export function FirmwareSubTab({
     [libEntries, selection],
   )
 
+  /** Variant the user clicked for the device on screen. Only an explicit click
+   *  may keep a variant whose haptic output doesn't fit the device. */
+  const explicitEnvRef = useRef<string | null>(null)
+  useEffect(() => {
+    explicitEnvRef.current = null
+  }, [deviceIp])
+
   // Keep libSelected inside the shown set: if the current selection
-  // belongs to a different board, jump to the first shown variant.
+  // belongs to a different board, or (unless clicked explicitly) to a
+  // different haptic output stage, jump to the device's default variant.
   useEffect(() => {
     if (entriesShown.length === 0) return
-    if (libSelected && entriesShown.some((e) => e.env === libSelected)) return
-    setLibSelected(entriesShown[0].env)
+    const current = entriesShown.find((e) => e.env === libSelected)
+    if (current && (explicitEnvRef.current === current.env || isPwmEntry(current) === knownPwm)) return
+    const next = pickDefaultEntry(entriesShown, knownPwm)
+    if (!next || next.env === libSelected) return
+    setLibSelected(next.env)
     setSource('library')
-  }, [entriesShown, libSelected])
+  }, [entriesShown, libSelected, knownPwm, deviceIp])
 
   /** Apply + persist an explicit family/hardware pick. */
   const selectHierarchy = useCallback((next: HierarchySelection) => {
@@ -456,12 +508,12 @@ export function FirmwareSubTab({
       if (next.hw) localStorage.setItem(HW_SELECTED_KEY, next.hw)
       else localStorage.removeItem(HW_SELECTED_KEY)
     } catch { /* localStorage unavailable */ }
-    const shown = entriesForSelection(libEntries, next)
-    if (shown.length > 0) {
-      setLibSelected(shown[0].env)
+    const pick = pickDefaultEntry(entriesForSelection(libEntries, next), knownPwm)
+    if (pick) {
+      setLibSelected(pick.env)
       setSource('library')
     }
-  }, [libEntries, deviceIp, FAMILY_SELECTED_KEY, HW_SELECTED_KEY])
+  }, [libEntries, deviceIp, knownPwm, FAMILY_SELECTED_KEY, HW_SELECTED_KEY])
 
   const selectFamily = useCallback((family: FirmwareFamily) => {
     const hws = availability.find((a) => a.family === family)?.hws ?? []
@@ -756,6 +808,9 @@ export function FirmwareSubTab({
     } else if (!(await checkBoardMatch('OTA'))) {
       return
     }
+    const pwmForIp = (ip: string): boolean =>
+      ip === device.ipAddress ? knownPwm : !!infoCache[ip]?.haptic_pwm
+    if (!(await checkHapticOutputMatch(targets.map(pwmForIp)))) return
 
     otaClearResult(device.ipAddress)
     let bin: Awaited<ReturnType<typeof readSelectedBin>>
@@ -891,6 +946,7 @@ export function FirmwareSubTab({
         if (!ok) return
       }
     }
+    if (!(await checkHapticOutputMatch(serialTargets.map((e) => !!e.info?.haptic_pwm)))) return
     let plan: Awaited<ReturnType<typeof readSelectedRegions>>
     try {
       plan = await readSelectedRegions()
@@ -1043,12 +1099,16 @@ export function FirmwareSubTab({
                       aria-selected={isSelected}
                       className={`firmware-variant-cell${isSelected ? ' selected' : ''}`}
                       onClick={() => {
+                        explicitEnvRef.current = e.env
                         setSource('library')
                         setLibSelected(e.env)
                       }}
                       title={`${entryLabel(e)} — ${e.env}${e.fwVersion ? ` · v${normalizeVersion(e.fwVersion)}` : ''}`}
                     >
                       <span className="firmware-variant-cell-label">{entryLabel(e)}</span>
+                      {isPwmEntry(e) && (
+                        <span className="editor-beta-label" title={t('firmware.pwmBetaHint')}>BETA</span>
+                      )}
                     </button>
                   )
                 })}
@@ -1084,6 +1144,12 @@ export function FirmwareSubTab({
                     {entryBoard(selectedEntry) && ` · ${boardLabel(entryBoard(selectedEntry))}`}
                   </span>
                 </div>
+
+                {isPwmEntry(selectedEntry) && (
+                  <div className="form-status warn" style={{ marginTop: 4 }}>
+                    {t('firmware.pwmCaution')}
+                  </div>
+                )}
 
                 {/* Cache-sourced (dev): .pio pruned this env, so we're
                   * serving the last snapshot — flag that it may be stale. */}

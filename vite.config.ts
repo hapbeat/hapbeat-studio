@@ -77,6 +77,9 @@ interface DevVariantMeta {
   board?: string
   label?: string
   description?: string
+  /** Haptic output stage ("pwm" = band_v4_pwm). Passed through verbatim;
+   *  firmwareLibrary maps it to `hapticOutput`. */
+  haptic_output?: string
   /** Per-env firmware version (device-firmware variant.json ≥ 2026-06).
    *  Preferred over the repo-global build_version.h, which only reflects
    *  the LAST build and mislabels other envs after a partial rebuild. */

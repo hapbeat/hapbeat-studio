@@ -11,7 +11,7 @@
  */
 
 import type { FirmwareLibraryEntry } from '@/utils/firmwareLibrary'
-import { inferVariantFromEnv } from '@/utils/firmwareLibrary'
+import { inferVariantFromEnv, isPwmEntry, matchesHapticOutput } from '@/utils/firmwareLibrary'
 import { isHapbeatBoard, isKnownNonHapbeatBoard } from '@/utils/hapbeatBoard'
 
 /**
@@ -211,4 +211,35 @@ export function resolveDefaultSelection({
 
   // 4. First family present.
   return pickFamily(pool, pool[0].family) ?? null
+}
+
+/**
+ * Default variant within the shown set for a device. The PWM-output image
+ * (band_v4_pwm) is never picked for a device that does not report
+ * `haptic_pwm`; a PWM device gets the PWM image when the set has one, else
+ * the first plain image (flashing it is still guarded by a confirm).
+ */
+export function pickDefaultEntry(
+  shown: FirmwareLibraryEntry[],
+  devicePwm: boolean,
+): FirmwareLibraryEntry | null {
+  return shown.find((e) => matchesHapticOutput(e, devicePwm))
+    ?? shown.find((e) => !isPwmEntry(e))
+    ?? shown[0]
+    ?? null
+}
+
+/**
+ * Pre-flight for an explicit flash of a library image onto targets whose
+ * `haptic_pwm` status is `targetsPwm` (true = reports haptic_pwm):
+ *   - `'pwm-image'`: the PWM image onto a target not known to be a PWM board
+ *   - `'removes-pwm'`: a plain image onto a target that runs PWM drive
+ *   - null: nothing to confirm
+ */
+export function hapticOutputFlashWarning(
+  entry: FirmwareLibraryEntry,
+  targetsPwm: boolean[],
+): 'pwm-image' | 'removes-pwm' | null {
+  if (isPwmEntry(entry)) return targetsPwm.every(Boolean) ? null : 'pwm-image'
+  return targetsPwm.some(Boolean) ? 'removes-pwm' : null
 }

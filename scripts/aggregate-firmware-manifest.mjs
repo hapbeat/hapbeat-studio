@@ -54,6 +54,8 @@ function inferVariantFromEnv(env) {
     const family = m[1] === 'necklace' || m[1] === 'duo' ? 'duo' : 'band'
     board = `${family}_wl_${m[2]}`
   }
+  // `<env>_pwm` = MCU-direct PWM output build (band_v4_pwm).
+  if (/_pwm/.test(e)) return { role, transport, board, hapticOutput: 'pwm' }
   return { role, transport, board }
 }
 
@@ -155,7 +157,7 @@ async function readReleaseMeta(srcDir) {
 /**
  * Read one release dir (a manifest + bins) and return its variant rows:
  * [{ id, repo, env, role, transport, transports?, board?, label, description?,
- *    fwVersion, tag?, appOtaSrc?, fullSerialSrc? }]
+ *    hapticOutput?, fwVersion, tag?, appOtaSrc?, fullSerialSrc? }]
  */
 async function readReleaseDir(repoName, repoShort, srcDir, tag) {
   let manifest = null
@@ -183,6 +185,9 @@ async function readReleaseDir(repoName, repoShort, srcDir, tag) {
         repo: repoName, env: v.env,
         role: v.role, transport: v.transport, transports: v.transports,
         board: v.board, label: v.label ?? v.env, description: v.description,
+        // variant.json `haptic_output` ("pwm" for band_v4_pwm, which shares the
+        // stock board id); env-name fallback for fragments that don't carry it.
+        hapticOutput: v.haptic_output ?? inferVariantFromEnv(v.env).hapticOutput,
         fwVersion: canonicalFwVersion(v.fwVersion ?? tagFw),
         tag: realTag,
         publishedAt,
@@ -202,6 +207,7 @@ async function readReleaseDir(repoName, repoShort, srcDir, tag) {
         id: `${repoShort}/${e.env}`,
         repo: repoName, env: e.env,
         role: inf.role, transport: inf.transport, board: inf.board,
+        hapticOutput: inf.hapticOutput,
         label: e.env, description: undefined,
         fwVersion: canonicalFwVersion(e.fwVersion ?? tagFw),
         tag: realTag,
@@ -309,6 +315,7 @@ async function main() {
       ...(head.board ? { board: head.board } : {}),
       label: head.label,
       ...(head.description ? { description: head.description } : {}),
+      ...(head.hapticOutput ? { haptic_output: head.hapticOutput } : {}),
       fwVersion: latest.fwVersion,
       ...(head.publishedAt ? { publishedAt: head.publishedAt } : {}),
       ...(latest.buildSha ? { buildSha: latest.buildSha } : {}),

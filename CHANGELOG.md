@@ -8,6 +8,9 @@ Hapbeat Studio の変更履歴。形式は [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+### Added（追加）
+- ファームウェアライブラリに PWM 改造基板専用の実験版「Band v4 PWM」を BETA 表示で追加。PWM 駆動を報告しないデバイスには既定選択・更新通知で提示せず、PWM 改造基板には通常の Band v4 を更新として出さない。PWM 版を通常基板へ、通常版を PWM 改造基板へ書き込む時は確認を出す
+
 ## [0.8.1] - 2026-10-01
 
 ### Fixed（修正）

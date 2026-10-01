@@ -148,6 +148,12 @@ export interface FirmwareLibraryEntry {
   label?: string
   /** Optional one-line description. */
   description?: string
+  /** Haptic output stage the image drives. `'pwm'` = experimental MCU-direct
+   *  PWM build for reworked boards (band_v4_pwm). It shares the stock board id
+   *  (band_wl_v4), so board+transport alone can't tell it apart — every
+   *  "firmware for this device" resolution must also match this against the
+   *  device's get_info `haptic_pwm`. Absent = the normal amplifier output. */
+  hapticOutput?: HapticOutput
   /**
    * Dev-server source: "live" = present in .pio/build now; "cache" = a
    * snapshot of a previously-built env that .pio has since pruned (still
@@ -174,6 +180,29 @@ export interface FirmwareRegion {
   label: string
 }
 
+/** Non-default haptic output stage a firmware image can target. */
+export type HapticOutput = 'pwm'
+
+/** variant.json / manifest `haptic_output` → typed value (unknown values dropped). */
+function parseHapticOutput(v: unknown): HapticOutput | undefined {
+  return v === 'pwm' ? 'pwm' : undefined
+}
+
+/** True for the experimental PWM-output image (band_v4_pwm). */
+export function isPwmEntry(e: FirmwareLibraryEntry): boolean {
+  return e.hapticOutput === 'pwm'
+}
+
+/**
+ * Does this image fit a device's haptic output stage? `devicePwm` = the
+ * device reports `haptic_pwm` in get_info. A device that does not (or whose
+ * info is unknown) never matches the PWM image, and a PWM device never
+ * matches the plain amplifier images.
+ */
+export function matchesHapticOutput(e: FirmwareLibraryEntry, devicePwm: boolean): boolean {
+  return isPwmEntry(e) === devicePwm
+}
+
 /** Base URL for production firmware distribution (served as static files from Studio). */
 const PROD_FIRMWARE_BASE = `${import.meta.env.BASE_URL}firmware`
 
@@ -188,6 +217,7 @@ export function inferVariantFromEnv(env: string): {
   role: NodeRole
   transport: NodeTransport
   board?: string
+  hapticOutput?: HapticOutput
 } {
   const e = env.toLowerCase()
   let role: NodeRole = 'receiver'
@@ -215,6 +245,8 @@ export function inferVariantFromEnv(env: string): {
     const family = m[1] === 'necklace' || m[1] === 'duo' ? 'duo' : 'band'
     board = `${family}_wl_${m[2]}`
   }
+  // `<env>_pwm` = MCU-direct PWM output build (band_v4_pwm).
+  if (/_pwm/.test(e)) return { role, transport, board, hapticOutput: 'pwm' }
   return { role, transport, board }
 }
 
@@ -234,6 +266,7 @@ function withInferredRole(e: FirmwareLibraryEntry): FirmwareLibraryEntry {
     transport: e.transport ?? inferred.transport,
     board,
     hapbeat: e.hapbeat ?? boardIsHapbeat(board),
+    hapticOutput: e.hapticOutput ?? inferred.hapticOutput,
   }
 }
 
@@ -265,8 +298,13 @@ export async function listFirmwareBuilds(): Promise<FirmwareLibraryEntry[]> {
   if (!r.ok) {
     throw new Error(`firmware list failed (${r.status} ${r.statusText})`)
   }
-  const json = (await r.json()) as { envs: FirmwareLibraryEntry[] }
-  return (json.envs ?? []).map(withInferredRole).filter(isFirmwareVisible)
+  // The dev plugin spreads variant.json verbatim, so the output stage arrives
+  // under its snake_case key.
+  const json = (await r.json()) as { envs: (FirmwareLibraryEntry & { haptic_output?: unknown })[] }
+  return (json.envs ?? [])
+    .map(({ haptic_output, ...e }) => ({ ...e, hapticOutput: parseHapticOutput(haptic_output) }))
+    .map(withInferredRole)
+    .filter(isFirmwareVisible)
 }
 
 interface ManifestArtifact {
@@ -294,6 +332,8 @@ interface ManifestVariantV2 {
   hapbeat?: boolean
   label?: string
   description?: string
+  /** variant.json `haptic_output` ("pwm" for band_v4_pwm). */
+  haptic_output?: string
   fwVersion?: string
   appOta?: ManifestArtifact
   fullSerial?: ManifestArtifact
@@ -350,6 +390,7 @@ async function listFirmwareBuildsFromManifest(): Promise<FirmwareLibraryEntry[]>
       hapbeat: v.hapbeat,
       label: v.label,
       description: v.description,
+      hapticOutput: parseHapticOutput(v.haptic_output),
       fwVersion: v.fwVersion,
       // Latest version's release date (versions are newest-first).
       publishedAt: v.versions?.[0]?.publishedAt,

@@ -99,4 +99,23 @@ describe('resolveLatestFirmware — 曖昧なら通知しない', () => {
     expect(resolveLatestFirmware(entries, undefined, 'wifi_udp')).toBeNull()
     expect(resolveLatestFirmware(entries, 'duo_wl_v4', 'wifi_udp')).toBeNull()
   })
+
+  it('同じ board の PWM 版と通常版は haptic_pwm の有無で分ける', () => {
+    const entries = [
+      entry({ env: 'band_v4', board: 'band_wl_v4', transport: 'wifi_udp', fwVersion: '0.4.2' }),
+      entry({ env: 'band_v4_pwm', board: 'band_wl_v4', transport: 'wifi_udp', hapticOutput: 'pwm', fwVersion: '0.1.0' }),
+    ]
+    // 通常基板 (haptic_pwm なし / 不明) には PWM 版を出さない
+    expect(resolveLatestFirmware(entries, 'band_wl_v4', 'wifi_udp')).toBe('0.4.2')
+    expect(resolveLatestFirmware(entries, 'band_wl_v4', 'wifi_udp', false)).toBe('0.4.2')
+    // PWM 改造基板には通常版を「更新」として出さない
+    expect(resolveLatestFirmware(entries, 'band_wl_v4', 'wifi_udp', true)).toBe('0.1.0')
+  })
+
+  it('PWM デバイスに合う版が無ければ null (通常版へ落とさない)', () => {
+    const entries = [
+      entry({ env: 'band_v4', board: 'band_wl_v4', transport: 'wifi_udp', fwVersion: '0.4.2' }),
+    ]
+    expect(resolveLatestFirmware(entries, 'band_wl_v4', 'wifi_udp', true)).toBeNull()
+  })
 })

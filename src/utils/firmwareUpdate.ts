@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react'
 import {
   compareVersions,
   listFirmwareBuilds,
+  matchesHapticOutput,
   normalizeVersion,
   type FirmwareLibraryEntry,
 } from './firmwareLibrary'
@@ -29,17 +30,24 @@ function loadLibraryCached(): Promise<FirmwareLibraryEntry[]> {
 }
 
 /**
- * board (+ transport) に対応するファームの最新版。
+ * board (+ transport + 出力段) に対応するファームの最新版。
  * 判定できない場合は null (= 何も表示しない)。
+ *
+ * `hapticPwm` = デバイスが get_info で `haptic_pwm` を報告している。band_v4_pwm
+ * は通常 Band v4 と同じ board id (band_wl_v4) を名乗るため、board だけで引くと
+ * PWM 改造基板に通常版を、通常基板に PWM 版を「更新」として出してしまう。
  */
 export function resolveLatestFirmware(
   entries: FirmwareLibraryEntry[],
   board: string | undefined,
   transport: NodeTransport | undefined,
+  hapticPwm = false,
 ): string | null {
   if (!board) return null
 
-  const byBoard = entries.filter((e) => e.board && e.board === board)
+  const byBoard = entries.filter(
+    (e) => e.board && e.board === board && matchesHapticOutput(e, hapticPwm),
+  )
   if (byBoard.length === 0) return null
 
   // 同じ board でも transport 違いの env が並ぶ (wifi_udp / mqtt / espnow_stream)。
@@ -65,6 +73,7 @@ export function useFirmwareUpdate(
   board: string | undefined,
   transport: NodeTransport | undefined,
   currentFw: string | null | undefined,
+  hapticPwm: boolean,
 ): string | null {
   const [entries, setEntries] = useState<FirmwareLibraryEntry[] | null>(null)
 
@@ -75,7 +84,7 @@ export function useFirmwareUpdate(
   }, [])
 
   if (!entries || !currentFw) return null
-  const latest = resolveLatestFirmware(entries, board, transport)
+  const latest = resolveLatestFirmware(entries, board, transport, hapticPwm)
   if (!latest) return null
   // compareVersions は「新しい方が前に来る」降順比較 (< 0 なら a が新しい)。
   return compareVersions(latest, currentFw) < 0 ? latest : null

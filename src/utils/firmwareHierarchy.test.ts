@@ -2,11 +2,13 @@ import { describe, it, expect } from 'vitest'
 import {
   entriesForSelection,
   familyOfEntry,
+  hapticOutputFlashWarning,
   hwOfEntry,
   listAvailability,
   listFamilies,
   listHw,
   parseHapbeatBoard,
+  pickDefaultEntry,
   resolveDefaultSelection,
 } from './firmwareHierarchy'
 import type { FirmwareLibraryEntry } from './firmwareLibrary'
@@ -164,5 +166,32 @@ describe('resolveDefaultSelection', () => {
       saved: { family: 'duo', hw: 'v3' },
       available: bandOnly,
     })).toEqual({ family: 'band', hw: 'v2' })
+  })
+})
+
+describe('PWM 出力版 (band_v4_pwm) の既定選択と書き込み確認', () => {
+  const plain = entry('band_v4', { board: 'band_wl_v4', hapbeat: true })
+  const plainMqtt = entry('band_v4_mqtt', { board: 'band_wl_v4', hapbeat: true })
+  const pwm = entry('band_v4_pwm', { board: 'band_wl_v4', hapbeat: true, hapticOutput: 'pwm' })
+
+  it('haptic_pwm を報告しないデバイスでは PWM 版が先頭でも選ばない', () => {
+    expect(pickDefaultEntry([pwm, plain, plainMqtt], false)?.env).toBe('band_v4')
+  })
+  it('haptic_pwm を報告するデバイスでは PWM 版を選ぶ', () => {
+    expect(pickDefaultEntry([plain, plainMqtt, pwm], true)?.env).toBe('band_v4_pwm')
+  })
+  it('PWM 版が一覧に無ければ通常版、空なら null', () => {
+    expect(pickDefaultEntry([plain], true)?.env).toBe('band_v4')
+    expect(pickDefaultEntry([], false)).toBeNull()
+  })
+
+  it('PWM 版は全対象が haptic_pwm を報告している時だけ確認なし', () => {
+    expect(hapticOutputFlashWarning(pwm, [true, true])).toBeNull()
+    expect(hapticOutputFlashWarning(pwm, [true, false])).toBe('pwm-image')
+    expect(hapticOutputFlashWarning(pwm, [false])).toBe('pwm-image')
+  })
+  it('通常版を PWM 改造基板に書くと確認する', () => {
+    expect(hapticOutputFlashWarning(plain, [false, true])).toBe('removes-pwm')
+    expect(hapticOutputFlashWarning(plain, [false])).toBeNull()
   })
 })
