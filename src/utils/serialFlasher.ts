@@ -187,7 +187,7 @@ async function eraseFlashAt(
     await loader.after('hard_reset')
     opts.onProgress?.({ phase: 'done', percent: 100 })
   } finally {
-    await safeDisconnect(transport)
+    await safeDisconnect(transport, port)
   }
 }
 
@@ -348,7 +348,7 @@ async function flashRegionsAt(
     }
     opts.onProgress?.({ phase: 'done', percent: 100 })
   } finally {
-    await safeDisconnect(transport)
+    await safeDisconnect(transport, port)
   }
 }
 
@@ -377,8 +377,21 @@ function makeTerminal(onLog?: (line: string) => void) {
   }
 }
 
-async function safeDisconnect(transport: Transport): Promise<void> {
+async function safeDisconnect(transport: Transport, port: SerialPort): Promise<void> {
   try { await transport.disconnect() } catch { /* ignore */ }
+  // esptool-js only waits 400 ms for its read loop to drop the stream lock
+  // before close(); if that close throws, the port stays open. The next device
+  // re-enumerating on the same COM port can reuse this SerialPort object, and
+  // its flash then fails with "The port is already open". Retry until closed
+  // (readable/writable are null once the port is closed).
+  for (let i = 0; i < 10 && (port.readable || port.writable); i++) {
+    try {
+      await port.close()
+      break
+    } catch {
+      await new Promise((r) => setTimeout(r, 100))
+    }
+  }
 }
 
 /** True for native-USB ESP32 boards (S3/C3 USB-Serial-JTAG, Espressif VID

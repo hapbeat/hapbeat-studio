@@ -91,11 +91,35 @@ async function openPortWithTimeout(
       ))
     }, timeoutMs)
   })
+  const openPromise = port.open({ baudRate })
   try {
-    await Promise.race([port.open({ baudRate }), timeoutPromise])
+    await Promise.race([openPromise, timeoutPromise])
+  } catch (err) {
+    // タイムアウト後にぶら下がった open() が遅れて成功すると、誰も持たない
+    // 「開いたままの port」が残り、次の open が "The port is already open" で
+    // 失敗する。遅れて開いたら即座に閉じる。
+    openPromise.then(() => port.close().catch(() => { /* ignore */ }), () => { /* open failed */ })
+    throw err
   } finally {
     if (timer) clearTimeout(timer)
   }
+}
+
+/** Live config conns keyed by port — lets any caller (flash / probe /
+ *  bulk config) evict a conn it doesn't own before opening the port. */
+const connsByPort = new Map<SerialPort, SerialConfigConn>()
+
+/**
+ * Make `port` closed and lock-free before someone else opens it: close any
+ * config conn still attached to it, then `port.close()` (no-op when already
+ * closed). Without this, a leftover conn — e.g. one whose device was unplugged
+ * — keeps the stream locks, `port.close()` throws, and the next `open()` fails
+ * with "The port is already open".
+ */
+export async function releaseSerialPort(port: SerialPort): Promise<void> {
+  const c = connsByPort.get(port)
+  if (c) await c.close().catch(() => { /* already closed */ })
+  try { await port.close() } catch { /* not open */ }
 }
 
 /**
@@ -337,6 +361,7 @@ export async function openConfigConnection(
   }
 
   const reader = port.readable!.getReader()
+  const writer = port.writable!.getWriter()
   ;(async () => {
     try {
       while (!closed) {
@@ -362,10 +387,20 @@ export async function openConfigConnection(
         if (w.timer) clearTimeout(w.timer)
         w.reject(new Error('serial connection closed'))
       }
+      // The stream ended without close() (device unplugged / rebooted):
+      // release the writer and close the port here. Otherwise the port stays
+      // "open" with a locked writer, and when the next device re-enumerates
+      // as the same SerialPort (same COM port), flashing it fails with
+      // "The port is already open".
+      if (!closed) {
+        closed = true
+        connsByPort.delete(port)
+        try { writer.releaseLock() } catch { /* released */ }
+        try { await port.close() } catch { /* already closed */ }
+      }
     }
   })()
 
-  const writer = port.writable!.getWriter()
   const enc = new TextEncoder()
 
   const send = (
@@ -397,11 +432,14 @@ export async function openConfigConnection(
   const close = async () => {
     if (closed) return
     closed = true
+    connsByPort.delete(port)
     try { await reader.cancel() } catch { /* already cancelled */ }
     try { writer.releaseLock() } catch { /* released */ }
     try { await port.close() } catch { /* already closed */ }
     cb.onDisconnect?.('user disconnect')
   }
 
-  return { port, send, close }
+  const conn: SerialConfigConn = { port, send, close }
+  connsByPort.set(port, conn)
+  return conn
 }

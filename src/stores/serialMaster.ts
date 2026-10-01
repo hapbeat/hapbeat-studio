@@ -6,6 +6,7 @@ import {
   isWebSerialSupported,
   openConfigConnection,
   pickConfigPort,
+  releaseSerialPort,
   type SerialConfigConn,
 } from '@/utils/serialConfig'
 import { eraseFlash as eraseFlashImpl, flashRegions, type FlashProgress } from '@/utils/serialFlasher'
@@ -132,6 +133,8 @@ const probeInFlight = new Map<string, Promise<void>>()
  *  probe's close we pad a short settle delay before the next open to let
  *  USB re-enumeration finish. */
 const lastProbeCloseAt = new Map<string, number>()
+/** Settle time after a probe's close before the same port is opened again. */
+const PROBE_SETTLE_MS = 1200
 /** Ports the user has an in-flight 設定-connect (openConfigFor) for.
  *  Auto-identify (and a stray manual ↻ 識別) must never probe — and
  *  reboot — a port while the user is actively trying to configure it. */
@@ -537,6 +540,33 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       knownPorts: s.knownPorts.map((e) => (e.id === id ? { ...e, ...patch } : e)),
     }))
 
+  /** The S3 resets on CDC CLOSE, so if a probe just closed this port, pad
+   *  out to PROBE_SETTLE_MS before reopening it (USB re-enumeration). */
+  async function waitProbeSettle(id: string): Promise<void> {
+    const closedAt = lastProbeCloseAt.get(id)
+    if (closedAt === undefined) return
+    const remaining = PROBE_SETTLE_MS - (Date.now() - closedAt)
+    if (remaining > 0) await new Promise((r) => setTimeout(r, remaining))
+  }
+
+  /**
+   * Take `port` for a flash / bulk config. A freshly plugged device is
+   * auto-identified (probePort holds the port for up to a few seconds), so
+   * wait for that probe and its close-triggered reset instead of racing it,
+   * then close any conn still left on the port. Closing a port whose streams
+   * are locked throws, and the following open() fails with "The port is
+   * already open" — the second-device flash failure (2026-10-01).
+   */
+  async function takePortExclusive(id: string, port: SerialPort): Promise<void> {
+    const inFlight = probeInFlight.get(id)
+    if (inFlight) {
+      log(`${id}: waiting for the in-flight probe before opening the port`)
+      await inFlight
+    }
+    await waitProbeSettle(id)
+    await releaseSerialPort(port)
+  }
+
   /**
    * Internal — open `port` as a config conn, hook up disconnect
    * handler, and wait for `get_info`. Resolves to the conn on
@@ -732,7 +762,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
         // `InvalidStateError: The port is already open` in
         // openConfigConnection. Closing first is a no-op when already
         // closed and idempotent so it's safe to do unconditionally.
-        try { await port.close() } catch { /* not open / already closed */ }
+        await releaseSerialPort(port)
 
         // First attach attempt with the held / freshly-picked port.
         const result = await attachConfigConn(port)
@@ -790,12 +820,12 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
           if (recovered) {
             log('recovered an already-granted port after re-enumeration — no permission prompt needed')
             setHeldPort(recovered)
-            try { await recovered.close() } catch { /* ignore */ }
+            await releaseSerialPort(recovered)
             return await attachConfigConn(recovered)
           }
           const fresh = await promptForPort()
           if (!fresh) return null
-          try { await fresh.close() } catch { /* ignore */ }
+          await releaseSerialPort(fresh)
           return await attachConfigConn(fresh)
         }
         return null
@@ -868,6 +898,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       } catch { /* ignore — diagnostic only */ }
       pushLog('serial', `flash → ${regions.map((r) => r.label).join(', ')} (${totalBytes.toLocaleString()} bytes${foundTag ? `, BUILD_TAG=${foundTag}` : ''}, compress=${compress})`)
       try {
+        await releaseSerialPort(port)
         await flashRegions(port, regions, {
           eraseAll,
           compress,
@@ -1213,7 +1244,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       let markProbeDone: () => void = () => {}
       probeInFlight.set(id, new Promise((res) => { markProbeDone = res }))
       try {
-        try { await port.close() } catch { /* not open */ }
+        await releaseSerialPort(port)
         c = await openConfigConnection(port, {
           onLog: (line) => useLogStore.getState().push('serial-cfg', `[probe:${id}] ${line}`),
         })
@@ -1319,12 +1350,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
         // pad out to ~1.2s since that close before opening again so the
         // USB-CDC re-enumeration has time to finish. Skipped entirely
         // when no probe has ever touched this port (the common case).
-        const closedAt = lastProbeCloseAt.get(id)
-        if (closedAt !== undefined) {
-          const SETTLE_MS = 1200
-          const remaining = SETTLE_MS - (Date.now() - closedAt)
-          if (remaining > 0) await new Promise((r) => setTimeout(r, remaining))
-        }
+        await waitProbeSettle(id)
         const { conn } = get()
         if (conn) await get().closeConfig()
         // Same acknowledgement as probePort — connecting supersedes the
@@ -1377,7 +1403,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       // Close the active config conn only if one of THESE targets is the
       // held port (esptool-js needs exclusive access to that port).
       const { conn, activePortId } = get()
-      if (conn && activePortId && targetIds.has(activePortId)) {
+      if (conn && ((activePortId && targetIds.has(activePortId)) || targets.some((e) => portById.get(e.id) === conn.port))) {
         log('flashSelected: closing active config conn (target is the held port)')
         await conn.close().catch(() => { /* already closed */ })
         set({ conn: null, info: null, wifiStatus: null, wifiProfiles: [], activePortId: null, port: null })
@@ -1410,7 +1436,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
         patchEntry(e.id, { flash: { state: 'flashing', progress: { phase: 'connect', percent: 0 } } })
         pushLog('serial', `[${label}] flash start`)
         try {
-          try { await port.close() } catch { /* not open */ }
+          await takePortExclusive(e.id, port)
           await flashRegions(port, regions, {
             eraseAll,
             compress,
@@ -1428,7 +1454,10 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
           pushLog('serial', `[${label}] flash done`)
           return null
         } catch (err) {
-          const msg = (err as Error).message ?? String(err)
+          const raw = (err as Error).message ?? String(err)
+          const msg = /already open/i.test(raw)
+            ? `${raw}（ポートが開いたまま残っています。ページを再読み込みしてから再試行してください）`
+            : raw
           patchEntry(e.id, { flash: { state: 'error', progress: null, message: msg } })
           pushLog('serial', `[${label}] flash FAILED: ${msg}`)
           return `${label}: ${msg}`
@@ -1498,7 +1527,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
         }
         let c: SerialConfigConn | null = null
         try {
-          try { await port.close() } catch { /* not open */ }
+          await takePortExclusive(t.id, port)
           c = await openConfigConnection(port, {
             onLog: (line) => useLogStore.getState().push('serial-cfg', `[bulk:${t.id}] ${line}`),
           })
