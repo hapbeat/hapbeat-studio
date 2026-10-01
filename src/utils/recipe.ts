@@ -6,12 +6,19 @@
 import type { AmShape, EnvelopePoint, NoiseColor, SampleRate } from '@/types/waveform'
 import { inRange, isEnvelope, isRecord, RECIPE_RANGES, type ParamRange } from './effectRanges'
 import { amGain, applyEnvelopeInPlace, bandNoise, mulberry32 } from './textureDsp'
+import { mixToMono } from './hapticFeatures'
+
+/** Audio material of a `sample` layer: a file below `hapbeat-agent/` or an editor clip. */
+export type RecipeSampleRef =
+  | { kind: 'file'; path: string }
+  | { kind: 'clip'; clipId: string; use?: 'original' | 'working' }
 
 export type RecipeSource =
   | { type: 'sine' | 'square' | 'triangle'; freqHz: number; freqEndHz?: number }
   | { type: 'noise'; color: NoiseColor; lowHz?: number; highHz?: number }
   | { type: 'decaying-sine'; freqHz: number; decayMs: number }
   | { type: 'impulse-train'; rateHz: number; jitter?: number; amplitudeJitter?: number; pulse: { freqHz: number; decayMs: number } }
+  | { type: 'sample'; ref: RecipeSampleRef; rate?: number; onsetsSec?: number[]; gainsDb?: number[]; maxSec?: number }
 
 export interface RecipeAm { rateHz: number; depth: number; shape: AmShape; jitter?: number }
 
@@ -40,7 +47,12 @@ export interface RenderedRecipe {
   normalizedDb?: number
 }
 
+/** Decoded mono material of the sample layers, keyed by `sampleRefKey(ref)`. */
+export type RecipeSamples = ReadonlyMap<string, { data: Float32Array; sampleRate: number }>
+
 export const RECIPE_FORMAT = 'hapbeat-recipe@1'
+/** Maximum number of copies (onsets) in one sample layer. */
+const MAX_SAMPLE_ONSETS = 64
 const DEFAULT_FADE_MS = 2
 /** Noise sources are scaled to the RMS of a full-scale sine so 0 dB layers are comparable. */
 const NOISE_RMS = Math.SQRT1_2
@@ -71,6 +83,46 @@ function describe(range: ParamRange): string {
   return `${range.kind === 'integer' ? 'integer ' : ''}${parts.join(' and ')}${range.unit ? ` ${range.unit}` : ''}`
 }
 
+/** Relative path under `hapbeat-agent/`: forward slashes, no `..`, no absolute / drive paths. */
+export function isSafeAgentPath(path: unknown): path is string {
+  if (typeof path !== 'string' || !path || path.length > 260 || path.startsWith('/') || /[\\:\x00-\x1f]/.test(path)) return false
+  return path.split('/').every(part => part !== '' && part !== '.' && part !== '..')
+}
+
+function validateSampleRef(ref: unknown, where: string): string | null {
+  if (!isRecord(ref)) return `${where} must be an object { kind: "file", path } or { kind: "clip", clipId, use? }`
+  if (ref.kind !== 'file' && ref.kind !== 'clip') return `${where}.kind must be "file" or "clip"`
+  for (const key of Object.keys(ref)) {
+    if (!(ref.kind === 'file' ? ['kind', 'path'] : ['kind', 'clipId', 'use']).includes(key)) return `${where}: unknown field "${key}"`
+  }
+  if (ref.kind === 'file') return isSafeAgentPath(ref.path) ? null : `${where}.path must be a relative path inside hapbeat-agent/ (for example "sources/tap.wav"); ".." and absolute paths are not allowed`
+  if (typeof ref.clipId !== 'string' || !ref.clipId) return `${where}.clipId must be a non-empty string`
+  return ref.use === undefined || ref.use === 'original' || ref.use === 'working' ? null : `${where}.use must be "original" or "working"`
+}
+
+function validateSample(source: Record<string, unknown>, where: string, ranges: Record<string, ParamRange>): string | null {
+  const error = checkFields(source, where, ranges, [], ['type', 'ref', 'onsetsSec', 'gainsDb']) ?? validateSampleRef(source.ref, `${where}.ref`)
+  if (error) return error
+  const { onsetsSec, gainsDb } = source
+  if (onsetsSec !== undefined) {
+    if (!Array.isArray(onsetsSec) || onsetsSec.length < 1 || onsetsSec.length > MAX_SAMPLE_ONSETS) return `${where}.onsetsSec must be an array of 1–${MAX_SAMPLE_ONSETS} start times (s)`
+    for (let i = 0; i < onsetsSec.length; i++) {
+      const t: unknown = onsetsSec[i]
+      if (typeof t !== 'number' || !Number.isFinite(t) || t < 0) return `${where}.onsetsSec[${i}] must be a number >= 0`
+      if (i > 0 && t < onsetsSec[i - 1]) return `${where}.onsetsSec must be non-decreasing`
+    }
+  }
+  if (gainsDb !== undefined) {
+    const count = Array.isArray(onsetsSec) ? onsetsSec.length : 1
+    if (!Array.isArray(gainsDb) || gainsDb.length !== count) return `${where}.gainsDb must be an array with one value per onsetsSec entry (${count})`
+    const range = RECIPE_RANGES.layer.gainDb
+    for (let i = 0; i < gainsDb.length; i++) {
+      if (!inRange(gainsDb[i], range)) return `${where}.gainsDb[${i}] is out of range (${describe(range)})`
+    }
+  }
+  return null
+}
+
 function validateSource(source: unknown, where: string): string | null {
   if (!isRecord(source)) return `${where} must be an object`
   const type = source.type
@@ -89,6 +141,8 @@ function validateSource(source: unknown, where: string): string | null {
     }
     case 'decaying-sine':
       return checkFields(source, where, ranges, ['freqHz', 'decayMs'], ['type'])
+    case 'sample':
+      return validateSample(source, where, ranges)
     default: {
       const error = checkFields(source, where, ranges, ['rateHz'], ['type', 'pulse'])
       if (error) return error
@@ -163,8 +217,49 @@ export function impulseOnsets(length: number, sampleRate: number, rateHz: number
   return onsets
 }
 
-function renderSource(source: RecipeSource, length: number, sampleRate: number, seed: number): Float32Array {
+/** Stable key of a sample ref in `RecipeSamples`. */
+export function sampleRefKey(ref: RecipeSampleRef): string {
+  return ref.kind === 'file' ? `file:${ref.path}` : `clip:${ref.clipId}:${ref.use ?? 'original'}`
+}
+
+/** Linear-interpolation resample; `step` is the source-sample advance per output sample. */
+function resampleLinear(data: Float32Array, step: number): Float32Array {
+  if (data.length === 0) return data
+  const out = new Float32Array(Math.floor((data.length - 1) / step) + 1)
+  for (let i = 0; i < out.length; i++) {
+    const pos = i * step, j = Math.floor(pos), frac = pos - j
+    out[i] = j + 1 < data.length ? data[j] + (data[j + 1] - data[j]) * frac : data[j]
+  }
+  return out
+}
+
+/** Places one (optionally truncated) copy of the material at each onset; copies past the layer end are clipped. */
+function renderSample(source: Extract<RecipeSource, { type: 'sample' }>, length: number, sampleRate: number, samples: RecipeSamples, fadeMs: number): Float32Array {
+  const key = sampleRefKey(source.ref)
+  const sample = samples.get(key)
+  if (!sample) throw new Error(`Sample layer audio "${key}" is not loaded (${source.ref.kind === 'file' ? `hapbeat-agent/${source.ref.path}` : `editor clip "${source.ref.clipId}"`})`)
+  const material = resampleLinear(sample.data, (sample.sampleRate * (source.rate ?? 1)) / sampleRate)
+  const cut = source.maxSec === undefined ? material.length : Math.min(material.length, Math.round(source.maxSec * sampleRate))
+  const copy = material.slice(0, cut)
+  if (cut < material.length) {
+    const fade = Math.min(Math.floor(cut / 2), Math.round((fadeMs / 1000) * sampleRate))
+    for (let i = 0; i < fade; i++) copy[cut - 1 - i] *= i / fade
+  }
+  const out = new Float32Array(length)
+  const onsets = source.onsetsSec ?? [0]
+  onsets.forEach((onsetSec, k) => {
+    const start = Math.round(onsetSec * sampleRate)
+    const gain = 10 ** ((source.gainsDb?.[k] ?? 0) / 20)
+    const end = Math.min(length, start + copy.length)
+    for (let i = start; i < end; i++) out[i] += copy[i - start] * gain
+  })
+  return out
+}
+
+function renderSource(source: RecipeSource, length: number, sampleRate: number, seed: number, samples: RecipeSamples, fadeMs: number): Float32Array {
   switch (source.type) {
+    case 'sample':
+      return renderSample(source, length, sampleRate, samples, fadeMs)
     case 'sine': case 'square': case 'triangle':
       return renderTone(length, sampleRate, source.type, source.freqHz, source.freqEndHz)
     case 'noise': {
@@ -192,8 +287,11 @@ function renderSource(source: RecipeSource, length: number, sampleRate: number, 
   }
 }
 
-/** Deterministic mono render: the same recipe always yields the same samples. */
-export function renderRecipe(recipe: Recipe): RenderedRecipe {
+/**
+ * Deterministic mono render: the same recipe (and sample material) always yields the same samples.
+ * `samples` must hold every sample layer's ref (see loadRecipeSamples); a missing ref throws.
+ */
+export function renderRecipe(recipe: Recipe, samples: RecipeSamples = new Map()): RenderedRecipe {
   const { sampleRate } = recipe
   const total = Math.max(1, Math.round(recipe.durationSec * sampleRate))
   const mix = new Float32Array(total)
@@ -202,13 +300,14 @@ export function renderRecipe(recipe: Recipe): RenderedRecipe {
     const available = total - start
     const length = Math.min(available, layer.durationSec === undefined ? available : Math.round(layer.durationSec * sampleRate))
     if (length <= 0) return
-    const data = renderSource(layer.source, length, sampleRate, sourceSeed(recipe.seed, index))
+    const fadeMs = layer.fadeMs ?? DEFAULT_FADE_MS
+    const data = renderSource(layer.source, length, sampleRate, sourceSeed(recipe.seed, index), samples, fadeMs)
     if (layer.am) {
       const gain = amGain(length, sampleRate, { ...layer.am, jitter: layer.am.jitter ?? 0 }, recipe.seed + index)
       for (let i = 0; i < length; i++) data[i] *= gain[i]
     }
     if (layer.envelope) applyEnvelopeInPlace(data, layer.envelope)
-    const fade = Math.min(Math.floor(length / 2), Math.round(((layer.fadeMs ?? DEFAULT_FADE_MS) / 1000) * sampleRate))
+    const fade = Math.min(Math.floor(length / 2), Math.round((fadeMs / 1000) * sampleRate))
     for (let i = 0; i < fade; i++) {
       const g = i / fade
       data[i] *= g
@@ -223,6 +322,33 @@ export function renderRecipe(recipe: Recipe): RenderedRecipe {
   const scale = 0.98 / peak
   for (let i = 0; i < total; i++) mix[i] *= scale
   return { data: mix, sampleRate, normalizedDb: 20 * Math.log10(scale) }
+}
+
+export interface RecipeSampleLoader {
+  /** Bytes of a file below `hapbeat-agent/`; throws a descriptive Error when it cannot be read. */
+  readAgentFile: (path: string) => Promise<ArrayBuffer>
+  getClip: (clipId: string, use: 'original' | 'working') => AudioBuffer | null
+  decodeAudio: (bytes: ArrayBuffer) => Promise<AudioBuffer>
+}
+
+/** Loads (and mixes to mono) the material of every sample layer, keyed for renderRecipe. */
+export async function loadRecipeSamples(recipe: Recipe, loader: RecipeSampleLoader): Promise<RecipeSamples> {
+  const samples = new Map<string, { data: Float32Array; sampleRate: number }>()
+  for (const { source } of recipe.layers) {
+    if (source.type !== 'sample') continue
+    const key = sampleRefKey(source.ref)
+    if (samples.has(key)) continue
+    const { ref } = source
+    let buffer: AudioBuffer
+    if (ref.kind === 'file') buffer = await loader.decodeAudio(await loader.readAgentFile(ref.path))
+    else {
+      const clip = loader.getClip(ref.clipId, ref.use ?? 'original')
+      if (!clip) throw new Error(`Sample layer clip "${ref.clipId}" is not in the editor`)
+      buffer = clip
+    }
+    samples.set(key, { data: mixToMono(Array.from({ length: buffer.numberOfChannels }, (_, ch) => buffer.getChannelData(ch))), sampleRate: buffer.sampleRate })
+  }
+  return samples
 }
 
 // ---- Presets (initial hypotheses; tune on real hardware) ----

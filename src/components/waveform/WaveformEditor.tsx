@@ -127,7 +127,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const [recipeDialog, setRecipeDialog] = useState<{ container: HTMLElement; initial?: Recipe } | null>(null)
   const openRecipe = (anchor: HTMLElement, initial?: Recipe) => setRecipeDialog({ container: anchor.ownerDocument.body, initial })
   const createRecipeClip = (recipe: Recipe, presetId: string | null) => {
-    s.addRecipeClip(recipe, presetId ? t(`editor.recipe.preset.${presetId}` as MessageId) : t('editor.recipe.clipName'), `recipe:${presetId ?? 'custom'}`)
+    void s.addRecipeClip(recipe, presetId ? t(`editor.recipe.preset.${presetId}` as MessageId) : t('editor.recipe.clipName'), `recipe:${presetId ?? 'custom'}`, useAgentTrialStore.getState().folder)
     setRecipeDialog(null)
   }
   useEffect(() => { player.setMuted(muted) }, [player, muted])

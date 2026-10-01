@@ -6,7 +6,9 @@ import { decodeAudioFile, encodeWavBlob, encodeMonoWavBlob } from '@/utils/wavIO
 import { cropBuffer, applyEffect } from '@/utils/audioDsp'
 import { loadDirectoryHandle, saveDirectoryHandle } from '@/utils/localDirectory'
 import { EditorFolder, type EditorDocument } from '@/utils/editorFolder'
-import { renderRecipe, type Recipe } from '@/utils/recipe'
+import { loadRecipeSamples, renderRecipe, type Recipe } from '@/utils/recipe'
+import { readAgentBytes } from '@/utils/agentInbox'
+import type { KnowledgeFolder } from '@/utils/hapticKnowledge'
 import { derivedEffectChain } from '@/utils/agentTrialUi'
 import { sha256Hex } from '@/utils/sha256'
 import { getActiveHelperChannel } from '@/utils/helperRequest'
@@ -34,8 +36,11 @@ interface EditorState {
   openFolder: () => Promise<void>
   save: () => Promise<void>
   loadFiles: (files: File[]) => Promise<void>
-  /** Renders `recipe` into a new clip (never modifies existing clips). */
-  addRecipeClip: (recipe: Recipe, name: string, sourceFileName: string) => void
+  /**
+   * Renders `recipe` into a new clip (never modifies existing clips). Sample-layer files are read
+   * from `agentFolder` (hapbeat-agent/ of the open editor folder). Failures are reported through `error`.
+   */
+  addRecipeClip: (recipe: Recipe, name: string, sourceFileName: string, agentFolder: KnowledgeFolder | null) => Promise<void>
   /** Adds a clip built on `clip.originalBuffer` with `effects` as a not-yet-applied chain (never modifies existing clips). Returns its id, or null when no folder is open or the editor is busy. */
   addDerivedClip: (clip: Pick<WaveformClip, 'name' | 'originalBuffer' | 'exportSampleRate'> & Partial<Pick<WaveformClip, 'description' | 'sourceFileName' | 'sourceGroupId' | 'sourceSha256' | 'provenance' | 'recipe'>>, effects: EffectParams[]) => string | null
   selectClip: (id: string) => void
@@ -167,10 +172,19 @@ export const useWaveformStore = create<EditorState>((set, get) => {
       } catch (error) { get().setError(error) }
       finally { set({ isProcessing: false }) }
     },
-    addRecipeClip: (recipe, name, sourceFileName) => {
+    addRecipeClip: async (recipe, name, sourceFileName, agentFolder) => {
       if (!get().folder || get().isProcessing) return
+      set({ isProcessing: true, error: null })
       try {
-        const { data, sampleRate } = renderRecipe(recipe)
+        const samples = await loadRecipeSamples(recipe, {
+          readAgentFile: path => agentFolder ? readAgentBytes(agentFolder, path) : Promise.reject(new Error(`Cannot read hapbeat-agent/${path}: no editor folder is open`)),
+          getClip: (clipId, use) => {
+            const clip = get().documents.find(d => d.clip.id === clipId)?.clip
+            return clip ? (use === 'working' ? clip.buffer : clip.originalBuffer) : null
+          },
+          decodeAudio: decodeAudioFile,
+        })
+        const { data, sampleRate } = renderRecipe(recipe, samples)
         const buffer = new AudioBuffer({ numberOfChannels: 1, length: data.length, sampleRate })
         buffer.copyToChannel(data as Float32Array<ArrayBuffer>, 0)
         const id = crypto.randomUUID()
@@ -178,6 +192,7 @@ export const useWaveformStore = create<EditorState>((set, get) => {
         if (get().clip) histories.set(get().clip!.id, { undoStack: get().undoStack, redoStack: get().redoStack })
         dirty({ documents: [...get().documents, { clip, effects: [], exportAsMono: false }], clip, effects: [], exportAsMono: false, selectedRegion: null, undoStack: [], redoStack: [] })
       } catch (error) { get().setError(error) }
+      finally { set({ isProcessing: false }) }
     },
     addDerivedClip: (source, effects) => {
       if (!get().folder || get().isProcessing) return null

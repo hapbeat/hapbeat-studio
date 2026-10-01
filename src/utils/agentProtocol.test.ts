@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { isSafeAgentPath, normalizeTerm, parseTrialRequest, ratingError, termSlug, type RatingBody, type TrialRequest } from './agentProtocol'
+import { normalizeTerm, parseTrialRequest, ratingError, termSlug, type RatingBody, type TrialRequest } from './agentProtocol'
+import { isSafeAgentPath } from './recipe'
 
 const request = (patch: Record<string, unknown> = {}, candidate: Record<string, unknown> = {}) => JSON.stringify({
   format: 'hapbeat-trial@1', id: 't-01', intent: 'modify', prompt: 'もっとゴワゴワに', terms: ['ごわごわ'],

@@ -128,6 +128,11 @@ export const RECIPE_RANGES = {
       'pulse.freqHz': { min: 5, max: 2000, unit: 'Hz' },
       'pulse.decayMs': { min: 1, max: 5000, unit: 'ms' },
     },
+    /** `ref`, `onsetsSec` and `gainsDb` are structured fields described in GUIDE.md. */
+    'sample': {
+      rate: { min: 0.25, max: 4 },
+      maxSec: { min: 0.001, max: 30, unit: 's' },
+    },
   },
   am: {
     rateHz: EFFECT_RANGES.am.rateHz,

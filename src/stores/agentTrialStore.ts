@@ -4,10 +4,10 @@ import { sourceGroup } from '@/utils/editorWaveform'
 import { applyEffect, resample } from '@/utils/audioDsp'
 import { decodeAudioFile } from '@/utils/wavIO'
 import { sha256Hex } from '@/utils/sha256'
-import { renderRecipe, type Recipe } from '@/utils/recipe'
+import { loadRecipeSamples, renderRecipe, type Recipe } from '@/utils/recipe'
 import { CURRENT_STUDIO_VERSION } from '@/utils/studioVersions'
 import { ratingError, type RatingBody } from '@/utils/agentProtocol'
-import { processInbox, submitTrialRequest, encodePcm16Wav, type AcceptResult, type InboxDeps, type InboxResult } from '@/utils/agentInbox'
+import { processInbox, readAgentBytes, submitTrialRequest, encodePcm16Wav, type AcceptResult, type InboxDeps, type InboxResult } from '@/utils/agentInbox'
 import { buildCatalog } from '@/utils/agentGuide'
 import { KnowledgeFolder, localIsoString, trialSlugs, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
 
@@ -81,7 +81,7 @@ const inboxDeps = (): InboxDeps => ({
     return clip ? { buffer: use === 'working' ? clip.buffer : clip.originalBuffer, name: clip.name } : null
   },
   decodeAudio: decodeAudioFile,
-  renderRecipe: recipe => renderRecipe(recipe as Recipe),
+  renderRecipe: (recipe, samples) => renderRecipe(recipe as Recipe, samples),
   createBuffer: monoBuffer,
   applyEffect,
   resample,
@@ -195,7 +195,9 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
         clipId = useWaveformStore.getState().addDerivedClip({ ...base, originalBuffer: buffer, exportSampleRate: 48000, sourceFileName: source.path.split('/').pop(), sourceSha256 }, spec.effects)
       } else {
         const recipe = source.recipe as Recipe
-        const { data, sampleRate } = renderRecipe(recipe)
+        const getClip = inboxDeps().getClip
+        const samples = await loadRecipeSamples(recipe, { readAgentFile: path => readAgentBytes(folder, path), getClip: (id, use) => getClip(id, use)?.buffer ?? null, decodeAudio: decodeAudioFile })
+        const { data, sampleRate } = renderRecipe(recipe, samples)
         clipId = useWaveformStore.getState().addDerivedClip({ ...base, originalBuffer: monoBuffer(data, sampleRate), exportSampleRate: recipe.sampleRate, sourceFileName: `recipe:${trialId}/${candidateId}`, recipe }, spec.effects)
       }
       if (!clipId) throw new Error('The editor is busy or has no folder open; try again')

@@ -5,7 +5,7 @@
  */
 import type { EffectParams } from '@/types/waveform'
 import { validateEffectParams } from '@/utils/editorFolder'
-import { validateRecipe } from '@/utils/recipe'
+import { isSafeAgentPath, validateRecipe } from '@/utils/recipe'
 import type { HapticFeatures } from '@/utils/hapticFeatures'
 
 export const TRIAL_FORMAT = 'hapbeat-trial@1'
@@ -70,12 +70,6 @@ export interface RatingFile extends RatingBody { history: RatingBody[] }
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 const optString = (v: unknown, max: number) => v === undefined || (typeof v === 'string' && v.length <= max)
-
-/** Relative path under `hapbeat-agent/`: forward slashes, no `..`, no absolute / drive paths. */
-export function isSafeAgentPath(path: unknown): path is string {
-  if (typeof path !== 'string' || !path || path.length > 260 || path.startsWith('/') || /[\\:\x00-\x1f]/.test(path)) return false
-  return path.split('/').every(part => part !== '' && part !== '.' && part !== '..')
-}
 
 function candidateError(c: unknown, index: number): string | null {
   const at = `candidates[${index}]`

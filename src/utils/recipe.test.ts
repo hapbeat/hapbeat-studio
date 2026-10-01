@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { impulseOnsets, RECIPE_PRESETS, renderRecipe, validateRecipe, type Recipe, type RecipeLayer } from './recipe'
+import { impulseOnsets, loadRecipeSamples, RECIPE_PRESETS, renderRecipe, validateRecipe, type Recipe, type RecipeLayer } from './recipe'
 import { mulberry32 } from './textureDsp'
 
 const recipe = (layers: RecipeLayer[], durationSec = 1, seed = 42): Recipe => ({ format: 'hapbeat-recipe@1', sampleRate: 48000, durationSec, seed, layers })
@@ -109,5 +109,103 @@ describe('renderRecipe', () => {
     const loud = renderRecipe(recipe([{ source: { type: 'sine', freqHz: 100 } }, { source: { type: 'sine', freqHz: 100 }, gainDb: 6 }]))
     expect(peak(loud.data)).toBeCloseTo(0.98, 3)
     expect(loud.normalizedDb).toBeLessThan(-9)
+  })
+})
+
+describe('sample layers', () => {
+  const file = { kind: 'file' as const, path: 'sources/tap.wav' }
+  const constant = (n: number, v = 0.5) => new Float32Array(n).fill(v)
+  const samples = (data: Float32Array, sampleRate = 48000, key = 'file:sources/tap.wav') => new Map([[key, { data, sampleRate }]])
+  const fakeBuffer = (channels: Float32Array[], sampleRate: number) => ({ numberOfChannels: channels.length, sampleRate, getChannelData: (ch: number) => channels[ch] }) as unknown as AudioBuffer
+
+  it('validates the documented example and every optional field', () => {
+    expect(validateRecipe({ format: 'hapbeat-recipe@1', sampleRate: 48000, durationSec: 0.4, seed: 1, layers: [
+      { source: { type: 'sample', ref: file, onsetsSec: [0, 0.15], gainsDb: [0, -3], maxSec: 0.08 } },
+      { source: { type: 'sine', freqHz: 60 }, durationSec: 0.25, gainDb: -6, envelope: [{ time: 0, value: 1 }, { time: 1, value: 0 }] },
+    ] })).toBeNull()
+    expect(validateRecipe(recipe([{ source: { type: 'sample', ref: { kind: 'clip', clipId: 'c1', use: 'working' }, rate: 0.25 } }]))).toBeNull()
+    expect(validateRecipe(recipe([{ source: { type: 'sample', ref: { kind: 'clip', clipId: 'c1' }, rate: 4, gainsDb: [-60] } }]))).toBeNull()
+  })
+
+  it.each([
+    ['unknown sample field', { type: 'sample', ref: file, loop: true }, 'loop'],
+    ['missing ref', { type: 'sample' }, 'ref'],
+    ['unsafe path', { type: 'sample', ref: { kind: 'file', path: '../x.wav' } }, 'ref.path'],
+    ['unknown ref field', { type: 'sample', ref: { ...file, use: 'working' } }, 'use'],
+    ['unknown ref kind', { type: 'sample', ref: { kind: 'url', path: 'x' } }, 'ref.kind'],
+    ['empty clip id', { type: 'sample', ref: { kind: 'clip', clipId: '' } }, 'clipId'],
+    ['bad clip use', { type: 'sample', ref: { kind: 'clip', clipId: 'c1', use: 'rendered' } }, 'use'],
+    ['rate out of range', { type: 'sample', ref: file, rate: 5 }, 'rate'],
+    ['maxSec out of range', { type: 'sample', ref: file, maxSec: 0 }, 'maxSec'],
+    ['empty onsets', { type: 'sample', ref: file, onsetsSec: [] }, 'onsetsSec'],
+    ['too many onsets', { type: 'sample', ref: file, onsetsSec: Array.from({ length: 65 }, (_, i) => i / 100) }, 'onsetsSec'],
+    ['negative onset', { type: 'sample', ref: file, onsetsSec: [-0.1] }, 'onsetsSec[0]'],
+    ['decreasing onsets', { type: 'sample', ref: file, onsetsSec: [0.2, 0.1] }, 'non-decreasing'],
+    ['gain count mismatch', { type: 'sample', ref: file, onsetsSec: [0, 0.1], gainsDb: [0] }, 'gainsDb'],
+    ['gain count without onsets', { type: 'sample', ref: file, gainsDb: [0, 0] }, 'gainsDb'],
+    ['gain out of range', { type: 'sample', ref: file, onsetsSec: [0, 0.1], gainsDb: [0, 13] }, 'gainsDb[1]'],
+  ])('rejects %s', (_label, source, fragment) => {
+    const error = validateRecipe(recipe([{ source: source as never }]))
+    expect(error).toBeTypeOf('string')
+    expect(error).toContain(fragment)
+  })
+
+  it('places a copy at each onset with its gain and cuts each copy at maxSec', () => {
+    const r = recipe([{ source: { type: 'sample', ref: file, onsetsSec: [0, 0.1], gainsDb: [0, -6], maxSec: 0.005 }, fadeMs: 0 }])
+    const { data } = renderRecipe(r, samples(constant(480)))
+    expect(peak(data, 0, 240)).toBeCloseTo(0.5, 6)
+    expect(Math.abs(data[0])).toBeCloseTo(0.5, 6)
+    expect(peak(data, 240, 4800)).toBe(0)
+    expect(data[4800]).toBeCloseTo(0.5 * 10 ** (-6 / 20), 6)
+    expect(data[5039]).toBeCloseTo(0.5 * 10 ** (-6 / 20), 6)
+    expect(peak(data, 5040)).toBe(0)
+    expect(renderRecipe(r, samples(constant(480))).data).toEqual(data)
+  })
+
+  it('fades out at the cut, sums overlapping copies and clips copies at the layer end', () => {
+    const cut = renderRecipe(recipe([{ source: { type: 'sample', ref: file, onsetsSec: [0.1], maxSec: 0.005 }, fadeMs: 1 }]), samples(constant(480))).data
+    expect(cut[4800 + 239]).toBe(0)
+    expect(cut[4800 + 239 - 24]).toBeCloseTo(0.25, 6)
+    const overlap = renderRecipe(recipe([{ source: { type: 'sample', ref: file, onsetsSec: [0.1, 0.1] }, fadeMs: 0 }]), samples(constant(480))).data
+    expect(overlap[4900]).toBeCloseTo(1, 6)
+    const late = renderRecipe(recipe([{ source: { type: 'sample', ref: file, onsetsSec: [0.98] }, durationSec: 0.985, fadeMs: 0 }]), samples(constant(960))).data
+    expect(late).toHaveLength(48000)
+    expect(peak(late, 47040, 47280)).toBeCloseTo(0.5, 6)
+    expect(peak(late, 47280)).toBe(0)
+  })
+
+  it('resamples to the recipe rate including the playback rate', () => {
+    const nonZero = (data: Float32Array) => data.reduce((n, v) => n + (v !== 0 ? 1 : 0), 0)
+    const at = (rate: number) => renderRecipe(recipe([{ source: { type: 'sample', ref: file, rate }, fadeMs: 0 }]), samples(constant(1600), 16000)).data
+    // Linear interpolation ends at the last source sample, so the length may fall short by under one source sample.
+    expect(Math.abs(nonZero(at(1)) - 4800)).toBeLessThanOrEqual(3)
+    expect(Math.abs(nonZero(at(2)) - 2400)).toBeLessThanOrEqual(3)
+    expect(Math.abs(nonZero(at(0.5)) - 9600)).toBeLessThanOrEqual(6)
+  })
+
+  it('throws when a sample ref was not loaded', () => {
+    expect(() => renderRecipe(recipe([{ source: { type: 'sample', ref: file } }]))).toThrow(/sources\/tap\.wav/)
+    expect(() => renderRecipe(recipe([{ source: { type: 'sample', ref: { kind: 'clip', clipId: 'c1' } } }]), samples(constant(10)))).toThrow(/clip:c1:original/)
+  })
+
+  it('loads each ref once, mixed to mono', async () => {
+    const reads: string[] = []
+    const loaded = await loadRecipeSamples(recipe([
+      { source: { type: 'sample', ref: file } },
+      { source: { type: 'sample', ref: file, rate: 2 } },
+      { source: { type: 'sample', ref: { kind: 'clip', clipId: 'c1', use: 'working' } } },
+      { source: { type: 'sine', freqHz: 60 } },
+    ]), {
+      readAgentFile: async path => { reads.push(path); return new ArrayBuffer(4) },
+      decodeAudio: async () => fakeBuffer([Float32Array.from([1, 0]), Float32Array.from([0, 1])], 16000),
+      getClip: (id, use) => id === 'c1' && use === 'working' ? fakeBuffer([Float32Array.from([0.25])], 48000) : null,
+    })
+    expect(reads).toEqual(['sources/tap.wav'])
+    expect([...loaded.keys()]).toEqual(['file:sources/tap.wav', 'clip:c1:working'])
+    expect(Array.from(loaded.get('file:sources/tap.wav')!.data)).toEqual([0.5, 0.5])
+    expect(loaded.get('file:sources/tap.wav')!.sampleRate).toBe(16000)
+    await expect(loadRecipeSamples(recipe([{ source: { type: 'sample', ref: { kind: 'clip', clipId: 'gone' } } }]), {
+      readAgentFile: async () => new ArrayBuffer(0), decodeAudio: async () => fakeBuffer([new Float32Array(1)], 48000), getClip: () => null,
+    })).rejects.toThrow(/"gone" is not in the editor/)
   })
 })

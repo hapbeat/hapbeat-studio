@@ -3,6 +3,7 @@ import type { CandidateFile, TrialFile } from './agentProtocol'
 import { encodePcm16Wav, normalizeOverPeak, processInbox, SETTLE_MS, submitTrialRequest, type InboxDeps } from './agentInbox'
 import { KnowledgeFolder } from './hapticKnowledge'
 import { MemoryDirectory } from './memoryDirectory.testutil'
+import { renderRecipe, type Recipe } from './recipe'
 
 /** Minimal AudioBuffer stand-in; the inbox only touches these members through injected deps. */
 function fakeBuffer(channels: Float32Array[], sampleRate: number): AudioBuffer {
@@ -98,6 +99,29 @@ describe('processInbox', () => {
     await processInbox(folder, deps())
     expect(root.has('hapbeat-agent/inbox/_rejected/bad_2.json')).toBe(true)
     expect(await root.text('hapbeat-agent/inbox/_rejected/bad.error.txt')).toMatch(/Invalid JSON/)
+  })
+
+  it('renders a recipe candidate whose sample layer reads a file from hapbeat-agent/', async () => {
+    const root = new MemoryDirectory('root')
+    const folder = await KnowledgeFolder.open(root.asHandle())
+    root.put('hapbeat-agent/sources/rain.wav', 'RIFF')
+    const mixed = (path: string) => ({ ...recipe, layers: [{ source: { type: 'sample', ref: { kind: 'file', path } }, fadeMs: 0 }, { source: { type: 'sine', freqHz: 60 }, gainDb: -40 }] })
+    root.put('hapbeat-agent/inbox/t-03.json', JSON.stringify({
+      format: 'hapbeat-trial@1', id: 't-03', intent: 'create', prompt: 'tap', terms: ['tap'],
+      candidates: [
+        { id: 'A', label: 'mix', source: { kind: 'recipe', recipe: mixed('sources/rain.wav') }, effects: [] },
+        { id: 'B', label: 'missing', source: { kind: 'recipe', recipe: mixed('sources/none.wav') }, effects: [] },
+      ],
+    }))
+    const result = await processInbox(folder, { ...deps(), renderRecipe: (r, samples) => renderRecipe(r as Recipe, samples) })
+    expect(result.accepted).toEqual(['t-03'])
+    const base = 'haptic-knowledge/trials/2026-09/t-03'
+    const a = await root.json<CandidateFile>(`${base}/candidates/A.json`)
+    expect(a.error).toBeUndefined()
+    // decodeAudio yields 0.1 s of 100 Hz at 16 kHz; the sample layer resamples it into the 48 kHz recipe.
+    expect(a.features!.dominantHz).toBeCloseTo(100, -1)
+    expect(a.features!.durationSec).toBeCloseTo(0.1, 2)
+    expect((await root.json<CandidateFile>(`${base}/candidates/B.json`)).error).toBe('File not found: hapbeat-agent/sources/none.wav')
   })
 
   it('waits until a request file has settled', async () => {

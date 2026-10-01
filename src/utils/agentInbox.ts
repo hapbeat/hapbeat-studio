@@ -7,6 +7,7 @@ import type { EffectParams } from '@/types/waveform'
 import { parseTrialRequest, trialRequestError, CANDIDATE_FORMAT, type CandidateFile, type CandidateSource, type TrialCandidate, type TrialFile, type TrialRequest } from '@/utils/agentProtocol'
 import { computeFeatures, mixToMono } from '@/utils/hapticFeatures'
 import { localIsoString, monthOf, type KnowledgeFolder } from '@/utils/hapticKnowledge'
+import { loadRecipeSamples, type Recipe, type RecipeSamples } from '@/utils/recipe'
 
 export const OUTPUT_RATE = 48000
 /** A request file must be unchanged this long before it is read (agents may still be writing). */
@@ -18,7 +19,8 @@ export interface InboxDeps {
   now: () => Date
   getClip: (clipId: string, use: 'original' | 'working') => { buffer: AudioBuffer; name: string } | null
   decodeAudio: (bytes: ArrayBuffer) => Promise<AudioBuffer>
-  renderRecipe: (recipe: unknown) => { data: Float32Array; sampleRate: number }
+  /** `samples` holds the material of the recipe's sample layers (loadRecipeSamples). */
+  renderRecipe: (recipe: unknown, samples: RecipeSamples) => { data: Float32Array; sampleRate: number }
   createBuffer: (data: Float32Array, sampleRate: number) => AudioBuffer
   applyEffect: (buffer: AudioBuffer, params: EffectParams) => Promise<AudioBuffer>
   resample: (buffer: AudioBuffer, sampleRate: number) => Promise<AudioBuffer>
@@ -47,6 +49,14 @@ export function normalizeOverPeak(data: Float32Array): { data: Float32Array; gai
   return { data: data.map(v => v * gain), gainDb: Math.round(20 * Math.log10(gain) * 100) / 100 }
 }
 
+/** Bytes of a file below hapbeat-agent/ (path already validated by isSafeAgentPath). */
+export async function readAgentBytes(folder: KnowledgeFolder, path: string): Promise<ArrayBuffer> {
+  let file: File
+  try { file = await folder.readAgentFile(path) }
+  catch { throw new Error(`File not found: hapbeat-agent/${path}`) }
+  return file.arrayBuffer()
+}
+
 const channelsOf = (buffer: AudioBuffer) => Array.from({ length: buffer.numberOfChannels }, (_, ch) => buffer.getChannelData(ch))
 
 async function loadSource(source: CandidateSource, folder: KnowledgeFolder, deps: InboxDeps): Promise<{ buffer: AudioBuffer; clipName?: string }> {
@@ -56,14 +66,15 @@ async function loadSource(source: CandidateSource, folder: KnowledgeFolder, deps
       if (!clip) throw new Error(`Clip "${source.clipId}" is not in the editor (see catalog.json)`)
       return { buffer: clip.buffer, clipName: clip.name }
     }
-    case 'file': {
-      let file: File
-      try { file = await folder.readAgentFile(source.path) }
-      catch { throw new Error(`File not found: hapbeat-agent/${source.path}`) }
-      return { buffer: await deps.decodeAudio(await file.arrayBuffer()) }
-    }
+    case 'file':
+      return { buffer: await deps.decodeAudio(await readAgentBytes(folder, source.path)) }
     case 'recipe': {
-      const rendered = deps.renderRecipe(source.recipe)
+      const samples = await loadRecipeSamples(source.recipe as Recipe, {
+        readAgentFile: path => readAgentBytes(folder, path),
+        getClip: (clipId, use) => deps.getClip(clipId, use)?.buffer ?? null,
+        decodeAudio: deps.decodeAudio,
+      })
+      const rendered = deps.renderRecipe(source.recipe, samples)
       return { buffer: deps.createBuffer(rendered.data, rendered.sampleRate) }
     }
   }

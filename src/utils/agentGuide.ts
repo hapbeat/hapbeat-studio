@@ -94,6 +94,13 @@ Write the inbox file atomically if you can (write \`<trialId>.json.tmp\`, then r
   - \`{ "kind": "clip", "clipId": "…", "use": "working" }\` — the clip's current processed audio.
   - \`{ "kind": "file", "path": "sources/rain.wav" }\` — relative to \`hapbeat-agent/\`; \`..\` and absolute paths are rejected.
   - \`{ "kind": "recipe", "recipe": { "format": "hapbeat-recipe@1", … } }\` — a generator recipe (ranges under \`recipe\` in catalog.json).
+    A recipe layer can also play audio material with \`"source": { "type": "sample", "ref": … }\`, so one recipe mixes recordings with synthesized layers:
+    - \`ref\`: \`{ "kind": "file", "path": "sources/tap.wav" }\` (relative to \`hapbeat-agent/\`, same path rule as file sources) or \`{ "kind": "clip", "clipId": "…", "use": "original" | "working" }\` (\`use\` defaults to \`"original"\`).
+    - \`rate\` (optional): playback rate; pitch and length change together. \`maxSec\` (optional): each copy is cut at this length with a \`fadeMs\` fade-out. Ranges under \`recipe.sources.sample\` in catalog.json.
+    - \`onsetsSec\` (optional, default \`[0]\`): 1–64 start times in seconds (≥ 0, non-decreasing) relative to the layer start; one copy of the material starts at each. \`gainsDb\` (optional): one gain per onset, −60…12 dB each. Overlapping copies add up; copies past the layer end are cut off.
+    - The material is mixed to mono and resampled to the recipe's \`sampleRate\`; then the layer's \`am\`, \`envelope\`, \`fadeMs\` and \`gainDb\` apply as usual.
+    - Example — a recorded tap plus a 60 Hz body:
+      \`{ "format": "hapbeat-recipe@1", "sampleRate": 48000, "durationSec": 0.4, "seed": 1, "layers": [ { "source": { "type": "sample", "ref": { "kind": "file", "path": "sources/tap.wav" }, "onsetsSec": [0, 0.15], "gainsDb": [0, -3], "maxSec": 0.08 } }, { "source": { "type": "sine", "freqHz": 60 }, "durationSec": 0.25, "gainDb": -6, "envelope": [{ "time": 0, "value": 1 }, { "time": 1, "value": 0 }] } ] }\`
 - \`effects\`: array of effect parameter objects applied in order (no \`id\` / \`enabled\`). Allowed types and ranges are in \`catalog.json\` → \`effectTypes\`. Use \`[]\` for none.
 
 Processing: stereo sources are averaged to mono, effects are applied in order, the result is resampled to 48 kHz and, if its peak exceeds 1.0, normalized to 0.98 (recorded as \`autoNormalizedDb\`). A candidate that fails to render gets an \`error\` in its candidates/<cid>.json; the other candidates are still rendered. An invalid request is moved to \`inbox/_rejected/\` with an \`.error.txt\`; fix it and submit again under a new id.
@@ -158,7 +165,7 @@ Content-Type: application/json
 - \`duration_seconds\` is optional (0.5–30; omit to let the model choose). \`prompt_influence\` is 0–1 (default 0.3).
 - Save the response body as MP3 (or WAV) under \`hapbeat-agent/sources/\`; Studio decodes MP3 fine.
 - Cost (checked on 2026-09-29, may change — check ElevenLabs' pricing page): about 40 credits per second when \`duration_seconds\` is set, 200 credits per generation when it is automatic. The free plan (10,000 credits/month) is NOT licensed for commercial use and requires attribution; Starter and above allow commercial use. Tell the user before spending credits.
-- Generated sound effects usually carry little energy below ~100 Hz. Plan to add low end (for example \`freq-shift\` down or \`lpf\`; candidates cannot mix two sources, so a \`recipe\` candidate is the way to build the low end separately) and check \`bandEnergy\` of the rendered candidate.
+- Generated sound effects usually carry little energy below ~100 Hz. Plan to add low end (for example \`freq-shift\` down or \`lpf\`; to mix the recording with a synthesized low end, use a \`recipe\` candidate with a \`sample\` layer for the recording and a tone / decaying-sine layer for the low end) and check \`bandEnergy\` of the rendered candidate.
 
 ## Rules
 
