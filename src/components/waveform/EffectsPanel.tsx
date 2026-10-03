@@ -1,28 +1,20 @@
 import { useState, useCallback, useEffect } from 'react'
+import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import type { EffectType } from '@/types/waveform'
 import { EFFECT_LABELS, EXPERIMENTAL_EFFECTS } from '@/types/waveform'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { EffectParamEditor } from './EffectParamEditor'
-import { useI18n } from '@/i18n/I18nProvider'
+import { useI18n, type MessageId } from '@/i18n/I18nProvider'
+import { EditorMenu, EditorMenuItem, EditorMenuSection } from './EditorMenu'
+import { useEditor } from './editorContext'
 
-const EFFECT_TYPES: EffectType[] = [
-  'repitch',
-  'noise-gate',
-  'lpf',
-  'hpf',
-  'bpf',
-  'envelope',
-  'gain',
-  'normalize',
-  'fade-in',
-  'fade-out',
-  'reverse',
-  'mono-convert',
-  'am',
-  'noise-mix',
-  'freq-shift',
-  'compressor',
-  'saturate',
+/** "+ Add effect" menu, grouped so the list stays scannable. Audio-oriented effects are last. */
+const EFFECT_CATEGORIES: { label: MessageId; types: EffectType[] }[] = [
+  { label: 'editor.effectCategory.filter', types: ['lpf', 'hpf', 'bpf'] },
+  { label: 'editor.effectCategory.level', types: ['gain', 'normalize', 'compressor', 'noise-gate', 'saturate'] },
+  { label: 'editor.effectCategory.shape', types: ['envelope', 'fade-in', 'fade-out', 'reverse'] },
+  { label: 'editor.effectCategory.texture', types: ['repitch', 'am', 'noise-mix', 'freq-shift', 'mono-convert'] },
+  { label: 'editor.audioEffects', types: ['pitch-shift', 'time-stretch', 'eq'] },
 ]
 
 function getEffectSummary(params: import('@/types/waveform').EffectParams): string {
@@ -142,16 +134,14 @@ export function EffectsPanel({preview, onPreviewChange}: {preview: boolean; onPr
           ))}
         </div>
 
-        <div className="editor-effect-palette">
-          {EFFECT_TYPES.map(type => <button className="editor-effect-tile" key={type} onClick={() => handleAdd(type)} title={EFFECT_LABELS[type]}>
-            <EffectIcon type={type} /><span>{EFFECT_LABELS[type]}</span>
-            {EXPERIMENTAL_EFFECTS.has(type) && <small className="effect-experimental-badge" title={t('editor.experimentalHint')}>{t('editor.experimental')}</small>}
-          </button>)}
-        </div>
-
-        <details className="editor-audio-effects"><summary>{t('editor.audioEffects')}</summary>
-          {(['pitch-shift', 'time-stretch', 'eq'] as EffectType[]).map(type => <button className="toolbar-btn" key={type} onClick={() => handleAdd(type)}>{EFFECT_LABELS[type]}</button>)}
-        </details>
+        <EditorMenu label={`+ ${t('editor.addEffect')}`} className="editor-add-effect">
+          {EFFECT_CATEGORIES.map(category => <EditorMenuSection key={category.label} label={t(category.label)}>
+            {category.types.map(type => <EditorMenuItem key={type} onSelect={() => handleAdd(type)}>
+              <EffectIcon type={type} /><span>{EFFECT_LABELS[type]}</span>
+              {EXPERIMENTAL_EFFECTS.has(type) && <small className="effect-experimental-badge" title={t('editor.experimentalHint')}>{t('editor.experimental')}</small>}
+            </EditorMenuItem>)}
+          </EditorMenuSection>)}
+        </EditorMenu>
         <div className="effects-chain-footer" style={{ borderTop: 'none', paddingTop: 0 }}>
           <button
             className="apply-effects-btn"
@@ -187,6 +177,17 @@ export function EffectsPanel({preview, onPreviewChange}: {preview: boolean; onPr
       </div>
     </div>
   )
+}
+
+/** Effects dock panel: disabled while no clip is selected, the original is shown, or an AI candidate is auditioned. */
+export function EffectsDockPanel() {
+  const { original, previewEnabled, setPreviewEnabled } = useEditor()
+  const hasClip = useWaveformStore(s => !!s.clip)
+  const isProcessing = useWaveformStore(s => s.isProcessing)
+  const audition = useAgentTrialStore(s => !!s.audition)
+  return <fieldset className="editor-panel editor-edit-controls" disabled={!hasClip || original || isProcessing || audition}>
+    <EffectsPanel preview={previewEnabled} onPreviewChange={setPreviewEnabled} />
+  </fieldset>
 }
 
 function EffectIcon({type}: {type: EffectType}) {

@@ -5,8 +5,8 @@ import { useEditorSettings } from '@/stores/editorSettings'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { useI18n } from '@/i18n/I18nProvider'
 
-export function TransportBar({ player: ws, available, playback, pending, muted, onMutedChange }: {
-  player: EditorBufferPlayer; available: boolean; playback: EditorPlayback | null; pending: boolean; muted: boolean; onMutedChange: (value: boolean) => void
+export function TransportBar({ player: ws, available, playback, pending }: {
+  player: EditorBufferPlayer; available: boolean; playback: EditorPlayback | null; pending: boolean
 }) {
   const { t } = useI18n()
   const [playing, setPlaying] = useState(false)
@@ -35,7 +35,5 @@ export function TransportBar({ player: ws, available, playback, pending, muted, 
     <span className="transport-time">{time.toFixed(3)} / {(ws?.getDuration() ?? 0).toFixed(3)} s</span>
     <label><input type="checkbox" checked={loop} onChange={e => updateSettings({loop: e.target.checked})} />{t('editor.loop')}</label>
     <label className="editor-loop-delay">{t('editor.loopDelay')}<input type="number" min={0} max={60} step={.1} value={loopDelay} onChange={e => updateSettings({loopDelay: Math.max(0, Math.min(60, Number(e.target.value) || 0))})} />s</label>
-    <span className="editor-output-note">{t('editor.outputTargets')}</span>
-    <label><input type="checkbox" checked={!muted} onChange={e => onMutedChange(!e.target.checked)} />{t('editor.sound')}</label>
   </div>
 }

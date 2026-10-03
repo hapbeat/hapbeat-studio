@@ -16,6 +16,7 @@
     "strip:wav-meta": "node scripts/strip-wav-metadata.mjs"
   },
   "dependencies": {
+    "dockview-react": "^8.4.0",
     "esptool-js": "^0.6.0",
     "idb": "^8.0.0",
     "jszip": "^3.10.0",

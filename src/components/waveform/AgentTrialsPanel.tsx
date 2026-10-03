@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useAgentTrialStore, type AuditionTarget } from '@/stores/agentTrialStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
@@ -7,18 +7,26 @@ import { localIsoString, type DimensionsDoc, type TrialRecord } from '@/utils/ha
 import type { HapticFeatures } from '@/utils/hapticFeatures'
 import { formToRating, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, type CandidateRatingForm, type Direction, type RatingForm } from '@/utils/agentTrialUi'
 import { WaveformThumbnail } from './WaveformThumbnail'
+import { useEditor } from './editorContext'
 
+/** Filter value for trials without a project (not a valid project name, so it cannot collide). */
+const UNASSIGNED_FILTER = ' '
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 const num = (v: number | null, digits: number, unit = '') => v === null ? '—' : `${v.toFixed(digits)}${unit}`
 
 /**
  * "AI trials": trials that a local agent dropped into hapbeat-agent/inbox/, their
  * candidates (audition / adopt) and the rating form. Polling is driven by WaveformEditor.
- * Kept mounted while hidden so selection and unsaved ratings survive tab switches.
+ * The dock keeps it mounted while its tab is in the background, so selection and
+ * unsaved ratings survive tab switches.
  * Selection and audition live in agentTrialStore so MCP requests can drive them too.
  */
-export function AgentTrialsPanel({ hidden, deviceNames }: { hidden: boolean; deviceNames: string[] }) {
+export function AgentTrialsPanel() {
   const { t } = useI18n()
+  const { playbackDevices } = useEditor()
+  const deviceNames = useMemo(() => [...new Set(playbackDevices.map(device => device.name).filter(Boolean))], [playbackDevices])
+  /** '' = every trial; otherwise the trial's `project` (UNASSIGNED_FILTER = trials without one). */
+  const [projectFilter, setProjectFilter] = useState('')
   const trials = useAgentTrialStore(s => s.trials)
   const folder = useAgentTrialStore(s => s.folder)
   const polling = useAgentTrialStore(s => s.polling)
@@ -38,12 +46,20 @@ export function AgentTrialsPanel({ hidden, deviceNames }: { hidden: boolean; dev
   }, [lastResult])
   useEffect(() => { setRejected([]) }, [folder])
   const record = trials.find(r => r.trial.id === selectedId) ?? null
-  return <div className="agent-panel" hidden={hidden}>
+  const projects = useMemo(() => [...new Set(trials.map(r => r.trial.project).filter((p): p is string => !!p))].sort((a, b) => a.localeCompare(b)), [trials])
+  const shown = projectFilter === '' ? trials : trials.filter(r => (r.trial.project ?? UNASSIGNED_FILTER) === projectFilter)
+  return <div className="agent-panel">
     <div className={`agent-status ${storeError ? 'error' : ''}`} role="status">{storeError ?? t(!folder ? 'editor.agent.noFolder' : polling ? 'editor.agent.watching' : 'editor.agent.paused')}</div>
     <div className={`agent-mcp-status ${isConnected && folder ? 'ready' : ''}`} title={t('editor.agent.mcpHint')}>{t(!isConnected ? 'editor.agent.mcpHelperOff' : folder ? 'editor.agent.mcpReady' : 'editor.agent.mcpNoFolder')}</div>
+    {projects.length > 0 && <label className="agent-project-filter">{t('editor.project')}
+      <select value={projectFilter} onChange={e => setProjectFilter(e.target.value)}>
+        <option value="">{t('editor.allProjects')}</option>
+        {projects.map(name => <option key={name} value={name}>{name}</option>)}
+        <option value={UNASSIGNED_FILTER}>{t('editor.unassigned')}</option>
+      </select></label>}
     <div className="agent-trial-list" aria-label={t('editor.agent.tab')}>
       {trials.length === 0 && rejected.length === 0 && <p className="agent-muted">{t('editor.agent.empty')}</p>}
-      {trials.map(r => <button key={r.trial.id} className={`agent-trial-item ${r.trial.id === selectedId ? 'selected' : ''}`} aria-pressed={r.trial.id === selectedId} onClick={() => setSelectedId(r.trial.id)}>
+      {shown.map(r => <button key={r.trial.id} className={`agent-trial-item ${r.trial.id === selectedId ? 'selected' : ''}`} aria-pressed={r.trial.id === selectedId} onClick={() => setSelectedId(r.trial.id)}>
         <strong>{r.trial.terms.join(' · ')}</strong>
         <span className={`agent-badge ${r.rating ? 'rated' : 'unrated'}`}>{t(r.rating ? 'editor.agent.rated' : 'editor.agent.unrated')}</span>
         <small>{r.trial.id} · {t('editor.agent.candidateCount', { count: r.trial.candidates.length })}</small>
