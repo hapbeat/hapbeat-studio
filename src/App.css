@@ -174,6 +174,25 @@ select.app-version-select option {
   color: var(--text-secondary, #ddd);
 }
 
+/* Folded header: a slim bar keeps the expand button reachable on every tab. */
+.app-header-collapsed {
+  display: flex;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+.header-collapse-toggle {
+  padding: 2px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.header-collapse-toggle:hover { color: var(--text-primary); border-color: var(--border-light); }
+
 /* 右側メタ情報グループ: docs リンク + Helper 接続状態 を縦中央揃えで並べる */
 .header-meta {
   display: flex;

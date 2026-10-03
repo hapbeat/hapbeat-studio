@@ -71,6 +71,15 @@ export function App() {
     })(),
   ]))
 
+  // The app header can be folded away to give tabs (notably the editor) more height.
+  // A slim bar with the expand button stays visible while folded.
+  const [headerCollapsed, setHeaderCollapsed] = useState(() => {
+    try { return localStorage.getItem('hapbeat-studio-header-collapsed') === '1' } catch { return false }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('hapbeat-studio-header-collapsed', headerCollapsed ? '1' : '0') } catch { /* preference only */ }
+  }, [headerCollapsed])
+
   useEffect(() => {
     localStorage.setItem('hapbeat-studio-tab', activeTab)
     setVisitedTabs((prev) => {
@@ -134,6 +143,13 @@ export function App() {
 
   return (
     <div className="app">
+      {headerCollapsed ? (
+        <div className="app-header-collapsed">
+          <button type="button" className="header-collapse-toggle" onClick={() => setHeaderCollapsed(false)} aria-label={t('header.expand')} title={t('header.expand')}>
+            ▾ Hapbeat Studio · {tabLabels[activeTab].main}
+          </button>
+        </div>
+      ) : (
       <header className="app-header">
         <div className="header-title">
           <span className="header-brand"><span className="header-brand-full">Hapbeat </span>Studio</span>
@@ -202,8 +218,10 @@ export function App() {
               <span className="connection-status-label">{t('common.helper')}</span>
             </button>
           )}
+          <button type="button" className="header-collapse-toggle" onClick={() => setHeaderCollapsed(true)} aria-label={t('header.collapse')} title={t('header.collapse')}>▴</button>
         </div>
       </header>
+      )}
       {/* Outdated-Helper banner: shown when a Helper is connected but its
           version is below MIN_HELPER_VERSION. Dismissible per session, with a
           one-click jump into HelperManageModal where the upgrade commands
