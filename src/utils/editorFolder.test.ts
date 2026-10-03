@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
-import { encodeEditorBuffer, decodeEditorBuffer, parseEditorIndex, EditorFolder, type EditorDocument } from './editorFolder'
+import { encodeEditorBuffer, decodeEditorBuffer, parseEditorIndex, EditorFolder, isProjectName, normalizeProjectName, type EditorDocument } from './editorFolder'
 import { cropBuffer, deleteRegion, fadeIn, fadeOut, noiseGate, normalize, applyEnvelope, applyEffect } from './audioDsp'
 
 class TestBuffer {
@@ -221,6 +221,23 @@ describe('editor lossless local project', () => {
     expect(parseEditorIndex(JSON.stringify(index)).version).toBe(1)
     const broken = {...index, clips: [{...index.clips[0], effects: [{id:'x',enabled:true,params:{type:'time-stretch',rate:0}}]}]}
     expect(() => parseEditorIndex(JSON.stringify(broken))).toThrow()
+  })
+  it('roundtrips the optional project label and loads projects saved without one', async () => {
+    const dir = directory(), source = doc(buffer([[.1,.2]])), other = doc(buffer([[.3]])), {folder} = await EditorFolder.open(dir.handle)
+    source.clip.project = 'UI sounds'; other.clip.id = 'clip-2'
+    await folder.save([source, other])
+    const [restored, plain] = (await EditorFolder.open(dir.handle)).documents
+    expect(restored.clip.project).toBe('UI sounds')
+    expect(plain.clip.project).toBeUndefined()
+    const clip = {id:'a',name:'a',original:'good.f32',working:'x.f32',exportSampleRate:48000,exportAsMono:false,effects:[]}
+    expect(parseEditorIndex(JSON.stringify({version: 1, revision: 'r', clips: [clip]})).clips[0].project).toBeUndefined()
+    for (const bad of ['', ' padded', 'x'.repeat(81), 'tab	here', 3]) expect(() => parseEditorIndex(JSON.stringify({version: 1, revision: 'r', clips: [{...clip, project: bad}]}))).toThrow()
+  })
+  it('normalizes typed project names', () => {
+    expect(normalizeProjectName('  Game   UI ')).toBe('Game UI')
+    expect(normalizeProjectName('   ')).toBeUndefined()
+    expect(normalizeProjectName('x'.repeat(100))).toHaveLength(80)
+    expect(isProjectName(normalizeProjectName('a	b'))).toBe(true)
   })
   it('accepts optional material provenance fields and rejects malformed ones', () => {
     const clip = {id:'a',name:'a',original:'good.f32',working:'x.f32',exportSampleRate:48000,exportAsMono:false,effects:[]}

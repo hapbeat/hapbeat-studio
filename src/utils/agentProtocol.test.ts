@@ -28,6 +28,15 @@ describe('agentProtocol', () => {
     expect(error(request({ candidates: [JSON.parse(request()).candidates[0], JSON.parse(request()).candidates[0]] }))).toMatch(/duplicated/)
   })
 
+  it('accepts an optional project label and rejects malformed ones', () => {
+    const result = parseTrialRequest(request({ project: 'Cloth textures' }), 't-01')
+    expect(result.ok && result.trial.project).toBe('Cloth textures')
+    for (const bad of ['', ' x', 'x'.repeat(81), 1]) {
+      const r = parseTrialRequest(request({ project: bad }), 't-01')
+      expect(r.ok ? null : r.error).toMatch(/project/)
+    }
+  })
+
   it('validates file paths', () => {
     expect(isSafeAgentPath('sources/rain.wav')).toBe(true)
     for (const bad of ['/abs.wav', 'C:/x.wav', 'a\\b.wav', 'sources/../x.wav', './x.wav', 'a//b.wav', '']) expect(isSafeAgentPath(bad)).toBe(false)

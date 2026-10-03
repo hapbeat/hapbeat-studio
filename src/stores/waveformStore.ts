@@ -42,11 +42,11 @@ interface EditorState {
    */
   addRecipeClip: (recipe: Recipe, name: string, sourceFileName: string, agentFolder: KnowledgeFolder | null) => Promise<void>
   /** Adds a clip built on `clip.originalBuffer` with `effects` as a not-yet-applied chain (never modifies existing clips). Returns its id, or null when no folder is open or the editor is busy. */
-  addDerivedClip: (clip: Pick<WaveformClip, 'name' | 'originalBuffer' | 'exportSampleRate'> & Partial<Pick<WaveformClip, 'description' | 'sourceFileName' | 'sourceGroupId' | 'sourceSha256' | 'provenance' | 'recipe'>>, effects: EffectParams[]) => string | null
+  addDerivedClip: (clip: Pick<WaveformClip, 'name' | 'originalBuffer' | 'exportSampleRate'> & Partial<Pick<WaveformClip, 'description' | 'project' | 'sourceFileName' | 'sourceGroupId' | 'sourceSha256' | 'provenance' | 'recipe'>>, effects: EffectParams[]) => string | null
   selectClip: (id: string) => void
   duplicateClip: () => void
   extractSelection: () => void
-  updateClipInfo: (id: string, patch: {name?: string; description?: string}) => void
+  updateClipInfo: (id: string, patch: {name?: string; description?: string; project?: string | undefined}) => void
   /** Applies helper lookup results to every clip whose `sourceSha256` is in `found`; saves only when something changed. */
   setProvenance: (found: Map<string, MaterialProvenance>) => void
   setClipName: (name: string) => void

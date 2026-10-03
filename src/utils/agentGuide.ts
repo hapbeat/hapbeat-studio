@@ -87,7 +87,8 @@ Write the inbox file atomically if you can (write \`<trialId>.json.tmp\`, then r
 - \`id\`: /^[A-Za-z0-9_-]{1,80}$/ and must equal the file name without \`.json\`. Must be new.
 - \`intent\`: \`"modify"\` (process existing material) or \`"create"\` (from scratch).
 - \`prompt\`: the user's original request (required, ≤ 2000 chars). \`terms\`: 1–5 target words (≤ 40 chars each).
-- Optional: \`parentTrial\`, \`agent\`, \`rationale\` (≤ 4000 chars), \`knowledgeUsed\`.
+- Optional: \`parentTrial\`, \`agent\`, \`rationale\` (≤ 4000 chars), \`knowledgeUsed\`, \`project\`.
+- \`project\` (optional): editor project label, 1–80 characters without leading/trailing spaces. Adopted candidates are filed under this project in the editor's clip list; reuse a \`project\` value from catalog.json clips to add to an existing project.
 - \`candidates\`: 1–6. \`id\` /^[A-Za-z0-9_-]{1,16}$/ unique in the trial, \`label\` ≤ 80 chars, \`hypothesis\` ≤ 400 chars.
 - \`source\` is one of:
   - \`{ "kind": "clip", "clipId": "…" }\` — the clip's original (imported) audio.
@@ -232,7 +233,7 @@ export const claudeMd = () => '@AGENTS.md\n'
 // ---- catalog.json ----
 
 export interface CatalogClip {
-  id: string; name: string; description?: string; sourceFileName?: string
+  id: string; name: string; description?: string; project?: string; sourceFileName?: string
   durationSec: number; sampleRate: number; channels: number
   effects: unknown[]; features: HapticFeatures
 }
@@ -260,7 +261,7 @@ export function buildCatalog(documents: EditorDocument[], studioVersion: string,
   return {
     format: 'hapbeat-catalog@1', studioVersion, generatedAt,
     clips: documents.map(({ clip, effects }) => ({
-      id: clip.id, name: clip.name, description: clip.description, sourceFileName: clip.sourceFileName,
+      id: clip.id, name: clip.name, description: clip.description, project: clip.project, sourceFileName: clip.sourceFileName,
       durationSec: Math.round(clip.buffer.duration * 1e4) / 1e4, sampleRate: clip.buffer.sampleRate, channels: clip.buffer.numberOfChannels,
       effects: effects.filter(e => e.enabled).map(e => e.params),
       features: bufferFeatures(clip.buffer),

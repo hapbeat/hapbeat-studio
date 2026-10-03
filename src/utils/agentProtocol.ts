@@ -4,7 +4,7 @@
  * the agent writes trial requests, Studio renders them and stores human ratings.
  */
 import type { EffectParams } from '@/types/waveform'
-import { validateEffectParams } from '@/utils/editorFolder'
+import { isProjectName, validateEffectParams } from '@/utils/editorFolder'
 import { isSafeAgentPath, validateRecipe } from '@/utils/recipe'
 import type { HapticFeatures } from '@/utils/hapticFeatures'
 
@@ -29,6 +29,8 @@ export interface TrialRequest {
   agent?: { name?: string; model?: string }
   rationale?: string
   knowledgeUsed?: string[]
+  /** Optional editor project label; copied to clips adopted from this trial. */
+  project?: string
   candidates: TrialCandidate[]
 }
 /** trials/<YYYY-MM>/<id>/trial.json */
@@ -112,6 +114,7 @@ export function trialRequestError(data: unknown, fileId?: string): string | null
   if (data.parentTrial !== undefined && (typeof data.parentTrial !== 'string' || !TRIAL_ID.test(data.parentTrial))) return 'parentTrial must be a trial id'
   if (data.agent !== undefined && (!isObject(data.agent) || !optString(data.agent.name, 80) || !optString(data.agent.model, 80))) return 'agent must be { name?: string, model?: string }'
   if (!optString(data.rationale, 4000)) return 'rationale must be a string of at most 4000 characters'
+  if (data.project !== undefined && !isProjectName(data.project)) return 'project must be a string of 1-80 characters without leading/trailing spaces or control characters'
   if (data.knowledgeUsed !== undefined && (!Array.isArray(data.knowledgeUsed) || data.knowledgeUsed.length > 50 || !data.knowledgeUsed.every(k => typeof k === 'string' && k.length <= 200))) return 'knowledgeUsed must be an array of strings'
   if (!Array.isArray(data.candidates) || data.candidates.length < 1 || data.candidates.length > 6) return 'candidates must contain 1-6 items'
   const ids = new Set<string>()

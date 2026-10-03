@@ -17,6 +17,8 @@ export interface WaveformClip {
   /** Last helper `material_lookup` summary for `sourceSha256`. */
   provenance?: MaterialProvenance
   description?: string
+  /** Optional project label used to group clips in the editor (`.hapbeat-editor/project.json`). */
+  project?: string
   /** The current working AudioBuffer (post-edits, pre-export) */
   buffer: AudioBuffer
   /** Original imported buffer (never mutated, for revert) */

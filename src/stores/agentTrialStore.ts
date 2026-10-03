@@ -179,7 +179,7 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
       const requested = record.trial.candidates.find(c => c.id === candidateId)
       const spec = record.candidates.find(c => c.id === candidateId)?.spec ?? requested
       if (!requested || !spec) throw new Error(`Candidate "${candidateId}" is not in trial "${trialId}"`)
-      const base = { name: requested.label, description: `trial:${trialId}/${candidateId}` }
+      const base = { name: requested.label, description: `trial:${trialId}/${candidateId}`, project: record.trial.project }
       const source = spec.source
       let clipId: string | null
       if (source.kind === 'clip') {

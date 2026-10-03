@@ -12,7 +12,7 @@ export interface EditorDocument {
 }
 interface DiskClip {
   id: string; name: string; original: string; working: string
-  sourceFileName?: string; sourceGroupId?: string; description?: string
+  sourceFileName?: string; sourceGroupId?: string; description?: string; project?: string
   sourceSha256?: string; provenance?: MaterialProvenance
   renderedEffects?: EffectEntry[]
   recipe?: Recipe
@@ -21,6 +21,14 @@ interface DiskClip {
 interface ProjectIndex { version: 1; revision: string; clips: DiskClip[] }
 const INDEX = 'project.json'
 const PREVIOUS = 'project.previous.json'
+export const PROJECT_NAME_MAX = 80
+/** Optional clip / trial project label: 1-80 characters, no surrounding whitespace or control characters. */
+export const isProjectName = (value: unknown): value is string => typeof value === 'string' && value.length >= 1 && value.length <= PROJECT_NAME_MAX && value.trim() === value && !/[\x00-\x1f\x7f]/.test(value)
+/** User input → stored project label; blank input clears the project. */
+export function normalizeProjectName(input: string): string | undefined {
+  const value = input.replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, PROJECT_NAME_MAX).trim()
+  return value || undefined
+}
 const safePath = (value: unknown): value is string => typeof value === 'string' && /^[a-zA-Z0-9-]+\.f32$/.test(value)
 
 /** Private lossless float format; no browser resampling on restoration. */
@@ -83,7 +91,7 @@ export function parseEditorIndex(text: string): ProjectIndex {
   if (data?.version !== 1 || typeof data.revision !== 'string' || !Array.isArray(data.clips)) throw new Error('Unsupported or damaged editor project')
   const ids = new Set<string>()
   for (const c of data.clips) {
-    if (!c || typeof c.id !== 'string' || ids.has(c.id) || typeof c.name !== 'string' || (c.sourceFileName !== undefined && typeof c.sourceFileName !== 'string') || (c.sourceGroupId !== undefined && typeof c.sourceGroupId !== 'string') || (c.description !== undefined && typeof c.description !== 'string') || (c.sourceSha256 !== undefined && !isSha256Hex(c.sourceSha256)) || (c.provenance !== undefined && !validateProvenance(c.provenance)) || !safePath(c.original) || !safePath(c.working) || ![16000,24000,44100,48000].includes(c.exportSampleRate) || typeof c.exportAsMono !== 'boolean' || !validateEffects(c.effects) || (c.renderedEffects !== undefined && !validateEffects(c.renderedEffects)) || (c.recipe !== undefined && validateRecipe(c.recipe) !== null)) throw new Error('Invalid editor project clip')
+    if (!c || typeof c.id !== 'string' || ids.has(c.id) || typeof c.name !== 'string' || (c.sourceFileName !== undefined && typeof c.sourceFileName !== 'string') || (c.sourceGroupId !== undefined && typeof c.sourceGroupId !== 'string') || (c.description !== undefined && typeof c.description !== 'string') || (c.project !== undefined && !isProjectName(c.project)) || (c.sourceSha256 !== undefined && !isSha256Hex(c.sourceSha256)) || (c.provenance !== undefined && !validateProvenance(c.provenance)) || !safePath(c.original) || !safePath(c.working) || ![16000,24000,44100,48000].includes(c.exportSampleRate) || typeof c.exportAsMono !== 'boolean' || !validateEffects(c.effects) || (c.renderedEffects !== undefined && !validateEffects(c.renderedEffects)) || (c.recipe !== undefined && validateRecipe(c.recipe) !== null)) throw new Error('Invalid editor project clip')
     ids.add(c.id)
   }
   return data
@@ -137,7 +145,7 @@ export class EditorFolder {
     const documents: EditorDocument[] = []
     for (const c of index?.clips ?? []) {
       const originalBuffer = await load(c.original), buffer = await load(c.working)
-      documents.push({ clip: { id: c.id, name: c.name, sourceFileName: c.sourceFileName, sourceGroupId: c.sourceGroupId, sourceSha256: c.sourceSha256, provenance: c.provenance, description: c.description, buffer, originalBuffer, exportSampleRate: c.exportSampleRate, renderedEffects: c.renderedEffects, recipe: c.recipe }, effects: c.effects, exportAsMono: c.exportAsMono })
+      documents.push({ clip: { id: c.id, name: c.name, sourceFileName: c.sourceFileName, sourceGroupId: c.sourceGroupId, sourceSha256: c.sourceSha256, provenance: c.provenance, description: c.description, project: c.project, buffer, originalBuffer, exportSampleRate: c.exportSampleRate, renderedEffects: c.renderedEffects, recipe: c.recipe }, effects: c.effects, exportAsMono: c.exportAsMono })
     }
     return { folder, documents }
   }
@@ -155,7 +163,7 @@ export class EditorFolder {
       }
       const clips: DiskClip[] = []
       for (const { clip, effects, exportAsMono } of documents) clips.push({
-        id: clip.id, name: clip.name, sourceFileName: clip.sourceFileName, sourceGroupId: clip.sourceGroupId, sourceSha256: clip.sourceSha256, provenance: clip.provenance, description: clip.description, original: await storeBuffer(clip.originalBuffer), working: await storeBuffer(clip.buffer), renderedEffects: clip.renderedEffects, recipe: clip.recipe, effects, exportSampleRate: clip.exportSampleRate, exportAsMono,
+        id: clip.id, name: clip.name, sourceFileName: clip.sourceFileName, sourceGroupId: clip.sourceGroupId, sourceSha256: clip.sourceSha256, provenance: clip.provenance, description: clip.description, project: clip.project, original: await storeBuffer(clip.originalBuffer), working: await storeBuffer(clip.buffer), renderedEffects: clip.renderedEffects, recipe: clip.recipe, effects, exportSampleRate: clip.exportSampleRate, exportAsMono,
       })
       const index: ProjectIndex = { version: 1, revision: crypto.randomUUID(), clips }
       const text = JSON.stringify(index, null, 2)
