@@ -203,6 +203,7 @@ export const messages = defineMessages({
   "editor.details": { ja: "詳細", en: "Details" },
   "editor.exportMenu": { ja: "書き出し", en: "Export" },
   "editor.exporting": { ja: "{folder} に書き出し中…", en: "Exporting to {folder}…" },
+  "editor.sendHaptics": { ja: "触覚を送信する（エディタの再生のみ）", en: "Send haptics (editor playback only)" },
   "editor.recipe.create": { ja: "生成レイヤーから新規作成", en: "New from generator layers" },
   "editor.recipe.edit": { ja: "生成レイヤーを編集", en: "Edit generator layers" },
   "editor.recipe.title": { ja: "生成レイヤーで波形を作成", en: "Create a waveform from generator layers" },

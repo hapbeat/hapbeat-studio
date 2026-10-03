@@ -961,3 +961,4 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 .editor-viewport::before, .editor-viewport::after { content: ''; position: absolute; top: 50%; width: 4px; height: 18px; margin-top: -9px; border-radius: 2px; background: var(--accent-light); }
 .editor-viewport::before { left: -3px; }
 .editor-viewport::after { right: -3px; }
+.editor-output-options { display: flex; flex-wrap: wrap; gap: 6px 20px; }

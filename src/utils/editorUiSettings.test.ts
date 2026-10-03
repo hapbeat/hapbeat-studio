@@ -5,9 +5,11 @@ const layout = { grid: { root: {} }, panels: { clips: {} } }
 
 describe('editor UI settings', () => {
   it('keeps valid fields and replaces invalid ones with defaults', () => {
-    const settings = sanitizeUiSettings({ loop: true, loopDelay: 99, height: 'tall', clipGroupBy: 'nope', collapsedGroups: [1], dockLayout: layout, muted: true })
+    const settings = sanitizeUiSettings({ loop: true, loopDelay: 99, height: 'tall', clipGroupBy: 'nope', collapsedGroups: [1], dockLayout: layout, muted: true, sendHaptics: 'no' })
     expect(settings).toEqual({ ...DEFAULT_UI_SETTINGS, loop: true, loopDelay: 60, dockLayout: layout, muted: true })
     expect(sanitizeUiSettings({ dockLayout: { grid: 1 } }).dockLayout).toBeNull()
+    expect(sanitizeUiSettings({}).sendHaptics).toBe(true)
+    expect(sanitizeUiSettings({ sendHaptics: false }).sendHaptics).toBe(false)
   })
 
   it('roundtrips through the file format and rejects untagged or broken files', () => {

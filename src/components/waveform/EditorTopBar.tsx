@@ -18,6 +18,7 @@ export function EditorTopBar({ dockApi, notice, onNotice }: { dockApi: DockviewA
   const { openRecipe } = useEditor()
   const { toast } = useToast()
   const muted = useEditorSettings(state => state.muted)
+  const sendHaptics = useEditorSettings(state => state.sendHaptics)
   const audioInput = useRef<HTMLInputElement>(null)
   const settingsInput = useRef<HTMLInputElement>(null)
   const [openPanels, setOpenPanels] = useState<string[]>([])
@@ -74,7 +75,10 @@ export function EditorTopBar({ dockApi, notice, onNotice }: { dockApi: DockviewA
     </EditorMenu>
     <span className={`editor-save-state ${s.saveStatus}`} role="status">{t(`editor.save.${s.saveStatus}`)}</span>
     <span className={`editor-bar-notice ${s.error ? 'error' : ''}`} role="status" title={notice ?? undefined}>{notice ?? ''}</span>
-    <DevicePill selectionScope="kit" showWhenDisconnected modalExtra={<label><input type="checkbox" checked={!muted} onChange={e => useEditorSettings.getState().update({ muted: !e.target.checked })} />{t('editor.sound')}</label>} />
+    <DevicePill selectionScope="kit" showWhenDisconnected modalExtra={<div className="editor-output-options">
+      <label><input type="checkbox" checked={sendHaptics} onChange={e => useEditorSettings.getState().update({ sendHaptics: e.target.checked })} />{t('editor.sendHaptics')}</label>
+      <label><input type="checkbox" checked={!muted} onChange={e => useEditorSettings.getState().update({ muted: !e.target.checked })} />{t('editor.sound')}</label>
+    </div>} />
     <EditorMenu label={`${t('editor.viewMenu')} ▾`} disabled={!dockApi}>
       <EditorMenuSection label={t('editor.viewPanels')}>
         {EDITOR_PANELS.map(id => <EditorMenuItem key={id} keepOpen checked={openPanels.includes(id)} onSelect={() => dockApi && togglePanel(dockApi, id, t)}>{t(PANEL_TITLES[id])}</EditorMenuItem>)}

@@ -16,6 +16,8 @@ export interface EditorUiSettings {
   height: number
   /** PC audio muted during editor playback. */
   muted: boolean
+  /** Stream haptics to the selected devices during editor playback (off = PC-only audition). Kit is unaffected. */
+  sendHaptics: boolean
   clipThumbnails: boolean
   clipGroupBy: ClipGroupBy
   /** Collapsed clip-list group keys. */
@@ -25,7 +27,7 @@ export interface EditorUiSettings {
 }
 
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
-  loop: false, loopDelay: 0, height: 180, muted: false,
+  loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], dockLayout: null,
 }
 
@@ -44,6 +46,7 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     loopDelay: clamp(v.loopDelay, 0, 60, d.loopDelay),
     height: clamp(v.height, 100, 700, d.height),
     muted: typeof v.muted === 'boolean' ? v.muted : d.muted,
+    sendHaptics: typeof v.sendHaptics === 'boolean' ? v.sendHaptics : d.sendHaptics,
     clipThumbnails: typeof v.clipThumbnails === 'boolean' ? v.clipThumbnails : d.clipThumbnails,
     clipGroupBy: v.clipGroupBy === 'source' || v.clipGroupBy === 'project' ? v.clipGroupBy : d.clipGroupBy,
     collapsedGroups: strings(v.collapsedGroups, 1000) ? v.collapsedGroups : d.collapsedGroups,

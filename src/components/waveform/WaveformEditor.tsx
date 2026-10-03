@@ -77,8 +77,10 @@ export function WaveformEditor({ active }: { active: boolean }) {
   // Haptic targets: the shared Kit device selection (header device pill / Devices modal), same rule as Kit playback.
   const kitSelectedIps = useDeviceStore(state => state.kitSelectedIps)
   const muted = useEditorSettings(state => state.muted)
+  const sendHaptics = useEditorSettings(state => state.sendHaptics)
   const playbackDevices = useMemo(() => isConnected ? onlinePlaybackDevices(devices) : [], [isConnected, devices])
-  const targets = useMemo(() => isConnected ? resolvePlaybackTargets(devices, kitSelectedIps).map(device => device.ipAddress) : [], [isConnected, devices, kitSelectedIps])
+  // "Send haptics" off → no targets, so EditorPlayback never opens a stream (PC-only audition).
+  const targets = useMemo(() => isConnected && sendHaptics ? resolvePlaybackTargets(devices, kitSelectedIps).map(device => device.ipAddress) : [], [isConnected, sendHaptics, devices, kitSelectedIps])
   const targetKey = targets.join(',')
   const audioBuffer = audition ? audition.buffer : original ? s.clip?.originalBuffer : previewActive ? (preview.buffer ?? s.clip?.buffer) : s.clip?.buffer
   const player = useMemo(() => new EditorBufferPlayer(null, undefined, s.setError), [s.clip?.id, original, auditionKey])
