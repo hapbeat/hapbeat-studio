@@ -1,6 +1,6 @@
 /**
  * Waveform editor UI preferences (dock layout, panel set, clip list view,
- * playback / output options). Kept in three places so a cleared browser or a
+ * playback options). Haptic targets use the shared Kit device selection (deviceStore). Kept in three places so a cleared browser or a
  * new PC does not lose them: localStorage, `.hapbeat-editor/ui-settings.json`
  * in the editor folder, and a user-exported JSON file.
  */
@@ -16,8 +16,6 @@ export interface EditorUiSettings {
   height: number
   /** PC audio muted during editor playback. */
   muted: boolean
-  /** Haptic send targets by IP; null = every connected playback device. */
-  targets: string[] | null
   clipThumbnails: boolean
   clipGroupBy: ClipGroupBy
   /** Collapsed clip-list group keys. */
@@ -27,7 +25,7 @@ export interface EditorUiSettings {
 }
 
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
-  loop: false, loopDelay: 0, height: 180, muted: false, targets: null,
+  loop: false, loopDelay: 0, height: 180, muted: false,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], dockLayout: null,
 }
 
@@ -46,7 +44,6 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     loopDelay: clamp(v.loopDelay, 0, 60, d.loopDelay),
     height: clamp(v.height, 100, 700, d.height),
     muted: typeof v.muted === 'boolean' ? v.muted : d.muted,
-    targets: v.targets === null || strings(v.targets, 256) ? (v.targets as string[] | null) : d.targets,
     clipThumbnails: typeof v.clipThumbnails === 'boolean' ? v.clipThumbnails : d.clipThumbnails,
     clipGroupBy: v.clipGroupBy === 'source' || v.clipGroupBy === 'project' ? v.clipGroupBy : d.clipGroupBy,
     collapsedGroups: strings(v.collapsedGroups, 1000) ? v.collapsedGroups : d.collapsedGroups,

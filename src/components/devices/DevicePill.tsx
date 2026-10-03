@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore, type DeviceSelectionScope } from '@/stores/deviceStore'
 import { DevicesModal } from './DevicesModal'
@@ -22,9 +22,13 @@ import './DevicePill.css'
 interface DevicePillProps {
   hapbeatOnly?: boolean
   selectionScope: Exclude<DeviceSelectionScope, 'manage'>
+  /** Surface-specific options shown under the device list in the modal (e.g. the editor's PC audio toggle). */
+  modalExtra?: ReactNode
+  /** Keep the pill visible while Helper is disconnected (needed when `modalExtra` must stay reachable). */
+  showWhenDisconnected?: boolean
 }
 
-export function DevicePill({ hapbeatOnly, selectionScope }: DevicePillProps) {
+export function DevicePill({ hapbeatOnly, selectionScope, modalExtra, showWhenDisconnected }: DevicePillProps) {
   const { t } = useI18n()
   const { isConnected: helperConnected, devices } = useHelperConnection()
   const selectedIps = useDeviceStore((s) => selectionScope === 'kit' ? s.kitSelectedIps : s.displaySelectedIps)
@@ -64,7 +68,7 @@ export function DevicePill({ hapbeatOnly, selectionScope }: DevicePillProps) {
             <span className="device-pill-more">+{moreCount}</span>
           )}
         </button>
-      ) : helperConnected ? (
+      ) : helperConnected || showWhenDisconnected ? (
         <button
           type="button"
           className="device-pill muted"
@@ -77,7 +81,7 @@ export function DevicePill({ hapbeatOnly, selectionScope }: DevicePillProps) {
       ) : null}
       {/* "Devices ▸" 個別ボタンは header の Devices タブと冗長なので削除済み。
           pill 自体クリックでモーダルを開く。 */}
-      <DevicesModal open={open} onClose={() => setOpen(false)} hapbeatOnly={hapbeatOnly} selectionScope={selectionScope} />
+      <DevicesModal open={open} onClose={() => setOpen(false)} hapbeatOnly={hapbeatOnly} selectionScope={selectionScope} extra={modalExtra} />
     </>
   )
 }

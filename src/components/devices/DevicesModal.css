@@ -97,3 +97,11 @@
   background-color: #16213e;
 }
 
+/* Surface-specific options under the device list (e.g. the editor's PC audio toggle). */
+.devices-modal-extra {
+  flex-shrink: 0;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border-light, #3a3a5e);
+  font-size: 13px;
+}
+.devices-modal-extra label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { DeviceList } from './DeviceList'
 import type { DeviceSelectionScope } from '@/stores/deviceStore'
@@ -12,6 +12,8 @@ interface Props {
    *  Set from the UI/Display tab, where the config only applies to Hapbeat. */
   hapbeatOnly?: boolean
   selectionScope?: DeviceSelectionScope
+  /** Surface-specific options rendered under the device list. */
+  extra?: ReactNode
 }
 
 /**
@@ -29,7 +31,7 @@ interface Props {
  * `position: fixed` — only `createPortal(..., document.body)`
  * reliably escapes that.
  */
-export function DevicesModal({ open, onClose, hapbeatOnly, selectionScope = 'manage' }: Props) {
+export function DevicesModal({ open, onClose, hapbeatOnly, selectionScope = 'manage', extra }: Props) {
   const { t } = useI18n()
   useEffect(() => {
     if (!open) return
@@ -71,6 +73,7 @@ export function DevicesModal({ open, onClose, hapbeatOnly, selectionScope = 'man
         </div>
         <div className="devices-modal-body">
           <DeviceList hapbeatOnly={hapbeatOnly} selectionScope={selectionScope} />
+          {extra && <div className="devices-modal-extra">{extra}</div>}
         </div>
       </div>
     </div>
