@@ -9,13 +9,12 @@ import { WaveformPanel } from './WaveformPanel'
 import { PropertiesPanel } from './PropertiesPanel'
 import { EffectsDockPanel } from './EffectsPanel'
 import { AgentTrialsPanel } from './AgentTrialsPanel'
-import { OutputPanel } from './OutputPanel'
 
-export const EDITOR_PANELS = ['clips', 'waveform', 'properties', 'effects', 'agent', 'output'] as const
+export const EDITOR_PANELS = ['clips', 'waveform', 'properties', 'effects', 'agent'] as const
 export type EditorPanelId = typeof EDITOR_PANELS[number]
 export const PANEL_TITLES: Record<EditorPanelId, MessageId> = {
   clips: 'editor.panel.clips', waveform: 'editor.panel.waveform', properties: 'editor.panel.properties',
-  effects: 'editor.panel.effects', agent: 'editor.agent.tab', output: 'editor.panel.output',
+  effects: 'editor.panel.effects', agent: 'editor.agent.tab',
 }
 type Translate = (id: MessageId, params?: Record<string, string | number>) => string
 
@@ -29,7 +28,6 @@ const COMPONENTS: Record<EditorPanelId, FunctionComponent<IDockviewPanelProps>> 
   properties: () => <PropertiesPanel />,
   effects: () => <EffectsDockPanel />,
   agent: () => <AgentTrialsPanel />,
-  output: () => <OutputPanel />,
 }
 
 /** Where a panel goes when it is (re)opened from the View menu without a saved position. */
@@ -43,7 +41,6 @@ function addPanel(api: DockviewApi, id: EditorPanelId, t: Translate, inactive = 
     case 'effects': return api.addPanel({ ...base, ...(api.getPanel('agent') ? near('agent', 'within') : api.getPanel('waveform') ? near('waveform', 'right') : { position: { direction: 'right' } }), initialWidth: 380 })
     case 'agent': return api.addPanel({ ...base, ...(api.getPanel('effects') ? near('effects', 'within') : { position: { direction: 'right' } }), initialWidth: 380 })
     case 'properties': return api.addPanel({ ...base, ...(api.getPanel('waveform') ? near('waveform', 'below') : { position: { direction: 'below' } }), initialHeight: 180 })
-    case 'output': return api.addPanel({ ...base, position: { direction: 'below' }, initialHeight: 110 })
   }
 }
 
@@ -54,7 +51,6 @@ export function buildDefaultLayout(api: DockviewApi, t: Translate) {
   addPanel(api, 'effects', t)
   addPanel(api, 'agent', t, true)
   addPanel(api, 'properties', t)
-  addPanel(api, 'output', t)
   api.getPanel('waveform')?.api.setActive()
 }
 

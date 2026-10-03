@@ -58,7 +58,7 @@ function getEffectSummary(params: import('@/types/waveform').EffectParams): stri
   }
 }
 
-export function EffectsPanel({preview, onPreviewChange}: {preview: boolean; onPreviewChange: (value: boolean) => void}) {
+export function EffectsPanel() {
   const { t } = useI18n()
   const [selectedEffectId, setSelectedEffectId] = useState<string | null>(null)
 
@@ -90,7 +90,6 @@ export function EffectsPanel({preview, onPreviewChange}: {preview: boolean; onPr
   return (
     <div className="effects-panel">
       <div className="effects-chain">
-        <label className="editor-preview-toggle"><input type="checkbox" checked={preview} onChange={e => onPreviewChange(e.target.checked)} />{t('editor.previewToggle')}</label>
         <div className="effects-chain-header">
           <span>{t('editor.tactile')}</span>
           <span style={{ fontSize: '12px', fontWeight: 'normal' }}>
@@ -145,7 +144,7 @@ export function EffectsPanel({preview, onPreviewChange}: {preview: boolean; onPr
         <div className="effects-chain-footer" style={{ borderTop: 'none', paddingTop: 0 }}>
           <button
             className="apply-effects-btn"
-            onClick={() => void applyEffects().then(() => {if (!useWaveformStore.getState().error) onPreviewChange(false)})}
+            onClick={() => void applyEffects()}
             disabled={isProcessing}
             style={{ flex: 1 }}
           >
@@ -181,12 +180,12 @@ export function EffectsPanel({preview, onPreviewChange}: {preview: boolean; onPr
 
 /** Effects dock panel: disabled while no clip is selected, the original is shown, or an AI candidate is auditioned. */
 export function EffectsDockPanel() {
-  const { original, previewEnabled, setPreviewEnabled } = useEditor()
+  const { original } = useEditor()
   const hasClip = useWaveformStore(s => !!s.clip)
   const isProcessing = useWaveformStore(s => s.isProcessing)
   const audition = useAgentTrialStore(s => !!s.audition)
   return <fieldset className="editor-panel editor-edit-controls" disabled={!hasClip || original || isProcessing || audition}>
-    <EffectsPanel preview={previewEnabled} onPreviewChange={setPreviewEnabled} />
+    <EffectsPanel />
   </fieldset>
 }
 

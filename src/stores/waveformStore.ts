@@ -15,6 +15,9 @@ import { getActiveHelperChannel } from '@/utils/helperRequest'
 import { registerExportedDerived, type MaterialProvenance } from '@/utils/materials'
 
 interface History { buffer: AudioBuffer; effects: EffectEntry[]; label: string }
+/** True while the effect chain differs from what `clip.buffer` was rendered with (the editor then shows a live render). */
+export const effectsPending = (clip: WaveformClip | null, effects: EffectEntry[]): boolean =>
+  !!clip && (effects.length ? !effects.every(e => e.applied) : clip.buffer !== clip.originalBuffer)
 interface EditorState {
   rememberedFolder: FileSystemDirectoryHandle | null
   restored: boolean
@@ -251,7 +254,7 @@ export const useWaveformStore = create<EditorState>((set, get) => {
     toggleEffect: id => { if (!get().isProcessing) dirty({ effects: get().effects.map(e => e.id === id ? { ...e, enabled: !e.enabled, applied: false } : {...e, applied: false}) }) },
     applyEffects: async () => {
       const { clip, effects } = get()
-      if (!clip || get().isProcessing || (effects.length ? effects.every(e => e.applied) : clip.buffer === clip.originalBuffer)) return
+      if (!clip || get().isProcessing || !effectsPending(clip, effects)) return
       set({ isProcessing: true, error: null })
       try {
         let buffer = clip.originalBuffer
@@ -301,8 +304,14 @@ export const useWaveformStore = create<EditorState>((set, get) => {
     },
     setZoom: zoom => set({ zoom: Math.max(1, Math.min(200000, zoom)) }),
     exportWav: async () => {
+      if (!get().clip || !get().folder || get().isProcessing) throw new Error('Select a clip first')
+      // Export what "Edited" shows: render a pending effect chain first.
+      if (effectsPending(get().clip, get().effects)) {
+        await get().applyEffects()
+        if (get().error) throw new Error(get().error!)
+      }
       const { clip, folder, exportAsMono } = get()
-      if (!clip || !folder || get().isProcessing) throw new Error('Select a clip first')
+      if (!clip || !folder) throw new Error('Select a clip first')
       set({ isProcessing: true })
       try {
         await get().save()

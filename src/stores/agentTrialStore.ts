@@ -201,6 +201,8 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
         clipId = useWaveformStore.getState().addDerivedClip({ ...base, originalBuffer: monoBuffer(data, sampleRate), exportSampleRate: recipe.sampleRate, sourceFileName: `recipe:${trialId}/${candidateId}`, recipe }, spec.effects)
       }
       if (!clipId) throw new Error('The editor is busy or has no folder open; try again')
+      // Render the candidate's chain now so "Edited", catalog features and exports match what was auditioned.
+      await useWaveformStore.getState().applyEffects()
       return { clipId, name: base.name }
     },
     selectTrial: selectedTrialId => set({ selectedTrialId }),

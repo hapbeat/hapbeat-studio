@@ -11,6 +11,8 @@ import { WaveformThumbnail } from './WaveformThumbnail'
 import { useEditorSettings } from '@/stores/editorSettings'
 import type { EditorBufferPlayer } from '@/utils/editorBufferPlayer'
 
+type OverviewMode = 'left' | 'right' | 'move' | 'seek'
+
 /** `viewKey` identifies what is shown (defaults to the clip id); a new key re-fits the zoom. */
 export function WaveformDisplay({ original, bufferOverride, player, viewKey }: { original: boolean; bufferOverride?: AudioBuffer; player: EditorBufferPlayer; viewKey?: string }) {
   const { t } = useI18n()
@@ -23,7 +25,9 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey }: {
   const drag = useRef<{ anchor: number; x: number; moved: boolean } | null>(null)
   const anchor = useRef(0)
   const [ready, setReady] = useState(false)
-  const [selectZoom, setSelectZoom] = useState(false)
+  /** Overview frame drag: resize from either edge, move from inside, seek outside. */
+  const overviewDrag = useRef<{ mode: OverviewMode; x: number; view: { start: number; end: number } } | null>(null)
+  const [overviewHover, setOverviewHover] = useState<OverviewMode>('seek')
   const [time, setTime] = useState(0)
   const [viewport, setViewport] = useState({start: 0, end: 0})
   const clip = useWaveformStore(s => s.clip)
@@ -144,6 +148,16 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey }: {
     player.setTime(next)
     ws.current?.setScrollTime(Math.max(0, next - (viewport.end - viewport.start) / 2))
   }
+  /** Which part of the overview frame is under the pointer (edges within 6 px resize the visible range). */
+  const overviewModeAt = (event: PointerEvent<HTMLDivElement>): OverviewMode => {
+    if (!duration) return 'seek'
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const x = event.clientX - bounds.left
+    const left = viewport.start / duration * bounds.width, right = Math.min(viewport.end, duration) / duration * bounds.width
+    if (Math.abs(x - left) <= 6) return 'left'
+    if (Math.abs(x - right) <= 6) return 'right'
+    return x > left && x < right ? 'move' : 'seek'
+  }
   return <div className="waveform-display" style={{ display: clip ? 'block' : 'none' }}>
     <div className={`editor-selection-status ${selection ? 'has-selection' : ''}`}>
       <strong>{selection ? t('editor.rangeSelected') : t('editor.noRangeSelected')}</strong>
@@ -156,7 +170,7 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey }: {
         }
       }}>
       <div ref={container} className="waveform-container" />
-      <div className={`editor-wave-pointer ${selectZoom ? 'zoom-selection' : ''}`} role="group" aria-label={t('editor.selectionHint')}
+      <div className="editor-wave-pointer" role="group" aria-label={t('editor.selectionHint')}
         onDoubleClick={event => {event.preventDefault(); selectAll()}}
         onPointerDown={event => {
           if (!ready || processing || event.button !== 0) return
@@ -164,7 +178,7 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey }: {
           event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId)
           const next = pointerTime(event)
           player.setTime(next)
-          if (event.shiftKey) { selectAt(anchor.current, next); if (selectZoom) fitRange(Math.min(anchor.current,next),Math.max(anchor.current,next)); return }
+          if (event.shiftKey) { selectAt(anchor.current, next); return }
           let base = next
           if (selection && Math.abs(next - selection.start) * zoom < 8) base = selection.end
           else if (selection && Math.abs(next - selection.end) * zoom < 8) base = selection.start
@@ -181,7 +195,6 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey }: {
           const state = drag.current
           if (state) {
             if (!state.moved) useWaveformStore.getState().setSelectedRegion(null)
-            else if (selectZoom) fitRange(Math.min(state.anchor,pointerTime(event)),Math.max(state.anchor,pointerTime(event)))
           }
           drag.current = null
           if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
@@ -194,16 +207,35 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey }: {
       onKeyDown={event => {if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {event.preventDefault(); useEditorSettings.getState().update({height: Math.max(100, Math.min(700, height + (event.key === 'ArrowDown' ? 20 : -20)))})}}} />
     <div className="editor-wheel-hint">{t('editor.wheelHint')}</div>
     <div className="waveform-controls">
-      <button className={`toolbar-btn ${!selectZoom ? 'selected' : ''}`} onClick={() => setSelectZoom(false)}>↔ {t('editor.selectMode')}</button>
-      <button className={`toolbar-btn ${selectZoom ? 'selected' : ''}`} onClick={() => setSelectZoom(true)}>⌕ {t('editor.zoomMode')}</button>
-      <label className="zoom-control">Zoom <input type="range" min={0} max={Math.log(200000)} step={.01} value={Math.log(zoom)} onChange={event => useWaveformStore.getState().setZoom(Math.exp(Number(event.target.value)))} /></label>
-      <button className="toolbar-btn" disabled={!selection || !ready} onClick={() => fitRange(selection!.start,selection!.end)}>{t('editor.zoomSelection')}</button>
       <button className="toolbar-btn" disabled={!buffer || !ready} onClick={() => fitRange(0,duration)}>{t('editor.fit')}</button>
       <span>{duration.toFixed(3)} s · {buffer?.sampleRate} Hz</span>
     </div>
-    <div className="editor-overview" title={t('editor.overviewHint')} onPointerDown={event => {event.currentTarget.setPointerCapture(event.pointerId); moveOverview(event)}} onPointerMove={event => {if(event.currentTarget.hasPointerCapture(event.pointerId)) moveOverview(event)}} onPointerUp={event => {if(event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)}}>
+    <div className={`editor-overview hover-${overviewDrag.current?.mode ?? overviewHover}`} title={t('editor.overviewHint')}
+      onPointerDown={event => {
+        if (!ready || event.button !== 0) return
+        event.currentTarget.setPointerCapture(event.pointerId)
+        const mode = overviewModeAt(event)
+        overviewDrag.current = { mode, x: event.clientX, view: viewport }
+        if (mode === 'seek') moveOverview(event)
+      }}
+      onPointerMove={event => {
+        const state = overviewDrag.current
+        if (!state) { setOverviewHover(overviewModeAt(event)); return }
+        const bounds = event.currentTarget.getBoundingClientRect()
+        const at = Math.max(0, Math.min(duration, (event.clientX - bounds.left) / bounds.width * duration))
+        const minSpan = Math.max(duration / 2000, (container.current?.clientWidth ?? 800) / 200000)
+        if (state.mode === 'left') fitRange(Math.max(0, Math.min(at, state.view.end - minSpan)), state.view.end)
+        else if (state.mode === 'right') fitRange(state.view.start, Math.min(duration, Math.max(at, state.view.start + minSpan)))
+        else if (state.mode === 'move') {
+          const span = state.view.end - state.view.start
+          const start = Math.max(0, Math.min(duration - span, state.view.start + (event.clientX - state.x) / bounds.width * duration))
+          ws.current?.setScrollTime(start); setViewport({ start, end: start + span })
+        } else moveOverview(event)
+      }}
+      onPointerUp={event => { overviewDrag.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId) }}
+      onPointerCancel={() => { overviewDrag.current = null }}>
       {buffer && <WaveformThumbnail buffer={buffer} />}
-      <div className="editor-viewport" style={{left: `${duration ? viewport.start/duration*100 : 0}%`, width: `${duration ? Math.min(100,(viewport.end-viewport.start)/duration*100) : 100}%`}} />
+      <div className="editor-viewport" aria-hidden="true" style={{left: `${duration ? viewport.start/duration*100 : 0}%`, width: `${duration ? Math.min(100,(viewport.end-viewport.start)/duration*100) : 100}%`}} />
       <div className="editor-overview-playhead" style={{left: `${duration ? time/duration*100 : 0}%`}} />
     </div>
     <div className="editor-seek-row">

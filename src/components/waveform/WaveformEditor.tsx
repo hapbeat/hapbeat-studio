@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DockviewApi } from 'dockview-react'
 import { StatusBar } from './StatusBar'
-import { useWaveformStore } from '@/stores/waveformStore'
+import { effectsPending, useWaveformStore } from '@/stores/waveformStore'
+import { useDeviceStore } from '@/stores/deviceStore'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { EditorPlayback } from '@/utils/editorPlayback'
@@ -20,7 +21,7 @@ import { useAgentEndpoint } from '@/hooks/useAgentEndpoint'
 import { isDemoMode } from '@/demo/isDemoMode'
 import { lookupMaterials, provenanceLine } from '@/utils/materials'
 import type { WaveformClip } from '@/types/waveform'
-import { onlinePlaybackDevices } from '@/utils/playbackDevices'
+import { onlinePlaybackDevices, resolvePlaybackTargets } from '@/utils/playbackDevices'
 import { handlePlaybackShortcut } from '@/utils/playbackShortcut'
 import { useEditorSettingsFolderSync, type SettingsSyncNotice } from '@/hooks/useEditorSettingsFolderSync'
 import { EditorContext, type EditorShared } from './editorContext'
@@ -31,7 +32,6 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const { t } = useI18n()
   const s = useWaveformStore()
   const [original, setOriginal] = useState(false)
-  const [previewEnabled, setPreviewEnabled] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [dockApi, setDockApi] = useState<DockviewApi | null>(null)
   const [popoutWindows, setPopoutWindows] = useState<Window[]>([])
@@ -49,7 +49,10 @@ export function WaveformEditor({ active }: { active: boolean }) {
     return () => useAgentTrialStore.getState().stopPolling()
   }, [active, s.folder])
   useAgentEndpoint(active && !!s.folder, s.folder?.root.name ?? null)
-  const preview = useEditorPreview(s.clip, s.effects, previewEnabled && !original && !audition)
+  /** "Edited" always reflects the effect chain: while it has unapplied changes the editor shows a live (debounced, cancellable) render. */
+  const pendingChain = effectsPending(s.clip, s.effects)
+  const previewActive = pendingChain && !original && !audition
+  const preview = useEditorPreview(s.clip, s.effects, previewActive)
   useEffect(() => { void useWaveformStore.getState().restoreFolder() }, [])
   const onSettingsNotice = useCallback((value: SettingsSyncNotice) => setNotice(value.kind === 'unreadable'
     ? t('editor.settings.unreadable', { error: value.error, file: value.keptAs }) : t('editor.settings.writeFailed', { error: value.error })), [t])
@@ -71,12 +74,13 @@ export function WaveformEditor({ active }: { active: boolean }) {
     if (line.key === 'known') return t('editor.provenance.known', { site: line.site, license: line.license }) + (line.needsReview ? t('editor.provenance.review') : '')
     return line.key === 'none' ? '' : t(`editor.provenance.${line.key}`)
   }, [t])
-  const selectedTargets = useEditorSettings(state => state.targets)
+  // Haptic targets: the shared Kit device selection (header device pill / Devices modal), same rule as Kit playback.
+  const kitSelectedIps = useDeviceStore(state => state.kitSelectedIps)
   const muted = useEditorSettings(state => state.muted)
   const playbackDevices = useMemo(() => isConnected ? onlinePlaybackDevices(devices) : [], [isConnected, devices])
-  const targets = useMemo(() => playbackDevices.filter(device => selectedTargets === null || selectedTargets.includes(device.ipAddress)).map(device => device.ipAddress), [playbackDevices, selectedTargets])
+  const targets = useMemo(() => isConnected ? resolvePlaybackTargets(devices, kitSelectedIps).map(device => device.ipAddress) : [], [isConnected, devices, kitSelectedIps])
   const targetKey = targets.join(',')
-  const audioBuffer = audition ? audition.buffer : original ? s.clip?.originalBuffer : previewEnabled ? (preview.buffer ?? s.clip?.buffer) : s.clip?.buffer
+  const audioBuffer = audition ? audition.buffer : original ? s.clip?.originalBuffer : previewActive ? (preview.buffer ?? s.clip?.buffer) : s.clip?.buffer
   const player = useMemo(() => new EditorBufferPlayer(null, undefined, s.setError), [s.clip?.id, original, auditionKey])
   useEffect(() => {player.activate(); return () => player.dispose()}, [player])
   player.setBuffer(audioBuffer ?? null)
@@ -105,11 +109,17 @@ export function WaveformEditor({ active }: { active: boolean }) {
     const unsubs = [player.on('pause', () => playback.paused()), player.on('finish', () => playback.paused()), player.on('timeupdate', time => playback.timeUpdated(time)), player.on('seeking', time => playback.seek(time))]
     return () => unsubs.forEach(unsub => unsub())
   }, [player, playback])
+  /** Play / stop (no pause): stopping rewinds to the selection start (or 0). */
+  const togglePlay = useCallback(() => {
+    if (useWaveformStore.getState().isProcessing) return
+    if (playback.pending || player.isPlaying()) { playback.stop(); player.setTime(useWaveformStore.getState().selectedRegion?.start ?? 0); return }
+    void playback.toggle().catch(s.setError)
+  }, [playback, player, s.setError])
   useEffect(() => {
-    const toggle = () => { if (active && !useWaveformStore.getState().isProcessing) void playback?.toggle().catch(s.setError) }
+    const toggle = () => { if (active) togglePlay() }
     window.addEventListener('studio:editor-playback', toggle)
     return () => window.removeEventListener('studio:editor-playback', toggle)
-  }, [active, playback, s.setError])
+  }, [active, togglePlay])
   const [recipeDialog, setRecipeDialog] = useState<{ container: HTMLElement; initial?: Recipe } | null>(null)
   const openRecipe = useCallback((doc: Document, initial?: Recipe) => setRecipeDialog({ container: doc.body, initial }), [])
   const createRecipeClip = (recipe: Recipe, presetId: string | null) => {
@@ -141,7 +151,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
       const state = useWaveformStore.getState()
       if (state.isProcessing) return
 
-      if (original || previewEnabled || audition) return
+      if (original || audition) return
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? state.redo() : state.undo() }
       if (event.key === 'Delete' && state.selectedRegion) { event.preventDefault(); state.deleteRegion() }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -159,16 +169,15 @@ export function WaveformEditor({ active }: { active: boolean }) {
       window.removeEventListener('keydown', keydown)
       for (const popup of popoutWindows) { popup.removeEventListener('keydown', space, true); popup.removeEventListener('keydown', keydown) }
     }
-  }, [active, original, previewEnabled, audition, popoutWindows])
+  }, [active, original, audition, popoutWindows])
   const shared: EditorShared = {
-    active, original, setOriginal, previewEnabled, setPreviewEnabled, preview, auditionKey, audioBuffer, player, playback, pending,
+    active, original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, player, playback, pending, togglePlay,
     openRecipe, provenanceText, isConnected, playbackDevices, targets, setVisibleClipIds,
   }
   return <EditorContext.Provider value={shared}>
     <div className="waveform-editor" onDragOver={e => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' } }}
       onDrop={e => { if (!e.dataTransfer.files.length) return; e.preventDefault(); if (s.folder) void s.loadFiles(Array.from(e.dataTransfer.files)); else s.setError(t('editor.chooseFirst')) }}>
-      <EditorTopBar dockApi={dockApi} onNotice={setNotice} />
-      <div className="editor-notice" role="status">{s.error ?? notice ?? t('editor.workflow')}</div>
+      <EditorTopBar dockApi={dockApi} notice={s.error ?? notice} onNotice={setNotice} />
       <EditorDockLayout onApi={setDockApi} onPopoutWindows={setPopoutWindows} onNotice={setNotice} />
       <StatusBar />
       {recipeDialog && <RecipeDialog container={recipeDialog.container} initial={recipeDialog.initial} onCreate={createRecipeClip} onClose={() => setRecipeDialog(null)} />}

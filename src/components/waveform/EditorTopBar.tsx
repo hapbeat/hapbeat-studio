@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { DockviewApi } from 'dockview-react'
 import { useWaveformStore } from '@/stores/waveformStore'
+import { useToast } from '@/components/common/Toast'
+import { DevicePill } from '@/components/devices/DevicePill'
+import type { SampleRate } from '@/types/waveform'
 import { editorUiSettings, useEditorSettings } from '@/stores/editorSettings'
 import { useI18n } from '@/i18n/I18nProvider'
 import { parseUiSettingsFile, serializeUiSettings } from '@/utils/editorUiSettings'
@@ -9,10 +12,12 @@ import { EDITOR_PANELS, PANEL_TITLES, togglePanel } from './EditorDockLayout'
 import { useEditor } from './editorContext'
 
 /** Editor header: folder · import · export, plus the View and "…" menus. Everything else lives in panels. */
-export function EditorTopBar({ dockApi, onNotice }: { dockApi: DockviewApi | null; onNotice: (message: string) => void }) {
+export function EditorTopBar({ dockApi, notice, onNotice }: { dockApi: DockviewApi | null; notice: string | null; onNotice: (message: string) => void }) {
   const { t } = useI18n()
   const s = useWaveformStore()
   const { openRecipe } = useEditor()
+  const { toast } = useToast()
+  const muted = useEditorSettings(state => state.muted)
   const audioInput = useRef<HTMLInputElement>(null)
   const settingsInput = useRef<HTMLInputElement>(null)
   const [openPanels, setOpenPanels] = useState<string[]>([])
@@ -24,7 +29,13 @@ export function EditorTopBar({ dockApi, onNotice }: { dockApi: DockviewApi | nul
     return () => subscription.dispose()
   }, [dockApi])
   const folderName = s.folder?.root.name ?? s.rememberedFolder?.name
-  const exportClip = () => { void s.exportWav().then(name => onNotice(t('editor.exported', { file: `exports/${name}` }))).catch(s.setError) }
+  const exportClip = () => {
+    onNotice(t('editor.exporting', { folder: 'exports/' }))
+    void s.exportWav().then(name => {
+      const message = t('editor.exported', { file: `exports/${name}` })
+      onNotice(message); toast(message, 'success')
+    }).catch(s.setError)
+  }
   const exportSettings = () => {
     const url = URL.createObjectURL(new Blob([serializeUiSettings(editorUiSettings(useEditorSettings.getState()))], { type: 'application/json' }))
     const link = document.createElement('a')
@@ -49,8 +60,21 @@ export function EditorTopBar({ dockApi, onNotice }: { dockApi: DockviewApi | nul
       <EditorMenuItem onSelect={() => audioInput.current?.click()}>{t('editor.import')}</EditorMenuItem>
       <EditorMenuItem onSelect={doc => openRecipe(doc)}>{t('editor.recipe.create')}</EditorMenuItem>
     </EditorMenu>
-    <button className="toolbar-btn" title={`${t('editor.exportTarget')} · ${t('editor.exportHint')}`} disabled={!s.clip || !s.folder || s.isProcessing} onClick={exportClip}>{t('editor.export')}</button>
+    <EditorMenu label={`${t('editor.exportMenu')} ▾`} disabled={!s.clip || !s.folder || s.isProcessing}>
+      <EditorMenuSection label={t('editor.exportFormat')}>
+        <div className="editor-menu-fields">
+          <select aria-label={t('editor.exportFormat')} value={s.clip?.exportSampleRate ?? 48000} onChange={e => s.setExportSampleRate(Number(e.target.value) as SampleRate)}>
+            <option value={16000}>16 kHz</option><option value={24000}>24 kHz</option><option value={44100}>44.1 kHz</option><option value={48000}>48 kHz</option>
+          </select>
+          <label className="editor-checkbox"><input type="checkbox" checked={s.exportAsMono} onChange={e => s.setExportAsMono(e.target.checked)} />Mono</label>
+        </div>
+      </EditorMenuSection>
+      <EditorMenuItem onSelect={exportClip}>{t('editor.export')}</EditorMenuItem>
+      <p className="editor-menu-note">{t('editor.exportTarget')}<br />{t('editor.exportHint')}</p>
+    </EditorMenu>
     <span className={`editor-save-state ${s.saveStatus}`} role="status">{t(`editor.save.${s.saveStatus}`)}</span>
+    <span className={`editor-bar-notice ${s.error ? 'error' : ''}`} role="status" title={notice ?? undefined}>{notice ?? ''}</span>
+    <DevicePill selectionScope="kit" showWhenDisconnected modalExtra={<label><input type="checkbox" checked={!muted} onChange={e => useEditorSettings.getState().update({ muted: !e.target.checked })} />{t('editor.sound')}</label>} />
     <EditorMenu label={`${t('editor.viewMenu')} ▾`} disabled={!dockApi}>
       <EditorMenuSection label={t('editor.viewPanels')}>
         {EDITOR_PANELS.map(id => <EditorMenuItem key={id} keepOpen checked={openPanels.includes(id)} onSelect={() => dockApi && togglePanel(dockApi, id, t)}>{t(PANEL_TITLES[id])}</EditorMenuItem>)}

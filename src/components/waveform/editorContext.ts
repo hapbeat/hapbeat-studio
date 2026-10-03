@@ -10,8 +10,8 @@ export interface EditorShared {
   active: boolean
   original: boolean
   setOriginal: (value: boolean) => void
-  previewEnabled: boolean
-  setPreviewEnabled: (value: boolean) => void
+  /** The effect chain has changes not yet rendered into the clip; "Edited" then shows `preview`. */
+  pendingChain: boolean
   preview: { status: 'idle' | 'rendering' | 'ready' | 'error'; error: string }
   /** `trialId/candidateId` of the AI candidate shown instead of the clip, if any. */
   auditionKey: string | null
@@ -19,11 +19,13 @@ export interface EditorShared {
   player: EditorBufferPlayer
   playback: EditorPlayback
   pending: boolean
+  /** Play / stop; stopping rewinds. Shared by the transport button and Space. */
+  togglePlay: () => void
   /** Opens the recipe dialog in `doc` (main page or a popped-out window). */
   openRecipe: (doc: Document, initial?: Recipe) => void
   provenanceText: (clip: WaveformClip) => string
   isConnected: boolean
-  /** Connected playback devices (same rule as Kit deploy). */
+  /** Connected playback devices (same rule as Kit deploy); used for rating device suggestions. */
   playbackDevices: DeviceInfo[]
   /** Resolved haptic target IPs for playback. */
   targets: string[]
