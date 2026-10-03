@@ -4,6 +4,7 @@ import { EFFECT_RANGES, inRange, isEnvelope, isRecord } from './effectRanges'
 import { validateRecipe, type Recipe } from './recipe'
 import { isSha256Hex } from './sha256'
 import { validateProvenance, type MaterialProvenance } from './materials'
+import { UI_SETTINGS_FILE } from './editorUiSettings'
 
 export interface EditorDocument {
   clip: WaveformClip
@@ -174,6 +175,15 @@ export class EditorFolder {
     }
     if (typeof navigator !== 'undefined' && navigator.locks) await navigator.locks.request(`hapbeat-editor:${this.root.name}`, save)
     else throw new Error('Editor saving requires Web Locks (Chrome / Edge on localhost or HTTPS).')
+  }
+  /** `.hapbeat-editor/ui-settings.json` text, or null when absent. */
+  async readUiSettings(): Promise<string | null> { return readText(await this.directory(), UI_SETTINGS_FILE) }
+  async writeUiSettings(text: string) { await writeEditorFile(await this.directory(), UI_SETTINGS_FILE, text) }
+  /** Keeps an unreadable settings file under a new name before it is overwritten (never deleted). */
+  async keepUiSettingsCopy(text: string): Promise<string> {
+    const name = `ui-settings.unreadable-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
+    await writeEditorFile(await this.directory(), name, text)
+    return name
   }
   async keepImport(id: string, file: File) {
     const sources = await (await this.directory()).getDirectoryHandle('imports', { create: true })

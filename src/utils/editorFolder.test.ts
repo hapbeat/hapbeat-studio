@@ -233,6 +233,16 @@ describe('editor lossless local project', () => {
     expect(parseEditorIndex(JSON.stringify({version: 1, revision: 'r', clips: [clip]})).clips[0].project).toBeUndefined()
     for (const bad of ['', ' padded', 'x'.repeat(81), 'tab	here', 3]) expect(() => parseEditorIndex(JSON.stringify({version: 1, revision: 'r', clips: [{...clip, project: bad}]}))).toThrow()
   })
+  it('reads, writes and keeps UI settings next to the project without deleting anything', async () => {
+    const dir = directory(), {folder} = await EditorFolder.open(dir.handle)
+    expect(await folder.readUiSettings()).toBeNull()
+    await folder.writeUiSettings('{"format":"hapbeat-editor-ui@1"}')
+    expect(await folder.readUiSettings()).toBe('{"format":"hapbeat-editor-ui@1"}')
+    const kept = await folder.keepUiSettingsCopy('{broken')
+    expect(kept).toMatch(/^ui-settings\.unreadable-.+\.json$/)
+    expect(await dir.files.get(kept)!.text()).toBe('{broken')
+    expect(dir.files.has('ui-settings.json')).toBe(true)
+  })
   it('normalizes typed project names', () => {
     expect(normalizeProjectName('  Game   UI ')).toBe('Game UI')
     expect(normalizeProjectName('   ')).toBeUndefined()

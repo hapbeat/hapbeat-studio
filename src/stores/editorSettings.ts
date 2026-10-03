@@ -1,14 +1,25 @@
 import { create } from 'zustand'
-interface Settings { columns: number; loop: boolean; loopDelay: number; height: number; layout: 'bottom' | 'right'; popupWidth: number; popupHeight: number }
-const defaults: Settings = {columns: 0,loop: false, loopDelay: 0,height: 180, layout: 'bottom', popupWidth: 920, popupHeight: 760}
-const clamp = (value: unknown, min: number, max: number, fallback: number) => typeof value === 'number' && Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback
-function read(): Settings {
-  try {
-    const value = JSON.parse(localStorage.getItem('hapbeat-editor-settings') ?? '{}')
-    return {columns: [0,1,2,3].includes(value.columns) ? value.columns : 0, loop: value.loop === true, loopDelay: clamp(value.loopDelay, 0, 60, 0), height: clamp(value.height, 100, 700, 180), layout: value.layout === 'right' ? 'right' : 'bottom', popupWidth: clamp(value.popupWidth, 420, 2400, 920), popupHeight: clamp(value.popupHeight, 300, 1600, 760)}
-  } catch { return defaults }
+import { parseStoredUiSettings, DEFAULT_UI_SETTINGS, UI_SETTINGS_STORAGE_KEY, type EditorUiSettings } from '@/utils/editorUiSettings'
+
+interface EditorSettingsState extends EditorUiSettings {
+  /** Bumped when settings are replaced wholesale (folder copy, import, reset) so the dock re-applies `dockLayout`. */
+  layoutRevision: number
+  update: (patch: Partial<EditorUiSettings>) => void
+  replace: (settings: EditorUiSettings) => void
 }
-export const useEditorSettings = create<Settings & {update: (patch: Partial<Settings>) => void}>((set, get) => ({...read(), update: patch => {
-  const next = {...get(), ...patch}; set(patch)
-  try { localStorage.setItem('hapbeat-editor-settings', JSON.stringify({columns: next.columns, loop: next.loop, loopDelay: next.loopDelay, height: next.height, layout: next.layout, popupWidth: next.popupWidth, popupHeight: next.popupHeight})) } catch { /* UI preferences must not prevent editing. */ }
-}}))
+
+function read(): EditorUiSettings {
+  try { return parseStoredUiSettings(localStorage.getItem(UI_SETTINGS_STORAGE_KEY)) ?? { ...DEFAULT_UI_SETTINGS } } catch { return { ...DEFAULT_UI_SETTINGS } }
+}
+export function editorUiSettings(state: EditorUiSettings): EditorUiSettings {
+  const { loop, loopDelay, height, muted, targets, clipThumbnails, clipGroupBy, collapsedGroups, dockLayout } = state
+  return { loop, loopDelay, height, muted, targets, clipThumbnails, clipGroupBy, collapsedGroups, dockLayout }
+}
+function store(settings: EditorUiSettings) {
+  try { localStorage.setItem(UI_SETTINGS_STORAGE_KEY, JSON.stringify(settings)) } catch { /* UI preferences must not prevent editing. */ }
+}
+export const useEditorSettings = create<EditorSettingsState>((set, get) => ({
+  ...read(), layoutRevision: 0,
+  update: patch => { set(patch); store(editorUiSettings(get())) },
+  replace: settings => { set({ ...settings, layoutRevision: get().layoutRevision + 1 }); store(editorUiSettings(get())) },
+}))
