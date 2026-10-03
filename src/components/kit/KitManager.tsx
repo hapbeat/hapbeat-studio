@@ -8,6 +8,7 @@ import { formatFileSize } from '@/utils/wavIO'
 import { findDuplicateEventIds, validateEventIds } from '@/utils/kitExporter'
 import type { LibraryClip, LibraryViewMode, KitDefinition } from '@/types/library'
 import type { DeviceInfo } from '@/types/manager'
+import { resolvePlaybackTargets } from '@/utils/playbackDevices'
 import { CapacityGauge } from './CapacityGauge'
 import { KitEventRow } from './editor/KitEventRow'
 import { KitEventEditModal } from './editor/KitEventEditModal'
@@ -488,12 +489,7 @@ function useAudioPreview() {
     // known device and clips played on devices the user never selected
     // (bug report 2026-06-24).
     const { kitSelectedIps } = useDeviceStore.getState()
-    const isPlayback = (d: DeviceInfo) => !d.role || d.role === 'receiver'
-    const onlinePlayback = devices.filter((d) => d.online && isPlayback(d))
-    const targetIps = (kitSelectedIps.length === 0
-      ? onlinePlayback
-      : onlinePlayback.filter((d) => kitSelectedIps.includes(d.ipAddress))
-    ).map((d) => d.ipAddress)
+    const targetIps = resolvePlaybackTargets(devices, kitSelectedIps).map((d) => d.ipAddress)
 
     if (hasDevice && targetIps.length > 0) {
       // Scope every device-bound message to the resolved targets by
@@ -2058,16 +2054,9 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
   // Kits only go to PLAYBACK devices (receivers / no-role legacy). A
   // sensor / broker / transmitter must never receive a kit — that's how a
   // kit got wrongly written to the ATOM Lite sensor (user report 2026-06-13).
-  const isPlaybackDevice = (d: import('@/types/manager').DeviceInfo) =>
-    !d.role || d.role === 'receiver'
   // Deploy targets: online playback devices, restricted to the current
   // sidebar selection when there is one (else all online playback devices).
-  const deployTargets = (() => {
-    const playback = devices.filter((d) => d.online && isPlaybackDevice(d))
-    if (selectedIps.length === 0) return playback
-    const sel = new Set(selectedIps)
-    return playback.filter((d) => sel.has(d.ipAddress))
-  })()
+  const deployTargets = resolvePlaybackTargets(devices, selectedIps)
 
   // Per-IP deploy progress sourced from Helper's `deploy_progress` push.
   // Cleared on a new deploy (`deploy started`) and on completion.
