@@ -8,6 +8,8 @@ import type { HapticFeatures } from '@/utils/hapticFeatures'
 import { formToRating, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, type CandidateRatingForm, type Direction, type RatingForm } from '@/utils/agentTrialUi'
 import { WaveformThumbnail } from './WaveformThumbnail'
 import { useEditor } from './editorContext'
+import { useSceneVideoTarget } from '@/utils/editorSceneSync'
+import { useSceneStore } from '@/stores/sceneStore'
 import { useEditorSettings } from '@/stores/editorSettings'
 import { wantedSceneProject } from '@/utils/trialScene'
 
@@ -26,6 +28,18 @@ const num = (v: number | null, digits: number, unit = '') => v === null ? '—' 
 export function AgentTrialsPanel() {
   const { t } = useI18n()
   const { playbackDevices, linkSceneProject } = useEditor()
+  /** Trial picked by a click in the list: its first candidate is auditioned (not played) once its audio is loaded. */
+  const [autoTrialId, setAutoTrialId] = useState<string | null>(null)
+  const pickTrial = (r: TrialRecord) => {
+    setSelectedId(r.trial.id)
+    setAutoTrialId(r.trial.id)
+    // The Scene video (window or docked panel, never opened here) switches to this trial's moment.
+    useSceneVideoTarget.getState().setTarget({ kind: 'trial', trialId: r.trial.id })
+    const wanted = wantedSceneProject({ scene: r.trial.scene, saved: useEditorSettings.getState().trialScenes[r.trial.id], fallback: r.trial.project })
+    const scene = useSceneStore.getState()
+    // Same as "▶ Video": this click may grant the folder permission or link the folder once.
+    if (wanted && scene.lib?.project_name !== wanted) void linkSceneProject(wanted, { quietIfRefused: true })
+  }
   const deviceNames = useMemo(() => [...new Set(playbackDevices.map(device => device.name).filter(Boolean))], [playbackDevices])
   /** '' = every trial; otherwise the trial's `project` (UNASSIGNED_FILTER = trials without one). */
   const [projectFilter, setProjectFilter] = useState('')
@@ -66,7 +80,7 @@ export function AgentTrialsPanel() {
       </select></label>}
     <div className="agent-trial-list" aria-label={t('editor.agent.tab')}>
       {trials.length === 0 && rejected.length === 0 && <p className="agent-muted">{t('editor.agent.empty')}</p>}
-      {shown.map(r => <button key={r.trial.id} className={`agent-trial-item ${r.trial.id === selectedId ? 'selected' : ''}`} aria-pressed={r.trial.id === selectedId} onClick={() => setSelectedId(r.trial.id)}>
+      {shown.map(r => <button key={r.trial.id} className={`agent-trial-item ${r.trial.id === selectedId ? 'selected' : ''}`} aria-pressed={r.trial.id === selectedId} onClick={() => pickTrial(r)}>
         <strong>{r.trial.terms.join(' · ')}</strong>
         <span className={`agent-badge ${r.rating ? 'rated' : 'unrated'}`}>{t(r.rating ? 'editor.agent.rated' : 'editor.agent.unrated')}</span>
         <small>{r.trial.id} · {t('editor.agent.candidateCount', { count: r.trial.candidates.length })}</small>
@@ -77,17 +91,20 @@ export function AgentTrialsPanel() {
         <small>{r.error}</small><small>{t('editor.agent.rejectedHint')}</small>
       </div>)}
     </div>
-    {record ? <TrialDetail key={record.trial.id} record={record} dimensions={dimensions} known={trials} audition={audition} onAudition={onAudition} deviceNames={deviceNames} onSelectTrial={setSelectedId} />
+    {record ? <TrialDetail key={record.trial.id} record={record} dimensions={dimensions} known={trials} audition={audition} onAudition={onAudition} deviceNames={deviceNames} onSelectTrial={setSelectedId}
+      autoAudition={autoTrialId === record.trial.id} onAutoAuditioned={() => setAutoTrialId(null)} />
       : <p className="agent-muted">{t('editor.agent.selectTrial')}</p>}
   </div>
 }
 
-function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNames, onSelectTrial }: {
+function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNames, onSelectTrial, autoAudition, onAutoAuditioned }: {
   record: TrialRecord; dimensions: DimensionsDoc | null; known: TrialRecord[]; audition: AuditionTarget | null
   onAudition: (target: AuditionTarget, buffer: AudioBuffer) => void; deviceNames: string[]; onSelectTrial: (id: string) => void
+  /** Set after a click in the trial list: audition the first candidate (no playback) and bring the waveform forward. */
+  autoAudition: boolean; onAutoAuditioned: () => void
 }) {
   const { t } = useI18n()
-  const { openSceneVideo } = useEditor()
+  const { openSceneVideo, focusEditorPanel } = useEditor()
   const { trial, rating } = record
   const sceneSaved = useEditorSettings(s => s.trialScenes[trial.id])
   const ids = useId()
@@ -108,6 +125,15 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
       .then(buffer => { if (!cancelled) setAudio(a => ({ ...a, [cid]: buffer })) }, error => { if (!cancelled) setAudio(a => ({ ...a, [cid]: { error: message(error) } })) })
     return () => { cancelled = true }
   }, [trial.id, renderable])
+  const first = trial.candidates[0]?.id
+  const firstAudio = first ? audio[first] : undefined
+  useEffect(() => {
+    if (!autoAudition || !first || !firstAudio) return
+    onAutoAuditioned()
+    if ('error' in firstAudio || audition?.trialId === trial.id) return
+    onAudition({ trialId: trial.id, candidateId: first }, firstAudio)
+    focusEditorPanel('waveform')
+  }, [autoAudition, first, firstAudio])
 
   const edit = (update: (f: RatingForm) => RatingForm) => { setForm(update); setDirty(true); setSaveError(null) }
   const editCandidate = (cid: string, patch: Partial<CandidateRatingForm>) => edit(f => ({ ...f, candidates: { ...f.candidates, [cid]: { ...f.candidates[cid], ...patch } } }))

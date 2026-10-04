@@ -96,7 +96,8 @@ export function EditorScenePanel() {
   }, [root, chosen?.file])
   // Show the start frame (lead before the mark) whenever the clip or lead changes.
   const cue = () => { const v = video.current; if (v && chosen) { v.pause(); v.currentTime = sceneVideoTime(chosen.mark, -lead) } }
-  useEffect(cue, [src, chosen?.mark, lead])
+  // A new subject, clip, lead or auditioned candidate re-cues the video (it waits; nothing plays by itself).
+  useEffect(cue, [src, chosen?.mark, lead, audition?.candidateId, audition?.trialId])
   // A trial follows its auditions; a clip follows the editor playback while no candidate is auditioned.
   const synced = !!chosen && (subject.kind === 'trial' ? audition?.trialId === subject.trialId : !audition)
   useEffect(() => {

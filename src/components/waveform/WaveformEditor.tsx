@@ -208,9 +208,10 @@ export function WaveformEditor({ active }: { active: boolean }) {
     if (scene.root && scene.lib && (!project || scene.lib.project_name === project)) { show(); return }
     void linkSceneProject(project).then(show, s.setError)
   }, [dockApi, t, s.setError, linkSceneProject])
+  const focusEditorPanel = useCallback((id: Parameters<EditorShared['focusEditorPanel']>[0]) => { if (dockApi) focusPanel(dockApi, id, t) }, [dockApi, t])
   const shared: EditorShared = {
     active, original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, player, playback, pending, togglePlay,
-    openRecipe, provenanceText, isConnected, playbackDevices, targets, setVisibleClipIds, openSceneVideo, linkSceneProject,
+    openRecipe, provenanceText, isConnected, playbackDevices, targets, setVisibleClipIds, openSceneVideo, linkSceneProject, focusEditorPanel,
   }
   return <EditorContext.Provider value={shared}>
     <div className="waveform-editor" onDragOver={e => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' } }}
