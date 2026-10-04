@@ -48,7 +48,7 @@ export function resolveTrialScene(o: { lib: SceneLib | null; data: SceneData | n
   return { kind: 'ready', options, chosen: saved ?? (o.scene ? options[0] : null) }
 }
 
-/** Video time for editor playback time `playerTime`: the video starts `leadSec` before the mark when the audition starts. */
-export function sceneVideoTime(mark: number, leadSec: number, playerTime: number): number {
-  return Math.max(0, mark - leadSec + playerTime)
+/** Video time for editor playback time `playerTime`: playback time 0 sounds on the cue mark. */
+export function sceneVideoTime(mark: number, playerTime: number): number {
+  return Math.max(0, mark + playerTime)
 }

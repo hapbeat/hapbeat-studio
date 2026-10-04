@@ -27,6 +27,7 @@ import { useEditorSettingsFolderSync, type SettingsSyncNotice } from '@/hooks/us
 import { EditorContext, type EditorShared } from './editorContext'
 import { EditorDockLayout, focusPanel } from './EditorDockLayout'
 import { EditorTopBar } from './EditorTopBar'
+import { scenePreRoll } from '@/utils/editorSceneSync'
 
 export function WaveformEditor({ active }: { active: boolean }) {
   const { t } = useI18n()
@@ -104,6 +105,8 @@ export function WaveformEditor({ active }: { active: boolean }) {
       await (await import('@/utils/audioStreamer')).streamClip(blob, route, {...options, cacheKey: key})
     }, setPending, s.setError)
   }, [player, targetKey, send, s.setError])
+  // The Scene video panel's lead-in (audio / haptics start on the cue mark).
+  playback.preRoll = scenePreRoll
   useEffect(() => () => playback?.stop(), [playback])
   useEffect(() => { if (!active) playback?.stop() }, [active, playback])
   useEffect(() => {

@@ -14,6 +14,8 @@ describe('scene data files', () => {
     expect(() => parseViewerLib('{')).toThrow(/viewer-lib.json/)
     expect(() => parseViewerLib(JSON.stringify({ ...sampleLib(), paths: { cues: 'a' } }))).toThrow(/paths/)
     expect(() => parseViewerLib(JSON.stringify({ ...sampleLib(), clip_name: '(' }))).toThrow(/clip_name/)
+    expect(() => parseViewerLib(JSON.stringify({ ...sampleLib(), loop_at: 'hand' }))).toThrow(/loop_at/)
+    expect(parseViewerLib(JSON.stringify({ ...sampleLib(), loop_at: ['hand'] })).loop_at).toEqual(['hand'])
     expect(() => parseViewerData(JSON.stringify({ ...sampleData(), fps: 0 }))).toThrow(/fps/)
     const data = sampleData()
     expect(() => parseViewerData(JSON.stringify({ ...data, clips: [{ ...data.clips[0], levels: 'x' }] }))).toThrow(/clips/)

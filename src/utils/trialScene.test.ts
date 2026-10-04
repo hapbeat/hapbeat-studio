@@ -30,10 +30,9 @@ describe('trial scene clips', () => {
     expect(otherPick.kind === 'ready' && otherPick.chosen).toBeNull()
   })
 
-  it('starts the video the lead before the mark', () => {
-    expect(sceneVideoTime(2, 2, 0)).toBe(0)
-    expect(sceneVideoTime(2, 2, 0.5)).toBe(0.5)
-    expect(sceneVideoTime(1, 2, 0)).toBe(0)
-    expect(sceneVideoTime(2, 0, 0.3)).toBeCloseTo(2.3)
+  it('maps playback time 0 to the cue mark', () => {
+    expect(sceneVideoTime(2, 0)).toBe(2)
+    expect(sceneVideoTime(2, 0.5)).toBe(2.5)
+    expect(sceneVideoTime(1, -2)).toBe(0)
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addClipEntry, addRoute, assignSound, clipNameFromFile, clipsForCue, encodePcm16Wav, parseCueTable, removeRoute, serializeCueTable, setClipIntensity, setSoundVolume, soundNameFromFile, updateRoute, validateCueTable, type CueTableContext } from './sceneCueTable'
+import { addClipEntry, addRoute, positionsForCue, assignSound, clipNameFromFile, clipsForCue, encodePcm16Wav, parseCueTable, removeRoute, serializeCueTable, setClipIntensity, setSoundVolume, soundNameFromFile, updateRoute, validateCueTable, type CueTableContext } from './sceneCueTable'
 import { sampleLib, sampleTable } from './sceneTestFixtures'
 
 const ctx = (patch: Partial<CueTableContext> = {}): CueTableContext => ({
@@ -36,6 +36,16 @@ describe('scene cue table validation (the demos\' validate())', () => {
       'grab: gain must be 0..2',
       'grab: unknown clip missing',
     ]))
+  })
+
+  it('limits loop-cue positions when the lib has loop_at', () => {
+    const t = updateRoute(sampleTable(), 'feed_loop', 0, { at: 'both' })
+    expect(validateCueTable(t, ctx())).toEqual([])
+    const lib = { ...sampleLib(), loop_at: ['hand'] }
+    expect(validateCueTable(t, ctx({ lib }))).toEqual(['feed_loop: continuous layers allow at = hand'])
+    expect(positionsForCue(lib, 'feed_loop')).toEqual(['hand'])
+    expect(positionsForCue(lib, 'button')).toEqual(lib.at)
+    expect(addRoute(sampleTable(), { ...sampleLib(), loop_at: ['pos_chest'] }, 'feed_loop')?.cues.feed_loop.haptics[1].at).toBe('pos_chest')
   })
 
   it('requires the WAV of every clip and cue sound', () => {

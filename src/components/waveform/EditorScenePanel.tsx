@@ -4,15 +4,17 @@ import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useEditorSettings } from '@/stores/editorSettings'
 import { sceneVideoUrl, useSceneStore } from '@/stores/sceneStore'
 import { resolveTrialScene, sceneVideoTime } from '@/utils/trialScene'
+import { setScenePreRoll } from '@/utils/editorSceneSync'
 import { useEditor } from './editorContext'
 import './EditorScenePanel.css'
 
 /**
  * "Scene video": the recorded game moment of the AI trial being rated, from
  * the project open in the Scene tab (same store). While a candidate of that
- * trial is auditioned, the (muted) video follows the editor playback: it
- * starts `sceneLeadSec` before the cue mark when the audition starts, seeks
- * with it and stops with it.
+ * trial is auditioned, the (muted) video starts `sceneLeadSec` before the cue
+ * mark and the audition (sound + haptics) is held back by the same lead, so it
+ * sounds exactly on the mark; seeking and stopping follow the editor player.
+ * A lead of 0 starts both at once.
  */
 export function EditorScenePanel() {
   const { t } = useI18n()
@@ -39,19 +41,25 @@ export function EditorScenePanel() {
     return () => { cancelled = true }
   }, [root, chosen?.file])
   // Show the start frame (lead before the mark) whenever the clip or lead changes.
-  const cue = () => { const v = video.current; if (v && chosen) { v.pause(); v.currentTime = sceneVideoTime(chosen.mark, lead, 0) } }
+  const cue = () => { const v = video.current; if (v && chosen) { v.pause(); v.currentTime = sceneVideoTime(chosen.mark, -lead) } }
   useEffect(cue, [src, chosen?.mark, lead])
   const synced = !!chosen && !!audition && audition.trialId === trialId
   useEffect(() => {
     if (!synced || !chosen) return
-    const at = (time: number) => sceneVideoTime(chosen.mark, lead, time)
+    const at = (time: number) => sceneVideoTime(chosen.mark, time)
+    setScenePreRoll({
+      seconds: lead,
+      begin: start => { const v = video.current; if (!v) return; v.currentTime = at(start - lead); void v.play().catch(() => {}) },
+      cancel: () => video.current?.pause(),
+    })
     const unsubs = [
-      player.on('play', time => { const v = video.current; if (!v) return; v.currentTime = at(time); void v.play().catch(() => {}) }),
+      // After the lead-in the video is already running; only correct a visible drift.
+      player.on('play', time => { const v = video.current; if (!v) return; if (v.paused || Math.abs(v.currentTime - at(time)) > 0.1) v.currentTime = at(time); void v.play().catch(() => {}) }),
       player.on('seeking', time => { const v = video.current; if (v) v.currentTime = at(time) }),
       player.on('pause', () => video.current?.pause()),
       player.on('finish', () => video.current?.pause()),
     ]
-    return () => { unsubs.forEach(unsub => unsub()); video.current?.pause() }
+    return () => { setScenePreRoll(null); unsubs.forEach(unsub => unsub()); video.current?.pause() }
   }, [player, synced, chosen?.mark, lead])
 
   if (!trialId || !trial) return <div className="editor-scene-panel"><p className="agent-muted">{t('editor.scene.noTrial')}</p></div>

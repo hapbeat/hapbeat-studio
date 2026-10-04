@@ -42,6 +42,10 @@ export const serializeCueTable = (table: CueTable) => JSON.stringify(table, null
 
 export const isLoopCue = (lib: SceneLib, name: string) => lib.loop_cues.includes(name)
 
+/** Positions a cue's routes may use: lib.at, narrowed by lib.loop_at for loop cues. */
+export const positionsForCue = (lib: SceneLib, name: string) =>
+  isLoopCue(lib, name) && lib.loop_at ? lib.at.filter(a => lib.loop_at!.includes(a)) : lib.at
+
 /** Clips a cue may use: loop clips for loop cues, one-shots otherwise. */
 export const clipsForCue = (table: CueTable, lib: SceneLib, name: string) =>
   Object.keys(table.clips).filter(c => table.clips[c].loop === isLoopCue(lib, name)).sort()
@@ -89,6 +93,7 @@ export function validateCueTable(table: CueTable, ctx: CueTableContext): string[
       if (!Object.prototype.hasOwnProperty.call(clips, r.clip)) err.push(`${name}: unknown clip ${String(r.clip)}`)
       else if (clips[r.clip].loop !== isLoopCue(lib, name)) err.push(`${name}: clip ${r.clip} loop=${clips[r.clip].loop} does not fit this cue`)
       if (!lib.at.includes(r.at)) err.push(`${name}: at must be one of ${lib.at.join(', ')}`)
+      else if (!positionsForCue(lib, name).includes(r.at)) err.push(`${name}: continuous layers allow at = ${positionsForCue(lib, name).join(', ')}`)
       if (!inRange(r.gain, 0, 2)) err.push(`${name}: gain must be 0..2`)
     }
   }
@@ -111,8 +116,8 @@ export function updateRoute(table: CueTable, cue: string, index: number, patch: 
 export function addRoute(table: CueTable, lib: SceneLib, cue: string, clip?: string): CueTable | null {
   const chosen = clip ?? Object.keys(table.clips).find(c => table.clips[c].loop === isLoopCue(lib, cue))
   if (!chosen) return null
-  const next = clone(table)
-  next.cues[cue].haptics.push({ clip: chosen, at: 'hand', gain: 1.0 })
+  const next = clone(table), positions = positionsForCue(lib, cue)
+  next.cues[cue].haptics.push({ clip: chosen, at: positions.includes('hand') ? 'hand' : positions[0] ?? 'hand', gain: 1.0 })
   return next
 }
 

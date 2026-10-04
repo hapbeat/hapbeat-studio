@@ -24,6 +24,17 @@ describe('editor playback routing without physical output', () => {
     playback.paused(); playback.stop(); await vi.advanceTimersByTimeAsync(2000)
     expect(pc.play).toHaveBeenCalledTimes(2); expect(playback.pending).toBe(false)
   })
+  it('starts the audio after the pre-roll and cancels the pre-roll on Stop', async () => {
+    vi.useFakeTimers(); const pc = player(), begin = vi.fn(), cancel = vi.fn()
+    const playback = new EditorPlayback(pc, vi.fn(), [], vi.fn(), vi.fn())
+    playback.preRoll = () => ({seconds: 2, begin, cancel})
+    playback.configure(null, false); const job = playback.play(0, 4)
+    await vi.advanceTimersByTimeAsync(1999); expect(begin).toHaveBeenCalledWith(0); expect(pc.play).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1); await job; expect(pc.play).toHaveBeenCalledWith(0, 4); expect(cancel).not.toHaveBeenCalled()
+    const again = playback.play(0, 4); await vi.advanceTimersByTimeAsync(500); playback.stop(); await again
+    expect(cancel).toHaveBeenCalledTimes(1); expect(pc.play).toHaveBeenCalledTimes(1)
+    playback.preRoll = () => ({seconds: 0, begin, cancel}); await playback.play(0, 4); expect(pc.play).toHaveBeenCalledTimes(2)
+  })
   it('cancels the silence wait when repeat is unchecked', async () => {
     vi.useFakeTimers(); const pc = player(); pc.getCurrentTime = () => 4
     const playback = new EditorPlayback(pc, vi.fn(), [], vi.fn(), vi.fn())

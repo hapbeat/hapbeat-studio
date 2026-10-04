@@ -197,7 +197,7 @@ export const messages = defineMessages({
   "editor.scene.loading": { ja: "映像を読み込み中…", en: "Loading video…" },
   "editor.scene.lead": { ja: "印の", en: "Start" },
   "editor.scene.leadUnit": { ja: "秒前から", en: "s before the mark" },
-  "editor.scene.synced": { ja: "試聴に合わせて再生します（映像は無音）。開始位置は印の何秒前かで調整できます", en: "Plays with the audition (muted). Adjust how many seconds before the mark it starts." },
+  "editor.scene.synced": { ja: "試聴すると映像（無音）が印の手前から始まり、音と触覚はちょうど印の時刻で鳴ります。0 秒にすると即時に再生します", en: "On audition the muted video starts before the mark and the sound and haptics play exactly on it. 0 s plays both at once." },
   "editor.scene.auditionHint": { ja: "この試行の候補を試聴すると、映像も一緒に再生されます", en: "Audition a candidate of this trial to play the video with it." },
   "editor.importMenu": { ja: "読み込み", en: "Import" },
   "editor.viewMenu": { ja: "表示", en: "View" },

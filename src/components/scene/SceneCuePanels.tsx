@@ -3,7 +3,7 @@ import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { familyColor, momentCues, type SceneLib } from '@/utils/sceneData'
-import { addRoute, assignSound, clipsForCue, isLoopCue, removeRoute, setClipIntensity, setSoundVolume, updateRoute } from '@/utils/sceneCueTable'
+import { addRoute, assignSound, clipsForCue, isLoopCue, positionsForCue, removeRoute, setClipIntensity, setSoundVolume, updateRoute } from '@/utils/sceneCueTable'
 import { useScene } from './sceneContext'
 
 /** Body position labels (lib.at vocabulary, contracts device-addressing); unknown ones show as is. */
@@ -118,7 +118,7 @@ export function SceneHapticsPanel() {
           {clipsForCue(table, lib, name).map(c => <option key={c} value={c}>{c}</option>)}
         </select>
         <select value={r.at} aria-label={t('scene.route.at')} onChange={e => { e.target.blur(); store.edit(tb => updateRoute(tb, name, i, { at: e.target.value })) }}>
-          {lib.at.map(a => <option key={a} value={a}>{atLabel(a)}</option>)}
+          {[...new Set([...positionsForCue(lib, name), r.at])].map(a => <option key={a} value={a}>{atLabel(a)}</option>)}
         </select>
         <NumberField value={r.gain} min={0} max={2} step={0.05} label={t('scene.route.gain')} onCommit={x => store.edit(tb => updateRoute(tb, name, i, { gain: x }))} />
         <button type="button" className="scene-icon-btn" title={t('scene.route.test')} aria-label={t('scene.route.test')} onClick={e => { e.currentTarget.blur(); test(i) }}>▶</button>

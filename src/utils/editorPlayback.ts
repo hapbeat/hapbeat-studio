@@ -9,7 +9,15 @@ interface Player {
   getCurrentTime(): number
   getDuration(): number
 }
+/**
+ * Lead-in before the audio / haptics start (the editor's Scene video panel: the
+ * video starts `seconds` before the cue mark so the audition sounds on the mark).
+ * `begin` is called when the lead-in starts, `cancel` when Stop interrupts it.
+ */
+export interface PlaybackPreRoll { seconds: number; begin: (start: number) => void; cancel: () => void }
 export class EditorPlayback {
+  /** Read at every play; null or 0 s = start at once. */
+  preRoll: (() => PlaybackPreRoll | null) | null = null
   // Finish the previous stream_end before starting another clip or target set.
   private static settled: Promise<void> = Promise.resolve()
   private controller: AbortController | null = null
@@ -95,6 +103,16 @@ export class EditorPlayback {
       await unlocked
       await previous
       if (controller.signal.aborted) return
+      const preRoll = this.preRoll?.()
+      if (preRoll && preRoll.seconds > 0) {
+        preRoll.begin(start)
+        await new Promise<void>(resolve => {
+          const timer = setTimeout(() => { controller.signal.removeEventListener('abort', abort); resolve() }, preRoll.seconds * 1000)
+          const abort = () => { clearTimeout(timer); preRoll.cancel(); resolve() }
+          controller.signal.addEventListener('abort', abort, {once: true})
+        })
+        if (controller.signal.aborted) return
+      }
       if (!this.targets.length) {
         this.pending = false; this.changed(false)
         await this.player.play(start, end)
