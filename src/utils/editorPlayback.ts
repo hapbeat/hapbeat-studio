@@ -29,6 +29,8 @@ export class EditorPlayback {
   private loopDelay = 0
   loop = false
   pending = false
+  /** The current play runs once even with loop on (Scene video click). Reset by every play. */
+  private once = false
   constructor(private player: Player, private encode: (start: number, end: number) => Promise<Blob>, private targets: string[],
     private send: (message: ManagerMessage) => void,
     private stream: (blob: Blob, send: (message: ManagerMessage) => void, options: StreamOptions) => Promise<void>,
@@ -47,7 +49,7 @@ export class EditorPlayback {
   paused() {
     const range = this.range
     if (!range || this.pending || this.player.isPlaying()) return
-    const repeat = range && this.loop && this.player.getCurrentTime() >= range.end - .002
+    const repeat = range && this.loop && !this.once && this.player.getCurrentTime() >= range.end - .002
     this.range = null
     this.cancel()
     const revision = this.revision
@@ -85,8 +87,10 @@ export class EditorPlayback {
     const time = this.player.getCurrentTime()
     return this.play(this.selection || time < range.start || time >= range.end ? range.start : time, range.end)
   }
-  play(start = 0, end?: number): Promise<void> {
+  /** `once`: no loop repeat for this play. */
+  play(start = 0, end?: number, once = false): Promise<void> {
     this.stop()
+    this.once = once
     this.player.prepare?.()
     const duration = this.player.getDuration()
     start = Math.max(0, Math.min(duration, start)); end = Math.max(start, Math.min(duration, end ?? duration))

@@ -37,7 +37,7 @@ describe('rating form', () => {
 
   it('omits unrated candidates and unset fields, and passes protocol validation', () => {
     const form = ratingToForm(trial, null, { device: 'Band 1', position: '', deviceWiper: '96', volumeLabel: '', note: '' })
-    form.candidates.A = { overall: 4, termMatch: { ごわごわ: -1 }, directions: { roughness: 1 }, comment: '  ok  ' }
+    form.candidates.A = { overall: 4, termMatch: { ごわごわ: -1 }, directions: { roughness: 1 }, comment: '  ok  ', useRange: [] }
     form.best = 'A'
     form.context.position = ' neck '
     const body = formToRating(form, trial, '2026-09-29T15:42:00+09:00')
@@ -102,5 +102,25 @@ describe('trial kind and rating wording', () => {
     form.context.deviceWiper = '128'
     expect(ratingFormIssue(form)).toEqual({ kind: 'bad-wiper' })
     expect(parseWiper(' 100 ')).toBe(100)
+  })
+})
+
+describe('use only this part (useRange)', () => {
+  it('records sorted, rounded ranges, ignores duplicates / empty ones, and saves them', async () => {
+    const { addUseRange } = await import('./agentTrialUi')
+    let ranges = addUseRange([], 0.52345, 0.1)
+    ranges = addUseRange(ranges, 0.1, 0.52345)
+    ranges = addUseRange(ranges, 0.6, 0.6)
+    ranges = addUseRange(ranges, 0.01, 0.05)
+    expect(ranges).toEqual([[0.01, 0.05], [0.1, 0.523]])
+    const form = ratingToForm(trial, null)
+    form.candidates.A.useRange = ranges
+    expect(ratingFormIssue(form)).toEqual({ kind: 'missing-overall', candidateId: 'A' })
+    form.candidates.A.overall = 4
+    const body = formToRating(form, trial, '2026-10-05T10:00:00+09:00')
+    expect(body.candidates.A.useRange).toEqual([[0.01, 0.05], [0.1, 0.523]])
+    expect(ratingError(body, trial, [])).toBeNull()
+    expect(ratingToForm(trial, body).candidates.A.useRange).toEqual([[0.01, 0.05], [0.1, 0.523]])
+    expect(ratingError({ ...body, candidates: { A: { overall: 4, useRange: [[0.5, 0.2]] } } }, trial, [])).toMatch(/useRange/)
   })
 })

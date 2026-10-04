@@ -83,6 +83,17 @@ export interface CandidateRating {
   termMatch?: Record<string, number>
   directions?: Record<string, -1 | 0 | 1>
   comment?: string
+  /** "Use only this part": [startSec, endSec] ranges of the rendered candidate the user marked (1–8). */
+  useRange?: [number, number][]
+}
+export const MAX_USE_RANGES = 8
+/** Valid `useRange`: 1–8 pairs with 0 ≤ start < end ≤ 3600 s. */
+export function useRangeError(value: unknown): string | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_USE_RANGES) return `useRange must be 1-${MAX_USE_RANGES} [startSec, endSec] pairs`
+  for (const r of value) {
+    if (!Array.isArray(r) || r.length !== 2 || !r.every(v => typeof v === 'number' && Number.isFinite(v)) || r[0] < 0 || r[1] <= r[0] || r[1] > 3600) return 'useRange entries must be [startSec, endSec] with 0 <= start < end <= 3600'
+  }
+  return null
 }
 /**
  * Rating conditions. `deviceWiper` is the device's MCP4018 volume wiper value
@@ -195,6 +206,7 @@ export function ratingError(rating: RatingBody, trial: TrialRequest, dimensionId
     for (const v of Object.values(r.termMatch ?? {})) if (!Number.isFinite(v) || v < -2 || v > 2) return `${cid}: termMatch must be -2..+2`
     for (const [dim, v] of Object.entries(r.directions ?? {})) if (!dimensionIds.includes(dim) || ![-1, 0, 1].includes(v)) return `${cid}: invalid direction "${dim}"`
     if (!optString(r.comment, 4000)) return `${cid}: comment is too long`
+    if (r.useRange !== undefined) { const error = useRangeError(r.useRange); if (error) return `${cid}: ${error}` }
   }
   return null
 }

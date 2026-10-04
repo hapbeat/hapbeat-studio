@@ -3,7 +3,7 @@
  * chain and the rating form ↔ hapbeat-rating@1 conversion.
  */
 import type { EffectEntry, EffectParams } from '@/types/waveform'
-import { RATING_FORMAT, DEVICE_WIPER_MAX, type RatingBody, type RatingContext, type TrialKind, type TrialRequest } from '@/utils/agentProtocol'
+import { RATING_FORMAT, DEVICE_WIPER_MAX, MAX_USE_RANGES, type RatingBody, type RatingContext, type TrialKind, type TrialRequest } from '@/utils/agentProtocol'
 import type { Dimension } from '@/utils/hapticKnowledge'
 import type { DeviceInfo } from '@/types/manager'
 
@@ -13,7 +13,8 @@ export function derivedEffectChain(effects: EffectParams[], newId: () => string 
 }
 
 export type Direction = -1 | 0 | 1
-export interface CandidateRatingForm { overall: number | null; termMatch: Record<string, number>; directions: Record<string, Direction>; comment: string }
+/** `useRange`: "use only this part" ranges recorded from the waveform selection (seconds of the rendered candidate). */
+export interface CandidateRatingForm { overall: number | null; termMatch: Record<string, number>; directions: Record<string, Direction>; comment: string; useRange: [number, number][] }
 /** Text fields of the conditions; `deviceWiper` is typed only when the helper cannot report it. */
 export interface RatingContextForm { device: string; position: string; deviceWiper: string; volumeLabel: string; note: string }
 export interface RatingForm { best: string | null; othersSimilar: boolean; context: RatingContextForm; candidates: Record<string, CandidateRatingForm> }
@@ -21,7 +22,7 @@ export interface RatingForm { best: string | null; othersSimilar: boolean; conte
 export const EMPTY_CONTEXT: RatingContextForm = { device: '', position: '', deviceWiper: '', volumeLabel: '', note: '' }
 export const POSITION_SUGGESTIONS = ['neck', 'chest', 'back', 'wrist', 'waist'] as const
 
-const emptyCandidate = (): CandidateRatingForm => ({ overall: null, termMatch: {}, directions: {}, comment: '' })
+const emptyCandidate = (): CandidateRatingForm => ({ overall: null, termMatch: {}, directions: {}, comment: '', useRange: [] })
 
 /** Pre-fills from the saved rating; a trial without a rating starts empty with the remembered context. */
 export function ratingToForm(trial: TrialRequest, rating: RatingBody | null, rememberedContext: RatingContextForm = EMPTY_CONTEXT): RatingForm {
@@ -32,12 +33,12 @@ export function ratingToForm(trial: TrialRequest, rating: RatingBody | null, rem
   const candidates: Record<string, CandidateRatingForm> = {}
   for (const c of trial.candidates) {
     const saved = rating?.candidates[c.id]
-    candidates[c.id] = saved ? { overall: saved.overall, termMatch: { ...saved.termMatch }, directions: { ...saved.directions }, comment: saved.comment ?? '' } : emptyCandidate()
+    candidates[c.id] = saved ? { overall: saved.overall, termMatch: { ...saved.termMatch }, directions: { ...saved.directions }, comment: saved.comment ?? '', useRange: (saved.useRange ?? []).map(r => [r[0], r[1]] as [number, number]) } : emptyCandidate()
   }
   return { best: rating?.best ?? null, othersSimilar: rating?.othersSimilar === true, context, candidates }
 }
 
-const touched = (c: CandidateRatingForm) => Object.keys(c.termMatch).length > 0 || Object.keys(c.directions).length > 0 || c.comment.trim() !== ''
+const touched = (c: CandidateRatingForm) => Object.keys(c.termMatch).length > 0 || Object.keys(c.directions).length > 0 || c.comment.trim() !== '' || c.useRange.length > 0
 
 /** Why the form cannot be saved yet: nothing rated, or a candidate has inputs but no overall score. */
 export function ratingFormIssue(form: RatingForm): { kind: 'none-rated' } | { kind: 'missing-overall'; candidateId: string } | { kind: 'similar-needs-best' } | { kind: 'bad-wiper' } | null {
@@ -63,6 +64,7 @@ export function formToRating(form: RatingForm, trial: TrialRequest, ratedAt: str
       ...(Object.keys(termMatch).length ? { termMatch } : {}),
       ...(Object.keys(f.directions).length ? { directions: { ...f.directions } } : {}),
       ...(comment ? { comment } : {}),
+      ...(f.useRange.length ? { useRange: f.useRange.map(r => [round3(r[0]), round3(r[1])] as [number, number]) } : {}),
     }
   }
   const context: RatingContext = {}
@@ -76,6 +78,15 @@ export function formToRating(form: RatingForm, trial: TrialRequest, ratedAt: str
     ...(form.othersSimilar && form.best ? { othersSimilar: true as const } : {}),
     candidates,
   }
+}
+
+const round3 = (x: number) => Math.round(x * 1000) / 1000
+
+/** Adds a "use only this part" range (rounded to ms; duplicates ignored, at most MAX_USE_RANGES). */
+export function addUseRange(ranges: [number, number][], start: number, end: number): [number, number][] {
+  const r: [number, number] = [round3(Math.min(start, end)), round3(Math.max(start, end))]
+  if (r[1] <= r[0] || ranges.some(x => x[0] === r[0] && x[1] === r[1]) || ranges.length >= MAX_USE_RANGES) return ranges
+  return [...ranges, r].sort((a, b) => a[0] - b[0])
 }
 
 /** Integer 0..DEVICE_WIPER_MAX, else null. */

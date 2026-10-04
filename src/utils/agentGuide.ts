@@ -149,6 +149,7 @@ Processing: stereo sources are averaged to mono, effects are applied in order, t
 
 - \`overall\`: 1–5. \`termMatch\` per term: −2 = far too weak, 0 = just right, +2 = too strong.
 - \`directions\` per dimension id (see dimensions.json): +1 = "should be more <high pole>", −1 = "more <low pole>", 0 = fine.
+- \`useRange\` (optional): \`[[startSec, endSec], …]\` (1–8) — "use only this part" of the rendered candidate (seconds on its 48 kHz audio, after the effects). In the next trial, keep the candidate's source and effects and append \`{ "type": "trim", "start": startSec, "end": endSec }\` as the last effect (one candidate per range when there are several); for a \`sample\` recipe layer you may instead set \`maxSec\` / \`onsetsSec\`. Say in \`rationale\` that the range came from \`useRange\`.
 - \`context.deviceWiper\`: the device's MCP4018 volume wiper (integer 0–127; same as kit-format \`device_wiper\`) — compare volumes with this. \`volumeLabel\` ("level/steps") is only a human aid: the step count depends on the user's settings. Both may be absent.
 - \`othersSimilar\` (optional, \`true\`): the user judged every other candidate to be about the same as \`best\` and left them unrated. Do not invent scores for them; treat it as a note that the hypothesis axis made little difference.
 - \`history\` holds earlier ratings of the same trial (the user re-rated).

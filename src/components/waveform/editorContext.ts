@@ -22,6 +22,14 @@ export interface EditorShared {
   pending: boolean
   /** Play / stop; stopping rewinds. Shared by the transport button and Space. */
   togglePlay: () => void
+  /** Plays from `time` (a plain click on the waveform): the start marker moves there, any range is cleared. */
+  playAt: (time: number) => void
+  /** Stops playback (back to the start marker / range start). */
+  stopPlayback: () => void
+  /** True while playing or starting to play. */
+  isPlaybackActive: () => boolean
+  /** ⏮ / double click: from the range start, else 0. `once`: the whole audio from 0, a single pass even with loop on (Scene video click). */
+  playFromStart: (once?: boolean) => void
   /** Opens the recipe dialog in `doc` (main page or a popped-out window). */
   openRecipe: (doc: Document, initial?: Recipe) => void
   provenanceText: (clip: WaveformClip) => string

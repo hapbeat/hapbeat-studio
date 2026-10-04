@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent } from 'react'
+import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import WaveSurfer from 'wavesurfer.js'
 import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.esm.js'
 import { useWaveformStore } from '@/stores/waveformStore'
@@ -11,19 +11,25 @@ import { useI18n } from '@/i18n/I18nProvider'
 import { WaveformThumbnail } from './WaveformThumbnail'
 import { useEditorSettings } from '@/stores/editorSettings'
 import type { EditorBufferPlayer } from '@/utils/editorBufferPlayer'
+import { useEditor } from './editorContext'
 
 type OverviewMode = 'left' | 'right' | 'move' | 'seek'
 
-/** `viewKey` identifies what is shown (defaults to the clip id); a new key re-fits the zoom. */
-export function WaveformDisplay({ original, bufferOverride, player, viewKey }: { original: boolean; bufferOverride?: AudioBuffer; player: EditorBufferPlayer; viewKey?: string }) {
+/**
+ * `viewKey` identifies what is shown (defaults to the clip id); a new key re-fits the zoom.
+ * Mouse playback: a click plays from there (a click while playing stops), a drag selects a
+ * range, a double click plays from the start. `transport` sits right under the waveform.
+ */
+export function WaveformDisplay({ original, bufferOverride, player, viewKey, transport }: { original: boolean; bufferOverride?: AudioBuffer; player: EditorBufferPlayer; viewKey?: string; transport?: ReactNode }) {
   const { t } = useI18n()
+  const { playAt, stopPlayback, isPlaybackActive, playFromStart } = useEditor()
   const height = useEditorSettings(s => s.height)
   const surface = useRef<HTMLDivElement>(null)
   const resize = useRef<{y: number; height: number} | null>(null)
   const container = useRef<HTMLDivElement>(null)
   const ws = useRef<WaveSurfer | null>(null)
   const regions = useRef<RegionsPlugin | null>(null)
-  const drag = useRef<{ anchor: number; x: number; moved: boolean } | null>(null)
+  const drag = useRef<{ anchor: number; x: number; moved: boolean; time: number; wasPlaying: boolean } | null>(null)
   const anchor = useRef(0)
   const [ready, setReady] = useState(false)
   /** Overview frame drag: resize from either edge, move from inside, seek outside. */
@@ -179,19 +185,21 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey }: {
         return x >= 0 && x <= width ? <div className="editor-start-marker" aria-hidden="true" style={{ left: x }} /> : null
       })()}
       <div className="editor-wave-pointer" role="group" aria-label={t('editor.selectionHint')}
-        onDoubleClick={event => {event.preventDefault(); selectAll()}}
+        onDoubleClick={event => { event.preventDefault(); if (ready && !processing) playFromStart() }}
         onPointerDown={event => {
           if (!ready || processing || event.button !== 0) return
           surface.current?.focus({preventScroll: true})
           event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId)
           const next = pointerTime(event)
-          player.setTime(next)
+          // While playing, a click stops (on pointer up); the playhead is not moved by the press.
+          const wasPlaying = isPlaybackActive()
+          if (!wasPlaying) player.setTime(next)
           if (event.shiftKey) { selectAt(anchor.current, next); return }
           let base = next
           if (selection && Math.abs(next - selection.start) * zoom < 8) base = selection.end
           else if (selection && Math.abs(next - selection.end) * zoom < 8) base = selection.start
           anchor.current = base
-          drag.current = {anchor: base, x: event.clientX, moved: false}
+          drag.current = {anchor: base, x: event.clientX, moved: false, time: next, wasPlaying}
         }}
         onPointerMove={event => {
           const state = drag.current
@@ -202,13 +210,14 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey }: {
         onPointerUp={event => {
           const state = drag.current
           if (state) {
-            // A plain click sets the start marker; a drag made a range (shown instead).
-            if (!state.moved) { useWaveformStore.getState().setSelectedRegion(null); useStartMarker.getState().set(player.getCurrentTime()) }
+            // A plain click plays from there (the start marker moves there) or, while playing, stops; a drag made a range.
+            if (!state.moved) { if (state.wasPlaying) stopPlayback(); else playAt(state.time) }
           }
           drag.current = null
           if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
         }} onPointerCancel={() => {drag.current = null}} />
     </div>
+    {transport}
     <div className="editor-wave-resize" role="separator" aria-label={t('editor.resizeWave')} aria-orientation="horizontal" aria-valuenow={height} aria-valuemin={100} aria-valuemax={700} tabIndex={0}
       onPointerDown={event => {event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); resize.current = {y: event.clientY, height}}}
       onPointerMove={event => {if (resize.current) useEditorSettings.getState().update({height: Math.max(100, Math.min(700, resize.current.height + event.clientY - resize.current.y))})}}

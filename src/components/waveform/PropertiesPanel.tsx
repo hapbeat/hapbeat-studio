@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import { useWaveformStore } from '@/stores/waveformStore'
+import { estimateWavSize, formatFileSize } from '@/utils/wavIO'
 import { useEditorSettings } from '@/stores/editorSettings'
 import { useI18n } from '@/i18n/I18nProvider'
 import { normalizeProjectName } from '@/utils/editorFolder'
@@ -58,6 +59,7 @@ export function PropertiesPanel() {
   const project = useEffectiveProject(clip ?? NO_CLIP)
   const scene = useSceneChoice({ kind: 'clip', clipId: clip?.id ?? null })
   const eventMarks = useEditorSettings(s => s.eventMarks)
+  const exportAsMono = useWaveformStore(s => s.exportAsMono)
   if (!clip) return <div className="editor-panel editor-panel-empty">{t('editor.noClip')}</div>
   const update = useWaveformStore.getState().updateClipInfo
   const provenance = provenanceText(clip)
@@ -83,6 +85,7 @@ export function PropertiesPanel() {
       <EventMarkBadges marks={clipEventMarks(clip, eventMarks)} />
     </div>
     <ul className="editor-properties-details" aria-label={t('editor.details')}>
+      <li>{t('editor.exportFormat')}: PCM16 WAV · {exportAsMono || clip.buffer.numberOfChannels === 1 ? 'Mono' : 'Stereo'} · {clip.exportSampleRate} Hz · {formatFileSize(estimateWavSize(clip.buffer.duration, clip.exportSampleRate, exportAsMono ? 1 : clip.buffer.numberOfChannels))}</li>
       {clip.sourceFileName && <li title={clip.sourceFileName}>{t('editor.sourceFile')}: {clip.sourceFileName}</li>}
       {provenance && <li className="editor-provenance" title={clip.provenance?.referrerUrl ?? undefined}>{provenance}</li>}
       {clip.recipe && <li>{t('editor.generatorLayers', { count: clip.recipe.layers.length })}{' '}

@@ -118,7 +118,7 @@ export const messages = defineMessages({
   "editor.edited": { ja: "編集後", en: "Edited" },
   "editor.original": { ja: "元音声", en: "Original" },
   "editor.originalHint": { ja: "元音声から範囲を選択して、新しいクリップに切り出せます。", en: "Select a range from the original and extract it as a new clip." },
-  "editor.selectionHint": { ja: "クリックで再生位置、ドラッグで範囲選択、Shift＋クリックで範囲指定。", en: "Click to seek, drag to select, or Shift-click to extend the selection." },
+  "editor.selectionHint": { ja: "クリックでその位置から再生（再生中は停止）、ドラッグで範囲選択、Shift＋クリックで範囲を広げる、ダブルクリック／⏮ で先頭から。", en: "Click to play from there (click again to stop), drag to select, Shift-click to extend, double-click or ⏮ to play from the start." },
   "editor.emptyHint": { ja: "1トラックで効果音を編集。複数ファイルのドロップに対応。", en: "Single-track sound editing. Drop multiple audio files to compare." },
   "editor.fit": { ja: "全体表示", en: "Fit" },
   "editor.undo": { ja: "元に戻す", en: "Undo" },
@@ -1146,6 +1146,10 @@ export const messages = defineMessages({
   'editor.agent.method.layered': { ja: '既成クリップ＋余韻', en: 'layered' },
   'editor.agent.method.onset': { ja: '立ち上がりに打つ', en: 'onset hits' },
   'editor.agent.method.bandsplit': { ja: '帯域分割', en: 'band split' },
+  'editor.playFromStart': { ja: '先頭から再生（範囲があれば範囲の先頭から）', en: 'Play from the start (of the range, if one is selected)' },
+  'editor.agent.useRangeRecord': { ja: '選択範囲を記録', en: 'Record selected range' },
+  'editor.agent.useRangeHint': { ja: 'この候補を試聴中に波形で選んだ範囲を「この部分だけ使いたい」として評価に残します（AI は次の試行でこの範囲に切り詰めます）', en: 'Saves the range selected on this candidate waveform as "use only this part" (the AI trims to it in the next trial).' },
+  'editor.agent.useRangeRemove': { ja: 'この範囲を削除', en: 'Remove this range' },
 })
 
 export type MessageId = keyof typeof messages

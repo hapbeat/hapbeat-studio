@@ -816,6 +816,8 @@
 .agent-chip-btn { padding: 2px 4px; border: 1px solid var(--border-light); border-radius: 10px; background: var(--bg-primary); color: var(--text-secondary); font-size: 11px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-chip-btn.selected { border-color: #a78bfa; background: rgba(167,139,250,.2); color: var(--text-primary); }
 .agent-comment { width: 100%; box-sizing: border-box; resize: vertical; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-light); border-radius: 5px; padding: 6px 8px; font: inherit; font-size: 12px; }
+.agent-use-range { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.agent-chip-remove { margin-left: 4px; padding: 0 2px; border: 0; background: transparent; color: var(--text-secondary); cursor: pointer; }
 .agent-trial-rating { display: flex; flex-direction: column; gap: 8px; }
 .agent-trial-rating fieldset { margin: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; min-width: 0; }
 .agent-trial-rating legend { padding: 0 4px; font-size: 12px; color: var(--text-secondary); }

@@ -11,7 +11,7 @@ import { useEditor } from './editorContext'
 export function WaveformPanel() {
   const { t } = useI18n()
   const s = useWaveformStore()
-  const { original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, player, playback, pending, togglePlay } = useEditor()
+  const { original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, player, playback, pending, togglePlay, playFromStart } = useEditor()
   const audition = !!auditionKey
   const eventPreview = useEventStore(state => state.preview)
   const region = s.selectedRegion
@@ -61,8 +61,8 @@ export function WaveformPanel() {
     <div className="editor-preview-status" role="status">{status}</div>
     <div className="waveform-main">
       {!s.clip && !audition && <div className="waveform-empty"><div className="empty-icon">∿</div><div className="empty-message">{t('wave.drop')}</div><div className="empty-hint">{t('editor.emptyHint')}</div></div>}
-      <WaveformDisplay original={original} bufferOverride={audioBuffer} player={player} viewKey={auditionKey ?? undefined} />
+      <WaveformDisplay original={original} bufferOverride={audioBuffer} player={player} viewKey={auditionKey ?? undefined}
+        transport={<TransportBar player={player} available={!!audioBuffer} playback={playback} pending={pending} onToggle={togglePlay} onFromStart={() => playFromStart()} />} />
     </div>
-    <TransportBar player={player} available={!!audioBuffer} playback={playback} pending={pending} onToggle={togglePlay} />
   </div>
 }

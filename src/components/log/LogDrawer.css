@@ -86,18 +86,6 @@ body.log-drawer-resizing * {
   color: var(--text-muted);
 }
 
-/* Read-out of the active tab (e.g. the editor's export format); takes the free space, right-aligned. */
-.log-drawer-info {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: right;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-}
-
 .log-drawer-clear {
   background: transparent;
   color: var(--text-secondary);

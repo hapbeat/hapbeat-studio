@@ -11,6 +11,7 @@ import { useSceneSettings } from '@/stores/sceneSettings'
 import { resolvePlaybackTargets } from '@/utils/playbackDevices'
 import { matchesAddress, tableTargets, type HapticDevice } from '@/utils/sceneHaptics'
 import { focusEvent } from '@/utils/sceneData'
+import { isTypingTarget } from '@/utils/playbackShortcut'
 import { SceneRuntime } from './sceneRuntime'
 import { SceneContext, type SceneShared } from './sceneContext'
 import { SceneDockLayout } from './SceneDockLayout'
@@ -85,7 +86,7 @@ export function SceneView({ active }: { active: boolean }) {
     const playback = () => { if (useSceneStore.getState().items.length) { runtime.audio(); runtime.togglePlay() } }
     const keydown = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
-      if (e.ctrlKey || e.metaKey || e.altKey || (el.closest && el.closest('input, select, textarea, [contenteditable=true]'))) return
+      if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(el) || (el.closest && el.closest('input'))) return
       const s = useSceneStore.getState(), it = s.items[s.cur], v = runtime.video
       if (!it || !s.lib) return
       runtime.audio()

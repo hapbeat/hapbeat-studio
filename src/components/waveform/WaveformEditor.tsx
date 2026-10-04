@@ -6,8 +6,7 @@ import { useI18n } from '@/i18n/I18nProvider'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { EditorPlayback } from '@/utils/editorPlayback'
 import { cropBuffer } from '@/utils/audioDsp'
-import { encodeWavBlob, estimateWavSize, formatFileSize } from '@/utils/wavIO'
-import { useStatusInfo } from '@/stores/statusInfo'
+import { encodeWavBlob } from '@/utils/wavIO'
 import type { SampleRate } from '@/types/waveform'
 import './WaveformEditor.css'
 import { useEditorSettings } from '@/stores/editorSettings'
@@ -22,7 +21,7 @@ import { isDemoMode } from '@/demo/isDemoMode'
 import { lookupMaterials, provenanceLine } from '@/utils/materials'
 import type { WaveformClip } from '@/types/waveform'
 import { onlinePlaybackDevices, resolvePlaybackTargets } from '@/utils/playbackDevices'
-import { handlePlaybackShortcut } from '@/utils/playbackShortcut'
+import { handlePlaybackShortcut, isTypingTarget } from '@/utils/playbackShortcut'
 import { useEditorSettingsFolderSync, type SettingsSyncNotice } from '@/hooks/useEditorSettingsFolderSync'
 import { EditorContext, type EditorShared } from './editorContext'
 import { EditorDockLayout, focusPanel, POPOUT_URL } from './EditorDockLayout'
@@ -110,9 +109,6 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const player = useMemo(() => new EditorBufferPlayer(null, undefined, s.setError), [s.clip?.id, original, auditionKey])
   useEffect(() => {player.activate(); return () => player.dispose()}, [player])
   useDecidedSoundSync(player)
-  // Export format of the selected clip, shown in the bottom log bar while this tab is active.
-  const statusText = s.clip ? `PCM16 WAV · ${s.exportAsMono || s.clip.buffer.numberOfChannels === 1 ? 'Mono' : 'Stereo'} · ${formatFileSize(estimateWavSize(s.clip.buffer.duration, s.clip.exportSampleRate, s.exportAsMono ? 1 : s.clip.buffer.numberOfChannels))}` : null
-  useEffect(() => { if (active) { useStatusInfo.getState().set(statusText); return () => useStatusInfo.getState().set(null) } }, [active, statusText])
   player.setBuffer(audioBuffer ?? null)
   useEffect(() => {
     const selection = useWaveformStore.getState().selectedRegion
@@ -150,6 +146,28 @@ export function WaveformEditor({ active }: { active: boolean }) {
     if (!useWaveformStore.getState().selectedRegion && useStartMarker.getState().start !== null) player.setTime(start)
     void playback.toggle().catch(s.setError)
   }, [playback, player, s.setError])
+  const stopPlayback = useCallback(() => {
+    playback.stop()
+    player.setTime(playStart(useWaveformStore.getState().selectedRegion, useStartMarker.getState().start))
+  }, [playback, player])
+  const isPlaybackActive = useCallback(() => playback.pending || player.isPlaying(), [playback, player])
+  const playAt = useCallback((time: number) => {
+    if (useWaveformStore.getState().isProcessing) return
+    useWaveformStore.getState().setSelectedRegion(null)
+    useStartMarker.getState().set(time)
+    const settings = useEditorSettings.getState()
+    playback.configure(null, settings.loop, settings.loopDelay)
+    player.setTime(time)
+    void playback.play(time).catch(s.setError)
+  }, [playback, player, s.setError])
+  const playFromStart = useCallback((once = false) => {
+    if (useWaveformStore.getState().isProcessing) return
+    playback.stop()
+    useStartMarker.getState().set(null)
+    if (once) { player.setTime(0); void playback.play(0, player.getDuration(), true).catch(s.setError); return }
+    player.setTime(useWaveformStore.getState().selectedRegion?.start ?? 0)
+    void playback.toggle().catch(s.setError)
+  }, [playback, player, s.setError])
   useEffect(() => {
     const toggle = () => { if (active) togglePlay() }
     window.addEventListener('studio:editor-playback', toggle)
@@ -182,7 +200,8 @@ export function WaveformEditor({ active }: { active: boolean }) {
     if (!active) return
     const keydown = (event: KeyboardEvent) => {
       const element = event.target as HTMLElement
-      if (!element.closest || element.closest('input, select, textarea, [contenteditable=true]') || (element.closest('button') && !element.closest('.editor-clip'))) return
+      // Typing (shared rule) and any other form control keep their keys; buttons too, except clip rows.
+      if (!element.closest || isTypingTarget(element) || element.closest('input') || (element.closest('button') && !element.closest('.editor-clip'))) return
       const state = useWaveformStore.getState()
       if (state.isProcessing) return
 
@@ -239,7 +258,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   }, [dockApi, t, s.setError, linkSceneProject])
   const focusEditorPanel = useCallback((id: Parameters<EditorShared['focusEditorPanel']>[0]) => { if (dockApi) focusPanel(dockApi, id, t) }, [dockApi, t])
   const shared: EditorShared = {
-    active, original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, player, playback, pending, togglePlay,
+    active, original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, player, playback, pending, togglePlay, playAt, stopPlayback, isPlaybackActive, playFromStart,
     openRecipe, provenanceText, isConnected, playbackDevices, targets, setVisibleClipIds, openSceneVideo, linkSceneProject, focusEditorPanel,
   }
   return <EditorContext.Provider value={shared}>

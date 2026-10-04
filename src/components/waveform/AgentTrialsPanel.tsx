@@ -5,7 +5,7 @@ import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { localIsoString, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
 import type { HapticFeatures } from '@/utils/hapticFeatures'
-import { autoRatingContext, EMPTY_CONTEXT, formToRating, jaPolePhrase, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, trialKind, visibleDimensions, type CandidateRatingForm, type Direction, type RatingForm } from '@/utils/agentTrialUi'
+import { addUseRange, autoRatingContext, EMPTY_CONTEXT, formToRating, jaPolePhrase, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, trialKind, visibleDimensions, type CandidateRatingForm, type Direction, type RatingForm } from '@/utils/agentTrialUi'
 import { trialTarget, type TrialKind } from '@/utils/agentProtocol'
 import { useEventStore } from '@/stores/eventStore'
 import { assignEventsForTrial, effectiveEvent, parseEventKey, trialEvent } from '@/utils/cueEvents'
@@ -169,6 +169,8 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
   const event = sceneLib && sceneTable && trial.scene?.project === sceneLib.project_name ? trialEvent(sceneTable, trial.scene) : null
   const soundFirst = target === 'haptic' && !!event && !!sceneLib && !!sceneTable && !isLoopCue(sceneLib, parseEventKey(event).cue) && !effectiveEvent(sceneTable, parseEventKey(event))?.sfx
   const marks = useEditorSettings(s => s.eventMarks)
+  /** The waveform selection while a candidate is auditioned: recorded as its "use only this part" range. */
+  const selection = useWaveformStore(s => s.selectedRegion)
   const edit = (update: (f: RatingForm) => RatingForm) => { setForm(update); setDirty(true); setSaveError(null) }
   const editCandidate = (cid: string, patch: Partial<CandidateRatingForm>) => edit(f => ({ ...f, candidates: { ...f.candidates, [cid]: { ...f.candidates[cid], ...patch } } }))
   const issue = ratingFormIssue(form)
@@ -255,7 +257,8 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
               onClick={() => useEventStore.getState().requestDecide({ target, source: { kind: 'candidate', trialId: trial.id, candidateId: requested.id }, event })}>{t(target === 'sound' ? 'events.decideSound' : 'events.decideHaptic')}</button>
             {(marks[`${trial.id}/${requested.id}`] ?? []).map(m => <span key={`${m.project}:${m.event}:${m.target}`} className="editor-event-badge" title={m.project}>{m.target === 'sound' ? '♪' : '≋'} {m.event}</span>)}
           </div>
-          <CandidateRatingInputs value={form.candidates[requested.id]} terms={trial.terms} dimensions={shownDimensions} onChange={patch => editCandidate(requested.id, patch)} />
+          <CandidateRatingInputs value={form.candidates[requested.id]} terms={trial.terms} dimensions={shownDimensions} onChange={patch => editCandidate(requested.id, patch)}
+            selection={active ? selection : null} />
         </article>
       })}
     </div>
@@ -306,8 +309,10 @@ const DIMENSION_HINTS: Record<string, MessageId> = {
   pleasantness: 'editor.agent.dimHint.pleasantness',
 }
 const TERM_LABELS = { '-2': 'editor.agent.tooWeak', '0': 'editor.agent.justRight', '2': 'editor.agent.tooStrong' } as const
-function CandidateRatingInputs({ value, terms, dimensions, onChange }: {
+function CandidateRatingInputs({ value, terms, dimensions, onChange, selection }: {
   value: CandidateRatingForm; terms: string[]; dimensions: DimensionsDoc | null; onChange: (patch: Partial<CandidateRatingForm>) => void
+  /** The waveform range selected on this candidate (only while it is the auditioned one). */
+  selection: { start: number; end: number } | null
 }) {
   const { t, locale } = useI18n()
   const setTerm = (term: string, v: number | undefined) => {
@@ -351,6 +356,12 @@ function CandidateRatingInputs({ value, terms, dimensions, onChange }: {
         </div>
       })}
     </div>}
+    <div className="agent-use-range">
+      <button className="toolbar-btn" disabled={!selection || selection.end <= selection.start} title={t('editor.agent.useRangeHint')}
+        onClick={() => { if (selection) onChange({ useRange: addUseRange(value.useRange, selection.start, selection.end) }) }}>{t('editor.agent.useRangeRecord')}</button>
+      {value.useRange.map((r, i) => <span key={`${r[0]}-${r[1]}`} className="agent-chip">{r[0].toFixed(3)}–{r[1].toFixed(3)} s
+        <button className="agent-chip-remove" aria-label={t('editor.agent.useRangeRemove')} title={t('editor.agent.useRangeRemove')} onClick={() => onChange({ useRange: value.useRange.filter((_, k) => k !== i) })}>✕</button></span>)}
+    </div>
     <textarea className="agent-comment" rows={2} placeholder={t('editor.agent.comment')} aria-label={t('editor.agent.comment')} value={value.comment} onChange={e => onChange({ comment: e.target.value })} />
   </div>
 }

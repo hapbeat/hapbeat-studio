@@ -6,8 +6,8 @@ import { useWaveformStore } from '@/stores/waveformStore'
 import { useI18n } from '@/i18n/I18nProvider'
 
 /** Play / stop (two states; stopping rewinds), loop and loop silence. A selection limits playback to it. */
-export function TransportBar({ player: ws, available, playback, pending, onToggle }: {
-  player: EditorBufferPlayer; available: boolean; playback: EditorPlayback | null; pending: boolean; onToggle: () => void
+export function TransportBar({ player: ws, available, playback, pending, onToggle, onFromStart }: {
+  player: EditorBufferPlayer; available: boolean; playback: EditorPlayback | null; pending: boolean; onToggle: () => void; onFromStart: () => void
 }) {
   const { t } = useI18n()
   const [playing, setPlaying] = useState(false)
@@ -28,6 +28,7 @@ export function TransportBar({ player: ws, available, playback, pending, onToggl
   }, [ws, playback])
   return <div className="transport-bar">
     <div className="transport-buttons">
+      <button className="transport-btn" disabled={!available || processing} title={t('editor.playFromStart')} aria-label={t('editor.playFromStart')} onClick={onFromStart}>⏮</button>
       <button className="transport-btn play-btn" disabled={!available || processing} aria-label={playing || pending ? t('wave.stop') : t('wave.play')} onClick={onToggle}><span className="transport-label-stack" aria-hidden="true"><span style={{visibility: playing || pending ? 'hidden' : 'visible'}}>▶ {t('wave.play')}</span><span style={{visibility: playing || pending ? 'visible' : 'hidden'}}>■ {t('wave.stop')}</span></span></button>
     </div>
     <span className="transport-time">{time.toFixed(3)} / {(ws?.getDuration() ?? 0).toFixed(3)} s</span>

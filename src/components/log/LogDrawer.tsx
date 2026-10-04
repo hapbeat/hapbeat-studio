@@ -1,4 +1,3 @@
-import { useStatusInfo } from '@/stores/statusInfo'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore } from '@/stores/deviceStore'
@@ -193,7 +192,6 @@ export function LogDrawer() {
       el.scrollHeight - el.scrollTop - el.clientHeight <= 2
   }
 
-  const statusInfo = useStatusInfo(s => s.text)
   return (
     <div
       className={`log-drawer${visible ? '' : ' collapsed'}`}
@@ -223,7 +221,7 @@ export function LogDrawer() {
         <span className="log-drawer-count">
           {t('log.count', { count: entries.length, subscription: subscribedIp ? t('log.subscription', { ip: subscribedIp }) : '' })}
         </span>
-        <span className="log-drawer-info" title={statusInfo ?? ''}>{statusInfo}</span>
+        <span style={{ flex: 1 }} />
         <LocalFsStatus />
         <button className="log-drawer-clear" onClick={clear}>{t('common.clear')}</button>
       </div>

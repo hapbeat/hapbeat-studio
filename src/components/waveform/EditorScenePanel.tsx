@@ -77,7 +77,7 @@ function useShownSubject(): SceneSubject {
  */
 export function EditorScenePanel() {
   const { t } = useI18n()
-  const { player, linkSceneProject, togglePlay } = useEditor()
+  const { player, linkSceneProject, playFromStart } = useEditor()
   /** Focus in this panel (its own window when popped out) = play "from the video": lead-in first, sound + haptics on the mark. */
   const rootRef = useRef<HTMLDivElement>(null)
   const [focused, setFocused] = useState(false)
@@ -172,7 +172,7 @@ export function EditorScenePanel() {
           <input type="number" min={0} max={10} step={0.5} value={lead} onChange={e => { const x = parseFloat(e.target.value); if (Number.isFinite(x)) useEditorSettings.getState().update({ sceneLeadSec: Math.max(0, Math.min(10, x)) }) }} />
           {t('editor.scene.leadUnit')}</label>
       </div>
-      <div className="editor-scene-stage" onClick={e => { e.currentTarget.closest<HTMLElement>('.editor-scene-panel')?.focus(); focusedRef.current = true; setFocused(true); if (synced) togglePlay() }}>
+      <div className="editor-scene-stage" onClick={e => { e.currentTarget.closest<HTMLElement>('.editor-scene-panel')?.focus(); focusedRef.current = true; setFocused(true); if (synced) playFromStart(true) }}>
         {chosen && src && !videoError ? <video ref={video} src={src} muted playsInline preload="auto" onLoadedMetadata={cue} onError={e => setVideoError(e.currentTarget.error?.message || `MediaError ${e.currentTarget.error?.code ?? ''}`)} />
           : <p className="agent-muted">{chosen && videoError ? t('editor.scene.unreadable', { file: chosen.file, error: videoError }) : chosen ? t('editor.scene.loading') : t('editor.scene.pickHint')}</p>}
       </div>
