@@ -1,5 +1,6 @@
 import { useWaveformStore } from '@/stores/waveformStore'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
+import { useEventStore } from '@/stores/eventStore'
 import { useI18n } from '@/i18n/I18nProvider'
 import { WaveformDisplay } from './WaveformDisplay'
 import { TransportBar } from './TransportBar'
@@ -12,6 +13,7 @@ export function WaveformPanel() {
   const s = useWaveformStore()
   const { original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, player, playback, pending, togglePlay } = useEditor()
   const audition = !!auditionKey
+  const eventPreview = useEventStore(state => state.preview)
   const region = s.selectedRegion
   const duration = audioBuffer?.duration ?? 0
   const locked = s.isProcessing || audition
@@ -25,18 +27,19 @@ export function WaveformPanel() {
     }
     useWaveformStore.getState().extractSelection()
   }
-  const status = audition ? t('editor.agent.auditionHint')
+  const status = eventPreview ? t(eventPreview.target === 'sound' ? 'events.preview.soundHint' : 'events.preview.hapticHint')
+    : audition ? t('editor.agent.auditionHint')
     : original ? t('editor.originalHint')
     : pendingChain ? (preview.error || t(preview.status === 'rendering' ? 'editor.previewRendering' : 'editor.previewHint'))
     : t('editor.selectionHint')
   return <div className="editor-panel editor-waveform-panel">
     <div className="editor-comparison">
-      <strong className={`editor-active-name ${audition ? 'editor-auditioning' : ''}`}>{auditionKey ? t('editor.agent.auditioning', { name: auditionKey }) : s.clip?.name ?? t('editor.noClip')}</strong>
+      <strong className={`editor-active-name ${audition ? 'editor-auditioning' : ''}`}>{eventPreview ? t('events.preview.name', { name: eventPreview.label }) : auditionKey ? t('editor.agent.auditioning', { name: auditionKey }) : s.clip?.name ?? t('editor.noClip')}</strong>
       <div className="editor-segmented" role="group" aria-label={t('editor.showing')}>
         <button className={`toolbar-btn ${!original ? 'selected' : ''}`} disabled={!s.clip || locked} aria-pressed={!original} title={t('editor.committedHint')} onClick={() => { if (original) s.setSelectedRegion(null); setOriginal(false) }}>∿ {t('editor.edited')}</button>
         <button className={`toolbar-btn ${original ? 'selected' : ''}`} disabled={!s.clip || locked} aria-pressed={original} onClick={() => { s.setSelectedRegion(null); setOriginal(true) }}>↩ {t('editor.original')}</button>
       </div>
-      {audition && <button className="toolbar-btn" onClick={() => useAgentTrialStore.getState().clearAudition()}>{t('editor.agent.backToClip')}</button>}
+      {audition && <button className="toolbar-btn" onClick={() => { useAgentTrialStore.getState().clearAudition(); useEventStore.getState().clearPreview() }}>{t('editor.agent.backToClip')}</button>}
       <button className="toolbar-btn editor-extract" onClick={() => void extract()} disabled={!region || locked}>✂ {t('editor.extract')}</button>
       <EditorMenu label={`${t('editor.editMenu')} ▾`} disabled={!s.clip || locked}>
         <EditorMenuItem onSelect={s.undo} disabled={original || !s.undoStack.length}>{t('editor.undo')} <kbd>Ctrl+Z</kbd></EditorMenuItem>

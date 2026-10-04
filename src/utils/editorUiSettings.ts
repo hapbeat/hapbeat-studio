@@ -40,12 +40,16 @@ export interface EditorUiSettings {
   clipScenes: Record<string, TrialSceneChoice>
   /** Decisions per editor clip id or AI candidate (`<trialId>/<candidateId>`); newest last. */
   eventMarks: Record<string, EventMark[]>
+  /** Events panel: height (px) of the event list above the detail. */
+  eventsListHeight: number
+  /** Events panel: show the "Repetition" section for every event, not only those that fire repeatedly in the recording. */
+  eventsShowAllRepeat: boolean
 }
 
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {},
+  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, eventsShowAllRepeat: false,
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -89,6 +93,8 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     trialScenes: sceneChoices(v.trialScenes),
     clipScenes: sceneChoices(v.clipScenes),
     eventMarks: eventMarks(v.eventMarks),
+    eventsListHeight: clamp(v.eventsListHeight, 80, 1200, d.eventsListHeight),
+    eventsShowAllRepeat: typeof v.eventsShowAllRepeat === 'boolean' ? v.eventsShowAllRepeat : d.eventsShowAllRepeat,
   }
 }
 

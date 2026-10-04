@@ -90,10 +90,11 @@ export function AgentTrialsPanel() {
     <div className="agent-trial-list" aria-label={t('editor.agent.tab')}>
       {trials.length === 0 && rejected.length === 0 && <p className="agent-muted">{t('editor.agent.empty')}</p>}
       {shown.map(r => <button key={r.trial.id} className={`agent-trial-item ${r.trial.id === selectedId ? 'selected' : ''}`} aria-pressed={r.trial.id === selectedId} onClick={() => pickTrial(r)}>
-        <strong>{r.trial.terms.join(' · ')}</strong>
+        {/* A trial for a game event is titled by the event (scene.cues); its words come second. */}
+        <strong>{r.trial.scene ? r.trial.scene.cues.join(' + ') : r.trial.terms.join(' · ')}</strong>
         <span className={`agent-badge ${r.rating ? 'rated' : 'unrated'}`}>{t(r.rating ? 'editor.agent.rated' : 'editor.agent.unrated')}</span>
         {trialTarget(r.trial) === 'sound' && <span className="agent-badge">{t('editor.agent.targetSound')}</span>}
-        <small>{r.trial.id} · {t('editor.agent.candidateCount', { count: r.trial.candidates.length })}</small>
+        <small>{r.trial.scene && `${r.trial.terms.join(' · ')} · `}{r.trial.id} · {t('editor.agent.candidateCount', { count: r.trial.candidates.length })}</small>
       </button>)}
       {rejected.map(r => <div key={`${r.file}\n${r.error}`} className="agent-rejected">
         <strong>{t('editor.agent.rejected', { file: r.file })}</strong>
@@ -195,7 +196,7 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
 
   return <div className="agent-detail">
     <div className="agent-detail-head">
-      <strong>{trial.id}</strong>
+      {trial.scene ? <><strong>{trial.scene.cues.join(' + ')}</strong><small>{trial.terms.join(' · ')} · {trial.id}</small></> : <strong>{trial.id}</strong>}
       <small>{t('editor.agent.received')}: {new Date(trial.receivedAt).toLocaleString()}{trial.agent && ` · ${t('editor.agent.agentName')}: ${[trial.agent.name, trial.agent.model].filter(Boolean).join(' / ')}`}</small>
       {trial.parentTrial && <small>{t('editor.agent.parent')}: {known.some(r => r.trial.id === trial.parentTrial)
         ? <button className="agent-link" onClick={() => onSelectTrial(trial.parentTrial!)}>{trial.parentTrial}</button> : trial.parentTrial}</small>}
@@ -209,7 +210,6 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
     </dl>
     {kind === 'sequence' && <p className="agent-muted">{t('editor.agent.sequenceNote')}</p>}
     {target === 'sound' && <p className="agent-muted">{t('editor.agent.soundTrialNote')}</p>}
-    {event && <p className="agent-muted">{t('editor.agent.forEvent', { event })}</p>}
     {soundFirst && <p className="events-hint">{t('events.soundFirst')}</p>}
     <div className="agent-notice" role="status">{notice}</div>
     <div className="agent-candidates">

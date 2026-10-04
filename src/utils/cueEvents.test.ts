@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  addEventMark, addOwnRoute, addVariant, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, defaultClipName, defaultSoundName,
+  addEventMark, addPositionRoute, addVariant, eventFireCounts, hasRepeatSettings, simultaneousGroups, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, defaultClipName, defaultSoundName,
   effectiveEvent, eventSceneCues, jitterGain, listEvents, MaterialPicker, matchesName, materialUsers, needsRouteForm, overwriteUsers,
   parseEventKey, removeVariant, resolveEventName, setOverride, setRouteClips, setSfxSounds, setVariation, trialEvent, trialsForEvent,
 } from './cueEvents'
@@ -164,8 +164,11 @@ describe('events panel edits', () => {
     expect(() => addVariant(t, 'grab', 'Reach')).toThrow(/must match/)
     t = setOverride(t, { cue: 'grab', variant: 'reach' }, 'haptics', true)
     expect(t.cues.grab.variants!.reach.haptics).toEqual([])
-    t = addOwnRoute(t, sampleLib(), { cue: 'grab', variant: 'reach' })!
+    t = addPositionRoute(t, sampleLib(), { cue: 'grab', variant: 'reach' })!
     expect(t.cues.grab.variants!.reach.haptics).toEqual([{ clip: 'click', at: 'hand', gain: 1 }])
+    // "+ add position": same clip and gain, next unused position.
+    t = addPositionRoute(t, sampleLib(), { cue: 'grab', variant: 'reach' })!
+    expect(t.cues.grab.variants!.reach.haptics![1]).toEqual({ clip: 'click', at: 'both', gain: 1 })
     expect(t.cues.grab.haptics).toEqual([])
     t = setOverride(t, { cue: 'grab', variant: 'reach' }, 'haptics', false)
     expect(t.cues.grab.variants!.reach).toEqual({})
@@ -218,5 +221,24 @@ describe('playback picks and links', () => {
     const mark = { project: 'mill', event: 'button', target: 'haptic' as const }
     const marks = addEventMark(addEventMark({}, 'c1', mark), 'c1', { ...mark, target: 'sound' })
     expect(addEventMark(marks, 'c1', mark).c1.map(m => m.target)).toEqual(['sound', 'haptic'])
+  })
+})
+
+describe('recording: repetition and simultaneous groups', () => {
+  it('counts firings per event and groups cues of the same moment', () => {
+    const t = v2Table()
+    const events = [{ name: 'button' }, { name: 'button:soft' }, { name: 'button' }, { name: 'button:loud' }, { name: 'nope' }]
+    expect(eventFireCounts(t, events)).toEqual({ button: 3, 'button:soft': 1 })
+    const moments = [{ names: ['button', 'grab'] }, { names: ['detent', 'grab'] }, { names: ['feed_loop'] }, { names: ['button:soft', 'nope'] }]
+    // detent is a tick: left out; grab joins button.
+    expect(simultaneousGroups(t, moments, ['detent'])).toEqual([['button', 'grab']])
+    expect(simultaneousGroups(t, moments, [])).toEqual([['button', 'grab', 'detent']])
+  })
+
+  it('knows when an event already has repetition settings', () => {
+    const t = v2Table()
+    expect(hasRepeatSettings(effectiveEvent(t, { cue: 'button', variant: null })!)).toBe(true) // variation
+    expect(hasRepeatSettings(effectiveEvent(t, { cue: 'detent', variant: null })!)).toBe(false)
+    expect(hasRepeatSettings(effectiveEvent(t, { cue: 'button', variant: 'soft' })!)).toBe(true) // clips list
   })
 })

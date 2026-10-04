@@ -80,8 +80,8 @@ function DecideForm({ request }: { request: DecideRequest }) {
   let body: JSX.Element
   let canSubmit = false, exists = false
   if (result) body = <DecidedNotice result={result} />
-  else if (!table || !lib) body = <p>{t('events.decide.noProject')}</p>
-  else if (!events.length) body = <p>{t('events.decide.noEvents')}</p>
+  else if (!table || !lib) body = <p className="recipe-dialog-note">{t('events.decide.noProject')}</p>
+  else if (!events.length) body = <p className="recipe-dialog-note">{t('events.decide.noEvents')}</p>
   else {
     const pattern = target === 'haptic' ? lib.clip_name : lib.sound_name
     const nameOk = matchesName(name, pattern) && !(target === 'sound' && lib.loop_sounds.includes(name))
@@ -91,8 +91,8 @@ function DecideForm({ request }: { request: DecideRequest }) {
     const soundFirst = target === 'haptic' && valid && !isLoopCue(lib, ref.cue) && !effectiveEvent(table, ref)?.sfx
     const loopMismatch = target === 'haptic' && !!table.clips[name] && table.clips[name].loop !== isLoopCue(lib, ref.cue)
     canSubmit = valid && nameOk && !loopMismatch && !dirty && !busy
-    body = <div className="events-decide-form">
-      <p className="agent-muted">{t('events.decide.source', { source: sourceLabel })}</p>
+    body = <>
+      <p className="recipe-dialog-note">{t('events.decide.source', { source: sourceLabel })}</p>
       <label className="recipe-dialog-field">{t('events.decide.event')}
         <select value={event} onChange={e => { setEvent(e.target.value); setError(null) }}>
           {events.map(k => <option key={k} value={k}>{k}</option>)}
@@ -114,11 +114,11 @@ function DecideForm({ request }: { request: DecideRequest }) {
           <input type="number" min={0} max={2} step={0.05} value={gain} onChange={e => { const x = parseFloat(e.target.value); if (Number.isFinite(x)) setGain(Math.max(0, Math.min(2, x))) }} />
         </label>
       </div>}
-      {!routeForm && target === 'haptic' && <p className="agent-muted">{t('events.decide.keepsRoute')}</p>}
-      <p className="agent-muted">{t(target === 'haptic' ? 'events.decide.writesHaptic' : 'events.decide.writesSound', { dir: target === 'haptic' ? lib.paths.clips : lib.paths.sounds, table: lib.paths.cues })}</p>
+      {!routeForm && target === 'haptic' && <p className="recipe-dialog-note">{t('events.decide.keepsRoute')}</p>}
+      <p className="recipe-dialog-note">{t(target === 'haptic' ? 'events.decide.writesHaptic' : 'events.decide.writesSound', { dir: target === 'haptic' ? lib.paths.clips : lib.paths.sounds, table: lib.paths.cues })}</p>
       {dirty && <p className="events-warn">{t('events.decide.dirty')}</p>}
       {error && <p className="events-warn" role="alert">{error}</p>}
-    </div>
+    </>
   }
   const submit = async () => {
     if (!canSubmit) return
@@ -132,9 +132,9 @@ function DecideForm({ request }: { request: DecideRequest }) {
   }
   return createPortal(
     <div className="confirm-dialog-backdrop" onClick={() => { if (!busy) close() }}>
-      <div className="confirm-dialog events-decide-dialog" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
+      <div className="confirm-dialog recipe-dialog events-decide-dialog" onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
         <div className="confirm-dialog-title">{title}</div>
-        <div className="confirm-dialog-body">{body}</div>
+        <div className="confirm-dialog-body recipe-dialog-body">{body}</div>
         <div className="confirm-dialog-actions">
           <button type="button" className="form-button-secondary" disabled={busy} onClick={close}>{t(result ? 'common.close' : 'common.cancel')}</button>
           {!result && <button type="button" className="form-button" disabled={!canSubmit} onClick={() => void submit()}>{t(busy ? 'events.decide.writing' : exists ? 'events.decide.overwriteSubmit' : 'events.decide.submit')}</button>}

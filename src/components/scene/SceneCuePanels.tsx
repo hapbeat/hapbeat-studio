@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { useI18n, type MessageId } from '@/i18n/I18nProvider'
+import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { familyColor, momentCues, type SceneLib } from '@/utils/sceneData'
@@ -8,16 +8,16 @@ import { effectiveEvent, resolveEventName } from '@/utils/cueEvents'
 import { useEventStore } from '@/stores/eventStore'
 import { useScene } from './sceneContext'
 
-/** Body position labels (lib.at vocabulary, contracts device-addressing); unknown ones show as is. */
-const AT_LABELS: Record<string, MessageId> = {
-  hand: 'scene.at.hand', both: 'scene.at.both', pos_neck: 'scene.at.pos_neck', pos_chest: 'scene.at.pos_chest', pos_abd: 'scene.at.pos_abd',
-  pos_l_arm: 'scene.at.pos_l_arm', pos_r_arm: 'scene.at.pos_r_arm', pos_l_wrist: 'scene.at.pos_l_wrist', pos_r_wrist: 'scene.at.pos_r_wrist',
-  pos_hip: 'scene.at.pos_hip', pos_l_thigh: 'scene.at.pos_l_thigh', pos_r_thigh: 'scene.at.pos_r_thigh', pos_l_ankle: 'scene.at.pos_l_ankle', pos_r_ankle: 'scene.at.pos_r_ankle',
-}
+/**
+ * Body position labels from the device address (lib.at, contracts device-addressing):
+ * `pos_neck` → neck, `pos_l_wrist` → l_wrist; `hand` = the acting hand's wrist, `both` = both wrists.
+ */
 export function useAtLabel() {
   const { t } = useI18n()
-  return (at: string) => AT_LABELS[at] ? t(AT_LABELS[at]) : at
+  return (at: string) => at === 'hand' ? t('scene.at.hand') : at === 'both' ? t('scene.at.both') : at.replace(/^pos_/, '')
 }
+/** Gain / volume as shown next to its name ("gain 1.0", "gain 0.35"). */
+export const formatGain = (x: number) => Number.isInteger(x * 10) ? x.toFixed(1) : String(Math.round(x * 1000) / 1000)
 
 /** Number input committed like the viewer's: on the native change event (spinner, Enter, blur), not on every keystroke. */
 export function NumberField({ value, min, max, step, disabled, onCommit, label }: { value: number | ''; min: number; max: number; step: number; disabled?: boolean; onCommit: (value: number) => void; label: string }) {

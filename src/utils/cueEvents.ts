@@ -271,9 +271,45 @@ export function addEventMark<M extends { project: string; event: string; target:
   return { ...marks, [subject]: [...list, mark].slice(-limit) }
 }
 
-/** Adds a route to what `ref` writes: the first clip that fits the cue, at the default position, gain 1 (null when the table has no fitting clip). */
-export function addOwnRoute(table: CueTable, lib: SceneLib, ref: EventRef): CueTable | null {
-  const clip = Object.keys(table.clips).find(c => table.clips[c].loop === isLoopCue(lib, ref.cue))
-  if (!clip) return null
-  return edited(table, ref, entry => { entry.haptics = [...(entry.haptics ?? []), { clip, at: defaultAt(lib, ref.cue), gain: 1.0 }] })
+// ── The recording: how often events fire, which fire together ──
+
+/** Firings per event key in the recording (`cue:variant` names resolved like the game; unknown names skipped). */
+export function eventFireCounts(table: CueTable, events: readonly { name: string }[]): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const ev of events) { const r = resolveEventName(table, ev.name); if (r) { const k = eventKey(r.ref); out[k] = (out[k] ?? 0) + 1 } }
+  return out
+}
+
+/**
+ * Cues the recording plays at the same moment (the cue names of one recorded
+ * clip, i.e. within MOMENT_S, e.g. roar + roar_impact), joined transitively;
+ * ticks and unknown names left out, variants counted as their cue. Groups of
+ * two or more, each in table order; display only (the table is not changed).
+ */
+export function simultaneousGroups(table: CueTable, moments: readonly { names: readonly string[] }[], ticks: readonly string[]): string[][] {
+  const order = Object.keys(table.cues), parent = new Map<string, string>()
+  const find = (x: string): string => { const p = parent.get(x) ?? x; if (p === x) return x; const r = find(p); parent.set(x, r); return r }
+  for (const m of moments) {
+    const cues = [...new Set(m.names.map(n => resolveEventName(table, n)?.ref.cue).filter((c): c is string => !!c && !ticks.includes(c)))]
+    for (let i = 1; i < cues.length; i++) { const a = find(cues[0]), b = find(cues[i]); if (a !== b) parent.set(b, a) }
+  }
+  const groups = new Map<string, string[]>()
+  for (const cue of order) { const r = find(cue); groups.set(r, [...(groups.get(r) ?? []), cue]) }
+  return [...groups.values()].filter(g => g.length > 1)
+}
+
+/** True when the event writes anything of the "Repetition" section (several clips / sounds, or a variation). */
+export function hasRepeatSettings(e: EffectiveEvent): boolean {
+  return sfxSounds(e.sfx).length > 1 || e.haptics.some(r => routeClips(r).length > 1) || (!!e.variation && Object.keys(e.variation).length > 0)
+}
+
+/** "＋ add position": a new route of what `ref` writes with the first route's clip at the next unused position (null when every position is used or no clip fits). */
+export function addPositionRoute(table: CueTable, lib: SceneLib, ref: EventRef): CueTable | null {
+  const e = effectiveEvent(table, ref)
+  if (!e) return null
+  const used = new Set(e.haptics.map(r => r.at))
+  const at = positionsForCue(lib, ref.cue).find(a => !used.has(a))
+  const clip = e.haptics.length ? routeClips(e.haptics[0])[0] : Object.keys(table.clips).find(c => table.clips[c].loop === isLoopCue(lib, ref.cue))
+  if (!at || !clip) return null
+  return edited(table, ref, (entry, effective) => { entry.haptics = [...effective.haptics, { clip, at, gain: e.haptics[0]?.gain ?? 1.0 }] })
 }

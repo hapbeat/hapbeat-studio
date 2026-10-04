@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FunctionComponent } from 'react'
+import { useEffect, useRef, useState, type FunctionComponent, type ReactNode } from 'react'
 import { DockviewReact, themeDark, type DockviewApi, type DockviewReadyEvent, type IDockviewHeaderActionsProps, type IDockviewPanel, type IDockviewPanelProps } from 'dockview-react'
 import 'dockview-react/dist/styles/dockview.css'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
@@ -23,15 +23,23 @@ type Translate = (id: MessageId, params?: Record<string, string | number>) => st
 /** Same-origin blank page dockview moves popped-out groups into (public/popout.html). */
 export const POPOUT_URL = `${import.meta.env.BASE_URL}popout.html`
 
+/**
+ * Every panel sits in a focusable frame: a click anywhere in it focuses the panel, and the
+ * frame (always reserved, coloured while focused) shows which panel has the keyboard.
+ */
+function PanelFrame({ children }: { children: ReactNode }) {
+  return <div className="editor-dock-panel" tabIndex={-1}>{children}</div>
+}
+
 /** dockview needs stable component references; each panel reads shared editor state from context. */
 const COMPONENTS: Record<EditorPanelId, FunctionComponent<IDockviewPanelProps>> = {
-  clips: () => <ClipsPanel />,
-  events: () => <EventsPanel />,
-  waveform: () => <WaveformPanel />,
-  properties: () => <PropertiesPanel />,
-  effects: () => <EffectsDockPanel />,
-  agent: () => <AgentTrialsPanel />,
-  scene: () => <EditorScenePanel />,
+  clips: () => <PanelFrame><ClipsPanel /></PanelFrame>,
+  events: () => <PanelFrame><EventsPanel /></PanelFrame>,
+  waveform: () => <PanelFrame><WaveformPanel /></PanelFrame>,
+  properties: () => <PanelFrame><PropertiesPanel /></PanelFrame>,
+  effects: () => <PanelFrame><EffectsDockPanel /></PanelFrame>,
+  agent: () => <PanelFrame><AgentTrialsPanel /></PanelFrame>,
+  scene: () => <PanelFrame><EditorScenePanel /></PanelFrame>,
 }
 
 /** Where a panel goes when it is (re)opened from the View menu without a saved position. */

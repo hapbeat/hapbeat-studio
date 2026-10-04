@@ -12,8 +12,8 @@ function read(): EditorUiSettings {
   try { return parseStoredUiSettings(localStorage.getItem(UI_SETTINGS_STORAGE_KEY)) ?? { ...DEFAULT_UI_SETTINGS } } catch { return { ...DEFAULT_UI_SETTINGS } }
 }
 export function editorUiSettings(state: EditorUiSettings): EditorUiSettings {
-  const { loop, loopDelay, height, muted, sendHaptics, clipThumbnails, clipGroupBy, collapsedGroups, projectNames, dockLayout, sceneLeadSec, trialScenes, clipScenes, eventMarks } = state
-  return { loop, loopDelay, height, muted, sendHaptics, clipThumbnails, clipGroupBy, collapsedGroups, projectNames, dockLayout, sceneLeadSec, trialScenes, clipScenes, eventMarks }
+  const { loop, loopDelay, height, muted, sendHaptics, clipThumbnails, clipGroupBy, collapsedGroups, projectNames, dockLayout, sceneLeadSec, trialScenes, clipScenes, eventMarks, eventsListHeight, eventsShowAllRepeat } = state
+  return { loop, loopDelay, height, muted, sendHaptics, clipThumbnails, clipGroupBy, collapsedGroups, projectNames, dockLayout, sceneLeadSec, trialScenes, clipScenes, eventMarks, eventsListHeight, eventsShowAllRepeat }
 }
 function store(settings: EditorUiSettings) {
   try { localStorage.setItem(UI_SETTINGS_STORAGE_KEY, JSON.stringify(settings)) } catch { /* UI preferences must not prevent editing. */ }

@@ -1,5 +1,7 @@
 /* Events panel (cue table events of the linked game project) and the "decide" dialog. */
-.events-panel { display: flex; flex-direction: column; gap: 8px; overflow: auto; padding: 8px; font-size: 13px; }
+.events-panel { display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: 0; overflow: hidden; padding: 8px; box-sizing: border-box; font-size: 13px; }
+.events-panel > * { flex-shrink: 0; }
+.events-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .events-project { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .events-project label { display: flex; align-items: center; gap: 6px; }
 .events-project select { min-width: 160px; }
@@ -8,11 +10,23 @@
 .events-decided p { margin: 0 0 4px 0; }
 .events-command { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .events-command code { padding: 2px 6px; background: var(--bg-primary); border-radius: 3px; word-break: break-all; }
-.events-list { display: flex; flex-direction: column; gap: 2px; max-height: 40%; min-height: 80px; overflow: auto; border: 1px solid var(--border); border-radius: 4px; padding: 2px; }
+.events-list { display: flex; flex-direction: column; gap: 2px; overflow: auto; border: 1px solid var(--border); border-radius: 4px; padding: 2px; box-sizing: border-box; }
+/* Drag handle between the list and the detail (height saved in the editor UI settings). */
+.events-split { height: 6px; margin: -2px 0; cursor: row-resize; border-radius: 3px; background: transparent; touch-action: none; }
+.events-split::after { content: ''; display: block; width: 40px; height: 2px; margin: 2px auto; border-radius: 1px; background: var(--border-light); }
+.events-split:hover::after, .events-split:focus-visible::after { background: var(--accent-light); }
+.events-split:focus-visible { outline: none; }
+.events-detail-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
+/* Simultaneous group (recording, display only): a framed block with a heading. Variants: indented, dashed rule, "variant" tag. */
+.events-group { border: 1px solid var(--border-light); border-left: 3px solid #7aa2e3; border-radius: 4px; padding: 2px; margin: 2px 0; }
+.events-group-head { display: flex; align-items: center; gap: 6px; padding: 1px 6px; font-size: 12px; color: var(--text-secondary); }
+.events-tag { padding: 0 5px; border-radius: 8px; font-size: 10px; font-weight: normal; border: 1px solid var(--border-light); }
+.events-tag.simultaneous { border-color: #7aa2e3; color: #a9c3f0; }
+.events-tag.variant { margin-left: 6px; border-style: dashed; color: var(--text-secondary); }
 .events-row { display: grid; grid-template-columns: 1fr auto; gap: 0 6px; width: 100%; padding: 3px 6px; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 3px; color: var(--text-primary); cursor: pointer; }
 .events-row:hover { background: var(--bg-tertiary, rgba(255, 255, 255, 0.04)); }
 .events-row.selected { border-color: var(--accent); background: rgba(255, 255, 255, 0.06); }
-.events-row.nested { padding-left: 20px; }
+.events-row.variant { margin-left: 14px; width: calc(100% - 14px); border-left: 1px dashed var(--border-light); border-radius: 0 3px 3px 0; }
 .events-row-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .events-row-name small { margin-left: 6px; font-weight: normal; color: var(--text-muted); }
 .events-row-badges { display: flex; gap: 4px; }
@@ -24,13 +38,23 @@
 .events-detail { display: flex; flex-direction: column; gap: 6px; }
 .events-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .events-assign { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.events-assign-clip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+/* One material row (sound, or clip × position × gain); a click opens it in the waveform panel. */
+.events-material { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
+.events-material:hover { border-color: var(--border-light); }
+.events-material.active { border-color: #67e8f9; }
+.events-field { display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); }
+.events-add { align-self: flex-start; }
+.events-collapse { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; width: 100%; padding: 0; text-align: left; background: transparent; border: none; color: var(--text-primary); cursor: pointer; }
+.events-repeat-meta { margin-left: auto; color: var(--text-muted); }
+.events-repeat { display: flex; flex-direction: column; gap: 4px; padding-left: 14px; }
 .events-sec { border-top: 1px solid var(--border); padding-top: 6px; display: flex; flex-direction: column; gap: 4px; }
 .events-sec h4 { margin: 0; font-size: 13px; }
 .events-sec h5 { margin: 4px 0 0; font-size: 12px; color: var(--text-secondary); }
 .events-override { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .events-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-.events-chip { display: inline-flex; align-items: center; gap: 2px; padding: 0 4px; border: 1px solid var(--border-light); border-radius: 10px; }
-.events-route { display: flex; flex-direction: column; gap: 3px; padding: 3px 0; }
+.events-chip { display: inline-flex; align-items: center; gap: 2px; padding: 0 6px; border: 1px solid var(--border-light); border-radius: 10px; cursor: pointer; }
+.events-chip.active { border-color: #67e8f9; }
 .events-row-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .events-row-edit label { display: inline-flex; align-items: center; gap: 4px; }
 .events-variation { display: flex; flex-wrap: wrap; gap: 6px 12px; }
@@ -41,10 +65,14 @@
 .events-trials { margin: 0; padding-left: 16px; }
 .events-hint { margin: 0; color: #e3c27a; font-size: 12px; }
 .events-warn { margin: 0; color: #f08a7a; font-size: 12px; }
-.events-decide-dialog { max-width: 480px; }
-.events-decide-form { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
-.events-decide-form .recipe-dialog-field { display: flex; flex-direction: column; gap: 3px; }
+.events-decide-dialog { max-width: 520px; }
+.events-decide-dialog input, .events-decide-dialog select { background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 13px; box-sizing: border-box; }
+.events-decide-dialog .recipe-dialog-field input { width: 100%; }
+.events-decide-dialog .recipe-dialog-field select { max-width: 100%; }
+.events-decide-dialog .events-warn, .events-decide-dialog .events-hint { line-height: 1.45; overflow-wrap: anywhere; }
 .events-decide-route { display: flex; gap: 12px; }
+.events-decide-route .recipe-dialog-field { flex: 1; }
+.events-decide-dialog .events-decided { font-size: 13px; }
 /* Clip list: decided-for badges. */
 .editor-event-badges { display: flex; flex-wrap: wrap; gap: 3px; }
 .editor-event-badge { padding: 0 5px; border-radius: 4px; font-size: 10px; font-weight: normal; border: 1px solid #4f9e7a; color: #8dd5b1; }

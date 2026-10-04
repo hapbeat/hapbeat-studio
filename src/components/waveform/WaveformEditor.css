@@ -975,6 +975,8 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 /* Start marker of a plain click (stays after playing; the range selection is cyan) */
 
 .editor-start-marker { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px solid #fbbf24; pointer-events: none; z-index: 4; }
-/* Focus frame: which panel Space plays from. Always reserved (no layout shift), coloured on focus — same as the Scene video panel. */
-.editor-waveform-panel { box-shadow: inset 0 0 0 2px transparent; }
-.editor-waveform-panel:focus-within { box-shadow: inset 0 0 0 2px var(--accent-light); }
+/* Focus frame of every editor dock panel (EditorDockLayout PanelFrame): always reserved (no layout shift), coloured while the panel has focus. Drawn above the panel's own backgrounds. */
+.editor-dock-panel { position: relative; height: 100%; min-height: 0; box-sizing: border-box; overflow: hidden; }
+.editor-dock-panel:focus { outline: none; }
+.editor-dock-panel::after { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 20; box-shadow: inset 0 0 0 2px transparent; }
+.editor-dock-panel:focus-within::after { box-shadow: inset 0 0 0 2px var(--accent-light); }

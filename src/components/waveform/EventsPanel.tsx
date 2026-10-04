@@ -1,68 +1,120 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useEventStore, type DecideTarget } from '@/stores/eventStore'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useWaveformStore } from '@/stores/waveformStore'
+import { useEditorSettings } from '@/stores/editorSettings'
 import { sceneProjectNames } from '@/utils/sceneRegistry'
 import { useSceneVideoTarget } from '@/utils/editorSceneSync'
-import { RATE } from '@/utils/sceneHaptics'
 import { clipsForCue, isLoopCue, PICK_MODES, positionsForCue, routeClips, sfxSounds, VARIANT_NAME, type CueTable, type CueVariation, type VariationNumberKey } from '@/utils/sceneCueTable'
 import type { SceneLib } from '@/utils/sceneData'
 import {
-  addOwnRoute, addVariant, effectiveEvent, eventKey, listEvents, parseEventKey, removeOwnRoute, removeVariant, setOverride, setOwnSfxVolume,
-  setRouteClips, setSfxSounds, setVariation, trialsForEvent, updateOwnRoute, type EffectiveEvent, type EventRef, type EventRow,
+  addPositionRoute, addVariant, effectiveEvent, eventFireCounts, eventKey, hasRepeatSettings, listEvents, parseEventKey, removeOwnRoute, removeVariant,
+  setOverride, setOwnSfxVolume, setRouteClips, setSfxSounds, setVariation, simultaneousGroups, trialsForEvent, updateOwnRoute,
+  type EffectiveEvent, type EventRef, type EventRow,
 } from '@/utils/cueEvents'
-import { NumberField, useAtLabel } from '@/components/scene/SceneCuePanels'
+import { NumberField, formatGain, useAtLabel } from '@/components/scene/SceneCuePanels'
 import { useEditor } from './editorContext'
 import { DecidedNotice } from './DecideDialog'
-import { playPreview, playSamples } from './eventAudio'
+import { EditorMenu, EditorMenuItem } from './EditorMenu'
+import { openEventHaptic, openEventSound } from './eventAudio'
 import './EventsPanel.css'
 
 const LAST_PROJECT_KEY = 'hapbeat-events-project'
 const NEW_FOLDER = ' new'
+/** Select value of a multi-material route / sound (not a valid name). */
+const MULTI = ' multi'
+const LIST_MIN = 80, LIST_MAX = 1200
 const readLast = () => { try { return localStorage.getItem(LAST_PROJECT_KEY) } catch { return null } }
 const writeLast = (name: string) => { try { localStorage.setItem(LAST_PROJECT_KEY, name) } catch { /* preference only */ } }
+/** Row clicks open the material in the waveform panel; clicks on the row's own controls do not. */
+const onRowClick = (open: () => void) => (e: MouseEvent) => { if (!(e.target as HTMLElement).closest('button, input, select, textarea, label')) open() }
 
 /**
  * "Events": the events (cues and their variants) of the game project open in
  * the Scene tab (same store, picked through the project registry), whether each
  * has its sound / haptic decided, and per event: its sound and haptic routes
- * (PC preview), variants and variation, the AI trials made for it, and
- * "decide" with the editor's clip. Edits here mark the table unsaved (Save /
- * Revert at the top, same as the Scene tab); "decide" writes at once.
+ * (a click opens the WAV in the waveform panel for the normal playback),
+ * repetition settings, variants, the AI trials made for it, and "assign" of the
+ * selected editor clip. Cues the recording plays at the same moment are grouped
+ * (display only). Edits mark the table unsaved (Save / Revert at the top, same
+ * as the Scene tab); "decide" writes at once.
  */
 export function EventsPanel() {
   const { t } = useI18n()
   const table = useSceneStore(s => s.table)
   const lib = useSceneStore(s => s.lib)
+  const data = useSceneStore(s => s.data)
   const dirty = useSceneStore(s => s.dirty)
   const busy = useSceneStore(s => s.busy)
   const result = useEventStore(s => s.result)
   const selected = useEventStore(s => s.selected)
+  const showAllRepeat = useEditorSettings(s => s.eventsShowAllRepeat)
   const rows = useMemo(() => table && lib ? listEvents(table, lib) : [], [table, lib])
+  const groups = useMemo(() => table && lib && data ? simultaneousGroups(table, data.clips, lib.ticks) : [], [table, lib, data])
+  const counts = useMemo(() => table && data ? eventFireCounts(table, data.full.events) : {}, [table, data])
   const select = (key: string) => {
     useEventStore.getState().select(key)
     // The Scene video panel (window or docked, never opened here) shows this event's moment.
     useSceneVideoTarget.getState().setTarget({ kind: 'event', key })
   }
   const effective = table && selected ? effectiveEvent(table, parseEventKey(selected)) : null
+  const block = (r: EventRow) => <div key={r.key}>
+    <EventRowButton row={r} selected={selected === r.key} onSelect={select} />
+    {r.variants.map(v => <EventRowButton key={v.key} row={v} selected={selected === v.key} onSelect={select} />)}
+  </div>
+  const listItems: ReactNode[] = [], done = new Set<string>()
+  for (const r of rows) {
+    if (done.has(r.key)) continue
+    const group = groups.find(g => g.includes(r.key))
+    if (!group) { listItems.push(block(r)); continue }
+    group.forEach(k => done.add(k))
+    listItems.push(<div key={`group:${group.join('+')}`} className="events-group" title={t('events.simultaneousHint')}>
+      <div className="events-group-head">{group.join(' ＋ ')}<span className="events-tag simultaneous">{t('events.simultaneous')}</span></div>
+      {group.map(k => rows.find(x => x.key === k)).filter((x): x is EventRow => !!x).map(block)}
+    </div>)
+  }
   return <div className="editor-panel events-panel">
-    <ProjectPicker />
+    <div className="events-top">
+      <ProjectPicker />
+      <EditorMenu label="⋯" title={t('events.menu')}>
+        <EditorMenuItem checked={showAllRepeat} onSelect={() => useEditorSettings.getState().update({ eventsShowAllRepeat: !showAllRepeat })}>{t('events.showAllRepeat')}</EditorMenuItem>
+      </EditorMenu>
+    </div>
     {dirty && <div className="events-dirty" role="status">{t('events.unsaved')}
       <button type="button" className="toolbar-btn" disabled={busy} onClick={() => void useSceneStore.getState().save()}>{t('events.save')}</button>
       <button type="button" className="toolbar-btn" disabled={busy} onClick={() => void useSceneStore.getState().revert()}>{t('events.revert')}</button></div>}
     {result && <DecidedNotice result={result} onClose={() => useEventStore.getState().setResult(null)} />}
     {!table || !lib ? <p className="agent-muted">{t('events.noProject')}</p> : <>
-      <div className="events-list" role="listbox" aria-label={t('editor.panel.events')}>
-        {rows.map(r => <div key={r.key}>
-          <EventRowButton row={r} selected={selected === r.key} onSelect={select} />
-          {r.variants.map(v => <EventRowButton key={v.key} row={v} selected={selected === v.key} onSelect={select} nested />)}
-        </div>)}
+      <ResizableList label={t('editor.panel.events')}>{listItems}</ResizableList>
+      <div className="events-detail-scroll">
+        {effective ? <EventDetail key={selected!} table={table} lib={lib} e={effective} onSelect={select} fireCount={counts[selected!] ?? 0} showAllRepeat={showAllRepeat} />
+          : <p className="agent-muted">{t('events.selectHint')}</p>}
       </div>
-      {effective ? <EventDetail key={selected!} table={table} lib={lib} e={effective} onSelect={select} /> : <p className="agent-muted">{t('events.selectHint')}</p>}
     </>}
   </div>
+}
+
+/** The event list with a drag handle below it; the height is an editor UI setting (localStorage, folder copy, export). */
+function ResizableList({ label, children }: { label: string; children: ReactNode }) {
+  const { t } = useI18n()
+  const saved = useEditorSettings(s => s.eventsListHeight)
+  const [dragging, setDragging] = useState<number | null>(null)
+  const start = useRef<{ y: number; h: number } | null>(null)
+  const height = dragging ?? saved
+  const clamp = (h: number) => Math.max(LIST_MIN, Math.min(LIST_MAX, Math.round(h)))
+  const commit = (h: number) => { useEditorSettings.getState().update({ eventsListHeight: clamp(h) }); setDragging(null) }
+  return <>
+    <div className="events-list" role="listbox" aria-label={label} style={{ height }}>{children}</div>
+    <div className="events-split" role="separator" aria-orientation="horizontal" aria-label={t('events.resize')} title={t('events.resize')} tabIndex={0}
+      aria-valuemin={LIST_MIN} aria-valuemax={LIST_MAX} aria-valuenow={height}
+      onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); start.current = { y: e.clientY, h: height } }}
+      onPointerMove={e => { if (start.current) setDragging(clamp(start.current.h + e.clientY - start.current.y)) }}
+      onPointerUp={e => { if (!start.current) return; const h = start.current.h + e.clientY - start.current.y; start.current = null; commit(h) }}
+      onPointerCancel={() => { start.current = null; setDragging(null) }}
+      onKeyDown={e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); commit(height + (e.key === 'ArrowDown' ? 20 : -20)) } }} />
+  </>
 }
 
 /** Project picker over the registry (game projects linked once in the Scene tab / editor); remembers the last one. */
@@ -102,23 +154,27 @@ function ProjectPicker() {
   </div>
 }
 
-function EventRowButton({ row, selected, nested, onSelect }: { row: EventRow; selected: boolean; nested?: boolean; onSelect: (key: string) => void }) {
+function EventRowButton({ row, selected, onSelect }: { row: EventRow; selected: boolean; onSelect: (key: string) => void }) {
   const { t } = useI18n()
+  const variant = row.ref.variant !== null
   const badge = (label: string, state: 'set' | 'unset' | 'na') => <span className={`events-badge ${state}`}>{label} {state === 'set' ? '✓' : state === 'unset' ? t('events.notYet') : '—'}</span>
-  return <button type="button" role="option" aria-selected={selected} className={`events-row ${selected ? 'selected' : ''} ${nested ? 'nested' : ''}`} onClick={() => onSelect(row.key)} title={row.description ?? ''}>
-    <span className="events-row-name">{nested ? `:${row.ref.variant}` : row.key}{row.loop && <small>{t('events.loop')}</small>}</span>
+  return <button type="button" role="option" aria-selected={selected} className={`events-row ${selected ? 'selected' : ''} ${variant ? 'variant' : ''}`} onClick={() => onSelect(row.key)} title={row.description ?? ''}>
+    <span className="events-row-name">{variant ? <>{`:${row.ref.variant}`}<span className="events-tag variant">{t('events.variantTag')}</span></> : row.key}{row.loop && <small>{t('events.loop')}</small>}</span>
     <span className="events-row-badges">{badge(t('events.badge.sound'), row.sound)}{badge(t('events.badge.haptic'), row.haptic)}</span>
     {row.description && <small className="events-row-desc">{row.description}</small>}
   </button>
 }
 
-function EventDetail({ table, lib, e, onSelect }: { table: CueTable; lib: SceneLib; e: EffectiveEvent; onSelect: (key: string) => void }) {
+type Edit = (change: (tb: CueTable) => CueTable | null) => boolean
+
+function EventDetail({ table, lib, e, onSelect, fireCount, showAllRepeat }: { table: CueTable; lib: SceneLib; e: EffectiveEvent; onSelect: (key: string) => void; fireCount: number; showAllRepeat: boolean }) {
   const { t } = useI18n()
   const { openSceneVideo } = useEditor()
   const key = eventKey(e.ref), loop = isLoopCue(lib, e.ref.cue)
   const clip = useWaveformStore(s => s.clip)
-  const decide = (target: DecideTarget) => { if (clip) useEventStore.getState().requestDecide({ target, source: { kind: 'clip', clipId: clip.id }, event: key }) }
-  const edit = (change: (tb: CueTable) => CueTable | null) => useSceneStore.getState().edit(change)
+  const assign = (target: DecideTarget) => { if (clip) useEventStore.getState().requestDecide({ target, source: { kind: 'clip', clipId: clip.id }, event: key }) }
+  const edit: Edit = change => useSceneStore.getState().edit(change)
+  const repeat = showAllRepeat || fireCount >= 2 || hasRepeatSettings(e)
   return <div className="events-detail">
     <div className="events-detail-head">
       <strong>{key}</strong>
@@ -126,19 +182,17 @@ function EventDetail({ table, lib, e, onSelect }: { table: CueTable; lib: SceneL
     </div>
     {e.description && <p className="agent-muted">{e.description}</p>}
     <div className="events-assign">
-      <span>{t('events.assignClip', { name: clip?.name ?? '—' })}</span>
-      <button type="button" className="toolbar-btn" disabled={!clip || loop} onClick={() => decide('sound')}>{t('events.decideSound')}</button>
-      <button type="button" className="toolbar-btn" disabled={!clip} onClick={() => decide('haptic')}>{t('events.decideHaptic')}</button>
+      <span className="events-assign-clip" title={clip?.name ?? ''}>{t('events.selectedClip', { name: clip?.name ?? '—' })}</span>
+      <button type="button" className="toolbar-btn" disabled={!clip || loop} onClick={() => assign('sound')}>{t('events.assignSound')}</button>
+      <button type="button" className="toolbar-btn" disabled={!clip} onClick={() => assign('haptic')}>{t('events.assignHaptic')}</button>
     </div>
     <SoundSection lib={lib} e={e} loop={loop} edit={edit} />
     <HapticSection table={table} lib={lib} e={e} loop={loop} edit={edit} />
-    <VariationSection e={e} loop={loop} edit={edit} />
+    {repeat && <RepeatSection table={table} lib={lib} e={e} loop={loop} edit={edit} fireCount={fireCount} />}
     <VariantsSection table={table} e={e} onSelect={onSelect} edit={edit} />
     <TrialsSection project={lib.project_name} eventKey={key} />
   </div>
 }
-
-type Edit = (change: (tb: CueTable) => CueTable | null) => boolean
 
 /** For a variant: "inherited from the cue" with an override button, or "own" with a button back to inheriting. */
 function OverrideBar({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'haptics' | 'variation'; edit: Edit }) {
@@ -151,70 +205,66 @@ function OverrideBar({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'ha
   </div>
 }
 
+/** The event's sound: one row (a click opens it in the waveform panel; PC playback only). Several sounds are edited under "Repetition". */
 function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent; loop: boolean; edit: Edit }) {
   const { t } = useI18n()
   const soundFiles = useSceneStore(s => s.soundFiles)
-  const buffers = useSceneStore(s => s.sfx)
-  const sounds = sfxSounds(e.sfx), editable = e.own.sfx
+  const previewId = useEventStore(s => s.preview?.id)
+  const key = eventKey(e.ref), sounds = sfxSounds(e.sfx), editable = e.own.sfx
+  const open = () => { if (e.sfx && sounds[0] && !openEventSound(key, sounds[0], e.sfx.volume)) useWaveformStore.getState().setError(t('events.preview.missing', { name: sounds[0] })) }
   return <section className="events-sec">
     <h4>{t('events.sound')}</h4>
     {loop ? <p className="agent-muted">{t('scene.sound.loopCue')}</p> : <>
       <OverrideBar e={e} field="sfx" edit={edit} />
-      {!sounds.length && <p className="agent-muted">{t('events.soundNone')}</p>}
-      <div className="events-chips">
-        {sounds.map(s => <span key={s} className="events-chip">
-          <button type="button" className="scene-icon-btn" title={t('events.playPc')} aria-label={t('events.playPc')} disabled={!buffers[s]} onClick={() => buffers[s] && playPreview(buffers[s], e.sfx?.volume ?? 1)}>▶</button>{s}
-          {editable && <button type="button" className="scene-icon-btn" aria-label={t('events.remove')} title={t('events.remove')} onClick={() => edit(tb => setSfxSounds(tb, e.ref, sounds.filter(x => x !== s)))}>✕</button>}
-        </span>)}
-      </div>
-      {editable && <div className="events-row-edit">
-        <select value="" aria-label={t('events.addSound')} onChange={ev => { const v = ev.target.value; ev.target.blur(); if (v) edit(tb => setSfxSounds(tb, e.ref, [...sounds, v])) }}>
-          <option value="">{t(sounds.length ? 'events.addSoundMulti' : 'events.addSound')}</option>
-          {soundFiles.filter(s => !sounds.includes(s)).map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        {e.sfx && <label>{t('scene.sound.volume')} <NumberField value={e.sfx.volume} min={0} max={2} step={0.05} label={t('scene.sound.volume')} onCommit={x => edit(tb => setOwnSfxVolume(tb, e.ref, x))} /></label>}
+      {!sounds.length && !editable && <p className="agent-muted">{t('events.soundNone')}</p>}
+      {(sounds.length > 0 || editable) && <div className={`events-material ${previewId === `${key}|sound|${sounds[0]}` ? 'active' : ''}`} onClick={onRowClick(open)} title={t('events.openHint')}>
+        {editable ? <select value={sounds.length > 1 ? MULTI : sounds[0] ?? ''} aria-label={t('events.sound')} onChange={ev => { const v = ev.target.value; ev.target.blur(); edit(tb => setSfxSounds(tb, e.ref, v ? [v] : [])) }}>
+          <option value="">{t('events.soundNone')}</option>
+          {sounds.length > 1 && <option value={MULTI} disabled>{t('events.multiSounds', { count: sounds.length })}</option>}
+          {soundFiles.map(s => <option key={s} value={s}>{s}</option>)}
+        </select> : <span>{sounds.length > 1 ? t('events.multiSounds', { count: sounds.length }) : sounds[0]}</span>}
+        {e.sfx && <span className="events-field">{t('scene.sound.volume')} {editable
+          ? <NumberField value={e.sfx.volume} min={0} max={2} step={0.05} label={t('scene.sound.volume')} onCommit={x => edit(tb => setOwnSfxVolume(tb, e.ref, x))} />
+          : formatGain(e.sfx.volume)}</span>}
       </div>}
       <p className="agent-muted">{t('events.soundDir', { dir: lib.paths.sounds })}</p>
     </>}
   </section>
 }
 
+/** Haptic output: one row = one clip × body position × gain; "＋ add position" plays the event on another position at the same time. */
 function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: SceneLib; e: EffectiveEvent; loop: boolean; edit: Edit }) {
   const { t } = useI18n()
   const atLabel = useAtLabel()
-  const pcm = useSceneStore(s => s.pcm)
-  const editable = e.own.haptics
+  const previewId = useEventStore(s => s.preview?.id)
+  const key = eventKey(e.ref), editable = e.own.haptics
   const fitting = clipsForCue(table, lib, e.ref.cue)
-  const play = (clip: string, gain: number) => { const p = pcm[clip]; if (p) playSamples(p, RATE, Math.min(1, (table.clips[clip]?.intensity ?? 1) * gain)) }
+  const open = (clip: string | undefined, gain: number, at: string) => { if (clip && !openEventHaptic(key, clip, gain, at)) useWaveformStore.getState().setError(t('events.preview.missing', { name: clip })) }
+  const free = positionsForCue(lib, e.ref.cue).some(a => !e.haptics.some(r => r.at === a))
   return <section className="events-sec">
     <h4>{t('events.haptic')}</h4>
     {!loop && !e.sfx && <p className="events-hint">{t('events.soundFirst')}</p>}
     <OverrideBar e={e} field="haptics" edit={edit} />
+    <p className="agent-muted">{t('events.hapticRowsHint')}</p>
     {!e.haptics.length && <p className="agent-muted">{t('events.hapticNone')}</p>}
     {e.haptics.map((r, i) => {
-      const clips = routeClips(r)
-      return <div key={i} className="events-route">
-        <div className="events-chips">
-          {clips.map(c => <span key={c} className="events-chip">
-            <button type="button" className="scene-icon-btn" title={t('events.playPcHaptic')} aria-label={t('events.playPcHaptic')} disabled={!pcm[c]} onClick={() => play(c, r.gain)}>▶</button>{c}
-            {editable && clips.length > 1 && <button type="button" className="scene-icon-btn" aria-label={t('events.remove')} title={t('events.remove')} onClick={() => edit(tb => setRouteClips(tb, e.ref, i, clips.filter(x => x !== c)))}>✕</button>}
-          </span>)}
-          {!editable && <span className="agent-muted">× {atLabel(r.at)} × {r.gain}</span>}
-        </div>
-        {editable && <div className="events-row-edit">
-          <select value="" aria-label={t('events.addClip')} onChange={ev => { const v = ev.target.value; ev.target.blur(); if (v) edit(tb => setRouteClips(tb, e.ref, i, [...clips, v])) }}>
-            <option value="">{t('events.addClipMulti')}</option>
-            {fitting.filter(c => !clips.includes(c)).map(c => <option key={c} value={c}>{c}</option>)}
+      const clips = routeClips(r), first = clips[0]
+      return <div key={i} className={`events-material ${previewId === `${key}|haptic|${first}|${r.at}` ? 'active' : ''}`} onClick={onRowClick(() => open(first, r.gain, r.at))} title={t('events.openHint')}>
+        {editable ? <>
+          <select value={clips.length > 1 ? MULTI : first} aria-label={t('scene.route.clip')} onChange={ev => { const v = ev.target.value; ev.target.blur(); edit(tb => setRouteClips(tb, e.ref, i, [v])) }}>
+            {clips.length > 1 && <option value={MULTI} disabled>{t('events.multiClips', { count: clips.length })}</option>}
+            {[...new Set([...fitting, ...(first ? [first] : [])])].map(c => <option key={c} value={c}>{c}</option>)}
           </select>
           <select value={r.at} aria-label={t('scene.route.at')} onChange={ev => { const v = ev.target.value; ev.target.blur(); edit(tb => updateOwnRoute(tb, e.ref, i, { at: v })) }}>
             {[...new Set([...positionsForCue(lib, e.ref.cue), r.at])].map(a => <option key={a} value={a}>{atLabel(a)}</option>)}
           </select>
-          <NumberField value={r.gain} min={0} max={2} step={0.05} label={t('scene.route.gain')} onCommit={x => edit(tb => updateOwnRoute(tb, e.ref, i, { gain: x }))} />
+          <span className="events-field">gain <NumberField value={r.gain} min={0} max={2} step={0.05} label={t('scene.route.gain')} onCommit={x => edit(tb => updateOwnRoute(tb, e.ref, i, { gain: x }))} /></span>
           <button type="button" className="scene-icon-btn" aria-label={t('scene.route.remove')} title={t('scene.route.remove')} onClick={() => edit(tb => removeOwnRoute(tb, e.ref, i))}>✕</button>
-        </div>}
+        </> : <span>{clips.length > 1 ? t('events.multiClips', { count: clips.length }) : first} × {atLabel(r.at)} × gain {formatGain(r.gain)}</span>}
       </div>
     })}
-    {editable && <button type="button" className="toolbar-btn" onClick={() => { if (!edit(tb => addOwnRoute(tb, lib, e.ref))) useSceneStore.getState().note({ id: loop ? 'scene.route.noLoopClip' : 'scene.route.noClip', error: true }) }}>＋ {t('scene.route.add')}</button>}
+    {editable && <button type="button" className="toolbar-btn events-add" disabled={!free} title={t('events.addPositionHint')}
+      onClick={() => { if (!edit(tb => addPositionRoute(tb, lib, e.ref))) useWaveformStore.getState().setError(t(loop ? 'scene.route.noLoopClip' : 'scene.route.noClip')) }}>＋ {t('events.addPosition')}</button>}
   </section>
 }
 
@@ -224,24 +274,66 @@ const VARIATION_FIELDS: { key: VariationNumberKey; max: number; step: number; lo
   { key: 'rateJitterPct', max: 50, step: 1, loopOk: false },
 ]
 
-/** Repetition jitter (v2 `variation`); in a loop cue only the gain jitter applies. 0 = none (the field is left out). */
-function VariationSection({ e, loop, edit }: { e: EffectiveEvent; loop: boolean; edit: Edit }) {
+/**
+ * "Repetition" (collapsed): settings that change an event a little every time it
+ * fires — several clips / sounds with how one is picked, and the jitter of
+ * v2 `variation`. Shown for events the recording fires twice or more, or that
+ * already have such settings (or all, from the panel's ⋯ menu). In a loop cue
+ * only the gain jitter applies.
+ */
+function RepeatSection({ table, lib, e, loop, edit, fireCount }: { table: CueTable; lib: SceneLib; e: EffectiveEvent; loop: boolean; edit: Edit; fireCount: number }) {
   const { t } = useI18n()
-  const v: CueVariation = e.variation ?? {}, editable = e.own.variation
-  const set = (patch: Partial<CueVariation>) => edit(tb => setVariation(tb, e.ref, patch))
+  const atLabel = useAtLabel()
+  const soundFiles = useSceneStore(s => s.soundFiles)
+  const previewId = useEventStore(s => s.preview?.id)
+  const [open, setOpen] = useState(false)
+  const key = eventKey(e.ref), v: CueVariation = e.variation ?? {}
+  const sounds = sfxSounds(e.sfx), set = (patch: Partial<CueVariation>) => edit(tb => setVariation(tb, e.ref, patch))
+  const fitting = clipsForCue(table, lib, e.ref.cue)
+  const chip = (name: string, active: boolean, onOpen: () => void, onRemove: (() => void) | null) => <span key={name} className={`events-chip ${active ? 'active' : ''}`} onClick={onRowClick(onOpen)} title={t('events.openHint')}>{name}
+    {onRemove && <button type="button" className="scene-icon-btn" aria-label={t('events.remove')} title={t('events.remove')} onClick={onRemove}>✕</button>}</span>
   return <section className="events-sec">
-    <h4>{t('events.variation')}</h4>
-    <OverrideBar e={e} field="variation" edit={edit} />
-    <div className="events-variation">
-      {VARIATION_FIELDS.filter(f => !loop || f.loopOk).map(f => <label key={f.key} title={t(`events.variation.${f.key}.hint` as MessageId)}>{t(`events.variation.${f.key}` as MessageId)}
-        <NumberField value={typeof v[f.key] === 'number' ? v[f.key] as number : 0} min={0} max={f.max} step={f.step} disabled={!editable} label={t(`events.variation.${f.key}` as MessageId)}
-          onCommit={x => set({ [f.key]: x > 0 ? Math.min(f.max, x) : undefined })} /></label>)}
-      {!loop && <label title={t('events.variation.pick.hint')}>{t('events.variation.pick')}
-        <select value={v.pick ?? ''} disabled={!editable} onChange={ev => { const p = ev.target.value; ev.target.blur(); set({ pick: p ? p as CueVariation['pick'] : undefined }) }}>
-          <option value="">{t('events.variation.pick.default')}</option>
-          {PICK_MODES.map(p => <option key={p} value={p}>{t(`events.variation.pick.${p}` as MessageId)}</option>)}
-        </select></label>}
-    </div>
+    <button type="button" className="events-collapse" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <span aria-hidden="true">{open ? '▾' : '▸'}</span><strong>{t('events.repeat')}</strong>
+      <span className="agent-muted">{t('events.repeatHint')}</span>
+      <small className="events-repeat-meta">{t('events.firedTimes', { count: fireCount })}{hasRepeatSettings(e) ? ` · ${t('events.repeatSet')}` : ''}</small>
+    </button>
+    {open && <div className="events-repeat">
+      {!loop && <>
+        <h5>{t('events.repeat.sounds')}</h5>
+        {e.sfx ? <div className="events-chips">
+          {sounds.map(s => chip(s, previewId === `${key}|sound|${s}`, () => openEventSound(key, s, e.sfx!.volume), e.own.sfx && sounds.length > 1 ? () => edit(tb => setSfxSounds(tb, e.ref, sounds.filter(x => x !== s))) : null))}
+          {e.own.sfx && <select value="" aria-label={t('events.addSoundMulti')} onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) edit(tb => setSfxSounds(tb, e.ref, [...sounds, x])) }}>
+            <option value="">{t('events.addSoundMulti')}</option>
+            {soundFiles.filter(s => !sounds.includes(s)).map(s => <option key={s} value={s}>{s}</option>)}
+          </select>}
+        </div> : <p className="agent-muted">{t('events.soundNone')}</p>}
+        <h5>{t('events.repeat.clips')}</h5>
+        {e.haptics.map((r, i) => {
+          const clips = routeClips(r)
+          return <div key={i} className="events-chips"><span className="agent-muted">{atLabel(r.at)}:</span>
+            {clips.map(c => chip(c, previewId === `${key}|haptic|${c}|${r.at}`, () => openEventHaptic(key, c, r.gain, r.at), e.own.haptics && clips.length > 1 ? () => edit(tb => setRouteClips(tb, e.ref, i, clips.filter(x => x !== c))) : null))}
+            {e.own.haptics && <select value="" aria-label={t('events.addClipMulti')} onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) edit(tb => setRouteClips(tb, e.ref, i, [...clips, x])) }}>
+              <option value="">{t('events.addClipMulti')}</option>
+              {fitting.filter(c => !clips.includes(c)).map(c => <option key={c} value={c}>{c}</option>)}
+            </select>}
+          </div>
+        })}
+        {!e.haptics.length && <p className="agent-muted">{t('events.hapticNone')}</p>}
+      </>}
+      <h5>{t('events.variation')}</h5>
+      <OverrideBar e={e} field="variation" edit={edit} />
+      <div className="events-variation">
+        {!loop && <label title={t('events.variation.pick.hint')}>{t('events.variation.pick')}
+          <select value={v.pick ?? ''} disabled={!e.own.variation} onChange={ev => { const p = ev.target.value; ev.target.blur(); set({ pick: p ? p as CueVariation['pick'] : undefined }) }}>
+            <option value="">{t('events.variation.pick.default')}</option>
+            {PICK_MODES.map(p => <option key={p} value={p}>{t(`events.variation.pick.${p}` as MessageId)}</option>)}
+          </select></label>}
+        {VARIATION_FIELDS.filter(f => !loop || f.loopOk).map(f => <label key={f.key} title={t(`events.variation.${f.key}.hint` as MessageId)}>{t(`events.variation.${f.key}` as MessageId)}
+          <NumberField value={typeof v[f.key] === 'number' ? v[f.key] as number : 0} min={0} max={f.max} step={f.step} disabled={!e.own.variation} label={t(`events.variation.${f.key}` as MessageId)}
+            onCommit={x => set({ [f.key]: x > 0 ? Math.min(f.max, x) : undefined })} /></label>)}
+      </div>
+    </div>}
   </section>
 }
 

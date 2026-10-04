@@ -47,7 +47,10 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const setVisibleClipIds = useCallback((ids: string[]) => { visibleClipIds.current = ids }, [])
   /** AI trial candidate shown / played instead of the clip (agentTrialStore). Editing is disabled meanwhile. */
   const audition = useAgentTrialStore(state => state.audition)
-  const auditionKey = audition ? `${audition.trialId}/${audition.candidateId}` : null
+  /** An event's sound / haptic opened from the Events panel: shown and played like an audition (read only). */
+  const eventPreview = useEventStore(state => state.preview)
+  const auditionKey = audition ? `${audition.trialId}/${audition.candidateId}` : eventPreview ? `event:${eventPreview.id}` : null
+  useEffect(() => { if (audition) useEventStore.getState().clearPreview() }, [audition])
   const focusRequest = useAgentTrialStore(state => state.focusRequest)
   useEffect(() => { if (focusRequest && dockApi) focusPanel(dockApi, 'agent', t) }, [focusRequest, dockApi])
   // Scene tab "open in editor": the Events panel with the event selected, and its moment in the Scene video panel.
@@ -72,7 +75,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   useAgentEndpoint(active && !!s.folder, s.folder?.root.name ?? null)
   /** "Edited" always reflects the effect chain: while it has unapplied changes the editor shows a live (debounced, cancellable) render. */
   const pendingChain = effectsPending(s.clip, s.effects)
-  const previewActive = pendingChain && !original && !audition
+  const previewActive = pendingChain && !original && !audition && !eventPreview
   const preview = useEditorPreview(s.clip, s.effects, previewActive)
   useEffect(() => { void useWaveformStore.getState().restoreFolder() }, [])
   const onSettingsNotice = useCallback((value: SettingsSyncNotice) => setNotice(value.kind === 'unreadable'
@@ -101,9 +104,9 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const sendHaptics = useEditorSettings(state => state.sendHaptics)
   const playbackDevices = useMemo(() => isConnected ? onlinePlaybackDevices(devices) : [], [isConnected, devices])
   // "Send haptics" off → no targets, so EditorPlayback never opens a stream (PC-only audition).
-  const targets = useMemo(() => isConnected && sendHaptics && !auditionIsSound ? resolvePlaybackTargets(devices, kitSelectedIps).map(device => device.ipAddress) : [], [isConnected, sendHaptics, auditionIsSound, devices, kitSelectedIps])
+  const targets = useMemo(() => isConnected && sendHaptics && !auditionIsSound && eventPreview?.target !== 'sound' ? resolvePlaybackTargets(devices, kitSelectedIps).map(device => device.ipAddress) : [], [isConnected, sendHaptics, auditionIsSound, eventPreview?.target, devices, kitSelectedIps])
   const targetKey = targets.join(',')
-  const audioBuffer = audition ? audition.buffer : original ? s.clip?.originalBuffer : previewActive ? (preview.buffer ?? s.clip?.buffer) : s.clip?.buffer
+  const audioBuffer = audition ? audition.buffer : eventPreview ? eventPreview.buffer : original ? s.clip?.originalBuffer : previewActive ? (preview.buffer ?? s.clip?.buffer) : s.clip?.buffer
   const player = useMemo(() => new EditorBufferPlayer(null, undefined, s.setError), [s.clip?.id, original, auditionKey])
   useEffect(() => {player.activate(); return () => player.dispose()}, [player])
   useDecidedSoundSync(player)
@@ -156,7 +159,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
     setRecipeDialog(null)
   }
   useEffect(() => { player.setMuted(muted) }, [player, muted])
-  useEffect(() => { setOriginal(false); useAgentTrialStore.getState().clearAudition() }, [s.clip?.id])
+  useEffect(() => { setOriginal(false); useAgentTrialStore.getState().clearAudition(); useEventStore.getState().clearPreview() }, [s.clip?.id])
   // MCP `audition` with play: true — the usual playback path (selected haptic targets, PC audio per the mute toggle).
   const playRequested = useAgentTrialStore(state => state.playRequested)
   useEffect(() => {
@@ -180,7 +183,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
       const state = useWaveformStore.getState()
       if (state.isProcessing) return
 
-      if (original || audition) return
+      if (original || audition || eventPreview) return
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? state.redo() : state.undo() }
       if (event.key === 'Delete' && state.selectedRegion) { event.preventDefault(); state.deleteRegion() }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -198,7 +201,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
       window.removeEventListener('keydown', keydown)
       for (const popup of popoutWindows) { popup.removeEventListener('keydown', space, true); popup.removeEventListener('keydown', keydown) }
     }
-  }, [active, original, audition, popoutWindows])
+  }, [active, original, audition, eventPreview, popoutWindows])
   /** Project names whose folder link the user refused this session (the trials filter does not ask again). */
   const refusedScenes = useRef(new Set<string>())
   const linkSceneProject = useCallback(async (name: string | null, options?: { quietIfRefused?: boolean }) => {

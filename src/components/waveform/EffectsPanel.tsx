@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
+import { useEventStore } from '@/stores/eventStore'
 import type { EffectType } from '@/types/waveform'
 import { EFFECT_LABELS, EXPERIMENTAL_EFFECTS } from '@/types/waveform'
 import { useWaveformStore } from '@/stores/waveformStore'
@@ -178,12 +179,13 @@ export function EffectsPanel() {
   )
 }
 
-/** Effects dock panel: disabled while no clip is selected, the original is shown, or an AI candidate is auditioned. */
+/** Effects dock panel: disabled while no clip is selected, the original is shown, or an AI candidate / event material is shown. */
 export function EffectsDockPanel() {
+  const eventPreview = useEventStore(s => !!s.preview)
   const { original } = useEditor()
   const hasClip = useWaveformStore(s => !!s.clip)
   const isProcessing = useWaveformStore(s => s.isProcessing)
-  const audition = useAgentTrialStore(s => !!s.audition)
+  const audition = useAgentTrialStore(s => !!s.audition) || eventPreview
   return <fieldset className="editor-panel editor-edit-controls" disabled={!hasClip || original || isProcessing || audition}>
     <EffectsPanel />
   </fieldset>
