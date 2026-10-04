@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type PointerEvent } from 'react'
 import WaveSurfer from 'wavesurfer.js'
 import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.esm.js'
 import { useWaveformStore } from '@/stores/waveformStore'
+import { useStartMarker } from '@/utils/editorStartMarker'
 import { encodeWavBlob } from '@/utils/wavIO'
 import { timeAtPixel, zoomAtTime } from '@/utils/waveformView'
 import { renderSampleWaveform } from '@/utils/editorWaveform'
@@ -33,6 +34,7 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey }: {
   const clip = useWaveformStore(s => s.clip)
   const zoom = useWaveformStore(s => s.zoom)
   const selection = useWaveformStore(s => s.selectedRegion)
+  const marker = useStartMarker(s => s.start)
   const processing = useWaveformStore(s => s.isProcessing)
   const buffer = bufferOverride ?? (original ? clip?.originalBuffer : clip?.buffer)
   const loadedClip = useRef<string>()
@@ -55,6 +57,7 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey }: {
     const sameClip = loadedClip.current === viewId
     const scroll = instance.getScroll() / Math.max(1, useWaveformStore.getState().zoom)
     instance.pause(); setReady(false); anchor.current = 0
+    useStartMarker.getState().set(null)
     regions.current?.clearRegions()
     if (!buffer) { instance.empty(); return }
     void (async () => {
@@ -170,6 +173,11 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey }: {
         }
       }}>
       <div ref={container} className="waveform-container" />
+      {marker !== null && !selection && ready && duration > 0 && (() => {
+        const width = surface.current?.clientWidth ?? 0
+        const x = (marker - viewport.start) * Math.max(zoom, width / duration)
+        return x >= 0 && x <= width ? <div className="editor-start-marker" aria-hidden="true" style={{ left: x }} /> : null
+      })()}
       <div className="editor-wave-pointer" role="group" aria-label={t('editor.selectionHint')}
         onDoubleClick={event => {event.preventDefault(); selectAll()}}
         onPointerDown={event => {
@@ -194,7 +202,8 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey }: {
         onPointerUp={event => {
           const state = drag.current
           if (state) {
-            if (!state.moved) useWaveformStore.getState().setSelectedRegion(null)
+            // A plain click sets the start marker; a drag made a range (shown instead).
+            if (!state.moved) { useWaveformStore.getState().setSelectedRegion(null); useStartMarker.getState().set(player.getCurrentTime()) }
           }
           drag.current = null
           if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)

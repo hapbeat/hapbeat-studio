@@ -27,6 +27,7 @@ import { useEditorSettingsFolderSync, type SettingsSyncNotice } from '@/hooks/us
 import { EditorContext, type EditorShared } from './editorContext'
 import { EditorDockLayout, focusPanel, POPOUT_URL } from './EditorDockLayout'
 import { EditorTopBar } from './EditorTopBar'
+import { playStart, useStartMarker } from '@/utils/editorStartMarker'
 import { scenePreRoll, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
 import { useSceneStore } from '@/stores/sceneStore'
 
@@ -118,7 +119,10 @@ export function WaveformEditor({ active }: { active: boolean }) {
   /** Play / stop (no pause): stopping rewinds to the selection start (or 0). */
   const togglePlay = useCallback(() => {
     if (useWaveformStore.getState().isProcessing) return
-    if (playback.pending || player.isPlaying()) { playback.stop(); player.setTime(useWaveformStore.getState().selectedRegion?.start ?? 0); return }
+    const start = playStart(useWaveformStore.getState().selectedRegion, useStartMarker.getState().start)
+    if (playback.pending || player.isPlaying()) { playback.stop(); player.setTime(start); return }
+    // A clicked start (no range) plays from there again, also after the previous play ran to the end.
+    if (!useWaveformStore.getState().selectedRegion && useStartMarker.getState().start !== null) player.setTime(start)
     void playback.toggle().catch(s.setError)
   }, [playback, player, s.setError])
   useEffect(() => {
