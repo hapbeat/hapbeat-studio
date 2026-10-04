@@ -9,12 +9,13 @@ import { WaveformPanel } from './WaveformPanel'
 import { PropertiesPanel } from './PropertiesPanel'
 import { EffectsDockPanel } from './EffectsPanel'
 import { AgentTrialsPanel } from './AgentTrialsPanel'
+import { EditorScenePanel } from './EditorScenePanel'
 
-export const EDITOR_PANELS = ['clips', 'waveform', 'properties', 'effects', 'agent'] as const
+export const EDITOR_PANELS = ['clips', 'waveform', 'properties', 'effects', 'agent', 'scene'] as const
 export type EditorPanelId = typeof EDITOR_PANELS[number]
 export const PANEL_TITLES: Record<EditorPanelId, MessageId> = {
   clips: 'editor.panel.clips', waveform: 'editor.panel.waveform', properties: 'editor.panel.properties',
-  effects: 'editor.panel.effects', agent: 'editor.agent.tab',
+  effects: 'editor.panel.effects', agent: 'editor.agent.tab', scene: 'editor.panel.scene',
 }
 type Translate = (id: MessageId, params?: Record<string, string | number>) => string
 
@@ -28,6 +29,7 @@ const COMPONENTS: Record<EditorPanelId, FunctionComponent<IDockviewPanelProps>> 
   properties: () => <PropertiesPanel />,
   effects: () => <EffectsDockPanel />,
   agent: () => <AgentTrialsPanel />,
+  scene: () => <EditorScenePanel />,
 }
 
 /** Where a panel goes when it is (re)opened from the View menu without a saved position. */
@@ -40,6 +42,8 @@ function addPanel(api: DockviewApi, id: EditorPanelId, t: Translate, inactive = 
     case 'clips': return api.addPanel({ ...base, ...(api.getPanel('waveform') ? near('waveform', 'left') : { position: { direction: 'left' } }), initialWidth: 270 })
     case 'effects': return api.addPanel({ ...base, ...(api.getPanel('agent') ? near('agent', 'within') : api.getPanel('waveform') ? near('waveform', 'right') : { position: { direction: 'right' } }), initialWidth: 380 })
     case 'agent': return api.addPanel({ ...base, ...(api.getPanel('effects') ? near('effects', 'within') : { position: { direction: 'right' } }), initialWidth: 380 })
+    // Not in the default layout: shown from the View menu, next to the AI trials it belongs to.
+    case 'scene': return api.addPanel({ ...base, ...(api.getPanel('agent') ? near('agent', 'above') : api.getPanel('waveform') ? near('waveform', 'right') : { position: { direction: 'right' } }), initialWidth: 380, initialHeight: 260 })
     case 'properties': return api.addPanel({ ...base, ...(api.getPanel('waveform') ? near('waveform', 'below') : { position: { direction: 'below' } }), initialHeight: 180 })
   }
 }

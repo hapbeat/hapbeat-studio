@@ -11,6 +11,8 @@ export const UI_SETTINGS_FILE = 'ui-settings.json'
 export const UI_SETTINGS_STORAGE_KEY = 'hapbeat-editor-settings'
 
 export type ClipGroupBy = 'project' | 'source'
+/** Scene clip chosen for an AI trial in the Scene video panel: the Scene project and the clip's video file. */
+export interface TrialSceneChoice { project: string; file: string }
 export interface EditorUiSettings {
   loop: boolean
   loopDelay: number
@@ -28,16 +30,28 @@ export interface EditorUiSettings {
   projectNames: string[]
   /** dockview `toJSON()` output; null = default layout. */
   dockLayout: Record<string, unknown> | null
+  /** Scene video panel: the video starts this many seconds before the cue mark when an audition plays. */
+  sceneLeadSec: number
+  /** Scene video panel: scene clip picked per AI trial id. */
+  trialScenes: Record<string, TrialSceneChoice>
 }
 
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
+  sceneLeadSec: 2, trialScenes: {},
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const clamp = (value: unknown, min: number, max: number, fallback: number) => typeof value === 'number' && Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback
 const strings = (value: unknown, max: number): value is string[] => Array.isArray(value) && value.length <= max && value.every(item => typeof item === 'string' && item.length <= 200)
+const isSceneChoice = (value: unknown): value is TrialSceneChoice => isRecord(value) && typeof value.project === 'string' && value.project.length <= 200
+  && typeof value.file === 'string' && value.file.length <= 300
+/** Choices keyed by AI trial id (at most 2000); invalid entries are dropped. */
+function trialScenes(value: unknown): Record<string, TrialSceneChoice> {
+  if (!isRecord(value)) return {}
+  return Object.fromEntries(Object.entries(value).filter(([id, choice]) => /^[A-Za-z0-9_-]{1,80}$/.test(id) && isSceneChoice(choice)).slice(0, 2000)) as Record<string, TrialSceneChoice>
+}
 /** Shallow shape check; dockview itself rejects a layout it cannot restore. */
 const isDockLayout = (value: unknown): value is Record<string, unknown> => isRecord(value) && isRecord(value.grid) && isRecord(value.panels)
 
@@ -56,6 +70,8 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     collapsedGroups: strings(v.collapsedGroups, 1000) ? v.collapsedGroups : d.collapsedGroups,
     projectNames: strings(v.projectNames, 500) ? [...new Set(v.projectNames.filter(isProjectName))] : d.projectNames,
     dockLayout: isDockLayout(v.dockLayout) ? v.dockLayout : d.dockLayout,
+    sceneLeadSec: clamp(v.sceneLeadSec, 0, 10, d.sceneLeadSec),
+    trialScenes: trialScenes(v.trialScenes),
   }
 }
 

@@ -14,6 +14,13 @@ describe('editor UI settings', () => {
     expect(sanitizeUiSettings({ projectNames: [1] }).projectNames).toEqual([])
   })
 
+  it('keeps valid scene choices per trial and clamps the scene lead', () => {
+    const s = sanitizeUiSettings({ sceneLeadSec: 30, trialScenes: { 't-01': { project: 'trex', file: '03_roar.mp4' }, 'bad id': { project: 'x', file: 'y' }, 't-02': { project: 1 } } })
+    expect(s.sceneLeadSec).toBe(10)
+    expect(s.trialScenes).toEqual({ 't-01': { project: 'trex', file: '03_roar.mp4' } })
+    expect(sanitizeUiSettings({}).sceneLeadSec).toBe(2)
+  })
+
   it('roundtrips through the file format and rejects untagged or broken files', () => {
     const settings = { ...DEFAULT_UI_SETTINGS, clipThumbnails: true, dockLayout: layout }
     const parsed = parseUiSettingsFile(serializeUiSettings(settings))

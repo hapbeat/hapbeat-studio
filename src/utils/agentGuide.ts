@@ -87,8 +87,9 @@ Write the inbox file atomically if you can (write \`<trialId>.json.tmp\`, then r
 - \`id\`: /^[A-Za-z0-9_-]{1,80}$/ and must equal the file name without \`.json\`. Must be new.
 - \`intent\`: \`"modify"\` (process existing material) or \`"create"\` (from scratch).
 - \`prompt\`: the user's original request (required, ≤ 2000 chars). \`terms\`: 1–5 target words (≤ 40 chars each).
-- Optional: \`parentTrial\`, \`agent\`, \`rationale\` (≤ 4000 chars), \`knowledgeUsed\`, \`project\`.
+- Optional: \`parentTrial\`, \`agent\`, \`rationale\` (≤ 4000 chars), \`knowledgeUsed\`, \`project\`, \`scene\`.
 - \`project\` (optional): editor project label, 1–80 characters without leading/trailing spaces. Adopted candidates are filed under this project in the editor's clip list; reuse a \`project\` value from catalog.json clips to add to an existing project.
+- \`scene\` (optional): \`{ "project": "trex-encounter", "cues": ["roar", "roar_impact"] }\` — the game moment the haptic is for. \`project\` is the game project's name (\`project_name\` in its \`Saved/HapticViewer/viewer-lib.json\`), \`cues\` 1–20 cue names from its cue table (/^[A-Za-z0-9_.-]{1,80}$/). While that project is open in Studio's Scene tab, the editor's Scene video panel shows the recorded clip of that moment and plays it with each audition, so the user rates the candidates against the game footage. Omit it when the trial is not for a recorded game moment.
 - \`candidates\`: 1–6. \`id\` /^[A-Za-z0-9_-]{1,16}$/ unique in the trial, \`label\` ≤ 80 chars, \`hypothesis\` ≤ 400 chars.
 - \`source\` is one of:
   - \`{ "kind": "clip", "clipId": "…" }\` — the clip's original (imported) audio.

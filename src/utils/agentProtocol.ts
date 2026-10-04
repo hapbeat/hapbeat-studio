@@ -13,6 +13,8 @@ export const RATING_FORMAT = 'hapbeat-rating@1'
 export const CANDIDATE_FORMAT = 'hapbeat-candidate@1'
 export const TRIAL_ID = /^[A-Za-z0-9_-]{1,80}$/
 export const CANDIDATE_ID = /^[A-Za-z0-9_-]{1,16}$/
+/** Game cue name in a Scene project's cue table (Unreal / Unity identifiers, contracts event-id characters). */
+export const SCENE_CUE = /^[A-Za-z0-9_.-]{1,80}$/
 
 export type CandidateSource =
   | { kind: 'clip'; clipId: string; use?: 'original' | 'working' }
@@ -31,8 +33,14 @@ export interface TrialRequest {
   knowledgeUsed?: string[]
   /** Optional editor project label; copied to clips adopted from this trial. */
   project?: string
+  /**
+   * Optional game scene the trial is for: the Scene tab project (`viewer-lib.json`
+   * `project_name`) and the cues whose recorded moments the editor's Scene video panel shows.
+   */
+  scene?: TrialScene
   candidates: TrialCandidate[]
 }
+export interface TrialScene { project: string; cues: string[] }
 /** trials/<YYYY-MM>/<id>/trial.json */
 export interface TrialFile extends TrialRequest { receivedAt: string; studioVersion: string }
 /** trials/<YYYY-MM>/<id>/candidates/<cid>.json */
@@ -115,6 +123,8 @@ export function trialRequestError(data: unknown, fileId?: string): string | null
   if (data.agent !== undefined && (!isObject(data.agent) || !optString(data.agent.name, 80) || !optString(data.agent.model, 80))) return 'agent must be { name?: string, model?: string }'
   if (!optString(data.rationale, 4000)) return 'rationale must be a string of at most 4000 characters'
   if (data.project !== undefined && !isProjectName(data.project)) return 'project must be a string of 1-80 characters without leading/trailing spaces or control characters'
+  if (data.scene !== undefined && (!isObject(data.scene) || !isProjectName(data.scene.project) || !Array.isArray(data.scene.cues) || data.scene.cues.length < 1 || data.scene.cues.length > 20
+    || !data.scene.cues.every(c => typeof c === 'string' && SCENE_CUE.test(c)))) return 'scene must be { project: string (1-80 characters), cues: 1-20 cue names matching /^[A-Za-z0-9_.-]{1,80}$/ }'
   if (data.knowledgeUsed !== undefined && (!Array.isArray(data.knowledgeUsed) || data.knowledgeUsed.length > 50 || !data.knowledgeUsed.every(k => typeof k === 'string' && k.length <= 200))) return 'knowledgeUsed must be an array of strings'
   if (!Array.isArray(data.candidates) || data.candidates.length < 1 || data.candidates.length > 6) return 'candidates must contain 1-6 items'
   const ids = new Set<string>()

@@ -28,6 +28,15 @@ describe('agentProtocol', () => {
     expect(error(request({ candidates: [JSON.parse(request()).candidates[0], JSON.parse(request()).candidates[0]] }))).toMatch(/duplicated/)
   })
 
+  it('accepts an optional game scene and rejects malformed ones', () => {
+    const result = parseTrialRequest(request({ scene: { project: 'trex-encounter', cues: ['roar', 'roar_impact'] } }), 't-01')
+    expect(result.ok && result.trial.scene).toEqual({ project: 'trex-encounter', cues: ['roar', 'roar_impact'] })
+    for (const bad of [{}, { project: 'x', cues: [] }, { project: '', cues: ['a'] }, { project: 'x', cues: ['a b'] }, { project: 'x', cues: 'roar' }, 'roar']) {
+      const r = parseTrialRequest(request({ scene: bad }), 't-01')
+      expect(r.ok ? null : r.error).toMatch(/scene/)
+    }
+  })
+
   it('accepts an optional project label and rejects malformed ones', () => {
     const result = parseTrialRequest(request({ project: 'Cloth textures' }), 't-01')
     expect(result.ok && result.trial.project).toBe('Cloth textures')
