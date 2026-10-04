@@ -1150,6 +1150,7 @@ export const messages = defineMessages({
   'editor.agent.useRangeRecord': { ja: '選択範囲を記録', en: 'Record selected range' },
   'editor.agent.useRangeHint': { ja: 'この候補を試聴中に波形で選んだ範囲を「この部分だけ使いたい」として評価に残します（AI は次の試行でこの範囲に切り詰めます）', en: 'Saves the range selected on this candidate waveform as "use only this part" (the AI trims to it in the next trial).' },
   'editor.agent.useRangeRemove': { ja: 'この範囲を削除', en: 'Remove this range' },
+  'editor.agent.playHint': { ja: 'この候補を試聴して再生（Space でも可）。PC 音・触覚の送信は通常の再生と同じ設定に従います', en: 'Audition and play this candidate (Space works too). PC audio and haptics follow the normal playback settings.' },
 })
 
 export type MessageId = keyof typeof messages

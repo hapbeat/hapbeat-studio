@@ -30,6 +30,8 @@ export interface EditorShared {
   isPlaybackActive: () => boolean
   /** ⏮ / double click: from the range start, else 0. `once`: the whole audio from 0, a single pass even with loop on (Scene video click). */
   playFromStart: (once?: boolean) => void
+  /** Candidate card ▶ / Space on a card: auditions the candidate and plays it (normal path), or stops it when it is the one playing. */
+  toggleCandidate: (trialId: string, candidateId: string) => void
   /** Opens the recipe dialog in `doc` (main page or a popped-out window). */
   openRecipe: (doc: Document, initial?: Recipe) => void
   provenanceText: (clip: WaveformClip) => string

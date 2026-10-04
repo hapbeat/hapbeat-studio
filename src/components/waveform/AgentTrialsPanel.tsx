@@ -117,7 +117,14 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
   autoAudition: boolean; onAutoAuditioned: () => void
 }) {
   const { t } = useI18n()
-  const { openSceneVideo, focusEditorPanel } = useEditor()
+  const { openSceneVideo, focusEditorPanel, player, pending, toggleCandidate } = useEditor()
+  /** The editor playback is sounding (the ▶ / ■ of the auditioned card). */
+  const [playing, setPlaying] = useState(false)
+  useEffect(() => {
+    setPlaying(player.isPlaying())
+    const unsubs = [player.on('play', () => setPlaying(true)), player.on('pause', () => setPlaying(false)), player.on('finish', () => setPlaying(false))]
+    return () => unsubs.forEach(unsub => unsub())
+  }, [player])
   const { trial, rating } = record
   const sceneSaved = useEditorSettings(s => s.trialScenes[trial.id])
   const ids = useId()
@@ -244,7 +251,9 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
           if (!buffer || active || (event.target as HTMLElement).closest('button, input, select, textarea, label, a')) return
           onAudition({ trialId: trial.id, candidateId: requested.id }, buffer)
         }
-        return <article key={requested.id} className={`agent-candidate ${active ? 'auditioning' : ''} ${buffer ? 'selectable' : ''}`} aria-current={active || undefined} onClick={select}>
+        const sounding = active && (playing || pending)
+        return <article key={requested.id} className={`agent-candidate ${active ? 'auditioning' : ''} ${sounding ? 'playing' : ''} ${buffer ? 'selectable' : ''}`} aria-current={active || undefined} onClick={select}
+          tabIndex={0} data-trial-id={trial.id} data-candidate-id={requested.id}>
           <header><strong>{requested.id}</strong><span title={requested.label}>{requested.label}</span>
             {requested.method && <small className="agent-method" title={t('editor.agent.methodHint')}>{t(`editor.agent.method.${requested.method}` as MessageId)}</small>}</header>
           {requested.hypothesis && <p className="agent-hypothesis">{requested.hypothesis}</p>}
@@ -252,6 +261,10 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
             : <small className={file?.error || loaded ? 'error' : ''}>{file?.error ? t('editor.agent.renderError', { message: file.error }) : loaded && 'error' in loaded ? loaded.error : file ? t('editor.agent.loadingAudio') : ''}</small>}</div>
           <FeatureLine features={file?.features ?? null} />
           <div className="agent-candidate-actions">
+            <button className="toolbar-btn agent-play-btn" disabled={!file?.audio || !!file?.error} aria-label={t(sounding ? 'wave.stop' : 'wave.play')} title={t('editor.agent.playHint')}
+              onClick={() => toggleCandidate(trial.id, requested.id)}>
+              <span className="transport-label-stack" aria-hidden="true"><span style={{ visibility: sounding ? 'hidden' : 'visible' }}>▶ {t('wave.play')}</span><span style={{ visibility: sounding ? 'visible' : 'hidden' }}>■ {t('wave.stop')}</span></span>
+            </button>
             <button className="toolbar-btn" title={t('editor.agent.adoptHint')} disabled={!editorFolder || processing} onClick={() => void adopt(requested.id, requested.label)}>{t('editor.agent.adopt')}</button>
             <button className="toolbar-btn" disabled={!buffer} title={t('events.decideHint')}
               onClick={() => useEventStore.getState().requestDecide({ target, source: { kind: 'candidate', trialId: trial.id, candidateId: requested.id }, event })}>{t(target === 'sound' ? 'events.decideSound' : 'events.decideHaptic')}</button>

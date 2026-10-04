@@ -168,11 +168,24 @@ export function WaveformEditor({ active }: { active: boolean }) {
     player.setTime(useWaveformStore.getState().selectedRegion?.start ?? 0)
     void playback.toggle().catch(s.setError)
   }, [playback, player, s.setError])
+  const toggleCandidate = useCallback((trialId: string, candidateId: string) => {
+    const shown = useAgentTrialStore.getState().audition
+    if (shown && shown.trialId === trialId && shown.candidateId === candidateId && isPlaybackActive()) { stopPlayback(); return }
+    // Audition (if needed) and play through the usual path (WaveformEditor's playRequested effect).
+    void useAgentTrialStore.getState().requestAudition(trialId, candidateId, true).catch(s.setError)
+  }, [isPlaybackActive, stopPlayback, s.setError])
   useEffect(() => {
-    const toggle = () => { if (active) togglePlay() }
+    const toggle = () => {
+      if (!active) return
+      // Space with focus on an AI candidate card acts like the card's ▶ (typing in its rating fields never reaches here).
+      const docs = [document, ...popoutWindows.map(w => w.document)]
+      const card = docs.map(d => (d.activeElement as HTMLElement | null)?.closest?.<HTMLElement>('[data-candidate-id]')).find(Boolean)
+      if (card?.dataset.trialId && card.dataset.candidateId) toggleCandidate(card.dataset.trialId, card.dataset.candidateId)
+      else togglePlay()
+    }
     window.addEventListener('studio:editor-playback', toggle)
     return () => window.removeEventListener('studio:editor-playback', toggle)
-  }, [active, togglePlay])
+  }, [active, togglePlay, toggleCandidate, popoutWindows])
   const [recipeDialog, setRecipeDialog] = useState<{ container: HTMLElement; initial?: Recipe } | null>(null)
   const openRecipe = useCallback((doc: Document, initial?: Recipe) => setRecipeDialog({ container: doc.body, initial }), [])
   const createRecipeClip = (recipe: Recipe, presetId: string | null) => {
@@ -258,7 +271,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   }, [dockApi, t, s.setError, linkSceneProject])
   const focusEditorPanel = useCallback((id: Parameters<EditorShared['focusEditorPanel']>[0]) => { if (dockApi) focusPanel(dockApi, id, t) }, [dockApi, t])
   const shared: EditorShared = {
-    active, original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, player, playback, pending, togglePlay, playAt, stopPlayback, isPlaybackActive, playFromStart,
+    active, original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, player, playback, pending, togglePlay, playAt, stopPlayback, isPlaybackActive, playFromStart, toggleCandidate,
     openRecipe, provenanceText, isConnected, playbackDevices, targets, setVisibleClipIds, openSceneVideo, linkSceneProject, focusEditorPanel,
   }
   return <EditorContext.Provider value={shared}>

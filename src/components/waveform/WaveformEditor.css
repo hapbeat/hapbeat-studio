@@ -791,6 +791,11 @@
 .agent-candidate { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-secondary); }
 .agent-candidate.selectable { cursor: pointer; }
 .agent-candidate.auditioning { border-color: #22d3ee; box-shadow: inset 0 0 0 1px #22d3ee; }
+/* The card whose candidate is sounding; ▶ / ■ share one fixed-width button (no layout shift). */
+.agent-candidate.playing { border-color: #67e8f9; box-shadow: inset 0 0 0 2px #67e8f9; }
+.agent-candidate:focus { outline: none; }
+.agent-candidate:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 1px; }
+.agent-play-btn { flex: none; min-width: 6.5em; }
 .agent-candidate header { display: flex; gap: 8px; min-width: 0; }
 .agent-candidate header span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-method { flex-shrink: 0; margin-left: auto; padding: 0 6px; border: 1px solid var(--border-light); border-radius: 8px; font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
