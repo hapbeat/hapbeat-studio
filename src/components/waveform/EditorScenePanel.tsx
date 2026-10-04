@@ -63,7 +63,21 @@ function useShownSubject(): { kind: 'trial'; trialId: string | null } | { kind: 
  */
 export function EditorScenePanel() {
   const { t } = useI18n()
-  const { player, linkSceneProject } = useEditor()
+  const { player, linkSceneProject, togglePlay } = useEditor()
+  /** Focus in this panel (its own window when popped out) = play "from the video": lead-in first, sound + haptics on the mark. */
+  const rootRef = useRef<HTMLDivElement>(null)
+  const [focused, setFocused] = useState(false)
+  const focusedRef = useRef(false); focusedRef.current = focused
+  useEffect(() => {
+    const root = rootRef.current, doc = root?.ownerDocument, view = doc?.defaultView
+    if (!root || !doc || !view) return
+    const sync = () => setFocused(doc.hasFocus() && root.contains(doc.activeElement))
+    const events: [EventTarget, string][] = [[root, 'focusin'], [root, 'focusout'], [view, 'focus'], [view, 'blur']]
+    const later = () => { setTimeout(sync) }
+    for (const [target, name] of events) target.addEventListener(name, later)
+    sync()
+    return () => { for (const [target, name] of events) target.removeEventListener(name, later) }
+  })
   const video = useRef<HTMLVideoElement>(null)
   const root = useSceneStore(s => s.root)
   useEffect(() => { void useSceneStore.getState().restore() }, [])
@@ -104,6 +118,7 @@ export function EditorScenePanel() {
     if (!synced || !chosen) return
     const at = (time: number) => sceneVideoTime(chosen.mark, time)
     setScenePreRoll({
+      active: () => focusedRef.current,
       seconds: lead,
       begin: start => { const v = video.current; if (!v) return; v.currentTime = at(start - lead); void v.play().catch(() => {}) },
       cancel: () => video.current?.pause(),
@@ -129,8 +144,9 @@ export function EditorScenePanel() {
   }
   const message = state.kind === 'noClips' ? t('editor.scene.noClips', { cues: state.cues.join(', ') }) : null
   const title = subject.kind === 'trial' ? t('editor.scene.forTrial', { id: choice.id }) : t('editor.scene.forClip', { name: clipName })
-  return <div className="editor-scene-panel">
-    <div className="editor-scene-title" title={title}>{title}</div>
+  return <div className="editor-scene-panel" ref={rootRef} tabIndex={-1}>
+    <div className="editor-scene-title" title={title}>{title}
+      {synced && <span className={`editor-scene-mode ${focused ? 'video' : ''}`}>{focused ? t('editor.scene.modeVideo', { seconds: lead }) : t('editor.scene.modeWave')}</span>}</div>
     {message ? <p className="agent-muted">{message}</p> : <>
       <div className="editor-scene-bar">
         <SceneChoiceSelect choice={choice} label={t('editor.scene.clip')} />
@@ -138,7 +154,7 @@ export function EditorScenePanel() {
           <input type="number" min={0} max={10} step={0.5} value={lead} onChange={e => { const x = parseFloat(e.target.value); if (Number.isFinite(x)) useEditorSettings.getState().update({ sceneLeadSec: Math.max(0, Math.min(10, x)) }) }} />
           {t('editor.scene.leadUnit')}</label>
       </div>
-      <div className="editor-scene-stage">
+      <div className="editor-scene-stage" onClick={e => { e.currentTarget.closest<HTMLElement>('.editor-scene-panel')?.focus(); focusedRef.current = true; setFocused(true); if (synced) togglePlay() }}>
         {chosen && src ? <video ref={video} src={src} muted playsInline preload="auto" onLoadedMetadata={cue} />
           : <p className="agent-muted">{chosen ? t('editor.scene.loading') : t('editor.scene.pickHint')}</p>}
       </div>

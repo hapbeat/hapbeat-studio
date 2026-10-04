@@ -1,11 +1,12 @@
-import { useEffect, useId, useMemo, useState } from 'react'
-import { useI18n } from '@/i18n/I18nProvider'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useAgentTrialStore, type AuditionTarget } from '@/stores/agentTrialStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { localIsoString, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
 import type { HapticFeatures } from '@/utils/hapticFeatures'
-import { formToRating, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, type CandidateRatingForm, type Direction, type RatingForm } from '@/utils/agentTrialUi'
+import { autoRatingContext, formToRating, jaPolePhrase, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, trialKind, visibleDimensions, type CandidateRatingForm, type Direction, type RatingForm } from '@/utils/agentTrialUi'
+import type { TrialKind } from '@/utils/agentProtocol'
 import { WaveformThumbnail } from './WaveformThumbnail'
 import { useEditor } from './editorContext'
 import { useSceneVideoTarget } from '@/utils/editorSceneSync'
@@ -17,6 +18,11 @@ import { wantedSceneProject } from '@/utils/trialScene'
 const UNASSIGNED_FILTER = ' '
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 const num = (v: number | null, digits: number, unit = '') => v === null ? '—' : `${v.toFixed(digits)}${unit}`
+/**
+ * Unsaved rating forms per trial id, kept while the page is open so switching
+ * trials (the detail view remounts) or candidates does not lose them. Cleared on save.
+ */
+const drafts = new Map<string, RatingForm>()
 
 /**
  * "AI trials": trials that a local agent dropped into hapbeat-agent/inbox/, their
@@ -110,13 +116,19 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
   const ids = useId()
   const editorFolder = useWaveformStore(s => s.folder)
   const processing = useWaveformStore(s => s.isProcessing)
-  const [form, setForm] = useState<RatingForm>(() => ratingToForm(trial, rating, loadRememberedContext()))
-  const [dirty, setDirty] = useState(false)
+  const [form, setForm] = useState<RatingForm>(() => drafts.get(trial.id) ?? ratingToForm(trial, rating, loadRememberedContext()))
+  const [dirty, setDirty] = useState(() => drafts.has(trial.id))
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
   // Re-sync with disk after a save (or a rating written elsewhere), not on every poll.
-  useEffect(() => { setForm(ratingToForm(trial, rating, loadRememberedContext())); setDirty(false) }, [rating?.ratedAt])
+  // The first run is the mount: keep a draft restored above.
+  const mounted = useRef(false)
+  useEffect(() => {
+    if (!mounted.current) { mounted.current = true; return }
+    drafts.delete(trial.id); setForm(ratingToForm(trial, rating, loadRememberedContext())); setDirty(false)
+  }, [rating?.ratedAt])
+  useEffect(() => { if (dirty) drafts.set(trial.id, form); else drafts.delete(trial.id) }, [form, dirty, trial.id])
   const [audio, setAudio] = useState<Record<string, AudioBuffer | { error: string }>>({})
   const renderable = record.candidates.filter(c => c.audio && !c.error).map(c => c.id).join(',')
   useEffect(() => {
@@ -135,13 +147,22 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
     focusEditorPanel('waveform')
   }, [autoAudition, first, firstAudio])
 
+  // Device names and body volume come from the helper (playback targets); typed only when it cannot tell.
+  const { targets } = useEditor()
+  const { devices } = useHelperConnection()
+  const auto = useMemo(() => autoRatingContext(devices, targets), [devices, targets])
+  const sceneLib = useSceneStore(s => s.lib)
+  const kind: TrialKind | null = trialKind(trial, record.candidates.map(c => c.features?.durationSec),
+    sceneLib && trial.scene?.project === sceneLib.project_name ? sceneLib.loop_cues : [])
+  const shownDimensions = useMemo(() => dimensions ? { ...dimensions, dimensions: visibleDimensions(dimensions.dimensions, kind) } : null, [dimensions, kind])
   const edit = (update: (f: RatingForm) => RatingForm) => { setForm(update); setDirty(true); setSaveError(null) }
   const editCandidate = (cid: string, patch: Partial<CandidateRatingForm>) => edit(f => ({ ...f, candidates: { ...f.candidates, [cid]: { ...f.candidates[cid], ...patch } } }))
   const issue = ratingFormIssue(form)
   const save = async () => {
     if (issue || saving) return
     setSaving(true)
-    try { await useAgentTrialStore.getState().saveRating(trial.id, formToRating(form, trial, localIsoString(new Date()))); rememberContext(form.context); setDirty(false) }
+    const withAuto = { ...form, context: { ...form.context, ...(auto.device ? { device: auto.device } : {}), ...(auto.volume ? { volume: auto.volume } : {}) } }
+    try { await useAgentTrialStore.getState().saveRating(trial.id, formToRating(withAuto, trial, localIsoString(new Date()))); rememberContext(withAuto.context); drafts.delete(trial.id); setDirty(false) }
     catch (error) { setSaveError(message(error)) }
     finally { setSaving(false) }
   }
@@ -169,6 +190,7 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
       <dt>{t('editor.agent.terms')}</dt><dd>{trial.terms.map(term => <span className="agent-chip" key={term}>{term}</span>)}</dd>
       {trial.rationale && <><dt>{t('editor.agent.rationale')}</dt><dd>{trial.rationale}</dd></>}
     </dl>
+    {kind === 'sequence' && <p className="agent-muted">{t('editor.agent.sequenceNote')}</p>}
     <div className="agent-notice" role="status">{notice}</div>
     <div className="agent-candidates">
       {trial.candidates.map(requested => {
@@ -189,7 +211,7 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
           <div className="agent-candidate-actions">
             <button className="toolbar-btn" title={t('editor.agent.adoptHint')} disabled={!editorFolder || processing} onClick={() => void adopt(requested.id, requested.label)}>{t('editor.agent.adopt')}</button>
           </div>
-          <CandidateRatingInputs value={form.candidates[requested.id]} terms={trial.terms} dimensions={dimensions} onChange={patch => editCandidate(requested.id, patch)} />
+          <CandidateRatingInputs value={form.candidates[requested.id]} terms={trial.terms} dimensions={shownDimensions} onChange={patch => editCandidate(requested.id, patch)} />
         </article>
       })}
     </div>
@@ -200,9 +222,9 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
         </label>)}
       </fieldset>
       <fieldset className="agent-context"><legend>{t('editor.agent.context')}</legend>
-        {contextField('device', t('editor.agent.device'), `${ids}-devices`)}
+        {auto.device ? <div className="agent-field agent-field-auto" title={t('editor.agent.autoHint')}>{t('editor.agent.device')}<output>{auto.device}</output></div> : contextField('device', t('editor.agent.device'), `${ids}-devices`)}
         {contextField('position', t('editor.agent.position'), `${ids}-positions`)}
-        {contextField('volume', t('editor.agent.volume'))}
+        {auto.volume ? <div className="agent-field agent-field-auto" title={t('editor.agent.autoHint')}>{t('editor.agent.volume')}<output>{auto.volume}</output></div> : contextField('volume', t('editor.agent.volume'))}
         {contextField('note', t('editor.agent.note'))}
         <datalist id={`${ids}-devices`}>{deviceNames.map(name => <option key={name} value={name} />)}</datalist>
         <datalist id={`${ids}-positions`}>{POSITION_SUGGESTIONS.map(p => <option key={p} value={p} />)}</datalist>
@@ -226,6 +248,12 @@ function FeatureLine({ features: f }: { features: HapticFeatures | null }) {
   </div>
 }
 
+/** Short "what this rates" tooltips for the seed dimensions; others get a generic low ↔ high line. */
+const DIMENSION_HINTS: Record<string, MessageId> = {
+  roughness: 'editor.agent.dimHint.roughness', weight: 'editor.agent.dimHint.weight', sharpness: 'editor.agent.dimHint.sharpness',
+  intensity: 'editor.agent.dimHint.intensity', regularity: 'editor.agent.dimHint.regularity', continuity: 'editor.agent.dimHint.continuity',
+  pleasantness: 'editor.agent.dimHint.pleasantness',
+}
 const TERM_LABELS = { '-2': 'editor.agent.tooWeak', '0': 'editor.agent.justRight', '2': 'editor.agent.tooStrong' } as const
 function CandidateRatingInputs({ value, terms, dimensions, onChange }: {
   value: CandidateRatingForm; terms: string[]; dimensions: DimensionsDoc | null; onChange: (patch: Partial<CandidateRatingForm>) => void
@@ -260,11 +288,17 @@ function CandidateRatingInputs({ value, terms, dimensions, onChange }: {
     })}
     {dimensions && dimensions.dimensions.length > 0 && <div className="agent-directions" aria-label={t('editor.agent.directions')}>
       <small>{t('editor.agent.directions')}</small>
-      {dimensions.dimensions.map(d => <div className="agent-direction" key={d.id}>
-        <span>{locale === 'ja' ? d.ja : d.en}</span>
-        {([-1, 0, 1] as Direction[]).map(v => <button key={v} className={`agent-chip-btn ${value.directions[d.id] === v ? 'selected' : ''}`} aria-pressed={value.directions[d.id] === v} onClick={() => setDirection(d.id, v)}>
-          {v === 0 ? t('editor.agent.fine') : t('editor.agent.more', { pole: d.poles[locale][v < 0 ? 0 : 1] })}</button>)}
-      </div>)}
+      {dimensions.dimensions.map(d => {
+        const name = locale === 'ja' ? d.ja : d.en
+        const [low, high] = d.poles[locale]
+        const hint = DIMENSION_HINTS[d.id] ? t(DIMENSION_HINTS[d.id]) : t('editor.agent.dimHint.generic', { low, high })
+        const pole = (p: string) => locale === 'ja' ? t('editor.agent.more', { pole: jaPolePhrase(p) }) : t('editor.agent.more', { pole: p })
+        return <div className="agent-direction" key={d.id}>
+          <span title={hint}>{name}:</span>
+          {([-1, 0, 1] as Direction[]).map(v => <button key={v} title={hint} className={`agent-chip-btn ${value.directions[d.id] === v ? 'selected' : ''}`} aria-pressed={value.directions[d.id] === v} onClick={() => setDirection(d.id, v)}>
+            {v === 0 ? t('editor.agent.fine') : pole(v < 0 ? low : high)}</button>)}
+        </div>
+      })}
     </div>}
     <textarea className="agent-comment" rows={2} placeholder={t('editor.agent.comment')} aria-label={t('editor.agent.comment')} value={value.comment} onChange={e => onChange({ comment: e.target.value })} />
   </div>

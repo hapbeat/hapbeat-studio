@@ -28,6 +28,13 @@ describe('agentProtocol', () => {
     expect(error(request({ candidates: [JSON.parse(request()).candidates[0], JSON.parse(request()).candidates[0]] }))).toMatch(/duplicated/)
   })
 
+  it('accepts an optional kind', () => {
+    const ok = parseTrialRequest(request({ kind: 'loop' }), 't-01')
+    expect(ok.ok && ok.trial.kind).toBe('loop')
+    const bad = parseTrialRequest(request({ kind: 'burst' }), 't-01')
+    expect(bad.ok ? null : bad.error).toMatch(/kind/)
+  })
+
   it('accepts an optional game scene and rejects malformed ones', () => {
     const result = parseTrialRequest(request({ scene: { project: 'trex-encounter', cues: ['roar', 'roar_impact'] } }), 't-01')
     expect(result.ok && result.trial.scene).toEqual({ project: 'trex-encounter', cues: ['roar', 'roar_impact'] })

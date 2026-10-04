@@ -18,7 +18,7 @@ describe('editor UI settings', () => {
     const s = sanitizeUiSettings({ sceneLeadSec: 30, trialScenes: { 't-01': { project: 'trex', file: '03_roar.mp4' }, 'bad id': { project: 'x', file: 'y' }, 't-02': { project: 1 } } })
     expect(s.sceneLeadSec).toBe(10)
     expect(s.trialScenes).toEqual({ 't-01': { project: 'trex', file: '03_roar.mp4' } })
-    expect(sanitizeUiSettings({}).sceneLeadSec).toBe(2)
+    expect(sanitizeUiSettings({}).sceneLeadSec).toBe(1)
     expect(sanitizeUiSettings({ clipScenes: { 'c1': { project: 'trex', file: '01.mp4' }, 'x': 3 } }).clipScenes).toEqual({ c1: { project: 'trex', file: '01.mp4' } })
   })
 

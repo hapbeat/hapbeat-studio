@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { EffectParams } from '@/types/waveform'
 import { ratingError, type RatingBody, type TrialRequest } from './agentProtocol'
-import { derivedEffectChain, formToRating, ratingFormIssue, ratingToForm } from './agentTrialUi'
+import { autoRatingContext, derivedEffectChain, formToRating, jaPolePhrase, ratingFormIssue, ratingToForm, trialKind, visibleDimensions } from './agentTrialUi'
+import type { DeviceInfo } from '@/types/manager'
 
 const trial: TrialRequest = {
   format: 'hapbeat-trial@1', id: 't1', intent: 'modify', prompt: 'p', terms: ['ごわごわ', 'ざらざら'],
@@ -55,5 +56,34 @@ describe('rating form', () => {
     expect(form.context).toEqual({ device: '', position: 'wrist', volume: '', note: '' })
     expect(form.candidates.A.overall).toBeNull()
     expect(formToRating(form, trial, saved.ratedAt)).toEqual(saved)
+  })
+})
+
+describe('trial kind and rating wording', () => {
+  it('uses the explicit kind, else a loop scene cue, else the candidate lengths', () => {
+    expect(trialKind({ kind: 'sequence' }, [0.2])).toBe('sequence')
+    expect(trialKind({ scene: { project: 'p', cues: ['hold'] } }, [3], ['hold', 'rub'])).toBe('loop')
+    expect(trialKind({}, [0.4, 1.2])).toBe('oneshot')
+    expect(trialKind({}, [0.4, 3])).toBeNull()
+    expect(trialKind({}, [null, undefined])).toBeNull()
+  })
+
+  it('hides the repetition dimensions for one-shots only', () => {
+    const dims = [{ id: 'weight' }, { id: 'regularity' }, { id: 'continuity' }]
+    expect(visibleDimensions(dims, 'oneshot').map(d => d.id)).toEqual(['weight'])
+    expect(visibleDimensions(dims, 'loop')).toHaveLength(3)
+    expect(visibleDimensions(dims, null)).toHaveLength(3)
+  })
+
+  it('turns pole words into natural 「もっと…」 phrases', () => {
+    expect(['粗い', '重い', '滑らか', '不快', '快', '規則的', '断続', '連続'].map(jaPolePhrase))
+      .toEqual(['粗く', '重く', '滑らかに', '不快に', '心地よく', '規則的に', '途切れがちに', '途切れなく'])
+  })
+
+  it('fills device names and body volume from the helper, empty when unknown', () => {
+    const dev = (ip: string, name: string, level: number | null, steps: number | null) => ({ ipAddress: ip, name, volumeLevel: level, volumeSteps: steps }) as DeviceInfo
+    expect(autoRatingContext([dev('a', 'neck', 3, 8), dev('b', 'wrist', 3, 8)], ['a', 'b'])).toEqual({ device: 'neck, wrist', volume: '3/8' })
+    expect(autoRatingContext([dev('a', 'neck', null, null)], ['a'])).toEqual({ device: 'neck', volume: '' })
+    expect(autoRatingContext([], [])).toEqual({ device: '', volume: '' })
   })
 })

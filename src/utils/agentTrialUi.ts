@@ -3,7 +3,9 @@
  * chain and the rating form ↔ hapbeat-rating@1 conversion.
  */
 import type { EffectEntry, EffectParams } from '@/types/waveform'
-import { RATING_FORMAT, type RatingBody, type RatingContext, type TrialRequest } from '@/utils/agentProtocol'
+import { RATING_FORMAT, type RatingBody, type RatingContext, type TrialKind, type TrialRequest } from '@/utils/agentProtocol'
+import type { Dimension } from '@/utils/hapticKnowledge'
+import type { DeviceInfo } from '@/types/manager'
 
 /** Candidate effects as a NOT-yet-applied editor chain (fresh ids, enabled) so the user can keep tweaking. */
 export function derivedEffectChain(effects: EffectParams[], newId: () => string = () => crypto.randomUUID()): EffectEntry[] {
@@ -76,4 +78,43 @@ export function loadRememberedContext(): RatingContextForm {
 }
 export function rememberContext(context: RatingContextForm) {
   try { localStorage.setItem(CONTEXT_KEY, JSON.stringify(context)) } catch { /* storage unavailable: context is only a convenience */ }
+}
+
+// ---- Trial kind, dimension wording, automatic conditions ----
+
+/** Longest candidate (seconds) that still reads as a single event when a trial names no kind. */
+export const ONESHOT_MAX_SEC = 2
+/**
+ * The trial's kind: its `kind`, else a loop when every scene cue is a loop cue,
+ * else a one-shot when every rendered candidate is at most ONESHOT_MAX_SEC long.
+ * null = unknown (the form shows every dimension).
+ */
+export function trialKind(trial: Pick<TrialRequest, 'kind' | 'scene'>, durations: (number | null | undefined)[], loopCues: string[] = []): TrialKind | null {
+  if (trial.kind) return trial.kind
+  if (trial.scene && trial.scene.cues.length && trial.scene.cues.every(c => loopCues.includes(c))) return 'loop'
+  const known = durations.filter((d): d is number => typeof d === 'number' && Number.isFinite(d))
+  return known.length && known.every(d => d <= ONESHOT_MAX_SEC) ? 'oneshot' : null
+}
+/** Dimensions about repetition do not apply to a single event. */
+export const REPETITION_DIMENSIONS = ['regularity', 'continuity']
+export const visibleDimensions = <T extends Pick<Dimension, 'id'>>(dimensions: T[], kind: TrialKind | null) =>
+  kind === 'oneshot' ? dimensions.filter(d => !REPETITION_DIMENSIONS.includes(d.id)) : dimensions
+
+/** Pole words that do not read naturally as 「もっと〜に」. */
+const JA_POLE_PHRASES: Record<string, string> = { '快': '心地よく', '断続': '途切れがちに', '連続': '途切れなく' }
+/** Japanese pole → adverbial phrase for 「もっと…」: i-adjectives take く (重い → 重く), the rest に (滑らか → 滑らかに). */
+export function jaPolePhrase(pole: string): string {
+  if (JA_POLE_PHRASES[pole]) return JA_POLE_PHRASES[pole]
+  return /[^\x00-\x7f]い$/.test(pole) && !/(きれい|嫌い|綺麗)$/.test(pole) ? pole.slice(0, -1) + 'く' : pole + 'に'
+}
+
+/** Rating conditions the helper reports for the playback devices: names and body volume (level / steps). Empty strings when unknown. */
+export function autoRatingContext(devices: DeviceInfo[], targetIps: string[]): { device: string; volume: string } {
+  const targets = targetIps.map(ip => devices.find(d => d.ipAddress === ip)).filter((d): d is DeviceInfo => !!d)
+  const device = targets.map(d => d.name).filter(Boolean).join(', ')
+  const levels = targets.filter(d => typeof d.volumeLevel === 'number')
+  const volume = levels.length === targets.length && targets.length
+    ? [...new Set(levels.map(d => typeof d.volumeSteps === 'number' ? `${d.volumeLevel}/${d.volumeSteps}` : String(d.volumeLevel)))].join(', ')
+    : ''
+  return { device, volume }
 }
