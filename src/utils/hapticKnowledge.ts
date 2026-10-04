@@ -5,7 +5,7 @@
  * dimensions → terms → trials → candidates → ratings.
  */
 import type { CandidateFile, RatingBody, RatingFile, TrialFile } from '@/utils/agentProtocol'
-import { normalizeTerm, termSlug, trialTarget } from '@/utils/agentProtocol'
+import { normalizeTerm, termSlug, trialTarget, type TrialMethod } from '@/utils/agentProtocol'
 import { SCALAR_FEATURES, type HapticFeatures } from '@/utils/hapticFeatures'
 import { writeEditorFile } from '@/utils/editorFolder'
 import { agentsMd, claudeMd, guideMarkdown, insightsTemplate, knowledgeReadme } from '@/utils/agentGuide'
@@ -68,8 +68,12 @@ export interface FeatureStat { median: number; p25: number; p75: number }
 export interface FeatureGroup { n: number; features: Record<string, FeatureStat> }
 export interface TermExample {
   trialId: string; candidateId: string; overall: number; termMatch: number | null
+  /** How the candidate was made (its `method`), when the trial said. */
+  method?: TrialMethod
   spec: CandidateFile['spec']; features: HapticFeatures | null; comment?: string
 }
+/** Per way of making: rated candidates, how many were good / too weak / too strong, and the best rated example. */
+export interface MethodStat { rated: number; good: number; tooWeak: number; tooStrong: number; best: TermExample | null }
 export interface TermDoc {
   format: 'hapbeat-term@1'
   term: string; slug: string; aliases: string[]
@@ -77,6 +81,8 @@ export interface TermDoc {
   counts: { trials: number; ratedCandidates: number }
   good: FeatureGroup; tooWeak: FeatureGroup; tooStrong: FeatureGroup
   directionVotes: Record<string, { '+': number; '-': number }>
+  /** Keyed by method; candidates without one are counted under "unspecified". */
+  byMethod: Record<string, MethodStat>
   exemplars: TermExample[]
   counterExamples: TermExample[]
   updatedAt: string | null
@@ -111,6 +117,8 @@ function featureGroup(items: { features: HapticFeatures | null }[]): FeatureGrou
 export const trialSlugs = (trial: TrialFile, dims: DimensionsDoc) => trialTarget(trial) === 'sound' ? [] : [...new Set(trial.terms.map(t => canonicalTerm(t, dims).slug))]
 const latest = (dates: (string | undefined)[]) => dates.filter((d): d is string => !!d).sort((a, b) => Date.parse(a) - Date.parse(b) || a.localeCompare(b)).pop() ?? null
 
+const isGood = (c: { overall: number; termMatch: number | null }) => c.overall >= 4 && c.termMatch !== null && Math.abs(c.termMatch) <= 0.5
+
 /** Aggregates every rated candidate of the trials that target `slug`. Deterministic for the same inputs. */
 export function aggregateTerm(slug: string, dims: DimensionsDoc, records: TrialRecord[]): TermDoc {
   const related = records.filter(r => trialSlugs(r.trial, dims).includes(slug)).sort((a, b) => a.trial.id.localeCompare(b.trial.id))
@@ -124,6 +132,7 @@ export function aggregateTerm(slug: string, dims: DimensionsDoc, records: TrialR
       const tmKey = Object.keys(cr.termMatch ?? {}).find(k => canonicalTerm(k, dims).slug === slug)
       rated.push({
         trialId: r.trial.id, candidateId: cid, overall: cr.overall, termMatch: tmKey === undefined ? null : cr.termMatch![tmKey],
+        ...(requested?.method ? { method: requested.method } : {}),
         spec: cand?.spec ?? { source: requested?.source ?? { kind: 'file', path: '?' }, effects: requested?.effects ?? [] },
         features: cand?.features ?? null, comment: cr.comment, ratedAt: r.rating.ratedAt, directions: cr.directions ?? {},
       })
@@ -140,14 +149,23 @@ export function aggregateTerm(slug: string, dims: DimensionsDoc, records: TrialR
   const exemplars = rated.filter(c => c.overall >= 4)
     .sort((a, b) => b.overall - a.overall || Math.abs(a.termMatch ?? 2) - Math.abs(b.termMatch ?? 2) || byRecency(a, b)).slice(0, 5).map(example)
   const counterExamples = rated.filter(c => c.overall <= 2).sort((a, b) => a.overall - b.overall || byRecency(a, b)).slice(0, 3).map(example)
+  const byMethod: Record<string, MethodStat> = {}
+  for (const c of [...rated].sort((a, b) => b.overall - a.overall || byRecency(a, b))) {
+    const m = (byMethod[c.method ?? 'unspecified'] ??= { rated: 0, good: 0, tooWeak: 0, tooStrong: 0, best: null })
+    m.rated++
+    if (isGood(c)) m.good++
+    if (c.termMatch !== null && c.termMatch <= -1) m.tooWeak++
+    if (c.termMatch !== null && c.termMatch >= 1) m.tooStrong++
+    m.best ??= example(c)
+  }
   return {
     format: 'hapbeat-term@1',
     term: displayTerm, slug, aliases: entry?.aliases ?? [], dimensions: entry?.dimensions ?? {},
     counts: { trials: related.length, ratedCandidates: rated.length },
-    good: featureGroup(rated.filter(c => c.overall >= 4 && c.termMatch !== null && Math.abs(c.termMatch) <= 0.5)),
+    good: featureGroup(rated.filter(isGood)),
     tooWeak: featureGroup(rated.filter(c => c.termMatch !== null && c.termMatch <= -1)),
     tooStrong: featureGroup(rated.filter(c => c.termMatch !== null && c.termMatch >= 1)),
-    directionVotes, exemplars, counterExamples,
+    directionVotes, byMethod, exemplars, counterExamples,
     updatedAt: latest(related.flatMap(r => [r.trial.receivedAt, r.rating?.ratedAt])),
   }
 }

@@ -5,7 +5,7 @@
  */
 import type { AmShape, EnvelopePoint, NoiseColor, SampleRate } from '@/types/waveform'
 import { inRange, isEnvelope, isRecord, RECIPE_RANGES, type ParamRange } from './effectRanges'
-import { amGain, applyEnvelopeInPlace, bandNoise, mulberry32 } from './textureDsp'
+import { amGain, amplitudeEnvelope, applyEnvelopeInPlace, bandNoise, detectOnsets, mulberry32 } from './textureDsp'
 import { mixToMono } from './hapticFeatures'
 
 /** Audio material of a `sample` layer: a file below `hapbeat-agent/` or an editor clip. */
@@ -13,12 +13,26 @@ export type RecipeSampleRef =
   | { kind: 'file'; path: string }
   | { kind: 'clip'; clipId: string; use?: 'original' | 'working' }
 
-export type RecipeSource =
+/** Synthesized sources that can also serve as a `follow` carrier or an `onsets` hit. */
+export type RecipeSynthSource =
   | { type: 'sine' | 'square' | 'triangle'; freqHz: number; freqEndHz?: number }
   | { type: 'noise'; color: NoiseColor; lowHz?: number; highHz?: number }
   | { type: 'decaying-sine'; freqHz: number; decayMs: number }
+export const SYNTH_SOURCE_TYPES = ['sine', 'square', 'triangle', 'noise', 'decaying-sine'] as const
+
+/** Sound → haptic: the material's amplitude envelope (moving RMS over `smoothMs`, default 10 ms) × a synthesized carrier. */
+export interface RecipeFollow { mode: 'envelope'; smoothMs?: number; carrier: RecipeSynthSource }
+/**
+ * Sound → haptic: onsets detected in the material (the 5 ms level above `thresholdDb` re its peak,
+ * risen by `riseDb` (default 6) within 20 ms, at most one per `minGapMs`), each replaced by `hit`
+ * (a sample ref or a synth source, `hitSec` long; default the whole ref / 0.15 s) scaled by the level there.
+ */
+export interface RecipeOnsets { auto: { thresholdDb: number; minGapMs: number; riseDb?: number }; hit: RecipeSampleRef | RecipeSynthSource; hitSec?: number }
+
+export type RecipeSource =
+  | RecipeSynthSource
   | { type: 'impulse-train'; rateHz: number; jitter?: number; amplitudeJitter?: number; pulse: { freqHz: number; decayMs: number } }
-  | { type: 'sample'; ref: RecipeSampleRef; rate?: number; onsetsSec?: number[]; gainsDb?: number[]; maxSec?: number }
+  | { type: 'sample'; ref: RecipeSampleRef; rate?: number; onsetsSec?: number[]; gainsDb?: number[]; maxSec?: number; follow?: RecipeFollow; onsets?: RecipeOnsets }
 
 export interface RecipeAm { rateHz: number; depth: number; shape: AmShape; jitter?: number }
 
@@ -58,6 +72,9 @@ const DEFAULT_FADE_MS = 2
 const NOISE_RMS = Math.SQRT1_2
 /** Pulses are truncated once their decay reaches −80 dB (e^−9.21). */
 const PULSE_TAIL_TAUS = 9.21
+const DEFAULT_FOLLOW_SMOOTH_MS = 10
+const DEFAULT_ONSET_RISE_DB = 6
+const DEFAULT_SYNTH_HIT_SEC = 0.15
 
 /** Checks `obj` against `ranges`; `required` keys must exist, others are optional; unknown keys are rejected. */
 function checkFields(obj: Record<string, unknown>, where: string, ranges: Record<string, ParamRange>, required: string[], extra: string[] = []): string | null {
@@ -100,9 +117,37 @@ function validateSampleRef(ref: unknown, where: string): string | null {
   return ref.use === undefined || ref.use === 'original' || ref.use === 'working' ? null : `${where}.use must be "original" or "working"`
 }
 
-function validateSample(source: Record<string, unknown>, where: string, ranges: Record<string, ParamRange>): string | null {
-  const error = checkFields(source, where, ranges, [], ['type', 'ref', 'onsetsSec', 'gainsDb']) ?? validateSampleRef(source.ref, `${where}.ref`)
+/** A synthesized source (follow carrier / onset hit). */
+function validateSynth(source: unknown, where: string): string | null {
+  if (!isRecord(source) || !(SYNTH_SOURCE_TYPES as readonly unknown[]).includes(source.type)) return `${where}.type must be one of ${SYNTH_SOURCE_TYPES.join(', ')}`
+  return validateSource(source, where)
+}
+
+function validateFollow(follow: unknown, where: string): string | null {
+  if (!isRecord(follow)) return `${where} must be an object { mode: "envelope", smoothMs?, carrier }`
+  return checkFields(follow, where, RECIPE_RANGES.sampleFollow, ['mode'], ['carrier'])
+    ?? (follow.carrier === undefined ? `${where}.carrier is required` : validateSynth(follow.carrier, `${where}.carrier`))
+}
+
+function validateOnsets(onsets: unknown, where: string): string | null {
+  if (!isRecord(onsets)) return `${where} must be an object { auto: { thresholdDb, minGapMs, riseDb? }, hit, hitSec? }`
+  const r = RECIPE_RANGES.sampleOnsets
+  const error = checkFields(onsets, where, { hitSec: r.hitSec }, [], ['auto', 'hit'])
   if (error) return error
+  if (!isRecord(onsets.auto)) return `${where}.auto must be an object { thresholdDb, minGapMs, riseDb? }`
+  const autoError = checkFields(onsets.auto, `${where}.auto`, { thresholdDb: r['auto.thresholdDb'], minGapMs: r['auto.minGapMs'], riseDb: r['auto.riseDb'] }, ['thresholdDb', 'minGapMs'])
+  if (autoError) return autoError
+  if (onsets.hit === undefined) return `${where}.hit is required (a sample ref { kind: "file" | "clip", … } or a synth source { type: … })`
+  return isRecord(onsets.hit) && 'kind' in onsets.hit ? validateSampleRef(onsets.hit, `${where}.hit`) : validateSynth(onsets.hit, `${where}.hit`)
+}
+
+function validateSample(source: Record<string, unknown>, where: string, ranges: Record<string, ParamRange>): string | null {
+  const error = checkFields(source, where, ranges, [], ['type', 'ref', 'onsetsSec', 'gainsDb', 'follow', 'onsets']) ?? validateSampleRef(source.ref, `${where}.ref`)
+  if (error) return error
+  if (source.follow !== undefined && source.onsets !== undefined) return `${where}: use either follow or onsets, not both`
+  if (source.onsets !== undefined && (source.onsetsSec !== undefined || source.gainsDb !== undefined)) return `${where}: onsets (detected) cannot be combined with onsetsSec / gainsDb`
+  const extraError = (source.follow === undefined ? null : validateFollow(source.follow, `${where}.follow`)) ?? (source.onsets === undefined ? null : validateOnsets(source.onsets, `${where}.onsets`))
+  if (extraError) return extraError
   const { onsetsSec, gainsDb } = source
   if (onsetsSec !== undefined) {
     if (!Array.isArray(onsetsSec) || onsetsSec.length < 1 || onsetsSec.length > MAX_SAMPLE_ONSETS) return `${where}.onsetsSec must be an array of 1–${MAX_SAMPLE_ONSETS} start times (s)`
@@ -233,33 +278,65 @@ function resampleLinear(data: Float32Array, step: number): Float32Array {
   return out
 }
 
-/** Places one (optionally truncated) copy of the material at each onset; copies past the layer end are clipped. */
-function renderSample(source: Extract<RecipeSource, { type: 'sample' }>, length: number, sampleRate: number, samples: RecipeSamples, fadeMs: number): Float32Array {
-  const key = sampleRefKey(source.ref)
+/** A sample ref's material at the output rate (× `rate`), or an Error naming what is missing. */
+function material(ref: RecipeSampleRef, rate: number, sampleRate: number, samples: RecipeSamples): Float32Array {
+  const key = sampleRefKey(ref)
   const sample = samples.get(key)
-  if (!sample) throw new Error(`Sample layer audio "${key}" is not loaded (${source.ref.kind === 'file' ? `hapbeat-agent/${source.ref.path}` : `editor clip "${source.ref.clipId}"`})`)
-  const material = resampleLinear(sample.data, (sample.sampleRate * (source.rate ?? 1)) / sampleRate)
-  const cut = source.maxSec === undefined ? material.length : Math.min(material.length, Math.round(source.maxSec * sampleRate))
-  const copy = material.slice(0, cut)
-  if (cut < material.length) {
-    const fade = Math.min(Math.floor(cut / 2), Math.round((fadeMs / 1000) * sampleRate))
-    for (let i = 0; i < fade; i++) copy[cut - 1 - i] *= i / fade
-  }
-  const out = new Float32Array(length)
-  const onsets = source.onsetsSec ?? [0]
-  onsets.forEach((onsetSec, k) => {
-    const start = Math.round(onsetSec * sampleRate)
-    const gain = 10 ** ((source.gainsDb?.[k] ?? 0) / 20)
-    const end = Math.min(length, start + copy.length)
+  if (!sample) throw new Error(`Sample layer audio "${key}" is not loaded (${ref.kind === 'file' ? `hapbeat-agent/${ref.path}` : `editor clip "${ref.clipId}"`})`)
+  return resampleLinear(sample.data, (sample.sampleRate * rate) / sampleRate)
+}
+
+function fadeOutInPlace(data: Float32Array, sampleRate: number, fadeMs: number) {
+  const fade = Math.min(Math.floor(data.length / 2), Math.round((fadeMs / 1000) * sampleRate))
+  for (let i = 0; i < fade; i++) data[data.length - 1 - i] *= i / fade
+}
+/** The first `seconds` of `data` (all when undefined), with a `fadeMs` fade-out when cut. */
+function cutWithFade(data: Float32Array, seconds: number | undefined, sampleRate: number, fadeMs: number): Float32Array {
+  const cut = seconds === undefined ? data.length : Math.min(data.length, Math.round(seconds * sampleRate))
+  const copy = data.slice(0, cut)
+  if (cut < data.length) fadeOutInPlace(copy, sampleRate, fadeMs)
+  return copy
+}
+
+/** Adds `copy` × gain at each (start, gain); copies past the end are clipped. */
+function place(out: Float32Array, copy: Float32Array, starts: { start: number; gain: number }[]) {
+  for (const { start, gain } of starts) {
+    const end = Math.min(out.length, start + copy.length)
     for (let i = start; i < end; i++) out[i] += copy[i - start] * gain
-  })
+  }
+}
+
+/**
+ * Places one (optionally truncated) copy of the material at each onset (copies
+ * past the layer end are clipped). With `follow`, the result's amplitude
+ * envelope modulates a synthesized carrier instead; with `onsets`, the onsets
+ * detected in the material are each replaced by `hit`.
+ */
+function renderSample(source: Extract<RecipeSource, { type: 'sample' }>, length: number, sampleRate: number, seed: number, samples: RecipeSamples, fadeMs: number): Float32Array {
+  const data = material(source.ref, source.rate ?? 1, sampleRate, samples)
+  const out = new Float32Array(length)
+  if (source.onsets) {
+    const { auto, hit, hitSec } = source.onsets
+    const found = detectOnsets(data.subarray(0, length), sampleRate, { thresholdDb: auto.thresholdDb, minGapMs: auto.minGapMs, riseDb: auto.riseDb ?? DEFAULT_ONSET_RISE_DB }, MAX_SAMPLE_ONSETS)
+    let copy: Float32Array
+    if ('kind' in hit) copy = cutWithFade(material(hit, 1, sampleRate, samples), hitSec, sampleRate, fadeMs)
+    else { copy = renderSource(hit, Math.max(1, Math.round((hitSec ?? DEFAULT_SYNTH_HIT_SEC) * sampleRate)), sampleRate, seed, samples, fadeMs); fadeOutInPlace(copy, sampleRate, fadeMs) }
+    place(out, copy, found.map(o => ({ start: o.index, gain: o.level })))
+    return out
+  }
+  const copy = cutWithFade(data, source.maxSec, sampleRate, fadeMs)
+  place(out, copy, (source.onsetsSec ?? [0]).map((onsetSec, k) => ({ start: Math.round(onsetSec * sampleRate), gain: 10 ** ((source.gainsDb?.[k] ?? 0) / 20) })))
+  if (!source.follow) return out
+  const envelope = amplitudeEnvelope(out, sampleRate, source.follow.smoothMs ?? DEFAULT_FOLLOW_SMOOTH_MS)
+  const carrier = renderSource(source.follow.carrier, length, sampleRate, seed, samples, fadeMs)
+  for (let i = 0; i < length; i++) out[i] = envelope[i] * carrier[i]
   return out
 }
 
 function renderSource(source: RecipeSource, length: number, sampleRate: number, seed: number, samples: RecipeSamples, fadeMs: number): Float32Array {
   switch (source.type) {
     case 'sample':
-      return renderSample(source, length, sampleRate, samples, fadeMs)
+      return renderSample(source, length, sampleRate, seed, samples, fadeMs)
     case 'sine': case 'square': case 'triangle':
       return renderTone(length, sampleRate, source.type, source.freqHz, source.freqEndHz)
     case 'noise': {
@@ -334,11 +411,11 @@ export interface RecipeSampleLoader {
 /** Loads (and mixes to mono) the material of every sample layer, keyed for renderRecipe. */
 export async function loadRecipeSamples(recipe: Recipe, loader: RecipeSampleLoader): Promise<RecipeSamples> {
   const samples = new Map<string, { data: Float32Array; sampleRate: number }>()
-  for (const { source } of recipe.layers) {
-    if (source.type !== 'sample') continue
-    const key = sampleRefKey(source.ref)
+  const refs = recipe.layers.flatMap(({ source }) => source.type !== 'sample' ? []
+    : [source.ref, ...(source.onsets && 'kind' in source.onsets.hit ? [source.onsets.hit] : [])])
+  for (const ref of refs) {
+    const key = sampleRefKey(ref)
     if (samples.has(key)) continue
-    const { ref } = source
     let buffer: AudioBuffer
     if (ref.kind === 'file') buffer = await loader.decodeAudio(await loader.readAgentFile(ref.path))
     else {

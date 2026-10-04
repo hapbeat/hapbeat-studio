@@ -54,6 +54,7 @@ export type EffectType =
   | 'am'
   | 'noise-mix'
   | 'freq-shift'
+  | 'band-split'
   | 'compressor'
   | 'saturate'
 
@@ -148,6 +149,16 @@ export interface FreqShiftParams {
   shiftHz: number
 }
 
+/** Low band passes; the high band becomes its amplitude envelope × a carrier at a frequency the actuator plays. */
+export interface BandSplitParams {
+  type: 'band-split'
+  crossoverHz: number
+  carrierHz: number
+  carrierShape: 'sine' | 'square' | 'triangle'
+  highGainDb: number
+  smoothMs: number
+}
+
 export interface CompressorParams {
   type: 'compressor'
   thresholdDb: number
@@ -186,6 +197,7 @@ export type EffectParams =
   | AmParams
   | NoiseMixParams
   | FreqShiftParams
+  | BandSplitParams
   | CompressorParams
   | SaturateParams
 
@@ -226,6 +238,7 @@ export const EFFECT_LABELS: Record<EffectType, string> = {
   'am': 'Amplitude Mod (AM)',
   'noise-mix': 'Noise Mix',
   'freq-shift': 'Frequency Shift',
+  'band-split': 'Band Split',
   'compressor': 'Compressor',
   'saturate': 'Saturate',
 }
@@ -277,6 +290,8 @@ export function getDefaultParams(type: EffectType): EffectParams {
       return { type, levelDb: -12, lowHz: 40, highHz: 400, color: 'white', follow: true, seed: 1 }
     case 'freq-shift':
       return { type, shiftHz: 0 }
+    case 'band-split':
+      return { type, crossoverHz: 150, carrierHz: 80, carrierShape: 'sine', highGainDb: 0, smoothMs: 10 }
     case 'compressor':
       return { type, thresholdDb: -24, ratio: 4, attackMs: 5, releaseMs: 100, kneeDb: 6, makeupDb: 0 }
     case 'saturate':

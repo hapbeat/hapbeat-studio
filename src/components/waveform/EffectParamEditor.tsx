@@ -14,11 +14,12 @@ import type {
   AmParams,
   NoiseMixParams,
   FreqShiftParams,
+  BandSplitParams,
   CompressorParams,
   SaturateParams,
 } from '@/types/waveform'
 import { useI18n } from '@/i18n/I18nProvider'
-import { AM_SHAPES, EFFECT_RANGES, NOISE_COLORS, SATURATE_MODES, SEED_RANGE, type ParamRange } from '@/utils/effectRanges'
+import { AM_SHAPES, CARRIER_SHAPES, EFFECT_RANGES, NOISE_COLORS, SATURATE_MODES, SEED_RANGE, type ParamRange } from '@/utils/effectRanges'
 import { EnvelopeCanvas } from './EnvelopeCanvas'
 
 interface EffectParamEditorProps {
@@ -60,6 +61,8 @@ export function EffectParamEditor({ params, onChange }: EffectParamEditorProps) 
       return <NoiseMixEditor params={params} onChange={onChange} />
     case 'freq-shift':
       return <FreqShiftEditor params={params} onChange={onChange} />
+    case 'band-split':
+      return <BandSplitEditor params={params} onChange={onChange} />
     case 'compressor':
       return <CompressorEditor params={params} onChange={onChange} />
     case 'saturate':
@@ -518,6 +521,21 @@ function FreqShiftEditor({ params, onChange }: { params: FreqShiftParams; onChan
     <>
       <p className="effect-param-hint">{t('editor.freqShiftHint')}</p>
       <RangeSlider label="Shift" value={params.shiftHz} range={EFFECT_RANGES['freq-shift'].shiftHz} format={v => `${v > 0 ? '+' : ''}${v} Hz`} onChange={shiftHz => onChange({ ...params, shiftHz })} />
+    </>
+  )
+}
+
+function BandSplitEditor({ params, onChange }: { params: BandSplitParams; onChange: (p: EffectParams) => void }) {
+  const { t } = useI18n()
+  const r = EFFECT_RANGES['band-split']
+  return (
+    <>
+      <p className="effect-param-hint">{t('editor.bandSplitHint')}</p>
+      <RangeSlider label="Crossover" value={params.crossoverHz} range={r.crossoverHz} log format={hz} onChange={crossoverHz => onChange({ ...params, crossoverHz })} />
+      <RangeSlider label="Carrier" value={params.carrierHz} range={r.carrierHz} log format={hz} onChange={carrierHz => onChange({ ...params, carrierHz })} />
+      <EnumSelect label="Carrier shape" value={params.carrierShape} options={CARRIER_SHAPES} onChange={carrierShape => onChange({ ...params, carrierShape })} />
+      <RangeSlider label="High band level" value={params.highGainDb} range={r.highGainDb} format={signedDb} onChange={highGainDb => onChange({ ...params, highGainDb })} />
+      <RangeSlider label="Smoothing" value={params.smoothMs} range={r.smoothMs} format={v => `${v} ms`} onChange={smoothMs => onChange({ ...params, smoothMs })} />
     </>
   )
 }

@@ -92,7 +92,7 @@ Write the inbox file atomically if you can (write \`<trialId>.json.tmp\`, then r
 - \`kind\` (optional): \`"oneshot"\` (one event: a hit, a footstep), \`"loop"\` (a continuous texture or hum) or \`"sequence"\` (a repeated series such as consecutive footsteps; reserved — rated like the others for now). The rating form hides the regularity / continuity dimensions for \`"oneshot"\`. When omitted, Studio infers it from the scene cue (a loop cue → loop) and the candidates' length (all ≤ 2 s → oneshot).
 - \`target\` (optional, default \`"haptic"\`): \`"sound"\` when the trial designs the event's sound effect instead of its haptic. Decide the sound of an event first, then its haptic to match it. Sound candidates are rendered at 48 kHz full band and auditioned on the PC only (never sent to a device); their ratings have overall / term match / comment only and are not aggregated into \`haptic-knowledge/terms/\`. While auditioning a haptic candidate for an event whose sound is decided, Studio plays that sound with it.
 - \`scene\` (optional): \`{ "project": "trex-encounter", "cues": ["roar", "roar_impact"] }\` — the game moment the haptic is for. \`project\` is the game project's name (\`project_name\` in its \`Saved/HapticViewer/viewer-lib.json\`), \`cues\` 1–20 cue names from its cue table (/^[A-Za-z0-9_.-]{1,80}$/), optionally with a variant as \`"cue:variant"\` (e.g. \`"footstep:approach"\`). The first cue is the event a candidate is decided for in Studio. While that project is open in Studio's Scene tab, the editor's Scene video panel shows the recorded clip of that moment and plays it with each audition, so the user rates the candidates against the game footage. Omit it when the trial is not for a recorded game moment.
-- \`candidates\`: 1–6. \`id\` /^[A-Za-z0-9_-]{1,16}$/ unique in the trial, \`label\` ≤ 80 chars, \`hypothesis\` ≤ 400 chars.
+- \`candidates\`: 1–6. \`id\` /^[A-Za-z0-9_-]{1,16}$/ unique in the trial, \`label\` ≤ 80 chars, \`hypothesis\` ≤ 400 chars, \`method\` (optional): how the candidate is made — \`"synth"\`, \`"sfx"\`, \`"envelope"\`, \`"layered"\`, \`"onset"\` or \`"bandsplit"\` (see "Ways to make a haptic"). Set it on haptic candidates: the knowledge counts results per method.
 - \`source\` is one of:
   - \`{ "kind": "clip", "clipId": "…" }\` — the clip's original (imported) audio.
   - \`{ "kind": "clip", "clipId": "…", "use": "working" }\` — the clip's current processed audio.
@@ -103,9 +103,30 @@ Write the inbox file atomically if you can (write \`<trialId>.json.tmp\`, then r
     - \`rate\` (optional): playback rate; pitch and length change together. \`maxSec\` (optional): each copy is cut at this length with a \`fadeMs\` fade-out. Ranges under \`recipe.sources.sample\` in catalog.json.
     - \`onsetsSec\` (optional, default \`[0]\`): 1–64 start times in seconds (≥ 0, non-decreasing) relative to the layer start; one copy of the material starts at each. \`gainsDb\` (optional): one gain per onset, −60…12 dB each. Overlapping copies add up; copies past the layer end are cut off.
     - The material is mixed to mono and resampled to the recipe's \`sampleRate\`; then the layer's \`am\`, \`envelope\`, \`fadeMs\` and \`gainDb\` apply as usual.
+    - \`follow\` (optional): \`{ "mode": "envelope", "smoothMs": 10, "carrier": <synth source> }\` — the layer plays the placed material's amplitude envelope (moving RMS over \`smoothMs\`, 1–200 ms, default 10; × √2 so a full-scale sine reads 1) multiplied by \`carrier\`, a \`sine\` / \`square\` / \`triangle\` / \`noise\` / \`decaying-sine\` source (same fields as a layer source). The sound's timing and loudness shape, on a vibration the actuator plays well (method \`envelope\`).
+    - \`onsets\` (optional): \`{ "auto": { "thresholdDb": -30, "minGapMs": 120, "riseDb": 6 }, "hit": <sample ref or synth source>, "hitSec": 0.12 }\` — onsets are detected in the material (its 5 ms level above \`thresholdDb\` re its peak, risen by at least \`riseDb\` (default 6) within 20 ms; at most one per \`minGapMs\`; at most 64) and each gets one copy of \`hit\` (a \`{ "kind": "file" | "clip", … }\` ref or a synth source such as \`{ "type": "decaying-sine", "freqHz": 60, "decayMs": 50 }\`), cut to \`hitSec\` (default: the whole ref / 0.15 s for a synth source), scaled by the material's level at the onset (0–1). The material itself is not played (method \`onset\`). Cannot be combined with \`onsetsSec\` / \`gainsDb\` or \`follow\`.
+    - Ranges: \`recipe.sampleFollow\` and \`recipe.sampleOnsets\` in catalog.json.
     - Example — a recorded tap plus a 60 Hz body:
       \`{ "format": "hapbeat-recipe@1", "sampleRate": 48000, "durationSec": 0.4, "seed": 1, "layers": [ { "source": { "type": "sample", "ref": { "kind": "file", "path": "sources/tap.wav" }, "onsetsSec": [0, 0.15], "gainsDb": [0, -3], "maxSec": 0.08 } }, { "source": { "type": "sine", "freqHz": 60 }, "durationSec": 0.25, "gainDb": -6, "envelope": [{ "time": 0, "value": 1 }, { "time": 1, "value": 0 }] } ] }\`
 - \`effects\`: array of effect parameter objects applied in order (no \`id\` / \`enabled\`). Allowed types and ranges are in \`catalog.json\` → \`effectTypes\`. Use \`[]\` for none.
+  - \`band-split\` (method \`bandsplit\`): \`{ "type": "band-split", "crossoverHz": 150, "carrierHz": 80, "carrierShape": "sine", "highGainDb": 0, "smoothMs": 10 }\` — below \`crossoverHz\` passes unchanged (24 dB/oct); above it the band is replaced by its amplitude envelope (moving RMS over \`smoothMs\`) × a \`carrierHz\` carrier (\`sine\` / \`square\` / \`triangle\`), at \`highGainDb\`.
+
+## Ways to make a haptic (\`method\`)
+
+Real vibration recordings are not assumed. Six ways, from material Studio can reach:
+
+| method | how | good for | build it with |
+|---|---|---|---|
+| \`synth\` | synthesize from scratch | clean thumps, hums, textures with no matching sound; full control of frequency | \`recipe\` (tone / noise / decaying-sine / impulse-train layers, \`am\`, \`envelope\`) |
+| \`sfx\` | the sound effect itself, processed | sounds that already carry low, body-like energy (impacts, rumbles) | \`file\` / \`clip\` source + effects (\`lpf\`, \`freq-shift\`, \`compressor\`, \`envelope\`, …) |
+| \`envelope\` | only the sound's loudness shape and timing, on a haptic-friendly carrier | sounds with good timing but little usable low end (whooshes, voices, bright hits) | \`recipe\` \`sample\` layer with \`follow\` |
+| \`layered\` | a short stock haptic clip at the head, then a tail made by 2 (\`sfx\`) or 3 (\`envelope\`) | a crisp attack plus the sound's own decay | \`recipe\`: \`sample\` layer of the stock clip (\`maxSec\`) + a later layer from the sound |
+| \`onset\` | detect the sound's attacks and put a short haptic hit on each | footsteps, rapid hits, mechanical clicks: rhythm matters more than tone | \`recipe\` \`sample\` layer with \`onsets\` |
+| \`bandsplit\` | split at ~150 Hz: the low band as is, the high band as its loudness shape on a tactile-frequency carrier | full-range sounds whose low end is already right and whose highs carry the detail | \`sfx\` source + \`band-split\` effect |
+
+Order of work:
+1. Decide the event's sound first (\`target: "sound"\` trials). For its haptic, prefer methods that use that decided sound as material (\`sfx\`, \`envelope\`, \`layered\`, \`onset\`, \`bandsplit\`); the sound WAV is in the project's sound folder (see the Scene project) — copy it under \`hapbeat-agent/sources/\` to reference it.
+2. In the first haptic trial of an event, line up candidates made by DIFFERENT methods (for example \`sfx\`, \`envelope\`, \`onset\`, \`synth\`). Then refine within the method that rated best, one axis at a time (the "Recommended workflow" above). \`terms/<slug>.json\` → \`byMethod\` shows which methods tend to work for a term.
 
 Processing: stereo sources are averaged to mono, effects are applied in order, the result is resampled to 48 kHz and, if its peak exceeds 1.0, normalized to 0.98 (recorded as \`autoNormalizedDb\`). A candidate that fails to render gets an \`error\` in its candidates/<cid>.json; the other candidates are still rendered. An invalid request is moved to \`inbox/_rejected/\` with an \`.error.txt\`; fix it and submit again under a new id.
 
@@ -134,7 +155,7 @@ Processing: stereo sources are averaged to mono, effects are applied in order, t
 
 ## Term aggregation \`hapbeat-term@1\` (derived)
 
-\`terms/<slug>.json\`: \`dimensions\` (from dimensions.json), \`counts\`, \`good\` (overall ≥ 4 and |termMatch| ≤ 0.5), \`tooWeak\` (termMatch ≤ −1), \`tooStrong\` (termMatch ≥ +1) with per-feature median/p25/p75, \`directionVotes\`, \`exemplars\` (top 5 with overall ≥ 4, including their spec) and \`counterExamples\` (overall ≤ 2). Slug = term after alias resolution, NFKC, trimmed, katakana → hiragana, file-name characters replaced by \`_\`.
+\`terms/<slug>.json\`: \`dimensions\` (from dimensions.json), \`counts\`, \`good\` (overall ≥ 4 and |termMatch| ≤ 0.5), \`tooWeak\` (termMatch ≤ −1), \`tooStrong\` (termMatch ≥ +1) with per-feature median/p25/p75, \`directionVotes\`, \`byMethod\` (per candidate \`method\`, \`"unspecified"\` when absent: \`rated\`, \`good\`, \`tooWeak\`, \`tooStrong\` counts and the \`best\` rated example), \`exemplars\` (top 5 with overall ≥ 4, including their spec and method) and \`counterExamples\` (overall ≤ 2). Slug = term after alias resolution, NFKC, trimmed, katakana → hiragana, file-name characters replaced by \`_\`.
 
 ## Features
 

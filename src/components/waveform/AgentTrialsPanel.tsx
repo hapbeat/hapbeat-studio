@@ -243,7 +243,8 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
           onAudition({ trialId: trial.id, candidateId: requested.id }, buffer)
         }
         return <article key={requested.id} className={`agent-candidate ${active ? 'auditioning' : ''} ${buffer ? 'selectable' : ''}`} aria-current={active || undefined} onClick={select}>
-          <header><strong>{requested.id}</strong><span title={requested.label}>{requested.label}</span></header>
+          <header><strong>{requested.id}</strong><span title={requested.label}>{requested.label}</span>
+            {requested.method && <small className="agent-method" title={t('editor.agent.methodHint')}>{t(`editor.agent.method.${requested.method}` as MessageId)}</small>}</header>
           {requested.hypothesis && <p className="agent-hypothesis">{requested.hypothesis}</p>}
           <div className="agent-thumb">{buffer ? <WaveformThumbnail buffer={buffer} />
             : <small className={file?.error || loaded ? 'error' : ''}>{file?.error ? t('editor.agent.renderError', { message: file.error }) : loaded && 'error' in loaded ? loaded.error : file ? t('editor.agent.loadingAudio') : ''}</small>}</div>

@@ -21,6 +21,7 @@ export const AM_SHAPES = ['sine', 'square', 'triangle', 'random'] as const
 export const NOISE_COLORS = ['white', 'pink', 'brown'] as const
 export const SATURATE_MODES = ['soft', 'hard', 'fold'] as const
 export const MONO_METHODS = ['average', 'left', 'right'] as const
+export const CARRIER_SHAPES = ['sine', 'square', 'triangle'] as const
 export const SEED_RANGE: ParamRange = { min: 0, max: 2147483647, step: 1, kind: 'integer' }
 
 const FILTER: Record<string, ParamRange> = {
@@ -73,6 +74,13 @@ export const EFFECT_RANGES: Record<EffectType, Record<string, ParamRange>> = {
     seed: SEED_RANGE,
   },
   'freq-shift': { shiftHz: { min: -1000, max: 1000, step: 1, unit: 'Hz' } },
+  'band-split': {
+    crossoverHz: { min: 40, max: 400, step: 1, unit: 'Hz' },
+    carrierHz: { min: 20, max: 400, step: 1, unit: 'Hz' },
+    carrierShape: { enum: CARRIER_SHAPES },
+    highGainDb: { min: -60, max: 12, step: 0.5, unit: 'dB' },
+    smoothMs: { min: 1, max: 200, step: 1, unit: 'ms' },
+  },
   'compressor': {
     thresholdDb: { min: -60, max: 0, step: 0.5, unit: 'dB' },
     ratio: { min: 1, max: 20, step: 0.1 },
@@ -140,11 +148,25 @@ export const RECIPE_RANGES = {
     shape: EFFECT_RANGES.am.shape,
     jitter: EFFECT_RANGES.am.jitter,
   },
+  /** `sample` source `follow` (its `carrier` is a sine / square / triangle / noise / decaying-sine source). */
+  sampleFollow: {
+    mode: { enum: ['envelope'] },
+    smoothMs: { min: 1, max: 200, unit: 'ms' },
+  },
+  /** `sample` source `onsets`: `auto.*` detection, `hitSec` length of each hit (`hit` is a sample ref or a synth source). */
+  sampleOnsets: {
+    'auto.thresholdDb': { min: -80, max: 0, unit: 'dB' },
+    'auto.minGapMs': { min: 10, max: 5000, unit: 'ms' },
+    'auto.riseDb': { min: 1, max: 40, unit: 'dB' },
+    hitSec: { min: 0.005, max: 5, unit: 's' },
+  },
 } as const satisfies {
   recipe: Record<string, ParamRange>
   layer: Record<string, ParamRange>
   sources: Record<string, Record<string, ParamRange>>
   am: Record<string, ParamRange>
+  sampleFollow: Record<string, ParamRange>
+  sampleOnsets: Record<string, ParamRange>
 }
 
 /** True when `value` satisfies `range` (numbers are finite; enums / booleans by membership). */

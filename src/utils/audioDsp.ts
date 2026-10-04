@@ -15,6 +15,7 @@ import type {
 import {
   applyAm,
   applyEnvelopeInPlace,
+  bandSplit,
   compress,
   frequencyShift,
   noiseMix,
@@ -439,6 +440,8 @@ export async function applyEffect(
       return mapChannels(buffer, data => noiseMix(data, buffer.sampleRate, params))
     case 'freq-shift':
       return mapChannels(buffer, data => frequencyShift(data, buffer.sampleRate, params.shiftHz))
+    case 'band-split':
+      return mapChannels(buffer, data => bandSplit(data, buffer.sampleRate, params))
     case 'compressor':
       return mapChannels(buffer, data => compress(data, buffer.sampleRate, params))
     case 'saturate':

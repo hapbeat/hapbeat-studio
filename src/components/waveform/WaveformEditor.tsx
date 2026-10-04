@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DockviewApi } from 'dockview-react'
-import { StatusBar } from './StatusBar'
 import { effectsPending, useWaveformStore } from '@/stores/waveformStore'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { EditorPlayback } from '@/utils/editorPlayback'
 import { cropBuffer } from '@/utils/audioDsp'
-import { encodeWavBlob } from '@/utils/wavIO'
+import { encodeWavBlob, estimateWavSize, formatFileSize } from '@/utils/wavIO'
+import { useStatusInfo } from '@/stores/statusInfo'
 import type { SampleRate } from '@/types/waveform'
 import './WaveformEditor.css'
 import { useEditorSettings } from '@/stores/editorSettings'
@@ -110,6 +110,9 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const player = useMemo(() => new EditorBufferPlayer(null, undefined, s.setError), [s.clip?.id, original, auditionKey])
   useEffect(() => {player.activate(); return () => player.dispose()}, [player])
   useDecidedSoundSync(player)
+  // Export format of the selected clip, shown in the bottom log bar while this tab is active.
+  const statusText = s.clip ? `PCM16 WAV · ${s.exportAsMono || s.clip.buffer.numberOfChannels === 1 ? 'Mono' : 'Stereo'} · ${formatFileSize(estimateWavSize(s.clip.buffer.duration, s.clip.exportSampleRate, s.exportAsMono ? 1 : s.clip.buffer.numberOfChannels))}` : null
+  useEffect(() => { if (active) { useStatusInfo.getState().set(statusText); return () => useStatusInfo.getState().set(null) } }, [active, statusText])
   player.setBuffer(audioBuffer ?? null)
   useEffect(() => {
     const selection = useWaveformStore.getState().selectedRegion
@@ -244,7 +247,6 @@ export function WaveformEditor({ active }: { active: boolean }) {
       onDrop={e => { if (!e.dataTransfer.files.length) return; e.preventDefault(); if (s.folder) void s.loadFiles(Array.from(e.dataTransfer.files)); else s.setError(t('editor.chooseFirst')) }}>
       <EditorTopBar dockApi={dockApi} notice={s.error ?? notice} onNotice={setNotice} />
       <EditorDockLayout onApi={setDockApi} onPopoutWindows={setPopoutWindows} onNotice={setNotice} />
-      <StatusBar />
       <DecideDialog />
       {recipeDialog && <RecipeDialog container={recipeDialog.container} initial={recipeDialog.initial} onCreate={createRecipeClip} onClose={() => setRecipeDialog(null)} />}
       {s.isProcessing && <div className="processing-overlay"><div className="processing-spinner" /><span>{t('wave.processing')}</span></div>}

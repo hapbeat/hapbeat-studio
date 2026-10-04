@@ -14,7 +14,7 @@ const EFFECT_CATEGORIES: { label: MessageId; types: EffectType[] }[] = [
   { label: 'editor.effectCategory.filter', types: ['lpf', 'hpf', 'bpf'] },
   { label: 'editor.effectCategory.level', types: ['gain', 'normalize', 'compressor', 'noise-gate', 'saturate'] },
   { label: 'editor.effectCategory.shape', types: ['envelope', 'fade-in', 'fade-out', 'reverse'] },
-  { label: 'editor.effectCategory.texture', types: ['repitch', 'am', 'noise-mix', 'freq-shift', 'mono-convert'] },
+  { label: 'editor.effectCategory.texture', types: ['repitch', 'am', 'noise-mix', 'freq-shift', 'band-split', 'mono-convert'] },
   { label: 'editor.audioEffects', types: ['pitch-shift', 'time-stretch', 'eq'] },
 ]
 
@@ -52,6 +52,8 @@ function getEffectSummary(params: import('@/types/waveform').EffectParams): stri
       return `${params.color} ${params.lowHz}–${params.highHz}Hz ${params.levelDb > 0 ? '+' : ''}${params.levelDb}dB`
     case 'freq-shift':
       return `${params.shiftHz > 0 ? '+' : ''}${params.shiftHz}Hz`
+    case 'band-split':
+      return `${params.crossoverHz}Hz → ${params.carrierHz}Hz`
     case 'compressor':
       return `${params.thresholdDb}dB ${params.ratio}:1`
     case 'saturate':
@@ -151,6 +153,7 @@ export function EffectsPanel() {
           >
             {t('editor.apply')}
           </button>
+          <span className="effects-help" tabIndex={0} title={t('editor.pendingHint')} aria-label={t('editor.pendingHint')}>?</span>
           <button
             className="clear-effects-btn"
             onClick={handleClear}
@@ -200,7 +203,7 @@ function EffectIcon({type}: {type: EffectType}) {
     'fade-in':'M2 22L30 3M2 22H30', 'fade-out':'M2 3L30 22M2 22H30', reverse:'M29 12H3L11 5M3 12L11 19',
     'mono-convert':'M3 4L17 12H29M3 21L17 12',
     am:'M2 13Q5 3 8 13T14 13T20 13T26 13T32 13M2 4H30M2 22H30', 'noise-mix':'M2 13L4 9L6 16L8 7L10 18L12 10L14 15L16 6L18 19L20 11L22 14L24 8L26 17L28 12L30 13',
-    'freq-shift':'M2 20Q6 4 10 20M14 12H22M19 9L22 12L19 15M24 20Q27 4 30 20', compressor:'M2 22L16 8H30M16 8V22M2 8H10',
+    'freq-shift':'M2 20Q6 4 10 20M14 12H22M19 9L22 12L19 15M24 20Q27 4 30 20', 'band-split':'M2 6H14M2 20Q5 14 8 20T14 20M16 13H30M18 4V22', compressor:'M2 22L16 8H30M16 8V22M2 8H10',
     saturate:'M2 20C8 20 8 5 16 5H30M2 20H30',
   }
   return <svg viewBox="0 0 32 26" aria-hidden="true"><path d={paths[type] ?? 'M2 13H8L13 4L19 22L24 13H30'} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>

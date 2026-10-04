@@ -27,7 +27,14 @@ export type CandidateSource =
   | { kind: 'clip'; clipId: string; use?: 'original' | 'working' }
   | { kind: 'file'; path: string }
   | { kind: 'recipe'; recipe: unknown }
-export interface TrialCandidate { id: string; label: string; hypothesis?: string; source: CandidateSource; effects: EffectParams[] }
+/**
+ * How a haptic candidate is made (guide "Ways to make a haptic"): synthesized,
+ * a processed sound effect, the sound's envelope on a carrier, a stock clip
+ * head plus a made tail, hits on the sound's onsets, or a band split.
+ */
+export const TRIAL_METHODS = ['synth', 'sfx', 'envelope', 'layered', 'onset', 'bandsplit'] as const
+export type TrialMethod = typeof TRIAL_METHODS[number]
+export interface TrialCandidate { id: string; label: string; hypothesis?: string; method?: TrialMethod; source: CandidateSource; effects: EffectParams[] }
 export interface TrialRequest {
   format: typeof TRIAL_FORMAT
   id: string
@@ -107,6 +114,7 @@ function candidateError(c: unknown, index: number): string | null {
   if (typeof c.id !== 'string' || !CANDIDATE_ID.test(c.id)) return `${at}.id must match /^[A-Za-z0-9_-]{1,16}$/`
   if (typeof c.label !== 'string' || !c.label.trim() || c.label.length > 80) return `${at}.label must be a non-empty string of at most 80 characters`
   if (!optString(c.hypothesis, 400)) return `${at}.hypothesis must be a string of at most 400 characters`
+  if (c.method !== undefined && !(TRIAL_METHODS as readonly unknown[]).includes(c.method)) return `${at}.method must be one of ${TRIAL_METHODS.join(', ')}`
   const s = c.source
   if (!isObject(s)) return `${at}.source must be an object`
   switch (s.kind) {

@@ -354,3 +354,78 @@ export function applyEnvelopeInPlace(data: Float32Array, points: EnvelopePoint[]
     data[i] *= p0.value + (p1.value - p0.value) * frac
   }
 }
+
+// ---- Sound → haptic: amplitude follower, onsets, band split ----
+
+export type CarrierShape = 'sine' | 'square' | 'triangle'
+
+/** A constant-frequency periodic wave (−1…1). */
+export function carrierTone(length: number, sampleRate: number, freqHz: number, shape: CarrierShape = 'sine'): Float32Array {
+  const out = new Float32Array(length)
+  for (let i = 0; i < length; i++) {
+    const frac = (freqHz * i / sampleRate) % 1
+    out[i] = shape === 'sine' ? Math.sin(2 * Math.PI * frac) : shape === 'square' ? (frac < 0.5 ? 1 : -1)
+      : frac < 0.25 ? 4 * frac : frac < 0.75 ? 2 - 4 * frac : 4 * frac - 4
+  }
+  return out
+}
+
+/**
+ * Amplitude envelope ("the shape of loud and quiet"): centred moving RMS over
+ * `smoothMs`, × √2 so a steady full-scale sine reads 1.
+ */
+export function amplitudeEnvelope(data: Float32Array, sampleRate: number, smoothMs: number): Float32Array {
+  if (!data.length) return new Float32Array(0)
+  const env = rmsEnvelope([data], Math.max(1, Math.round(sampleRate * smoothMs / 1000)))
+  for (let i = 0; i < env.length; i++) env[i] *= Math.SQRT2
+  return env
+}
+
+export interface OnsetSettings {
+  /** Level (dB re the material's peak level) the 5 ms level must exceed. */
+  thresholdDb: number
+  /** At most one onset per this interval. */
+  minGapMs: number
+  /** Rise the level must make within the last 20 ms (dB). */
+  riseDb: number
+}
+export const ONSET_WINDOW_MS = 5
+export const ONSET_RISE_MS = 20
+/** Onset positions (samples) with the material's 5 ms level there (0–1 of its peak), at most `max`. */
+export function detectOnsets(data: Float32Array, sampleRate: number, settings: OnsetSettings, max = 64): { index: number; level: number }[] {
+  const env = amplitudeEnvelope(data, sampleRate, ONSET_WINDOW_MS)
+  let peak = 0
+  for (const v of env) peak = Math.max(peak, v)
+  if (peak <= 0) return []
+  const db = (v: number) => 20 * Math.log10(Math.max(v / peak, 1e-6))
+  const back = Math.max(1, Math.round(sampleRate * ONSET_RISE_MS / 1000)), gap = Math.round(sampleRate * settings.minGapMs / 1000)
+  const out: { index: number; level: number }[] = []
+  let last = -Infinity
+  for (let i = 1; i < env.length && out.length < max; i++) {
+    if (i - last < gap) continue
+    const now = db(env[i])
+    if (now < settings.thresholdDb || now - db(env[Math.max(0, i - back)]) < settings.riseDb) continue
+    // The onset sits where the rise starts to level off: take the local maximum within the rise window.
+    let top = i
+    for (let j = i; j < Math.min(env.length, i + back); j++) if (env[j] > env[top]) top = j
+    out.push({ index: i, level: env[top] / peak })
+    last = i
+  }
+  return out
+}
+
+export interface BandSplitSettings { crossoverHz: number; carrierHz: number; carrierShape: CarrierShape; highGainDb: number; smoothMs: number }
+/**
+ * Band split: the band below `crossoverHz` passes as is (24 dB/oct); the band
+ * above it is replaced by its amplitude envelope × a `carrierHz` carrier, so the
+ * high band's timing reaches the actuator at a frequency it can play.
+ */
+export function bandSplit(channels: Float32Array[], sampleRate: number, settings: BandSplitSettings): Float32Array[] {
+  const gain = dbToGain(settings.highGainDb)
+  return channels.map(ch => {
+    const low = biquad2(ch, sampleRate, 'lowpass', settings.crossoverHz)
+    const env = amplitudeEnvelope(biquad2(ch, sampleRate, 'highpass', settings.crossoverHz), sampleRate, settings.smoothMs)
+    const carrier = carrierTone(ch.length, sampleRate, settings.carrierHz, settings.carrierShape)
+    return low.map((v, i) => v + env[i] * carrier[i] * gain)
+  })
+}

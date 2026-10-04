@@ -166,19 +166,17 @@ export function App() {
 
   return (
     <div className="app">
-      {headerCollapsed ? (
-        <div className="app-header-collapsed">
-          <button type="button" className="header-collapse-toggle" onClick={() => setHeaderCollapsed(false)} aria-label={t('header.expand')} title={t('header.expand')}>
-            ▾ Hapbeat Studio · {tabLabels[activeTab].main}
-          </button>
-        </div>
-      ) : (
-      <header className="app-header">
+      {/* Folded, the header keeps its layout (hidden) in a slim bar, so the open / close toggle stays at the same place: the left end of the tab row. */}
+      <header className={`app-header ${headerCollapsed ? 'app-header-folded' : ''}`}>
         <div className="header-title">
           <span className="header-brand"><span className="header-brand-full">Hapbeat </span>Studio</span>
           <VersionSwitcher compact />
         </div>
-        <div className="header-toggle header-toggle-tabs">
+        <div className="header-tabs-box">
+          <button type="button" className="header-collapse-toggle" onClick={() => setHeaderCollapsed(!headerCollapsed)}
+            aria-label={t(headerCollapsed ? 'header.expand' : 'header.collapse')} title={t(headerCollapsed ? 'header.expand' : 'header.collapse')}>{headerCollapsed ? '▾' : '▴'}</button>
+          {headerCollapsed && <span className="header-collapsed-label">Hapbeat Studio · {tabLabels[activeTab].main}</span>}
+        <div className="header-toggle header-toggle-tabs" aria-hidden={headerCollapsed || undefined}>
           {TABS.map((tab) => (
             <button
               key={tab}
@@ -190,6 +188,7 @@ export function App() {
               <span className="tab-btn-sub">{tabLabels[tab].sub}</span>
             </button>
           ))}
+        </div>
         </div>
         <div className="header-meta">
           <a
@@ -241,10 +240,8 @@ export function App() {
               <span className="connection-status-label">{t('common.helper')}</span>
             </button>
           )}
-          <button type="button" className="header-collapse-toggle" onClick={() => setHeaderCollapsed(true)} aria-label={t('header.collapse')} title={t('header.collapse')}>▴</button>
         </div>
       </header>
-      )}
       {/* Outdated-Helper banner: shown when a Helper is connected but its
           version is below MIN_HELPER_VERSION. Dismissible per session, with a
           one-click jump into HelperManageModal where the upgrade commands
