@@ -51,6 +51,7 @@ import {
   STREAM_V2_UNSUPPORTED_SDKS,
   streamV2MinimumLines,
 } from '@/utils/streamV2Compat'
+import { readAppDescVersion } from '@/utils/espAppDesc'
 import { DriverHelpLinks } from './DriverHelpLinks'
 
 const ROLE_ORDER: NodeRole[] = ['receiver', 'sensor', 'broker', 'transmitter']
@@ -390,38 +391,6 @@ export function FirmwareSubTab({
     return ok
   }, [source, selectedEntry, ask, pushLog, t])
 
-  /**
-   * Pre-flight: a stream-v2 image (firmware ≥ 0.5.0) silences streamed haptics
-   * from apps on pre-v2 SDKs. Confirm before writing it onto a target that
-   * runs pre-v2 or unknown firmware. Library source only — a local .bin
-   * carries no declared version.
-   */
-  const checkStreamV2Compat = useCallback(async (
-    currentFws: Array<string | null | undefined>,
-  ): Promise<boolean> => {
-    if (source !== 'library' || !selectedEntry) return true
-    if (!needsStreamV2Warning(selectedEntry.fwVersion, currentFws)) return true
-    const ok = await ask({
-      title: t('firmware.streamV2Title'),
-      message: t('firmware.streamV2Message', {
-        version: normalizeVersion(selectedEntry.fwVersion),
-        min: STREAM_V2_FIRMWARE_MIN,
-        minimums: streamV2MinimumLines(),
-        unsupported: STREAM_V2_UNSUPPORTED_SDKS.join(', '),
-      }),
-      confirmLabel: t('firmware.streamV2Confirm'),
-      cancelLabel: t('common.cancel'),
-      danger: true,
-    })
-    if (!ok) {
-      pushLog(
-        'firmware',
-        `flash aborted — stream v2 compatibility (fw=${selectedEntry.fwVersion}, `
-        + `targets=[${currentFws.map((fw) => fw ?? '?').join(', ')}])`,
-      )
-    }
-    return ok
-  }, [source, selectedEntry, ask, pushLog, t])
   const [localError, setLocalError] = useState<string | null>(null)
 
   // ---- Library: refresh on mount + on demand --------------------------
@@ -631,6 +600,48 @@ export function FirmwareSubTab({
       path: f.name,
     }
   }, [localHandle])
+
+  /**
+   * Pre-flight: a stream-v2 image (firmware ≥ 0.5.0) silences streamed haptics
+   * from apps on pre-v2 SDKs. Confirm before writing it onto a target that
+   * runs pre-v2 or unknown firmware. A local .bin is judged by the version in
+   * its app descriptor; images without one (older builds) are not judged.
+   */
+  const checkStreamV2Compat = useCallback(async (
+    currentFws: Array<string | null | undefined>,
+  ): Promise<boolean> => {
+    let targetFw: string | null | undefined
+    if (source === 'library') {
+      if (!selectedEntry) return true
+      targetFw = selectedEntry.fwVersion
+    } else {
+      // A read failure here is reported by the flash path's own read below.
+      targetFw = await readLocalRaw()
+        .then((raw) => readAppDescVersion(raw.bytes))
+        .catch(() => null)
+    }
+    if (!needsStreamV2Warning(targetFw, currentFws)) return true
+    const ok = await ask({
+      title: t('firmware.streamV2Title'),
+      message: t('firmware.streamV2Message', {
+        version: normalizeVersion(targetFw),
+        min: STREAM_V2_FIRMWARE_MIN,
+        minimums: streamV2MinimumLines(),
+        unsupported: STREAM_V2_UNSUPPORTED_SDKS.join(', '),
+      }),
+      confirmLabel: t('firmware.streamV2Confirm'),
+      cancelLabel: t('common.cancel'),
+      danger: true,
+    })
+    if (!ok) {
+      pushLog(
+        'firmware',
+        `flash aborted — stream v2 compatibility (fw=${targetFw}, `
+        + `targets=[${currentFws.map((fw) => fw ?? '?').join(', ')}])`,
+      )
+    }
+    return ok
+  }, [source, selectedEntry, readLocalRaw, ask, pushLog, t])
 
   const readSelectedBin = useCallback(async (): Promise<{
     bytes: Uint8Array
