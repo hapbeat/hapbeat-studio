@@ -115,7 +115,7 @@ Processing: stereo sources are averaged to mono, effects are applied in order, t
   "format": "hapbeat-rating@1",
   "trialId": "…",
   "ratedAt": "2026-09-29T15:42:00+09:00",
-  "context": { "device": "…", "position": "neck", "volumeWiper": 128, "volumeLabel": "5/10", "note": "…" },
+  "context": { "device": "…", "position": "neck", "deviceWiper": 64, "volumeLabel": "5/10", "note": "…" },
   "best": "B",
   "othersSimilar": true,
   "candidates": {
@@ -127,7 +127,7 @@ Processing: stereo sources are averaged to mono, effects are applied in order, t
 
 - \`overall\`: 1–5. \`termMatch\` per term: −2 = far too weak, 0 = just right, +2 = too strong.
 - \`directions\` per dimension id (see dimensions.json): +1 = "should be more <high pole>", −1 = "more <low pole>", 0 = fine.
-- \`context.volumeWiper\`: the device's raw volume wiper value (integer 0–255) — compare volumes with this. \`volumeLabel\` ("level/steps") is only a human aid: the step count depends on the user's settings. Both may be absent.
+- \`context.deviceWiper\`: the device's MCP4018 volume wiper (integer 0–127; same as kit-format \`device_wiper\`) — compare volumes with this. \`volumeLabel\` ("level/steps") is only a human aid: the step count depends on the user's settings. Both may be absent.
 - \`othersSimilar\` (optional, \`true\`): the user judged every other candidate to be about the same as \`best\` and left them unrated. Do not invent scores for them; treat it as a note that the hypothesis axis made little difference.
 - \`history\` holds earlier ratings of the same trial (the user re-rated).
 

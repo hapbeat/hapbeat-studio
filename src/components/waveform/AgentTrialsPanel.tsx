@@ -162,7 +162,7 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
     if (issue || saving) return
     setSaving(true)
     const withAuto = { ...form, context: { ...form.context, ...(auto.device ? { device: auto.device } : {}),
-      ...(auto.volumeWiper !== null ? { volumeWiper: String(auto.volumeWiper), volumeLabel: auto.volumeLabel } : { volumeLabel: '' }) } }
+      ...(auto.deviceWiper !== null ? { deviceWiper: String(auto.deviceWiper), volumeLabel: auto.volumeLabel } : { volumeLabel: '' }) } }
     try { await useAgentTrialStore.getState().saveRating(trial.id, formToRating(withAuto, trial, localIsoString(new Date()))); rememberContext(withAuto.context); drafts.delete(trial.id); setDirty(false) }
     catch (error) { setSaveError(message(error)) }
     finally { setSaving(false) }
@@ -175,7 +175,7 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
     : issue?.kind === 'similar-needs-best' ? t('editor.agent.similarNeedsBest') : issue?.kind === 'bad-wiper' ? t('editor.agent.badWiper') : t('editor.agent.noneRated')
   const volumeText = (wiper: number, label: string) => {
     const [level, steps] = label.split('/')
-    return label ? t('editor.agent.volumeWithSteps', { wiper, level, steps }) : t('editor.agent.volumeWiperOnly', { wiper })
+    return label ? t('editor.agent.volumeWithSteps', { wiper, level, steps }) : t('editor.agent.deviceWiperOnly', { wiper })
   }
   const saveStatus = saveError ? t('editor.agent.saveFailed', { message: saveError }) : dirty ? (issue ? issueText : t('editor.agent.unsaved'))
     : rating ? t('editor.agent.saved', { time: new Date(rating.ratedAt).toLocaleString() }) : issueText
@@ -233,9 +233,9 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
       <fieldset className="agent-context"><legend>{t('editor.agent.context')}</legend>
         {auto.device ? <div className="agent-field agent-field-auto" title={t('editor.agent.autoHint')}>{t('editor.agent.device')}<output>{auto.device}</output></div> : contextField('device', t('editor.agent.device'), `${ids}-devices`)}
         {contextField('position', t('editor.agent.position'), `${ids}-positions`)}
-        {auto.volumeWiper !== null
-          ? <div className="agent-field agent-field-auto" title={t('editor.agent.autoHint')}>{t('editor.agent.volume')}<output>{volumeText(auto.volumeWiper, auto.volumeLabel)}</output></div>
-          : <label className="agent-field" title={t('editor.agent.wiperHint')}>{t('editor.agent.volumeWiper')}<input type="number" min={0} max={255} step={1} value={form.context.volumeWiper} onChange={e => { const value = e.target.value; edit(f => ({ ...f, context: { ...f.context, volumeWiper: value } })) }} /></label>}
+        {auto.deviceWiper !== null
+          ? <div className="agent-field agent-field-auto" title={t('editor.agent.autoHint')}>{t('editor.agent.volume')}<output>{volumeText(auto.deviceWiper, auto.volumeLabel)}</output></div>
+          : <label className="agent-field" title={t('editor.agent.wiperHint')}>{t('editor.agent.deviceWiper')}<input type="number" min={0} max={127} step={1} value={form.context.deviceWiper} onChange={e => { const value = e.target.value; edit(f => ({ ...f, context: { ...f.context, deviceWiper: value } })) }} /></label>}
         {contextField('note', t('editor.agent.note'))}
         <datalist id={`${ids}-devices`}>{deviceNames.map(name => <option key={name} value={name} />)}</datalist>
         <datalist id={`${ids}-positions`}>{POSITION_SUGGESTIONS.map(p => <option key={p} value={p} />)}</datalist>

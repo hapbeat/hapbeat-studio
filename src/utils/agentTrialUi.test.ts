@@ -36,14 +36,14 @@ describe('rating form', () => {
   })
 
   it('omits unrated candidates and unset fields, and passes protocol validation', () => {
-    const form = ratingToForm(trial, null, { device: 'Band 1', position: '', volumeWiper: '96', volumeLabel: '', note: '' })
+    const form = ratingToForm(trial, null, { device: 'Band 1', position: '', deviceWiper: '96', volumeLabel: '', note: '' })
     form.candidates.A = { overall: 4, termMatch: { ごわごわ: -1 }, directions: { roughness: 1 }, comment: '  ok  ' }
     form.best = 'A'
     form.context.position = ' neck '
     const body = formToRating(form, trial, '2026-09-29T15:42:00+09:00')
     expect(body).toEqual({
       format: 'hapbeat-rating@1', trialId: 't1', ratedAt: '2026-09-29T15:42:00+09:00',
-      context: { device: 'Band 1', position: 'neck', volumeWiper: 96 }, best: 'A',
+      context: { device: 'Band 1', position: 'neck', deviceWiper: 96 }, best: 'A',
       candidates: { A: { overall: 4, termMatch: { ごわごわ: -1 }, directions: { roughness: 1 }, comment: 'ok' } },
     })
     expect(ratingError(body, trial, ['roughness'])).toBeNull()
@@ -52,8 +52,8 @@ describe('rating form', () => {
   it('round-trips a saved rating and prefers its context over the remembered one', () => {
     const saved: RatingBody = { format: 'hapbeat-rating@1', trialId: 't1', ratedAt: '2026-09-29T15:42:00+09:00', context: { position: 'wrist' }, best: 'B',
       candidates: { B: { overall: 2, termMatch: { ざらざら: 1 }, comment: 'harsh' } } }
-    const form = ratingToForm(trial, saved, { device: 'other', position: 'neck', volumeWiper: '', volumeLabel: '', note: '' })
-    expect(form.context).toEqual({ device: '', position: 'wrist', volumeWiper: '', volumeLabel: '', note: '' })
+    const form = ratingToForm(trial, saved, { device: 'other', position: 'neck', deviceWiper: '', volumeLabel: '', note: '' })
+    expect(form.context).toEqual({ device: '', position: 'wrist', deviceWiper: '', volumeLabel: '', note: '' })
     expect(form.candidates.A.overall).toBeNull()
     expect(formToRating(form, trial, saved.ratedAt)).toEqual(saved)
   })
@@ -82,10 +82,10 @@ describe('trial kind and rating wording', () => {
 
   it('fills device names and the volume wiper from the helper, empty when unknown', () => {
     const dev = (ip: string, name: string, wiper: number | null, level: number | null, steps: number | null) => ({ ipAddress: ip, name, volumeWiper: wiper, volumeLevel: level, volumeSteps: steps }) as DeviceInfo
-    expect(autoRatingContext([dev('a', 'neck', 64, 5, 10), dev('b', 'wrist', 64, 5, 10)], ['a', 'b'])).toEqual({ device: 'neck, wrist', volumeWiper: 64, volumeLabel: '5/10' })
-    expect(autoRatingContext([dev('a', 'neck', 64, null, null)], ['a'])).toEqual({ device: 'neck', volumeWiper: 64, volumeLabel: '' })
-    expect(autoRatingContext([dev('a', 'neck', 64, 5, 10), dev('b', 'wrist', 80, 6, 10)], ['a', 'b']).volumeWiper).toBeNull()
-    expect(autoRatingContext([], [])).toEqual({ device: '', volumeWiper: null, volumeLabel: '' })
+    expect(autoRatingContext([dev('a', 'neck', 64, 5, 10), dev('b', 'wrist', 64, 5, 10)], ['a', 'b'])).toEqual({ device: 'neck, wrist', deviceWiper: 64, volumeLabel: '5/10' })
+    expect(autoRatingContext([dev('a', 'neck', 64, null, null)], ['a'])).toEqual({ device: 'neck', deviceWiper: 64, volumeLabel: '' })
+    expect(autoRatingContext([dev('a', 'neck', 64, 5, 10), dev('b', 'wrist', 80, 6, 10)], ['a', 'b']).deviceWiper).toBeNull()
+    expect(autoRatingContext([], [])).toEqual({ device: '', deviceWiper: null, volumeLabel: '' })
   })
 
   it('lets "others similar" save with only the best rated, and checks the wiper', () => {
@@ -98,8 +98,8 @@ describe('trial kind and rating wording', () => {
     expect(body.othersSimilar).toBe(true)
     expect(Object.keys(body.candidates)).toEqual(['A'])
     expect(ratingError(body, trial, [])).toBeNull()
-    form.context.volumeWiper = '300'
+    form.context.deviceWiper = '128'
     expect(ratingFormIssue(form)).toEqual({ kind: 'bad-wiper' })
-    expect(parseWiper(' 128 ')).toBe(128)
+    expect(parseWiper(' 100 ')).toBe(100)
   })
 })

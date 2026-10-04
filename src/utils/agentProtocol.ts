@@ -72,12 +72,13 @@ export interface CandidateRating {
   comment?: string
 }
 /**
- * Rating conditions. `volumeWiper` is the device's raw volume wiper value
- * (the reference: the step count of `volumeLabel` depends on user settings);
+ * Rating conditions. `deviceWiper` is the device's MCP4018 volume wiper value
+ * (0–127, same meaning as kit-format `device_wiper`; the reference — the step
+ * count of `volumeLabel` depends on user settings);
  * `volumeLabel` is a human aid such as "5/10", present only when the steps are known.
  */
-export interface RatingContext { device?: string; position?: string; volumeWiper?: number; volumeLabel?: string; note?: string }
-export const VOLUME_WIPER_MAX = 255
+export interface RatingContext { device?: string; position?: string; deviceWiper?: number; volumeLabel?: string; note?: string }
+export const DEVICE_WIPER_MAX = 127
 export interface RatingBody {
   format: typeof RATING_FORMAT
   trialId: string
@@ -168,9 +169,9 @@ export function ratingError(rating: RatingBody, trial: TrialRequest, dimensionId
   const ctx = rating.context
   if (ctx !== undefined) {
     if (!isObject(ctx)) return 'context must be an object'
-    if (ctx.volumeWiper !== undefined && (typeof ctx.volumeWiper !== 'number' || !Number.isInteger(ctx.volumeWiper) || ctx.volumeWiper < 0 || ctx.volumeWiper > VOLUME_WIPER_MAX)) return `context.volumeWiper must be an integer 0-${VOLUME_WIPER_MAX}`
+    if (ctx.deviceWiper !== undefined && (typeof ctx.deviceWiper !== 'number' || !Number.isInteger(ctx.deviceWiper) || ctx.deviceWiper < 0 || ctx.deviceWiper > DEVICE_WIPER_MAX)) return `context.deviceWiper must be an integer 0-${DEVICE_WIPER_MAX}`
     for (const key of ['device', 'position', 'volumeLabel', 'note'] as const) if (!optString(ctx[key], 400)) return `context.${key} must be a string`
-    if ('volume' in ctx) return 'context.volume was replaced by volumeWiper / volumeLabel'
+    if ('volume' in ctx || 'volumeWiper' in ctx) return 'context.volume was replaced by deviceWiper / volumeLabel'
   }
   if (!isObject(rating.candidates)) return 'candidates must be an object'
   for (const [cid, r] of Object.entries(rating.candidates)) {
