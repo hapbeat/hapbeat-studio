@@ -1,0 +1,231 @@
+import { create } from 'zustand'
+import type { MessageId, MessageParams } from '@/i18n/messages'
+import { loadDirectoryHandle, saveDirectoryHandle } from '@/utils/localDirectory'
+import { buildItems, VIEWER_DIR, type SceneData, type SceneItem, type SceneLib } from '@/utils/sceneData'
+import { addClipEntry, clipNameFromFile, encodePcm16Wav, soundNameFromFile, validateCueTable, type CueTable } from '@/utils/sceneCueTable'
+import { openSceneProject, readProjectFile, readSceneTable, writeSceneSave, type PendingWavs } from '@/utils/sceneProject'
+import { RATE } from '@/utils/sceneHaptics'
+
+/**
+ * Scene tab (haptic authoring) state: the opened game project folder, its
+ * recording, the cue table being edited (one cue at a time) and the decoded
+ * clip / sound audio. Disk is the truth: the table and WAVs are read from the
+ * project and written back by `save()`; only the folder handle is kept in
+ * IndexedDB (key `scenedir`) so the next visit can reopen it.
+ */
+
+export interface SceneNotice { id: MessageId; params?: MessageParams; error?: boolean }
+export interface SceneSelection { name: string; /** Time in the current item's video; null when picked from the list. */ t: number | null }
+
+interface SceneState {
+  root: FileSystemDirectoryHandle | null
+  remembered: FileSystemDirectoryHandle | null
+  restored: boolean
+  busy: boolean
+  lib: SceneLib | null
+  data: SceneData | null
+  items: SceneItem[]
+  table: CueTable | null
+  /** kit and cue names as loaded (the tab never changes them; save checks it). */
+  loaded: { kit: string | undefined; cueNames: string[] } | null
+  clipFiles: string[]
+  soundFiles: string[]
+  pending: PendingWavs
+  /** clip → mono 16 kHz samples. */
+  pcm: Record<string, Float32Array>
+  /** sound → decoded 48 kHz buffer. */
+  sfx: Record<string, AudioBuffer>
+  dirty: boolean
+  cur: number
+  sel: SceneSelection | null
+  notice: SceneNotice | null
+  /** Shown in the video panel while no recording is loaded. */
+  empty: SceneNotice | null
+  log: string[]
+  restore: () => Promise<void>
+  /** Opens the folder picker (call from the click handler). */
+  pick: () => Promise<void>
+  reconnect: () => Promise<void>
+  select: (index: number) => void
+  selectCue: (name: string, t: number | null) => void
+  edit: (change: (table: CueTable) => CueTable | null) => boolean
+  addClip: (file: File, loop: boolean) => Promise<string | null>
+  addSound: (file: File) => Promise<string | null>
+  save: () => Promise<void>
+  revert: () => Promise<void>
+  note: (notice: SceneNotice) => void
+  addLog: (text: string) => void
+}
+
+const message = (error: unknown) => error instanceof Error ? error.message : String(error)
+const clipKey = (project: string) => `hapbeat-scene-clip:${project}`
+
+async function decode(buf: ArrayBuffer, rate: number): Promise<AudioBuffer> { return new OfflineAudioContext(1, 1, rate).decodeAudioData(buf) }
+function mono(b: AudioBuffer): Float32Array {
+  const out = new Float32Array(b.length)
+  for (let c = 0; c < b.numberOfChannels; c++) { const d = b.getChannelData(c); for (let i = 0; i < b.length; i++) out[i] += d[i] / b.numberOfChannels }
+  return out
+}
+
+/** The mp4s are read from the project folder: one Blob URL per file while the project is open. */
+const videoUrls = new Map<string, Promise<string>>()
+function clearVideoUrls() {
+  for (const url of videoUrls.values()) void url.then(u => URL.revokeObjectURL(u), () => {})
+  videoUrls.clear()
+}
+export function sceneVideoUrl(root: FileSystemDirectoryHandle, file: string): Promise<string> {
+  let url = videoUrls.get(file)
+  if (!url) {
+    url = readProjectFile(root, `${VIEWER_DIR}/${file}`).then(f => URL.createObjectURL(f))
+    url.catch(() => videoUrls.delete(file))
+    videoUrls.set(file, url)
+  }
+  return url
+}
+
+export const useSceneStore = create<SceneState>((set, get) => {
+  const note = (notice: SceneNotice) => set({ notice })
+  const addLog = (text: string) => set(s => ({ log: [...s.log.slice(-199), `${new Date().toLocaleTimeString()}  ${text}`] }))
+
+  /** Reads the cue table and decodes every clip / cue sound of the open project. */
+  const loadTable = async () => {
+    const { root, lib } = get()
+    if (!root || !lib) return
+    const files = await readSceneTable(root, lib)
+    const pcm: Record<string, Float32Array> = {}, sfx: Record<string, AudioBuffer> = {}
+    await Promise.all([
+      ...Object.keys(files.table.clips).map(async n => { pcm[n] = mono(await decode(await (await readProjectFile(root, `${lib.paths.clips}/${n}.wav`)).arrayBuffer(), RATE)) }),
+      ...files.soundFiles.map(async n => { sfx[n] = await decode(await (await readProjectFile(root, `${lib.paths.sounds}/${n}.wav`)).arrayBuffer(), 48000) }),
+    ])
+    set({ table: files.table, loaded: { kit: files.table.kit, cueNames: Object.keys(files.table.cues) }, clipFiles: files.clipFiles, soundFiles: files.soundFiles,
+      pcm, sfx, pending: { clips: {}, sounds: {} }, dirty: false })
+  }
+
+  /** Opens a project folder; a folder with a lib is remembered even when the recording is missing (one click after recording). */
+  const openFolder = async (handle: FileSystemDirectoryHandle): Promise<boolean> => {
+    const opened = await openSceneProject(handle)
+    if (!opened.ok && opened.reason === 'noLib') {
+      const notice = { id: 'scene.open.noLib' as const, params: { folder: handle.name, dir: VIEWER_DIR }, error: true }
+      set({ notice, empty: get().items.length ? get().empty : notice })
+      addLog(opened.error)
+      return false
+    }
+    set({ remembered: handle })
+    await saveDirectoryHandle(handle, 'scenedir').catch(() => {})
+    if (!opened.ok) {
+      const notice = { id: 'scene.open.noData' as const, params: { title: opened.lib.title, dir: VIEWER_DIR, command: opened.lib.record_command ?? 'Scripts/record-haptic-clips.ps1' }, error: true }
+      set({ notice, empty: get().items.length ? get().empty : notice })
+      addLog(opened.error)
+      return false
+    }
+    clearVideoUrls()
+    set({ root: handle, lib: opened.lib, data: opened.data, items: buildItems(opened.data), sel: null, cur: 0, empty: null, table: null })
+    await loadTable()
+    let start = 1
+    try { start = Number(localStorage.getItem(clipKey(opened.lib.project_name))) || 1 } catch { /* preference only */ }
+    get().select(Math.min(start, get().items.length - 1))
+    return true
+  }
+
+  const guarded = async (work: () => Promise<void>) => {
+    if (get().busy) return
+    set({ busy: true })
+    try { await work() } catch (error) { note({ id: 'scene.open.failed', params: { error: message(error) }, error: true }); addLog(message(error)) }
+    finally { set({ busy: false }) }
+  }
+
+  return {
+    root: null, remembered: null, restored: false, busy: false,
+    lib: null, data: null, items: [], table: null, loaded: null, clipFiles: [], soundFiles: [],
+    pending: { clips: {}, sounds: {} }, pcm: {}, sfx: {}, dirty: false, cur: 0, sel: null,
+    notice: null, empty: null, log: [],
+    note, addLog,
+
+    restore: async () => {
+      if (get().restored) return
+      set({ restored: true })
+      await guarded(async () => {
+        const handle = await loadDirectoryHandle('scenedir')
+        set({ remembered: handle })
+        if (handle && await handle.queryPermission({ mode: 'readwrite' }) === 'granted') await openFolder(handle)
+      })
+    },
+    pick: async () => {
+      if (!('showDirectoryPicker' in window)) { note({ id: 'scene.open.unsupported', error: true }); return }
+      let handle: FileSystemDirectoryHandle
+      try { handle = await window.showDirectoryPicker({ id: 'hapbeat-scene-project', mode: 'readwrite' }) }
+      catch (error) { if (!(error instanceof DOMException && error.name === 'AbortError')) note({ id: 'scene.open.failed', params: { error: message(error) }, error: true }); return }
+      await guarded(async () => { if (await openFolder(handle)) note({ id: 'scene.open.loaded', params: { folder: handle.name } }) })
+    },
+    reconnect: async () => {
+      const handle = get().remembered
+      if (!handle) return
+      if (await handle.requestPermission({ mode: 'readwrite' }) !== 'granted') return
+      await guarded(async () => { if (await openFolder(handle)) note({ id: 'scene.open.loaded', params: { folder: handle.name } }) })
+    },
+
+    select: index => {
+      const { items, lib } = get()
+      if (!items.length) return
+      const cur = (index + items.length) % items.length, it = items[cur]
+      set({ cur, sel: it.kind === 'clip' ? { name: it.name, t: it.event } : get().sel && { ...get().sel!, t: null } })
+      if (lib) try { localStorage.setItem(clipKey(lib.project_name), String(cur)) } catch { /* preference only */ }
+    },
+    selectCue: (name, t) => set({ sel: { name, t } }),
+
+    edit: change => {
+      const table = get().table
+      if (!table) return false
+      const next = change(table)
+      if (!next) return false
+      set({ table: next, dirty: true })
+      return true
+    },
+
+    addClip: async (file, loop) => {
+      const { table, lib, clipFiles } = get()
+      if (!table || !lib) return null
+      const name = clipNameFromFile(file.name, new Set([...Object.keys(table.clips), ...clipFiles]), lib.clip_name)
+      if (!name) { note({ id: 'scene.wav.badClipName', params: { file: file.name }, error: true }); return null }
+      let data: Float32Array
+      try { data = mono(await decode(await file.arrayBuffer(), RATE)) } catch { note({ id: 'scene.wav.unreadable', params: { file: file.name }, error: true }); return null }
+      set(s => ({ pcm: { ...s.pcm, [name]: data }, pending: { ...s.pending, clips: { ...s.pending.clips, [name]: encodePcm16Wav(data, RATE, 1) } },
+        table: s.table && addClipEntry(s.table, name, loop, file.name), dirty: true }))
+      note({ id: 'scene.wav.clipAdded', params: { name, seconds: (data.length / RATE).toFixed(2) } })
+      return name
+    },
+    addSound: async file => {
+      const { lib, soundFiles } = get()
+      if (!lib) return null
+      const name = soundNameFromFile(file.name, new Set([...soundFiles, ...lib.loop_sounds]), lib.sound_name)
+      if (!name) { note({ id: 'scene.wav.badSoundName', params: { file: file.name }, error: true }); return null }
+      let b: AudioBuffer
+      try { b = await decode(await file.arrayBuffer(), 48000) } catch { note({ id: 'scene.wav.unreadable', params: { file: file.name }, error: true }); return null }
+      const ch = b.numberOfChannels, inter = new Float32Array(b.length * ch)
+      for (let c = 0; c < ch; c++) { const d = b.getChannelData(c); for (let i = 0; i < b.length; i++) inter[i * ch + c] = d[i] }
+      set(s => ({ sfx: { ...s.sfx, [name]: b }, pending: { ...s.pending, sounds: { ...s.pending.sounds, [name]: encodePcm16Wav(inter, 48000, ch) } },
+        soundFiles: [...s.soundFiles, name].sort(), dirty: true }))
+      note({ id: 'scene.wav.soundAdded', params: { name, dir: lib.paths.sounds } })
+      return name
+    },
+
+    save: async () => {
+      const { root, lib, table, loaded, pending, clipFiles, soundFiles } = get()
+      if (!root || !lib || !table || !loaded) { note({ id: 'scene.save.noProject', error: true }); return }
+      const problems = validateCueTable(table, { lib, kit: loaded.kit, cueNames: loaded.cueNames,
+        clipFiles: new Set([...clipFiles, ...Object.keys(pending.clips)]), soundFiles: new Set([...soundFiles, ...Object.keys(pending.sounds)]) })
+      if (problems.length) { note({ id: 'scene.save.invalid', params: { problems: problems.join(' / ') }, error: true }); for (const p of problems) addLog(p); return }
+      const added = Object.keys(pending.clips).length + Object.keys(pending.sounds).length
+      await guarded(async () => {
+        try { await writeSceneSave(root, lib, table, pending) }
+        catch (error) { note({ id: 'scene.save.failed', params: { error: message(error) }, error: true }); addLog(message(error)); return }
+        await loadTable()
+        note({ id: added ? 'scene.save.doneWavs' : 'scene.save.done', params: { file: lib.paths.cues, count: added } })
+      })
+    },
+    revert: async () => {
+      if (!get().root) return
+      await guarded(async () => { await loadTable(); note({ id: 'scene.reverted' }) })
+    },
+  }
+})

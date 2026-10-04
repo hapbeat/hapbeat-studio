@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { WaveformEditor } from '@/components/waveform/WaveformEditor'
 import { DisplayEditor } from '@/components/display/DisplayEditor'
+import { SceneView } from '@/components/scene/SceneView'
 import { KitManager } from '@/components/kit/KitManager'
 import { Devices } from '@/components/devices/Devices'
 import { LogDrawer } from '@/components/log/LogDrawer'
@@ -17,11 +18,26 @@ import { useI18n } from '@/i18n/I18nProvider'
 import './App.css'
 import { handlePlaybackShortcut } from '@/utils/playbackShortcut'
 
-type Tab = 'editor' | 'kit' | 'display' | 'devices'
+type Tab = 'editor' | 'scene' | 'kit' | 'display' | 'devices'
 
-const TABS: Tab[] = ['editor', 'kit', 'display', 'devices']
+const TABS: Tab[] = ['editor', 'scene', 'kit', 'display', 'devices']
 
 const DEFAULT_TAB: Tab = 'kit'
+
+/** Tabs still in beta (badge on the tab button). */
+const BETA_TABS: Tab[] = ['editor', 'scene']
+
+/**
+ * Tab shown on load: `?tab=<id>` in the URL (e.g. `/?tab=scene`, used by the
+ * haptic authoring launcher) wins, then the last tab used, then Kit.
+ */
+function initialTab(): Tab {
+  let wanted: string | null = null
+  try { wanted = new URLSearchParams(window.location.search).get('tab') } catch { /* no URL params */ }
+  if (wanted && (TABS as string[]).includes(wanted)) return wanted as Tab
+  const saved = localStorage.getItem('hapbeat-studio-tab')
+  return (TABS as string[]).includes(saved ?? '') ? (saved as Tab) : DEFAULT_TAB
+}
 
 const DOCS_URL = 'https://devtools.hapbeat.com/docs/tools/studio/initial-setup/'
 
@@ -53,23 +69,16 @@ export function App() {
   const { locale, setLocale, t } = useI18n()
   const tabLabels: Record<Tab, { main: string; sub: string }> = {
     editor: { main: t('tabs.editor.main'), sub: t('tabs.editor.sub') },
+    scene: { main: t('tabs.scene.main'), sub: t('tabs.scene.sub') },
     kit: { main: t('tabs.kit.main'), sub: t('tabs.kit.sub') },
     display: { main: t('tabs.ui.main'), sub: t('tabs.ui.sub') },
     devices: { main: t('tabs.manage.main'), sub: t('tabs.manage.sub') },
   }
-  const [activeTab, setActiveTab] = useState<Tab>(() => {
-    const saved = localStorage.getItem('hapbeat-studio-tab')
-    return (TABS as string[]).includes(saved ?? '') ? (saved as Tab) : DEFAULT_TAB
-  })
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab)
 
   // Track which tabs the user has visited at least once. We mount each
   // tab on first visit and keep it mounted after — see PersistentTab.
-  const [visitedTabs, setVisitedTabs] = useState<Set<Tab>>(() => new Set([
-    (() => {
-      const saved = localStorage.getItem('hapbeat-studio-tab')
-      return (TABS as string[]).includes(saved ?? '') ? (saved as Tab) : DEFAULT_TAB
-    })(),
-  ]))
+  const [visitedTabs, setVisitedTabs] = useState<Set<Tab>>(() => new Set([initialTab()]))
 
   // The app header can be folded away to give tabs (notably the editor) more height.
   // A slim bar with the expand button stays visible while folded.
@@ -80,6 +89,13 @@ export function App() {
     try { localStorage.setItem('hapbeat-studio-header-collapsed', headerCollapsed ? '1' : '0') } catch { /* preference only */ }
   }, [headerCollapsed])
 
+  // `?tab=` only picks the first tab: drop it so a reload keeps the tab used last.
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    if (!url.searchParams.has('tab')) return
+    url.searchParams.delete('tab')
+    window.history.replaceState(window.history.state, '', url)
+  }, [])
   useEffect(() => {
     localStorage.setItem('hapbeat-studio-tab', activeTab)
     setVisitedTabs((prev) => {
@@ -163,7 +179,7 @@ export function App() {
               onClick={() => setActiveTab(tab)}
             >
               <span className="tab-btn-main">{tabLabels[tab].main}</span>
-              {tab === 'editor' && <span className="tab-beta-badge" aria-label={t('editor.beta')}>BETA</span>}
+              {BETA_TABS.includes(tab) && <span className="tab-beta-badge" aria-label={t('editor.beta')}>BETA</span>}
               <span className="tab-btn-sub">{tabLabels[tab].sub}</span>
             </button>
           ))}
@@ -264,9 +280,12 @@ export function App() {
         helperVersion={helperVersion}
         helperCompat={helperCompat}
       />
-      <main className={`tab-content ${activeTab === 'editor' ? 'tab-content-editor' : ''}`}>
+      <main className={`tab-content ${activeTab === 'editor' || activeTab === 'scene' ? 'tab-content-editor' : ''}`}>
         <PersistentTab active={activeTab === 'editor'} visited={visitedTabs.has('editor')}>
           <WaveformEditor active={activeTab === 'editor'} />
+        </PersistentTab>
+        <PersistentTab active={activeTab === 'scene'} visited={visitedTabs.has('scene')}>
+          <SceneView active={activeTab === 'scene'} />
         </PersistentTab>
         <PersistentTab active={activeTab === 'kit'} visited={visitedTabs.has('kit')}>
           <KitManager />

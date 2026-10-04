@@ -57,17 +57,18 @@ type Node = { kind: 'directory'; children: Map<string, Node> } | { kind: 'file';
 
 /** Minimal in-memory FileSystemDirectoryHandle (the calls the Scene tab makes). */
 export function memoryFolder(files: Record<string, string | Uint8Array>, name = 'project') {
-  const root: Node = { kind: 'directory', children: new Map() }
+  type Dir = Extract<Node, { kind: 'directory' }>
+  const root: Dir = { kind: 'directory', children: new Map() }
   const notFound = () => new DOMException('not found', 'NotFoundError')
   const put = (path: string, data: Uint8Array) => {
-    const parts = path.split('/'); let dir = root
+    const parts = path.split('/'); let dir: Dir = root
     for (const p of parts.slice(0, -1)) {
-      if (dir.kind !== 'directory') throw new Error('not a dir')
       let next = dir.children.get(p)
       if (!next) { next = { kind: 'directory', children: new Map() }; dir.children.set(p, next) }
+      if (next.kind !== 'directory') throw new Error('not a dir')
       dir = next
     }
-    if (dir.kind === 'directory') dir.children.set(parts[parts.length - 1], { kind: 'file', data })
+    dir.children.set(parts[parts.length - 1], { kind: 'file', data })
   }
   for (const [path, data] of Object.entries(files)) put(path, typeof data === 'string' ? new TextEncoder().encode(data) : data)
   const fileHandle = (fname: string, node: Extract<Node, { kind: 'file' }>) => ({
@@ -112,5 +113,5 @@ export function memoryFolder(files: Record<string, string | Uint8Array>, name = 
     return node?.kind === 'file' ? new TextDecoder().decode(node.data) : null
   }
   const exists = (path: string) => read(path) !== null
-  return { handle: dirHandle(name, root as Extract<Node, { kind: 'directory' }>) as FileSystemDirectoryHandle, read, exists }
+  return { handle: dirHandle(name, root) as FileSystemDirectoryHandle, read, exists }
 }

@@ -12,6 +12,10 @@ describe('Studio playback shortcuts', () => {
     const dispatch = vi.fn(); handlePlaybackShortcut(key(), tab, dispatch)
     expect(dispatch.mock.calls.map(([e]) => e.type)).toEqual(['studio:kit-playback'])
   })
+  it('sends Scene playback to the Scene tab', () => {
+    const dispatch = vi.fn(); handlePlaybackShortcut(key(), 'scene', dispatch)
+    expect(dispatch.mock.calls.map(([e]) => e.type)).toEqual(['studio:scene-playback'])
+  })
   it('does not repeatedly toggle, interfere with composition, or play a hidden tab from Display', () => {
     const dispatch = vi.fn()
     handlePlaybackShortcut(key({repeat: true}), 'editor', dispatch)

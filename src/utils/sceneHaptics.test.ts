@@ -87,13 +87,13 @@ describe('scene haptic streams', () => {
     expect(sent).toEqual([])
     pump(1000)
     pump(1000 + QUIET_END_MS + 1, { playing: false })
-    expect(sent.at(-1)?.type).toBe('stream_end')
+    expect(sent[sent.length - 1]?.type).toBe('stream_end')
   })
 
   it('ends a device stream when the device leaves the selection', () => {
     const { sent, pump } = run()
     pump(1000)
     pump(1010, { devices: [] })
-    expect(sent.at(-1)).toEqual({ type: 'stream_end', payload: expect.objectContaining({ targets: ['10.0.0.2'] }) })
+    expect(sent[sent.length - 1]).toEqual({ type: 'stream_end', payload: expect.objectContaining({ targets: ['10.0.0.2'] }) })
   })
 })
