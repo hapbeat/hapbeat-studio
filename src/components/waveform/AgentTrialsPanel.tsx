@@ -138,15 +138,18 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
         const file = record.candidates.find(c => c.id === requested.id)
         const loaded = audio[requested.id], buffer = loaded && !('error' in loaded) ? loaded : null
         const active = audition?.trialId === trial.id && audition.candidateId === requested.id
-        return <article key={requested.id} className={`agent-candidate ${active ? 'auditioning' : ''}`}>
+        // Clicking anywhere on the card (except its own controls) auditions it in the waveform panel.
+        const select = (event: { target: EventTarget }) => {
+          if (!buffer || active || (event.target as HTMLElement).closest('button, input, select, textarea, label, a')) return
+          onAudition({ trialId: trial.id, candidateId: requested.id }, buffer)
+        }
+        return <article key={requested.id} className={`agent-candidate ${active ? 'auditioning' : ''} ${buffer ? 'selectable' : ''}`} aria-current={active || undefined} onClick={select}>
           <header><strong>{requested.id}</strong><span title={requested.label}>{requested.label}</span></header>
           {requested.hypothesis && <p className="agent-hypothesis">{requested.hypothesis}</p>}
           <div className="agent-thumb">{buffer ? <WaveformThumbnail buffer={buffer} />
             : <small className={file?.error || loaded ? 'error' : ''}>{file?.error ? t('editor.agent.renderError', { message: file.error }) : loaded && 'error' in loaded ? loaded.error : file ? t('editor.agent.loadingAudio') : ''}</small>}</div>
           <FeatureLine features={file?.features ?? null} />
           <div className="agent-candidate-actions">
-            <button className={`toolbar-btn ${active ? 'selected' : ''}`} aria-pressed={active} disabled={!buffer} onClick={() => buffer && onAudition({ trialId: trial.id, candidateId: requested.id }, buffer)}>
-              {t(active ? 'editor.agent.auditioningButton' : 'editor.agent.audition')}</button>
             <button className="toolbar-btn" title={t('editor.agent.adoptHint')} disabled={!editorFolder || processing} onClick={() => void adopt(requested.id, requested.label)}>{t('editor.agent.adopt')}</button>
           </div>
           <CandidateRatingInputs value={form.candidates[requested.id]} terms={trial.terms} dimensions={dimensions} onChange={patch => editCandidate(requested.id, patch)} />

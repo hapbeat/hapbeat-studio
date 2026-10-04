@@ -784,7 +784,8 @@
 
 /* AI trials panel. Status lines have fixed heights so notices never push content. */
 .editor-active-name.editor-auditioning { color: #67e8f9; }
-.agent-panel { display: flex; flex-direction: column; gap: 8px; padding: 10px; min-width: 0; font-size: 13px; }
+.agent-panel { display: flex; flex-direction: column; gap: 8px; padding: 10px; min-width: 0; height: 100%; box-sizing: border-box; overflow-y: auto; font-size: 13px; }
+.agent-panel > * { flex-shrink: 0; }
 .agent-panel[hidden] { display: none; }
 .agent-status, .agent-notice { height: 36px; overflow: auto; font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
 .agent-notice { height: 20px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
@@ -814,7 +815,8 @@
 .agent-chip { display: inline-block; margin: 0 4px 2px 0; padding: 0 7px; border: 1px solid var(--border-light); border-radius: 10px; }
 .agent-candidates { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 8px; }
 .agent-candidate { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-secondary); }
-.agent-candidate.auditioning { border-color: #22d3ee; }
+.agent-candidate.selectable { cursor: pointer; }
+.agent-candidate.auditioning { border-color: #22d3ee; box-shadow: inset 0 0 0 1px #22d3ee; }
 .agent-candidate header { display: flex; gap: 8px; min-width: 0; }
 .agent-candidate header span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-hypothesis { margin: 0; font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
