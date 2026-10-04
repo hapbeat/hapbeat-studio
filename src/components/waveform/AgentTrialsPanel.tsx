@@ -5,6 +5,7 @@ import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { localIsoString, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
 import type { HapticFeatures } from '@/utils/hapticFeatures'
+import { clearRatingDraft, DRAFT_DEBOUNCE_MS, newerDraft, readFolderDraft, readLocalDraft, writeRatingDraft } from '@/utils/ratingDrafts'
 import { addUseRange, autoRatingContext, EMPTY_CONTEXT, formToRating, jaPolePhrase, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, trialKind, visibleDimensions, type CandidateRatingForm, type Direction, type RatingForm } from '@/utils/agentTrialUi'
 import { trialTarget, type TrialKind } from '@/utils/agentProtocol'
 import { useEventStore } from '@/stores/eventStore'
@@ -53,7 +54,9 @@ export function AgentTrialsPanel() {
   }
   const deviceNames = useMemo(() => [...new Set(playbackDevices.map(device => device.name).filter(Boolean))], [playbackDevices])
   /** '' = every trial; otherwise the trial's `project` (UNASSIGNED_FILTER = trials without one). */
-  const [projectFilter, setProjectFilter] = useState('')
+  /** Remembered in the editor UI settings (localStorage, folder copy, export). */
+  const projectFilter = useEditorSettings(s => s.trialProjectFilter)
+  const setProjectFilter = (value: string) => useEditorSettings.getState().update({ trialProjectFilter: value })
   const trials = useAgentTrialStore(s => s.trials)
   const folder = useAgentTrialStore(s => s.folder)
   const polling = useAgentTrialStore(s => s.polling)
@@ -130,8 +133,28 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
   const ids = useId()
   const editorFolder = useWaveformStore(s => s.folder)
   const processing = useWaveformStore(s => s.isProcessing)
-  const [form, setForm] = useState<RatingForm>(() => drafts.get(trial.id) ?? ratingToForm(trial, rating, loadRememberedContext()))
-  const [dirty, setDirty] = useState(() => drafts.has(trial.id))
+  // Unsaved form: this page's memory first, else the draft kept across reloads (localStorage now, the folder copy below).
+  const [localDraft] = useState(() => drafts.has(trial.id) ? null : readLocalDraft(trial))
+  const [form, setForm] = useState<RatingForm>(() => drafts.get(trial.id) ?? localDraft?.form ?? ratingToForm(trial, rating, loadRememberedContext()))
+  const [dirty, setDirty] = useState(() => drafts.has(trial.id) || !!localDraft)
+  /** The form came from a stored draft (shown until it is saved). */
+  const [restored, setRestored] = useState(!!localDraft)
+  const touchedSinceMount = useRef(false)
+  useEffect(() => {
+    if (drafts.has(trial.id) || !editorFolder) return
+    let cancelled = false
+    void readFolderDraft(editorFolder.root, trial).then(found => {
+      if (cancelled || touchedSinceMount.current || !found || newerDraft(localDraft, found) !== found || found === localDraft) return
+      setForm(found.form); setDirty(true); setRestored(true)
+    })
+    return () => { cancelled = true }
+  }, [trial.id, editorFolder])
+  // Every change is kept as a draft (debounced) in the editor folder and localStorage.
+  useEffect(() => {
+    if (!dirty) return
+    const timer = setTimeout(() => { void writeRatingDraft(editorFolder?.root ?? null, trial.id, form, localIsoString(new Date())).catch(() => {}) }, DRAFT_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [form, dirty, trial.id, editorFolder])
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
@@ -178,7 +201,7 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
   const marks = useEditorSettings(s => s.eventMarks)
   /** The waveform selection while a candidate is auditioned: recorded as its "use only this part" range. */
   const selection = useWaveformStore(s => s.selectedRegion)
-  const edit = (update: (f: RatingForm) => RatingForm) => { setForm(update); setDirty(true); setSaveError(null) }
+  const edit = (update: (f: RatingForm) => RatingForm) => { touchedSinceMount.current = true; setForm(update); setDirty(true); setSaveError(null) }
   const editCandidate = (cid: string, patch: Partial<CandidateRatingForm>) => edit(f => ({ ...f, candidates: { ...f.candidates, [cid]: { ...f.candidates[cid], ...patch } } }))
   const issue = ratingFormIssue(form)
   const save = async () => {
@@ -188,7 +211,10 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
       ...(auto.deviceWiper !== null ? { deviceWiper: String(auto.deviceWiper), volumeLabel: auto.volumeLabel } : { volumeLabel: '' }) } }
     const body = formToRating(withAuto, trial, localIsoString(new Date()))
     let saved = false
-    try { await useAgentTrialStore.getState().saveRating(trial.id, body); if (target === 'haptic') rememberContext(withAuto.context); drafts.delete(trial.id); setDirty(false); saved = true }
+    try {
+      await useAgentTrialStore.getState().saveRating(trial.id, body); if (target === 'haptic') rememberContext(withAuto.context); drafts.delete(trial.id); setDirty(false); setRestored(false); saved = true
+      await clearRatingDraft(editorFolder?.root ?? null, trial.id).catch(() => {})
+    }
     catch (error) { setSaveError(message(error)) }
     finally { setSaving(false) }
     if (saved && body.best && trial.scene && autoAssign) await assignBest(body.best)
@@ -217,7 +243,7 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
     const [level, steps] = label.split('/')
     return label ? t('editor.agent.volumeWithSteps', { wiper, level, steps }) : t('editor.agent.deviceWiperOnly', { wiper })
   }
-  const saveStatus = saveError ? t('editor.agent.saveFailed', { message: saveError }) : dirty ? (issue ? issueText : t('editor.agent.unsaved'))
+  const saveStatus = saveError ? t('editor.agent.saveFailed', { message: saveError }) : dirty ? `${restored ? t('editor.agent.draftRestored') + ' ' : ''}${issue ? issueText : t('editor.agent.unsaved')}`
     : rating ? t('editor.agent.saved', { time: new Date(rating.ratedAt).toLocaleString() }) : issueText
   const contextField = (key: keyof RatingForm['context'], label: string, list?: string) =>
     <label className="agent-field">{label}<input list={list} value={form.context[key]} onChange={e => { const value = e.target.value; edit(f => ({ ...f, context: { ...f.context, [key]: value } })) }} /></label>
@@ -328,6 +354,9 @@ function CandidateRatingInputs({ value, terms, dimensions, onChange, selection }
   selection: { start: number; end: number } | null
 }) {
   const { t, locale } = useI18n()
+  const [more, setMore] = useState(false)
+  /** How many folded inputs hold something (shown on the closed toggle). */
+  const extra = Object.keys(value.directions).length + value.useRange.length + (value.comment.trim() ? 1 : 0)
   const setTerm = (term: string, v: number | undefined) => {
     const termMatch = { ...value.termMatch }
     if (v === undefined) delete termMatch[term]; else termMatch[term] = v
@@ -355,7 +384,12 @@ function CandidateRatingInputs({ value, terms, dimensions, onChange, selection }
         <div className="agent-scale">{(['-2', '0', '2'] as const).map(k => <small key={k}>{t(TERM_LABELS[k])}</small>)}</div>
       </div>
     })}
-    {dimensions && dimensions.dimensions.length > 0 && <div className="agent-directions" aria-label={t('editor.agent.directions')}>
+    {/* Directions, kept ranges and the comment fold away (closed at first); overall and term match stay visible. */}
+    <button type="button" className="agent-more" aria-expanded={more} onClick={() => setMore(!more)}>
+      <span aria-hidden="true">{more ? '▾' : '▸'}</span>{t('editor.agent.moreRating')}
+      {extra > 0 && <small className="agent-more-count">{t('editor.agent.moreSet', { count: extra })}</small>}
+    </button>
+    {more && dimensions && dimensions.dimensions.length > 0 && <div className="agent-directions" aria-label={t('editor.agent.directions')}>
       <small>{t('editor.agent.directions')}</small>
       {dimensions.dimensions.map(d => {
         const name = locale === 'ja' ? d.ja : d.en
@@ -369,12 +403,12 @@ function CandidateRatingInputs({ value, terms, dimensions, onChange, selection }
         </div>
       })}
     </div>}
-    <div className="agent-use-range">
+    {more && <div className="agent-use-range">
       <button className="toolbar-btn" disabled={!selection || selection.end <= selection.start} title={t('editor.agent.useRangeHint')}
         onClick={() => { if (selection) onChange({ useRange: addUseRange(value.useRange, selection.start, selection.end) }) }}>{t('editor.agent.useRangeRecord')}</button>
       {value.useRange.map((r, i) => <span key={`${r[0]}-${r[1]}`} className="agent-chip">{r[0].toFixed(3)}–{r[1].toFixed(3)} s
         <button className="agent-chip-remove" aria-label={t('editor.agent.useRangeRemove')} title={t('editor.agent.useRangeRemove')} onClick={() => onChange({ useRange: value.useRange.filter((_, k) => k !== i) })}>✕</button></span>)}
-    </div>
-    <textarea className="agent-comment" rows={2} placeholder={t('editor.agent.comment')} aria-label={t('editor.agent.comment')} value={value.comment} onChange={e => onChange({ comment: e.target.value })} />
+    </div>}
+    {more && <textarea className="agent-comment" rows={2} placeholder={t('editor.agent.comment')} aria-label={t('editor.agent.comment')} value={value.comment} onChange={e => onChange({ comment: e.target.value })} />}
   </div>
 }
