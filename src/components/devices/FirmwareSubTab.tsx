@@ -45,6 +45,12 @@ import {
   type HierarchySelection,
 } from '@/utils/firmwareHierarchy'
 import { chipIdForBoard, validateOtaImage, type OtaValidationResult } from '@/utils/otaImageValidation'
+import {
+  needsStreamV2Warning,
+  STREAM_V2_FIRMWARE_MIN,
+  STREAM_V2_UNSUPPORTED_SDKS,
+  streamV2MinimumLines,
+} from '@/utils/streamV2Compat'
 import { DriverHelpLinks } from './DriverHelpLinks'
 
 const ROLE_ORDER: NodeRole[] = ['receiver', 'sensor', 'broker', 'transmitter']
@@ -378,6 +384,39 @@ export function FirmwareSubTab({
     })
     if (!ok) {
       pushLog('firmware', `flash aborted — haptic output mismatch (env=${selectedEntry.env}, ${warning})`)
+    }
+    return ok
+  }, [source, selectedEntry, ask, pushLog, t])
+
+  /**
+   * Pre-flight: a stream-v2 image (firmware ≥ 0.5.0) silences streamed haptics
+   * from apps on pre-v2 SDKs. Confirm before writing it onto a target that
+   * runs pre-v2 or unknown firmware. Library source only — a local .bin
+   * carries no declared version.
+   */
+  const checkStreamV2Compat = useCallback(async (
+    currentFws: Array<string | null | undefined>,
+  ): Promise<boolean> => {
+    if (source !== 'library' || !selectedEntry) return true
+    if (!needsStreamV2Warning(selectedEntry.fwVersion, currentFws)) return true
+    const ok = await ask({
+      title: t('firmware.streamV2Title'),
+      message: t('firmware.streamV2Message', {
+        version: normalizeVersion(selectedEntry.fwVersion),
+        min: STREAM_V2_FIRMWARE_MIN,
+        minimums: streamV2MinimumLines(),
+        unsupported: STREAM_V2_UNSUPPORTED_SDKS.join(', '),
+      }),
+      confirmLabel: t('firmware.streamV2Confirm'),
+      cancelLabel: t('common.cancel'),
+      danger: true,
+    })
+    if (!ok) {
+      pushLog(
+        'firmware',
+        `flash aborted — stream v2 compatibility (fw=${selectedEntry.fwVersion}, `
+        + `targets=[${currentFws.map((fw) => fw ?? '?').join(', ')}])`,
+      )
     }
     return ok
   }, [source, selectedEntry, ask, pushLog, t])
@@ -811,6 +850,9 @@ export function FirmwareSubTab({
     const pwmForIp = (ip: string): boolean =>
       ip === device.ipAddress ? knownPwm : !!infoCache[ip]?.haptic_pwm
     if (!(await checkHapticOutputMatch(targets.map(pwmForIp)))) return
+    const fwForIp = (ip: string): string | undefined =>
+      infoCache[ip]?.fw ?? devices.find((d) => d.ipAddress === ip)?.firmwareVersion
+    if (!(await checkStreamV2Compat(targets.map(fwForIp)))) return
 
     otaClearResult(device.ipAddress)
     let bin: Awaited<ReturnType<typeof readSelectedBin>>
@@ -947,6 +989,7 @@ export function FirmwareSubTab({
       }
     }
     if (!(await checkHapticOutputMatch(serialTargets.map((e) => !!e.info?.haptic_pwm)))) return
+    if (!(await checkStreamV2Compat(serialTargets.map((e) => e.info?.fw)))) return
     let plan: Awaited<ReturnType<typeof readSelectedRegions>>
     try {
       plan = await readSelectedRegions()
