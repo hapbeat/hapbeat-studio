@@ -262,8 +262,6 @@ export const messages = defineMessages({
   "editor.agent.parent": { ja: "前回の試行", en: "Previous trial" },
   "editor.agent.agentName": { ja: "エージェント", en: "Agent" },
   "editor.agent.received": { ja: "受信", en: "Received" },
-  "editor.agent.audition": { ja: "試聴", en: "Audition" },
-  "editor.agent.auditioningButton": { ja: "試聴中", en: "Auditioning" },
   "editor.agent.adopt": { ja: "クリップとして採用", en: "Adopt as clip" },
   "editor.agent.adoptHint": { ja: "候補の素材を新しいクリップの原音にし、エフェクトを未適用のチェーンとして追加します。", en: "Creates a new clip from the candidate's source with its effects as an unapplied chain." },
   "editor.agent.adopted": { ja: "「{name}」を新しいクリップとして追加しました（エフェクトは未適用）。", en: "Added \"{name}\" as a new clip (effects not applied yet)." },
