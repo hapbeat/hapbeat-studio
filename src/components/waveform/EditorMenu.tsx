@@ -52,6 +52,9 @@ export function EditorMenuItem({ onSelect, disabled, checked, children, keepOpen
   </button>
 }
 
+/** Closes the enclosing menu (for custom content such as a text field committed with Enter). */
+export const useCloseEditorMenu = () => useContext(CloseMenu)
+
 export function EditorMenuSection({ label, children }: { label: ReactNode; children: ReactNode }) {
   return <div role="group" className="editor-menu-section"><div className="editor-menu-heading">{label}</div>{children}</div>
 }

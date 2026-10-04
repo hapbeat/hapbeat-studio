@@ -1,3 +1,5 @@
+import { isProjectName } from './editorFolder'
+
 /**
  * Waveform editor UI preferences (dock layout, panel set, clip list view,
  * playback options). Haptic targets use the shared Kit device selection (deviceStore). Kept in three places so a cleared browser or a
@@ -22,13 +24,15 @@ export interface EditorUiSettings {
   clipGroupBy: ClipGroupBy
   /** Collapsed clip-list group keys. */
   collapsedGroups: string[]
+  /** User-listed project names; a clip named `<name>-…` joins that project automatically (see clipProjects). */
+  projectNames: string[]
   /** dockview `toJSON()` output; null = default layout. */
   dockLayout: Record<string, unknown> | null
 }
 
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
-  clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], dockLayout: null,
+  clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -50,6 +54,7 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     clipThumbnails: typeof v.clipThumbnails === 'boolean' ? v.clipThumbnails : d.clipThumbnails,
     clipGroupBy: v.clipGroupBy === 'source' || v.clipGroupBy === 'project' ? v.clipGroupBy : d.clipGroupBy,
     collapsedGroups: strings(v.collapsedGroups, 1000) ? v.collapsedGroups : d.collapsedGroups,
+    projectNames: strings(v.projectNames, 500) ? [...new Set(v.projectNames.filter(isProjectName))] : d.projectNames,
     dockLayout: isDockLayout(v.dockLayout) ? v.dockLayout : d.dockLayout,
   }
 }

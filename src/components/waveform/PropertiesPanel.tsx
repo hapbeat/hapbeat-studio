@@ -1,20 +1,29 @@
 import { useEffect, useId, useMemo, useState } from 'react'
 import { useWaveformStore } from '@/stores/waveformStore'
+import { useEditorSettings } from '@/stores/editorSettings'
 import { useI18n } from '@/i18n/I18nProvider'
 import { normalizeProjectName } from '@/utils/editorFolder'
+import { effectiveProject, knownProjectNames, type EffectiveProject } from '@/utils/clipProjects'
 import { useEditor } from './editorContext'
 
-/** Distinct project labels of the open clips, sorted for pickers. */
+/** Known project names (explicit labels of the open clips + the user's auto-group list), sorted for pickers. */
 export function useProjectNames(): string[] {
   const documents = useWaveformStore(s => s.documents)
-  return useMemo(() => [...new Set(documents.map(doc => doc.clip.project).filter((p): p is string => !!p))].sort((a, b) => a.localeCompare(b)), [documents])
+  const listed = useEditorSettings(s => s.projectNames)
+  return useMemo(() => knownProjectNames(documents.map(doc => doc.clip.project), listed), [documents, listed])
+}
+
+/** Explicit project, else the one derived from the clip-name prefix. */
+export function useEffectiveProject(clip: { name: string; project?: string }): EffectiveProject {
+  const known = useProjectNames()
+  return useMemo(() => effectiveProject(clip, known), [clip.name, clip.project, known])
 }
 
 /**
  * Project picker: type a new name or pick an existing one. The value is
  * committed (normalized) on blur / Enter so spaces can be typed freely.
  */
-export function ProjectField({ clipId, value, autoFocus, onDone }: { clipId: string; value: string | undefined; autoFocus?: boolean; onDone?: () => void }) {
+export function ProjectField({ clipId, value, autoProject, autoFocus, onDone }: { clipId: string; value: string | undefined; autoProject?: string; autoFocus?: boolean; onDone?: () => void }) {
   const { t } = useI18n()
   const listId = useId()
   const projects = useProjectNames()
@@ -28,11 +37,13 @@ export function ProjectField({ clipId, value, autoFocus, onDone }: { clipId: str
     onDone?.()
   }
   return <>
-    <input list={listId} value={draft} placeholder={t('editor.projectPlaceholder')} aria-label={t('editor.project')} disabled={processing} autoFocus={autoFocus}
+    <input list={listId} value={draft} placeholder={autoProject ? t('editor.projectAutoPlaceholder', { name: autoProject }) : t('editor.projectPlaceholder')} title={t('editor.projectHint')} aria-label={t('editor.project')} disabled={processing} autoFocus={autoFocus}
       onChange={e => setDraft(e.target.value)} onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { setDraft(value ?? ''); onDone?.() } }} />
     <datalist id={listId}>{projects.map(name => <option key={name} value={name} />)}</datalist>
   </>
 }
+
+const NO_CLIP = { name: '' }
 
 /** Selected clip's name, usage note and project, then one detail per line (wraps in narrow panels). */
 export function PropertiesPanel() {
@@ -41,6 +52,7 @@ export function PropertiesPanel() {
   const processing = useWaveformStore(s => s.isProcessing)
   const folder = useWaveformStore(s => s.folder)
   const { openRecipe, provenanceText, auditionKey } = useEditor()
+  const project = useEffectiveProject(clip ?? NO_CLIP)
   if (!clip) return <div className="editor-panel editor-panel-empty">{t('editor.noClip')}</div>
   const update = useWaveformStore.getState().updateClipInfo
   const provenance = provenanceText(clip)
@@ -48,7 +60,11 @@ export function PropertiesPanel() {
     <fieldset className="editor-properties-fields" disabled={processing || !!auditionKey}>
       <label>{t('editor.name')}<input value={clip.name} onChange={e => update(clip.id, { name: e.target.value })} /></label>
       <label>{t('editor.descriptionLabel')}<input placeholder={t('editor.description')} value={clip.description ?? ''} onChange={e => update(clip.id, { description: e.target.value })} /></label>
-      <label>{t('editor.project')}<ProjectField clipId={clip.id} value={clip.project} /></label>
+      <label>
+        <span className="editor-project-label">{t('editor.project')}{project.auto && <span className="editor-project-auto" title={t('editor.projectAutoHint', { name: project.project })}>{t('editor.projectAuto')}</span>}</span>
+        <ProjectField clipId={clip.id} value={clip.project} autoProject={project.auto ? project.project : undefined} />
+        <small className="editor-project-hint">{t('editor.projectHint')}</small>
+      </label>
     </fieldset>
     <ul className="editor-properties-details" aria-label={t('editor.details')}>
       {clip.sourceFileName && <li title={clip.sourceFileName}>{t('editor.sourceFile')}: {clip.sourceFileName}</li>}

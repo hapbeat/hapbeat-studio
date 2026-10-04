@@ -6,6 +6,7 @@ import { decodeAudioFile, encodeWavBlob, encodeMonoWavBlob } from '@/utils/wavIO
 import { cropBuffer, applyEffect } from '@/utils/audioDsp'
 import { loadDirectoryHandle, saveDirectoryHandle } from '@/utils/localDirectory'
 import { EditorFolder, type EditorDocument } from '@/utils/editorFolder'
+import { assignProject } from '@/utils/clipProjects'
 import { loadRecipeSamples, renderRecipe, type Recipe } from '@/utils/recipe'
 import { readAgentBytes } from '@/utils/agentInbox'
 import type { KnowledgeFolder } from '@/utils/hapticKnowledge'
@@ -50,6 +51,8 @@ interface EditorState {
   duplicateClip: () => void
   extractSelection: () => void
   updateClipInfo: (id: string, patch: {name?: string; description?: string; project?: string | undefined}) => void
+  /** Sets (or clears) the explicit project of several clips in one save. */
+  setClipsProject: (ids: string[], project: string | undefined) => void
   /** Applies helper lookup results to every clip whose `sourceSha256` is in `found`; saves only when something changed. */
   setProvenance: (found: Map<string, MaterialProvenance>) => void
   setClipName: (name: string) => void
@@ -233,6 +236,12 @@ export const useWaveformStore = create<EditorState>((set, get) => {
     updateClipInfo: (id, patch) => {
       if (get().isProcessing) return
       const documents = get().documents.map(doc => doc.clip.id === id ? {...doc, clip: {...doc.clip, ...patch}} : doc)
+      dirty({documents, clip: documents.find(doc => doc.clip.id === get().clip?.id)?.clip ?? get().clip})
+    },
+    setClipsProject: (ids, project) => {
+      if (get().isProcessing) return
+      const documents = assignProject(get().documents, ids, project)
+      if (documents.every((doc, index) => doc === get().documents[index])) return
       dirty({documents, clip: documents.find(doc => doc.clip.id === get().clip?.id)?.clip ?? get().clip})
     },
     setProvenance: found => {

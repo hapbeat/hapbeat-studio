@@ -10,6 +10,8 @@ describe('editor UI settings', () => {
     expect(sanitizeUiSettings({ dockLayout: { grid: 1 } }).dockLayout).toBeNull()
     expect(sanitizeUiSettings({}).sendHaptics).toBe(true)
     expect(sanitizeUiSettings({ sendHaptics: false }).sendHaptics).toBe(false)
+    expect(sanitizeUiSettings({ projectNames: ['trex', ' bad ', 'trex', ''] }).projectNames).toEqual(['trex'])
+    expect(sanitizeUiSettings({ projectNames: [1] }).projectNames).toEqual([])
   })
 
   it('roundtrips through the file format and rejects untagged or broken files', () => {
