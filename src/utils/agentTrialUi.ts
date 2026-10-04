@@ -3,7 +3,7 @@
  * chain and the rating form ↔ hapbeat-rating@1 conversion.
  */
 import type { EffectEntry, EffectParams } from '@/types/waveform'
-import { RATING_FORMAT, type RatingBody, type RatingContext, type TrialKind, type TrialRequest } from '@/utils/agentProtocol'
+import { RATING_FORMAT, VOLUME_WIPER_MAX, type RatingBody, type RatingContext, type TrialKind, type TrialRequest } from '@/utils/agentProtocol'
 import type { Dimension } from '@/utils/hapticKnowledge'
 import type { DeviceInfo } from '@/types/manager'
 
@@ -14,29 +14,36 @@ export function derivedEffectChain(effects: EffectParams[], newId: () => string 
 
 export type Direction = -1 | 0 | 1
 export interface CandidateRatingForm { overall: number | null; termMatch: Record<string, number>; directions: Record<string, Direction>; comment: string }
-export interface RatingContextForm { device: string; position: string; volume: string; note: string }
-export interface RatingForm { best: string | null; context: RatingContextForm; candidates: Record<string, CandidateRatingForm> }
+/** Text fields of the conditions; `volumeWiper` is typed only when the helper cannot report it. */
+export interface RatingContextForm { device: string; position: string; volumeWiper: string; volumeLabel: string; note: string }
+export interface RatingForm { best: string | null; othersSimilar: boolean; context: RatingContextForm; candidates: Record<string, CandidateRatingForm> }
 
-export const EMPTY_CONTEXT: RatingContextForm = { device: '', position: '', volume: '', note: '' }
+export const EMPTY_CONTEXT: RatingContextForm = { device: '', position: '', volumeWiper: '', volumeLabel: '', note: '' }
 export const POSITION_SUGGESTIONS = ['neck', 'chest', 'back', 'wrist', 'waist'] as const
 
 const emptyCandidate = (): CandidateRatingForm => ({ overall: null, termMatch: {}, directions: {}, comment: '' })
 
 /** Pre-fills from the saved rating; a trial without a rating starts empty with the remembered context. */
 export function ratingToForm(trial: TrialRequest, rating: RatingBody | null, rememberedContext: RatingContextForm = EMPTY_CONTEXT): RatingForm {
-  const context = rating ? { ...EMPTY_CONTEXT, ...rating.context } : { ...rememberedContext }
+  const saved = rating?.context
+  const context: RatingContextForm = saved
+    ? { ...EMPTY_CONTEXT, device: saved.device ?? '', position: saved.position ?? '', note: saved.note ?? '', volumeLabel: saved.volumeLabel ?? '', volumeWiper: saved.volumeWiper === undefined ? '' : String(saved.volumeWiper) }
+    : rating ? { ...EMPTY_CONTEXT } : { ...rememberedContext }
   const candidates: Record<string, CandidateRatingForm> = {}
   for (const c of trial.candidates) {
     const saved = rating?.candidates[c.id]
     candidates[c.id] = saved ? { overall: saved.overall, termMatch: { ...saved.termMatch }, directions: { ...saved.directions }, comment: saved.comment ?? '' } : emptyCandidate()
   }
-  return { best: rating?.best ?? null, context, candidates }
+  return { best: rating?.best ?? null, othersSimilar: rating?.othersSimilar === true, context, candidates }
 }
 
 const touched = (c: CandidateRatingForm) => Object.keys(c.termMatch).length > 0 || Object.keys(c.directions).length > 0 || c.comment.trim() !== ''
 
 /** Why the form cannot be saved yet: nothing rated, or a candidate has inputs but no overall score. */
-export function ratingFormIssue(form: RatingForm): { kind: 'none-rated' } | { kind: 'missing-overall'; candidateId: string } | null {
+export function ratingFormIssue(form: RatingForm): { kind: 'none-rated' } | { kind: 'missing-overall'; candidateId: string } | { kind: 'similar-needs-best' } | { kind: 'bad-wiper' } | null {
+  const wiper = form.context.volumeWiper.trim()
+  if (wiper && parseWiper(wiper) === null) return { kind: 'bad-wiper' }
+  if (form.othersSimilar && (!form.best || form.candidates[form.best]?.overall == null)) return { kind: 'similar-needs-best' }
   const entries = Object.entries(form.candidates)
   const missing = entries.find(([, c]) => c.overall === null && touched(c))
   if (missing) return { kind: 'missing-overall', candidateId: missing[0] }
@@ -59,13 +66,24 @@ export function formToRating(form: RatingForm, trial: TrialRequest, ratedAt: str
     }
   }
   const context: RatingContext = {}
-  for (const key of Object.keys(EMPTY_CONTEXT) as (keyof RatingContextForm)[]) { const v = form.context[key].trim(); if (v) context[key] = v }
+  for (const key of ['device', 'position', 'volumeLabel', 'note'] as const) { const v = form.context[key].trim(); if (v) context[key] = v }
+  const wiper = parseWiper(form.context.volumeWiper)
+  if (wiper !== null) context.volumeWiper = wiper
   return {
     format: RATING_FORMAT, trialId: trial.id, ratedAt,
     ...(Object.keys(context).length ? { context } : {}),
     ...(form.best && trial.candidates.some(c => c.id === form.best) ? { best: form.best } : {}),
+    ...(form.othersSimilar && form.best ? { othersSimilar: true as const } : {}),
     candidates,
   }
+}
+
+/** Integer 0..VOLUME_WIPER_MAX, else null. */
+export function parseWiper(text: string): number | null {
+  const t = text.trim()
+  if (!/^\d{1,3}$/.test(t)) return null
+  const n = Number(t)
+  return n <= VOLUME_WIPER_MAX ? n : null
 }
 
 const CONTEXT_KEY = 'hapbeat-agent-rating-context'
@@ -108,13 +126,16 @@ export function jaPolePhrase(pole: string): string {
   return /[^\x00-\x7f]い$/.test(pole) && !/(きれい|嫌い|綺麗)$/.test(pole) ? pole.slice(0, -1) + 'く' : pole + 'に'
 }
 
-/** Rating conditions the helper reports for the playback devices: names and body volume (level / steps). Empty strings when unknown. */
-export function autoRatingContext(devices: DeviceInfo[], targetIps: string[]): { device: string; volume: string } {
+/**
+ * Rating conditions the helper reports for the playback devices: names, the
+ * volume wiper (only when every target reports the same value) and the level
+ * label "level/steps" when known. Empty / null when unknown.
+ */
+export function autoRatingContext(devices: DeviceInfo[], targetIps: string[]): { device: string; volumeWiper: number | null; volumeLabel: string } {
   const targets = targetIps.map(ip => devices.find(d => d.ipAddress === ip)).filter((d): d is DeviceInfo => !!d)
   const device = targets.map(d => d.name).filter(Boolean).join(', ')
-  const levels = targets.filter(d => typeof d.volumeLevel === 'number')
-  const volume = levels.length === targets.length && targets.length
-    ? [...new Set(levels.map(d => typeof d.volumeSteps === 'number' ? `${d.volumeLevel}/${d.volumeSteps}` : String(d.volumeLevel)))].join(', ')
-    : ''
-  return { device, volume }
+  const wipers = [...new Set(targets.map(d => d.volumeWiper))]
+  const volumeWiper = targets.length && wipers.length === 1 && typeof wipers[0] === 'number' ? wipers[0] : null
+  const labels = [...new Set(targets.map(d => typeof d.volumeLevel === 'number' && typeof d.volumeSteps === 'number' ? `${d.volumeLevel}/${d.volumeSteps}` : ''))]
+  return { device, volumeWiper, volumeLabel: volumeWiper !== null && labels.length === 1 ? labels[0] : '' }
 }

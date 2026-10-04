@@ -71,13 +71,21 @@ export interface CandidateRating {
   directions?: Record<string, -1 | 0 | 1>
   comment?: string
 }
-export interface RatingContext { device?: string; position?: string; volume?: string; note?: string }
+/**
+ * Rating conditions. `volumeWiper` is the device's raw volume wiper value
+ * (the reference: the step count of `volumeLabel` depends on user settings);
+ * `volumeLabel` is a human aid such as "5/10", present only when the steps are known.
+ */
+export interface RatingContext { device?: string; position?: string; volumeWiper?: number; volumeLabel?: string; note?: string }
+export const VOLUME_WIPER_MAX = 255
 export interface RatingBody {
   format: typeof RATING_FORMAT
   trialId: string
   ratedAt: string
   context?: RatingContext
   best?: string
+  /** "Every other candidate is about the same as the best": the others may be left unrated. Recorded only; aggregation does not infer scores from it. */
+  othersSimilar?: true
   candidates: Record<string, CandidateRating>
 }
 /** trials/<YYYY-MM>/<id>/rating.json — latest rating plus every previous one. */
@@ -156,6 +164,14 @@ export function ratingError(rating: RatingBody, trial: TrialRequest, dimensionId
   if (rating.format !== RATING_FORMAT || rating.trialId !== trial.id || Number.isNaN(Date.parse(rating.ratedAt))) return 'Invalid rating header'
   const cids = new Set(trial.candidates.map(c => c.id))
   if (rating.best !== undefined && !cids.has(rating.best)) return `Unknown best candidate "${rating.best}"`
+  if (rating.othersSimilar !== undefined && (rating.othersSimilar !== true || !rating.best || !rating.candidates[rating.best])) return 'othersSimilar must be true and needs a rated best candidate'
+  const ctx = rating.context
+  if (ctx !== undefined) {
+    if (!isObject(ctx)) return 'context must be an object'
+    if (ctx.volumeWiper !== undefined && (typeof ctx.volumeWiper !== 'number' || !Number.isInteger(ctx.volumeWiper) || ctx.volumeWiper < 0 || ctx.volumeWiper > VOLUME_WIPER_MAX)) return `context.volumeWiper must be an integer 0-${VOLUME_WIPER_MAX}`
+    for (const key of ['device', 'position', 'volumeLabel', 'note'] as const) if (!optString(ctx[key], 400)) return `context.${key} must be a string`
+    if ('volume' in ctx) return 'context.volume was replaced by volumeWiper / volumeLabel'
+  }
   if (!isObject(rating.candidates)) return 'candidates must be an object'
   for (const [cid, r] of Object.entries(rating.candidates)) {
     if (!cids.has(cid)) return `Unknown candidate "${cid}"`

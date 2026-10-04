@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { EffectParams } from '@/types/waveform'
 import { ratingError, type RatingBody, type TrialRequest } from './agentProtocol'
-import { autoRatingContext, derivedEffectChain, formToRating, jaPolePhrase, ratingFormIssue, ratingToForm, trialKind, visibleDimensions } from './agentTrialUi'
+import { autoRatingContext, derivedEffectChain, parseWiper, formToRating, jaPolePhrase, ratingFormIssue, ratingToForm, trialKind, visibleDimensions } from './agentTrialUi'
 import type { DeviceInfo } from '@/types/manager'
 
 const trial: TrialRequest = {
@@ -36,14 +36,14 @@ describe('rating form', () => {
   })
 
   it('omits unrated candidates and unset fields, and passes protocol validation', () => {
-    const form = ratingToForm(trial, null, { device: 'Band 1', position: '', volume: '', note: '' })
+    const form = ratingToForm(trial, null, { device: 'Band 1', position: '', volumeWiper: '96', volumeLabel: '', note: '' })
     form.candidates.A = { overall: 4, termMatch: { ごわごわ: -1 }, directions: { roughness: 1 }, comment: '  ok  ' }
     form.best = 'A'
     form.context.position = ' neck '
     const body = formToRating(form, trial, '2026-09-29T15:42:00+09:00')
     expect(body).toEqual({
       format: 'hapbeat-rating@1', trialId: 't1', ratedAt: '2026-09-29T15:42:00+09:00',
-      context: { device: 'Band 1', position: 'neck' }, best: 'A',
+      context: { device: 'Band 1', position: 'neck', volumeWiper: 96 }, best: 'A',
       candidates: { A: { overall: 4, termMatch: { ごわごわ: -1 }, directions: { roughness: 1 }, comment: 'ok' } },
     })
     expect(ratingError(body, trial, ['roughness'])).toBeNull()
@@ -52,8 +52,8 @@ describe('rating form', () => {
   it('round-trips a saved rating and prefers its context over the remembered one', () => {
     const saved: RatingBody = { format: 'hapbeat-rating@1', trialId: 't1', ratedAt: '2026-09-29T15:42:00+09:00', context: { position: 'wrist' }, best: 'B',
       candidates: { B: { overall: 2, termMatch: { ざらざら: 1 }, comment: 'harsh' } } }
-    const form = ratingToForm(trial, saved, { device: 'other', position: 'neck', volume: '', note: '' })
-    expect(form.context).toEqual({ device: '', position: 'wrist', volume: '', note: '' })
+    const form = ratingToForm(trial, saved, { device: 'other', position: 'neck', volumeWiper: '', volumeLabel: '', note: '' })
+    expect(form.context).toEqual({ device: '', position: 'wrist', volumeWiper: '', volumeLabel: '', note: '' })
     expect(form.candidates.A.overall).toBeNull()
     expect(formToRating(form, trial, saved.ratedAt)).toEqual(saved)
   })
@@ -80,10 +80,26 @@ describe('trial kind and rating wording', () => {
       .toEqual(['粗く', '重く', '滑らかに', '不快に', '心地よく', '規則的に', '途切れがちに', '途切れなく'])
   })
 
-  it('fills device names and body volume from the helper, empty when unknown', () => {
-    const dev = (ip: string, name: string, level: number | null, steps: number | null) => ({ ipAddress: ip, name, volumeLevel: level, volumeSteps: steps }) as DeviceInfo
-    expect(autoRatingContext([dev('a', 'neck', 3, 8), dev('b', 'wrist', 3, 8)], ['a', 'b'])).toEqual({ device: 'neck, wrist', volume: '3/8' })
-    expect(autoRatingContext([dev('a', 'neck', null, null)], ['a'])).toEqual({ device: 'neck', volume: '' })
-    expect(autoRatingContext([], [])).toEqual({ device: '', volume: '' })
+  it('fills device names and the volume wiper from the helper, empty when unknown', () => {
+    const dev = (ip: string, name: string, wiper: number | null, level: number | null, steps: number | null) => ({ ipAddress: ip, name, volumeWiper: wiper, volumeLevel: level, volumeSteps: steps }) as DeviceInfo
+    expect(autoRatingContext([dev('a', 'neck', 64, 5, 10), dev('b', 'wrist', 64, 5, 10)], ['a', 'b'])).toEqual({ device: 'neck, wrist', volumeWiper: 64, volumeLabel: '5/10' })
+    expect(autoRatingContext([dev('a', 'neck', 64, null, null)], ['a'])).toEqual({ device: 'neck', volumeWiper: 64, volumeLabel: '' })
+    expect(autoRatingContext([dev('a', 'neck', 64, 5, 10), dev('b', 'wrist', 80, 6, 10)], ['a', 'b']).volumeWiper).toBeNull()
+    expect(autoRatingContext([], [])).toEqual({ device: '', volumeWiper: null, volumeLabel: '' })
+  })
+
+  it('lets "others similar" save with only the best rated, and checks the wiper', () => {
+    const form = ratingToForm(trial, null)
+    form.othersSimilar = true
+    expect(ratingFormIssue(form)).toEqual({ kind: 'similar-needs-best' })
+    form.best = 'A'; form.candidates.A.overall = 4
+    expect(ratingFormIssue(form)).toBeNull()
+    const body = formToRating(form, trial, '2026-09-29T15:42:00+09:00')
+    expect(body.othersSimilar).toBe(true)
+    expect(Object.keys(body.candidates)).toEqual(['A'])
+    expect(ratingError(body, trial, [])).toBeNull()
+    form.context.volumeWiper = '300'
+    expect(ratingFormIssue(form)).toEqual({ kind: 'bad-wiper' })
+    expect(parseWiper(' 128 ')).toBe(128)
   })
 })

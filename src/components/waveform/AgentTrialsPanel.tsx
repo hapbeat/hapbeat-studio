@@ -161,7 +161,8 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
   const save = async () => {
     if (issue || saving) return
     setSaving(true)
-    const withAuto = { ...form, context: { ...form.context, ...(auto.device ? { device: auto.device } : {}), ...(auto.volume ? { volume: auto.volume } : {}) } }
+    const withAuto = { ...form, context: { ...form.context, ...(auto.device ? { device: auto.device } : {}),
+      ...(auto.volumeWiper !== null ? { volumeWiper: String(auto.volumeWiper), volumeLabel: auto.volumeLabel } : { volumeLabel: '' }) } }
     try { await useAgentTrialStore.getState().saveRating(trial.id, formToRating(withAuto, trial, localIsoString(new Date()))); rememberContext(withAuto.context); drafts.delete(trial.id); setDirty(false) }
     catch (error) { setSaveError(message(error)) }
     finally { setSaving(false) }
@@ -170,7 +171,12 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
     try { await useAgentTrialStore.getState().adoptCandidate(trial.id, cid); setNotice(t('editor.agent.adopted', { name: label })) }
     catch (error) { setNotice(message(error)) }
   }
-  const issueText = issue?.kind === 'missing-overall' ? t('editor.agent.missingOverall', { id: issue.candidateId }) : t('editor.agent.noneRated')
+  const issueText = issue?.kind === 'missing-overall' ? t('editor.agent.missingOverall', { id: issue.candidateId })
+    : issue?.kind === 'similar-needs-best' ? t('editor.agent.similarNeedsBest') : issue?.kind === 'bad-wiper' ? t('editor.agent.badWiper') : t('editor.agent.noneRated')
+  const volumeText = (wiper: number, label: string) => {
+    const [level, steps] = label.split('/')
+    return label ? t('editor.agent.volumeWithSteps', { wiper, level, steps }) : t('editor.agent.volumeWiperOnly', { wiper })
+  }
   const saveStatus = saveError ? t('editor.agent.saveFailed', { message: saveError }) : dirty ? (issue ? issueText : t('editor.agent.unsaved'))
     : rating ? t('editor.agent.saved', { time: new Date(rating.ratedAt).toLocaleString() }) : issueText
   const contextField = (key: keyof RatingForm['context'], label: string, list?: string) =>
@@ -220,11 +226,16 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
         {[null, ...trial.candidates.map(c => c.id)].map(cid => <label key={cid ?? ''}>
           <input type="radio" name={`${ids}-best`} checked={form.best === cid} onChange={() => edit(f => ({ ...f, best: cid }))} />{cid ?? t('editor.agent.bestNone')}
         </label>)}
+        <label className="agent-similar" title={t('editor.agent.othersSimilarHint')}>
+          <input type="checkbox" checked={form.othersSimilar} onChange={e => { const othersSimilar = e.target.checked; edit(f => ({ ...f, othersSimilar })) }} />{t('editor.agent.othersSimilar')}
+        </label>
       </fieldset>
       <fieldset className="agent-context"><legend>{t('editor.agent.context')}</legend>
         {auto.device ? <div className="agent-field agent-field-auto" title={t('editor.agent.autoHint')}>{t('editor.agent.device')}<output>{auto.device}</output></div> : contextField('device', t('editor.agent.device'), `${ids}-devices`)}
         {contextField('position', t('editor.agent.position'), `${ids}-positions`)}
-        {auto.volume ? <div className="agent-field agent-field-auto" title={t('editor.agent.autoHint')}>{t('editor.agent.volume')}<output>{auto.volume}</output></div> : contextField('volume', t('editor.agent.volume'))}
+        {auto.volumeWiper !== null
+          ? <div className="agent-field agent-field-auto" title={t('editor.agent.autoHint')}>{t('editor.agent.volume')}<output>{volumeText(auto.volumeWiper, auto.volumeLabel)}</output></div>
+          : <label className="agent-field" title={t('editor.agent.wiperHint')}>{t('editor.agent.volumeWiper')}<input type="number" min={0} max={255} step={1} value={form.context.volumeWiper} onChange={e => { const value = e.target.value; edit(f => ({ ...f, context: { ...f.context, volumeWiper: value } })) }} /></label>}
         {contextField('note', t('editor.agent.note'))}
         <datalist id={`${ids}-devices`}>{deviceNames.map(name => <option key={name} value={name} />)}</datalist>
         <datalist id={`${ids}-positions`}>{POSITION_SUGGESTIONS.map(p => <option key={p} value={p} />)}</datalist>
