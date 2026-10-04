@@ -6,6 +6,8 @@ import { normalizeProjectName } from '@/utils/editorFolder'
 import { effectiveProject, knownProjectNames, type EffectiveProject } from '@/utils/clipProjects'
 import { useEditor } from './editorContext'
 import { SceneChoiceSelect, useSceneChoice } from './EditorScenePanel'
+import { useEventStore } from '@/stores/eventStore'
+import { clipEventMarks, EventMarkBadges } from './EventMarkBadges'
 
 /** Known project names (explicit labels of the open clips + the user's auto-group list), sorted for pickers. */
 export function useProjectNames(): string[] {
@@ -55,6 +57,7 @@ export function PropertiesPanel() {
   const { openRecipe, provenanceText, auditionKey, openSceneVideo } = useEditor()
   const project = useEffectiveProject(clip ?? NO_CLIP)
   const scene = useSceneChoice({ kind: 'clip', clipId: clip?.id ?? null })
+  const eventMarks = useEditorSettings(s => s.eventMarks)
   if (!clip) return <div className="editor-panel editor-panel-empty">{t('editor.noClip')}</div>
   const update = useWaveformStore.getState().updateClipInfo
   const provenance = provenanceText(clip)
@@ -72,6 +75,12 @@ export function PropertiesPanel() {
       <span>{t('editor.scene.row')}</span>
       <SceneChoiceSelect choice={scene} label={t('editor.scene.row')} />
       <button className="toolbar-btn" title={t('editor.scene.openHint')} onClick={() => openSceneVideo({ kind: 'clip' }, scene.wanted ?? null)}>▶ {t('editor.scene.open')}</button>
+    </div>
+    <div className="editor-scene-row">
+      <span>{t('events.menuSection')}</span>
+      <button className="toolbar-btn" onClick={() => useEventStore.getState().requestDecide({ target: 'sound', source: { kind: 'clip', clipId: clip.id }, event: null })}>{t('events.decideSound')}</button>
+      <button className="toolbar-btn" onClick={() => useEventStore.getState().requestDecide({ target: 'haptic', source: { kind: 'clip', clipId: clip.id }, event: null })}>{t('events.decideHaptic')}</button>
+      <EventMarkBadges marks={clipEventMarks(clip, eventMarks)} />
     </div>
     <ul className="editor-properties-details" aria-label={t('editor.details')}>
       {clip.sourceFileName && <li title={clip.sourceFileName}>{t('editor.sourceFile')}: {clip.sourceFileName}</li>}

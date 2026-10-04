@@ -13,6 +13,8 @@ export const UI_SETTINGS_STORAGE_KEY = 'hapbeat-editor-settings'
 export type ClipGroupBy = 'project' | 'source'
 /** Scene clip chosen for an AI trial in the Scene video panel: the Scene project and the clip's video file. */
 export interface TrialSceneChoice { project: string; file: string }
+/** An editor clip / AI candidate decided as an event's sound or haptic (clip-list badge). */
+export interface EventMark { project: string; event: string; target: 'sound' | 'haptic' }
 export interface EditorUiSettings {
   loop: boolean
   loopDelay: number
@@ -36,12 +38,14 @@ export interface EditorUiSettings {
   trialScenes: Record<string, TrialSceneChoice>
   /** Scene video panel: scene clip picked per editor clip id. */
   clipScenes: Record<string, TrialSceneChoice>
+  /** Decisions per editor clip id or AI candidate (`<trialId>/<candidateId>`); newest last. */
+  eventMarks: Record<string, EventMark[]>
 }
 
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, trialScenes: {}, clipScenes: {},
+  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {},
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -53,6 +57,15 @@ const isSceneChoice = (value: unknown): value is TrialSceneChoice => isRecord(va
 function sceneChoices(value: unknown): Record<string, TrialSceneChoice> {
   if (!isRecord(value)) return {}
   return Object.fromEntries(Object.entries(value).filter(([id, choice]) => /^[A-Za-z0-9_-]{1,80}$/.test(id) && isSceneChoice(choice)).slice(0, 2000)) as Record<string, TrialSceneChoice>
+}
+const isEventMark = (value: unknown): value is EventMark => isRecord(value) && typeof value.project === 'string' && value.project.length <= 200
+  && typeof value.event === 'string' && value.event.length <= 200 && (value.target === 'sound' || value.target === 'haptic')
+/** Marks keyed by clip id or `trialId/candidateId` (at most 2000 keys, 20 marks each); invalid entries are dropped. */
+function eventMarks(value: unknown): Record<string, EventMark[]> {
+  if (!isRecord(value)) return {}
+  return Object.fromEntries(Object.entries(value)
+    .filter((entry): entry is [string, unknown[]] => /^[A-Za-z0-9_-]{1,80}(\/[A-Za-z0-9_-]{1,16})?$/.test(entry[0]) && Array.isArray(entry[1]))
+    .map(([id, marks]) => [id, marks.filter(isEventMark).slice(-20)] as const).filter(([, marks]) => marks.length).slice(0, 2000))
 }
 /** Shallow shape check; dockview itself rejects a layout it cannot restore. */
 const isDockLayout = (value: unknown): value is Record<string, unknown> => isRecord(value) && isRecord(value.grid) && isRecord(value.panels)
@@ -75,6 +88,7 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     sceneLeadSec: clamp(v.sceneLeadSec, 0, 10, d.sceneLeadSec),
     trialScenes: sceneChoices(v.trialScenes),
     clipScenes: sceneChoices(v.clipScenes),
+    eventMarks: eventMarks(v.eventMarks),
   }
 }
 

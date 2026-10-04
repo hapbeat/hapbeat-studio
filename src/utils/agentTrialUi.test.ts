@@ -63,6 +63,7 @@ describe('trial kind and rating wording', () => {
   it('uses the explicit kind, else a loop scene cue, else the candidate lengths', () => {
     expect(trialKind({ kind: 'sequence' }, [0.2])).toBe('sequence')
     expect(trialKind({ scene: { project: 'p', cues: ['hold'] } }, [3], ['hold', 'rub'])).toBe('loop')
+    expect(trialKind({ scene: { project: 'p', cues: ['hold:slow'] } }, [3], ['hold', 'rub'])).toBe('loop')
     expect(trialKind({}, [0.4, 1.2])).toBe('oneshot')
     expect(trialKind({}, [0.4, 3])).toBeNull()
     expect(trialKind({}, [null, undefined])).toBeNull()

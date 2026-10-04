@@ -5,8 +5,11 @@ import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { localIsoString, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
 import type { HapticFeatures } from '@/utils/hapticFeatures'
-import { autoRatingContext, formToRating, jaPolePhrase, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, trialKind, visibleDimensions, type CandidateRatingForm, type Direction, type RatingForm } from '@/utils/agentTrialUi'
-import type { TrialKind } from '@/utils/agentProtocol'
+import { autoRatingContext, EMPTY_CONTEXT, formToRating, jaPolePhrase, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, trialKind, visibleDimensions, type CandidateRatingForm, type Direction, type RatingForm } from '@/utils/agentTrialUi'
+import { trialTarget, type TrialKind } from '@/utils/agentProtocol'
+import { useEventStore } from '@/stores/eventStore'
+import { effectiveEvent, parseEventKey, trialEvent } from '@/utils/cueEvents'
+import { isLoopCue } from '@/utils/sceneCueTable'
 import { WaveformThumbnail } from './WaveformThumbnail'
 import { useEditor } from './editorContext'
 import { useSceneVideoTarget } from '@/utils/editorSceneSync'
@@ -89,6 +92,7 @@ export function AgentTrialsPanel() {
       {shown.map(r => <button key={r.trial.id} className={`agent-trial-item ${r.trial.id === selectedId ? 'selected' : ''}`} aria-pressed={r.trial.id === selectedId} onClick={() => pickTrial(r)}>
         <strong>{r.trial.terms.join(' · ')}</strong>
         <span className={`agent-badge ${r.rating ? 'rated' : 'unrated'}`}>{t(r.rating ? 'editor.agent.rated' : 'editor.agent.unrated')}</span>
+        {trialTarget(r.trial) === 'sound' && <span className="agent-badge">{t('editor.agent.targetSound')}</span>}
         <small>{r.trial.id} · {t('editor.agent.candidateCount', { count: r.trial.candidates.length })}</small>
       </button>)}
       {rejected.map(r => <div key={`${r.file}\n${r.error}`} className="agent-rejected">
@@ -152,18 +156,25 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
   const { devices } = useHelperConnection()
   const auto = useMemo(() => autoRatingContext(devices, targets), [devices, targets])
   const sceneLib = useSceneStore(s => s.lib)
+  const sceneTable = useSceneStore(s => s.table)
   const kind: TrialKind | null = trialKind(trial, record.candidates.map(c => c.features?.durationSec),
     sceneLib && trial.scene?.project === sceneLib.project_name ? sceneLib.loop_cues : [])
-  const shownDimensions = useMemo(() => dimensions ? { ...dimensions, dimensions: visibleDimensions(dimensions.dimensions, kind) } : null, [dimensions, kind])
+  /** Sound trials rate overall / term match / comment only (no haptic dimensions or device conditions). */
+  const target = trialTarget(trial)
+  const shownDimensions = useMemo(() => dimensions && target === 'haptic' ? { ...dimensions, dimensions: visibleDimensions(dimensions.dimensions, kind) } : null, [dimensions, kind, target])
+  /** The event of the open Scene project this trial is for (its first scene cue), if any. */
+  const event = sceneLib && sceneTable && trial.scene?.project === sceneLib.project_name ? trialEvent(sceneTable, trial.scene) : null
+  const soundFirst = target === 'haptic' && !!event && !!sceneLib && !!sceneTable && !isLoopCue(sceneLib, parseEventKey(event).cue) && !effectiveEvent(sceneTable, parseEventKey(event))?.sfx
+  const marks = useEditorSettings(s => s.eventMarks)
   const edit = (update: (f: RatingForm) => RatingForm) => { setForm(update); setDirty(true); setSaveError(null) }
   const editCandidate = (cid: string, patch: Partial<CandidateRatingForm>) => edit(f => ({ ...f, candidates: { ...f.candidates, [cid]: { ...f.candidates[cid], ...patch } } }))
   const issue = ratingFormIssue(form)
   const save = async () => {
     if (issue || saving) return
     setSaving(true)
-    const withAuto = { ...form, context: { ...form.context, ...(auto.device ? { device: auto.device } : {}),
+    const withAuto = target === 'sound' ? { ...form, context: EMPTY_CONTEXT } : { ...form, context: { ...form.context, ...(auto.device ? { device: auto.device } : {}),
       ...(auto.deviceWiper !== null ? { deviceWiper: String(auto.deviceWiper), volumeLabel: auto.volumeLabel } : { volumeLabel: '' }) } }
-    try { await useAgentTrialStore.getState().saveRating(trial.id, formToRating(withAuto, trial, localIsoString(new Date()))); rememberContext(withAuto.context); drafts.delete(trial.id); setDirty(false) }
+    try { await useAgentTrialStore.getState().saveRating(trial.id, formToRating(withAuto, trial, localIsoString(new Date()))); if (target === 'haptic') rememberContext(withAuto.context); drafts.delete(trial.id); setDirty(false) }
     catch (error) { setSaveError(message(error)) }
     finally { setSaving(false) }
   }
@@ -197,6 +208,9 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
       {trial.rationale && <><dt>{t('editor.agent.rationale')}</dt><dd>{trial.rationale}</dd></>}
     </dl>
     {kind === 'sequence' && <p className="agent-muted">{t('editor.agent.sequenceNote')}</p>}
+    {target === 'sound' && <p className="agent-muted">{t('editor.agent.soundTrialNote')}</p>}
+    {event && <p className="agent-muted">{t('editor.agent.forEvent', { event })}</p>}
+    {soundFirst && <p className="events-hint">{t('events.soundFirst')}</p>}
     <div className="agent-notice" role="status">{notice}</div>
     <div className="agent-candidates">
       {trial.candidates.map(requested => {
@@ -216,6 +230,9 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
           <FeatureLine features={file?.features ?? null} />
           <div className="agent-candidate-actions">
             <button className="toolbar-btn" title={t('editor.agent.adoptHint')} disabled={!editorFolder || processing} onClick={() => void adopt(requested.id, requested.label)}>{t('editor.agent.adopt')}</button>
+            <button className="toolbar-btn" disabled={!buffer} title={t('events.decideHint')}
+              onClick={() => useEventStore.getState().requestDecide({ target, source: { kind: 'candidate', trialId: trial.id, candidateId: requested.id }, event })}>{t(target === 'sound' ? 'events.decideSound' : 'events.decideHaptic')}</button>
+            {(marks[`${trial.id}/${requested.id}`] ?? []).map(m => <span key={`${m.project}:${m.event}:${m.target}`} className="editor-event-badge" title={m.project}>{m.target === 'sound' ? '♪' : '≋'} {m.event}</span>)}
           </div>
           <CandidateRatingInputs value={form.candidates[requested.id]} terms={trial.terms} dimensions={shownDimensions} onChange={patch => editCandidate(requested.id, patch)} />
         </article>
@@ -230,7 +247,7 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
           <input type="checkbox" checked={form.othersSimilar} onChange={e => { const othersSimilar = e.target.checked; edit(f => ({ ...f, othersSimilar })) }} />{t('editor.agent.othersSimilar')}
         </label>
       </fieldset>
-      <fieldset className="agent-context"><legend>{t('editor.agent.context')}</legend>
+      {target === 'haptic' && <fieldset className="agent-context"><legend>{t('editor.agent.context')}</legend>
         {auto.device ? <div className="agent-field agent-field-auto" title={t('editor.agent.autoHint')}>{t('editor.agent.device')}<output>{auto.device}</output></div> : contextField('device', t('editor.agent.device'), `${ids}-devices`)}
         {contextField('position', t('editor.agent.position'), `${ids}-positions`)}
         {auto.deviceWiper !== null
@@ -239,7 +256,7 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
         {contextField('note', t('editor.agent.note'))}
         <datalist id={`${ids}-devices`}>{deviceNames.map(name => <option key={name} value={name} />)}</datalist>
         <datalist id={`${ids}-positions`}>{POSITION_SUGGESTIONS.map(p => <option key={p} value={p} />)}</datalist>
-      </fieldset>
+      </fieldset>}
       <div className="agent-save">
         <button className="apply-effects-btn" disabled={!!issue || saving || (!dirty && !!rating)} onClick={() => void save()}>{t('editor.agent.save')}</button>
         <span className={`agent-save-status ${saveError ? 'error' : !dirty && rating ? 'saved' : ''}`} role="status">{saveStatus}</span>

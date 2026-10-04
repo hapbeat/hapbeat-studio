@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CandidateFile, RatingFile, TrialFile } from './agentProtocol'
 import type { HapticFeatures } from './hapticFeatures'
-import { aggregateTerm, appendProposedInsight, buildIndex, canonicalTerm, KnowledgeFolder, knownSlugs, parseDimensions, SEED_DIMENSIONS, type TrialRecord } from './hapticKnowledge'
+import { aggregateTerm, appendProposedInsight, buildIndex, canonicalTerm, KnowledgeFolder, knownSlugs, parseDimensions, SEED_DIMENSIONS, trialSlugs, type TrialRecord } from './hapticKnowledge'
 import { MemoryDirectory } from './memoryDirectory.testutil'
 import { insightsTemplate } from './agentGuide'
 
@@ -30,6 +30,14 @@ describe('knowledge aggregation', () => {
     record('t2', ['gowa-gowa'], { A: { overall: 4, tm: 0.5 } }, '2026-09-30T10:00:00+09:00'),
     record('t3', ['ざらざら'], null),
   ]
+
+  it('keeps sound trials (target "sound") out of the haptic knowledge', () => {
+    const sound = record('s1', ['ごわごわ'], { A: { overall: 5, tm: 0 } })
+    sound.trial.target = 'sound'
+    const doc = aggregateTerm('ごわごわ', SEED_DIMENSIONS, [...records, sound])
+    expect(doc).toEqual(aggregateTerm('ごわごわ', SEED_DIMENSIONS, records))
+    expect(trialSlugs(sound.trial, SEED_DIMENSIONS)).toEqual([])
+  })
 
   it('resolves aliases and katakana to the canonical term', () => {
     expect(canonicalTerm('ゴワゴワ', SEED_DIMENSIONS)).toMatchObject({ term: 'ごわごわ', slug: 'ごわごわ' })

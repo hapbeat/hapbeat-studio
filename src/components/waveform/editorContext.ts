@@ -37,7 +37,7 @@ export interface EditorShared {
   /** Links the Scene project `name` through the registry (permission / one-time folder pick). Call from a click or a select change. */
   linkSceneProject: (name: string | null, options?: { quietIfRefused?: boolean }) => Promise<boolean>
   /** Shows a dock panel (re-adding it if closed) and brings its tab to the front. */
-  focusEditorPanel: (id: 'clips' | 'waveform' | 'properties' | 'effects' | 'agent' | 'scene') => void
+  focusEditorPanel: (id: 'clips' | 'events' | 'waveform' | 'properties' | 'effects' | 'agent' | 'scene') => void
 }
 
 export const EditorContext = createContext<EditorShared | null>(null)

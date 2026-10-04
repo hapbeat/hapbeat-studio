@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { WaveformEditor } from '@/components/waveform/WaveformEditor'
 import { DisplayEditor } from '@/components/display/DisplayEditor'
 import { SceneView } from '@/components/scene/SceneView'
+import { OPEN_TAB_EVENT } from '@/stores/eventStore'
 import { KitManager } from '@/components/kit/KitManager'
 import { Devices } from '@/components/devices/Devices'
 import { LogDrawer } from '@/components/log/LogDrawer'
@@ -110,6 +111,12 @@ export function App() {
     window.addEventListener('keydown', handleSpace, true)
     return () => window.removeEventListener('keydown', handleSpace, true)
   }, [activeTab])
+  // Cross-tab jumps (Scene tab "open in editor").
+  useEffect(() => {
+    const open = (event: Event) => { const tab = (event as CustomEvent<string>).detail; if ((TABS as string[]).includes(tab)) setActiveTab(tab as Tab) }
+    window.addEventListener(OPEN_TAB_EVENT, open)
+    return () => window.removeEventListener(OPEN_TAB_EVENT, open)
+  }, [])
   const { isConnected, helperVersion, helperCompat, send } = useHelperConnection()
   const { toast } = useToast()
   const [helperModalOpen, setHelperModalOpen] = useState(false)

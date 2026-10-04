@@ -1,4 +1,5 @@
-import type { CueTable } from './sceneCueTable'
+import { routeClips, type CueTable } from './sceneCueTable'
+import { effectiveEvent, eventKey, MaterialPicker, resolveEventName } from './cueEvents'
 import type { SceneLib } from './sceneData'
 
 /**
@@ -35,10 +36,13 @@ export function targetsOf(at: string, hand?: string): string[] {
   return [`*/${at}`]
 }
 
-/** Every device target the table routes to (for the coverage read-out and device matching). */
+/** Every device target the table routes to, variants included (for the coverage read-out and device matching). */
 export function tableTargets(table: CueTable): string[] {
   const out = new Set<string>()
-  for (const cue of Object.values(table.cues)) for (const r of cue.haptics) for (const t of targetsOf(r.at)) out.add(t)
+  for (const cue of Object.values(table.cues)) {
+    const routes = [...cue.haptics, ...Object.values(cue.variants ?? {}).flatMap(v => v.haptics ?? [])]
+    for (const r of routes) for (const t of targetsOf(r.at)) out.add(t)
+  }
   return [...out]
 }
 
@@ -53,25 +57,32 @@ export function buildLoopVoices(table: CueTable, lib: SceneLib): LoopVoice[] {
   const out: LoopVoice[] = []
   lib.layers.forEach(({ cue: name }, layer) => {
     for (const r of table.cues[name]?.haptics ?? []) {
-      const clip = table.clips[r.clip]
-      if (!clip) continue
-      const add = (targets: string[], side: number) => out.push({ clip: r.clip, targets, gain: clip.intensity * r.gain, layer, side, phase: {} })
+      // A loop does not re-pick while it plays: a multi-clip route loops its first clip.
+      const clipName = routeClips(r)[0], clip = clipName === undefined ? undefined : table.clips[clipName]
+      if (!clip || clipName === undefined) continue
+      const add = (targets: string[], side: number) => out.push({ clip: clipName, targets, gain: clip.intensity * r.gain, layer, side, phase: {} })
       if (r.at === 'hand') { add([WRIST.left], 0); add([WRIST.right], 1) } else add(targetsOf(r.at), -1)
     }
   })
   return out
 }
 
-/** Voices for one cue occurrence: its one-shot routes, starting at `start` (ms). */
-export function cueVoices(table: CueTable, pcm: Record<string, Float32Array>, ev: { name: string; hand: string; gain?: number }, start: number): OneShotVoice[] {
-  const cue = table.cues[ev.name]
-  if (!cue) return []
-  const out: OneShotVoice[] = []
-  for (const r of cue.haptics) {
-    const clip = table.clips[r.clip]
-    if (!pcm[r.clip] || !clip || clip.loop) continue
-    out.push({ pcm: pcm[r.clip], targets: targetsOf(r.at, ev.hand), gain: clip.intensity * r.gain * (ev.gain ?? 1), start, cue: true })
-  }
+/**
+ * Voices for one cue occurrence (`ev.name` = `cue` or `cue:variant`, resolved
+ * like the game: an unknown variant plays the cue): its one-shot routes,
+ * starting at `start` (ms). A multi-clip route plays one clip picked by the
+ * event's `variation.pick`; `jitter` is this firing's gain factor (shared with its sound).
+ */
+export function cueVoices(table: CueTable, pcm: Record<string, Float32Array>, ev: { name: string; hand: string; gain?: number }, start: number,
+  opts: { picker?: MaterialPicker; jitter?: number } = {}): OneShotVoice[] {
+  const resolved = resolveEventName(table, ev.name), e = resolved && effectiveEvent(table, resolved.ref)
+  if (!e) return []
+  const picker = opts.picker ?? new MaterialPicker(), out: OneShotVoice[] = []
+  e.haptics.forEach((r, i) => {
+    const name = picker.pick(`${eventKey(e.ref)}#${i}`, routeClips(r), e.variation?.pick), clip = name === undefined ? undefined : table.clips[name]
+    if (name === undefined || !pcm[name] || !clip || clip.loop) return
+    out.push({ pcm: pcm[name], targets: targetsOf(r.at, ev.hand), gain: clip.intensity * r.gain * (ev.gain ?? 1) * (opts.jitter ?? 1), start, cue: true })
+  })
   return out
 }
 

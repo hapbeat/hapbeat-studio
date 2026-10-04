@@ -30,6 +30,10 @@ import { EditorTopBar } from './EditorTopBar'
 import { playStart, useStartMarker } from '@/utils/editorStartMarker'
 import { scenePreRoll, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
 import { useSceneStore } from '@/stores/sceneStore'
+import { useEventStore } from '@/stores/eventStore'
+import { trialTarget } from '@/utils/agentProtocol'
+import { DecideDialog } from './DecideDialog'
+import { useDecidedSoundSync } from './eventAudio'
 
 export function WaveformEditor({ active }: { active: boolean }) {
   const { t } = useI18n()
@@ -46,6 +50,20 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const auditionKey = audition ? `${audition.trialId}/${audition.candidateId}` : null
   const focusRequest = useAgentTrialStore(state => state.focusRequest)
   useEffect(() => { if (focusRequest && dockApi) focusPanel(dockApi, 'agent', t) }, [focusRequest, dockApi])
+  // Scene tab "open in editor": the Events panel with the event selected, and its moment in the Scene video panel.
+  const eventFocusRequest = useEventStore(state => state.focusRequest)
+  useEffect(() => {
+    const key = useEventStore.getState().selected
+    if (!eventFocusRequest || !dockApi) return
+    focusPanel(dockApi, 'events', t)
+    if (key) useSceneVideoTarget.getState().setTarget({ kind: 'event', key })
+  }, [eventFocusRequest, dockApi])
+  /** A sound AI trial (target "sound") is auditioned on the PC only: no haptic targets while one is shown. */
+  const auditionIsSound = useAgentTrialStore(state => {
+    const shown = state.audition
+    const trial = shown ? state.trials.find(r => r.trial.id === shown.trialId)?.trial : undefined
+    return !!trial && trialTarget(trial) === 'sound'
+  })
   useEffect(() => {
     if (!active || !s.folder) return
     useAgentTrialStore.getState().startPolling()
@@ -83,11 +101,12 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const sendHaptics = useEditorSettings(state => state.sendHaptics)
   const playbackDevices = useMemo(() => isConnected ? onlinePlaybackDevices(devices) : [], [isConnected, devices])
   // "Send haptics" off → no targets, so EditorPlayback never opens a stream (PC-only audition).
-  const targets = useMemo(() => isConnected && sendHaptics ? resolvePlaybackTargets(devices, kitSelectedIps).map(device => device.ipAddress) : [], [isConnected, sendHaptics, devices, kitSelectedIps])
+  const targets = useMemo(() => isConnected && sendHaptics && !auditionIsSound ? resolvePlaybackTargets(devices, kitSelectedIps).map(device => device.ipAddress) : [], [isConnected, sendHaptics, auditionIsSound, devices, kitSelectedIps])
   const targetKey = targets.join(',')
   const audioBuffer = audition ? audition.buffer : original ? s.clip?.originalBuffer : previewActive ? (preview.buffer ?? s.clip?.buffer) : s.clip?.buffer
   const player = useMemo(() => new EditorBufferPlayer(null, undefined, s.setError), [s.clip?.id, original, auditionKey])
   useEffect(() => {player.activate(); return () => player.dispose()}, [player])
+  useDecidedSoundSync(player)
   player.setBuffer(audioBuffer ?? null)
   useEffect(() => {
     const selection = useWaveformStore.getState().selectedRegion
@@ -223,6 +242,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
       <EditorTopBar dockApi={dockApi} notice={s.error ?? notice} onNotice={setNotice} />
       <EditorDockLayout onApi={setDockApi} onPopoutWindows={setPopoutWindows} onNotice={setNotice} />
       <StatusBar />
+      <DecideDialog />
       {recipeDialog && <RecipeDialog container={recipeDialog.container} initial={recipeDialog.initial} onCreate={createRecipeClip} onClose={() => setRecipeDialog(null)} />}
       {s.isProcessing && <div className="processing-overlay"><div className="processing-spinner" /><span>{t('wave.processing')}</span></div>}
     </div>

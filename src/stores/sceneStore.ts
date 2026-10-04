@@ -61,6 +61,12 @@ interface SceneState {
   addClip: (file: File, loop: boolean) => Promise<string | null>
   addSound: (file: File) => Promise<string | null>
   save: () => Promise<void>
+  /**
+   * Editor "decide": validates `next` (with the new WAVs), writes the WAVs then
+   * the table, and reloads (the Scene tab shows it at once). Refused while the
+   * tab has unsaved edits, so a decision never saves them along unseen.
+   */
+  commitDecision: (next: CueTable, wavs: PendingWavs) => Promise<{ ok: true } | { ok: false; notice: SceneNotice; problems?: string[] }>
   revert: () => Promise<void>
   note: (notice: SceneNotice) => void
   addLog: (text: string) => void
@@ -261,6 +267,23 @@ export const useSceneStore = create<SceneState>((set, get) => {
         await loadTable()
         note({ id: added ? 'scene.save.doneWavs' : 'scene.save.done', params: { file: lib.paths.cues, count: added } })
       })
+    },
+    commitDecision: async (next, wavs) => {
+      const { root, lib, loaded, clipFiles, soundFiles, dirty, busy } = get()
+      if (!root || !lib || !loaded) return { ok: false, notice: { id: 'scene.save.noProject', error: true } }
+      if (dirty) return { ok: false, notice: { id: 'events.decide.dirty', error: true } }
+      if (busy) return { ok: false, notice: { id: 'events.decide.busy', error: true } }
+      const problems = validateCueTable(next, { lib, kit: loaded.kit, cueNames: loaded.cueNames,
+        clipFiles: new Set([...clipFiles, ...Object.keys(wavs.clips)]), soundFiles: new Set([...soundFiles, ...Object.keys(wavs.sounds)]) })
+      if (problems.length) { for (const p of problems) addLog(p); return { ok: false, notice: { id: 'scene.save.invalid', params: { problems: problems.join(' / ') }, error: true }, problems } }
+      let failed: SceneNotice | null = null
+      set({ busy: true })
+      try { await writeSceneSave(root, lib, next, wavs); await loadTable() }
+      catch (error) { failed = { id: 'scene.save.failed', params: { error: message(error) }, error: true }; addLog(message(error)) }
+      finally { set({ busy: false }) }
+      if (failed) return { ok: false, notice: failed }
+      addLog(`decide → ${[...Object.keys(wavs.clips).map(n => `${lib.paths.clips}/${n}.wav`), ...Object.keys(wavs.sounds).map(n => `${lib.paths.sounds}/${n}.wav`), lib.paths.cues].join(', ')}`)
+      return { ok: true }
     },
     revert: async () => {
       if (!get().root) return

@@ -7,48 +7,62 @@ import { sceneVideoUrl, useSceneStore } from '@/stores/sceneStore'
 import { resolveTrialScene, sceneVideoTime, wantedSceneProject, type TrialSceneState } from '@/utils/trialScene'
 import { setScenePreRoll, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
 import { useEditor } from './editorContext'
+import { useEventStore } from '@/stores/eventStore'
+import { eventSceneCues } from '@/utils/cueEvents'
 import './EditorScenePanel.css'
 
-/** The scene moment of an AI trial (its `scene`, else the pick saved per trial id) or of an editor clip (pick saved per clip id). */
-export function useSceneChoice(subject: { kind: 'trial'; trialId: string | null } | { kind: 'clip'; clipId: string | null }) {
+export type SceneSubject = { kind: 'trial'; trialId: string | null } | { kind: 'clip'; clipId: string | null } | { kind: 'event'; key: string | null }
+
+/**
+ * The scene moment of an AI trial (its `scene`, else the pick saved per trial id), of an editor
+ * clip (pick saved per clip id) or of an event of the open project (its recorded cue; the pick is kept for the session).
+ */
+export function useSceneChoice(subject: SceneSubject) {
   const lib = useSceneStore(s => s.lib)
   const data = useSceneStore(s => s.data)
+  const table = useSceneStore(s => s.table)
   const trials = useAgentTrialStore(s => s.trials)
-  const id = subject.kind === 'trial' ? subject.trialId : subject.clipId
+  const id = subject.kind === 'trial' ? subject.trialId : subject.kind === 'clip' ? subject.clipId : subject.key
   const trial = subject.kind === 'trial' ? trials.find(r => r.trial.id === id)?.trial ?? null : null
-  const saved = useEditorSettings(s => !id ? undefined : subject.kind === 'trial' ? s.trialScenes[id] : s.clipScenes[id])
-  /** The Scene project this subject needs (trial: `scene.project`, saved pick, `project` label; clip: saved pick). */
-  const wanted = wantedSceneProject({ scene: trial?.scene, saved, fallback: trial?.project })
-  const state: TrialSceneState = useMemo(() => resolveTrialScene({ lib, data, scene: trial?.scene, saved, project: wanted }), [lib, data, trial, saved, wanted])
+  const eventPick = useEventStore(s => subject.kind === 'event' && id ? s.scenePicks[id] : undefined)
+  const savedChoice = useEditorSettings(s => !id || subject.kind === 'event' ? undefined : subject.kind === 'trial' ? s.trialScenes[id] : s.clipScenes[id])
+  const saved = subject.kind === 'event' ? eventPick : savedChoice
+  const eventScene = useMemo(() => subject.kind === 'event' && id && lib && table ? { project: lib.project_name, cues: eventSceneCues(table, id) } : undefined, [subject.kind, id, lib, table])
+  const scene = trial?.scene ?? eventScene
+  /** The Scene project this subject needs (trial: `scene.project`, saved pick, `project` label; clip: saved pick; event: the open one). */
+  const wanted = wantedSceneProject({ scene, saved, fallback: trial?.project })
+  const state: TrialSceneState = useMemo(() => resolveTrialScene({ lib, data, scene, saved, project: wanted }), [lib, data, scene, saved, wanted])
   const choose = (file: string) => {
     if (!lib || !id) return
+    if (subject.kind === 'event') { useEventStore.getState().pickScene(id, file ? { project: lib.project_name, file } : null); return }
     const key = subject.kind === 'trial' ? 'trialScenes' : 'clipScenes'
     const choices = { ...useEditorSettings.getState()[key] }
     if (file) choices[id] = { project: lib.project_name, file }; else delete choices[id]
     useEditorSettings.getState().update({ [key]: choices })
   }
-  return { id, trial, wanted, state, chosen: state.kind === 'ready' ? state.chosen : null, choose }
+  return { id, trial, scene, wanted, state, chosen: state.kind === 'ready' ? state.chosen : null, choose }
 }
 
 /** Moment picker (a trial with `scene` always has one, so it offers no "none"). */
 export function SceneChoiceSelect({ choice, label }: { choice: ReturnType<typeof useSceneChoice>; label: string }) {
   const { t } = useI18n()
-  const { state, chosen, trial, choose } = choice
+  const { state, chosen, scene, choose } = choice
   if (state.kind !== 'ready') return <select aria-label={label} disabled><option>{t(state.kind === 'noProject' ? 'editor.scene.noProjectShort' : 'editor.scene.unavailable')}</option></select>
   return <select aria-label={label} value={chosen?.file ?? ''} onChange={e => choose(e.target.value)}>
-    {!trial?.scene && <option value="">{t('editor.scene.pick')}</option>}
+    {!scene && <option value="">{t('editor.scene.pick')}</option>}
     {state.options.map(o => <option key={o.file} value={o.file}>{o.label}</option>)}
   </select>
 }
 
 /** Which subject the panel shows: an auditioned candidate's trial, else the last "▶ Video" target. */
-function useShownSubject(): { kind: 'trial'; trialId: string | null } | { kind: 'clip'; clipId: string | null } {
+function useShownSubject(): SceneSubject {
   const audition = useAgentTrialStore(s => s.audition)
   const selectedTrialId = useAgentTrialStore(s => s.selectedTrialId)
   const target: SceneVideoTarget = useSceneVideoTarget(s => s.target)
   const clipId = useWaveformStore(s => s.clip?.id ?? null)
   if (audition) return { kind: 'trial', trialId: audition.trialId }
   if (target.kind === 'trial') return { kind: 'trial', trialId: target.trialId ?? selectedTrialId }
+  if (target.kind === 'event') return { kind: 'event', key: target.key }
   return { kind: 'clip', clipId }
 }
 
@@ -143,7 +157,7 @@ export function EditorScenePanel() {
     </div>
   }
   const message = state.kind === 'noClips' ? t('editor.scene.noClips', { cues: state.cues.join(', ') }) : null
-  const title = subject.kind === 'trial' ? t('editor.scene.forTrial', { id: choice.id }) : t('editor.scene.forClip', { name: clipName })
+  const title = subject.kind === 'trial' ? t('editor.scene.forTrial', { id: choice.id }) : subject.kind === 'event' ? t('editor.scene.forEvent', { name: choice.id ?? '' }) : t('editor.scene.forClip', { name: clipName })
   return <div className="editor-scene-panel" ref={rootRef} tabIndex={-1}>
     <div className="editor-scene-title" title={title}>{title}
       {synced && <span className={`editor-scene-mode ${focused ? 'video' : ''}`}>{focused ? t('editor.scene.modeVideo', { seconds: lead }) : t('editor.scene.modeWave')}</span>}</div>

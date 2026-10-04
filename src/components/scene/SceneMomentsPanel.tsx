@@ -3,6 +3,8 @@ import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { familyColor } from '@/utils/sceneData'
 import { HapticIcon } from './HapticIcon'
+import { effectiveEvent, resolveEventName } from '@/utils/cueEvents'
+import { useEventStore } from '@/stores/eventStore'
 
 /** The moments list: the full replay, then one clip per cue moment, with which outputs its cues use. */
 export function SceneMomentsPanel() {
@@ -22,13 +24,16 @@ export function SceneMomentsPanel() {
     </div>
     <div ref={list}>
       {items.map((it, k) => {
-        const cues = it.kind === 'clip' && table ? it.names.map(n => table.cues[n]).filter(Boolean) : []
+        // `cue:variant` names resolve like the game (an unknown variant plays its cue).
+        const cues = it.kind === 'clip' && table ? it.names.map(n => { const r = resolveEventName(table, n); return r && effectiveEvent(table, r.ref) }).filter(e => !!e) : []
         return <div key={k} className={`scene-item ${k === cur ? 'sel' : ''}`} onClick={() => useSceneStore.getState().select(k)}>
           <span className="scene-num">{k === 0 ? '▶' : String(k).padStart(2, '0')}</span>
           <span className="scene-dot" style={{ background: familyColor(lib, it.name) }} />
           <span className="scene-name">{it.kind === 'full' ? t('scene.full') : <>{it.names.join(' + ')}<small>{it.hand}</small></>}</span>
           <span className="scene-kinds">{cues.length > 0 && <><span className="h">{cues.some(c => c.haptics.length) ? <HapticIcon /> : null}</span><span className="s">{cues.some(c => c.sfx) ? '♪' : ''}</span></>}</span>
           <span className="scene-num">{it.kind === 'full' ? '' : `${it.at.toFixed(1)}s`}</span>
+          {it.kind === 'clip' && <button type="button" className="scene-icon-btn scene-open-editor" title={t('scene.openInEditorHint')}
+            onClick={e => { e.stopPropagation(); e.currentTarget.blur(); useEventStore.getState().openInEditor(it.name) }}>{t('scene.openInEditorShort')}</button>}
         </div>
       })}
     </div>

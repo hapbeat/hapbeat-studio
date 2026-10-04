@@ -3,6 +3,7 @@ import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { familyColor, frameAt } from '@/utils/sceneData'
+import { effectiveEvent, resolveEventName } from '@/utils/cueEvents'
 import { useScene } from './sceneContext'
 import { SPEEDS } from './sceneRuntime'
 import { SceneOutputToggles } from './SceneOutputToggles'
@@ -73,9 +74,11 @@ export function SceneTimelinePanel() {
       }
       // Cue markers per lane: the selected cue bright and framed, the clip's moment normal, the rest dimmed.
       const events = runtime.events()
+      // `cue:variant` names resolve like the game (variant fields, else the cue's).
+      const effective = (name: string) => { const r = table ? resolveEventName(table, name) : null; return r && table ? effectiveEvent(table, r.ref) : null }
       const lanes: [number, number, (name: string) => boolean, (name: string) => string][] = [
-        [top, mid, name => !!table?.cues[name] && (table.cues[name].haptics.length > 0 || lib.loop_cues.includes(name)), name => familyColor(lib, name)],
-        [mid + 1, base, name => !!table?.cues[name]?.sfx, () => SOUND_COLOR],
+        [top, mid, name => { const e = effective(name); return !!e && (e.haptics.length > 0 || lib.loop_cues.includes(e.ref.cue)) }, name => familyColor(lib, name)],
+        [mid + 1, base, name => !!effective(name)?.sfx, () => SOUND_COLOR],
       ]
       const found: Hit[] = []
       for (const [y0, y1, has, color] of lanes) {

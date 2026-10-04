@@ -1,0 +1,50 @@
+/* Events panel (cue table events of the linked game project) and the "decide" dialog. */
+.events-panel { display: flex; flex-direction: column; gap: 8px; overflow: auto; padding: 8px; font-size: 13px; }
+.events-project { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.events-project label { display: flex; align-items: center; gap: 6px; }
+.events-project select { min-width: 160px; }
+.events-dirty { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid #c9a34a; border-radius: 4px; color: #e3c27a; }
+.events-decided { padding: 6px 8px; border: 1px solid #4f9e7a; border-radius: 4px; color: var(--text-primary); }
+.events-decided p { margin: 0 0 4px 0; }
+.events-command { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.events-command code { padding: 2px 6px; background: var(--bg-primary); border-radius: 3px; word-break: break-all; }
+.events-list { display: flex; flex-direction: column; gap: 2px; max-height: 40%; min-height: 80px; overflow: auto; border: 1px solid var(--border); border-radius: 4px; padding: 2px; }
+.events-row { display: grid; grid-template-columns: 1fr auto; gap: 0 6px; width: 100%; padding: 3px 6px; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 3px; color: var(--text-primary); cursor: pointer; }
+.events-row:hover { background: var(--bg-tertiary, rgba(255, 255, 255, 0.04)); }
+.events-row.selected { border-color: var(--accent); background: rgba(255, 255, 255, 0.06); }
+.events-row.nested { padding-left: 20px; }
+.events-row-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.events-row-name small { margin-left: 6px; font-weight: normal; color: var(--text-muted); }
+.events-row-badges { display: flex; gap: 4px; }
+.events-row-desc { grid-column: 1 / -1; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Fixed width: the badge text changes between ✓ / 未 / — without moving the row. */
+.events-badge { display: inline-block; min-width: 4.6em; padding: 0 5px; border-radius: 4px; font-size: 11px; text-align: center; border: 1px solid var(--border-light); color: var(--text-secondary); }
+.events-badge.set { border-color: #4f9e7a; color: #8dd5b1; }
+.events-badge.unset { border-color: #c9a34a; color: #e3c27a; }
+.events-detail { display: flex; flex-direction: column; gap: 6px; }
+.events-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.events-assign { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.events-sec { border-top: 1px solid var(--border); padding-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+.events-sec h4 { margin: 0; font-size: 13px; }
+.events-sec h5 { margin: 4px 0 0; font-size: 12px; color: var(--text-secondary); }
+.events-override { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.events-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.events-chip { display: inline-flex; align-items: center; gap: 2px; padding: 0 4px; border: 1px solid var(--border-light); border-radius: 10px; }
+.events-route { display: flex; flex-direction: column; gap: 3px; padding: 3px 0; }
+.events-row-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.events-row-edit label { display: inline-flex; align-items: center; gap: 4px; }
+.events-variation { display: flex; flex-wrap: wrap; gap: 6px 12px; }
+.events-variation label { display: inline-flex; align-items: center; gap: 4px; }
+.events-panel .scene-number { width: 64px; }
+.events-panel .scene-icon-btn { padding: 0 4px; background: transparent; border: 1px solid transparent; border-radius: 3px; color: var(--text-secondary); cursor: pointer; }
+.events-panel .scene-icon-btn:hover:not(:disabled) { border-color: var(--border-light); color: var(--text-primary); }
+.events-trials { margin: 0; padding-left: 16px; }
+.events-hint { margin: 0; color: #e3c27a; font-size: 12px; }
+.events-warn { margin: 0; color: #f08a7a; font-size: 12px; }
+.events-decide-dialog { max-width: 480px; }
+.events-decide-form { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.events-decide-form .recipe-dialog-field { display: flex; flex-direction: column; gap: 3px; }
+.events-decide-route { display: flex; gap: 12px; }
+/* Clip list: decided-for badges. */
+.editor-event-badges { display: flex; flex-wrap: wrap; gap: 3px; }
+.editor-event-badge { padding: 0 5px; border-radius: 4px; font-size: 10px; font-weight: normal; border: 1px solid #4f9e7a; color: #8dd5b1; }

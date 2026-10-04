@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeTerm, parseTrialRequest, ratingError, termSlug, type RatingBody, type TrialRequest } from './agentProtocol'
+import { normalizeTerm, parseTrialRequest, ratingError, termSlug, trialTarget, type RatingBody, type TrialRequest } from './agentProtocol'
 import { isSafeAgentPath } from './recipe'
 
 const request = (patch: Record<string, unknown> = {}, candidate: Record<string, unknown> = {}) => JSON.stringify({
@@ -78,5 +78,22 @@ describe('agentProtocol', () => {
     expect(ratingError({ ...rating, context: { volume: '5' } as never }, trial, [])).toMatch(/volume/)
     expect(ratingError({ ...rating, othersSimilar: true }, trial, ['roughness'])).toBeNull()
     expect(ratingError({ ...rating, best: undefined, othersSimilar: true }, trial, ['roughness'])).toMatch(/othersSimilar/)
+  })
+})
+
+describe('trial target and variant cues (cue table v2)', () => {
+  it('accepts target sound / haptic and defaults to haptic', () => {
+    const sound = parseTrialRequest(request({ target: 'sound' }), 't-01')
+    expect(sound.ok && trialTarget(sound.trial)).toBe('sound')
+    const plain = parseTrialRequest(request(), 't-01')
+    expect(plain.ok && trialTarget(plain.trial)).toBe('haptic')
+    const bad = parseTrialRequest(request({ target: 'music' }), 't-01')
+    expect(bad.ok ? null : bad.error).toMatch(/target/)
+  })
+
+  it('accepts cue:variant scene cues', () => {
+    expect(parseTrialRequest(request({ scene: { project: 'trex-encounter', cues: ['footstep:approach'] } }), 't-01').ok).toBe(true)
+    const bad = parseTrialRequest(request({ scene: { project: 'trex-encounter', cues: ['footstep:Approach'] } }), 't-01')
+    expect(bad.ok ? null : bad.error).toMatch(/scene/)
   })
 })

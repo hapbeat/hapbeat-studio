@@ -3,7 +3,9 @@ import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { familyColor, momentCues, type SceneLib } from '@/utils/sceneData'
-import { addRoute, assignSound, clipsForCue, isLoopCue, positionsForCue, removeRoute, setClipIntensity, setSoundVolume, updateRoute } from '@/utils/sceneCueTable'
+import { addRoute, assignSound, clipsForCue, isLoopCue, positionsForCue, removeRoute, routeClips, setClipIntensity, setSoundVolume, sfxSounds, updateRoute } from '@/utils/sceneCueTable'
+import { effectiveEvent, resolveEventName } from '@/utils/cueEvents'
+import { useEventStore } from '@/stores/eventStore'
 import { useScene } from './sceneContext'
 
 /** Body position labels (lib.at vocabulary, contracts device-addressing); unknown ones show as is. */
@@ -50,7 +52,7 @@ function CuePicker() {
   const sel = useSceneStore(s => s.sel)
   useSceneStore(s => s.cur)
   if (!table || !lib) return null
-  const name = sel && table.cues[sel.name] ? sel.name : ''
+  const name = (sel && resolveEventName(table, sel.name)?.ref.cue) ?? ''
   const others = name ? momentCues(runtime.events(), sel!.t, lib.ticks).filter(n => n !== name) : []
   return <div className="scene-pick">
     <span className="scene-dim">{t('scene.editing')}</span>
@@ -71,16 +73,34 @@ function CuePicker() {
   </div>
 }
 
-function CueHead({ lib, name, description }: { lib: SceneLib; name: string; description?: string }) {
-  return <div className="scene-cuehead"><b style={{ color: familyColor(lib, name) }}>{name}</b><span className="scene-desc" title={description ?? ''}>{description ?? ''}</span></div>
+/**
+ * The edited cue's name and description, the selected moment's `cue:variant`
+ * name when it is a variant (with a note when the variant writes the field this
+ * panel edits: the panel edits the cue, variants are edited in the editor), and
+ * "Open in editor" (Events panel).
+ */
+function CueHead({ lib, name, description, field }: { lib: SceneLib; name: string; description?: string; field: 'sfx' | 'haptics' }) {
+  const { t } = useI18n()
+  const { event, variant, unknownVariant, overrides } = useSelectedCue()
+  return <>
+    <div className="scene-cuehead"><b style={{ color: familyColor(lib, name) }}>{variant ? event : name}</b><span className="scene-desc" title={description ?? ''}>{description ?? ''}</span>
+      <button type="button" className="scene-icon-btn" title={t('scene.openInEditorHint')} onClick={e => { e.currentTarget.blur(); if (event) useEventStore.getState().openInEditor(event) }}>{t('scene.openInEditor')}</button></div>
+    {unknownVariant && <div className="scene-dim">{t('scene.variant.unknown', { name: `${name}:${unknownVariant}`, cue: name })}</div>}
+    {variant && overrides[field] && <div className="scene-dim">{t('scene.variant.overrides', { name: event ?? '' })}</div>}
+  </>
 }
 
+/** The selected moment's cue (a `cue:variant` name resolves to its cue, which these panels edit). */
 function useSelectedCue() {
   const table = useSceneStore(s => s.table)
   const lib = useSceneStore(s => s.lib)
   const sel = useSceneStore(s => s.sel)
-  const name = table && sel && table.cues[sel.name] ? sel.name : null
-  return { table, lib, name }
+  const resolved = table && sel ? resolveEventName(table, sel.name) : null
+  const name = resolved ? resolved.ref.cue : null
+  const variant = resolved?.ref.variant ?? null
+  const own = table && resolved && variant ? effectiveEvent(table, resolved.ref)?.own : null
+  return { table, lib, name, variant, event: resolved ? (variant ? `${name}:${variant}` : name) : null, unknownVariant: resolved?.unknownVariant ?? null,
+    overrides: { sfx: !!own?.sfx, haptics: !!own?.haptics } }
 }
 
 /** Haptic routes of the selected cue: clip × body position × gain, plus the intensity of the clips it uses. */
@@ -104,17 +124,19 @@ export function SceneHapticsPanel() {
     if (!helperConnected) { store.note({ id: 'scene.test.noHelper', error: true }); return }
     const route = table.cues[name].haptics[index]
     const count = runtime.testRoute(route)
-    store.note({ id: 'scene.test.sent', params: { clip: route.clip, at: atLabel(route.at), count } })
+    store.note({ id: 'scene.test.sent', params: { clip: routeClips(route)[0] ?? '', at: atLabel(route.at), count } })
   }
   const cue = name ? table.cues[name] : null
-  const used = cue ? [...new Set(cue.haptics.map(r => r.clip))].filter(c => table.clips[c]) : []
+  const used = cue ? [...new Set(cue.haptics.flatMap(routeClips))].filter(c => table.clips[c]) : []
   return <div className="scene-cue-panel">
     <CuePicker />
     {!name || !cue ? <div className="scene-sec scene-dim">{t('scene.selectCue')}</div> : <div className="scene-cue">
-      <CueHead lib={lib} name={name} description={cue.description} />
+      <CueHead lib={lib} name={name} description={cue.description} field="haptics" />
       {cue.haptics.length > 0 && <div className="scene-heads"><span>{t('scene.route.clip')}</span><span>{t('scene.route.at')}</span><span>{t('scene.route.gain')}</span></div>}
       {cue.haptics.map((r, i) => <DropZone key={i} className="scene-route" onFile={file => void replaceWithWav(i, file)}>
-        <select value={r.clip} aria-label={t('scene.route.clip')} onChange={e => { e.target.blur(); store.edit(tb => updateRoute(tb, name, i, { clip: e.target.value })) }}>
+        {/* A multi-clip route (v2 `clips`) is edited in the editor's Events panel; picking one clip here replaces the list. */}
+        <select value={routeClips(r).length > 1 ? '' : routeClips(r)[0]} aria-label={t('scene.route.clip')} title={routeClips(r).join(', ')} onChange={e => { e.target.blur(); store.edit(tb => updateRoute(tb, name, i, { clip: e.target.value })) }}>
+          {routeClips(r).length > 1 && <option value="" disabled>{t('scene.route.multi', { count: routeClips(r).length })}</option>}
           {clipsForCue(table, lib, name).map(c => <option key={c} value={c}>{c}</option>)}
         </select>
         <select value={r.at} aria-label={t('scene.route.at')} onChange={e => { e.target.blur(); store.edit(tb => updateRoute(tb, name, i, { at: e.target.value })) }}>
@@ -144,6 +166,9 @@ export function SceneHapticsPanel() {
   </div>
 }
 
+/** Select value of a v2 multi-sound sfx (not a valid sound name). */
+const MULTI = ' multi'
+
 /** The selected cue's sound effect and volume. */
 export function SceneSoundPanel() {
   const { t } = useI18n()
@@ -161,12 +186,13 @@ export function SceneSoundPanel() {
   return <div className="scene-cue-panel">
     <CuePicker />
     {!name || !cue ? <div className="scene-sec scene-dim">{t('scene.selectCue')}</div>
-      : isLoopCue(lib, name) ? <div className="scene-cue"><CueHead lib={lib} name={name} description={cue.description} /><div className="scene-dim">{t('scene.sound.loopCue')}</div></div>
+      : isLoopCue(lib, name) ? <div className="scene-cue"><CueHead lib={lib} name={name} description={cue.description} field="sfx" /><div className="scene-dim">{t('scene.sound.loopCue')}</div></div>
         : <DropZone className="scene-cue" onFile={file => void addWav(file)}>
-          <CueHead lib={lib} name={name} description={cue.description} />
+          <CueHead lib={lib} name={name} description={cue.description} field="sfx" />
           <div className="scene-row">
-            <select className="scene-grow" value={cue.sfx?.sound ?? ''} aria-label={t('scene.panel.sound')} onChange={e => { e.target.blur(); store.edit(tb => assignSound(tb, name, e.target.value || null)) }}>
+            <select className="scene-grow" value={sfxSounds(cue.sfx).length > 1 ? MULTI : sfxSounds(cue.sfx)[0] ?? ''} title={sfxSounds(cue.sfx).join(', ')} aria-label={t('scene.panel.sound')} onChange={e => { e.target.blur(); store.edit(tb => assignSound(tb, name, e.target.value || null)) }}>
               <option value="">{t('scene.sound.none')}</option>
+              {sfxSounds(cue.sfx).length > 1 && <option value={MULTI} disabled>{t('scene.sound.multi', { count: sfxSounds(cue.sfx).length })}</option>}
               {soundFiles.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
             <span className="scene-dim">{t('scene.sound.volume')}</span>

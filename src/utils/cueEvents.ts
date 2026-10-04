@@ -1,0 +1,279 @@
+import type { SceneLib } from './sceneData'
+import {
+  clampNumber, isLoopCue, positionsForCue, routeClips, sfxSounds, VARIANT_NAME,
+  type CueEntry, type CueRoute, type CueSfx, type CueTable, type CueVariant, type CueVariation, type PickMode,
+} from './sceneCueTable'
+
+/**
+ * Events = the cues of a project's cue table (and their v2 variants), as the
+ * editor's Events panel and "decide" see them (DEC-083,
+ * docs/haptic-authoring-cue-table.md). A variant inherits every field it does
+ * not write from its cue; the game names one as `cue:variant`.
+ *
+ * Everything here is pure; edits return a new table (unknown fields kept).
+ */
+
+export interface EventRef { cue: string; variant: string | null }
+/** `cue` or `cue:variant` (the game's and viewer-data's name). */
+export const eventKey = (ref: EventRef) => ref.variant ? `${ref.cue}:${ref.variant}` : ref.cue
+export function parseEventKey(key: string): EventRef {
+  const i = key.indexOf(':')
+  return i < 0 ? { cue: key, variant: null } : { cue: key.slice(0, i), variant: key.slice(i + 1) }
+}
+
+/**
+ * A game cue name (`cue` / `cue:variant`) against the table: null when the cue
+ * is unknown; a variant the cue does not have resolves to the cue itself
+ * (`unknownVariant` set — the game plays the cue and logs a warning).
+ */
+export function resolveEventName(table: CueTable, name: string): { ref: EventRef; unknownVariant: string | null } | null {
+  const ref = parseEventKey(name), cue = table.cues[ref.cue]
+  if (!cue) return null
+  if (ref.variant === null) return { ref, unknownVariant: null }
+  return cue.variants && Object.prototype.hasOwnProperty.call(cue.variants, ref.variant) ? { ref, unknownVariant: null } : { ref: { cue: ref.cue, variant: null }, unknownVariant: ref.variant }
+}
+
+export interface EffectiveEvent {
+  ref: EventRef
+  description?: string
+  sfx: CueSfx | null
+  haptics: CueRoute[]
+  variation?: CueVariation
+  /** Which fields the variant writes itself (always true for a cue). */
+  own: { sfx: boolean; haptics: boolean; variation: boolean }
+}
+
+const variantOf = (table: CueTable, ref: EventRef): CueVariant | null => ref.variant === null ? null : table.cues[ref.cue]?.variants?.[ref.variant] ?? null
+
+/** What an event plays: the variant's fields where it writes them, else the cue's. Null when the event does not exist. */
+export function effectiveEvent(table: CueTable, ref: EventRef): EffectiveEvent | null {
+  const cue = table.cues[ref.cue]
+  if (!cue) return null
+  if (ref.variant === null) return { ref, description: cue.description, sfx: cue.sfx, haptics: cue.haptics, variation: cue.variation, own: { sfx: true, haptics: true, variation: true } }
+  const v = variantOf(table, ref)
+  if (!v) return null
+  const own = { sfx: v.sfx !== undefined, haptics: v.haptics !== undefined, variation: v.variation !== undefined }
+  return { ref, description: v.description ?? cue.description, sfx: own.sfx ? v.sfx ?? null : cue.sfx, haptics: own.haptics ? v.haptics! : cue.haptics, variation: own.variation ? v.variation : cue.variation, own }
+}
+
+/** Sound column: 'na' for loop cues (continuous layers have no cue sound). */
+export type SoundStatus = 'set' | 'unset' | 'na'
+export interface EventRow {
+  key: string
+  ref: EventRef
+  description?: string
+  loop: boolean
+  sound: SoundStatus
+  haptic: 'set' | 'unset'
+  /** The cue's variants (empty for a variant row). */
+  variants: EventRow[]
+}
+
+function row(table: CueTable, lib: SceneLib, ref: EventRef, variants: EventRow[]): EventRow {
+  const e = effectiveEvent(table, ref)!, loop = isLoopCue(lib, ref.cue)
+  return { key: eventKey(ref), ref, description: e.description, loop, sound: loop ? 'na' : e.sfx ? 'set' : 'unset', haptic: e.haptics.length ? 'set' : 'unset', variants }
+}
+
+/** Every cue in table order, each with its variants nested. */
+export function listEvents(table: CueTable, lib: SceneLib): EventRow[] {
+  return Object.keys(table.cues).map(cue => row(table, lib, { cue, variant: null },
+    Object.keys(table.cues[cue].variants ?? {}).map(variant => row(table, lib, { cue, variant }, []))))
+}
+
+/** Every event key of the table (cues, then `cue:variant`). */
+export const allEventKeys = (table: CueTable) => Object.entries(table.cues).flatMap(([cue, entry]) => [cue, ...Object.keys(entry.variants ?? {}).map(v => `${cue}:${v}`)])
+
+// ── Decide (an editor clip / AI candidate becomes an event's sound or haptic) ──
+
+const toClipName = (text: string) => text.toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^[^a-z]+/, '') || 'clip'
+const toSoundName = (text: string) => text.split(/[^A-Za-z0-9]+/).filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join('').replace(/^[^A-Za-z]+/, '') || 'Sfx'
+
+/** Default clip name for a haptic decision: the event's current (first) route clip, else the cue / `cue_variant` name. */
+export function defaultClipName(table: CueTable, ref: EventRef): string {
+  const current = effectiveEvent(table, ref)?.haptics.flatMap(routeClips)[0]
+  return current ?? toClipName(ref.variant ? `${ref.cue}_${ref.variant}` : ref.cue)
+}
+/** Default sound name: the event's current (first) sound, else the cue / variant name in PascalCase (roar_impact → RoarImpact). */
+export function defaultSoundName(table: CueTable, ref: EventRef): string {
+  return sfxSounds(effectiveEvent(table, ref)?.sfx)[0] ?? toSoundName(ref.variant ? `${ref.cue}_${ref.variant}` : ref.cue)
+}
+export const matchesName = (name: string, pattern: string) => { try { return new RegExp(pattern).test(name) } catch { return false } }
+
+/** Events (keys) whose own routes / sfx use the clip / sound. A variant counts only for the fields it writes. */
+export function materialUsers(table: CueTable, kind: 'clip' | 'sound', name: string): string[] {
+  const out: string[] = []
+  const uses = (entry: CueVariant) => kind === 'clip' ? (entry.haptics ?? []).some(r => routeClips(r).includes(name)) : sfxSounds(entry.sfx).includes(name)
+  for (const [cue, entry] of Object.entries(table.cues)) {
+    if (uses(entry)) out.push(cue)
+    for (const [variant, v] of Object.entries(entry.variants ?? {})) if (uses(v)) out.push(`${cue}:${variant}`)
+  }
+  return out
+}
+/** Other events that would hear the new WAV when `name` is overwritten for `ref` (shown before overwriting). */
+export const overwriteUsers = (table: CueTable, kind: 'clip' | 'sound', name: string, ref: EventRef) => materialUsers(table, kind, name).filter(k => k !== eventKey(ref))
+
+/** Body position offered for a new route: the acting hand where the project has it (wrist demos), else the first allowed one. */
+export function defaultAt(lib: SceneLib, cue: string): string {
+  const positions = positionsForCue(lib, cue)
+  return positions.includes('hand') ? 'hand' : positions[0] ?? 'hand'
+}
+/** True when a haptic decision for `ref` must ask for at / gain (the event has no route to keep them from). */
+export const needsRouteForm = (table: CueTable, ref: EventRef) => (effectiveEvent(table, ref)?.haptics.length ?? 0) === 0
+
+/** The entry `ref` writes to: the cue, or the variant (null when it does not exist). */
+function ownEntry(table: CueTable, ref: EventRef): CueEntry | CueVariant | null {
+  return ref.variant === null ? table.cues[ref.cue] ?? null : variantOf(table, ref)
+}
+function edited(table: CueTable, ref: EventRef, change: (entry: CueEntry | CueVariant, effective: EffectiveEvent) => void): CueTable {
+  const next = structuredClone(table), entry = ownEntry(next, ref), effective = effectiveEvent(next, ref)
+  if (!entry || !effective) throw new Error(`unknown event ${eventKey(ref)}`)
+  change(entry, structuredClone(effective))
+  return next
+}
+
+export interface HapticDecision { ref: EventRef; clip: string; /** at / gain for a new route (used only when the event has none). */ at: string; gain: number }
+/**
+ * Clip entry (added with intensity 1.0 and the cue's loop kind; an existing
+ * entry keeps its values) + the event's haptics: the first route plays `clip`
+ * (its at / gain kept), or a new route when there is none. A variant that
+ * inherited its haptics gets its own copy first.
+ */
+export function applyHapticDecision(table: CueTable, lib: SceneLib, d: HapticDecision): CueTable {
+  const next = edited(table, d.ref, (entry, effective) => {
+    const routes = effective.haptics
+    if (routes.length) { const { clips: _drop, ...first } = routes[0]; routes[0] = { ...first, clip: d.clip } }
+    else routes.push({ clip: d.clip, at: d.at, gain: clampNumber(d.gain, 0, 2) })
+    entry.haptics = routes
+  })
+  if (!next.clips[d.clip]) next.clips[d.clip] = { intensity: 1.0, loop: isLoopCue(lib, d.ref.cue), description: `Decided in Studio for ${eventKey(d.ref)}` }
+  return next
+}
+/** The event's sound becomes `sound` (one sound; volume kept, 1.0 when it had none). */
+export function applySoundDecision(table: CueTable, ref: EventRef, sound: string): CueTable {
+  return edited(table, ref, (entry, effective) => { entry.sfx = { sound, volume: effective.sfx ? effective.sfx.volume : 1.0 } })
+}
+
+// ── Events panel edits ──
+
+/** Adds an empty variant (inherits everything). Throws on a bad or taken name. */
+export function addVariant(table: CueTable, cue: string, name: string): CueTable {
+  if (!VARIANT_NAME.test(name)) throw new Error(`variant name must match ${VARIANT_NAME.source}`)
+  if (!table.cues[cue]) throw new Error(`unknown cue ${cue}`)
+  if (table.cues[cue].variants?.[name]) throw new Error(`${cue}:${name} already exists`)
+  const next = structuredClone(table), entry = next.cues[cue]
+  entry.variants = { ...(entry.variants ?? {}), [name]: {} }
+  return next
+}
+export function removeVariant(table: CueTable, cue: string, name: string): CueTable {
+  const next = structuredClone(table), entry = next.cues[cue]
+  if (entry?.variants) { delete entry.variants[name]; if (!Object.keys(entry.variants).length) delete entry.variants }
+  return next
+}
+export type OverridableField = 'sfx' | 'haptics' | 'variation'
+/** A variant starts writing `field` (a copy of what it inherited) or goes back to inheriting it. */
+export function setOverride(table: CueTable, ref: EventRef, field: OverridableField, on: boolean): CueTable {
+  if (ref.variant === null) return table
+  return edited(table, ref, (entry, effective) => {
+    if (!on) { delete entry[field]; return }
+    if (field === 'sfx') entry.sfx = effective.sfx
+    else if (field === 'haptics') entry.haptics = effective.haptics
+    else entry.variation = effective.variation ?? {}
+  })
+}
+/** Sets / clears (undefined) `variation` fields of what `ref` writes; an emptied variation is removed (a variant then inherits again only through setOverride). */
+export function setVariation(table: CueTable, ref: EventRef, patch: Partial<CueVariation>): CueTable {
+  return edited(table, ref, entry => {
+    const v: CueVariation = { ...(entry.variation ?? {}) }
+    for (const [key, value] of Object.entries(patch)) if (value === undefined) delete v[key]; else v[key] = value
+    if (Object.keys(v).length || ref.variant !== null) entry.variation = v
+    else delete entry.variation
+  })
+}
+/** Route `index` of what `ref` writes plays `clips` (one = `clip`, several = `clips`). */
+export function setRouteClips(table: CueTable, ref: EventRef, index: number, clips: string[]): CueTable {
+  if (!clips.length) return table
+  return edited(table, ref, entry => {
+    const route = entry.haptics?.[index]
+    if (!route) return
+    delete route.clip; delete route.clips
+    if (clips.length === 1) route.clip = clips[0]; else route.clips = [...clips]
+  })
+}
+export function updateOwnRoute(table: CueTable, ref: EventRef, index: number, patch: { at?: string; gain?: number }): CueTable {
+  return edited(table, ref, entry => {
+    const route = entry.haptics?.[index]
+    if (!route) return
+    if (patch.at !== undefined) route.at = patch.at
+    if (patch.gain !== undefined) route.gain = clampNumber(patch.gain, 0, 2)
+  })
+}
+export function removeOwnRoute(table: CueTable, ref: EventRef, index: number): CueTable {
+  return edited(table, ref, entry => { entry.haptics?.splice(index, 1) })
+}
+/** The sfx `ref` writes plays `sounds` (one = `sound`, several = `sounds`; empty = no sound); volume kept (1.0 when new). */
+export function setSfxSounds(table: CueTable, ref: EventRef, sounds: string[]): CueTable {
+  return edited(table, ref, entry => {
+    const volume = entry.sfx ? entry.sfx.volume : 1.0
+    entry.sfx = !sounds.length ? null : sounds.length === 1 ? { sound: sounds[0], volume } : { sounds: [...sounds], volume }
+  })
+}
+export function setOwnSfxVolume(table: CueTable, ref: EventRef, volume: number): CueTable {
+  return edited(table, ref, entry => { if (entry.sfx) entry.sfx.volume = clampNumber(volume, 0, 2) })
+}
+
+// ── Playback of v2 events (Scene tab, editor previews) ──
+
+/** Picks one of several materials per firing: `random` never repeats the previous pick, `roundRobin` cycles. State is per key. */
+export class MaterialPicker {
+  private last = new Map<string, number>()
+  constructor(private random: () => number = Math.random) {}
+  pick<T>(key: string, options: readonly T[], mode: PickMode = 'random'): T | undefined {
+    if (options.length <= 1) return options[0]
+    const prev = this.last.get(key)
+    let i: number
+    if (mode === 'roundRobin') i = prev === undefined ? 0 : (prev + 1) % options.length
+    else {
+      // Uniform over the options except the previous one.
+      const n = options.length - (prev === undefined ? 0 : 1)
+      i = Math.min(n - 1, Math.floor(this.random() * n))
+      if (prev !== undefined && i >= prev) i++
+    }
+    this.last.set(key, i)
+    return options[i]
+  }
+}
+/** Gain factor of one firing: a uniform ±`db` dB jitter (1 when 0 / absent). */
+export const jitterGain = (db: number | undefined, random: () => number = Math.random) => db ? 10 ** ((random() * 2 - 1) * db / 20) : 1
+
+// ── Links to the recording, AI trials and the clip list ──
+
+/** Recorded cue names that show an event: a variant its own `cue:variant`; a cue itself, then its variants (moments recorded before a variant existed show under the cue). */
+export function eventSceneCues(table: CueTable, key: string): string[] {
+  const ref = parseEventKey(key)
+  return ref.variant ? [key] : [ref.cue, ...Object.keys(table.cues[ref.cue]?.variants ?? {}).map(v => `${ref.cue}:${v}`)]
+}
+
+interface TrialLike { trial: { id: string; target?: 'sound' | 'haptic'; scene?: { project: string; cues: string[] } } }
+/** AI trials whose `scene` names the event (`cue` / `cue:variant`, exact) in `project`, split by target (default haptic). */
+export function trialsForEvent<T extends TrialLike>(trials: readonly T[], project: string, key: string): { sound: T[]; haptic: T[] } {
+  const linked = trials.filter(r => r.trial.scene?.project === project && r.trial.scene.cues.includes(key))
+  return { sound: linked.filter(r => r.trial.target === 'sound'), haptic: linked.filter(r => r.trial.target !== 'sound') }
+}
+/** The event a trial's candidates are decided for: its first scene cue that exists in the table. */
+export function trialEvent(table: CueTable, scene: { cues: string[] } | undefined): string | null {
+  for (const name of scene?.cues ?? []) { const r = resolveEventName(table, name); if (r && !r.unknownVariant) return eventKey(r.ref) }
+  return null
+}
+
+/** Clip-list marks: adds (or moves to the end) one decision, keeping at most `limit` per subject. */
+export function addEventMark<M extends { project: string; event: string; target: string }>(marks: Record<string, M[]>, subject: string, mark: M, limit = 20): Record<string, M[]> {
+  const list = (marks[subject] ?? []).filter(m => !(m.project === mark.project && m.event === mark.event && m.target === mark.target))
+  return { ...marks, [subject]: [...list, mark].slice(-limit) }
+}
+
+/** Adds a route to what `ref` writes: the first clip that fits the cue, at the default position, gain 1 (null when the table has no fitting clip). */
+export function addOwnRoute(table: CueTable, lib: SceneLib, ref: EventRef): CueTable | null {
+  const clip = Object.keys(table.clips).find(c => table.clips[c].loop === isLoopCue(lib, ref.cue))
+  if (!clip) return null
+  return edited(table, ref, entry => { entry.haptics = [...(entry.haptics ?? []), { clip, at: defaultAt(lib, ref.cue), gain: 1.0 }] })
+}

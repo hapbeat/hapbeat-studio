@@ -13,8 +13,12 @@ export const RATING_FORMAT = 'hapbeat-rating@1'
 export const CANDIDATE_FORMAT = 'hapbeat-candidate@1'
 export const TRIAL_ID = /^[A-Za-z0-9_-]{1,80}$/
 export const CANDIDATE_ID = /^[A-Za-z0-9_-]{1,16}$/
-/** Game cue name in a Scene project's cue table (Unreal / Unity identifiers, contracts event-id characters). */
-export const SCENE_CUE = /^[A-Za-z0-9_.-]{1,80}$/
+/** Game cue name in a Scene project's cue table (Unreal / Unity identifiers, contracts event-id characters), optionally `cue:variant` (cue table v2). */
+export const SCENE_CUE = /^[A-Za-z0-9_.-]{1,80}(:[a-z][a-z0-9_]{0,79})?$/
+/** What a trial designs: the event's sound effect (rendered full band, auditioned on the PC) or its haptic (the default). */
+export const TRIAL_TARGETS = ['sound', 'haptic'] as const
+export type TrialTarget = typeof TRIAL_TARGETS[number]
+export const trialTarget = (trial: Pick<TrialRequest, 'target'>): TrialTarget => trial.target ?? 'haptic'
 /** What kind of haptic a trial designs: a single event, a continuous loop, or a repeated series (sequence: reserved for group rating). */
 export const TRIAL_KINDS = ['oneshot', 'loop', 'sequence'] as const
 export type TrialKind = typeof TRIAL_KINDS[number]
@@ -43,6 +47,8 @@ export interface TrialRequest {
   scene?: TrialScene
   /** Optional; Studio infers it when absent (see agentTrialUi.trialKind). */
   kind?: TrialKind
+  /** Optional, default "haptic". Sound trials stay out of the haptic knowledge and their rating has no haptic dimensions. */
+  target?: TrialTarget
   candidates: TrialCandidate[]
 }
 export interface TrialScene { project: string; cues: string[] }
@@ -138,8 +144,9 @@ export function trialRequestError(data: unknown, fileId?: string): string | null
   if (!optString(data.rationale, 4000)) return 'rationale must be a string of at most 4000 characters'
   if (data.project !== undefined && !isProjectName(data.project)) return 'project must be a string of 1-80 characters without leading/trailing spaces or control characters'
   if (data.kind !== undefined && !(TRIAL_KINDS as readonly unknown[]).includes(data.kind)) return 'kind must be "oneshot", "loop" or "sequence"'
+  if (data.target !== undefined && !(TRIAL_TARGETS as readonly unknown[]).includes(data.target)) return 'target must be "sound" or "haptic"'
   if (data.scene !== undefined && (!isObject(data.scene) || !isProjectName(data.scene.project) || !Array.isArray(data.scene.cues) || data.scene.cues.length < 1 || data.scene.cues.length > 20
-    || !data.scene.cues.every(c => typeof c === 'string' && SCENE_CUE.test(c)))) return 'scene must be { project: string (1-80 characters), cues: 1-20 cue names matching /^[A-Za-z0-9_.-]{1,80}$/ }'
+    || !data.scene.cues.every(c => typeof c === 'string' && SCENE_CUE.test(c)))) return 'scene must be { project: string (1-80 characters), cues: 1-20 cue names matching /^[A-Za-z0-9_.-]{1,80}$/, optionally "cue:variant" }'
   if (data.knowledgeUsed !== undefined && (!Array.isArray(data.knowledgeUsed) || data.knowledgeUsed.length > 50 || !data.knowledgeUsed.every(k => typeof k === 'string' && k.length <= 200))) return 'knowledgeUsed must be an array of strings'
   if (!Array.isArray(data.candidates) || data.candidates.length < 1 || data.candidates.length > 6) return 'candidates must contain 1-6 items'
   const ids = new Set<string>()

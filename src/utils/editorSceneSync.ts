@@ -15,9 +15,9 @@ export function scenePreRoll(): PlaybackPreRoll | null { return current && curre
 /**
  * What the Scene video panel shows when no AI candidate is auditioned (an
  * audition always shows its trial): the trial whose "▶ Video" was pressed,
- * or the selected clip (Properties "▶ Video").
+ * the selected clip (Properties "▶ Video") or the event selected in the Events panel.
  */
-export type SceneVideoTarget = { kind: 'trial'; trialId: string } | { kind: 'clip' }
+export type SceneVideoTarget = { kind: 'trial'; trialId: string } | { kind: 'clip' } | { kind: 'event'; key: string }
 export const useSceneVideoTarget = create<{ target: SceneVideoTarget; setTarget: (target: SceneVideoTarget) => void }>(set => ({
   target: { kind: 'clip' },
   setTarget: target => set({ target }),

@@ -9,6 +9,8 @@ import { WaveformThumbnail } from './WaveformThumbnail'
 import { EditorMenu, EditorMenuItem, EditorMenuSection, useCloseEditorMenu } from './EditorMenu'
 import { ProjectField, useProjectNames } from './PropertiesPanel'
 import { useEditor } from './editorContext'
+import { useEventStore, type DecideTarget } from '@/stores/eventStore'
+import { clipEventMarks, EventMarkBadges } from './EventMarkBadges'
 
 const UNASSIGNED = ''
 interface ClipGroup { key: string; label: string; docs: EditorDocument[] }
@@ -42,6 +44,8 @@ export function ClipsPanel() {
   const collapsed = useEditorSettings(state => state.collapsedGroups)
   const update = useEditorSettings(state => state.update)
   const projectNames = useEditorSettings(state => state.projectNames)
+  const eventMarks = useEditorSettings(state => state.eventMarks)
+  const decide = (target: DecideTarget, clipId: string) => useEventStore.getState().requestDecide({ target, source: { kind: 'clip', clipId }, event: null })
   const projects = useProjectNames()
   const [query, setQuery] = useState('')
   /** Multi-selection for bulk actions; a plain click resets it to the clicked clip. */
@@ -138,12 +142,17 @@ export function ClipsPanel() {
                 : edit === 'project' ? <span className="editor-clip-inline"><ProjectField clipId={clip.id} value={clip.project} autoFocus onDone={() => setEditing(null)} /></span>
                 : <button className="editor-clip" disabled={busy} aria-pressed={selected} title={clip.name} onClick={e => clickClip(e, clip.id)}>
                   <strong>{clip.name || '—'}</strong><small>{clip.buffer.duration.toFixed(3)} s</small>
+                  <EventMarkBadges marks={clipEventMarks(clip, eventMarks)} />
                   {thumbnails && <WaveformThumbnail buffer={clip.buffer} />}
                 </button>}
               <EditorMenu label="⋯" title={t('editor.clipMenu', { name: clip.name })} className="editor-clip-menu" disabled={busy}>
                 <EditorMenuItem onSelect={() => setEditing({ id: clip.id, field: 'name' })}>{t('editor.rename')}</EditorMenuItem>
                 <EditorMenuItem disabled={!!auditionKey} onSelect={() => { s.selectClip(clip.id); useWaveformStore.getState().duplicateClip() }}>⧉ {t('editor.variant')}</EditorMenuItem>
                 {clip.recipe && <EditorMenuItem disabled={!s.folder} onSelect={doc => openRecipe(doc, clip.recipe)}>{t('editor.recipe.edit')}</EditorMenuItem>}
+                <EditorMenuSection label={t('events.menuSection')}>
+                  <EditorMenuItem onSelect={() => decide('sound', clip.id)}>{t('events.decideSound')}</EditorMenuItem>
+                  <EditorMenuItem onSelect={() => decide('haptic', clip.id)}>{t('events.decideHaptic')}</EditorMenuItem>
+                </EditorMenuSection>
                 <EditorMenuSection label={t('editor.setProject')}>
                   {projects.map(name => <EditorMenuItem key={name} checked={clip.project === name} onSelect={() => setProject(clip.id, normalizeProjectName(name))}>{name}</EditorMenuItem>)}
                   <EditorMenuItem onSelect={() => setEditing({ id: clip.id, field: 'project' })}>{t('editor.newProject')}</EditorMenuItem>

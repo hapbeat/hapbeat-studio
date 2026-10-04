@@ -4,6 +4,12 @@ import { DEFAULT_UI_SETTINGS, parseStoredUiSettings, parseUiSettingsFile, resolv
 const layout = { grid: { root: {} }, panels: { clips: {} } }
 
 describe('editor UI settings', () => {
+  it('keeps valid event marks (clip id or trialId/candidateId keys)', () => {
+    const mark = { project: 'trex', event: 'footstep:approach', target: 'haptic' }
+    const marks = sanitizeUiSettings({ eventMarks: { c1: [mark, { project: 'x' }], 't-1/A': [{ ...mark, target: 'sound' }], 'bad key': [mark], c2: 'no' } }).eventMarks
+    expect(marks).toEqual({ c1: [mark], 't-1/A': [{ ...mark, target: 'sound' }] })
+  })
+
   it('keeps valid fields and replaces invalid ones with defaults', () => {
     const settings = sanitizeUiSettings({ loop: true, loopDelay: 99, height: 'tall', clipGroupBy: 'nope', collapsedGroups: [1], dockLayout: layout, muted: true, sendHaptics: 'no' })
     expect(settings).toEqual({ ...DEFAULT_UI_SETTINGS, loop: true, loopDelay: 60, dockLayout: layout, muted: true })

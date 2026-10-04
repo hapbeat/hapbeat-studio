@@ -10,11 +10,38 @@ import type { SceneLib } from './sceneData'
  * table saved here passes the project's import step.
  *
  * Edits are immutable (each returns a new table); unknown fields are kept.
+ *
+ * v2 (docs/haptic-authoring-cue-table.md, DEC-083) adds optional fields only:
+ * per-cue `variants` (each overrides `sfx` / `haptics` / `variation` as a
+ * whole, the rest is inherited from the cue), `variation` (jitter + how a
+ * multi-material route / sound is picked), and multi-material `clips` on a
+ * route / `sounds` on a sfx (exactly one of `clip` / `clips`, `sound` / `sounds`).
  */
 
-export interface CueRoute { clip: string; at: string; gain: number }
-export interface CueSfx { sound: string; volume: number }
-export interface CueEntry { description?: string; sfx: CueSfx | null; haptics: CueRoute[]; [key: string]: unknown }
+/** A route plays `clip`, or one of `clips` per firing (picked by `variation.pick`). */
+export interface CueRoute { clip?: string; clips?: string[]; at: string; gain: number; [key: string]: unknown }
+/** A cue sound: `sound`, or one of `sounds` per firing. */
+export interface CueSfx { sound?: string; sounds?: string[]; volume: number; [key: string]: unknown }
+export const PICK_MODES = ['random', 'roundRobin'] as const
+export type PickMode = typeof PICK_MODES[number]
+export interface CueVariation { gainJitterDb?: number; pitchJitterSt?: number; rateJitterPct?: number; pick?: PickMode; [key: string]: unknown }
+/** A field left out (undefined) is inherited from the cue; `sfx: null` overrides with "no sound". */
+export interface CueVariant { description?: string; sfx?: CueSfx | null; haptics?: CueRoute[]; variation?: CueVariation; [key: string]: unknown }
+export interface CueEntry {
+  description?: string; sfx: CueSfx | null; haptics: CueRoute[]
+  variants?: Record<string, CueVariant>; variation?: CueVariation
+  [key: string]: unknown
+}
+/** Variant names (`<cue>:<variant>` in the game and in viewer-data events). */
+export const VARIANT_NAME = /^[a-z][a-z0-9_]*$/
+/** Ranges of the numeric `variation` fields. */
+export const VARIATION_RANGES = { gainJitterDb: [0, 12], pitchJitterSt: [0, 12], rateJitterPct: [0, 50] } as const
+export type VariationNumberKey = keyof typeof VARIATION_RANGES
+
+/** The clips a route may play (one for `clip`). */
+export const routeClips = (route: CueRoute): string[] => Array.isArray(route.clips) ? route.clips : typeof route.clip === 'string' ? [route.clip] : []
+/** The sounds a sfx may play (one for `sound`). */
+export const sfxSounds = (sfx: CueSfx | null | undefined): string[] => !sfx ? [] : Array.isArray(sfx.sounds) ? sfx.sounds : typeof sfx.sound === 'string' ? [sfx.sound] : []
 export interface ClipEntry { intensity: number; loop: boolean; description?: string; [key: string]: unknown }
 export interface CueTable { kit?: string; clips: Record<string, ClipEntry>; cues: Record<string, CueEntry>; [key: string]: unknown }
 
@@ -30,6 +57,17 @@ export function parseCueTable(text: string): CueTable {
     if (!isRecord(cue)) throw new Error(`cue table: cue ${name} must be an object`)
     if (cue.haptics !== undefined && !(Array.isArray(cue.haptics) && cue.haptics.every(isRecord))) throw new Error(`cue table: ${name}.haptics must be a list`)
     if (cue.sfx !== undefined && cue.sfx !== null && !isRecord(cue.sfx)) throw new Error(`cue table: ${name}.sfx must be an object or null`)
+    if (cue.variation !== undefined && !isRecord(cue.variation)) throw new Error(`cue table: ${name}.variation must be an object`)
+    if (cue.variants !== undefined) {
+      if (!isRecord(cue.variants)) throw new Error(`cue table: ${name}.variants must be an object`)
+      for (const [vn, variant] of Object.entries(cue.variants)) {
+        const at = `${name}.variants.${vn}`
+        if (!isRecord(variant)) throw new Error(`cue table: ${at} must be an object`)
+        if (variant.haptics !== undefined && !(Array.isArray(variant.haptics) && variant.haptics.every(isRecord))) throw new Error(`cue table: ${at}.haptics must be a list`)
+        if (variant.sfx !== undefined && variant.sfx !== null && !isRecord(variant.sfx)) throw new Error(`cue table: ${at}.sfx must be an object or null`)
+        if (variant.variation !== undefined && !isRecord(variant.variation)) throw new Error(`cue table: ${at}.variation must be an object`)
+      }
+    }
   }
   const table = v as unknown as CueTable
   // Missing `haptics` / `sfx` read as empty, as the demo scripts do (`cue.get(...)`).
@@ -65,12 +103,13 @@ const inRange = (value: unknown, lo: number, hi: number) => typeof value === 'nu
 /**
  * The demos' `validate(table)` with the lib's vocabulary: kit, clip names /
  * intensity / loop / WAV, the cue set, sound name / WAV / volume, route clip /
- * loop fit / position / gain. Returns every problem (empty = savable).
+ * loop fit / position / gain, and the v2 variants / variation / multi-material
+ * fields. Returns every problem (empty = savable). Shared by the Scene tab save and the editor's "decide".
  */
 export function validateCueTable(table: CueTable, ctx: CueTableContext): string[] {
   const err: string[] = []
   const { lib } = ctx
-  const clipRe = new RegExp(lib.clip_name), soundRe = new RegExp(lib.sound_name)
+  const clipRe = new RegExp(lib.clip_name)
   if (table.kit !== ctx.kit) err.push(`kit must be ${ctx.kit}`)
   const clips = table.clips
   for (const [name, c] of Object.entries(clips)) {
@@ -82,22 +121,51 @@ export function validateCueTable(table: CueTable, ctx: CueTableContext): string[
   const names = Object.keys(table.cues)
   if (names.length !== ctx.cueNames.length || names.some(n => !ctx.cueNames.includes(n))) err.push(`cues must be exactly ${ctx.cueNames.join(', ')}`)
   for (const [name, cue] of Object.entries(table.cues)) {
-    const sfx = cue.sfx
-    if (sfx) {
-      if (isLoopCue(lib, name)) err.push(`${name}: continuous layers have no cue sound`)
-      else if (typeof sfx.sound !== 'string' || !soundRe.test(sfx.sound) || lib.loop_sounds.includes(sfx.sound)) err.push(`${name}: bad sound ${String(sfx.sound)}`)
-      else if (!ctx.soundFiles.has(sfx.sound)) err.push(`${name}: ${lib.paths.sounds}/${sfx.sound}.wav missing`)
-      if (!inRange(sfx.volume, 0, 2)) err.push(`${name}: sfx volume must be 0..2`)
-    }
-    for (const r of cue.haptics) {
-      if (!Object.prototype.hasOwnProperty.call(clips, r.clip)) err.push(`${name}: unknown clip ${String(r.clip)}`)
-      else if (clips[r.clip].loop !== isLoopCue(lib, name)) err.push(`${name}: clip ${r.clip} loop=${clips[r.clip].loop} does not fit this cue`)
-      if (!lib.at.includes(r.at)) err.push(`${name}: at must be one of ${lib.at.join(', ')}`)
-      else if (!positionsForCue(lib, name).includes(r.at)) err.push(`${name}: continuous layers allow at = ${positionsForCue(lib, name).join(', ')}`)
-      if (!inRange(r.gain, 0, 2)) err.push(`${name}: gain must be 0..2`)
+    validateCueFields(err, table, ctx, name, name, cue)
+    for (const [vn, variant] of Object.entries(cue.variants ?? {})) {
+      if (!VARIANT_NAME.test(vn)) err.push(`${name}: variant name ${vn} must match ${VARIANT_NAME.source}`)
+      validateCueFields(err, table, ctx, name, `${name}:${vn}`, variant)
     }
   }
   return err
+}
+
+/**
+ * The checks of one cue or variant (`label` names it in messages; `cue` is the
+ * cue whose loop kind / positions apply). Fields a variant leaves out are inherited, so they are not checked twice.
+ * In a loop cue only `variation.gainJitterDb` takes effect; the other variation fields are allowed but ignored.
+ */
+function validateCueFields(err: string[], table: CueTable, ctx: CueTableContext, cue: string, label: string, entry: CueVariant): void {
+  const { lib } = ctx, clips = table.clips, soundRe = new RegExp(lib.sound_name)
+  const sfx = entry.sfx
+  if (sfx) {
+    const hasOne = sfx.sound !== undefined, hasMany = sfx.sounds !== undefined
+    if (isLoopCue(lib, cue)) err.push(`${label}: continuous layers have no cue sound`)
+    else if (hasOne === hasMany) err.push(`${label}: sfx needs exactly one of sound / sounds`)
+    else if (hasMany && !(Array.isArray(sfx.sounds) && sfx.sounds.length > 0)) err.push(`${label}: sfx.sounds must be a non-empty list`)
+    else for (const sound of hasMany ? sfx.sounds! : [sfx.sound]) {
+      if (typeof sound !== 'string' || !soundRe.test(sound) || lib.loop_sounds.includes(sound)) err.push(`${label}: bad sound ${String(sound)}`)
+      else if (!ctx.soundFiles.has(sound)) err.push(`${label}: ${lib.paths.sounds}/${sound}.wav missing`)
+    }
+    if (!inRange(sfx.volume, 0, 2)) err.push(`${label}: sfx volume must be 0..2`)
+  }
+  for (const r of entry.haptics ?? []) {
+    const hasOne = r.clip !== undefined, hasMany = r.clips !== undefined
+    if (hasOne === hasMany) err.push(`${label}: a route needs exactly one of clip / clips`)
+    else if (hasMany && !(Array.isArray(r.clips) && r.clips.length > 0)) err.push(`${label}: route clips must be a non-empty list`)
+    else for (const clip of hasMany ? r.clips! : [r.clip]) {
+      if (typeof clip !== 'string' || !Object.prototype.hasOwnProperty.call(clips, clip)) err.push(`${label}: unknown clip ${String(clip)}`)
+      else if (clips[clip].loop !== isLoopCue(lib, cue)) err.push(`${label}: clip ${clip} loop=${clips[clip].loop} does not fit this cue`)
+    }
+    if (!lib.at.includes(r.at)) err.push(`${label}: at must be one of ${lib.at.join(', ')}`)
+    else if (!positionsForCue(lib, cue).includes(r.at)) err.push(`${label}: continuous layers allow at = ${positionsForCue(lib, cue).join(', ')}`)
+    if (!inRange(r.gain, 0, 2)) err.push(`${label}: gain must be 0..2`)
+  }
+  const v = entry.variation
+  if (v !== undefined) {
+    for (const [key, [lo, hi]] of Object.entries(VARIATION_RANGES)) if (v[key] !== undefined && !inRange(v[key], lo, hi)) err.push(`${label}: variation.${key} must be ${lo}..${hi}`)
+    if (v.pick !== undefined && !(PICK_MODES as readonly unknown[]).includes(v.pick)) err.push(`${label}: variation.pick must be ${PICK_MODES.join(' or ')}`)
+  }
 }
 
 // ── Edits ──
@@ -108,6 +176,8 @@ export const clampNumber = (value: number, lo: number, hi: number) => Number.isF
 export function updateRoute(table: CueTable, cue: string, index: number, patch: Partial<CueRoute>): CueTable {
   const next = clone(table), route = next.cues[cue].haptics[index]
   Object.assign(route, patch)
+  // A single clip replaces a multi-clip list (exactly one of clip / clips).
+  if (patch.clip !== undefined) delete route.clips
   if (patch.gain !== undefined) route.gain = clampNumber(patch.gain, 0, 2)
   return next
 }

@@ -109,7 +109,8 @@ export const ONESHOT_MAX_SEC = 2
  */
 export function trialKind(trial: Pick<TrialRequest, 'kind' | 'scene'>, durations: (number | null | undefined)[], loopCues: string[] = []): TrialKind | null {
   if (trial.kind) return trial.kind
-  if (trial.scene && trial.scene.cues.length && trial.scene.cues.every(c => loopCues.includes(c))) return 'loop'
+  // A `cue:variant` scene cue is a loop when its cue is.
+  if (trial.scene && trial.scene.cues.length && trial.scene.cues.every(c => loopCues.includes(c.split(':')[0]))) return 'loop'
   const known = durations.filter((d): d is number => typeof d === 'number' && Number.isFinite(d))
   return known.length && known.every(d => d <= ONESHOT_MAX_SEC) ? 'oneshot' : null
 }

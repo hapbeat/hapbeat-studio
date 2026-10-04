@@ -152,9 +152,10 @@ export function momentCues(events: VisibleEvent[], t: number | null, ticks: stri
   return [...new Set(events.filter(e => Math.abs(e.t - t) <= MOMENT_S && !ticks.includes(e.name)).map(e => e.name))]
 }
 
-/** Marker colour by family (not per cue): the label on the marker names the cue. */
+/** Marker colour by family (not per cue): the label on the marker names the cue. A `cue:variant` takes its cue's family. */
 export function familyColor(lib: SceneLib, name: string): string {
-  return lib.families.find(f => f.cues.includes(name))?.color ?? '#888888'
+  const cue = name.split(':')[0]
+  return lib.families.find(f => f.cues.includes(name) || f.cues.includes(cue))?.color ?? '#888888'
 }
 
 /**

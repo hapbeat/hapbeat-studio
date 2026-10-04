@@ -5,7 +5,7 @@
  * dimensions → terms → trials → candidates → ratings.
  */
 import type { CandidateFile, RatingBody, RatingFile, TrialFile } from '@/utils/agentProtocol'
-import { normalizeTerm, termSlug } from '@/utils/agentProtocol'
+import { normalizeTerm, termSlug, trialTarget } from '@/utils/agentProtocol'
 import { SCALAR_FEATURES, type HapticFeatures } from '@/utils/hapticFeatures'
 import { writeEditorFile } from '@/utils/editorFolder'
 import { agentsMd, claudeMd, guideMarkdown, insightsTemplate, knowledgeReadme } from '@/utils/agentGuide'
@@ -107,7 +107,8 @@ function featureGroup(items: { features: HapticFeatures | null }[]): FeatureGrou
   }
   return { n: items.length, features }
 }
-export const trialSlugs = (trial: TrialFile, dims: DimensionsDoc) => [...new Set(trial.terms.map(t => canonicalTerm(t, dims).slug))]
+/** Terms a trial contributes to. Sound trials (target "sound") design the event's sound effect, not a haptic: they stay out of the haptic knowledge. */
+export const trialSlugs = (trial: TrialFile, dims: DimensionsDoc) => trialTarget(trial) === 'sound' ? [] : [...new Set(trial.terms.map(t => canonicalTerm(t, dims).slug))]
 const latest = (dates: (string | undefined)[]) => dates.filter((d): d is string => !!d).sort((a, b) => Date.parse(a) - Date.parse(b) || a.localeCompare(b)).pop() ?? null
 
 /** Aggregates every rated candidate of the trials that target `slug`. Deterministic for the same inputs. */
