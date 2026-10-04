@@ -105,6 +105,9 @@ export interface FirmwareVersionInfo {
   publishedAt?: number
   appOta?: FirmwareArtifact
   fullSerial?: FirmwareArtifact
+  /** Dev only: true = the local build (dist / .pio / cache) prepended ahead
+   *  of the published releases; absent = a published release. */
+  local?: boolean
 }
 
 export interface FirmwareLibraryEntry {
@@ -157,15 +160,17 @@ export interface FirmwareLibraryEntry {
   /**
    * Dev-server source: "live" = present in .pio/build now; "cache" = a
    * snapshot of a previously-built env that .pio has since pruned (still
-   * flashable, but possibly older). Absent in prod (always live release).
+   * flashable, but possibly older); "release" = a published release with no
+   * local build (dev lists both). Absent in prod (always live release).
    */
-  source?: 'live' | 'cache'
+  source?: 'live' | 'cache' | 'release'
   /** Epoch ms the cache snapshot was taken (dev `source:"cache"` only). */
   cachedAt?: number
   /**
    * All published versions, newest first (archive support — users can
    * roll back to an older release). The top-level fwVersion/appOta/
-   * fullSerial mirror versions[0]. Absent in dev mode (single build).
+   * fullSerial mirror versions[0]. In dev, a local build is versions[0]
+   * (`local: true`) followed by the published releases, when both exist.
    */
   versions?: FirmwareVersionInfo[]
 }
@@ -205,6 +210,10 @@ export function matchesHapticOutput(e: FirmwareLibraryEntry, devicePwm: boolean)
 
 /** Base URL for production firmware distribution (served as static files from Studio). */
 const PROD_FIRMWARE_BASE = `${import.meta.env.BASE_URL}firmware`
+
+/** Dev only: the published-release manifest + bins, proxied by the Vite dev
+ *  plugin from the production Studio (vite.config.ts `/firmware-releases`). */
+const DEV_RELEASE_BASE = '/firmware-releases'
 
 /**
  * Best-effort role/transport/board inference from a PlatformIO env name.
@@ -293,7 +302,22 @@ export async function listFirmwareBuilds(): Promise<FirmwareLibraryEntry[]> {
       .map(withInferredRole)
       .filter(isFirmwareVisible)
   }
-  // Dev: use Vite middleware
+  // Dev: local builds via Vite middleware + published releases (best-effort).
+  const [local, releases] = await Promise.all([
+    listLocalDevBuilds(),
+    listFirmwareBuildsFromManifest(DEV_RELEASE_BASE).catch((err) => {
+      // Offline / proxy failure → local builds only.
+      // eslint-disable-next-line no-console
+      console.info('[firmware] published releases unavailable — listing local builds only:', String(err))
+      return [] as FirmwareLibraryEntry[]
+    }),
+  ])
+  return mergeLocalWithReleases(local, releases)
+    .map(withInferredRole)
+    .filter(isFirmwareVisible)
+}
+
+async function listLocalDevBuilds(): Promise<FirmwareLibraryEntry[]> {
   const r = await fetch('/firmware-builds/list', { cache: 'no-store' })
   if (!r.ok) {
     throw new Error(`firmware list failed (${r.status} ${r.statusText})`)
@@ -303,8 +327,32 @@ export async function listFirmwareBuilds(): Promise<FirmwareLibraryEntry[]> {
   const json = (await r.json()) as { envs: (FirmwareLibraryEntry & { haptic_output?: unknown })[] }
   return (json.envs ?? [])
     .map(({ haptic_output, ...e }) => ({ ...e, hapticOutput: parseHapticOutput(haptic_output) }))
-    .map(withInferredRole)
-    .filter(isFirmwareVisible)
+}
+
+/**
+ * Dev: combine local builds with published releases per env. A local build
+ * becomes versions[0] (`local: true`, the default selection) followed by the
+ * env's releases; release-only envs are added with `source: 'release'`.
+ */
+export function mergeLocalWithReleases(
+  local: FirmwareLibraryEntry[],
+  releases: FirmwareLibraryEntry[],
+): FirmwareLibraryEntry[] {
+  const releaseByEnv = new Map(releases.map((e) => [e.env, e]))
+  const merged = local.map((e): FirmwareLibraryEntry => {
+    const rel = releaseByEnv.get(e.env)
+    if (!rel?.versions?.length) return e
+    releaseByEnv.delete(e.env)
+    return {
+      ...e,
+      versions: [
+        { fwVersion: e.fwVersion ?? '', appOta: e.appOta, fullSerial: e.fullSerial, local: true },
+        ...rel.versions,
+      ],
+    }
+  })
+  for (const rel of releaseByEnv.values()) merged.push({ ...rel, source: 'release' })
+  return merged
 }
 
 interface ManifestArtifact {
@@ -354,8 +402,10 @@ interface ManifestEnvV1 {
  * board/label per variant; v1 entries are mapped to receiver/wifi_udp with
  * role inferred from the env name.
  */
-async function listFirmwareBuildsFromManifest(): Promise<FirmwareLibraryEntry[]> {
-  const manifestUrl = `${PROD_FIRMWARE_BASE}/manifest.json`
+async function listFirmwareBuildsFromManifest(
+  base: string = PROD_FIRMWARE_BASE,
+): Promise<FirmwareLibraryEntry[]> {
+  const manifestUrl = `${base}/manifest.json`
   const r = await fetch(manifestUrl, { cache: 'no-store' })
   if (!r.ok) {
     throw new Error(
@@ -374,7 +424,7 @@ async function listFirmwareBuildsFromManifest(): Promise<FirmwareLibraryEntry[]>
       ? {
           size: a.size,
           mtime: a.mtime ?? 0,
-          path: `${PROD_FIRMWARE_BASE}/${a.filename}`,
+          path: `${base}/${a.filename}`,
         }
       : undefined
 
@@ -486,7 +536,8 @@ async function fetchArtifact(
   entry: FirmwareLibraryEntry,
   stem: 'firmware_app_ota' | 'firmware_full_serial',
 ): Promise<{ bytes: Uint8Array; mtime: number; size: number; path: string }> {
-  if (isProdMode()) {
+  const artifact = stem === 'firmware_app_ota' ? entry.appOta : entry.fullSerial
+  if (isProdMode() || artifact?.path.startsWith(`${DEV_RELEASE_BASE}/`)) {
     return fetchArtifactFromManifest(entry, stem)
   }
   return fetchArtifactFromDevPlugin(entry.env, stem)

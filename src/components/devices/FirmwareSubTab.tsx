@@ -315,6 +315,8 @@ export function FirmwareSubTab({
     if (!v) return baseEntry
     return {
       ...baseEntry,
+      // Dev: a release chosen under a local build is flagged as a release.
+      source: v.local || !baseEntry.source ? baseEntry.source : 'release' as const,
       fwVersion: v.fwVersion,
       publishedAt: v.publishedAt,
       appOta: v.appOta,
@@ -1181,6 +1183,12 @@ export function FirmwareSubTab({
                       v{normalizeVersion(selectedEntry.fwVersion)}
                     </span>
                   )}
+                  {/* Dev lists local builds and published releases together. */}
+                  {selectedEntry.source && (
+                    <span className="form-section-sub-inline" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+                      {selectedEntry.source === 'release' ? t('firmware.releaseBuild') : t('firmware.localBuild')}
+                    </span>
+                  )}
                   <span className="form-section-sub-inline" style={{ fontSize: 12 }}>
                     {ROLE_LABEL[entryRole(selectedEntry)]}
                     {selectedEntry.transport && ` · ${TRANSPORT_LABEL[selectedEntry.transport]}`}
@@ -1221,7 +1229,7 @@ export function FirmwareSubTab({
                           title={`${v.tag ?? `v${normalizeVersion(v.fwVersion)}`}${v.publishedAt ? ` · ${formatDate(v.publishedAt)} リリース` : ''}`}
                         >
                           v{normalizeVersion(v.fwVersion)}
-                           {i === 0 && <span className="firmware-version-chip-latest"> {t('firmware.latest')}</span>}
+                           {i === 0 && <span className="firmware-version-chip-latest"> {v.local ? t('firmware.localBuild') : t('firmware.latest')}</span>}
                         </button>
                       )
                     })}

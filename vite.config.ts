@@ -115,6 +115,10 @@ async function readVariantMeta(root: string, env: string): Promise<DevVariantMet
 const CACHE_ROOT = resolve(__dirname, 'node_modules/.cache/hapbeat-firmware-dev')
 const BIN_STEMS = ['firmware_app_ota', 'firmware_full_serial', 'firmware'] as const
 
+/** Production Studio origin whose /firmware/ tree holds the released firmware
+ *  (manifest.json + bins). Proxied in dev under /firmware-releases/. */
+const RELEASE_FIRMWARE_ORIGIN = 'https://studio.hapbeat.com'
+
 interface CachedMeta {
   repo?: string
   fwVersion?: string
@@ -226,6 +230,31 @@ function firmwareDevPlugin(buildRepos: FirmwareBuildRepo[], repoRoots: FirmwareR
     name: 'hapbeat-firmware-dev',
     apply: 'serve',
     configureServer(server) {
+      // Published releases: proxy the production manifest (built by CI with
+      // scripts/aggregate-firmware-manifest.mjs) + its bins, so dev mode lists
+      // the released versions alongside local builds. Server-side fetch avoids
+      // CORS. Offline → 502; the client then falls back to local-only.
+      server.middlewares.use('/firmware-releases', async (req, res, next) => {
+        const name = (req.url ?? '').replace(/^\//, '').split('?')[0]
+        if (!/^[A-Za-z0-9._-]+\.(json|bin)$/.test(name)) { next(); return }
+        try {
+          const r = await fetch(`${RELEASE_FIRMWARE_ORIGIN}/firmware/${name}`, {
+            signal: AbortSignal.timeout(name.endsWith('.json') ? 8000 : 60000),
+          })
+          if (!r.ok) {
+            res.statusCode = r.status
+            res.end(`release ${name}: ${r.status} ${r.statusText}`)
+            return
+          }
+          const data = Buffer.from(await r.arrayBuffer())
+          res.setHeader('content-type', r.headers.get('content-type') ?? 'application/octet-stream')
+          res.setHeader('cache-control', 'no-store')
+          res.end(data)
+        } catch (err) {
+          res.statusCode = 502
+          res.end(`release ${name} unreachable: ${String(err)}`)
+        }
+      })
       server.middlewares.use('/firmware-builds', async (req, res, next) => {
         try {
           const url = req.url ?? ''

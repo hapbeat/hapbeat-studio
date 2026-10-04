@@ -3,6 +3,7 @@ import {
   inferVariantFromEnv,
   formatBytes,
   matchesHapticOutput,
+  mergeLocalWithReleases,
   type FirmwareLibraryEntry,
 } from './firmwareLibrary'
 
@@ -61,5 +62,33 @@ describe('PWM 出力版 (band_v4_pwm) の判別', () => {
     expect(matchesHapticOutput(pwm, false)).toBe(false)
     expect(matchesHapticOutput(pwm, true)).toBe(true)
     expect(matchesHapticOutput(plain, true)).toBe(false)
+  })
+})
+
+describe('mergeLocalWithReleases — dev のローカルビルド + 公開リリース', () => {
+  const art = (path: string) => ({ size: 1, mtime: 0, path })
+  const rel = (env: string, fws: string[]): FirmwareLibraryEntry => ({
+    env,
+    fwVersion: fws[0],
+    appOta: art(`/firmware-releases/${env}_${fws[0]}.bin`),
+    versions: fws.map((fwVersion) => ({
+      fwVersion, tag: `dev/${env}/v${fwVersion}`, appOta: art(`/firmware-releases/${env}_${fwVersion}.bin`),
+    })),
+  })
+  it('ローカルを versions[0] (local) に置き、続けてリリースを並べる', () => {
+    const local: FirmwareLibraryEntry = { env: 'band_v4_pwm', fwVersion: '0.2.0d1', source: 'live', appOta: art('C:/x.bin') }
+    const [e] = mergeLocalWithReleases([local], [rel('band_v4_pwm', ['0.1.1', '0.1.0'])])
+    expect(e.fwVersion).toBe('0.2.0d1')
+    expect(e.source).toBe('live')
+    expect(e.versions?.map((v) => [v.fwVersion, v.local ?? false])).toEqual([
+      ['0.2.0d1', true], ['0.1.1', false], ['0.1.0', false],
+    ])
+  })
+  it('リリースのみの env は source=release で追加、ローカルのみはそのまま', () => {
+    const local: FirmwareLibraryEntry = { env: 'necklace_v3', fwVersion: '0.5.0d7', source: 'live' }
+    const out = mergeLocalWithReleases([local], [rel('band_v4', ['0.4.1'])])
+    expect(out.map((e) => [e.env, e.source, e.versions?.length])).toEqual([
+      ['necklace_v3', 'live', undefined], ['band_v4', 'release', 1],
+    ])
   })
 })
