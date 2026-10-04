@@ -33,7 +33,7 @@ import { useSceneStore } from '@/stores/sceneStore'
 import { useEventStore } from '@/stores/eventStore'
 import { trialTarget } from '@/utils/agentProtocol'
 import { DecideDialog } from './DecideDialog'
-import { useDecidedSoundSync } from './eventAudio'
+import { openEventDefault, useDecidedSoundSync } from './eventAudio'
 
 export function WaveformEditor({ active }: { active: boolean }) {
   const { t } = useI18n()
@@ -59,7 +59,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
     const key = useEventStore.getState().selected
     if (!eventFocusRequest || !dockApi) return
     focusPanel(dockApi, 'events', t)
-    if (key) useSceneVideoTarget.getState().setTarget({ kind: 'event', key })
+    if (key) { useSceneVideoTarget.getState().setTarget({ kind: 'event', key }); openEventDefault(key) }
   }, [eventFocusRequest, dockApi])
   /** A sound AI trial (target "sound") is auditioned on the PC only: no haptic targets while one is shown. */
   const auditionIsSound = useAgentTrialStore(state => {

@@ -37,3 +37,16 @@ describe('trial scene clips', () => {
     expect(sceneVideoTime(1, -2)).toBe(0)
   })
 })
+
+describe('event moments (cue table v2)', () => {
+  it('defaults to a moment of the first cue listed, before its variants', () => {
+    const data = sampleData()
+    data.clips = [
+      { ...data.clips[0], file: '01_button-soft.mp4', name: 'button:soft', names: ['button:soft'] },
+      { ...data.clips[0], file: '02_button.mp4', name: 'button', names: ['button'] },
+    ]
+    const state = resolveTrialScene({ lib: sampleLib(), data, scene: { project: 'mill', cues: ['button', 'button:soft'] } })
+    expect(state.kind === 'ready' && state.chosen?.file).toBe('02_button.mp4')
+    expect(state.kind === 'ready' && state.options.map(o => o.cue)).toEqual(['button:soft', 'button'])
+  })
+})

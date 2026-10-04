@@ -116,10 +116,13 @@ export function EditorScenePanel() {
   const clipName = useWaveformStore(s => s.clip?.name ?? '')
   const lead = useEditorSettings(s => s.sceneLeadSec)
   const [src, setSrc] = useState<string | null>(null)
+  /** A clip video that cannot be read (missing file, or a name the folder cannot hold such as `:`) is reported instead of "loading" forever. */
+  const [videoError, setVideoError] = useState<string | null>(null)
   useEffect(() => {
+    setVideoError(null)
     if (!root || !chosen) { setSrc(null); return }
     let cancelled = false
-    sceneVideoUrl(root, chosen.file).then(url => { if (!cancelled) setSrc(url) }, () => { if (!cancelled) setSrc(null) })
+    sceneVideoUrl(root, chosen.file).then(url => { if (!cancelled) setSrc(url) }, error => { if (!cancelled) { setSrc(null); setVideoError(error instanceof Error ? error.message : String(error)) } })
     return () => { cancelled = true }
   }, [root, chosen?.file])
   // Show the start frame (lead before the mark) whenever the clip or lead changes.
@@ -170,8 +173,8 @@ export function EditorScenePanel() {
           {t('editor.scene.leadUnit')}</label>
       </div>
       <div className="editor-scene-stage" onClick={e => { e.currentTarget.closest<HTMLElement>('.editor-scene-panel')?.focus(); focusedRef.current = true; setFocused(true); if (synced) togglePlay() }}>
-        {chosen && src ? <video ref={video} src={src} muted playsInline preload="auto" onLoadedMetadata={cue} />
-          : <p className="agent-muted">{chosen ? t('editor.scene.loading') : t('editor.scene.pickHint')}</p>}
+        {chosen && src && !videoError ? <video ref={video} src={src} muted playsInline preload="auto" onLoadedMetadata={cue} onError={e => setVideoError(e.currentTarget.error?.message || `MediaError ${e.currentTarget.error?.code ?? ''}`)} />
+          : <p className="agent-muted">{chosen && videoError ? t('editor.scene.unreadable', { file: chosen.file, error: videoError }) : chosen ? t('editor.scene.loading') : t('editor.scene.pickHint')}</p>}
       </div>
       <p className="agent-muted editor-scene-hint">{synced ? t('editor.scene.synced') : subject.kind === 'trial' && !trial ? '' : subject.kind === 'trial' ? t('editor.scene.auditionHint') : t('editor.scene.clipHint')}</p>
     </>}

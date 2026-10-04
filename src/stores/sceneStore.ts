@@ -3,7 +3,7 @@ import type { MessageId, MessageParams } from '@/i18n/messages'
 import { loadDirectoryHandle, saveDirectoryHandle } from '@/utils/localDirectory'
 import { buildItems, VIEWER_DIR, type SceneData, type SceneItem, type SceneLib } from '@/utils/sceneData'
 import { addClipEntry, clipNameFromFile, encodePcm16Wav, soundNameFromFile, validateCueTable, type CueTable } from '@/utils/sceneCueTable'
-import { openSceneProject, readProjectFile, readSceneTable, writeSceneSave, type PendingWavs } from '@/utils/sceneProject'
+import { openSceneProject, readProjectFile, readSceneTable, writeProjectFile, writeSceneSave, type PendingWavs } from '@/utils/sceneProject'
 import { RATE } from '@/utils/sceneHaptics'
 import { lookupSceneProject, registerSceneProject } from '@/utils/sceneRegistry'
 
@@ -67,6 +67,8 @@ interface SceneState {
    * tab has unsaved edits, so a decision never saves them along unseen.
    */
   commitDecision: (next: CueTable, wavs: PendingWavs) => Promise<{ ok: true } | { ok: false; notice: SceneNotice; problems?: string[] }>
+  /** Undo of a decision: writes back the previous WAV bytes and the previous cue table text, then reloads. Refused while the tab has unsaved edits. */
+  restoreDecision: (tableText: string, wavs: PendingWavs) => Promise<{ ok: true } | { ok: false; notice: SceneNotice }>
   revert: () => Promise<void>
   note: (notice: SceneNotice) => void
   addLog: (text: string) => void
@@ -283,6 +285,24 @@ export const useSceneStore = create<SceneState>((set, get) => {
       finally { set({ busy: false }) }
       if (failed) return { ok: false, notice: failed }
       addLog(`decide → ${[...Object.keys(wavs.clips).map(n => `${lib.paths.clips}/${n}.wav`), ...Object.keys(wavs.sounds).map(n => `${lib.paths.sounds}/${n}.wav`), lib.paths.cues].join(', ')}`)
+      return { ok: true }
+    },
+    restoreDecision: async (tableText, wavs) => {
+      const { root, lib, dirty, busy } = get()
+      if (!root || !lib) return { ok: false, notice: { id: 'scene.save.noProject', error: true } }
+      if (dirty) return { ok: false, notice: { id: 'events.decide.dirty', error: true } }
+      if (busy) return { ok: false, notice: { id: 'events.decide.busy', error: true } }
+      let failed: SceneNotice | null = null
+      set({ busy: true })
+      try {
+        for (const [name, buf] of Object.entries(wavs.clips)) await writeProjectFile(root, `${lib.paths.clips}/${name}.wav`, buf)
+        for (const [name, buf] of Object.entries(wavs.sounds)) await writeProjectFile(root, `${lib.paths.sounds}/${name}.wav`, buf)
+        await writeProjectFile(root, lib.paths.cues, tableText)
+        await loadTable()
+      } catch (error) { failed = { id: 'scene.save.failed', params: { error: message(error) }, error: true }; addLog(message(error)) }
+      finally { set({ busy: false }) }
+      if (failed) return { ok: false, notice: failed }
+      addLog(`undo decision → ${lib.paths.cues}`)
       return { ok: true }
     },
     revert: async () => {

@@ -8,7 +8,9 @@ import type { HapticFeatures } from '@/utils/hapticFeatures'
 import { autoRatingContext, EMPTY_CONTEXT, formToRating, jaPolePhrase, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, trialKind, visibleDimensions, type CandidateRatingForm, type Direction, type RatingForm } from '@/utils/agentTrialUi'
 import { trialTarget, type TrialKind } from '@/utils/agentProtocol'
 import { useEventStore } from '@/stores/eventStore'
-import { effectiveEvent, parseEventKey, trialEvent } from '@/utils/cueEvents'
+import { assignEventsForTrial, effectiveEvent, parseEventKey, trialEvent } from '@/utils/cueEvents'
+import { runDecision } from './eventDecide'
+import { DecidedNotice } from './DecideDialog'
 import { isLoopCue } from '@/utils/sceneCueTable'
 import { WaveformThumbnail } from './WaveformThumbnail'
 import { useEditor } from './editorContext'
@@ -175,9 +177,26 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
     setSaving(true)
     const withAuto = target === 'sound' ? { ...form, context: EMPTY_CONTEXT } : { ...form, context: { ...form.context, ...(auto.device ? { device: auto.device } : {}),
       ...(auto.deviceWiper !== null ? { deviceWiper: String(auto.deviceWiper), volumeLabel: auto.volumeLabel } : { volumeLabel: '' }) } }
-    try { await useAgentTrialStore.getState().saveRating(trial.id, formToRating(withAuto, trial, localIsoString(new Date()))); if (target === 'haptic') rememberContext(withAuto.context); drafts.delete(trial.id); setDirty(false) }
+    const body = formToRating(withAuto, trial, localIsoString(new Date()))
+    let saved = false
+    try { await useAgentTrialStore.getState().saveRating(trial.id, body); if (target === 'haptic') rememberContext(withAuto.context); drafts.delete(trial.id); setDirty(false); saved = true }
     catch (error) { setSaveError(message(error)) }
     finally { setSaving(false) }
+    if (saved && body.best && trial.scene && autoAssign) await assignBest(body.best)
+  }
+  /** The best candidate becomes the sound / haptic of the trial's events (rating save with "assign on save"). */
+  const autoAssign = useEditorSettings(s => s.autoAssignOnRating)
+  const [assignedId, setAssignedId] = useState<number | null>(null)
+  const lastResult = useEventStore(s => s.result)
+  const assignBest = async (best: string) => {
+    const scene = useSceneStore.getState()
+    if (!scene.table || !scene.lib || scene.lib.project_name !== trial.scene!.project) { setNotice(t('events.auto.noProject', { project: trial.scene!.project })); return }
+    const events = assignEventsForTrial(scene.table, scene.lib, trial.scene!.cues, target)
+    if (!events.length) { setNotice(t('events.auto.noEvents', { cues: trial.scene!.cues.join(', ') })); return }
+    try {
+      const r = await runDecision({ target, source: { kind: 'candidate', trialId: trial.id, candidateId: best }, events, name: null, at: null, gain: 1 })
+      if (r.ok) { setAssignedId(r.result.id); setNotice('') } else setNotice(t(r.notice.id, r.notice.params))
+    } catch (error) { setNotice(message(error)) }
   }
   const adopt = async (cid: string, label: string) => {
     try { await useAgentTrialStore.getState().adoptCandidate(trial.id, cid); setNotice(t('editor.agent.adopted', { name: label })) }
@@ -212,6 +231,7 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
     {target === 'sound' && <p className="agent-muted">{t('editor.agent.soundTrialNote')}</p>}
     {soundFirst && <p className="events-hint">{t('events.soundFirst')}</p>}
     <div className="agent-notice" role="status">{notice}</div>
+    {lastResult && lastResult.id === assignedId && <DecidedNotice result={lastResult} />}
     <div className="agent-candidates">
       {trial.candidates.map(requested => {
         const file = record.candidates.find(c => c.id === requested.id)
@@ -259,6 +279,8 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
       </fieldset>}
       <div className="agent-save">
         <button className="apply-effects-btn" disabled={!!issue || saving || (!dirty && !!rating)} onClick={() => void save()}>{t('editor.agent.save')}</button>
+        {trial.scene && <label className="agent-auto-assign" title={t('events.auto.hint')}>
+          <input type="checkbox" checked={autoAssign} onChange={e => useEditorSettings.getState().update({ autoAssignOnRating: e.target.checked })} />{t('events.auto.label')}</label>}
         <span className={`agent-save-status ${saveError ? 'error' : !dirty && rating ? 'saved' : ''}`} role="status">{saveStatus}</span>
       </div>
     </div>

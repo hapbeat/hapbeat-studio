@@ -18,7 +18,7 @@ import { NumberField, formatGain, useAtLabel } from '@/components/scene/SceneCue
 import { useEditor } from './editorContext'
 import { DecidedNotice } from './DecideDialog'
 import { EditorMenu, EditorMenuItem } from './EditorMenu'
-import { openEventHaptic, openEventSound } from './eventAudio'
+import { openEventDefault, openEventHaptic, openEventSound } from './eventAudio'
 import './EventsPanel.css'
 
 const LAST_PROJECT_KEY = 'hapbeat-events-project'
@@ -58,6 +58,8 @@ export function EventsPanel() {
     useEventStore.getState().select(key)
     // The Scene video panel (window or docked, never opened here) shows this event's moment.
     useSceneVideoTarget.getState().setTarget({ kind: 'event', key })
+    // The waveform panel follows: the event's haptic, else its sound.
+    openEventDefault(key)
   }
   const effective = table && selected ? effectiveEvent(table, parseEventKey(selected)) : null
   const block = (r: EventRow) => <div key={r.key}>

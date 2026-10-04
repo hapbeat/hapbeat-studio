@@ -44,12 +44,14 @@ export interface EditorUiSettings {
   eventsListHeight: number
   /** Events panel: show the "Repetition" section for every event, not only those that fire repeatedly in the recording. */
   eventsShowAllRepeat: boolean
+  /** AI trials: saving a rating with a best candidate assigns it to the trial's events. */
+  autoAssignOnRating: boolean
 }
 
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, eventsShowAllRepeat: false,
+  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, eventsShowAllRepeat: false, autoAssignOnRating: true,
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -95,6 +97,7 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     eventMarks: eventMarks(v.eventMarks),
     eventsListHeight: clamp(v.eventsListHeight, 80, 1200, d.eventsListHeight),
     eventsShowAllRepeat: typeof v.eventsShowAllRepeat === 'boolean' ? v.eventsShowAllRepeat : d.eventsShowAllRepeat,
+    autoAssignOnRating: typeof v.autoAssignOnRating === 'boolean' ? v.autoAssignOnRating : d.autoAssignOnRating,
   }
 }
 

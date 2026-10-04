@@ -4,8 +4,8 @@ import { useEditorSettings } from '@/stores/editorSettings'
 import { useEventStore } from '@/stores/eventStore'
 import { useSceneStore } from '@/stores/sceneStore'
 import { trialTarget } from '@/utils/agentProtocol'
-import { effectiveEvent, resolveEventName } from '@/utils/cueEvents'
-import { sfxSounds } from '@/utils/sceneCueTable'
+import { effectiveEvent, parseEventKey, resolveEventName } from '@/utils/cueEvents'
+import { routeClips, sfxSounds } from '@/utils/sceneCueTable'
 import { RATE } from '@/utils/sceneHaptics'
 import type { EditorBufferPlayer } from '@/utils/editorBufferPlayer'
 
@@ -95,4 +95,15 @@ export function useDecidedSoundSync(player: EditorBufferPlayer) {
     ]
     return () => { unsubs.forEach(unsub => unsub()); stop() }
   }, [player, sound, muted])
+}
+
+/** On selecting an event: the waveform panel shows its haptic (first route's clip), else its sound, else the editor clip again. */
+export function openEventDefault(key: string) {
+  const table = useSceneStore.getState().table
+  const e = table ? effectiveEvent(table, parseEventKey(key)) : null
+  const route = e?.haptics[0], clip = route ? routeClips(route)[0] : undefined
+  if (route && clip && openEventHaptic(key, clip, route.gain, route.at)) return
+  const sound = sfxSounds(e?.sfx)[0]
+  if (e?.sfx && sound && openEventSound(key, sound, e.sfx.volume)) return
+  useEventStore.getState().clearPreview()
 }

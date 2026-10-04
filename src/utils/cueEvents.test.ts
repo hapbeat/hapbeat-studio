@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  addEventMark, addPositionRoute, addVariant, eventFireCounts, hasRepeatSettings, simultaneousGroups, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, defaultClipName, defaultSoundName,
+  addEventMark, addPositionRoute, addVariant, eventFireCounts, hasRepeatSettings, simultaneousGroups, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
   effectiveEvent, eventSceneCues, jitterGain, listEvents, MaterialPicker, matchesName, materialUsers, needsRouteForm, overwriteUsers,
   parseEventKey, removeVariant, resolveEventName, setOverride, setRouteClips, setSfxSounds, setVariation, trialEvent, trialsForEvent,
 } from './cueEvents'
@@ -105,23 +105,42 @@ describe('events and effective resolution', () => {
 })
 
 describe('decide', () => {
-  it('names default to the current material, else the cue name', () => {
-    const t = v2Table()
-    expect(defaultClipName(t, { cue: 'button', variant: null })).toBe('click')
-    expect(defaultClipName(t, { cue: 'grab', variant: null })).toBe('grab')
-    expect(defaultSoundName(t, { cue: 'grab', variant: null })).toBe('Grab')
-    expect(defaultSoundName(t, { cue: 'feed_loop', variant: 'slow' })).toBe('FeedLoopSlow')
-    expect(defaultSoundName(t, { cue: 'button', variant: 'soft' })).toBe('Click')
-    expect(matchesName('grab', sampleLib().clip_name)).toBe(true)
-    expect(matchesName('Grab', sampleLib().clip_name)).toBe(false)
+  it('names a WAV after its source, safely, else after the event', () => {
+    const pat = sampleLib().clip_name, snd = sampleLib().sound_name
+    expect(safeWavName('Hit Low (v2).wav', 'clip', pat)).toBe('hit_low_v2')
+    expect(safeWavName('sources/rain.wav', 'clip', pat)).toBe('rain')
+    expect(safeWavName('どしん', 'clip', pat)).toBe('')
+    expect(safeWavName('Roar Impact', 'sound', snd)).toBe('Roar_Impact')
+    expect(wavBaseName(['どしん', undefined, 'sources/thud-1.wav'], 'clip', pat, { cue: 'grab', variant: null })).toBe('thud-1')
+    expect(wavBaseName(['どしん'], 'clip', pat, { cue: 'grab', variant: 'reach' })).toBe('grab_reach')
+    expect(wavBaseName([], 'sound', snd, { cue: 'roar_impact', variant: null })).toBe('RoarImpact')
+    expect(matchesName('grab', pat)).toBe(true)
+    expect(matchesName('Grab', pat)).toBe(false)
+  })
+
+  it('numbers a name only when the file differs, and reuses identical files', async () => {
+    const a = new Uint8Array([1, 2, 3]).buffer, b = new Uint8Array([9]).buffer
+    const disk: Record<string, ArrayBuffer> = { thud: b, thud_2: a }
+    const existing = async (n: string) => disk[n] ?? null
+    expect(await nextWavName('thud', a, existing)).toEqual({ name: 'thud_2', same: true })
+    expect(await nextWavName('thud', new Uint8Array([7]).buffer, existing)).toEqual({ name: 'thud_3', same: false })
+    expect(await nextWavName('fresh', a, existing)).toEqual({ name: 'fresh', same: false })
+    expect(await nextWavName('fresh', a, existing, n => n === 'fresh')).toEqual({ name: 'fresh_2', same: false })
+  })
+
+  it('assigns a rated trial to the cue, or to each listed variant when the cue is not listed', () => {
+    const t = v2Table(), lib = sampleLib()
+    expect(assignEventsForTrial(t, lib, ['button', 'button:soft', 'grab'], 'haptic')).toEqual(['button', 'grab'])
+    expect(assignEventsForTrial(t, lib, ['button:soft', 'button:plain', 'nope', 'button:loud'], 'haptic')).toEqual(['button:soft', 'button:plain'])
+    expect(assignEventsForTrial(t, lib, ['feed_loop', 'grab'], 'sound')).toEqual(['grab'])
   })
 
   it('lists the other events that use a WAV before it is overwritten', () => {
     const t = v2Table()
     expect(materialUsers(t, 'clip', 'click')).toEqual(['button', 'button:soft'])
-    expect(overwriteUsers(t, 'clip', 'click', { cue: 'button', variant: null })).toEqual(['button:soft'])
-    expect(overwriteUsers(t, 'sound', 'Click', { cue: 'grab', variant: null })).toEqual(['button', 'button:soft'])
-    expect(overwriteUsers(t, 'clip', 'fresh', { cue: 'grab', variant: null })).toEqual([])
+    expect(overwriteUsers(t, 'clip', 'click', ['button'])).toEqual(['button:soft'])
+    expect(overwriteUsers(t, 'sound', 'Click', ['grab'])).toEqual(['button', 'button:soft'])
+    expect(overwriteUsers(t, 'clip', 'fresh', ['grab'])).toEqual([])
   })
 
   it('haptic: replaces the first route clip keeping at / gain, or adds a route; adds the clip entry', () => {

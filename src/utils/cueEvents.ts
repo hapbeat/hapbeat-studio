@@ -88,14 +88,62 @@ export const allEventKeys = (table: CueTable) => Object.entries(table.cues).flat
 const toClipName = (text: string) => text.toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^[^a-z]+/, '') || 'clip'
 const toSoundName = (text: string) => text.split(/[^A-Za-z0-9]+/).filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join('').replace(/^[^A-Za-z]+/, '') || 'Sfx'
 
-/** Default clip name for a haptic decision: the event's current (first) route clip, else the cue / `cue_variant` name. */
-export function defaultClipName(table: CueTable, ref: EventRef): string {
-  const current = effectiveEvent(table, ref)?.haptics.flatMap(routeClips)[0]
-  return current ?? toClipName(ref.variant ? `${ref.cue}_${ref.variant}` : ref.cue)
+/** A WAV name from free text (clip name, candidate label, file name) in the lib's style, or '' when nothing usable is left. */
+export function safeWavName(text: string, kind: 'clip' | 'sound', pattern: string): string {
+  const base = text.replace(/\.(wav|mp3|ogg|flac)$/i, '').split(/[\\/]/).pop() ?? ''
+  const name = kind === 'clip'
+    ? base.toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^[^a-z]+/, '').replace(/_+$/, '')
+    : base.replace(/[^A-Za-z0-9_]+/g, '_').replace(/^[^A-Za-z]+/, '').replace(/_+$/, '')
+  return name && matchesName(name, pattern) ? name : ''
 }
-/** Default sound name: the event's current (first) sound, else the cue / variant name in PascalCase (roar_impact → RoarImpact). */
-export function defaultSoundName(table: CueTable, ref: EventRef): string {
-  return sfxSounds(effectiveEvent(table, ref)?.sfx)[0] ?? toSoundName(ref.variant ? `${ref.cue}_${ref.variant}` : ref.cue)
+/**
+ * Base name of a decided WAV: the first source text (original clip name,
+ * candidate label, source file name …) that makes a safe name, else the event
+ * (`cue` / `cue_variant`; sounds in PascalCase). Collisions are resolved later
+ * (nextWavName) against the files on disk.
+ */
+export function wavBaseName(sources: readonly (string | undefined)[], kind: 'clip' | 'sound', pattern: string, event: EventRef): string {
+  for (const text of sources) { const n = text ? safeWavName(text, kind, pattern) : ''; if (n) return n }
+  const label = event.variant ? `${event.cue}_${event.variant}` : event.cue
+  return kind === 'clip' ? toClipName(label) : toSoundName(label)
+}
+/** `base`, `base_2`, `base_3` … (the order nextWavName tries). */
+export const numberedName = (base: string, n: number) => n <= 1 ? base : `${base}_${n}`
+/**
+ * The name to write: the first of base, base_2 … that is free, or that already
+ * holds exactly these bytes (`same`: nothing to write). `existing` returns a
+ * file's bytes, or null when there is none.
+ */
+export async function nextWavName(base: string, wav: ArrayBuffer, existing: (name: string) => Promise<ArrayBuffer | null>, taken: (name: string) => boolean = () => false): Promise<{ name: string; same: boolean }> {
+  for (let n = 1; n < 1000; n++) {
+    const name = numberedName(base, n)
+    if (taken(name)) continue
+    const bytes = await existing(name)
+    if (!bytes) return { name, same: false }
+    if (sameBytes(bytes, wav)) return { name, same: true }
+  }
+  throw new Error(`no free WAV name for ${base}`)
+}
+export function sameBytes(a: ArrayBuffer, b: ArrayBuffer): boolean {
+  if (a.byteLength !== b.byteLength) return false
+  const x = new Uint8Array(a), y = new Uint8Array(b)
+  for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false
+  return true
+}
+/**
+ * Events a rated trial's best candidate is assigned to: per cue named in
+ * `scene.cues`, the cue itself when it is listed (its variants inherit it),
+ * else each listed variant. Unknown names are skipped, and loop cues for sounds.
+ */
+export function assignEventsForTrial(table: CueTable, lib: SceneLib, cues: readonly string[], target: 'sound' | 'haptic'): string[] {
+  const refs = cues.map(name => resolveEventName(table, name)).filter((r): r is NonNullable<typeof r> => !!r && !r.unknownVariant).map(r => r.ref)
+  const out: string[] = []
+  for (const ref of refs) {
+    if (target === 'sound' && isLoopCue(lib, ref.cue)) continue
+    const key = refs.some(r => r.cue === ref.cue && r.variant === null) ? ref.cue : eventKey(ref)
+    if (!out.includes(key)) out.push(key)
+  }
+  return out
 }
 export const matchesName = (name: string, pattern: string) => { try { return new RegExp(pattern).test(name) } catch { return false } }
 
@@ -109,8 +157,8 @@ export function materialUsers(table: CueTable, kind: 'clip' | 'sound', name: str
   }
   return out
 }
-/** Other events that would hear the new WAV when `name` is overwritten for `ref` (shown before overwriting). */
-export const overwriteUsers = (table: CueTable, kind: 'clip' | 'sound', name: string, ref: EventRef) => materialUsers(table, kind, name).filter(k => k !== eventKey(ref))
+/** Other events that would hear the new WAV when `name` is overwritten for `refs` (shown before overwriting). */
+export const overwriteUsers = (table: CueTable, kind: 'clip' | 'sound', name: string, keys: readonly string[]) => materialUsers(table, kind, name).filter(k => !keys.includes(k))
 
 /** Body position offered for a new route: the acting hand where the project has it (wrist demos), else the first allowed one. */
 export function defaultAt(lib: SceneLib, cue: string): string {

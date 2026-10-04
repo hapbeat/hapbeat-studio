@@ -15,6 +15,8 @@ export interface SceneClipOption {
   label: string
   /** Time of the cue mark in the clip video (seconds). */
   mark: number
+  /** The cue (of `cues`) the clip was matched by; null when any clip is offered. */
+  cue: string | null
 }
 
 /** Clips of the recording that contain one of `cues` (every clip when `cues` is null), with the mark of the first matching cue. */
@@ -24,7 +26,8 @@ export function trialSceneOptions(data: SceneData, cues: string[] | null): Scene
   items.forEach((it, index) => {
     if (it.kind !== 'clip' || (cues && !it.names.some(n => cues.includes(n)))) return
     const own = itemEvents(it, data.full.events, data.fps).find(e => e.own && (!cues || cues.includes(e.name)))
-    out.push({ file: it.file, label: `${String(index).padStart(2, '0')} ${it.names.join(' + ')} · ${it.hand} (${it.at.toFixed(1)} s)`, mark: own ? own.t : it.event })
+    const cue = cues ? cues.find(c => it.names.includes(c)) ?? null : null
+    out.push({ file: it.file, label: `${String(index).padStart(2, '0')} ${it.names.join(' + ')} · ${it.hand} (${it.at.toFixed(1)} s)`, mark: own ? own.t : it.event, cue })
   })
   return out
 }
@@ -51,7 +54,9 @@ export function resolveTrialScene(o: { lib: SceneLib | null; data: SceneData | n
   const options = trialSceneOptions(o.data, o.scene?.cues ?? null)
   if (o.scene && !options.length) return { kind: 'noClips', cues: o.scene.cues }
   const saved = o.saved && o.saved.project === o.lib.project_name ? options.find(x => x.file === o.saved!.file) : undefined
-  return { kind: 'ready', options, chosen: saved ?? (o.scene ? options[0] : null) }
+  // Default: a moment of the first cue listed (an event's own cue before its variants), else the first match.
+  const first = o.scene ? options.find(x => x.cue === o.scene!.cues[0]) ?? options[0] : null
+  return { kind: 'ready', options, chosen: saved ?? first }
 }
 
 /** Video time for editor playback time `playerTime`: playback time 0 sounds on the cue mark. */

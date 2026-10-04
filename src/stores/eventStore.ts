@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { TrialSceneChoice } from '@/utils/editorUiSettings'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
+import type { PendingWavs } from '@/utils/sceneProject'
 
 /**
  * Event-centred authoring (DEC-083) state shared by the editor's Events panel,
@@ -11,7 +12,20 @@ import { useAgentTrialStore } from '@/stores/agentTrialStore'
 export type DecideTarget = 'sound' | 'haptic'
 export type DecideSource = { kind: 'clip'; clipId: string } | { kind: 'candidate'; trialId: string; candidateId: string }
 export interface DecideRequest { target: DecideTarget; source: DecideSource; /** Event key to preselect (null = the selected event / the trial's first cue). */ event: string | null }
-export interface DecideResult { event: string; target: DecideTarget; name: string; file: string; importCommand: string }
+/** What a decision replaced: the cue table text and the overwritten WAV bytes (new WAVs are left in place). */
+export interface DecisionUndo { tableText: string; wavs: PendingWavs }
+export interface DecideResult {
+  id: number
+  events: string[]
+  target: DecideTarget
+  name: string
+  file: string
+  importCommand: string
+  /** The WAV already held these bytes (nothing written). */
+  reused: boolean
+  undo: DecisionUndo | null
+  undone: boolean
+}
 /**
  * An event's sound / haptic clip shown in the waveform panel instead of the editor clip (read only,
  * like an AI audition) and played by the normal playback: haptics go to the devices per "send haptics",

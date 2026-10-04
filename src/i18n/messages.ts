@@ -1082,7 +1082,7 @@ export const messages = defineMessages({
   'events.trials.none': { ja: 'なし', en: 'None' },
   'events.target.sound': { ja: '音', en: 'sound' },
   'events.target.haptic': { ja: '触覚', en: 'haptic' },
-  'events.decided': { ja: '決定しました — {event} の{target}（{file}）', en: 'Decided: {event} {target} ({file})' },
+  'events.decided': { ja: '割り当てました — {event} の{target}（{file}）', en: 'Assigned: {event} {target} ({file})' },
   'events.importNeeded': { ja: 'ゲームへの反映は取り込み（import_command）が必要です:', en: 'The game picks it up after the import step (import_command):' },
   'events.decide.noProject': { ja: 'ゲームのプロジェクトが開かれていません。イベントパネルでプロジェクトを選んでください', en: 'No game project is open. Pick one in the Events panel.' },
   'events.decide.noEvents': { ja: 'このプロジェクトに決定できるイベントがありません', en: 'This project has no event to decide for.' },
@@ -1127,6 +1127,17 @@ export const messages = defineMessages({
   'events.preview.soundHint': { ja: 'イベントの音を表示中（編集不可）。再生は PC だけで鳴ります', en: 'Showing an event sound (read only). It plays on the PC only.' },
   'events.preview.hapticHint': { ja: 'イベントの触覚を表示中（編集不可・ゲームと同じ強さ）。「触覚を送信」がオンならデバイスにも送ります。決定済みの音も一緒に鳴ります', en: 'Showing an event haptic (read only, at the game level). Sent to the devices while "Send haptics" is on; the decided sound plays with it.' },
   'events.preview.missing': { ja: '{name} の WAV が読み込まれていません', en: 'The WAV of {name} is not loaded.' },
+  'events.auto.label': { ja: '保存時にイベントへ割り当てる', en: 'Assign to the event on save' },
+  'events.auto.hint': { ja: '評価を保存すると、最良の候補をこの試行のイベントの音／触覚に自動で割り当てます（取り消し可）', en: 'Saving the rating assigns the best candidate as the sound / haptic of this trial\'s events (can be undone).' },
+  'events.auto.noProject': { ja: 'イベントへの割り当てを省きました: プロジェクト {project} が開かれていません（イベントパネルで選んでください）', en: 'Not assigned: project {project} is not open (pick it in the Events panel).' },
+  'events.auto.noEvents': { ja: 'イベントへの割り当てを省きました: 表に {cues} がありません', en: 'Not assigned: {cues} not in the cue table.' },
+  'events.undo': { ja: '取り消し', en: 'Undo' },
+  'events.undoHint': { ja: '直前の表と、上書きした WAV を元に戻します（新しく書いた WAV はそのまま残ります）', en: 'Restores the previous cue table and the overwritten WAV (a newly written WAV stays in place).' },
+  'events.undone': { ja: '取り消しました — {events} の{target}は元に戻りました', en: 'Undone: {events} {target} restored.' },
+  'events.decide.reused': { ja: '（同じ内容の WAV があったため書き込みなし）', en: '(an identical WAV already existed; nothing written)' },
+  'events.decide.preparing': { ja: '名前を準備中…', en: 'Preparing a name…' },
+  'events.decide.sameFile': { ja: '{file} は同じ内容なのでそのまま使います', en: '{file} has the same content and is reused.' },
+  'editor.scene.unreadable': { ja: '映像ファイルを読めません: {file}（{error}）。録画をやり直すと直る場合があります', en: 'Cannot read the video {file} ({error}). Re-recording may fix it.' },
 })
 
 export type MessageId = keyof typeof messages
