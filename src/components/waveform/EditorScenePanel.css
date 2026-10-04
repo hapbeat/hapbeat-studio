@@ -7,3 +7,8 @@
 .editor-scene-stage { flex: 1; min-height: 80px; display: flex; align-items: center; justify-content: center; background: #000; border-radius: 4px; overflow: hidden; }
 .editor-scene-stage video { max-width: 100%; max-height: 100%; display: block; }
 .editor-scene-hint { font-size: 12px; }
+.editor-scene-title { font-weight: 600; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-scene-link { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.editor-scene-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; font-size: 13px; }
+.editor-scene-row select { flex: 1; min-width: 120px; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-light); border-radius: 4px; padding: 2px 4px; }
+.agent-scene-btn { align-self: flex-start; margin-top: 4px; }

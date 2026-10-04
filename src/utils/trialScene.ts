@@ -30,18 +30,24 @@ export function trialSceneOptions(data: SceneData, cues: string[] | null): Scene
 }
 
 export type TrialSceneState =
-  /** No Scene project open, or it has no recording. */
-  | { kind: 'noProject' }
-  /** The trial's `scene` belongs to another Scene project. */
+  /** No Scene project open (`project`: the one wanted, if known). */
+  | { kind: 'noProject'; project?: string }
+  /** The wanted project is not the open one. */
   | { kind: 'otherProject'; project: string }
   /** The trial's cues never occur in the recording. */
   | { kind: 'noClips'; cues: string[] }
   /** `chosen` null: an older trial without `scene` and no saved pick yet. */
   | { kind: 'ready'; options: SceneClipOption[]; chosen: SceneClipOption | null }
 
-export function resolveTrialScene(o: { lib: SceneLib | null; data: SceneData | null; scene?: TrialScene; saved?: TrialSceneChoice }): TrialSceneState {
-  if (!o.lib || !o.data) return { kind: 'noProject' }
-  if (o.scene && o.scene.project !== o.lib.project_name) return { kind: 'otherProject', project: o.scene.project }
+/** The Scene project a trial / clip wants: the trial's `scene.project`, else the saved pick's, else `fallback` (a trial's `project` label). */
+export function wantedSceneProject(o: { scene?: TrialScene; saved?: TrialSceneChoice; fallback?: string }): string | undefined {
+  return o.scene?.project ?? o.saved?.project ?? o.fallback
+}
+
+export function resolveTrialScene(o: { lib: SceneLib | null; data: SceneData | null; scene?: TrialScene; saved?: TrialSceneChoice; project?: string }): TrialSceneState {
+  const wanted = o.project ?? wantedSceneProject(o)
+  if (!o.lib || !o.data) return wanted ? { kind: 'noProject', project: wanted } : { kind: 'noProject' }
+  if (wanted && wanted !== o.lib.project_name) return { kind: 'otherProject', project: wanted }
   const options = trialSceneOptions(o.data, o.scene?.cues ?? null)
   if (o.scene && !options.length) return { kind: 'noClips', cues: o.scene.cues }
   const saved = o.saved && o.saved.project === o.lib.project_name ? options.find(x => x.file === o.saved!.file) : undefined

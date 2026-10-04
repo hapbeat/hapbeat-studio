@@ -5,6 +5,7 @@ import { useI18n } from '@/i18n/I18nProvider'
 import { normalizeProjectName } from '@/utils/editorFolder'
 import { effectiveProject, knownProjectNames, type EffectiveProject } from '@/utils/clipProjects'
 import { useEditor } from './editorContext'
+import { SceneChoiceSelect, useSceneChoice } from './EditorScenePanel'
 
 /** Known project names (explicit labels of the open clips + the user's auto-group list), sorted for pickers. */
 export function useProjectNames(): string[] {
@@ -51,8 +52,9 @@ export function PropertiesPanel() {
   const clip = useWaveformStore(s => s.clip)
   const processing = useWaveformStore(s => s.isProcessing)
   const folder = useWaveformStore(s => s.folder)
-  const { openRecipe, provenanceText, auditionKey } = useEditor()
+  const { openRecipe, provenanceText, auditionKey, openSceneVideo } = useEditor()
   const project = useEffectiveProject(clip ?? NO_CLIP)
+  const scene = useSceneChoice({ kind: 'clip', clipId: clip?.id ?? null })
   if (!clip) return <div className="editor-panel editor-panel-empty">{t('editor.noClip')}</div>
   const update = useWaveformStore.getState().updateClipInfo
   const provenance = provenanceText(clip)
@@ -66,6 +68,11 @@ export function PropertiesPanel() {
         <small className="editor-project-hint">{t('editor.projectHint')}</small>
       </label>
     </fieldset>
+    <div className="editor-scene-row">
+      <span>{t('editor.scene.row')}</span>
+      <SceneChoiceSelect choice={scene} label={t('editor.scene.row')} />
+      <button className="toolbar-btn" title={t('editor.scene.openHint')} onClick={() => openSceneVideo({ kind: 'clip' }, scene.wanted ?? null)}>▶ {t('editor.scene.open')}</button>
+    </div>
     <ul className="editor-properties-details" aria-label={t('editor.details')}>
       {clip.sourceFileName && <li title={clip.sourceFileName}>{t('editor.sourceFile')}: {clip.sourceFileName}</li>}
       {provenance && <li className="editor-provenance" title={clip.provenance?.referrerUrl ?? undefined}>{provenance}</li>}

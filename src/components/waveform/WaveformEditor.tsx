@@ -25,9 +25,10 @@ import { onlinePlaybackDevices, resolvePlaybackTargets } from '@/utils/playbackD
 import { handlePlaybackShortcut } from '@/utils/playbackShortcut'
 import { useEditorSettingsFolderSync, type SettingsSyncNotice } from '@/hooks/useEditorSettingsFolderSync'
 import { EditorContext, type EditorShared } from './editorContext'
-import { EditorDockLayout, focusPanel } from './EditorDockLayout'
+import { EditorDockLayout, focusPanel, POPOUT_URL } from './EditorDockLayout'
 import { EditorTopBar } from './EditorTopBar'
-import { scenePreRoll } from '@/utils/editorSceneSync'
+import { scenePreRoll, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
+import { useSceneStore } from '@/stores/sceneStore'
 
 export function WaveformEditor({ active }: { active: boolean }) {
   const { t } = useI18n()
@@ -175,9 +176,41 @@ export function WaveformEditor({ active }: { active: boolean }) {
       for (const popup of popoutWindows) { popup.removeEventListener('keydown', space, true); popup.removeEventListener('keydown', keydown) }
     }
   }, [active, original, audition, popoutWindows])
+  /** Project names whose folder link the user refused this session (the trials filter does not ask again). */
+  const refusedScenes = useRef(new Set<string>())
+  const linkSceneProject = useCallback(async (name: string | null, options?: { quietIfRefused?: boolean }) => {
+    if (options?.quietIfRefused && name && refusedScenes.current.has(name)) return false
+    const result = await useSceneStore.getState().linkProject(name, true)
+    if (result.ok) { if (name) refusedScenes.current.delete(name); return true }
+    if (name && (result.reason === 'cancelled' || result.reason === 'failed')) refusedScenes.current.add(name)
+    if (result.notice) setNotice(t(result.notice.id, result.notice.params))
+    return false
+  }, [t])
+  /**
+   * "▶ Video" (AI trial / Properties): picks what the Scene video panel shows, links its Scene
+   * project if it is not the open one (registered folder: permission if needed; else the folder
+   * picker once — both need this click), then shows the panel in its own window. A blocked pop-up
+   * leaves it docked in the editor with a notice.
+   */
+  const openSceneVideo = useCallback((target: SceneVideoTarget, project: string | null) => {
+    useSceneVideoTarget.getState().setTarget(target)
+    if (!dockApi) return
+    const show = () => {
+      focusPanel(dockApi, 'scene', t)
+      const panel = dockApi.getPanel('scene')
+      if (!panel) return
+      if (panel.group.api.location.type === 'popout') { dockApi.getPopouts().find(p => p.group === panel.group)?.window.focus(); return }
+      void dockApi.addPopoutGroup(panel, { popoutUrl: POPOUT_URL }).then(opened => {
+        if (!opened) { dockApi.getPanel('scene')?.api.setActive(); setNotice(t('editor.scene.popupBlocked')) }
+      })
+    }
+    const scene = useSceneStore.getState()
+    if (scene.root && scene.lib && (!project || scene.lib.project_name === project)) { show(); return }
+    void linkSceneProject(project).then(show, s.setError)
+  }, [dockApi, t, s.setError, linkSceneProject])
   const shared: EditorShared = {
     active, original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, player, playback, pending, togglePlay,
-    openRecipe, provenanceText, isConnected, playbackDevices, targets, setVisibleClipIds,
+    openRecipe, provenanceText, isConnected, playbackDevices, targets, setVisibleClipIds, openSceneVideo, linkSceneProject,
   }
   return <EditorContext.Provider value={shared}>
     <div className="waveform-editor" onDragOver={e => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' } }}

@@ -8,6 +8,8 @@ import type { HapticFeatures } from '@/utils/hapticFeatures'
 import { formToRating, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, type CandidateRatingForm, type Direction, type RatingForm } from '@/utils/agentTrialUi'
 import { WaveformThumbnail } from './WaveformThumbnail'
 import { useEditor } from './editorContext'
+import { useEditorSettings } from '@/stores/editorSettings'
+import { wantedSceneProject } from '@/utils/trialScene'
 
 /** Filter value for trials without a project (not a valid project name, so it cannot collide). */
 const UNASSIGNED_FILTER = ' '
@@ -23,7 +25,7 @@ const num = (v: number | null, digits: number, unit = '') => v === null ? '—' 
  */
 export function AgentTrialsPanel() {
   const { t } = useI18n()
-  const { playbackDevices } = useEditor()
+  const { playbackDevices, linkSceneProject } = useEditor()
   const deviceNames = useMemo(() => [...new Set(playbackDevices.map(device => device.name).filter(Boolean))], [playbackDevices])
   /** '' = every trial; otherwise the trial's `project` (UNASSIGNED_FILTER = trials without one). */
   const [projectFilter, setProjectFilter] = useState('')
@@ -52,7 +54,12 @@ export function AgentTrialsPanel() {
     <div className={`agent-status ${storeError ? 'error' : ''}`} role="status">{storeError ?? t(!folder ? 'editor.agent.noFolder' : polling ? 'editor.agent.watching' : 'editor.agent.paused')}</div>
     <div className={`agent-mcp-status ${isConnected && folder ? 'ready' : ''}`} title={t('editor.agent.mcpHint')}>{t(!isConnected ? 'editor.agent.mcpHelperOff' : folder ? 'editor.agent.mcpReady' : 'editor.agent.mcpNoFolder')}</div>
     {projects.length > 0 && <label className="agent-project-filter">{t('editor.project')}
-      <select value={projectFilter} onChange={e => setProjectFilter(e.target.value)}>
+      <select value={projectFilter} onChange={e => {
+        const value = e.target.value
+        setProjectFilter(value)
+        // Choosing a project also links its game footage (registered folder, else one folder pick; refusals are not asked again).
+        if (value && value !== UNASSIGNED_FILTER) void linkSceneProject(value, { quietIfRefused: true })
+      }}>
         <option value="">{t('editor.allProjects')}</option>
         {projects.map(name => <option key={name} value={name}>{name}</option>)}
         <option value={UNASSIGNED_FILTER}>{t('editor.unassigned')}</option>
@@ -80,7 +87,9 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
   onAudition: (target: AuditionTarget, buffer: AudioBuffer) => void; deviceNames: string[]; onSelectTrial: (id: string) => void
 }) {
   const { t } = useI18n()
+  const { openSceneVideo } = useEditor()
   const { trial, rating } = record
+  const sceneSaved = useEditorSettings(s => s.trialScenes[trial.id])
   const ids = useId()
   const editorFolder = useWaveformStore(s => s.folder)
   const processing = useWaveformStore(s => s.isProcessing)
@@ -126,6 +135,8 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
       <small>{t('editor.agent.received')}: {new Date(trial.receivedAt).toLocaleString()}{trial.agent && ` · ${t('editor.agent.agentName')}: ${[trial.agent.name, trial.agent.model].filter(Boolean).join(' / ')}`}</small>
       {trial.parentTrial && <small>{t('editor.agent.parent')}: {known.some(r => r.trial.id === trial.parentTrial)
         ? <button className="agent-link" onClick={() => onSelectTrial(trial.parentTrial!)}>{trial.parentTrial}</button> : trial.parentTrial}</small>}
+      <button className="toolbar-btn agent-scene-btn" title={t('editor.scene.openHint')}
+        onClick={() => openSceneVideo({ kind: 'trial', trialId: trial.id }, wantedSceneProject({ scene: trial.scene, saved: sceneSaved, fallback: trial.project }) ?? null)}>▶ {t('editor.scene.open')}</button>
     </div>
     <dl className="agent-detail-meta">
       <dt>{t('editor.agent.prompt')}</dt><dd>{trial.prompt}</dd>

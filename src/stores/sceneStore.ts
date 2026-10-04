@@ -5,6 +5,7 @@ import { buildItems, VIEWER_DIR, type SceneData, type SceneItem, type SceneLib }
 import { addClipEntry, clipNameFromFile, encodePcm16Wav, soundNameFromFile, validateCueTable, type CueTable } from '@/utils/sceneCueTable'
 import { openSceneProject, readProjectFile, readSceneTable, writeSceneSave, type PendingWavs } from '@/utils/sceneProject'
 import { RATE } from '@/utils/sceneHaptics'
+import { lookupSceneProject, registerSceneProject } from '@/utils/sceneRegistry'
 
 /**
  * Scene tab (haptic authoring) state: the opened game project folder, its
@@ -15,6 +16,8 @@ import { RATE } from '@/utils/sceneHaptics'
  */
 
 export interface SceneNotice { id: MessageId; params?: MessageParams; error?: boolean }
+/** `needsClick`: registered but the folder permission must be granted from a click; `unregistered`: no folder known for the name yet. */
+export type LinkResult = { ok: true } | { ok: false; reason: 'needsClick' | 'unregistered' | 'cancelled' | 'failed' | 'dirty'; notice?: SceneNotice }
 export interface SceneSelection { name: string; /** Time in the current item's video; null when picked from the list. */ t: number | null }
 
 interface SceneState {
@@ -46,6 +49,12 @@ interface SceneState {
   /** Opens the folder picker (call from the click handler). */
   pick: () => Promise<void>
   reconnect: () => Promise<void>
+  /**
+   * Makes the project `name` (null = any project) the open one through the
+   * project registry. `interactive` (call from a click): may ask for folder
+   * permission, or show the folder picker once for an unregistered project.
+   */
+  linkProject: (name: string | null, interactive: boolean) => Promise<LinkResult>
   select: (index: number) => void
   selectCue: (name: string, t: number | null) => void
   edit: (change: (table: CueTable) => CueTable | null) => boolean
@@ -112,6 +121,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
     }
     set({ remembered: handle })
     await saveDirectoryHandle(handle, 'scenedir').catch(() => {})
+    await registerSceneProject(opened.lib.project_name, handle).catch(() => {})
     if (!opened.ok) {
       const notice = { id: 'scene.open.noData' as const, params: { title: opened.lib.title, dir: VIEWER_DIR, command: opened.lib.record_command ?? 'Scripts/record-haptic-clips.ps1' }, error: true }
       set({ notice, empty: get().items.length ? get().empty : notice })
@@ -162,6 +172,35 @@ export const useSceneStore = create<SceneState>((set, get) => {
       if (!handle) return
       if (await handle.requestPermission({ mode: 'readwrite' }) !== 'granted') return
       await guarded(async () => { if (await openFolder(handle)) note({ id: 'scene.open.loaded', params: { folder: handle.name } }) })
+    },
+
+    linkProject: async (name, interactive) => {
+      const s = get()
+      if (s.root && s.lib && (!name || s.lib.project_name === name)) return { ok: true }
+      if (s.busy) return { ok: false, reason: 'failed' }
+      if (s.dirty) return { ok: false, reason: 'dirty', notice: { id: 'scene.link.dirty', error: true } }
+      let handle = name ? await lookupSceneProject(name).catch(() => null) : null
+      if (handle) {
+        if (await handle.queryPermission({ mode: 'readwrite' }) !== 'granted') {
+          if (!interactive) return { ok: false, reason: 'needsClick' }
+          if (await handle.requestPermission({ mode: 'readwrite' }) !== 'granted') return { ok: false, reason: 'cancelled' }
+        }
+      } else {
+        if (!interactive) return { ok: false, reason: 'unregistered' }
+        if (!('showDirectoryPicker' in window)) return { ok: false, reason: 'failed', notice: { id: 'scene.open.unsupported', error: true } }
+        try { handle = await window.showDirectoryPicker({ id: 'hapbeat-scene-project', mode: 'readwrite' }) }
+        catch { return { ok: false, reason: 'cancelled' } }
+        if (name) {
+          // Register only the folder that really is this project.
+          const opened = await openSceneProject(handle)
+          if (!opened.ok && opened.reason === 'noLib') return { ok: false, reason: 'failed', notice: { id: 'scene.link.noLib', params: { folder: handle.name, name, dir: VIEWER_DIR }, error: true } }
+          if (opened.lib.project_name !== name) return { ok: false, reason: 'failed', notice: { id: 'scene.link.mismatch', params: { folder: handle.name, found: opened.lib.project_name, name }, error: true } }
+        }
+      }
+      let opened = false
+      const chosen = handle
+      await guarded(async () => { opened = await openFolder(chosen) })
+      return opened ? { ok: true } : { ok: false, reason: 'failed', notice: get().notice ?? undefined }
     },
 
     select: index => {

@@ -20,7 +20,7 @@ export const PANEL_TITLES: Record<EditorPanelId, MessageId> = {
 type Translate = (id: MessageId, params?: Record<string, string | number>) => string
 
 /** Same-origin blank page dockview moves popped-out groups into (public/popout.html). */
-const POPOUT_URL = `${import.meta.env.BASE_URL}popout.html`
+export const POPOUT_URL = `${import.meta.env.BASE_URL}popout.html`
 
 /** dockview needs stable component references; each panel reads shared editor state from context. */
 const COMPONENTS: Record<EditorPanelId, FunctionComponent<IDockviewPanelProps>> = {

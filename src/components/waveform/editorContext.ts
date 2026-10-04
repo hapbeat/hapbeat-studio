@@ -4,6 +4,7 @@ import type { EditorBufferPlayer } from '@/utils/editorBufferPlayer'
 import type { Recipe } from '@/utils/recipe'
 import type { DeviceInfo } from '@/types/manager'
 import type { WaveformClip } from '@/types/waveform'
+import type { SceneVideoTarget } from '@/utils/editorSceneSync'
 
 /** State the editor owns and every dock panel reads (panels render in dockview portals / popout windows). */
 export interface EditorShared {
@@ -31,6 +32,10 @@ export interface EditorShared {
   targets: string[]
   /** Clips in the order the clip list shows them (↑↓ navigation follows it). */
   setVisibleClipIds: (ids: string[]) => void
+  /** "▶ Video": shows the Scene video panel for the target in its own window, linking the Scene project `project` first if needed. Call from a click. */
+  openSceneVideo: (target: SceneVideoTarget, project: string | null) => void
+  /** Links the Scene project `name` through the registry (permission / one-time folder pick). Call from a click or a select change. */
+  linkSceneProject: (name: string | null, options?: { quietIfRefused?: boolean }) => Promise<boolean>
 }
 
 export const EditorContext = createContext<EditorShared | null>(null)

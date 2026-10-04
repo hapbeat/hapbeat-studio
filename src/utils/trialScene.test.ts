@@ -18,6 +18,8 @@ describe('trial scene clips', () => {
   it('resolves the trial scene against the open project and the saved pick', () => {
     const lib = sampleLib()
     expect(resolveTrialScene({ lib: null, data: null })).toEqual({ kind: 'noProject' })
+    expect(resolveTrialScene({ lib: null, data: null, scene: { project: 'trex', cues: ['roar'] } })).toEqual({ kind: 'noProject', project: 'trex' })
+    expect(resolveTrialScene({ lib, data, project: 'trex' })).toEqual({ kind: 'otherProject', project: 'trex' })
     expect(resolveTrialScene({ lib, data, scene: { project: 'other', cues: ['grab'] } })).toEqual({ kind: 'otherProject', project: 'other' })
     expect(resolveTrialScene({ lib, data, scene: { project: 'mill', cues: ['nope'] } })).toEqual({ kind: 'noClips', cues: ['nope'] })
     const auto = resolveTrialScene({ lib, data, scene: { project: 'mill', cues: ['grab'] } })
@@ -26,8 +28,7 @@ describe('trial scene clips', () => {
     expect(saved.kind === 'ready' && saved.chosen?.file).toBe('02_grab.mp4')
     const old = resolveTrialScene({ lib, data })
     expect(old.kind === 'ready' && old.options.length === 2 && old.chosen).toBeNull()
-    const otherPick = resolveTrialScene({ lib, data, saved: { project: 'other', file: '01_button.mp4' } }) // a pick made in another project is ignored
-    expect(otherPick.kind === 'ready' && otherPick.chosen).toBeNull()
+    expect(resolveTrialScene({ lib, data, saved: { project: 'other', file: '01_button.mp4' } })).toEqual({ kind: 'otherProject', project: 'other' })
   })
 
   it('maps playback time 0 to the cue mark', () => {
