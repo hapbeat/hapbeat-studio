@@ -149,13 +149,15 @@ export function sameBytes(a: ArrayBuffer, b: ArrayBuffer): boolean {
 /**
  * Events a rated trial's best candidate is assigned to: per cue named in
  * `scene.cues`, the cue itself when it is listed (its variants inherit it),
- * else each listed variant. Unknown names are skipped, and loop cues for sounds.
+ * else each listed variant. Unknown names are skipped, and loop cues for sounds
+ * unless the project plays loop-cue sounds.
  */
 export function assignEventsForTrial(table: CueTable, lib: SceneLib, cues: readonly string[], target: 'sound' | 'haptic'): string[] {
   const refs = cues.map(name => resolveEventName(table, name)).filter((r): r is NonNullable<typeof r> => !!r && !r.unknownVariant).map(r => r.ref)
   const out: string[] = []
   for (const ref of refs) {
-    if (target === 'sound' && isLoopCue(lib, ref.cue)) continue
+    // A loop cue takes a sound only where the project plays loop-cue sounds (lib.loop_cue_sounds).
+    if (target === 'sound' && !soundAllowed(lib, ref.cue)) continue
     const key = refs.some(r => r.cue === ref.cue && r.variant === null) ? ref.cue : eventKey(ref)
     if (!out.includes(key)) out.push(key)
   }

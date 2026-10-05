@@ -193,7 +193,7 @@ function EventDetail({ table, lib, e }: { table: CueTable; lib: SceneLib; e: Eff
     {e.description && <p className="agent-muted">{e.description}</p>}
     <div className="events-assign">
       <span className="events-assign-clip" title={clip?.name ?? ''}>{t('events.selectedClip', { name: clip?.name ?? '—' })}</span>
-      <button type="button" className="toolbar-btn" disabled={!clip || loop} title={t('events.addHint')} onClick={() => assign('sound')}>{t('events.assignSound')}</button>
+      <button type="button" className="toolbar-btn" disabled={!clip || !soundAllowed(lib, e.ref.cue)} title={t('events.addHint')} onClick={() => assign('sound')}>{t('events.assignSound')}</button>
       <button type="button" className="toolbar-btn" disabled={!clip} title={t('events.addHint')} onClick={() => assign('haptic')}>{t('events.assignHaptic')}</button>
     </div>
     <SoundSection lib={lib} e={e} loop={loop} edit={edit} />

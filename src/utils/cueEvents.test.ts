@@ -134,6 +134,11 @@ describe('decide', () => {
     expect(assignEventsForTrial(t, lib, ['button', 'button:soft', 'grab'], 'haptic')).toEqual(['button', 'grab'])
     expect(assignEventsForTrial(t, lib, ['button:soft', 'button:plain', 'nope', 'button:loud'], 'haptic')).toEqual(['button:soft', 'button:plain'])
     expect(assignEventsForTrial(t, lib, ['feed_loop', 'grab'], 'sound')).toEqual(['grab'])
+    // A loop cue's sound (rub in the T-Rex project) is assigned where the project plays loop-cue sounds.
+    const loopSounds = { ...lib, loop_cue_sounds: true }
+    expect(assignEventsForTrial(t, loopSounds, ['feed_loop'], 'sound')).toEqual(['feed_loop'])
+    const saved = applySoundDecision(t, { cue: 'feed_loop', variant: null }, 'Motor_rub')
+    expect(saved.cues.feed_loop.sfx).toEqual({ sound: 'Motor_rub', volume: 1 })
   })
 
   it('lists the other events that use a WAV before it is overwritten', () => {
