@@ -56,7 +56,7 @@ You help the user design vibration (haptic) clips for Hapbeat, a wearable vibrot
 1. Read \`haptic-knowledge/index.json\`, then the relevant \`terms/<slug>.json\` (compare \`exemplars\` and the feature differences between \`good\`, \`tooWeak\` and \`tooStrong\`) and the "Confirmed" section of \`insights.md\`.
 2. Pick ONE hypothesis axis and make 2–4 candidates along it (for example AM depth 0.4 / 0.7 / 0.95). Keep everything else fixed so the rating is interpretable.
 3. Write the request to \`hapbeat-agent/inbox/<trialId>.json\` and ask the user to rate it in Studio (Waveform editor → AI trials).
-4. Read \`haptic-knowledge/trials/*/<trialId>/rating.json\`. Use \`termMatch\` (too weak / right / too strong) and \`directions\` ("should be more …") to build the next candidates, and set \`parentTrial\` to the previous trial id.
+4. Read \`haptic-knowledge/trials/*/<trialId>/rating.json\`. Use \`overall\` (with its \`verdict\`), \`directions\` ("should be more …"), \`comment\` and \`useRange\` to build the next candidates, and set \`parentTrial\` to the previous trial id.
 5. When a tendency is consistent over 3 or more trials, append it to the "Proposed" section of \`insights.md\` with evidence (trialId/candidateId). Only the user moves items to "Confirmed".
 
 Write the inbox file atomically if you can (write \`<trialId>.json.tmp\`, then rename). Studio only picks up \`*.json\` files and waits until a file has been unchanged for about 1.5 s.
@@ -155,17 +155,17 @@ The user can send you a short message from the editor ("Send to agent" in the AI
   "best": "B",
   "othersSimilar": true,
   "candidates": {
-    "A": { "overall": 3, "termMatch": { "ごわごわ": -1 }, "directions": { "roughness": 1, "weight": 0 }, "comment": "…" }
+    "A": { "overall": 3, "verdict": "maybe", "directions": { "roughness": 1, "weight": 0 }, "comment": "…" }
   },
   "history": []
 }
 \`\`\`
 
-- \`overall\`: 1–5. \`termMatch\` per term: −2 = far too weak, 0 = just right, +2 = too strong.
-- \`directions\` per dimension id (see dimensions.json): +1 = "should be more <high pole>", −1 = "more <low pole>", 0 = fine.
+- \`overall\`: 1–5 (stars). \`verdict\` is written from it: 4–5 = \`"use"\`, 3 = \`"maybe"\`, 1–2 = \`"no"\` (there is no separate input). \`termMatch\` (per term, −2…+2) is no longer asked: Studio does not write it; older ratings may still have it.
+- \`directions\` per axis id: +1 = "should be more <high pole>", −1 = "more <low pole>", 0 = fine. Haptic trials use dimensions.json without \`pleasantness\` (the overall score covers it); \`regularity\` / \`continuity\` only for \`kind\` loop / sequence. Sound trials use their own axes: \`weight\` (bass), \`sharpness\`, \`intensity\` (volume) and \`length\` (short ↔ long); they never enter the haptic knowledge.
 - Dismissed trials: the user may set a trial aside without rating it (\`dismissed.json\` in its folder; \`"dismissed": true\` in \`index.json\`). It is left out of \`terms/\` and \`byMethod\`; treat it as "not useful, do not build on it" unless the user restores it.
 - Short ids: Studio numbers trials in reception order (\`T1\`, \`T2\` …; a candidate is \`T27-B\`). They are in \`index.json\`, \`list_trials\` and \`get_trial\` as \`shortId\`; the user refers to trials and candidates by them.
-- \`verdict\` (optional): \`"use"\` (usable as is), \`"maybe"\` (usable only for some purpose) or \`"no"\` (not usable); \`useFor\` (optional, ≤ 200 chars): what it is good for ("idle growl", "on the out-breath"). Several candidates may be \`"use"\`. There is no "best" input: Studio writes \`best\` = the \`"use"\` candidate with the highest \`overall\` when exactly one has it (absent on a tie or with no \`"use"\`), and assigns only that one to the event automatically. When two or more are \`"use"\`, ask the user whether to keep them all as one event's materials (multi-clip route \`clips\` / \`sounds\` with \`variation.pick\`, so each firing varies) or as separate variants (\`cue:variant\`) per \`useFor\`.
+- \`verdict\`: \`"use"\` / \`"maybe"\` / \`"no"\`, derived from \`overall\` as above; \`useFor\` (optional, ≤ 200 chars, older ratings): what it is good for ("idle growl", "on the out-breath"). Several candidates may be \`"use"\`. There is no "best" input: Studio writes \`best\` = the \`"use"\` candidate with the highest \`overall\` when exactly one has it (absent on a tie or with no \`"use"\`), and assigns only that one to the event automatically. When two or more are \`"use"\`, ask the user whether to keep them all as one event's materials (multi-clip route \`clips\` / \`sounds\` with \`variation.pick\`, so each firing varies) or as separate variants (\`cue:variant\`) per \`useFor\`.
 - \`useRange\` (optional): \`[[startSec, endSec], …]\` (1–8) — "use only this part" of the rendered candidate (seconds on its 48 kHz audio, after the effects). In the next trial, keep the candidate's source and effects and append \`{ "type": "trim", "start": startSec, "end": endSec }\` as the last effect (one candidate per range when there are several); for a \`sample\` recipe layer you may instead set \`maxSec\` / \`onsetsSec\`. Say in \`rationale\` that the range came from \`useRange\`.
 - \`context.deviceWiper\`: the device's MCP4018 volume wiper (integer 0–127; same as kit-format \`device_wiper\`) — compare volumes with this. \`volumeLabel\` ("level/steps") is only a human aid: the step count depends on the user's settings. Both may be absent.
 - \`othersSimilar\` (optional, \`true\`): the user judged every other candidate to be about the same as \`best\` and left them unrated. Do not invent scores for them; treat it as a note that the hypothesis axis made little difference.
@@ -173,7 +173,7 @@ The user can send you a short message from the editor ("Send to agent" in the AI
 
 ## Term aggregation \`hapbeat-term@1\` (derived)
 
-\`terms/<slug>.json\`: \`dimensions\` (from dimensions.json), \`counts\`, \`good\` (overall ≥ 4 and |termMatch| ≤ 0.5), \`tooWeak\` (termMatch ≤ −1), \`tooStrong\` (termMatch ≥ +1) with per-feature median/p25/p75, \`directionVotes\`, \`byMethod\` (per candidate \`method\`, \`"unspecified"\` when absent: \`rated\`, \`good\`, \`tooWeak\`, \`tooStrong\` counts and the \`best\` rated example), \`exemplars\` (top 5 with overall ≥ 4, including their spec and method) and \`counterExamples\` (overall ≤ 2). Slug = term after alias resolution, NFKC, trimmed, katakana → hiragana, file-name characters replaced by \`_\`.
+\`terms/<slug>.json\`: \`dimensions\` (from dimensions.json), \`counts\`, \`good\` (overall ≥ 4 and, when a term match exists, |termMatch| ≤ 0.5), \`tooWeak\` (termMatch ≤ −1), \`tooStrong\` (termMatch ≥ +1; both only from older ratings that have a term match) with per-feature median/p25/p75, \`directionVotes\`, \`byMethod\` (per candidate \`method\`, \`"unspecified"\` when absent: \`rated\`, \`good\`, \`tooWeak\`, \`tooStrong\` counts and the \`best\` rated example), \`exemplars\` (top 5 with overall ≥ 4, including their spec and method) and \`counterExamples\` (overall ≤ 2). Slug = term after alias resolution, NFKC, trimmed, katakana → hiragana, file-name characters replaced by \`_\`.
 
 ## Features
 

@@ -6,7 +6,8 @@ import { decodeAudioFile } from '@/utils/wavIO'
 import { sha256Hex } from '@/utils/sha256'
 import { loadRecipeSamples, renderRecipe, type Recipe } from '@/utils/recipe'
 import { CURRENT_STUDIO_VERSION } from '@/utils/studioVersions'
-import { ratingError, type RatingBody } from '@/utils/agentProtocol'
+import { ratingError, trialTarget, type RatingBody } from '@/utils/agentProtocol'
+import { SOUND_DIMENSIONS } from '@/utils/agentTrialUi'
 import { processInbox, readAgentBytes, submitTrialRequest, encodePcm16Wav, type AcceptResult, type InboxDeps, type InboxResult } from '@/utils/agentInbox'
 import { buildCatalog } from '@/utils/agentGuide'
 import { buildAgentMessage, outboxFileName, writeOutboxMessage } from '@/utils/agentOutbox'
@@ -44,6 +45,8 @@ interface AgentTrialState {
   saveRating: (trialId: string, rating: RatingBody) => Promise<void>
   /** Dismisses (true) or restores (false) a trial: dismissed trials are not rated and stay out of the knowledge. */
   setDismissed: (trialId: string, dismissed: boolean) => Promise<void>
+  /** Dismisses several trials at once (one knowledge regeneration). */
+  dismissMany: (trialIds: string[]) => Promise<void>
   loadCandidateAudio: (trialId: string, candidateId: string) => Promise<AudioBuffer>
   /** Creates a new editor clip from a candidate: its source as the original, its effects as a not-yet-applied chain. */
   adoptCandidate: (trialId: string, candidateId: string) => Promise<{ clipId: string; name: string }>
@@ -166,7 +169,8 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
       const folder = get().folder, record = get().trials.find(r => r.trial.id === trialId)
       if (!folder || !record) throw new Error(`Trial "${trialId}" is not loaded`)
       const dimensions = await folder.readDimensions()
-      const error = ratingError(rating, record.trial, dimensions.dimensions.map(d => d.id))
+      // Sound trials are rated on their own axes (SOUND_DIMENSIONS, incl. length), never in dimensions.json.
+      const error = ratingError(rating, record.trial, trialTarget(record.trial) === 'sound' ? SOUND_DIMENSIONS.map(d => d.id) : dimensions.dimensions.map(d => d.id))
       if (error) throw new Error(error)
       await folder.saveRating(record.month, rating)
       const records = await folder.listTrials()
@@ -181,6 +185,16 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
       const records = await folder.listTrials()
       const dimensions = await folder.readDimensions()
       await folder.regenerate(records, dimensions, trialSlugs(record.trial, dimensions))
+      set({ trials: newestFirst(records), dimensions, error: null })
+    },
+    dismissMany: async trialIds => {
+      const folder = get().folder
+      if (!folder) throw new Error('No editor folder is open')
+      const at = localIsoString(new Date())
+      for (const id of trialIds) { const record = get().trials.find(r => r.trial.id === id); if (record) await folder.dismissTrial(record.month, id, at) }
+      const records = await folder.listTrials()
+      const dimensions = await folder.readDimensions()
+      await folder.regenerate(records, dimensions)
       set({ trials: newestFirst(records), dimensions, error: null })
     },
     loadCandidateAudio: async (trialId, candidateId) => {

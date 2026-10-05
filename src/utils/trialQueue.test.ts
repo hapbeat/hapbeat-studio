@@ -30,3 +30,27 @@ describe('trial queue (top-down)', () => {
     expect(buildIndex(records, []).trials.find(r => r.id === 't2')?.dismissed).toBe(true)
   })
 })
+
+describe('trial filters (project / target) and the tab count', () => {
+  it('filters by project and target; a trial without target is haptic', async () => {
+    const { filterTrials } = await import('./trialQueue')
+    const recs = [
+      { trial: { id: 'a', receivedAt: '1', project: 'trex', target: 'sound' as const }, rating: null },
+      { trial: { id: 'b', receivedAt: '2', project: 'trex' }, rating: null },
+      { trial: { id: 'c', receivedAt: '3' }, rating: null, dismissed: 'x' },
+    ]
+    expect(filterTrials(recs, 'trex', 'haptic').map(r => r.trial.id)).toEqual(['b'])
+    expect(filterTrials(recs, '', 'sound').map(r => r.trial.id)).toEqual(['a'])
+    expect(filterTrials(recs, ' ', '').map(r => r.trial.id)).toEqual(['c'])
+    // The tab count = the queue: dismissed trials are not counted.
+    expect(trialQueue(filterTrials(recs, '', '')).length).toBe(2)
+  })
+
+  it('good no longer needs a term match (Studio does not ask it)', () => {
+    const at = '2026-10-05T10:00:00+09:00'
+    const r: TrialRecord = { month: '2026-10', candidates: [],
+      trial: { format: 'hapbeat-trial@1', id: 't', intent: 'create', prompt: 'p', terms: ['どしん'], receivedAt: at, studioVersion: 'x', candidates: [{ id: 'A', label: 'a', source: { kind: 'clip', clipId: 'c' }, effects: [] }] },
+      rating: { format: 'hapbeat-rating@1', trialId: 't', ratedAt: at, history: [], candidates: { A: { overall: 5, verdict: 'use' } } } }
+    expect(aggregateTerm('どしん', SEED_DIMENSIONS, [r]).good.n).toBe(1)
+  })
+})

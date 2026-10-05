@@ -70,7 +70,8 @@ export function formToRating(form: RatingForm, trial: TrialRequest, ratedAt: str
       ...(Object.keys(f.directions).length ? { directions: { ...f.directions } } : {}),
       ...(comment ? { comment } : {}),
       ...(f.useRange.length ? { useRange: f.useRange.map(r => [round3(r[0]), round3(r[1])] as [number, number]) } : {}),
-      ...(f.verdict ? { verdict: f.verdict } : {}),
+      // Derived from the overall score (no separate input).
+      verdict: verdictFromOverall(f.overall)!,
       ...(f.useFor.trim() ? { useFor: f.useFor.trim().slice(0, 200) } : {}),
     }
   }
@@ -133,8 +134,25 @@ export function trialKind(trial: Pick<TrialRequest, 'kind' | 'scene'>, durations
 }
 /** Dimensions about repetition do not apply to a single event. */
 export const REPETITION_DIMENSIONS = ['regularity', 'continuity']
+/** Axes the rating form does not ask (pleasantness reads as the overall score). */
+export const HIDDEN_DIMENSIONS = ['pleasantness']
+/** Axes shown for a haptic trial: regularity / continuity only for a loop or a sequence; never pleasantness. */
 export const visibleDimensions = <T extends Pick<Dimension, 'id'>>(dimensions: T[], kind: TrialKind | null) =>
-  kind === 'oneshot' ? dimensions.filter(d => !REPETITION_DIMENSIONS.includes(d.id)) : dimensions
+  dimensions.filter(d => !HIDDEN_DIMENSIONS.includes(d.id) && (kind === 'loop' || kind === 'sequence' || !REPETITION_DIMENSIONS.includes(d.id)))
+
+/**
+ * Axes of a sound trial (target "sound"): weight (bass), sharpness, strength (volume), length.
+ * Sound ratings never enter the haptic knowledge, so `length` needs no entry in dimensions.json.
+ */
+export const SOUND_DIMENSIONS: Dimension[] = [
+  { id: 'weight', ja: '重さ（低音）', en: 'Weight (bass)', poles: { ja: ['軽い', '重い'], en: ['light', 'heavy'] } },
+  { id: 'sharpness', ja: '鋭さ', en: 'Sharpness', poles: { ja: ['鈍い', '鋭い'], en: ['dull', 'sharp'] } },
+  { id: 'intensity', ja: '強さ（音量）', en: 'Strength (volume)', poles: { ja: ['弱い', '強い'], en: ['weak', 'strong'] } },
+  { id: 'length', ja: '長さ', en: 'Length', poles: { ja: ['短い', '長い'], en: ['short', 'long'] } },
+]
+
+/** The verdict the form writes, from the overall score: 4–5 use, 3 maybe, 1–2 no. */
+export const verdictFromOverall = (overall: number | null): Verdict | null => overall == null ? null : overall >= 4 ? 'use' : overall === 3 ? 'maybe' : 'no'
 
 /** Pole words that do not read naturally as 「もっと〜に」. */
 const JA_POLE_PHRASES: Record<string, string> = { '快': '心地よく', '断続': '途切れがちに', '連続': '途切れなく' }
@@ -159,14 +177,14 @@ export function autoRatingContext(devices: DeviceInfo[], targetIps: string[]): {
 }
 
 /** Candidates the user marked "use": with two or more, the notice suggests asking the agent (several materials with variation, or separate variants). */
-export const usableCandidates = (form: RatingForm) => Object.entries(form.candidates).filter(([, c]) => c.verdict === 'use').map(([id]) => id)
+export const usableCandidates = (form: RatingForm) => Object.entries(form.candidates).filter(([, c]) => verdictFromOverall(c.overall) === 'use').map(([id]) => id)
 
 /**
  * The trial's `best` (kept in hapbeat-rating@1 for compatibility; there is no input for it):
  * the "use" candidate with the highest overall score, when exactly one has it. Null on a tie or with no "use".
  */
 export function autoBest(form: RatingForm, ids: readonly string[]): string | null {
-  const usable = ids.filter(id => form.candidates[id]?.verdict === 'use' && form.candidates[id]?.overall != null)
+  const usable = ids.filter(id => verdictFromOverall(form.candidates[id]?.overall ?? null) === 'use')
   if (!usable.length) return null
   const top = Math.max(...usable.map(id => form.candidates[id].overall!))
   const leaders = usable.filter(id => form.candidates[id].overall === top)

@@ -138,7 +138,8 @@ function featureGroup(items: { features: HapticFeatures | null }[]): FeatureGrou
 export const trialSlugs = (trial: TrialFile, dims: DimensionsDoc) => trialTarget(trial) === 'sound' ? [] : [...new Set(trial.terms.map(t => canonicalTerm(t, dims).slug))]
 const latest = (dates: (string | undefined)[]) => dates.filter((d): d is string => !!d).sort((a, b) => Date.parse(a) - Date.parse(b) || a.localeCompare(b)).pop() ?? null
 
-const isGood = (c: { overall: number; termMatch: number | null }) => c.overall >= 4 && c.termMatch !== null && Math.abs(c.termMatch) <= 0.5
+/** Good: overall ≥ 4 and, when a term match was given (older ratings; Studio no longer asks it), within ±0.5. */
+const isGood = (c: { overall: number; termMatch: number | null }) => c.overall >= 4 && (c.termMatch === null || Math.abs(c.termMatch) <= 0.5)
 
 /** Aggregates every rated candidate of the trials that target `slug`. Deterministic for the same inputs. */
 export function aggregateTerm(slug: string, dims: DimensionsDoc, records: TrialRecord[]): TermDoc {

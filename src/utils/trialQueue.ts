@@ -24,3 +24,9 @@ export function nextAfter<T extends QueueRecord>(queueBefore: readonly T[], done
   const rest = queueBefore.filter(r => r.trial.id !== doneId)
   return (i >= 0 ? rest[i] : undefined) ?? rest[0] ?? null
 }
+
+/** Trial filters of the AI trials panel: project ('' = all, ' ' = none) and target ('' = all; a trial without `target` is haptic). */
+export const UNASSIGNED_PROJECT = ' '
+export function filterTrials<T extends { trial: { project?: string; target?: 'sound' | 'haptic' } }>(records: readonly T[], project: string, target: '' | 'sound' | 'haptic'): T[] {
+  return records.filter(r => (project === '' || (r.trial.project ?? UNASSIGNED_PROJECT) === project) && (target === '' || (r.trial.target ?? 'haptic') === target))
+}

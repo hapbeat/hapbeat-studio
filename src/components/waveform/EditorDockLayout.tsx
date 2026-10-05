@@ -4,6 +4,7 @@ import 'dockview-react/dist/styles/dockview.css'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useEditorSettings } from '@/stores/editorSettings'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
+import { filterTrials, trialQueue } from '@/utils/trialQueue'
 import { ClipsPanel } from './ClipsPanel'
 import { WaveformPanel } from './WaveformPanel'
 import { PropertiesPanel } from './PropertiesPanel'
@@ -124,7 +125,10 @@ export function EditorDockLayout({ onApi, onPopoutWindows, onNotice }: { onApi: 
   const tRef = useRef(t); tRef.current = t
   const callbacks = useRef({ onApi, onPopoutWindows, onNotice }); callbacks.current = { onApi, onPopoutWindows, onNotice }
   const layoutRevision = useEditorSettings(state => state.layoutRevision)
-  const unrated = useAgentTrialStore(state => state.trials.filter(r => !r.rating).length)
+  // Same count as the AI trials header ("n left"): the unrated, not dismissed trials of the chosen project / target.
+  const projectFilter = useEditorSettings(state => state.trialProjectFilter)
+  const targetFilter = useEditorSettings(state => state.trialTargetFilter)
+  const unrated = useAgentTrialStore(state => trialQueue(filterTrials(state.trials, projectFilter, targetFilter)).length)
   const applying = useRef(false)
   /** Bumped after every layout (re)build so titles are re-localized. */
   const [built, setBuilt] = useState(0)
@@ -169,7 +173,10 @@ export function EditorDockLayout({ onApi, onPopoutWindows, onNotice }: { onApi: 
   useEffect(() => {
     const api = apiRef.current
     if (!api) return
-    for (const id of EDITOR_PANELS) api.getPanel(id)?.api.setTitle(t(PANEL_TITLES[id]) + (id === 'agent' && unrated ? ` · ${t('editor.agent.unratedBadge', { count: unrated })}` : ''))
+    for (const id of EDITOR_PANELS) api.getPanel(id)?.api.setTitle(t(PANEL_TITLES[id]) + (id === 'agent' && unrated ? ` ● ${unrated}` : ''))
+    // The count's meaning, on hover (dockview has no title option for tabs).
+    const tab = (api.getPanel('agent')?.view as { tab?: { element?: HTMLElement } } | undefined)?.tab?.element
+    tab?.setAttribute('title', unrated ? t('editor.agent.unratedTitle', { count: unrated }) : t('editor.agent.tab'))
   }, [locale, unrated, t, built])
 
   return <div className="editor-dock-root">
