@@ -139,8 +139,9 @@ export function WaveformEditor({ active }: { active: boolean }) {
   // Auditions (AI candidate / event material) play at the scene's timing: on every target firing, without jitter
   // (DEC-085); one buffer, so Stop ends them all and seeks follow the video.
   const plan = useAuditionPlan()
-  const audioBuffer = useMemo(() => shownBuffer && plan && (audition || eventPreview) && !(plan.targets.length === 1 && plan.targets[0] === 0)
-    ? repeatBuffer(shownBuffer, plan.targets.map(atSec => ({ atSec, gain: 1, rate: 1 }))) : shownBuffer, [shownBuffer, plan, audition, eventPreview])
+  const stretched = !!shownBuffer && !!plan && (!!audition || !!eventPreview || !!adjusting) && !(plan.targets.length === 1 && plan.targets[0] === 0)
+  const audioBuffer = useMemo(() => stretched && shownBuffer && plan
+    ? repeatBuffer(shownBuffer, plan.targets.map(atSec => ({ atSec, gain: 1, rate: 1 }))) : shownBuffer, [stretched, shownBuffer, plan])
   const player = useMemo(() => new EditorBufferPlayer(null, undefined, s.setError), [s.clip?.id, original, auditionKey])
   useEffect(() => {player.activate(); return () => player.dispose()}, [player])
   useDecidedSoundSync(player)
@@ -274,7 +275,8 @@ export function WaveformEditor({ active }: { active: boolean }) {
 
       if (original || audition || eventPreview) return
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? state.redo() : state.undo() }
-      if (event.key === 'Delete' && state.selectedRegion) { event.preventDefault(); state.deleteRegion() }
+      // An adjusted material shown at its event's firings: a region on that stretch is not a region of the material.
+      if (event.key === 'Delete' && state.selectedRegion && !stretched) { event.preventDefault(); state.deleteRegion() }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         const ids = visibleClipIds.current
         const index = ids.indexOf(state.clip?.id ?? '')
@@ -290,7 +292,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
       window.removeEventListener('keydown', keydown)
       for (const popup of popoutWindows) { popup.removeEventListener('keydown', space, true); popup.removeEventListener('keydown', keydown) }
     }
-  }, [active, original, audition, eventPreview, popoutWindows])
+  }, [active, original, audition, eventPreview, popoutWindows, stretched])
   /** Project names whose folder link the user refused this session (the trials filter does not ask again). */
   const refusedScenes = useRef(new Set<string>())
   const linkSceneProject = useCallback(async (name: string | null, options?: { quietIfRefused?: boolean }) => {

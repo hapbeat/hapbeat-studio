@@ -13,6 +13,8 @@ import { CompanionSound, type SoundSource } from '@/utils/companionSound'
 import { FiringScheduler, type Firing } from '@/utils/firingScheduler'
 import { perfTrack } from '@/utils/perfRegistry'
 import { useAuditionPlan } from './EditorScenePanel'
+import { useAdjustingLink } from './eventEditing'
+import { decidedSoundEvents } from '@/utils/decidedSound'
 
 /**
  * Event materials in the editor: an event's sound / haptic clip opened in the
@@ -126,15 +128,14 @@ export function useDecidedSoundSync(player: EditorBufferPlayer) {
   const table = useSceneStore(s => s.table)
   const lib = useSceneStore(s => s.lib)
   const buffers = useSceneStore(s => s.sfx)
+  const adjusting = useAdjustingLink()
   const picked = useMemo((): SoundSource | null => {
     if (!table || !lib) return null
-    let names: string[] = []
-    if (audition && auditionCues) {
-      const [project, ...cues] = auditionCues.split('\n')
-      if (project === lib.project_name) names = cues
-    } else if (!audition && preview?.target === 'haptic') names = [preview.event]
+    const [project, ...cues] = auditionCues ? auditionCues.split('\n') : ['']
+    const names = decidedSoundEvents({ auditioning: !!audition, audition: auditionCues ? { project, cues } : null, preview: preview ? { event: preview.event, target: preview.target } : null,
+      adjusting, openProject: lib.project_name })
     return representativeSound(table, lib, names, buffers)
-  }, [audition, auditionCues, preview, table, lib, buffers])
+  }, [audition, auditionCues, preview, adjusting, table, lib, buffers])
   // A scene (DEC-085): each firing is its own source on the AudioContext clock — the event's sound on the rated
   // cue's firings (with a haptic audition) and the decided sound of the scene's other cues on theirs (no jitter).
   const plan = useAuditionPlan()

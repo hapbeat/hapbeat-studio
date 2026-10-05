@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useWaveformStore } from '@/stores/waveformStore'
+import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useEditorSettings } from '@/stores/editorSettings'
 import { useEventStore, type DecideTarget } from '@/stores/eventStore'
@@ -134,4 +135,13 @@ async function writeBack(buffer: AudioBuffer, link: MaterialLink) {
   } catch (error) {
     useWaveformStore.getState().setError(`${link.wav}.wav: ${error instanceof Error ? error.message : String(error)}`)
   }
+}
+
+/** The event material being adjusted (its document selected, nothing else shown over it), if any. */
+export function useAdjustingLink(): MaterialLink | null {
+  const auditioning = useAgentTrialStore(s => !!s.audition)
+  const previewing = useEventStore(s => !!s.preview)
+  const clipId = useWaveformStore(s => s.clip?.id ?? null)
+  const link = useEditorSettings(s => clipId ? s.materialLinks[clipId] : undefined)
+  return !auditioning && !previewing && link ? link : null
 }

@@ -7,6 +7,7 @@ import { sceneVideoUrl, useSceneStore } from '@/stores/sceneStore'
 import { resolveTrialScene, sceneEventTime, sceneVideoTime, stepSceneFrame, wantedSceneProject, type TrialSceneState } from '@/utils/trialScene'
 import { setScenePause, setScenePreRoll, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
 import { eventSoundSec } from './eventAudio'
+import { useAdjustingLink } from './eventEditing'
 import { isLoopCue } from '@/utils/sceneCueTable'
 import { parseEventKey } from '@/utils/cueEvents'
 import { isTypingTarget } from '@/utils/playbackShortcut'
@@ -60,16 +61,20 @@ export function useAuditionPlan(): AuditionPlan | null {
   const audition = useAgentTrialStore(s => s.audition)
   const previewEvent = useEventStore(s => s.preview?.event ?? null)
   const lib = useSceneStore(s => s.lib)
-  const subject: SceneSubject = audition ? { kind: 'trial', trialId: audition.trialId } : previewEvent ? { kind: 'event', key: previewEvent } : { kind: 'clip', clipId: null }
+  // An adjusted material plays like its event's material (same stretch and firing times).
+  const adjusting = useAdjustingLink()
+  const adjustEvent = adjusting && adjusting.project === lib?.project_name ? adjusting.event : null
+  const subject: SceneSubject = audition ? { kind: 'trial', trialId: audition.trialId } : previewEvent ? { kind: 'event', key: previewEvent }
+    : adjustEvent ? { kind: 'event', key: adjustEvent } : { kind: 'clip', clipId: null }
   const { chosen } = useSceneChoice(subject)
   const plan = useMemo((): AuditionPlan | null => {
-    if (!chosen?.segment || (!audition && !previewEvent)) return null
+    if (!chosen?.segment || (!audition && !previewEvent && !adjustEvent)) return null
     if (lib && chosen.cue && isLoopCue(lib, parseEventKey(chosen.cue).cue)) return null
     return {
       targets: chosen.marks.filter(m => m.target).map(m => m.t - chosen.mark),
       others: chosen.marks.filter(m => !m.target).map(m => ({ atSec: m.t - chosen.mark, name: m.name })),
     }
-  }, [chosen, audition, previewEvent, lib])
+  }, [chosen, audition, previewEvent, adjustEvent, lib])
   // By value: the AI trials poll replaces the trial objects every 2 s, which recomputes the same plan;
   // keeping the same object keeps the repeated buffer and the scheduled sounds playing.
   const stable = useRef<{ key: string; plan: AuditionPlan | null }>({ key: 'null', plan: null })
