@@ -6,8 +6,8 @@ import { useWaveformStore } from '@/stores/waveformStore'
 import { localIsoString, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
 import type { HapticFeatures } from '@/utils/hapticFeatures'
 import { clearRatingDraft, DRAFT_DEBOUNCE_MS, newerDraft, readFolderDraft, readLocalDraft, writeRatingDraft } from '@/utils/ratingDrafts'
-import { addUseRange, autoRatingContext, EMPTY_CONTEXT, formToRating, jaPolePhrase, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, trialKind, visibleDimensions, type CandidateRatingForm, type Direction, type RatingForm } from '@/utils/agentTrialUi'
-import { trialTarget, type TrialKind } from '@/utils/agentProtocol'
+import { addUseRange, usableCandidates, autoRatingContext, EMPTY_CONTEXT, formToRating, jaPolePhrase, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, trialKind, visibleDimensions, type CandidateRatingForm, type Direction, type RatingForm } from '@/utils/agentTrialUi'
+import { trialTarget, VERDICTS, type TrialKind } from '@/utils/agentProtocol'
 import { useEventStore } from '@/stores/eventStore'
 import { assignEventsForTrial, effectiveEvent, parseEventKey, trialEvent } from '@/utils/cueEvents'
 import { runDecision } from './eventDecide'
@@ -20,8 +20,8 @@ import { useSceneStore } from '@/stores/sceneStore'
 import { useEditorSettings } from '@/stores/editorSettings'
 import { wantedSceneProject } from '@/utils/trialScene'
 
-/** Trial tiles shown before "Show more" (newest first). */
-const TRIAL_TILE_LIMIT = 12
+/** Trial tiles shown before "Show more" (unrated first, newest first). */
+const TRIAL_TILE_LIMIT = 4
 /** Filter value for trials without a project (not a valid project name, so it cannot collide). */
 const UNASSIGNED_FILTER = ' '
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -81,8 +81,10 @@ export function AgentTrialsPanel() {
   const projects = useMemo(() => [...new Set(trials.map(r => r.trial.project).filter((p): p is string => !!p))].sort((a, b) => a.localeCompare(b)), [trials])
   const shown = projectFilter === '' ? trials : trials.filter(r => (r.trial.project ?? UNASSIGNED_FILTER) === projectFilter)
   const [showAll, setShowAll] = useState(false)
-  const listed = showAll || shown.length <= TRIAL_TILE_LIMIT ? shown
-    : [...shown.slice(0, TRIAL_TILE_LIMIT), ...shown.slice(TRIAL_TILE_LIMIT).filter(r => r.trial.id === selectedId)]
+  // Unrated trials first (newest first), then rated ones; the first few, the selected one and "Show more".
+  const ordered = [...shown.filter(r => !r.rating), ...shown.filter(r => r.rating)]
+  const listed = showAll || ordered.length <= TRIAL_TILE_LIMIT ? ordered
+    : [...ordered.slice(0, TRIAL_TILE_LIMIT), ...ordered.slice(TRIAL_TILE_LIMIT).filter(r => r.trial.id === selectedId)]
   return <div className="agent-panel">
     <div className={`agent-status ${storeError ? 'error' : ''}`} role="status">{storeError ?? t(!folder ? 'editor.agent.noFolder' : polling ? 'editor.agent.watching' : 'editor.agent.paused')}</div>
     <div className={`agent-mcp-status ${isConnected && folder ? 'ready' : ''}`} title={t('editor.agent.mcpHint')}>{t(!isConnected ? 'editor.agent.mcpHelperOff' : folder ? 'editor.agent.mcpReady' : 'editor.agent.mcpNoFolder')}</div>
@@ -102,6 +104,7 @@ export function AgentTrialsPanel() {
       {trials.length === 0 && rejected.length === 0 && <p className="agent-muted">{t('editor.agent.empty')}</p>}
       {listed.map(r => <button key={r.trial.id} className={`agent-trial-item ${r.trial.id === selectedId ? 'selected' : ''}`} aria-pressed={r.trial.id === selectedId} onClick={() => pickTrial(r)}
         title={`${r.trial.id} · ${t('editor.agent.candidateCount', { count: r.trial.candidates.length })}`}>
+        {r.shortId && <span className="agent-short-id">{r.shortId}</span>}
         {/* A trial for a game event is titled by the event (scene.cues); its words come second. */}
         <strong>{r.trial.scene ? r.trial.scene.cues.join(' + ') : r.trial.terms.join(' · ')}</strong>
         <small>{r.trial.scene ? r.trial.terms.join(' · ') : ''}</small>
@@ -229,6 +232,7 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
     }
     catch (error) { setSaveError(message(error)) }
     finally { setSaving(false) }
+    if (saved && usableCandidates(withAuto).length >= 2) setNotice(t('editor.agent.severalUsable', { ids: usableCandidates(withAuto).map(id => record.shortId ? `${record.shortId}-${id}` : id).join(', ') }))
     if (saved && body.best && trial.scene && autoAssign) await assignBest(body.best)
   }
   /** The best candidate becomes the sound / haptic of the trial's events (rating save with "assign on save"). */
@@ -262,6 +266,7 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
 
   return <div className="agent-detail">
     <div className="agent-detail-head">
+      {record.shortId && <span className="agent-short-id large" title={t('editor.agent.shortIdHint')}>{record.shortId}</span>}
       {trial.scene ? <><strong>{trial.scene.cues.join(' + ')}</strong><small>{trial.terms.join(' · ')} · {trial.id}</small></> : <strong>{trial.id}</strong>}
       <small>{t('editor.agent.received')}: {new Date(trial.receivedAt).toLocaleString()}{trial.agent && ` · ${t('editor.agent.agentName')}: ${[trial.agent.name, trial.agent.model].filter(Boolean).join(' / ')}`}</small>
       {trial.parentTrial && <small>{t('editor.agent.parent')}: {known.some(r => r.trial.id === trial.parentTrial)
@@ -292,7 +297,7 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
         const sounding = active && (playing || pending)
         return <article key={requested.id} className={`agent-candidate ${active ? 'auditioning' : ''} ${sounding ? 'playing' : ''} ${buffer ? 'selectable' : ''}`} aria-current={active || undefined} onClick={select}
           tabIndex={0} data-trial-id={trial.id} data-candidate-id={requested.id}>
-          <header><strong>{requested.id}</strong><span title={requested.label}>{requested.label}</span>
+          <header><strong className="agent-short-id" title={t('editor.agent.shortIdHint')}>{record.shortId ? `${record.shortId}-${requested.id}` : requested.id}</strong><span title={requested.label}>{requested.label}</span>
             {requested.method && <small className="agent-method" title={t('editor.agent.methodHint')}>{t(`editor.agent.method.${requested.method}` as MessageId)}</small>}</header>
           {requested.hypothesis && <p className="agent-hypothesis">{requested.hypothesis}</p>}
           <div className="agent-thumb">{buffer ? <WaveformThumbnail buffer={buffer} />
@@ -396,6 +401,12 @@ function CandidateRatingInputs({ value, terms, dimensions, onChange, selection }
         <div className="agent-scale">{(['-2', '0', '2'] as const).map(k => <small key={k}>{t(TERM_LABELS[k])}</small>)}</div>
       </div>
     })}
+    <div className="agent-verdict" role="group" aria-label={t('editor.agent.verdict')}>
+      {VERDICTS.map(v => <button key={v} type="button" className={`agent-chip-btn verdict-${v} ${value.verdict === v ? 'selected' : ''}`} aria-pressed={value.verdict === v}
+        onClick={() => onChange({ verdict: value.verdict === v ? null : v })}>{t(`editor.agent.verdict.${v}` as MessageId)}</button>)}
+      {(value.verdict === 'use' || value.verdict === 'maybe' || value.useFor) && <input className="agent-use-for" value={value.useFor} maxLength={200}
+        placeholder={t('editor.agent.useForPlaceholder')} aria-label={t('editor.agent.useFor')} onChange={e => onChange({ useFor: e.target.value })} />}
+    </div>
     {/* Directions, kept ranges and the comment fold away (closed at first); overall and term match stay visible. */}
     <button type="button" className="agent-more" aria-expanded={more} onClick={() => setMore(!more)}>
       <span aria-hidden="true">{more ? '▾' : '▸'}</span>{t('editor.agent.moreRating')}

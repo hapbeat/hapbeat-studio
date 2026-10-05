@@ -1156,6 +1156,14 @@ export const messages = defineMessages({
   'editor.agent.moreSet': { ja: '{count} 件入力済み', en: '{count} set' },
   'editor.agent.showMore': { ja: 'さらに表示（{count} 件）', en: 'Show {count} more' },
   'editor.agent.showFewer': { ja: '新しいものだけ表示', en: 'Show only the newest' },
+  'editor.agent.shortIdHint': { ja: 'エージェントとの会話で使う短い番号（試行 T27、候補 T27-B）', en: 'Short id for talking with the agent (trial T27, candidate T27-B)' },
+  'editor.agent.verdict': { ja: '使えるか', en: 'Usable?' },
+  'editor.agent.verdict.use': { ja: '使える', en: 'Use' },
+  'editor.agent.verdict.maybe': { ja: '条件付き', en: 'Maybe' },
+  'editor.agent.verdict.no': { ja: '無し', en: 'No' },
+  'editor.agent.useFor': { ja: '用途', en: 'Good for' },
+  'editor.agent.useForPlaceholder': { ja: '用途（例: 待機中の唸り、息を吐くとき）', en: 'Good for (e.g. idle growl, on the out-breath)' },
+  'editor.agent.severalUsable': { ja: '複数を採用候補にしています（{ids}）。素材を複数にしてランダムに鳴らす（繰り返しの揺らぎ）か、別バリエーションにするか、エージェントに相談してください。', en: 'Several candidates are marked usable ({ids}). Ask the agent whether to use them as several materials played at random (repetition variation) or as separate variants.' },
 })
 
 export type MessageId = keyof typeof messages

@@ -85,7 +85,13 @@ export interface CandidateRating {
   comment?: string
   /** "Use only this part": [startSec, endSec] ranges of the rendered candidate the user marked (1–8). */
   useRange?: [number, number][]
+  /** Usable as is / only for some use / not usable. Several candidates may be "use"; `best` stays optional. */
+  verdict?: Verdict
+  /** What it is good for ("idle growl", "on the out-breath"), ≤ 200 characters. */
+  useFor?: string
 }
+export const VERDICTS = ['use', 'maybe', 'no'] as const
+export type Verdict = typeof VERDICTS[number]
 export const MAX_USE_RANGES = 8
 /** Valid `useRange`: 1–8 pairs with 0 ≤ start < end ≤ 3600 s. */
 export function useRangeError(value: unknown): string | null {
@@ -207,6 +213,8 @@ export function ratingError(rating: RatingBody, trial: TrialRequest, dimensionId
     for (const [dim, v] of Object.entries(r.directions ?? {})) if (!dimensionIds.includes(dim) || ![-1, 0, 1].includes(v)) return `${cid}: invalid direction "${dim}"`
     if (!optString(r.comment, 4000)) return `${cid}: comment is too long`
     if (r.useRange !== undefined) { const error = useRangeError(r.useRange); if (error) return `${cid}: ${error}` }
+    if (r.verdict !== undefined && !(VERDICTS as readonly unknown[]).includes(r.verdict)) return `${cid}: verdict must be use, maybe or no`
+    if (!optString(r.useFor, 200)) return `${cid}: useFor must be a string of at most 200 characters`
   }
   return null
 }

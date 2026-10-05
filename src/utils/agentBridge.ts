@@ -5,7 +5,7 @@
  */
 import { CANDIDATE_ID, TRIAL_ID } from '@/utils/agentProtocol'
 import type { AcceptResult } from '@/utils/agentInbox'
-import { aggregateTerm, buildIndex, canonicalTerm, knownSlugs, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
+import { aggregateTerm, buildIndex, canonicalTerm, knownSlugs, shortTrialIds, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
 
 export const STUDIO_NOT_READY = 'STUDIO_NOT_READY: Open Hapbeat Studio → Waveform editor and open a folder.'
 export const REQUEST_ID = /^[A-Za-z0-9_-]{1,64}$/
@@ -80,8 +80,10 @@ const handlers: Record<string, Handler> = {
     }
   },
   get_trial: async (params, deps) => {
-    const { trial, candidates, rating } = await findTrial(deps, id(params, 'trialId', TRIAL_ID))
-    return { trial, candidates, rating }
+    const record = await findTrial(deps, id(params, 'trialId', TRIAL_ID))
+    const { trial, candidates, rating } = record
+    // Short id for conversation ("T27"; a candidate is "T27-B").
+    return { shortId: record.shortId ?? shortTrialIds(await deps.loadTrials()).get(trial.id), trial, candidates, rating }
   },
   list_trials: async (params, deps) => {
     const limit = params.limit ?? 20

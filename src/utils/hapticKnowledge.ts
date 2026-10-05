@@ -63,7 +63,25 @@ export function canonicalTerm(term: string, dims: DimensionsDoc): { term: string
 
 // ---- Pure aggregation ----
 
-export interface TrialRecord { month: string; trial: TrialFile; candidates: CandidateFile[]; rating: RatingFile | null }
+export interface TrialRecord {
+  month: string; trial: TrialFile; candidates: CandidateFile[]; rating: RatingFile | null
+  /** Short id for conversation ("T27"; candidates "T27-B"): the trial's position in reception order in this folder. */
+  shortId?: string
+}
+
+/**
+ * Short trial ids: T1, T2 … in reception order (receivedAt, then id). Trials are
+ * append-only and receivedAt only grows, so an id never changes once given;
+ * older trials get theirs the same way.
+ */
+export function shortTrialIds(records: readonly Pick<TrialRecord, 'trial'>[]): Map<string, string> {
+  const order = [...records].sort((a, b) => Date.parse(a.trial.receivedAt) - Date.parse(b.trial.receivedAt) || a.trial.id.localeCompare(b.trial.id))
+  return new Map(order.map((r, i) => [r.trial.id, `T${i + 1}`]))
+}
+export const withShortIds = <T extends Pick<TrialRecord, 'trial'> & { shortId?: string }>(records: T[]): T[] => {
+  const ids = shortTrialIds(records)
+  return records.map(r => ({ ...r, shortId: ids.get(r.trial.id) }))
+}
 export interface FeatureStat { median: number; p25: number; p75: number }
 export interface FeatureGroup { n: number; features: Record<string, FeatureStat> }
 export interface TermExample {
@@ -90,7 +108,7 @@ export interface TermDoc {
 export interface KnowledgeIndex {
   format: 'hapbeat-knowledge-index@1'
   terms: { term: string; slug: string; trials: number; ratedCandidates: number; goodN: number; updatedAt: string | null }[]
-  trials: { id: string; month: string; intent: string; terms: string[]; rated: boolean; receivedAt: string }[]
+  trials: { id: string; shortId: string; month: string; intent: string; terms: string[]; rated: boolean; receivedAt: string }[]
 }
 
 function flattenFeatures(f: HapticFeatures): Record<string, number> {
@@ -176,11 +194,12 @@ export function knownSlugs(dims: DimensionsDoc, records: TrialRecord[]): string[
 }
 
 export function buildIndex(records: TrialRecord[], terms: TermDoc[]): KnowledgeIndex {
+  const shortIds = shortTrialIds(records)
   return {
     format: 'hapbeat-knowledge-index@1',
     terms: [...terms].sort((a, b) => a.slug.localeCompare(b.slug)).map(t => ({ term: t.term, slug: t.slug, trials: t.counts.trials, ratedCandidates: t.counts.ratedCandidates, goodN: t.good.n, updatedAt: t.updatedAt })),
     trials: [...records].sort((a, b) => Date.parse(b.trial.receivedAt) - Date.parse(a.trial.receivedAt) || a.trial.id.localeCompare(b.trial.id))
-      .map(r => ({ id: r.trial.id, month: r.month, intent: r.trial.intent, terms: r.trial.terms, rated: !!r.rating, receivedAt: r.trial.receivedAt })),
+      .map(r => ({ id: r.trial.id, shortId: shortIds.get(r.trial.id)!, month: r.month, intent: r.trial.intent, terms: r.trial.terms, rated: !!r.rating, receivedAt: r.trial.receivedAt })),
   }
 }
 
@@ -336,7 +355,7 @@ export class KnowledgeFolder {
         } catch (error) { throw new Error(`haptic-knowledge/trials/${month}/${id}: ${error instanceof Error ? error.message : String(error)}`) }
       }
     }
-    return records
+    return withShortIds(records)
   }
   /** Writes rating.json; the previous rating (without its history) is appended to history. */
   async saveRating(month: string, rating: RatingBody): Promise<RatingFile> {

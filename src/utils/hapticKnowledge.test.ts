@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CandidateFile, RatingFile, TrialFile } from './agentProtocol'
 import type { HapticFeatures } from './hapticFeatures'
-import { aggregateTerm, appendProposedInsight, buildIndex, canonicalTerm, KnowledgeFolder, knownSlugs, parseDimensions, SEED_DIMENSIONS, trialSlugs, type TrialRecord } from './hapticKnowledge'
+import { aggregateTerm, appendProposedInsight, buildIndex, canonicalTerm, KnowledgeFolder, knownSlugs, parseDimensions, SEED_DIMENSIONS, trialSlugs, withShortIds, type TrialRecord } from './hapticKnowledge'
 import { MemoryDirectory } from './memoryDirectory.testutil'
 import { insightsTemplate } from './agentGuide'
 
@@ -70,6 +70,9 @@ describe('knowledge aggregation', () => {
     expect(slugs).toContain('ごわごわ')
     const index = buildIndex(records, slugs.map(s => aggregateTerm(s, SEED_DIMENSIONS, records)))
     expect(index.trials.map(t => t.id)).toEqual(['t2', 't1', 't3'])
+    // Short ids follow reception order (t1, t3 at 09-29 10:00 by id, then t2 on 09-30).
+    expect(index.trials.map(t => t.shortId)).toEqual(['T3', 'T1', 'T2'])
+    expect(withShortIds(records).map(r => r.shortId)).toEqual(['T1', 'T3', 'T2'])
     expect(index.trials[2].rated).toBe(false)
     expect(index.terms.find(t => t.slug === 'ごわごわ')).toMatchObject({ trials: 2, ratedCandidates: 4, goodN: 2 })
   })

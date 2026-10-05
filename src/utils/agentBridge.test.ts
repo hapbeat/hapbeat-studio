@@ -77,13 +77,13 @@ describe('handleAgentRequest', () => {
   })
 
   it('get_trial and list_trials', async () => {
-    expect(await ok('get_trial', { trialId: 't1' })).toEqual({ trial: records[0].trial, candidates: records[0].candidates, rating: records[0].rating })
+    expect(await ok('get_trial', { trialId: 't1' })).toEqual({ shortId: 'T2', trial: records[0].trial, candidates: records[0].candidates, rating: records[0].rating })
     expect(await error('get_trial', { trialId: 'nope' })).toBe('Trial "nope" not found')
     expect(await error('get_trial', { trialId: '../x' })).toMatch(/trialId must match/)
     expect((await ok('list_trials', {})).trials).toEqual([
-      { id: 't2', month: '2026-09', intent: 'create', terms: ['ゴワゴワ'], rated: false, receivedAt: '2026-09-30T10:00:00+09:00' },
-      { id: 't1', month: '2026-09', intent: 'create', terms: ['ゴワゴワ'], rated: true, receivedAt: '2026-09-29T10:00:00+09:00' },
-      { id: 't3', month: '2026-09', intent: 'create', terms: ['ゴワゴワ'], rated: false, receivedAt: '2026-09-28T10:00:00+09:00' },
+      { id: 't2', shortId: 'T3', month: '2026-09', intent: 'create', terms: ['ゴワゴワ'], rated: false, receivedAt: '2026-09-30T10:00:00+09:00' },
+      { id: 't1', shortId: 'T2', month: '2026-09', intent: 'create', terms: ['ゴワゴワ'], rated: true, receivedAt: '2026-09-29T10:00:00+09:00' },
+      { id: 't3', shortId: 'T1', month: '2026-09', intent: 'create', terms: ['ゴワゴワ'], rated: false, receivedAt: '2026-09-28T10:00:00+09:00' },
     ])
     expect((await ok('list_trials', { limit: 1, unratedOnly: true })).trials).toMatchObject([{ id: 't2' }])
     expect((await ok('list_trials', { unratedOnly: true })).trials).toMatchObject([{ id: 't2' }, { id: 't3' }])

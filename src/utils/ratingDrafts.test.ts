@@ -14,7 +14,7 @@ describe('rating drafts', () => {
   it('round-trips a form and re-checks every field', () => {
     const form = ratingToForm(trial, null)
     form.best = 'A'
-    form.candidates.A = { overall: 4, termMatch: { どしん: -1 }, directions: { weight: 1 }, comment: 'heavier', useRange: [[0.1, 0.4]] }
+    form.candidates.A = { overall: 4, termMatch: { どしん: -1 }, directions: { weight: 1 }, comment: 'heavier', useRange: [[0.1, 0.4]], verdict: 'maybe', useFor: 'idle growl' }
     const draft = parseRatingDraft(serializeRatingDraft('t-1', form, '2026-10-05T10:00:00+09:00'), trial)
     expect(draft?.form).toEqual(form)
     const messy = JSON.parse(serializeRatingDraft('t-1', form, '2026-10-05T10:00:00+09:00'))

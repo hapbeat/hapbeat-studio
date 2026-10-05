@@ -34,7 +34,8 @@ export function parseRatingDraft(text: string | null, trial: Pick<TrialRequest, 
     const termMatch = Object.fromEntries(Object.entries(isRecord(c.termMatch) ? c.termMatch : {}).filter(([k, x]) => trial.terms.includes(k) && typeof x === 'number' && x >= -2 && x <= 2)) as Record<string, number>
     const directions = Object.fromEntries(Object.entries(isRecord(c.directions) ? c.directions : {}).filter(([, x]) => x === -1 || x === 0 || x === 1)) as CandidateRatingForm['directions']
     const useRange = (Array.isArray(c.useRange) ? c.useRange : []).filter((r): r is [number, number] => Array.isArray(r) && r.length === 2 && r.every(x => typeof x === 'number' && Number.isFinite(x)) && r[0] >= 0 && r[1] > r[0])
-    candidates[id] = { overall, termMatch, directions, comment: str(c.comment), useRange }
+    const verdict = c.verdict === 'use' || c.verdict === 'maybe' || c.verdict === 'no' ? c.verdict : null
+    candidates[id] = { overall, termMatch, directions, comment: str(c.comment), useRange, verdict, useFor: str(c.useFor).slice(0, 200) }
   }
   const form: RatingForm = {
     best: typeof f.best === 'string' && ids.includes(f.best) ? f.best : null,

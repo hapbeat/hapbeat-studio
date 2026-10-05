@@ -37,7 +37,7 @@ describe('rating form', () => {
 
   it('omits unrated candidates and unset fields, and passes protocol validation', () => {
     const form = ratingToForm(trial, null, { device: 'Band 1', position: '', deviceWiper: '96', volumeLabel: '', note: '' })
-    form.candidates.A = { overall: 4, termMatch: { ごわごわ: -1 }, directions: { roughness: 1 }, comment: '  ok  ', useRange: [] }
+    form.candidates.A = { overall: 4, termMatch: { ごわごわ: -1 }, directions: { roughness: 1 }, comment: '  ok  ', useRange: [], verdict: null, useFor: '' }
     form.best = 'A'
     form.context.position = ' neck '
     const body = formToRating(form, trial, '2026-09-29T15:42:00+09:00')
@@ -122,5 +122,26 @@ describe('use only this part (useRange)', () => {
     expect(ratingError(body, trial, [])).toBeNull()
     expect(ratingToForm(trial, body).candidates.A.useRange).toEqual([[0.01, 0.05], [0.1, 0.523]])
     expect(ratingError({ ...body, candidates: { A: { overall: 4, useRange: [[0.5, 0.2]] } } }, trial, [])).toMatch(/useRange/)
+  })
+})
+
+describe('verdict / useFor (several usable candidates, best optional)', () => {
+  it('saves verdict and useFor, validates them, and lists the usable candidates', async () => {
+    const { usableCandidates } = await import('./agentTrialUi')
+    const form = ratingToForm(trial, null)
+    form.candidates.A = { ...form.candidates.A, overall: 4, verdict: 'use', useFor: '  idle growl ' }
+    form.candidates.B = { ...form.candidates.B, overall: 3, verdict: 'use' }
+    expect(usableCandidates(form)).toEqual(['A', 'B'])
+    const body = formToRating(form, trial, '2026-10-05T10:00:00+09:00')
+    expect(body.best).toBeUndefined()
+    expect(body.candidates.A).toMatchObject({ verdict: 'use', useFor: 'idle growl' })
+    expect(ratingError(body, trial, [])).toBeNull()
+    expect(ratingToForm(trial, body).candidates.A).toMatchObject({ verdict: 'use', useFor: 'idle growl' })
+    expect(ratingError({ ...body, candidates: { A: { overall: 4, verdict: 'great' as never } } }, trial, [])).toMatch(/verdict/)
+    expect(ratingError({ ...body, candidates: { A: { overall: 4, useFor: 'x'.repeat(201) } } }, trial, [])).toMatch(/useFor/)
+    // A verdict alone still needs an overall score.
+    const only = ratingToForm(trial, null)
+    only.candidates.A.verdict = 'no'
+    expect(ratingFormIssue(only)).toEqual({ kind: 'missing-overall', candidateId: 'A' })
   })
 })
