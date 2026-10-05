@@ -43,7 +43,7 @@ describe('rating form', () => {
     expect(trialBody.comment).toBe('B is closest, heavier')
     expect(trialBody.candidates).toEqual({})
     expect(ratingToForm(trial, trialBody).comment).toBe('B is closest, heavier')
-    expect(ratingError({ ...trialBody, candidates: { A: {} } }, trial, [])).toMatch(/overall score or a comment/)
+    expect(ratingError({ ...trialBody, candidates: { A: {} } }, trial, [])).toMatch(/overall score, a comment or an intensity/)
     expect(ratingError({ ...trialBody, comment: 'x'.repeat(4001) }, trial, [])).toMatch(/comment/)
   })
 
@@ -63,6 +63,12 @@ describe('rating form', () => {
     expect(formToRating(form, trial, body.ratedAt).candidates.A.intensity).toBeUndefined()
     expect(ratingError({ ...body, candidates: { A: { overall: 4, intensity: 1.5 } } }, trial, [])).toMatch(/intensity/)
     expect(ratingToForm(trial, body).candidates.A.intensity).toBe(0.5)
+    // Only the strength moved: saved as an unscored candidate holding the intensity, and valid.
+    const only = ratingToForm(trial, null); only.candidates.B.intensity = 0.4
+    expect(ratingFormIssue(only)).toBeNull()
+    const onlyBody = formToRating(only, trial, body.ratedAt)
+    expect(onlyBody.candidates).toEqual({ B: { intensity: 0.4 } })
+    expect(ratingError(onlyBody, trial, [])).toBeNull()
   })
 
   it('round-trips a saved rating and prefers its context over the remembered one', () => {

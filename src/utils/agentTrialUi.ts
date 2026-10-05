@@ -46,7 +46,8 @@ export function ratingToForm(trial: TrialRequest, rating: RatingBody | null, rem
   return { context, comment: rating?.comment ?? '', candidates }
 }
 
-const touched = (c: CandidateRatingForm) => Object.keys(c.termMatch).length > 0 || Object.keys(c.directions).length > 0 || c.comment.trim() !== '' || c.useRange.length > 0 || c.useFor.trim() !== ''
+/** Any input besides the score; a strength moved off 1 alone is kept too (saved as an intensity-only, unscored candidate). */
+const touched = (c: CandidateRatingForm) => Object.keys(c.termMatch).length > 0 || Object.keys(c.directions).length > 0 || c.comment.trim() !== '' || c.useRange.length > 0 || c.useFor.trim() !== '' || c.intensity !== 1
 
 /** Why the form cannot be saved yet: nothing rated, or a candidate has inputs but no overall score. */
 /** Why the form cannot be saved yet: nothing at all (no score and no comment anywhere), or a bad wiper. A candidate without a score is saved as "no score". */

@@ -61,6 +61,21 @@ describe('knowledge aggregation', () => {
     expect(doc.updatedAt).toBe('2026-09-30T11:00:00+09:00')
   })
 
+  it('takes the loudness features at the rated intensity (shape features unchanged); intensity-only candidates stay out', () => {
+    const r = record('t9', ['ごわごわ'], { A: { overall: 5, tm: 0 } })
+    r.rating!.candidates.A.intensity = 0.5
+    r.rating!.candidates.B = { intensity: 0.3 }
+    const doc = aggregateTerm('ごわごわ', SEED_DIMENSIONS, [r])
+    expect(doc.counts.ratedCandidates).toBe(1)
+    expect(doc.good.features.peakDb.median).toBeCloseTo(-1 - 6.0206, 3)
+    expect(doc.good.features.rmsDb.median).toBeCloseTo(-10 - 6.0206, 3)
+    expect(doc.good.features.crestDb.median).toBe(9)
+    expect(doc.good.features.centroidHz.median).toBe(100)
+    expect(doc.exemplars[0].features?.peakDb).toBeCloseTo(-7.0206, 3)
+    // No intensity = 1.
+    expect(aggregateTerm('ごわごわ', SEED_DIMENSIONS, [record('t9', ['ごわごわ'], { A: { overall: 5, tm: 0 } })]).good.features.peakDb.median).toBe(-1)
+  })
+
   it('is deterministic regardless of record order', () => {
     expect(aggregateTerm('ごわごわ', SEED_DIMENSIONS, [...records].reverse())).toEqual(aggregateTerm('ごわごわ', SEED_DIMENSIONS, records))
   })

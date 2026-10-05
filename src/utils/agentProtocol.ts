@@ -219,7 +219,7 @@ export function ratingError(rating: RatingBody, trial: TrialRequest, dimensionId
   for (const [cid, r] of Object.entries(rating.candidates)) {
     if (!cids.has(cid)) return `Unknown candidate "${cid}"`
     if (r.overall !== undefined && (!Number.isInteger(r.overall) || r.overall < 1 || r.overall > 5)) return `${cid}: overall must be 1-5`
-    if (r.overall === undefined && !(r.comment?.trim() || r.directions || r.useRange || r.termMatch || r.useFor)) return `${cid}: give an overall score or a comment`
+    if (r.overall === undefined && !(r.comment?.trim() || r.directions || r.useRange || r.termMatch || r.useFor || r.intensity !== undefined)) return `${cid}: give an overall score, a comment or an intensity`
     for (const v of Object.values(r.termMatch ?? {})) if (!Number.isFinite(v) || v < -2 || v > 2) return `${cid}: termMatch must be -2..+2`
     for (const [dim, v] of Object.entries(r.directions ?? {})) if (!dimensionIds.includes(dim) || ![-1, 0, 1].includes(v)) return `${cid}: invalid direction "${dim}"`
     if (!optString(r.comment, 4000)) return `${cid}: comment is too long`
