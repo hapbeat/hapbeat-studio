@@ -1,10 +1,13 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { usePageVisible } from '@/hooks/usePageVisible'
 import { perfTrack } from '@/utils/perfRegistry'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
-import { familyColor, frameAt } from '@/utils/sceneData'
+import { familyColor, frameAt, offsetOf } from '@/utils/sceneData'
+import { WHEEL_ZOOM_RATE, wheelPixels, zoomAtTime } from '@/utils/waveformView'
+import { ChangeEventForm, changedFiring, changeFailed } from './SceneMomentsPanel'
+import type { OverriddenEvent } from '@/utils/sceneOverrides'
 import { effectiveEvent, resolveEventName } from '@/utils/cueEvents'
 import { useScene } from './sceneContext'
 import { SPEEDS } from './sceneRuntime'
@@ -12,12 +15,17 @@ import { SceneOutputToggles } from './SceneOutputToggles'
 import { useMomentPlace } from './SceneCuePanels'
 
 const SOUND_COLOR = '#36c5c0'
-type Hit = { x: number; y0: number; y1: number; name: string; t: number }
+type Hit = { x: number; y0: number; y1: number; name: string; t: number; from?: string }
+/** The visible stretch of the timeline: `start` (s) and `zoom` (px per s) for one moment (`key`); fit = the whole. */
+type View = { key: string; start: number; zoom: number; fit: boolean }
+const MAX_ZOOM = 2000
 
 /**
  * Timeline: continuous-layer levels behind two lanes, haptics (upper) and
  * sound (lower); a cue shows in each lane it uses. Click a marker to edit
- * that cue, elsewhere to seek. Read-outs and output toggles above it.
+ * that cue (the moments list marks it too), elsewhere to seek; right-click a marker to change its event.
+ * Ctrl + wheel zooms around the pointer, wheel / Shift + wheel pans (like the editor's waveform), also while playing.
+ * Read-outs and output toggles above it.
  */
 export function SceneTimelinePanel() {
   const { t } = useI18n()
@@ -31,6 +39,8 @@ export function SceneTimelinePanel() {
   const tRef = useRef(t); tRef.current = t
   const placeOf = useMomentPlace()
   const placeRef = useRef(placeOf); placeRef.current = placeOf
+  const view = useRef<View>({ key: '', start: 0, zoom: 1, fit: true })
+  const [change, setChange] = useState<{ from: string; at: number } | null>(null)
 
   // Drawn only while the Scene tab is shown and the page visible.
   const { active } = useScene()
@@ -53,14 +63,20 @@ export function SceneTimelinePanel() {
       const fps = data.fps, layers = lib.layers, ticks = lib.ticks, sel = s.sel, table = s.table
       const series = layers.flatMap(l => l.gain.map((i, k) => ({ i, color: l.colors[k] })))
       const dur = v.duration || it.levels.length / fps || 1
-      const X = (time: number) => time / dur * w, top = 6, base = h - 16, mid = Math.round((top + base) / 2)
+      // The visible stretch: the whole moment until zoomed; while playing, the playhead is kept in view.
+      const vw = view.current, key = `${s.cur}:${it.file}`, fit = w / dur
+      if (vw.key !== key || vw.fit || vw.zoom < fit) { vw.key = key; vw.zoom = Math.max(fit, vw.fit || vw.key !== key ? fit : vw.zoom); vw.start = vw.fit ? 0 : vw.start; vw.fit = vw.zoom <= fit }
+      const span = w / vw.zoom
+      if (!v.paused && (v.currentTime < vw.start || v.currentTime > vw.start + span)) vw.start = Math.max(0, Math.min(dur - span, v.currentTime - span * 0.1))
+      vw.start = Math.max(0, Math.min(Math.max(0, dur - span), vw.start))
+      const X = (time: number) => (time - vw.start) * vw.zoom, top = 6, base = h - 16, mid = Math.round((top + base) / 2)
       if (runtime.part && runtime.partAB) { ctx.fillStyle = 'rgba(78,161,255,.13)'; ctx.fillRect(X(runtime.partAB[0]), 0, X(runtime.partAB[1]) - X(runtime.partAB[0]), h) }
       ctx.fillStyle = '#1a1d21'; ctx.fillRect(0, mid, w, 1)
       ctx.font = '10px Segoe UI, sans-serif'
       // Seconds grid (a clip counts from its cue).
       ctx.fillStyle = '#5c636c'
-      const step = dur > 20 ? 5 : 1
-      for (let sec = 0; sec <= dur; sec += step) { ctx.fillRect(X(sec), base, 1, 4); ctx.fillText(it.kind === 'clip' ? (sec - it.event).toFixed(0) + 's' : sec + 's', X(sec) + 2, h - 3) }
+      const step = span > 60 ? 10 : span > 20 ? 5 : span > 4 ? 1 : 0.5
+      for (let sec = Math.ceil(vw.start / step) * step; sec <= vw.start + span; sec += step) { ctx.fillRect(X(sec), base, 1, 4); ctx.fillText(it.kind === 'clip' ? (sec - it.event).toFixed(step < 1 ? 1 : 0) + 's' : sec.toFixed(step < 1 ? 1 : 0) + 's', X(sec) + 2, h - 3) }
       // Continuous layer levels.
       const L = it.levels
       let peak = 1
@@ -96,7 +112,8 @@ export function SceneTimelinePanel() {
         for (const ev of events) {
           if (!has(ev.name)) continue
           const x = X(ev.t), picked = !!sel && sel.name === ev.name && sel.t != null && Math.abs(ev.t - sel.t) < 0.02
-          found.push({ x, y0, y1, name: ev.name, t: ev.t })
+          if (x < -10 || x > w + 10) continue
+          found.push({ x, y0, y1, name: ev.name, t: ev.t, from: (ev as OverriddenEvent).from })
           ctx.fillStyle = color(ev.name)
           ctx.globalAlpha = picked ? 1 : sel && sel.t != null ? 0.35 : it.kind === 'clip' && !ev.own ? 0.5 : 1
           if (ticks.includes(ev.name) && !picked) { ctx.fillRect(x, y1 - 6, 1, 6); continue }
@@ -123,13 +140,41 @@ export function SceneTimelinePanel() {
     return () => { cancelAnimationFrame(frame); perfTrack('rafLoops', -1) }
   }, [runtime, live])
 
-  const onMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!useSceneStore.getState().items.length) return
+  const hitAt = (event: React.MouseEvent<HTMLCanvasElement>) => {
     const r = event.currentTarget.getBoundingClientRect(), x = event.clientX - r.left, y = event.clientY - r.top
-    const hit = hits.current.filter(m => y >= m.y0 && y <= m.y1 && Math.abs(m.x - x) <= 5).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0]
-    if (hit) { useSceneStore.getState().selectCue(hit.name, hit.t); runtime.video.pause(); runtime.seek(hit.t - useSceneSettings.getState().leadSec); return }
-    runtime.seek(x / r.width * (runtime.video.duration || 0))
+    return { x, hit: hits.current.filter(m => y >= m.y0 && y <= m.y1 && Math.abs(m.x - x) <= 5).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0] }
   }
+  const onMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!useSceneStore.getState().items.length || event.button !== 0) return
+    const { x, hit } = hitAt(event)
+    if (hit) { useSceneStore.getState().selectCue(hit.name, hit.t); runtime.video.pause(); runtime.seek(hit.t - useSceneSettings.getState().leadSec); return }
+    runtime.seek(view.current.start + x / view.current.zoom)
+  }
+  /** Right-click a marker: "Change" (the moments list's), over the timeline. */
+  const onContextMenu = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    const s = useSceneStore.getState(), it = s.items[s.cur], { hit } = hitAt(event)
+    if (!hit || !it) return
+    event.preventDefault()
+    s.selectCue(hit.name, hit.t)
+    setChange({ from: hit.from ?? hit.name, at: Math.round((hit.t + offsetOf(it)) * 1000) / 1000 })
+  }
+  // Ctrl + wheel zooms around the pointer; wheel / Shift + wheel pans (the editor waveform's handling).
+  useEffect(() => {
+    const cv = canvas.current
+    if (!cv) return
+    const wheel = (event: WheelEvent) => {
+      const r = cv.getBoundingClientRect(), vw = view.current, dur = runtime.video.duration || 1, fit = r.width / dur
+      const delta = wheelPixels(event, r.width)
+      event.preventDefault(); event.stopPropagation()
+      if (event.ctrlKey) {
+        const x = Math.max(0, Math.min(r.width, event.clientX - r.left)), time = vw.start + x / vw.zoom
+        const next = Math.min(MAX_ZOOM, Math.max(fit, vw.zoom * Math.exp(-delta * WHEEL_ZOOM_RATE)))
+        vw.start = zoomAtTime(time, x, next, r.width, dur); vw.zoom = next; vw.fit = next <= fit
+      } else vw.start = Math.max(0, Math.min(Math.max(0, dur - r.width / vw.zoom), vw.start + delta / vw.zoom))
+    }
+    cv.addEventListener('wheel', wheel, { passive: false })
+    return () => cv.removeEventListener('wheel', wheel)
+  }, [runtime])
 
   return <div className="scene-timeline">
     <div className="scene-info">
@@ -139,7 +184,18 @@ export function SceneTimelinePanel() {
       <span className="scene-info-state" ref={state} />
       <SceneOutputToggles />
     </div>
-    <canvas className="scene-timeline-canvas" ref={canvas} onMouseDown={onMouseDown} />
+    <canvas className="scene-timeline-canvas" ref={canvas} tabIndex={0} title={t('scene.timeline.hint')} onMouseDown={onMouseDown} onContextMenu={onContextMenu} />
+    {change && <TimelineChange from={change.from} at={change.at} onClose={() => setChange(null)} />}
     <div className="scene-help">{t('scene.keys')}</div>
+  </div>
+}
+
+/** "Change" opened from a timeline marker (over the timeline; the moments list's form). */
+function TimelineChange({ from, at, onClose }: { from: string; at: number; onClose: () => void }) {
+  const table = useSceneStore(s => s.table)
+  if (!table) return null
+  return <div className="scene-timeline-change">
+    <ChangeEventForm from={from} at={at} table={table} onClose={onClose} onError={changeFailed}
+      onSent={to => { onClose(); changedFiring(from, at, to) }} />
   </div>
 }

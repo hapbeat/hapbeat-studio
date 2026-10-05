@@ -1190,6 +1190,7 @@ export const messages = defineMessages({
   'scene.occ.newVariant': { ja: '新しい variant {name} を倍率だけの variant として作ります', en: 'Creates the new variant {name} (multipliers only).' },
   'scene.occ.reassign': { ja: 'イベントを変える…', en: 'Change event…' },
   'scene.moment.change': { ja: '変更', en: 'Change' },
+  'scene.timeline.hint': { ja: '印をクリックで選択、右クリックで「変更」。Ctrl＋スクロールで拡大縮小、スクロール（Shift＋スクロール）で左右に移動', en: 'Click a marker to select it, right-click to change its event. Ctrl + wheel zooms, wheel (Shift + wheel) pans.' },
   'scene.override.hint': { ja: 'ゲームの変更待ち。録画を撮り直すと実際の記録に置き換わります', en: 'Waiting for the game change. Re-recording the scene replaces it with the real recording.' },
   'scene.override.undo': { ja: '戻す', en: 'Undo' },
   'scene.override.undoHint': { ja: 'この発生の差し替えを外し、録画どおりのイベントに戻します（エージェントへの取り消しは送りません）', en: 'Removes this firing’s change and shows the recorded event again (nothing is sent to the agent).' },

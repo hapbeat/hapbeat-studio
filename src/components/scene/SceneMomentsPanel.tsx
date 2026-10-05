@@ -1,10 +1,10 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useWaveformStore } from '@/stores/waveformStore'
-import { familyColor } from '@/utils/sceneData'
+import { familyColor, offsetOf } from '@/utils/sceneData'
 import { addVariant, allEventKeys, effectiveEvent, parseEventKey, resolveEventName } from '@/utils/cueEvents'
 import { VARIANT_NAME, type CueTable } from '@/utils/sceneCueTable'
 import { HapticIcon } from './HapticIcon'
@@ -32,7 +32,15 @@ export function SceneMomentsPanel() {
   const list = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState<number | null>(null)
   const [sent, setSent] = useState<Record<number, true>>({})
-  useEffect(() => { list.current?.querySelector('.scene-item.sel')?.scrollIntoView({ block: 'nearest' }) }, [cur])
+  // The firing selected here or on the timeline (Event panel follows it too): its moment's row is marked and scrolled to.
+  const sel = useSceneStore(s => s.sel)
+  const picked = useMemo(() => {
+    const it = items[cur]
+    if (!sel || sel.t == null || !it) return -1
+    const replay = sel.t + offsetOf(it)
+    return items.findIndex(x => x.kind === 'clip' && x.names.includes(sel.name) && Math.abs(x.at - replay) < 0.05)
+  }, [sel, items, cur])
+  useEffect(() => { list.current?.querySelector('.scene-item.picked, .scene-item.sel')?.scrollIntoView({ block: 'nearest' }) }, [cur, picked])
   if (!lib) return <div className="scene-panel-empty">{t('scene.noProject')}</div>
   return <div className="scene-moments">
     <div className="scene-legend">
@@ -44,8 +52,13 @@ export function SceneMomentsPanel() {
       {items.map((it, k) => {
         // `cue:variant` names resolve like the game (an unknown variant plays its cue).
         const cues = it.kind === 'clip' && table ? it.names.map(n => { const r = resolveEventName(table, n); return r && effectiveEvent(table, r.ref) }).filter(e => !!e) : []
-        return <div key={k} className={`scene-item ${k === cur ? 'sel' : ''}`} title={t('scene.moment.playHint')}
-          onClick={e => { if ((e.target as HTMLElement).closest('.scene-occ-form, button')) return; runtime.audio(); runtime.playMoment(k, useSceneSettings.getState().leadSec) }}>
+        return <div key={k} className={`scene-item ${k === cur ? 'sel' : ''} ${k === picked ? 'picked' : ''}`} title={t('scene.moment.playHint')}
+          onClick={e => {
+            if ((e.target as HTMLElement).closest('.scene-occ-form, button')) return
+            runtime.audio(); runtime.playMoment(k, useSceneSettings.getState().leadSec)
+            // The timeline marks the moment's firing (video time of the clip) and the Event panel shows it.
+            if (it.kind === 'clip') useSceneStore.getState().selectCue(it.name, it.event)
+          }}>
           <span className="scene-num">{k === 0 ? '▶' : String(k).padStart(2, '0')}</span>
           <span className="scene-dot" style={{ background: familyColor(lib, it.name) }} />
           <span className="scene-name">{it.kind === 'full' ? t('scene.full') : <>{(it as OverriddenClip).from
@@ -62,25 +75,25 @@ export function SceneMomentsPanel() {
           </span>}
           {open === k && it.kind === 'clip' && table && <ChangeEventForm from={(it as OverriddenClip).from ?? it.name} at={it.at} table={table}
             onClose={() => setOpen(null)}
-            onSent={to => {
-              setSent(s => ({ ...s, [k]: true })); setOpen(null)
-              useSceneStore.getState().note({ id: 'scene.occ.sentStatus', params: { name: it.name, at: it.at.toFixed(2) } })
-              // Studio treats the firing as the new event at once (until the scene is re-recorded).
-              const from = (it as OverriddenClip).from ?? it.name
-              void saveSceneOverrides(setSceneOverride(useSceneStore.getState().overrides, { from, atSec: it.at, to, requestedAt: localIsoString(new Date()) }))
-                .catch(error => useSceneStore.getState().note({ id: 'scene.occ.failed', params: { message: error instanceof Error ? error.message : String(error) }, error: true }))
-            }}
-            onError={message => useSceneStore.getState().note({ id: 'scene.occ.failed', params: { message }, error: true })} />}
+            onSent={to => { setSent(s => ({ ...s, [k]: true })); setOpen(null); changedFiring((it as OverriddenClip).from ?? it.name, it.at, to) }}
+            onError={changeFailed} />}
         </div>
       })}
     </div>
   </div>
 }
 
+/** After a "Change" request: noted, and the firing is the new event at once (scene-overrides, until re-recorded). */
+export function changedFiring(from: string, atSec: number, to: string) {
+  useSceneStore.getState().note({ id: 'scene.occ.sentStatus', params: { name: from, at: atSec.toFixed(2) } })
+  void saveSceneOverrides(setSceneOverride(useSceneStore.getState().overrides, { from, atSec, to, requestedAt: localIsoString(new Date()) })).catch(error => changeFailed(error instanceof Error ? error.message : String(error)))
+}
+export const changeFailed = (message: string) => useSceneStore.getState().note({ id: 'scene.occ.failed', params: { message }, error: true })
+
 const EVENT_NAME = /^[A-Za-z0-9_.-]{1,80}(:[a-z][a-z0-9_]{0,79})?$/
 
 /** "Change event…": over the rows (absolute; nothing moves). An existing event or a new `cue:variant`, a comment, "Request". */
-function ChangeEventForm({ from, at, table, onSent, onError, onClose }: { from: string; at: number; table: CueTable; onSent: (to: string) => void; onError: (message: string) => void; onClose: () => void }) {
+export function ChangeEventForm({ from, at, table, onSent, onError, onClose }: { from: string; at: number; table: CueTable; onSent: (to: string) => void; onError: (message: string) => void; onClose: () => void }) {
   const { t } = useI18n()
   const listId = useId()
   const [to, setTo] = useState('')

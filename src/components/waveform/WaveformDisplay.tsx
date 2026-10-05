@@ -4,7 +4,7 @@ import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions.esm.js'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { useStartMarker } from '@/utils/editorStartMarker'
 import { encodeWavBlob } from '@/utils/wavIO'
-import { timeAtPixel, zoomAtTime } from '@/utils/waveformView'
+import { timeAtPixel, WHEEL_ZOOM_RATE, wheelPixels, zoomAtTime } from '@/utils/waveformView'
 import { renderSampleWaveform } from '@/utils/editorWaveform'
 import type { SampleRate } from '@/types/waveform'
 import { useI18n } from '@/i18n/I18nProvider'
@@ -116,11 +116,11 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
       const instance = ws.current
       if (!instance) return
       const bounds = element.getBoundingClientRect()
-      const delta = (event.deltaY || event.deltaX) * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? bounds.width : 1)
+      const delta = wheelPixels(event, bounds.width)
       if (event.ctrlKey) {
         const x = Math.max(0, Math.min(bounds.width, event.clientX - bounds.left))
         const time = (instance.getScroll() + x) / Math.max(zoom, bounds.width / duration)
-        const next = Math.min(200000, Math.max(bounds.width / duration, zoom * Math.exp(-delta * .003)))
+        const next = Math.min(200000, Math.max(bounds.width / duration, zoom * Math.exp(-delta * WHEEL_ZOOM_RATE)))
         useWaveformStore.getState().setZoom(next); instance.zoom(next)
         instance.setScrollTime(zoomAtTime(time, x, next, bounds.width, duration))
       } else {

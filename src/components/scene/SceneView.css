@@ -50,6 +50,8 @@
 .scene-item-actions { display: inline-flex; gap: 4px; }
 /* A firing shown as another event until the scene is re-recorded. */
 .scene-overridden { font-style: italic; }
+/* The moment of the firing selected on the timeline / here. */
+.scene-item.picked { outline: 1px solid var(--accent-light); outline-offset: -1px; }
 .scene-item.sel { background: rgba(124,92,191,.22); box-shadow: inset 3px 0 0 var(--accent-light); }
 /* "Change" on a moment: a one-line request over the following rows (nothing moves). */
 .scene-occ-form { position: absolute; left: 12px; right: 12px; top: 100%; z-index: 5; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 4px; padding: 4px; background: var(--bg-secondary); border: 1px solid var(--border-light); border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,.4); }
@@ -101,3 +103,8 @@
 .scene-ramp-steps { display: flex; flex-wrap: wrap; gap: 4px 8px; }
 .scene-ramp-steps label { display: inline-flex; align-items: center; gap: 3px; }
 .scene-ramp-steps .scene-number { width: 52px; }
+/* Timeline: "Change" opened from a marker, over the canvas (nothing moves). */
+.scene-timeline { position: relative; }
+.scene-timeline-change { position: absolute; left: 8px; right: 8px; top: 34px; z-index: 6; }
+.scene-timeline-change .scene-occ-form { position: static; }
+.scene-timeline-canvas:focus { outline: 1px solid var(--accent-light); outline-offset: -1px; }

@@ -34,6 +34,10 @@ export function waveformOutline(buffer: AudioBuffer, bins = 512): string {
   }
   return `M${upper.join(' L')} L${lower.reverse().join(' L')} Z`
 }
+/** Ctrl + wheel zoom per wheel pixel (zoom × e^(−delta × this)); shared by the waveform and the Scene timeline. */
+export const WHEEL_ZOOM_RATE = 0.003
+/** A wheel event's movement in pixels (lines and pages converted). */
+export const wheelPixels = (event: WheelEvent, pageWidth: number) => (event.deltaY || event.deltaX) * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? pageWidth : 1)
 export function zoomAtTime(time: number, x: number, zoom: number, width: number, duration: number) {
   return Math.max(0, Math.min(Math.max(0, duration - width / zoom), time - x / zoom))
 }
