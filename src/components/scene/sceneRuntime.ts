@@ -55,7 +55,10 @@ export class SceneRuntime {
     perfTrack('intervals', 1)
     let prev = useSceneStore.getState()
     this.unsubscribe = useSceneStore.subscribe(state => {
-      if (state.cur !== prev.cur || state.items[state.cur]?.file !== prev.items[prev.cur]?.file || (state.items !== prev.items && !state.items.length)) this.loadItem()
+      // A new moment, another file, or a newly opened recording (a re-opened project revokes the old video URLs, even for
+      // the same file names); not a mere rename of the items (firing overrides), which keeps the video playing.
+      if (state.cur !== prev.cur || state.root !== prev.root || state.recorded !== prev.recorded || state.items[state.cur]?.file !== prev.items[prev.cur]?.file
+        || (state.items !== prev.items && !state.items.length)) this.loadItem()
       if (state.table !== prev.table || state.lib !== prev.lib) this.rebuildLoops()
       prev = state
     })
