@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addClipEntry, addRoute, positionsForCue, assignSound, clipNameFromFile, clipsForCue, encodePcm16Wav, parseCueTable, removeRoute, serializeCueTable, setClipIntensity, setSoundIntensity, setSoundVolume, soundIntensity, materialIntensity, soundNameFromFile, updateRoute, validateCueTable, type CueTableContext } from './sceneCueTable'
+import { positionsForCue, clipsForCue, encodePcm16Wav, parseCueTable, serializeCueTable, setClipIntensity, setSoundIntensity, soundIntensity, materialIntensity, validateCueTable, type CueTableContext } from './sceneCueTable'
 import { sampleLib, sampleTable } from './sceneTestFixtures'
 
 const ctx = (patch: Partial<CueTableContext> = {}): CueTableContext => ({
@@ -39,17 +39,16 @@ describe('scene cue table validation (the demos\' validate())', () => {
   })
 
   it('limits loop-cue positions when the lib has loop_at', () => {
-    const t = updateRoute(sampleTable(), 'feed_loop', 0, { at: 'both' })
+    const t = sampleTable(); t.cues.feed_loop.haptics![0].at = 'both'
     expect(validateCueTable(t, ctx())).toEqual([])
     const lib = { ...sampleLib(), loop_at: ['hand'] }
     expect(validateCueTable(t, ctx({ lib }))).toEqual(['feed_loop: continuous layers allow at = hand'])
     expect(positionsForCue(lib, 'feed_loop')).toEqual(['hand'])
     expect(positionsForCue(lib, 'button')).toEqual(lib.at)
-    expect(addRoute(sampleTable(), { ...sampleLib(), loop_at: ['pos_chest'] }, 'feed_loop')?.cues.feed_loop.haptics![1].at).toBe('pos_chest')
   })
 
   it('requires the WAV of every clip and cue sound', () => {
-    const t = assignSound(sampleTable(), 'grab', 'Whoosh')
+    const t = sampleTable(); t.cues.grab.sfx = { sound: 'Whoosh', volume: 0.6 }
     expect(validateCueTable(t, ctx({ clipFiles: new Set(['click', 'hum']) }))).toEqual([
       'clip thump: Content/Kit/stream-clips/thump.wav missing',
       'grab: Content/Audio/Whoosh.wav missing',
@@ -71,39 +70,11 @@ describe('scene cue table validation (the demos\' validate())', () => {
 })
 
 describe('scene cue table edits', () => {
-  it('edits immutably and clamps values', () => {
+  it('clamps a clip intensity and lists the clips that fit a cue', () => {
     const t = sampleTable()
-    const a = updateRoute(t, 'button', 0, { gain: 5, at: 'both' })
-    expect(a.cues.button.haptics![0]).toEqual({ clip: 'click', at: 'both', gain: 2 })
-    expect(t.cues.button.haptics![0].gain).toBe(1)
     expect(setClipIntensity(t, 'click', -1).clips.click.intensity).toBe(0)
-    expect(setSoundVolume(t, 'button', 1.5).cues.button.sfx).toEqual({ sound: 'Click', volume: 1.5 })
-    expect(removeRoute(t, 'button', 0).cues.button.haptics).toEqual([])
-  })
-
-  it('adds routes with a clip that fits the cue', () => {
-    const lib = sampleLib()
-    expect(addRoute(sampleTable(), lib, 'grab')?.cues.grab.haptics).toEqual([{ clip: 'click', at: 'hand', gain: 1 }])
-    expect(addRoute(sampleTable(), lib, 'feed_loop')?.cues.feed_loop.haptics![1].clip).toBe('hum')
-    const noLoops = sampleTable(); delete noLoops.clips.hum
-    expect(addRoute(noLoops, lib, 'feed_loop')).toBeNull()
-    expect(clipsForCue(sampleTable(), lib, 'button')).toEqual(['click', 'thump'])
-  })
-
-  it('keeps the volume when a sound is swapped and defaults it to 0.6', () => {
-    expect(assignSound(sampleTable(), 'button', 'Bell').cues.button.sfx).toEqual({ sound: 'Bell', volume: 0.6 })
-    const t = setSoundVolume(sampleTable(), 'button', 1.2)
-    expect(assignSound(t, 'button', 'Bell').cues.button.sfx).toEqual({ sound: 'Bell', volume: 1.2 })
-    expect(assignSound(t, 'button', null).cues.button.sfx).toBeNull()
-  })
-
-  it('derives clip / sound names from dropped files', () => {
-    expect(clipNameFromFile('My Hit 01.WAV', new Set(['my_hit_01']), '^[a-z][a-z0-9_-]*$')).toBe('my_hit_01_2')
-    expect(clipNameFromFile('123.wav', new Set(), '^[a-z][a-z0-9_-]*$')).toBe('clip')
-    expect(clipNameFromFile('a.wav', new Set(), '^b')).toBeNull()
-    expect(soundNameFromFile('door-slam.wav', new Set(), '^[A-Za-z][A-Za-z0-9_]*$')).toBe('door_slam')
-    const t = addClipEntry(sampleTable(), 'new_hit', false, 'New Hit.wav')
-    expect(t.clips.new_hit).toEqual({ intensity: 1, loop: false, description: 'Imported from New Hit.wav' })
+    expect(t.clips.click.intensity).toBe(1)
+    expect(clipsForCue(sampleTable(), sampleLib(), 'button')).toEqual(['click', 'thump'])
   })
 
   it('round-trips the table text like the standalone viewer writes it', () => {

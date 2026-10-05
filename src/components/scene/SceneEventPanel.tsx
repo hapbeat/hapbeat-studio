@@ -9,7 +9,7 @@ import {
 } from '@/utils/cueEvents'
 import { sceneSegment } from '@/utils/sceneSegments'
 import { MaterialList } from '@/components/waveform/MaterialList'
-import { NumberField, useAtLabel } from './SceneCuePanels'
+import { CuePicker, NumberField, useAtLabel } from './SceneCuePanels'
 import { useScene } from './sceneContext'
 
 type Edit = (change: (tb: CueTable) => CueTable | null) => boolean
@@ -38,13 +38,14 @@ export function SceneEventPanel() {
   if (!table || !lib) return <div className="scene-panel-empty">{t('scene.noProject')}</div>
   const resolved = sel ? resolveEventName(table, sel.name) : null
   const e = resolved ? effectiveEvent(table, resolved.ref) : null
-  if (!resolved || !e) return <div className="scene-panel-empty">{t('scene.selectCue')}</div>
+  if (!resolved || !e) return <div className="scene-cue-panel scene-event"><CuePicker /><div className="scene-panel-empty">{t('scene.selectCue')}</div></div>
   const key = eventKey(e.ref), loop = isLoopCue(lib, e.ref.cue)
   const edit: Edit = change => useSceneStore.getState().edit(change)
   const select = (name: string) => useSceneStore.getState().selectCue(name, sel?.t ?? null)
   const sound = e.sfx ? sfxSounds(e.sfx)[0] : undefined
   const run = data ? sceneSegment(data.full.events, [key], (sound && useSceneStore.getState().sfx[sound]?.duration) || 1) : null
   return <div className="scene-cue-panel scene-event">
+    <CuePicker />
     <div className="scene-sec">
       <Variants table={table} e={e} select={select} edit={edit} />
       {e.ref.variant !== null && <VariantScale e={e} edit={edit} />}

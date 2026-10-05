@@ -12,7 +12,6 @@ export interface SceneShared {
   /** Asks before unsaved cue-table edits are dropped; true = go ahead. */
   confirmDiscard: () => Promise<boolean>
   /** Opens a file picker for one WAV. */
-  pickWav: () => Promise<File | null>
 }
 
 export const SceneContext = createContext<SceneShared | null>(null)

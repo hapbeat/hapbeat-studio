@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { MessageId, MessageParams } from '@/i18n/messages'
 import { loadDirectoryHandle, saveDirectoryHandle } from '@/utils/localDirectory'
 import { buildItems, VIEWER_DIR, type SceneData, type SceneItem, type SceneLib } from '@/utils/sceneData'
-import { addClipEntry, clipNameFromFile, encodePcm16Wav, soundNameFromFile, validateCueTable, type CueTable } from '@/utils/sceneCueTable'
+import { validateCueTable, type CueTable } from '@/utils/sceneCueTable'
 import { listWavs, openSceneProject, readProjectFile, readSceneTable, writeProjectFile, writeSceneSave, type PendingWavs } from '@/utils/sceneProject'
 import { CueTableSync } from '@/utils/cueTableSync'
 import { pageVisible, perfTrack } from '@/utils/perfRegistry'
@@ -61,8 +61,6 @@ interface SceneState {
   select: (index: number) => void
   selectCue: (name: string, t: number | null) => void
   edit: (change: (table: CueTable) => CueTable | null) => boolean
-  addClip: (file: File, loop: boolean) => Promise<string | null>
-  addSound: (file: File) => Promise<string | null>
   /** Saves pending edits now (they are saved 300 ms after the last edit anyway). */
   save: () => Promise<void>
   /** The last automatic save failed (an invalid table or a write error); shown until a save works. */
@@ -314,34 +312,6 @@ export const useSceneStore = create<SceneState>((set, get) => {
       return true
     },
 
-    addClip: async (file, loop) => {
-      const { table, lib, clipFiles } = get()
-      if (!table || !lib) return null
-      const name = clipNameFromFile(file.name, new Set([...Object.keys(table.clips), ...clipFiles]), lib.clip_name)
-      if (!name) { note({ id: 'scene.wav.badClipName', params: { file: file.name }, error: true }); return null }
-      let data: Float32Array
-      try { data = mono(await decode(await file.arrayBuffer(), RATE)) } catch { note({ id: 'scene.wav.unreadable', params: { file: file.name }, error: true }); return null }
-      set(s => ({ pcm: { ...s.pcm, [name]: data }, pending: { ...s.pending, clips: { ...s.pending.clips, [name]: encodePcm16Wav(data, RATE, 1) } },
-        table: s.table && addClipEntry(s.table, name, loop, file.name), dirty: true }))
-      scheduleSave()
-      note({ id: 'scene.wav.clipAdded', params: { name, seconds: (data.length / RATE).toFixed(2) } })
-      return name
-    },
-    addSound: async file => {
-      const { lib, soundFiles } = get()
-      if (!lib) return null
-      const name = soundNameFromFile(file.name, new Set([...soundFiles, ...lib.loop_sounds]), lib.sound_name)
-      if (!name) { note({ id: 'scene.wav.badSoundName', params: { file: file.name }, error: true }); return null }
-      let b: AudioBuffer
-      try { b = await decode(await file.arrayBuffer(), 48000) } catch { note({ id: 'scene.wav.unreadable', params: { file: file.name }, error: true }); return null }
-      const ch = b.numberOfChannels, inter = new Float32Array(b.length * ch)
-      for (let c = 0; c < ch; c++) { const d = b.getChannelData(c); for (let i = 0; i < b.length; i++) inter[i * ch + c] = d[i] }
-      set(s => ({ sfx: { ...s.sfx, [name]: b }, pending: { ...s.pending, sounds: { ...s.pending.sounds, [name]: encodePcm16Wav(inter, 48000, ch) } },
-        soundFiles: [...s.soundFiles, name].sort(), dirty: true }))
-      scheduleSave()
-      note({ id: 'scene.wav.soundAdded', params: { name, dir: lib.paths.sounds } })
-      return name
-    },
 
     save: async () => {
       if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }

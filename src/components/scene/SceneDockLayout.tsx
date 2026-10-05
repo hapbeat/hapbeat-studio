@@ -6,15 +6,17 @@ import { useSceneSettings } from '@/stores/sceneSettings'
 import { SceneVideoPanel } from './SceneVideoPanel'
 import { SceneTimelinePanel } from './SceneTimelinePanel'
 import { SceneMomentsPanel } from './SceneMomentsPanel'
-import { SceneHapticsPanel, SceneSoundPanel } from './SceneCuePanels'
 import { SceneProjectPanel } from './SceneProjectPanel'
 import { SceneEventPanel } from './SceneEventPanel'
+import { withoutDockPanels } from '@/utils/dockPanels'
 
-export const SCENE_PANELS = ['video', 'timeline', 'moments', 'haptics', 'sound', 'event', 'project'] as const
+export const SCENE_PANELS = ['video', 'timeline', 'moments', 'event', 'project'] as const
+/** Panels of earlier Studios, dropped from saved layouts (the old per-cue Haptics / Sound panels: the Event panel edits materials). */
+const REMOVED_PANELS = ['haptics', 'sound']
 export type ScenePanelId = typeof SCENE_PANELS[number]
 export const SCENE_PANEL_TITLES: Record<ScenePanelId, MessageId> = {
   video: 'scene.panel.video', timeline: 'scene.panel.timeline', moments: 'scene.panel.moments',
-  haptics: 'scene.panel.haptics', sound: 'scene.panel.sound', event: 'scene.panel.event', project: 'scene.panel.project',
+  event: 'scene.panel.event', project: 'scene.panel.project',
 }
 type Translate = (id: MessageId, params?: Record<string, string | number>) => string
 
@@ -23,8 +25,6 @@ const COMPONENTS: Record<ScenePanelId, FunctionComponent<IDockviewPanelProps>> =
   video: () => <SceneVideoPanel />,
   timeline: () => <SceneTimelinePanel />,
   moments: () => <SceneMomentsPanel />,
-  haptics: () => <SceneHapticsPanel />,
-  sound: () => <SceneSoundPanel />,
   event: () => <SceneEventPanel />,
   project: () => <SceneProjectPanel />,
 }
@@ -38,10 +38,8 @@ function addPanel(api: DockviewApi, id: ScenePanelId, t: Translate, inactive = f
     case 'video': return api.addPanel({ ...base, ...(near('timeline', 'above') ?? {}) })
     case 'timeline': return api.addPanel({ ...base, ...(near('video', 'below') ?? { position: { direction: 'below' } }), initialHeight: 210 })
     case 'moments': return api.addPanel({ ...base, position: { direction: 'left' }, initialWidth: 270 })
-    case 'haptics': return api.addPanel({ ...base, ...(near('sound', 'above') ?? { position: { direction: 'right' } }), initialWidth: 420 })
-    case 'sound': return api.addPanel({ ...base, ...(near('haptics', 'below') ?? { position: { direction: 'right' } }), initialWidth: 420 })
-    case 'event': return api.addPanel({ ...base, ...(near('sound', 'within') ?? near('haptics', 'within') ?? { position: { direction: 'right' } }), initialWidth: 420 })
-    case 'project': return api.addPanel({ ...base, ...(near('sound', 'within') ?? near('haptics', 'within') ?? { position: { direction: 'right' } }), initialWidth: 420 })
+    case 'event': return api.addPanel({ ...base, ...(near('project', 'within') ?? { position: { direction: 'right' } }), initialWidth: 420 })
+    case 'project': return api.addPanel({ ...base, ...(near('event', 'within') ?? { position: { direction: 'right' } }), initialWidth: 420 })
   }
 }
 
@@ -50,9 +48,7 @@ export function buildDefaultSceneLayout(api: DockviewApi, t: Translate) {
   addPanel(api, 'video', t)
   addPanel(api, 'timeline', t)
   addPanel(api, 'moments', t)
-  addPanel(api, 'haptics', t)
-  addPanel(api, 'sound', t)
-  addPanel(api, 'event', t, true)
+  addPanel(api, 'event', t)
   addPanel(api, 'project', t, true)
   api.getPanel('video')?.api.setActive()
 }
@@ -68,7 +64,7 @@ const savedLayout = (api: DockviewApi): Record<string, unknown> => ({ ...(api.to
 function applySavedLayout(api: DockviewApi, layout: Record<string, unknown> | null, t: Translate): boolean {
   if (!layout) { buildDefaultSceneLayout(api, t); return true }
   try {
-    api.fromJSON(layout as unknown as Parameters<DockviewApi['fromJSON']>[0])
+    api.fromJSON(withoutDockPanels(layout, REMOVED_PANELS) as unknown as Parameters<DockviewApi['fromJSON']>[0])
     if (!api.panels.length) buildDefaultSceneLayout(api, t)
     // Panels added in a later Studio (not known when the layout was saved) join it once; a panel the user closed stays closed.
     const known = Array.isArray(layout.knownPanels) ? layout.knownPanels as string[] : SCENE_PANELS.filter(id => id !== 'event')

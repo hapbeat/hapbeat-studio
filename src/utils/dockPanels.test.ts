@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { showDockPanel } from './dockPanels'
+import { showDockPanel, withoutDockPanels } from './dockPanels'
 
 /**
  * Regression: Space / ▶ in the AI trials panel scrolled it to the top, because
@@ -18,5 +18,22 @@ describe('showDockPanel', () => {
     const panel = { api: { isVisible: false, setActive: vi.fn() } }
     expect(showDockPanel(panel)).toBe(true)
     expect(panel.api.setActive).toHaveBeenCalledOnce()
+  })
+})
+
+describe('withoutDockPanels (panels a later Studio removed)', () => {
+  const leaf = (id: string, views: string[], activeView = views[0]) => ({ type: 'leaf', data: { id, views, activeView }, size: 100 })
+  const saved = {
+    grid: { root: { type: 'branch', data: [leaf('g1', ['video']), { type: 'branch', data: [leaf('g2', ['haptics']), leaf('g3', ['sound', 'event', 'project'], 'sound')], size: 400 }], size: 800 }, width: 1200, height: 800, orientation: 'HORIZONTAL' },
+    panels: { video: { id: 'video' }, haptics: { id: 'haptics' }, sound: { id: 'sound' }, event: { id: 'event' }, project: { id: 'project' } },
+    activeGroup: 'g3', knownPanels: ['video', 'haptics', 'sound', 'event', 'project'],
+  }
+  it('drops the old Haptics / Sound panels, their emptied group, and keeps the rest', () => {
+    const out = withoutDockPanels(saved, ['haptics', 'sound']) as typeof saved
+    expect(Object.keys(out.panels)).toEqual(['video', 'event', 'project'])
+    const inner = (out.grid.root.data[1] as { data: { data: { views: string[]; activeView: string } }[] }).data
+    expect(inner).toHaveLength(1)
+    expect(inner[0].data).toMatchObject({ views: ['event', 'project'], activeView: 'event' })
+    expect(withoutDockPanels(out, ['haptics', 'sound'])).toBe(out) // nothing left to drop
   })
 })

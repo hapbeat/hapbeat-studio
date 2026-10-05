@@ -20,15 +20,6 @@ import { SceneTopBar } from './SceneTopBar'
 import '@/components/waveform/WaveformEditor.css'
 import './SceneView.css'
 
-function pickWavFile(): Promise<File | null> {
-  return new Promise(resolve => {
-    const input = document.createElement('input')
-    input.type = 'file'; input.accept = '.wav,audio/*'
-    input.onchange = () => resolve(input.files?.[0] ?? null)
-    input.click()
-  })
-}
-
 /**
  * Scene tab: check and edit a game project's haptic / sound cue assignment
  * against its recorded gameplay (the haptic authoring viewer, inside Studio).
@@ -122,7 +113,7 @@ export function SceneView({ active }: { active: boolean }) {
   }, [active, runtime])
   useEffect(() => useSceneSettings.subscribe((s, prev) => { if (s.loop !== prev.loop) runtime.applyLoop() }), [runtime])
 
-  const shared: SceneShared = { runtime, active, helperConnected: isConnected, devices: targetDevices, confirmDiscard, pickWav: pickWavFile }
+  const shared: SceneShared = { runtime, active, helperConnected: isConnected, devices: targetDevices, confirmDiscard }
   const shownNotice = notice ? { text: t(notice.id, notice.params), error: !!notice.error } : layoutNotice ? { text: layoutNotice, error: true } : null
   return <SceneContext.Provider value={shared}>
     <div className="waveform-editor scene-view" data-dirty={dirty || undefined}

@@ -244,46 +244,7 @@ export function pairedProblem(sfx: CueSfx | null, routes: readonly CueRoute[]): 
 
 // ── Edits ──
 
-const clone = (table: CueTable): CueTable => structuredClone(table)
 export const clampNumber = (value: number, lo: number, hi: number) => Number.isFinite(value) ? Math.max(lo, Math.min(hi, value)) : lo
-
-export function updateRoute(table: CueTable, cue: string, index: number, patch: Partial<CueRoute>): CueTable {
-  const next = clone(table), route = next.cues[cue].haptics?.[index]
-  if (!route) return next
-  Object.assign(route, patch)
-  // A single clip replaces a multi-clip list (exactly one of clip / clips).
-  if (patch.clip !== undefined) delete route.clips
-  if (patch.gain !== undefined) route.gain = clampNumber(patch.gain, 0, 2)
-  return next
-}
-
-/** Adds a route with the first clip that fits the cue (null when the table has none). */
-export function addRoute(table: CueTable, lib: SceneLib, cue: string, clip?: string): CueTable | null {
-  const chosen = clip ?? Object.keys(table.clips).find(c => table.clips[c].loop === isLoopCue(lib, cue))
-  if (!chosen) return null
-  const next = clone(table), positions = positionsForCue(lib, cue)
-  ;(next.cues[cue].haptics ??= []).push({ clip: chosen, at: positions.includes('hand') ? 'hand' : positions[0] ?? 'hand', gain: 1.0 })
-  return next
-}
-
-export function removeRoute(table: CueTable, cue: string, index: number): CueTable {
-  const next = clone(table)
-  next.cues[cue].haptics?.splice(index, 1)
-  return next
-}
-
-/** Sets or clears a cue's sound; a new assignment keeps the previous volume (0.6 when there was none). */
-export function assignSound(table: CueTable, cue: string, sound: string | null): CueTable {
-  const next = clone(table), entry = next.cues[cue]
-  entry.sfx = sound ? { sound, volume: entry.sfx ? entry.sfx.volume : 0.6 } : null
-  return next
-}
-
-export function setSoundVolume(table: CueTable, cue: string, volume: number): CueTable {
-  const next = clone(table), sfx = next.cues[cue].sfx
-  if (sfx) sfx.volume = clampNumber(volume, 0, 2)
-  return next
-}
 
 /** Sets a sound's base level (adds its `sounds` entry). */
 // Intensity setters share every untouched part (cues stay the same object): a strength change re-resolves nothing that reads only the cues.
@@ -292,33 +253,6 @@ export function setSoundIntensity(table: CueTable, sound: string, intensity: num
 }
 export function setClipIntensity(table: CueTable, clip: string, intensity: number): CueTable {
   return { ...table, clips: { ...table.clips, [clip]: { ...table.clips[clip], intensity: clampNumber(intensity, 0, 1) } } }
-}
-
-export function addClipEntry(table: CueTable, name: string, loop: boolean, sourceFile: string): CueTable {
-  const next = clone(table)
-  next.clips[name] = { intensity: 1.0, loop, description: `Imported from ${sourceFile}` }
-  return next
-}
-
-/** `base`, else `base_2`, `base_3`… not in `taken`. */
-export function uniqueName(base: string, taken: Set<string>): string {
-  let name = base, k = 2
-  while (taken.has(name)) name = `${base}_${k++}`
-  return name
-}
-
-/** Clip name from a dropped file (lower-case, contracts event-id file-name characters), or null when it breaks lib.clip_name. */
-export function clipNameFromFile(fileName: string, taken: Set<string>, pattern: string): string | null {
-  const base = fileName.replace(/\.[^.]*$/, '').toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^[^a-z]+/, '') || 'clip'
-  const name = uniqueName(base, taken)
-  return new RegExp(pattern).test(name) ? name : null
-}
-
-/** Sound name from a dropped file (engine asset name characters), or null when it breaks lib.sound_name. */
-export function soundNameFromFile(fileName: string, taken: Set<string>, pattern: string): string | null {
-  const base = fileName.replace(/\.[^.]*$/, '').replace(/[^A-Za-z0-9_]+/g, '_').replace(/^[^A-Za-z]+/, '') || 'Sfx'
-  const name = uniqueName(base, taken)
-  return new RegExp(pattern).test(name) ? name : null
 }
 
 /** Interleaved float samples → PCM16 WAV (the viewer's writer: clips 16 kHz mono, sounds 48 kHz). */
