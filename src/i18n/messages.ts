@@ -1247,6 +1247,8 @@ export const messages = defineMessages({
   'editor.adjusting': { ja: 'イベント: {event} · {file}（調整中）', en: 'Event: {event} · {file} (adjusting)' },
   'events.request.send': { ja: '依頼する', en: 'Request' },
   'editor.intensity': { ja: '強さ', en: 'Strength' },
+  'editor.agent.intensityHapticHint': { ja: 'この候補にちょうど良い強さ（0〜1、既定 1）。動かすと試聴のデバイスへの強さがその場で変わり、評価に保存されます（1 のときは書きません）。イベントに入れるときもこの強さを引き継ぎます', en: 'The strength that suits this candidate (0–1, default 1). Moving it changes the audition’s strength on the devices at once; it is saved in the rating (not written when 1) and carried over when the candidate goes to an event.' },
+  'editor.agent.intensitySoundHint': { ja: 'この候補にちょうど良い強さ（0〜1、既定 1）。動かすと試聴の PC の音量がその場で変わり、評価に保存されます（1 のときは書きません）。イベントに入れるときもこの強さを引き継ぎます', en: 'The strength that suits this candidate (0–1, default 1). Moving it changes the audition’s PC volume at once; it is saved in the rating (not written when 1) and carried over when the candidate goes to an event.' },
   'editor.intensityHint': { ja: 'この素材の基準の強さ（intensity、0〜1）。cue 表に保存され、ゲームでは WAV × 強さ × 場面の倍率で鳴ります。WAV は形だけを持ち、常にフルスケールで書かれます', en: 'This material’s base strength (intensity, 0–1), saved in the cue table; the game plays WAV × strength × scene multiplier. The WAV holds only the shape, always at full scale.' },
   'editor.gainNotStrength': { ja: '強さは「調整」の強さスライダーで変えてください。ゲインは形の調整用（書き戻すときにフルスケールへ正規化されます）', en: 'Change strength with the Adjust strength slider; gain is for the shape (written back normalized to full scale).' },
   'scene.event.paired': { ja: '音と触覚を組にする', en: 'Pair sounds and haptics' },

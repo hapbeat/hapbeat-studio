@@ -57,6 +57,9 @@ interface EventState {
   /** The strength slider being moved: applied to the playback gain and the drawing at once, saved debounced. */
   liveLevel: LiveLevel | null
   setLiveLevel: (level: LiveLevel | null) => void
+  /** Strengths kept outside the cue table by `levelKey`: the AI candidates' rating form values (unsaved ones too). */
+  levels: Record<string, number>
+  setLevels: (levels: Record<string, number>) => void
   select: (key: string | null) => void
   /** Shows an event material in the waveform panel (ends an AI audition). */
   showPreview: (preview: EventPreview) => void
@@ -78,6 +81,8 @@ export const OPEN_TAB_EVENT = 'studio:open-tab'
 export const useEventStore = create<EventState>((set, get) => ({
   selected: null, focusRequest: 0, decide: null, scenePicks: {}, preview: null, liveLevel: null, sceneOccurrences: null,
   setLiveLevel: liveLevel => set({ liveLevel }),
+  levels: {},
+  setLevels: levels => { const s = get().levels; if (Object.entries(levels).some(([k, v]) => s[k] !== v)) set({ levels: { ...s, ...levels } }) },
   openInScene: key => {
     set({ sceneOccurrences: key })
     if (key) window.dispatchEvent(new CustomEvent(OPEN_TAB_EVENT, { detail: 'scene' }))

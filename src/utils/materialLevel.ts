@@ -15,8 +15,12 @@ export function peakOf(channels: readonly Float32Array[]): number {
 /** The gain that brings `peak` to the material peak (1 for silence). */
 export const normalizeGain = (peak: number) => peak > 0 ? MATERIAL_PEAK / peak : 1
 
-/** A new material from an AI candidate / clip: written normalized, its original size kept as the intensity (≤ 1). */
-export const intensityForPeak = (peak: number) => Math.min(1, peak / MATERIAL_PEAK)
+/**
+ * A new material from an AI candidate / clip: written normalized, its original size kept as the intensity —
+ * the normalization correction (peak / MATERIAL_PEAK) × the strength the rating chose (`rated`, an AI candidate's
+ * rating `intensity`; 1 otherwise), capped at 1.
+ */
+export const intensityForPeak = (peak: number, rated = 1) => Math.min(1, peak / MATERIAL_PEAK * rated)
 
 /**
  * An adjusted material written back after its chain changed: the render (`peak`) is normalized again, and the

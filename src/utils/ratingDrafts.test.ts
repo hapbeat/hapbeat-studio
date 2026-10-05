@@ -16,14 +16,15 @@ describe('rating drafts', () => {
   it('round-trips a form and re-checks every field', () => {
     const form = ratingToForm(trial, null)
     form.comment = 'B is closest'
-    form.candidates.A = { overall: 4, termMatch: { どしん: -1 }, directions: { weight: 1 }, comment: 'heavier', useRange: [[0.1, 0.4]], verdict: 'maybe', useFor: 'idle growl' }
+    form.candidates.A = { overall: 4, termMatch: { どしん: -1 }, directions: { weight: 1 }, comment: 'heavier', useRange: [[0.1, 0.4]], verdict: 'maybe', useFor: 'idle growl', intensity: 0.7 }
     const draft = parseRatingDraft(serializeRatingDraft('t-1', form, '2026-10-05T10:00:00+09:00'), trial)
     expect(draft?.form).toEqual(form)
     const messy = JSON.parse(serializeRatingDraft('t-1', form, '2026-10-05T10:00:00+09:00'))
-    messy.form.candidates.A.overall = 9; messy.form.candidates.A.termMatch = { other: 1 }; messy.form.best = 'Z'; messy.form.candidates.Z = {}
+    messy.form.candidates.A.overall = 9; messy.form.candidates.A.intensity = 3; messy.form.candidates.A.termMatch = { other: 1 }; messy.form.best = 'Z'; messy.form.candidates.Z = {}
     const cleaned = parseRatingDraft(JSON.stringify(messy), trial)!
     expect(cleaned.form.candidates.A.overall).toBeNull()
     expect(cleaned.form.candidates.A.termMatch).toEqual({})
+    expect(cleaned.form.candidates.A.intensity).toBe(1)
     expect(Object.keys(cleaned.form.candidates)).toEqual(['A', 'B'])
     expect(parseRatingDraft(serializeRatingDraft('other', form, 'x'), trial)).toBeNull()
     expect(parseRatingDraft('{', trial)).toBeNull()

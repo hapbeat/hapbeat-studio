@@ -93,6 +93,8 @@ export interface CandidateRating {
   verdict?: Verdict
   /** What it is good for ("idle growl", "on the out-breath"), ≤ 200 characters. */
   useFor?: string
+  /** The strength the user tried and chose for this candidate (0..1; absent = 1): rendered audio × intensity is the wanted level. */
+  intensity?: number
 }
 export const VERDICTS = ['use', 'maybe', 'no'] as const
 export type Verdict = typeof VERDICTS[number]
@@ -224,6 +226,7 @@ export function ratingError(rating: RatingBody, trial: TrialRequest, dimensionId
     if (r.useRange !== undefined) { const error = useRangeError(r.useRange); if (error) return `${cid}: ${error}` }
     if (r.verdict !== undefined && !(VERDICTS as readonly unknown[]).includes(r.verdict)) return `${cid}: verdict must be use, maybe or no`
     if (!optString(r.useFor, 200)) return `${cid}: useFor must be a string of at most 200 characters`
+    if (r.intensity !== undefined && (typeof r.intensity !== 'number' || !Number.isFinite(r.intensity) || r.intensity < 0 || r.intensity > 1)) return `${cid}: intensity must be a number 0-1`
   }
   return null
 }

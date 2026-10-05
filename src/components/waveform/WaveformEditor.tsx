@@ -145,9 +145,13 @@ export function WaveformEditor({ active }: { active: boolean }) {
     ? repeatBuffer(shownBuffer, plan.targets.map(atSec => ({ atSec, gain: 1, rate: 1 }))) : shownBuffer, [stretched, shownBuffer, plan])
   // The shown material's strength (DEC-086: WAV × intensity): a gain on the PC output and the device stream and a scale
   // of the "edited" drawing, changed live by the strength slider; the buffer is never rendered again for it.
-  const levelKeyShown = eventPreview ? levelKey.material(eventPreview.target, eventPreview.material) : adjusting ? levelKey.material(adjusting.target, adjusting.wav) : null
-  const levelMaterial = eventPreview ? { target: eventPreview.target, wav: eventPreview.material } : adjusting ?? null
-  const savedLevel = useSceneStore(state => levelMaterial && state.table ? materialIntensity(state.table, levelMaterial.target, levelMaterial.wav) : 1)
+  // An AI candidate's comes from its rating form (published by the AI trials panel).
+  const levelKeyShown = audition ? levelKey.candidate(audition.trialId, audition.candidateId)
+    : eventPreview ? levelKey.material(eventPreview.target, eventPreview.material) : adjusting ? levelKey.material(adjusting.target, adjusting.wav) : null
+  const levelMaterial = audition ? null : eventPreview ? { target: eventPreview.target, wav: eventPreview.material } : adjusting ?? null
+  const materialLevel = useSceneStore(state => levelMaterial && state.table ? materialIntensity(state.table, levelMaterial.target, levelMaterial.wav) : 1)
+  const candidateLevel = useEventStore(state => audition ? state.levels[levelKey.candidate(audition.trialId, audition.candidateId)] ?? 1 : 1)
+  const savedLevel = audition ? candidateLevel : materialLevel
   const liveLevel = useEventStore(state => levelKeyShown && state.liveLevel?.key === levelKeyShown ? state.liveLevel.value : null)
   // "Original" is the file as it is: drawn and played without it.
   const level = levelKeyShown && !original ? liveLevel ?? savedLevel : 1

@@ -9,6 +9,10 @@ describe('material levels (DEC-086)', () => {
     expect(normalizeGain(0.472) * 0.472).toBeCloseTo(MATERIAL_PEAK)
     expect(intensityForPeak(0.472)).toBeCloseTo(0.5)
     expect(intensityForPeak(1)).toBe(1)
+    // × the rated strength of an AI candidate, capped at 1.
+    expect(intensityForPeak(0.472, 0.5)).toBeCloseTo(0.25)
+    expect(intensityForPeak(1, 0.8)).toBeCloseTo(0.8 / 0.944, 2)
+    expect(intensityForPeak(1, 0.95)).toBe(1)
     expect(normalizeGain(0)).toBe(1)
   })
 

@@ -49,15 +49,20 @@ describe('rating form', () => {
 
   it('omits unrated candidates and unset fields, and passes protocol validation', () => {
     const form = ratingToForm(trial, null, { device: 'Band 1', position: '', deviceWiper: '96', volumeLabel: '', note: '' })
-    form.candidates.A = { overall: 4, termMatch: { ごわごわ: -1 }, directions: { roughness: 1 }, comment: '  ok  ', useRange: [], verdict: 'use', useFor: '' }
+    form.candidates.A = { overall: 4, termMatch: { ごわごわ: -1 }, directions: { roughness: 1 }, comment: '  ok  ', useRange: [], verdict: 'use', useFor: '', intensity: 0.5 }
     form.context.position = ' neck '
     const body = formToRating(form, trial, '2026-09-29T15:42:00+09:00')
     expect(body).toEqual({
       format: 'hapbeat-rating@1', trialId: 't1', ratedAt: '2026-09-29T15:42:00+09:00',
       context: { device: 'Band 1', position: 'neck', deviceWiper: 96 }, best: 'A',
-      candidates: { A: { overall: 4, termMatch: { ごわごわ: -1 }, directions: { roughness: 1 }, comment: 'ok', verdict: 'use' } },
+      candidates: { A: { overall: 4, termMatch: { ごわごわ: -1 }, directions: { roughness: 1 }, comment: 'ok', verdict: 'use', intensity: 0.5 } },
     })
     expect(ratingError(body, trial, ['roughness'])).toBeNull()
+    // The strength: written only when not 1, 0..1.
+    form.candidates.A.intensity = 1
+    expect(formToRating(form, trial, body.ratedAt).candidates.A.intensity).toBeUndefined()
+    expect(ratingError({ ...body, candidates: { A: { overall: 4, intensity: 1.5 } } }, trial, [])).toMatch(/intensity/)
+    expect(ratingToForm(trial, body).candidates.A.intensity).toBe(0.5)
   })
 
   it('round-trips a saved rating and prefers its context over the remembered one', () => {

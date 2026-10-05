@@ -4,8 +4,7 @@ import { useEditorSettings } from '@/stores/editorSettings'
 import { useSceneStore } from '@/stores/sceneStore'
 import { materialIntensity, setClipIntensity, setSoundIntensity } from '@/utils/sceneCueTable'
 import { levelKey, useEventStore } from '@/stores/eventStore'
-import { useEffect, useMemo } from 'react'
-import { LevelCommit, levelText } from '@/utils/levelCommit'
+import { LevelSlider } from './LevelSlider'
 import { useI18n } from '@/i18n/I18nProvider'
 import { WaveformDisplay } from './WaveformDisplay'
 import { TransportBar } from './TransportBar'
@@ -78,27 +77,13 @@ export function WaveformPanel() {
 }
 
 /**
- * The strength of the shown event material (DEC-086): its intensity (0..1, dB shown too), always available (no "Adjust"
- * needed). A move applies at once as the playback gain and the drawing scale (the editor reads `liveLevel`); the cue
- * table is written on release or 500 ms after the last move (LevelCommit). The WAV keeps the shape; effects are for the shape.
+ * The strength of the shown event material (DEC-086): its intensity, always available (no "Adjust" needed), written
+ * to the cue table (LevelSlider: live gain and drawing, saved debounced). The WAV keeps the shape; effects are for the shape.
  */
 function IntensitySlider({ target, wav, project }: { target: 'sound' | 'haptic'; wav: string; project?: string }) {
   const { t } = useI18n()
-  const key = levelKey.material(target, wav)
   const saved = useSceneStore(state => state.table && (!project || state.lib?.project_name === project) && (target === 'sound' || state.table.clips[wav]) ? materialIntensity(state.table, target, wav) : null)
-  const live = useEventStore(state => state.liveLevel?.key === key ? state.liveLevel.value : null)
-  const commit = useMemo(() => new LevelCommit(v => {
-    useSceneStore.getState().edit(tb => target === 'haptic' ? (tb.clips[wav] ? setClipIntensity(tb, wav, v) : null) : setSoundIntensity(tb, wav, v))
-    if (useEventStore.getState().liveLevel?.key === key) useEventStore.getState().setLiveLevel(null)
-  }), [key, target, wav])
-  useEffect(() => () => commit.flush(), [commit])
   if (saved === null) return null
-  const value = live ?? saved
-  return <label className="editor-intensity" title={t('editor.intensityHint')}>
-    {t('editor.intensity')}
-    <input type="range" min={0} max={1} step={0.01} value={value} aria-label={t('editor.intensity')}
-      onChange={e => { const v = parseFloat(e.target.value); useEventStore.getState().setLiveLevel({ key, value: v }); commit.input(v) }}
-      onPointerUp={() => commit.flush()} onKeyUp={() => commit.flush()} onBlur={() => commit.flush()} />
-    <span className="editor-intensity-value">{levelText(value)}</span>
-  </label>
+  return <LevelSlider levelKey={levelKey.material(target, wav)} saved={saved} label={t('editor.intensity')} title={t('editor.intensityHint')}
+    onSave={v => useSceneStore.getState().edit(tb => target === 'haptic' ? (tb.clips[wav] ? setClipIntensity(tb, wav, v) : null) : setSoundIntensity(tb, wav, v))} />
 }

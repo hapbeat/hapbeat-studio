@@ -19,6 +19,8 @@ export interface CandidateRatingForm {
   overall: number | null; termMatch: Record<string, number>; directions: Record<string, Direction>; comment: string; useRange: [number, number][]
   /** use / maybe / no (null = not said) and what it is good for. */
   verdict: Verdict | null; useFor: string
+  /** The strength slider (0..1, default 1): the audition's gain; saved as `intensity` when not 1. */
+  intensity: number
 }
 /** Text fields of the conditions; `deviceWiper` is typed only when the helper cannot report it. */
 export interface RatingContextForm { device: string; position: string; deviceWiper: string; volumeLabel: string; note: string }
@@ -28,7 +30,7 @@ export interface RatingForm { context: RatingContextForm; comment: string; candi
 
 export const EMPTY_CONTEXT: RatingContextForm = { device: '', position: '', deviceWiper: '', volumeLabel: '', note: '' }
 
-const emptyCandidate = (): CandidateRatingForm => ({ overall: null, termMatch: {}, directions: {}, comment: '', useRange: [], verdict: null, useFor: '' })
+const emptyCandidate = (): CandidateRatingForm => ({ overall: null, termMatch: {}, directions: {}, comment: '', useRange: [], verdict: null, useFor: '', intensity: 1 })
 
 /** Pre-fills from the saved rating; a trial without a rating starts empty with the remembered context. */
 export function ratingToForm(trial: TrialRequest, rating: RatingBody | null, rememberedContext: RatingContextForm = EMPTY_CONTEXT): RatingForm {
@@ -39,7 +41,7 @@ export function ratingToForm(trial: TrialRequest, rating: RatingBody | null, rem
   const candidates: Record<string, CandidateRatingForm> = {}
   for (const c of trial.candidates) {
     const saved = rating?.candidates[c.id]
-    candidates[c.id] = saved ? { overall: saved.overall ?? null, termMatch: { ...saved.termMatch }, directions: { ...saved.directions }, comment: saved.comment ?? '', useRange: (saved.useRange ?? []).map(r => [r[0], r[1]] as [number, number]), verdict: saved.verdict ?? null, useFor: saved.useFor ?? '' } : emptyCandidate()
+    candidates[c.id] = saved ? { overall: saved.overall ?? null, termMatch: { ...saved.termMatch }, directions: { ...saved.directions }, comment: saved.comment ?? '', useRange: (saved.useRange ?? []).map(r => [r[0], r[1]] as [number, number]), verdict: saved.verdict ?? null, useFor: saved.useFor ?? '', intensity: saved.intensity ?? 1 } : emptyCandidate()
   }
   return { context, comment: rating?.comment ?? '', candidates }
 }
@@ -73,6 +75,7 @@ export function formToRating(form: RatingForm, trial: TrialRequest, ratedAt: str
       // Derived from the overall score (no separate input).
       ...(f.overall !== null ? { verdict: verdictFromOverall(f.overall)! } : {}),
       ...(f.useFor.trim() ? { useFor: f.useFor.trim().slice(0, 200) } : {}),
+      ...(f.intensity !== 1 ? { intensity: Math.round(Math.max(0, Math.min(1, f.intensity)) * 100) / 100 } : {}),
     }
   }
   const context: RatingContext = {}

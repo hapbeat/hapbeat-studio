@@ -2,7 +2,7 @@ import { effectsPending, useWaveformStore } from '@/stores/waveformStore'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useSceneStore, type SceneNotice } from '@/stores/sceneStore'
 import { useEditorSettings } from '@/stores/editorSettings'
-import { type DecideResult, type DecideSource, type DecideTarget } from '@/stores/eventStore'
+import { levelKey, useEventStore, type DecideResult, type DecideSource, type DecideTarget } from '@/stores/eventStore'
 import { resample } from '@/utils/audioDsp'
 import { encodePcm16Wav, isLoopCue } from '@/utils/sceneCueTable'
 import { readProjectFile, writeProjectFile } from '@/utils/sceneProject'
@@ -13,6 +13,17 @@ import { intensityForPeak, normalizeGain, peakOf } from '@/utils/materialLevel'
 import { sameSound } from '@/utils/wavCompare'
 import { appendActivity } from '@/utils/activityLog'
 import { localIsoString } from '@/utils/hapticKnowledge'
+
+/**
+ * The strength the rating chose for an AI candidate (its rating form value, unsaved too, else the saved rating's
+ * `intensity`); 1 for an editor clip. Multiplied into the new material's intensity (intensityForPeak).
+ */
+export function ratedIntensity(source: DecideSource): number {
+  if (source.kind !== 'candidate') return 1
+  const form = useEventStore.getState().levels[levelKey.candidate(source.trialId, source.candidateId)]
+  if (form !== undefined) return form
+  return useAgentTrialStore.getState().trials.find(r => r.trial.id === source.trialId)?.rating?.candidates[source.candidateId]?.intensity ?? 1
+}
 
 /** Cue sounds are written at 48 kHz (the Scene tab's sound writer). */
 export const SOUND_RATE = 48000
@@ -119,7 +130,7 @@ export interface DecisionInput {
   at: string | null
   /** Pre-encoded WAV (the dialog encodes once to suggest a name). */
   wav?: ArrayBuffer
-  /** The intensity of a new material written from `wav` (its size before normalizing). */
+  /** The intensity of a new material written from `wav` (its size before normalizing × the rated strength). */
   intensity?: number
 }
 
@@ -131,10 +142,10 @@ export interface DecisionInput {
  * clip list, and publishes the result (Events panel / trial notices).
  */
 export async function runDecision(input: DecisionInput): Promise<{ ok: true; result: DecideResult } | { ok: false; notice: SceneNotice }> {
-  // Written normalized; the candidate's / clip's own size becomes the new material's intensity (DEC-086).
+  // Written normalized; the candidate's / clip's own size × its rated strength becomes the new material's intensity (DEC-086).
   const encoded = input.wav ? { wav: input.wav, intensity: input.intensity ?? 1 } : await (async () => {
     const m = await encodeMaterial(await decideSourceBuffer(input.source), input.target)
-    return { wav: m.wav, intensity: intensityForPeak(m.peak) }
+    return { wav: m.wav, intensity: intensityForPeak(m.peak, ratedIntensity(input.source)) }
   })()
   const wav = encoded.wav
   const before = useSceneStore.getState()

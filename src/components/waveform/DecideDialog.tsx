@@ -9,7 +9,7 @@ import { useEditorSettings } from '@/stores/editorSettings'
 import { isLoopCue, positionsForCue, soundAllowed } from '@/utils/sceneCueTable'
 import { allEventKeys, defaultAt, effectiveEvent, matchesName, needsRouteForm, overwriteUsers, parseEventKey, sameBytes, trialEvent } from '@/utils/cueEvents'
 import { useAtLabel } from '@/components/scene/SceneCuePanels'
-import { autoWavName, decideSourceBuffer, encodeMaterial, existingWav, runDecision } from './eventDecide'
+import { autoWavName, decideSourceBuffer, encodeMaterial, existingWav, ratedIntensity, runDecision } from './eventDecide'
 import { intensityForPeak } from '@/utils/materialLevel'
 import '@/components/common/ConfirmDialog.css'
 import './EventsPanel.css'
@@ -59,7 +59,7 @@ function DecideForm({ request }: { request: DecideRequest }) {
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
-    void decideSourceBuffer(source).then(b => encodeMaterial(b, target)).then(m => { if (!cancelled) { setWav(m.wav); setIntensity(intensityForPeak(m.peak)) } }, e => { if (!cancelled) setError(message(e)) })
+    void decideSourceBuffer(source).then(b => encodeMaterial(b, target)).then(m => { if (!cancelled) { setWav(m.wav); setIntensity(intensityForPeak(m.peak, ratedIntensity(source))) } }, e => { if (!cancelled) setError(message(e)) })
     return () => { cancelled = true }
   }, [])
   useEffect(() => {
@@ -78,7 +78,7 @@ function DecideForm({ request }: { request: DecideRequest }) {
   }, [wav, name, target])
   const [at, setAt] = useState(() => valid ? defaultAt(lib!, ref.cue) : 'hand')
   useEffect(() => { if (valid) setAt(defaultAt(lib!, ref.cue)) }, [event])
-  /** The new material's intensity (its size before normalizing; DEC-086). */
+  /** The new material's intensity (its size before normalizing × the rated strength; DEC-086). */
   const [intensity, setIntensity] = useState(1)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !busy) close() }

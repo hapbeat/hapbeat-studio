@@ -14,7 +14,8 @@ import { useDeviceStore } from '@/stores/deviceStore'
 import { appendActivity } from '@/utils/activityLog'
 import { useToast } from '@/components/common/Toast'
 import { toFirstPlay } from '@/utils/sceneSegments'
-import { useEventStore } from '@/stores/eventStore'
+import { levelKey, useEventStore } from '@/stores/eventStore'
+import { LevelSlider } from './LevelSlider'
 import { assignEventsForTrial, effectiveEvent, parseEventKey, trialEvent, cueRoutePositions } from '@/utils/cueEvents'
 import { runDecision } from './eventDecide'
 import { isLoopCue } from '@/utils/sceneCueTable'
@@ -304,6 +305,10 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
   /** Every change goes to the draft keeper (memory now, the stores after 300 ms). */
   const edit = (update: (f: RatingForm) => RatingForm) => { const next = update(form); setForm(next); drafts.change(trial.id, next); setDirty(true); setSaveError(null) }
   const editCandidate = (cid: string, patch: Partial<CandidateRatingForm>) => edit(f => ({ ...f, candidates: { ...f.candidates, [cid]: { ...f.candidates[cid], ...patch } } }))
+  // The candidates' strengths (form values, unsaved too) for the audition gain and "→ Event" / auto-assign.
+  useEffect(() => {
+    useEventStore.getState().setLevels(Object.fromEntries(trial.candidates.map(c => [levelKey.candidate(trial.id, c.id), form.candidates[c.id]?.intensity ?? 1])))
+  }, [form, trial])
   const issue = ratingFormIssue(form)
   /** The best candidate becomes the sound / haptic of the trial's events (rating save with "assign on save"). */
   const autoAssign = useEditorSettings(s => s.autoAssignOnRating)
@@ -413,6 +418,10 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
               </button>
               <strong className="agent-short-id" title={t('editor.agent.shortIdHint')}>{record.shortId ? `${record.shortId}-${requested.id}` : requested.id}</strong>
               <span className="agent-card-name" title={[requested.label, requested.hypothesis, requested.method && t(`editor.agent.method.${requested.method}` as MessageId)].filter(Boolean).join('\n')}>{requested.label}</span>
+              {/* The strength (saved in the rating as `intensity`): this candidate's audition gain, live. */}
+              <LevelSlider className="agent-card-level" levelKey={levelKey.candidate(trial.id, requested.id)} saved={form.candidates[requested.id].intensity}
+                label={t('editor.intensity')} title={t(target === 'sound' ? 'editor.agent.intensitySoundHint' : 'editor.agent.intensityHapticHint')}
+                onSave={intensity => { useEventStore.getState().setLevels({ [levelKey.candidate(trial.id, requested.id)]: intensity }); editCandidate(requested.id, { intensity }) }} />
               {/* By hand only (saving the rating assigns automatically): copy into the clip list / assign to the event. */}
               <span className="agent-card-actions">
                 <button type="button" className="agent-icon-btn" disabled={!editorFolder || processing} title={t('editor.agent.toClipHint')} aria-label={t('editor.agent.toClipHint')}

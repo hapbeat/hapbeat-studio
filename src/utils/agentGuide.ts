@@ -182,7 +182,7 @@ From the user's clicks: "Reassign…" on a firing (Scene tab, \`reassign\`), "Re
   "othersSimilar": true,
   "comment": "B is closest; all of them should be heavier",
   "candidates": {
-    "A": { "overall": 3, "verdict": "maybe", "directions": { "roughness": 1, "weight": 0 }, "comment": "…" }
+    "A": { "overall": 3, "verdict": "maybe", "directions": { "roughness": 1, "weight": 0 }, "intensity": 0.6, "comment": "…" }
   },
   "history": []
 }
@@ -195,6 +195,7 @@ From the user's clicks: "Reassign…" on a firing (Scene tab, \`reassign\`), "Re
 - Short ids: Studio numbers trials in reception order (\`T1\`, \`T2\` …; a candidate is \`T27-B\`). They are in \`index.json\`, \`list_trials\` and \`get_trial\` as \`shortId\`; the user refers to trials and candidates by them.
 - \`verdict\`: \`"use"\` / \`"maybe"\` / \`"no"\`, derived from \`overall\` as above; \`useFor\` (optional, ≤ 200 chars, older ratings): what it is good for ("idle growl", "on the out-breath"). Several candidates may be \`"use"\`. There is no "best" input: Studio writes \`best\` = the \`"use"\` candidate with the highest \`overall\` when exactly one has it (absent on a tie or with no \`"use"\`), and, on Save, every \`"use"\` candidate (except free-plan output) is added to the material pool of the first scene cue (see "Receiving ratings"). The order, variants and variation are decided by the user in Studio's Scene tab. When two or more are \`"use"\`, ask the user whether to keep them all as one event's materials (multi-clip route \`clips\` / \`sounds\` with \`variation.pick\`, so each firing varies) or as separate variants (\`cue:variant\`) per \`useFor\`.
 - \`useRange\` (optional): \`[[startSec, endSec], …]\` (1–8) — "use only this part" of the rendered candidate (seconds on its 48 kHz audio, after the effects). In the next trial, keep the candidate's source and effects and append \`{ "type": "trim", "start": startSec, "end": endSec }\` as the last effect (one candidate per range when there are several); for a \`sample\` recipe layer you may instead set \`maxSec\` / \`onsetsSec\`. Say in \`rationale\` that the range came from \`useRange\`.
+- \`intensity\` (optional, 0–1; absent = 1): the strength the user tried and chose for this candidate with its strength slider (the audition's device gain for a haptic trial, the PC volume for a sound trial). The rendered waveform × \`intensity\` is the wanted level: when you make the next candidates, take this strength as the reference (aim for that level rather than guessing louder or quieter). When the candidate goes into an event, Studio writes the material normalized and sets its intensity = (original peak / 0.944) × \`intensity\` (capped at 1).
 - \`context.deviceWiper\`: the device's MCP4018 volume wiper (integer 0–127; same as kit-format \`device_wiper\`) — compare volumes with this. \`volumeLabel\` ("level/steps") is only a human aid: the step count depends on the user's settings. Both may be absent.
 - \`othersSimilar\` (optional, \`true\`): the user judged every other candidate to be about the same as \`best\` and left them unrated. Do not invent scores for them; treat it as a note that the hypothesis axis made little difference.
 - \`history\` holds earlier ratings of the same trial (the user re-rated).
