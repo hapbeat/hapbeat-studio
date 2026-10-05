@@ -37,21 +37,20 @@ describe('rating form', () => {
 
   it('omits unrated candidates and unset fields, and passes protocol validation', () => {
     const form = ratingToForm(trial, null, { device: 'Band 1', position: '', deviceWiper: '96', volumeLabel: '', note: '' })
-    form.candidates.A = { overall: 4, termMatch: { ごわごわ: -1 }, directions: { roughness: 1 }, comment: '  ok  ', useRange: [], verdict: null, useFor: '' }
-    form.best = 'A'
+    form.candidates.A = { overall: 4, termMatch: { ごわごわ: -1 }, directions: { roughness: 1 }, comment: '  ok  ', useRange: [], verdict: 'use', useFor: '' }
     form.context.position = ' neck '
     const body = formToRating(form, trial, '2026-09-29T15:42:00+09:00')
     expect(body).toEqual({
       format: 'hapbeat-rating@1', trialId: 't1', ratedAt: '2026-09-29T15:42:00+09:00',
       context: { device: 'Band 1', position: 'neck', deviceWiper: 96 }, best: 'A',
-      candidates: { A: { overall: 4, termMatch: { ごわごわ: -1 }, directions: { roughness: 1 }, comment: 'ok' } },
+      candidates: { A: { overall: 4, termMatch: { ごわごわ: -1 }, directions: { roughness: 1 }, comment: 'ok', verdict: 'use' } },
     })
     expect(ratingError(body, trial, ['roughness'])).toBeNull()
   })
 
   it('round-trips a saved rating and prefers its context over the remembered one', () => {
     const saved: RatingBody = { format: 'hapbeat-rating@1', trialId: 't1', ratedAt: '2026-09-29T15:42:00+09:00', context: { position: 'wrist' }, best: 'B',
-      candidates: { B: { overall: 2, termMatch: { ざらざら: 1 }, comment: 'harsh' } } }
+      candidates: { B: { overall: 2, termMatch: { ざらざら: 1 }, comment: 'harsh', verdict: 'use' } } }
     const form = ratingToForm(trial, saved, { device: 'other', position: 'neck', deviceWiper: '', volumeLabel: '', note: '' })
     expect(form.context).toEqual({ device: '', position: 'wrist', deviceWiper: '', volumeLabel: '', note: '' })
     expect(form.candidates.A.overall).toBeNull()
@@ -89,16 +88,18 @@ describe('trial kind and rating wording', () => {
     expect(autoRatingContext([], [])).toEqual({ device: '', deviceWiper: null, volumeLabel: '' })
   })
 
-  it('lets "others similar" save with only the best rated, and checks the wiper', () => {
+  it('derives best from a unique top "use" candidate, and checks the wiper', async () => {
+    const { autoBest } = await import('./agentTrialUi')
     const form = ratingToForm(trial, null)
-    form.othersSimilar = true
-    expect(ratingFormIssue(form)).toEqual({ kind: 'similar-needs-best' })
-    form.best = 'A'; form.candidates.A.overall = 4
-    expect(ratingFormIssue(form)).toBeNull()
-    const body = formToRating(form, trial, '2026-09-29T15:42:00+09:00')
-    expect(body.othersSimilar).toBe(true)
-    expect(Object.keys(body.candidates)).toEqual(['A'])
-    expect(ratingError(body, trial, [])).toBeNull()
+    form.candidates.A = { ...form.candidates.A, overall: 4, verdict: 'use' }
+    form.candidates.B = { ...form.candidates.B, overall: 5, verdict: 'maybe' }
+    expect(autoBest(form, ['A', 'B'])).toBe('A')
+    expect(formToRating(form, trial, '2026-09-29T15:42:00+09:00').best).toBe('A')
+    form.candidates.B.verdict = 'use'
+    expect(autoBest(form, ['A', 'B'])).toBe('B')
+    form.candidates.B.overall = 4
+    expect(autoBest(form, ['A', 'B'])).toBeNull() // tie
+    expect(formToRating(form, trial, '2026-09-29T15:42:00+09:00').best).toBeUndefined()
     form.context.deviceWiper = '128'
     expect(ratingFormIssue(form)).toEqual({ kind: 'bad-wiper' })
     expect(parseWiper(' 100 ')).toBe(100)
@@ -133,7 +134,7 @@ describe('verdict / useFor (several usable candidates, best optional)', () => {
     form.candidates.B = { ...form.candidates.B, overall: 3, verdict: 'use' }
     expect(usableCandidates(form)).toEqual(['A', 'B'])
     const body = formToRating(form, trial, '2026-10-05T10:00:00+09:00')
-    expect(body.best).toBeUndefined()
+    expect(body.best).toBe('A') // the unique top "use" (4 > 3)
     expect(body.candidates.A).toMatchObject({ verdict: 'use', useFor: 'idle growl' })
     expect(ratingError(body, trial, [])).toBeNull()
     expect(ratingToForm(trial, body).candidates.A).toMatchObject({ verdict: 'use', useFor: 'idle growl' })

@@ -21,7 +21,8 @@ export interface CandidateRatingForm {
 }
 /** Text fields of the conditions; `deviceWiper` is typed only when the helper cannot report it. */
 export interface RatingContextForm { device: string; position: string; deviceWiper: string; volumeLabel: string; note: string }
-export interface RatingForm { best: string | null; othersSimilar: boolean; context: RatingContextForm; candidates: Record<string, CandidateRatingForm> }
+/** No trial-level "best" input: `best` is derived on save (autoBest). */
+export interface RatingForm { context: RatingContextForm; candidates: Record<string, CandidateRatingForm> }
 
 export const EMPTY_CONTEXT: RatingContextForm = { device: '', position: '', deviceWiper: '', volumeLabel: '', note: '' }
 export const POSITION_SUGGESTIONS = ['neck', 'chest', 'back', 'wrist', 'waist'] as const
@@ -39,16 +40,15 @@ export function ratingToForm(trial: TrialRequest, rating: RatingBody | null, rem
     const saved = rating?.candidates[c.id]
     candidates[c.id] = saved ? { overall: saved.overall, termMatch: { ...saved.termMatch }, directions: { ...saved.directions }, comment: saved.comment ?? '', useRange: (saved.useRange ?? []).map(r => [r[0], r[1]] as [number, number]), verdict: saved.verdict ?? null, useFor: saved.useFor ?? '' } : emptyCandidate()
   }
-  return { best: rating?.best ?? null, othersSimilar: rating?.othersSimilar === true, context, candidates }
+  return { context, candidates }
 }
 
 const touched = (c: CandidateRatingForm) => Object.keys(c.termMatch).length > 0 || Object.keys(c.directions).length > 0 || c.comment.trim() !== '' || c.useRange.length > 0 || c.verdict !== null || c.useFor.trim() !== ''
 
 /** Why the form cannot be saved yet: nothing rated, or a candidate has inputs but no overall score. */
-export function ratingFormIssue(form: RatingForm): { kind: 'none-rated' } | { kind: 'missing-overall'; candidateId: string } | { kind: 'similar-needs-best' } | { kind: 'bad-wiper' } | null {
+export function ratingFormIssue(form: RatingForm): { kind: 'none-rated' } | { kind: 'missing-overall'; candidateId: string } | { kind: 'bad-wiper' } | null {
   const wiper = form.context.deviceWiper.trim()
   if (wiper && parseWiper(wiper) === null) return { kind: 'bad-wiper' }
-  if (form.othersSimilar && (!form.best || form.candidates[form.best]?.overall == null)) return { kind: 'similar-needs-best' }
   const entries = Object.entries(form.candidates)
   const missing = entries.find(([, c]) => c.overall === null && touched(c))
   if (missing) return { kind: 'missing-overall', candidateId: missing[0] }
@@ -57,6 +57,7 @@ export function ratingFormIssue(form: RatingForm): { kind: 'none-rated' } | { ki
 
 /** Builds the rating body. Only candidates with an overall score are included; unset fields are omitted. */
 export function formToRating(form: RatingForm, trial: TrialRequest, ratedAt: string): RatingBody {
+  const best = autoBest(form, trial.candidates.map(c => c.id))
   const candidates: RatingBody['candidates'] = {}
   for (const c of trial.candidates) {
     const f = form.candidates[c.id]
@@ -80,8 +81,7 @@ export function formToRating(form: RatingForm, trial: TrialRequest, ratedAt: str
   return {
     format: RATING_FORMAT, trialId: trial.id, ratedAt,
     ...(Object.keys(context).length ? { context } : {}),
-    ...(form.best && trial.candidates.some(c => c.id === form.best) ? { best: form.best } : {}),
-    ...(form.othersSimilar && form.best ? { othersSimilar: true as const } : {}),
+    ...(best ? { best } : {}),
     candidates,
   }
 }
@@ -160,3 +160,15 @@ export function autoRatingContext(devices: DeviceInfo[], targetIps: string[]): {
 
 /** Candidates the user marked "use": with two or more, the notice suggests asking the agent (several materials with variation, or separate variants). */
 export const usableCandidates = (form: RatingForm) => Object.entries(form.candidates).filter(([, c]) => c.verdict === 'use').map(([id]) => id)
+
+/**
+ * The trial's `best` (kept in hapbeat-rating@1 for compatibility; there is no input for it):
+ * the "use" candidate with the highest overall score, when exactly one has it. Null on a tie or with no "use".
+ */
+export function autoBest(form: RatingForm, ids: readonly string[]): string | null {
+  const usable = ids.filter(id => form.candidates[id]?.verdict === 'use' && form.candidates[id]?.overall != null)
+  if (!usable.length) return null
+  const top = Math.max(...usable.map(id => form.candidates[id].overall!))
+  const leaders = usable.filter(id => form.candidates[id].overall === top)
+  return leaders.length === 1 ? leaders[0] : null
+}

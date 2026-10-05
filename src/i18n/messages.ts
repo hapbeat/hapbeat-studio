@@ -326,8 +326,6 @@ export const messages = defineMessages({
   "editor.agent.autoHint": { ja: "接続中のデバイスから自動で記録します（Devices タブと同じ本体音量）", en: "Recorded automatically from the connected devices (the same body volume as the Devices tab)" },
   "editor.agent.sequenceNote": { ja: "一連の場面（足音の連続など）としてまとめて評価する方式は今後対応予定です。今は候補ごとに評価してください", en: "Rating a repeated series (e.g. consecutive footsteps) as one group is planned. For now, rate each candidate." },
   "editor.agent.comment": { ja: "コメント", en: "Comment" },
-  "editor.agent.best": { ja: "最良の候補", en: "Best candidate" },
-  "editor.agent.bestNone": { ja: "なし", en: "None" },
   "editor.agent.context": { ja: "評価条件", en: "Conditions" },
   "editor.agent.device": { ja: "デバイス", en: "Device" },
   "editor.agent.position": { ja: "装着位置", en: "Position" },
@@ -337,9 +335,6 @@ export const messages = defineMessages({
   "editor.agent.volumeWithSteps": { ja: "ワイパー {wiper}（{steps} 段階の {level}）", en: "Wiper {wiper} (level {level} of {steps})" },
   "editor.agent.deviceWiperOnly": { ja: "ワイパー {wiper}", en: "Wiper {wiper}" },
   "editor.agent.badWiper": { ja: "音量のワイパー値は 0–127 の整数で入力してください。", en: "Enter the volume wiper as an integer 0–127." },
-  "editor.agent.othersSimilar": { ja: "最良以外は最良と大差なし（未評価のまま保存）", en: "Others are about the same as the best (leave them unrated)" },
-  "editor.agent.othersSimilarHint": { ja: "最良の候補だけ評価すれば保存できます。記録のみで、他の候補の点数は推定しません", en: "Only the best candidate needs a rating. Recorded as is; no scores are inferred for the others." },
-  "editor.agent.similarNeedsBest": { ja: "「大差なし」にするには、最良の候補を選んで総合評価を付けてください。", en: "To mark the others as similar, pick the best candidate and give it an overall score." },
   "editor.agent.note": { ja: "メモ", en: "Note" },
   "editor.agent.save": { ja: "評価を保存", en: "Save rating" },
   "editor.agent.saved": { ja: "保存済み（{time}）", en: "Saved ({time})" },
@@ -1164,6 +1159,7 @@ export const messages = defineMessages({
   'editor.agent.useFor': { ja: '用途', en: 'Good for' },
   'editor.agent.useForPlaceholder': { ja: '用途（例: 待機中の唸り、息を吐くとき）', en: 'Good for (e.g. idle growl, on the out-breath)' },
   'editor.agent.severalUsable': { ja: '複数を採用候補にしています（{ids}）。素材を複数にしてランダムに鳴らす（繰り返しの揺らぎ）か、別バリエーションにするか、エージェントに相談してください。', en: 'Several candidates are marked usable ({ids}). Ask the agent whether to use them as several materials played at random (repetition variation) or as separate variants.' },
+  'editor.agent.useNeedsOverall': { ja: '「使える」の候補に総合点を付けると、イベントへ自動で割り当てます。', en: 'Give the "use" candidate an overall score to assign it to the event automatically.' },
 })
 
 export type MessageId = keyof typeof messages

@@ -38,8 +38,6 @@ export function parseRatingDraft(text: string | null, trial: Pick<TrialRequest, 
     candidates[id] = { overall, termMatch, directions, comment: str(c.comment), useRange, verdict, useFor: str(c.useFor).slice(0, 200) }
   }
   const form: RatingForm = {
-    best: typeof f.best === 'string' && ids.includes(f.best) ? f.best : null,
-    othersSimilar: f.othersSimilar === true,
     context: { device: str(ctx.device), position: str(ctx.position), deviceWiper: str(ctx.deviceWiper), volumeLabel: str(ctx.volumeLabel), note: str(ctx.note) },
     candidates,
   }

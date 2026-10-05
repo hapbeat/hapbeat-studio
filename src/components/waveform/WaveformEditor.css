@@ -838,8 +838,6 @@
 .agent-trial-rating { display: flex; flex-direction: column; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-secondary); }
 .agent-trial-rating fieldset { margin: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; min-width: 0; }
 .agent-trial-rating legend { padding: 0 4px; font-size: 12px; color: var(--text-secondary); }
-.agent-best { display: flex; flex-wrap: wrap; gap: 4px 12px; }
-.agent-best label { display: flex; align-items: center; gap: 4px; }
 .agent-context { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); gap: 6px; }
 .agent-field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--text-secondary); }
 .agent-field input { width: 100%; min-width: 0; box-sizing: border-box; }
@@ -999,3 +997,19 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 .agent-verdict .verdict-maybe.selected { border-color: #c9a34a; background: rgba(201,163,74,.2); }
 .agent-verdict .verdict-no.selected { border-color: #b05a5a; background: rgba(176,90,90,.22); }
 .agent-use-for { flex: 1; min-width: 8em; }
+
+/* Candidate card: one dense first row, a growing comment row, the rest folded. */
+.agent-card-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.agent-card-row .agent-play-btn { min-width: 0; width: 30px; padding: 2px 0; flex: none; }
+.agent-card-label { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.agent-card-name { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-card-meta { display: flex; align-items: center; gap: 6px; height: 16px; min-width: 0; overflow: hidden; }
+.agent-card-meta .agent-thumb { flex: 0 0 72px; height: 14px; overflow: hidden; display: block; }
+.agent-card-meta .agent-thumb .editor-thumbnail { height: 14px; }
+.agent-card-meta .agent-features { flex-wrap: nowrap; min-height: 0; overflow: hidden; white-space: nowrap; font-size: 10px; color: var(--text-muted); }
+.agent-quick { display: flex; align-items: center; gap: 6px; flex: none; }
+.agent-quick .agent-verdict .agent-chip-btn { min-width: 0; padding: 2px 6px; }
+.agent-comment-row { display: flex; gap: 6px; align-items: flex-start; }
+.agent-comment-row .agent-comment { flex: 2; resize: none; overflow: hidden; min-height: 28px; }
+.agent-comment-row .agent-use-for { flex: 1; }
+.agent-candidate .agent-rating { border-top: 0; padding-top: 0; }
