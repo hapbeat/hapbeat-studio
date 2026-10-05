@@ -96,8 +96,9 @@ export class SceneRuntime {
       this.video.playbackRate = SPEEDS[this.speedIndex]
       const start = it.kind === 'full' ? this.pendingStart : null
       this.pendingStart = null
+      // Only a user's ▶ (playFull) starts it; loading a moment (reload, opening a project, selecting) leaves it paused.
       if (start !== null) { this.seek(start); void this.video.play().catch(() => {}) }
-      else if (this.part) this.setPart(true); else void this.video.play().catch(() => {})
+      else if (this.part) this.setPart(true, false)
     }
     sceneVideoUrl(root, it.file).then(url => { if (useSceneStore.getState().cur === cur && this.video.src !== url) this.video.src = url },
       error => useSceneStore.getState().note({ id: 'scene.video.unreadable', params: { file: it.file, error: error instanceof Error ? error.message : String(error) }, error: true }))
@@ -113,13 +114,14 @@ export class SceneRuntime {
     this.seek((Math.round(this.video.currentTime * fps) + frames + 0.5) / fps)
   }
   cycleSpeed() { this.speedIndex = (this.speedIndex + 1) % SPEEDS.length; this.video.playbackRate = SPEEDS[this.speedIndex] }
-  setPart(on: boolean) {
+  /** W: loop ±0.5 s around the focused cue; `play` false only cues it (a moment just loaded). */
+  setPart(on: boolean, play = true) {
     this.part = on
     this.partAB = null
     const it = this.item()
     if (on && it) {
       const e = focusEvent(it, this.events(), this.video.currentTime, useSceneStore.getState().lib?.ticks ?? [])
-      if (e) { this.partAB = [Math.max(0, e.t - 0.5), e.t + 0.5]; this.seek(this.partAB[0]); void this.video.play().catch(() => {}) }
+      if (e) { this.partAB = [Math.max(0, e.t - 0.5), e.t + 0.5]; this.seek(this.partAB[0]); if (play) void this.video.play().catch(() => {}) }
     }
     this.applyLoop()
   }

@@ -27,10 +27,11 @@ function bridgeDeps(): AgentBridgeDeps {
     guide: () => mcpGuideMarkdown(CURRENT_STUDIO_VERSION),
     catalog: () => buildCatalog(useWaveformStore.getState().documents, CURRENT_STUDIO_VERSION, localIsoString(new Date())),
     submitTrial: trial => agent().submitTrial(trial),
-    audition: async (trialId, candidateId, play) => {
+    // An agent can show a candidate but never starts playback (only the user's ▶ / Space / click does): `play` is ignored.
+    audition: async (trialId, candidateId) => {
       // A trial submitted through the inbox moments ago may not be in the store yet.
       if (!agent().trials.some(r => r.trial.id === trialId)) await agent().refresh()
-      await agent().requestAudition(trialId, candidateId, play)
+      await agent().requestAudition(trialId, candidateId, false)
     },
     adopt: async (trialId, candidateId) => {
       if (!agent().trials.some(r => r.trial.id === trialId)) await agent().refresh()

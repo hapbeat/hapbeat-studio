@@ -218,6 +218,8 @@ export function WaveformEditor({ active }: { active: boolean }) {
   useEffect(() => {
     if (!eventPreview?.autoplay || (autoplayed.current?.buffer === eventPreview.buffer && autoplayed.current.request === (eventPreview.playRequest ?? 0))) return
     autoplayed.current = { buffer: eventPreview.buffer, request: eventPreview.playRequest ?? 0 }
+    // One shot: the ▶ is consumed here, so a later remount or tab switch never plays it again by itself.
+    useEventStore.setState({ preview: { ...eventPreview, autoplay: false } })
     if (active && !useWaveformStore.getState().isProcessing) { useStartMarker.getState().set(null); void playback.play(0, player.getDuration(), true).catch(s.setError) }
   }, [eventPreview, playback, player, active, s.setError])
   useEffect(() => () => playback?.stop(), [playback])
@@ -292,7 +294,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const hapticAudition = (!!audition && !auditionIsSound) || (!audition && eventPreview?.target === 'haptic') || adjusting?.target === 'haptic'
   useEffect(() => { player.setOutput(waveformOnPc({ hapticAudition, hapticOnPc })) }, [player, hapticAudition, hapticOnPc])
   useEffect(() => { setOriginal(false); useAgentTrialStore.getState().clearAudition(); useEventStore.getState().clearPreview() }, [s.clip?.id])
-  // MCP `audition` with play: true — the usual playback path (selected haptic targets, PC audio per the mute toggle).
+  // ▶ on an AI candidate (requestAudition with play): the usual playback path. Consumed at once, so a request made while the tab is hidden never plays later.
   const playRequested = useAgentTrialStore(state => state.playRequested)
   useEffect(() => {
     if (!playRequested || !audition) return
