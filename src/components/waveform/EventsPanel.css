@@ -23,16 +23,16 @@
 .events-tag { padding: 0 5px; border-radius: 8px; font-size: 10px; font-weight: normal; border: 1px solid var(--border-light); }
 .events-tag.simultaneous { border-color: #7aa2e3; color: #a9c3f0; }
 .events-tag.variant { margin-left: 6px; border-style: dashed; color: var(--text-secondary); }
-.events-row { display: grid; grid-template-columns: 1fr auto; gap: 0 6px; width: 100%; padding: 3px 6px; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 3px; color: var(--text-primary); cursor: pointer; }
+.events-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 6px; width: 100%; padding: 3px 6px; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 3px; color: var(--text-primary); cursor: pointer; }
 .events-row:hover { background: var(--bg-tertiary, rgba(255, 255, 255, 0.04)); }
 .events-row.selected { border-color: var(--accent); background: rgba(255, 255, 255, 0.06); }
 .events-row.variant { margin-left: 14px; width: calc(100% - 14px); border-left: 1px dashed var(--border-light); border-radius: 0 3px 3px 0; }
 .events-row-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .events-row-name small { margin-left: 6px; font-weight: normal; color: var(--text-muted); }
-.events-row-badges { display: flex; gap: 4px; }
+.events-row-badges { display: flex; gap: 4px; flex-shrink: 0; }
 .events-row-desc { grid-column: 1 / -1; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Fixed width: the badge text changes between ✓ / 未 / — without moving the row. */
-.events-badge { display: inline-block; min-width: 6.2em; padding: 0 5px; border-radius: 4px; font-size: 11px; text-align: center; border: 1px solid var(--border-light); color: var(--text-secondary); }
+.events-badge { display: inline-block; white-space: nowrap; min-width: 6.2em; padding: 0 5px; border-radius: 4px; font-size: 11px; text-align: center; border: 1px solid var(--border-light); color: var(--text-secondary); }
 .events-badge.undecided { border-color: #c9a34a; color: #e3c27a; }
 .events-badge.none { border-color: #6b7280; color: #9ca3af; }
 .events-badge.none.approved { background: rgba(107,114,128,.18); }
@@ -43,6 +43,7 @@
 .events-review { display: inline-flex; align-items: center; gap: 4px; font-weight: normal; }
 .events-detail { display: flex; flex-direction: column; gap: 6px; }
 .events-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.events-detail-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .events-assign { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .events-assign-clip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
 /* One material row (sound, or clip × position × gain); a click opens it in the waveform panel. */
@@ -66,6 +67,8 @@
 .events-variation { display: flex; flex-wrap: wrap; gap: 6px 12px; }
 .events-variation label { display: inline-flex; align-items: center; gap: 4px; }
 .events-panel .scene-number { width: 64px; }
+/* Buttons and short labels keep one line; only names / descriptions shrink. */
+.events-panel .toolbar-btn, .events-panel .scene-icon-btn { white-space: nowrap; flex-shrink: 0; }
 .events-panel .scene-icon-btn { padding: 0 4px; background: transparent; border: 1px solid transparent; border-radius: 3px; color: var(--text-secondary); cursor: pointer; }
 .events-panel .scene-icon-btn:hover:not(:disabled) { border-color: var(--border-light); color: var(--text-primary); }
 .events-trials { margin: 0; padding-left: 16px; }

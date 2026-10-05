@@ -975,8 +975,12 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 .agent-topline .agent-status, .agent-topline .agent-mcp-status { height: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 0 1 auto; }
 .agent-filter { margin-left: auto; max-width: 12em; }
 .agent-filter + .agent-filter { margin-left: 0; }
-.agent-queue-nav { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: nowrap; }
-.agent-what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+/* Narrow panels wrap the controls to a second line instead of squeezing them; "what" keeps at least 8em. */
+.agent-queue-nav { display: flex; align-items: center; gap: 4px 6px; min-width: 0; flex-wrap: wrap; }
+/* Only the "what" text shrinks; ids, badges, menus, toggles and buttons keep one line. */
+.agent-queue-nav > :not(.agent-what) { flex-shrink: 0; white-space: nowrap; }
+.agent-topline .toolbar-btn, .agent-topline .agent-filter { flex-shrink: 0; white-space: nowrap; }
+.agent-what { flex: 1 1 8em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .agent-target-badge { flex: none; padding: 2px 10px; border-radius: 10px; font-size: 14px; font-weight: 700; border: 2px solid; }
 .agent-target-badge.sound { border-color: #36c5c0; color: #7fe3df; }
 .agent-target-badge.haptic { border-color: #a78bfa; color: #c4b5fd; }

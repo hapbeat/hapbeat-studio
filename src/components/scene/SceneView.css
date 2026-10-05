@@ -44,10 +44,11 @@
 .scene-moments { font-size: 13px; }
 .scene-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: 12px; }
 .scene-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; }
-.scene-item { display: grid; grid-template-columns: 26px 10px 1fr 38px auto; gap: 6px; align-items: center; padding: 5px 12px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,.04); }
+/* Six cells: number, dot, name (the only one that shrinks), kinds, time, Edit. */
+.scene-item { display: grid; grid-template-columns: 26px 10px minmax(0, 1fr) 38px auto auto; gap: 6px; align-items: center; padding: 5px 12px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,.04); }
 .scene-item:hover { background: var(--bg-hover); }
 .scene-item.sel { background: rgba(124,92,191,.22); box-shadow: inset 3px 0 0 var(--accent-light); }
-.scene-num { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.scene-num { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .scene-dot { width: 9px; height: 9px; border-radius: 50%; }
 .scene-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .scene-name small { color: var(--text-muted); margin-left: 4px; }
@@ -70,7 +71,7 @@
 .scene-heads { display: grid; grid-template-columns: 1fr 96px 58px 96px; gap: 4px; padding: 0 2px; color: var(--text-muted); font-size: 12px; }
 .scene-add-zone { display: flex; gap: 8px; align-items: center; margin-top: 4px; padding: 4px; font-size: 12px; }
 .scene-drop-hint { margin-top: 4px; font-size: 12px; }
-.scene-icon-btn { padding: 1px 6px; font-size: 12px; background: var(--bg-surface); color: var(--text-primary); border: 1px solid rgba(255,255,255,.1); border-radius: 4px; cursor: pointer; }
+.scene-icon-btn { white-space: nowrap; flex-shrink: 0; padding: 1px 6px; font-size: 12px; background: var(--bg-surface); color: var(--text-primary); border: 1px solid rgba(255,255,255,.1); border-radius: 4px; cursor: pointer; }
 .scene-icon-btn:disabled { opacity: .4; cursor: default; }
 .scene-number { width: 64px; }
 .scene-row { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
