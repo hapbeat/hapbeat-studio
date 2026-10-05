@@ -216,7 +216,9 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
   return <section className="events-sec">
     <h4 className="events-sec-head">{t('events.sound')}{allowed && <><ReviewToggle e={e} field="sfx" edit={edit} /><DecisionBar e={e} field="sfx" edit={edit} /></>}
       {allowed && e.sfx && <span className="events-field events-head-field">{t('scene.sound.volume')}
-        <NumberField value={e.sfx.volume} min={0} max={2} step={0.05} label={t('scene.sound.volume')} onCommit={x => edit(tb => setOwnSfxVolume(tb, e.ref, x))} /></span>}</h4>
+        <NumberField value={e.sfx.volume} min={0} max={2} step={0.05} label={t('scene.sound.volume')} onCommit={x => edit(tb => setOwnSfxVolume(tb, e.ref, x))} /></span>}
+      {/* After checking the sound (OK): on to the haptic — also for a cue without a sound. */}
+      <HapticRequestButton e={e} /></h4>
     {!allowed ? <p className="agent-muted">{t('scene.sound.loopCue')}</p> : <>
       {loop && <p className="agent-muted">{t('events.loopSoundHint')}</p>}
       {!sounds.length && <p className="agent-muted">{t(e.decided.sfx ? 'events.soundNone' : 'events.undecidedSound')}</p>}
@@ -244,7 +246,7 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
   const missing = (name: string) => useWaveformStore.getState().setError(t('events.preview.missing', { name }))
   const free = positionsForCue(lib, e.ref.cue).some(a => !e.haptics.some(r => r.at === a))
   return <section className="events-sec">
-    <h4 className="events-sec-head">{t('events.haptic')}<ReviewToggle e={e} field="haptics" edit={edit} /><DecisionBar e={e} field="haptics" edit={edit} /><HapticRequestButton e={e} /></h4>
+    <h4 className="events-sec-head">{t('events.haptic')}<ReviewToggle e={e} field="haptics" edit={edit} /><DecisionBar e={e} field="haptics" edit={edit} /></h4>
     {!loop && !e.decided.sfx && <p className="events-hint">{t('events.soundFirst')}</p>}
     {!e.haptics.length && <p className="agent-muted">{t(e.decided.haptics ? 'events.hapticNone' : 'events.undecidedHaptic')}</p>}
     {e.haptics.map((r, i) => {
@@ -375,14 +377,12 @@ function Reserves({ cue, target }: { cue: string; target: 'sound' | 'haptic' }) 
 const useReviseOpen = create<{ open: string | null; set: (open: string | null) => void }>(set => ({ open: null, set: open => set({ open }) }))
 const reviseKey = (cue: string, target: string, material: string) => `${cue}|${target}|${material}`
 
-/** "Edit as clip" and ⋯ (Remake…) of one material row. */
+/** "Edit as clip" and "Remake" (opens the one-line comment under the row) of one material row. */
 function MaterialActions({ event, target, wav }: { event: string; target: DecideTarget; wav: string }) {
   const { t } = useI18n()
   return <span className="events-mat-actions">
     <EditAsClipButton event={event} target={target} wav={wav} />
-    <EditorMenu label="⋯" title={t('events.revise.menu')}>
-      <EditorMenuItem onSelect={() => useReviseOpen.getState().set(reviseKey(event, target, wav))}>{t('events.revise.open')}</EditorMenuItem>
-    </EditorMenu>
+    <button type="button" className="agent-icon-btn" title={t('events.revise.hint')} onClick={() => { const key = reviseKey(event, target, wav); useReviseOpen.getState().set(useReviseOpen.getState().open === key ? null : key) }}>{t('events.revise.open')}</button>
   </span>
 }
 
@@ -398,7 +398,7 @@ function RevisePendingBadge({ cue, target, material }: { cue: string; target: 's
     const all = useEditorSettings.getState().revisePending
     useEditorSettings.getState().update({ revisePending: all.filter(r => !(r.cue === cue && r.target === target && r.material === material && reviseAnswered(r, trials))) })
   }, [mine.length, open.length, cue, target, material, trials])
-  return open.length ? <small className="events-revise-pending" title={t('events.revise.pendingHint')}>{t('events.revise.pending')}</small> : null
+  return open.length ? <small className="events-revise-pending" title={t('events.requested.hint')}>{t('events.requested')}</small> : null
 }
 
 /** The one-line remake comment under a material row: Enter sends (hapbeat-agent-message@1 `revise`), Esc closes. */
@@ -459,7 +459,7 @@ function HapticRequestButton({ e }: { e: EffectiveEvent }) {
   }
   const title = [t('events.hapticRequest.hint'), ...(e.decided.sfx ? [] : [t('events.hapticRequest.soundUndecided')]), ...(error ? [error] : [])].join('\n')
   return <span className="events-haptic-request">
-    <small className="events-revise-pending" style={{ visibility: waiting ? 'visible' : 'hidden' }}>{t('events.hapticRequest.pending')}</small>
+    <small className="events-revise-pending" style={{ visibility: waiting ? 'visible' : 'hidden' }} title={t('events.requested.hint')}>{t('events.requested')}</small>
     <button type="button" className={`agent-icon-btn ${error ? 'error' : ''}`} title={title} onClick={() => void send()}>{t('events.hapticRequest.button')}</button>
   </span>
 }

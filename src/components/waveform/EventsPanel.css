@@ -103,3 +103,4 @@
 .events-revise input { flex: 1; min-width: 0; }
 /* "Go to haptics" at the right end of the haptic heading (its "requested" mark keeps its place). */
 .events-haptic-request { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; flex: none; font-weight: normal; }
+.events-head-field + .events-haptic-request { margin-left: 8px; }

@@ -1211,14 +1211,11 @@ export const messages = defineMessages({
   'events.reserveAdopt': { ja: '採用', en: 'Adopt' },
   'events.reserveAdoptHint': { ja: 'WAV を書き出して素材候補の末尾に追加し（仮）、控えから外します', en: 'Writes the WAV, adds it to the end of the pool (tentative) and drops it from the reserves.' },
   'events.reserveRemoveHint': { ja: '控えから外します（試行と評価は残ります）', en: 'Drops it from the reserves (the trial and its rating stay).' },
-  'events.revise.menu': { ja: 'この素材の操作', en: 'Material actions' },
-  'events.revise.open': { ja: '作り直し…', en: 'Remake…' },
+  'events.revise.open': { ja: '再作成', en: 'Remake' },
   'events.revise.placeholder': { ja: 'どう作り直すか（Enter で送信、Esc で閉じる）', en: 'How to remake it (Enter sends, Esc closes)' },
   'events.revise.hint': { ja: 'エージェントに作り直しを依頼します（outbox）。素材は「仮」のまま残ります', en: 'Asks the agent for another take (outbox). The material stays tentative.' },
   'events.revise.message': { ja: '作り直し依頼: {cue} の {material}: {comment}', en: 'Remake request: {material} of {cue}: {comment}' },
   'events.revise.failed': { ja: '送信できません: {error}', en: 'Could not send: {error}' },
-  'events.revise.pending': { ja: '作り直し依頼中', en: 'remake requested' },
-  'events.revise.pendingHint': { ja: 'エージェントがこの cue の新しい試行を出すと消えます', en: 'Clears when the agent submits a new trial for this cue.' },
   'scene.saving': { ja: '保存中…', en: 'Saving…' },
   'scene.autosave.merged': { ja: 'cue 表が外部で変更されていたので、取り込んで保存しました', en: 'The cue table had changed outside Studio: merged and saved.' },
   'scene.autosave.conflicts': { ja: 'cue 表の外部の変更と重なった項目は Studio 側を優先しました: {fields}', en: 'Changed outside Studio too, kept Studio’s value: {fields}' },
@@ -1226,9 +1223,10 @@ export const messages = defineMessages({
   'events.hapticRequest.button': { ja: '触覚へ進む', en: 'Go to haptics' },
   'events.hapticRequest.hint': { ja: 'この cue の触覚をエージェントに依頼します（代表の音に合わせて。outbox）', en: 'Asks the agent for this cue’s haptic, matching its representative sound (outbox).' },
   'events.hapticRequest.soundUndecided': { ja: '音が未定です', en: 'The sound is undecided.' },
-  'events.hapticRequest.pending': { ja: '触覚の依頼中', en: 'haptic requested' },
   'events.hapticRequest.noSound': { ja: '音なし', en: 'no sound' },
   'events.hapticRequest.message': { ja: '触覚の依頼: {cue}（音: {sound}）', en: 'Haptic request: {cue} (sound: {sound})' },
+  'events.requested': { ja: '依頼済み', en: 'requested' },
+  'events.requested.hint': { ja: 'エージェントに依頼を送りました。試行が届くと消えます', en: 'Sent to the agent. Clears when its trial arrives.' },
 })
 
 export type MessageId = keyof typeof messages
