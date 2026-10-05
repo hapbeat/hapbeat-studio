@@ -12,7 +12,7 @@ import type { SceneLib } from '@/utils/sceneData'
 import {
   addPositionRoute, assignEventsForTrial, effectiveEvent, eventKey, listEvents, pairedClips, parseEventKey, removeOwnRoute,
   setRouteClips, setSfxSounds, simultaneousGroups, trialsForEvent, updateOwnRoute,
-  resetAllReviews, setNone, setReview, setUndecided,
+  resetAllReviews, setNone, setOverride, setReview, setUndecided, hasOwnMaterials,
   type EffectiveEvent, type EventRow, type SoundStatus,
 } from '@/utils/cueEvents'
 import { useConfirm } from '@/components/common/useConfirm'
@@ -40,7 +40,9 @@ const writeLast = (name: string) => { try { localStorage.setItem(LAST_PROJECT_KE
  * through the project registry), whether each has its sound / haptic decided, and
  * per cue: its sound and haptic material candidates (▶ / ★ representative / ×5 /
  * remove), the AI trials made for it, and "add" of the selected editor clip.
- * Variants, variation and per-situation choices live in the Scene tab (DEC-085). Cues the recording plays at the same moment are grouped
+ * Variation, creating / removing variants and scene multipliers live in the Scene tab (DEC-085); a variant that writes its own
+ * sfx or haptics (DEC-085 addendum, 2026-10-06) is a child row of its cue (`bite › tear`) with the same material editing.
+ * Cues the recording plays at the same moment are grouped
  * (display only). Edits mark the table unsaved (Save / Revert at the top, same
  * as the Scene tab); "decide" writes at once.
  */
@@ -62,12 +64,19 @@ export function EventsPanel() {
     // The waveform panel follows: the event's haptic, else its sound.
     openEventDefault(key)
   }
-  // Cues only: a variant opened from elsewhere (Scene tab, an AI trial) shows its cue.
-  const cue = selected ? parseEventKey(selected).cue : null
-  const effective = table && cue ? effectiveEvent(table, { cue, variant: null }) : null
+  // A variant with its own sfx / haptics is shown as itself; any other variant opened from elsewhere (Scene tab, an AI trial) shows its cue.
+  const ref = selected ? parseEventKey(selected) : null
+  const shownRef = ref && table && (ref.variant === null || !hasOwnMaterials(table, ref)) ? { cue: ref.cue, variant: null } : ref
+  const shown = shownRef ? eventKey(shownRef) : null
+  const effective = table && shownRef ? effectiveEvent(table, shownRef) : null
   const requested = useOpenRequests()
-  const block = (r: EventRow) => <EventRowButton key={r.key} row={r} selected={cue === r.key} onSelect={select}
+  const one = (r: EventRow) => <EventRowButton key={r.key} row={r} selected={shown === r.key} onSelect={select}
     requested={{ sound: requested.has(`${r.key}|sound`), haptic: requested.has(`${r.key}|haptic`) }} />
+  // A cue and, under it, its variants that write their own materials.
+  const block = (r: EventRow) => {
+    const children = table ? r.variants.filter(v => hasOwnMaterials(table, v.ref)) : []
+    return children.length ? <div key={r.key} className="events-family">{one(r)}{children.map(one)}</div> : one(r)
+  }
   const listItems: ReactNode[] = [], done = new Set<string>()
   for (const r of rows) {
     if (done.has(r.key)) continue
@@ -93,7 +102,7 @@ export function EventsPanel() {
     {!table || !lib ? <p className="agent-muted">{t('events.noProject')}</p> : <>
       <ResizableList label={t('editor.panel.events')}>{listItems}</ResizableList>
       <div className="events-detail-scroll">
-        {effective ? <EventDetail key={cue!} table={table} lib={lib} e={effective} />
+        {effective ? <EventDetail key={shown!} table={table} lib={lib} e={effective} />
           : <p className="agent-muted">{t('events.selectHint')}</p>}
       </div>
     </>}
@@ -166,8 +175,9 @@ function EventRowButton({ row, selected, onSelect, requested }: { row: EventRow;
     : status === 'na' ? <span className="events-badge na">{label} —</span>
     : <span className={`events-badge ${status.state} ${status.state === 'undecided' ? '' : status.review}`}>{label} {status.state === 'undecided' ? t('events.undecided')
       : `${status.state === 'none' ? `${t('events.noneShort')} ` : ''}${t(status.review === 'approved' ? 'events.reviewApproved' : 'events.reviewTentative')}`}</span>
-  return <button type="button" role="option" aria-selected={selected} className={`events-row ${selected ? 'selected' : ''}`} onClick={() => onSelect(row.key)} title={row.description ?? ''}>
-    <span className="events-row-name">{row.key}{row.loop && <small>{t('events.loop')}</small>}</span>
+  const child = row.ref.variant !== null
+  return <button type="button" role="option" aria-selected={selected} className={`events-row ${child ? 'variant' : ''} ${selected ? 'selected' : ''}`} onClick={() => onSelect(row.key)} title={row.description ?? ''}>
+    <span className="events-row-name">{child ? `${row.ref.cue} › ${row.ref.variant}` : row.key}{row.loop && <small>{t('events.loop')}</small>}</span>
     <span className="events-row-badges">{badge(t('events.badge.sound'), row.sound, requested.sound)}{badge(t('events.badge.haptic'), row.haptic, requested.haptic)}</span>
     {row.description && <small className="events-row-desc">{row.description}</small>}
   </button>
@@ -200,7 +210,7 @@ function EventDetail({ table, lib, e }: { table: CueTable; lib: SceneLib; e: Eff
     </div>
     <SoundSection lib={lib} e={e} loop={loop} edit={edit} />
     <HapticSection table={table} lib={lib} e={e} loop={loop} edit={edit} />
-    {variants.length > 0 && <p className="agent-muted" title={t('events.variantsInSceneHint')}>
+    {e.ref.variant === null && variants.length > 0 && <p className="agent-muted" title={t('events.variantsInSceneHint')}>
       <button type="button" className="agent-link" onClick={() => useEventStore.getState().openInScene(key)}>{t('events.variantsInScene', { count: variants.length })}</button></p>}
     <TrialsSection project={lib.project_name} eventKey={key} />
   </div>
@@ -220,13 +230,13 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
   // An approved sound is folded (its heading line stays); ▸ opens it.
   const [open, setOpen] = useState(e.review.sfx !== 'approved')
   return <section className="events-sec">
-    <h4 className="events-sec-head"><Fold open={open} set={setOpen} />{t('events.sound')}{allowed && <><ReviewToggle e={e} field="sfx" edit={edit} /><DecisionBar e={e} field="sfx" edit={edit} /></>}
+    <h4 className="events-sec-head"><Fold open={open} set={setOpen} />{t('events.sound')}{allowed && e.own.sfx && <><ReviewToggle e={e} field="sfx" edit={edit} /><DecisionBar e={e} field="sfx" edit={edit} /></>}
       {/* Ask for (more) sound candidates; after checking the sound (OK): on to the haptic — also for a cue without a sound. */}
       <span className="events-haptic-request"><button type="button" className="agent-icon-btn" title={t('events.soundRequest.hint')}
         onClick={() => { const k = `sound|${key}`; useReviseOpen.getState().set(useReviseOpen.getState().open === k ? null : k) }}>{t('events.soundRequest.button')}</button>
       <HapticRequestButton e={e} /></span></h4>
     <SoundRequestField cue={key} />
-    {!open ? null : !allowed ? <p className="agent-muted">{t('scene.sound.loopCue')}</p> : <>
+    {!open ? null : !allowed ? <p className="agent-muted">{t('scene.sound.loopCue')}</p> : !e.own.sfx ? <Inherited e={e} field="sfx" edit={edit} /> : <>
       {loop && <p className="agent-muted">{t('events.loopSoundHint')}</p>}
       {!sounds.length && <p className="agent-muted">{t(e.decided.sfx ? 'events.soundNone' : 'events.undecidedSound')}</p>}
       <MaterialList items={sounds} label={t('events.sound')} active={sounds.find(s => previewId === `${key}|sound|${s}`) ?? null} onPlay={play} onSelect={show}
@@ -257,8 +267,9 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
   const missing = (name: string) => useWaveformStore.getState().setError(t('events.preview.missing', { name }))
   const free = positionsForCue(lib, e.ref.cue).some(a => !e.haptics.some(r => r.at === a))
   return <section className="events-sec">
-    <h4 className="events-sec-head"><Fold open={hOpen} set={setHOpen} />{t('events.haptic')}<ReviewToggle e={e} field="haptics" edit={edit} /><DecisionBar e={e} field="haptics" edit={edit} /></h4>
-    {hOpen && <>
+    <h4 className="events-sec-head"><Fold open={hOpen} set={setHOpen} />{t('events.haptic')}{e.own.haptics && <><ReviewToggle e={e} field="haptics" edit={edit} /><DecisionBar e={e} field="haptics" edit={edit} /></>}</h4>
+    {hOpen && !e.own.haptics && <Inherited e={e} field="haptics" edit={edit} />}
+    {hOpen && e.own.haptics && <>
     {!loop && !e.decided.sfx && <p className="events-hint">{t('events.soundFirst')}</p>}
     {!e.haptics.length && <p className="agent-muted">{t(e.decided.haptics ? 'events.hapticNone' : 'events.undecidedHaptic')}</p>}
     {e.haptics.map((r, i) => {
@@ -340,7 +351,10 @@ function DecisionBar({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'ha
   // Fixed slots on the section's head line: a button that does not apply is hidden, not removed (nothing moves).
   return <span className="events-decision">
     <button type="button" className="agent-icon-btn" style={{ visibility: isNone ? 'hidden' : 'visible' }} title={t(field === 'sfx' ? 'events.setNoneSoundHint' : 'events.setNoneHapticHint')} onClick={() => edit(tb => setNone(tb, e.ref, field))}>{t('events.setNone')}</button>
-    <button type="button" className="agent-icon-btn" style={{ visibility: e.ref.variant === null && e.decided[field] ? 'visible' : 'hidden' }} title={t('events.setUndecidedHint')} onClick={() => edit(tb => setUndecided(tb, e.ref.cue, field))}>{t('events.setUndecided')}</button>
+    {/* A cue: back to undecided; a variant (child row): back to its cue's (the override removed). */}
+    {e.ref.variant === null
+      ? <button type="button" className="agent-icon-btn" style={{ visibility: e.decided[field] ? 'visible' : 'hidden' }} title={t('events.setUndecidedHint')} onClick={() => edit(tb => setUndecided(tb, e.ref.cue, field))}>{t('events.setUndecided')}</button>
+      : <button type="button" className="agent-icon-btn" title={t('events.backToParentHint', { parent: e.ref.cue })} onClick={() => edit(tb => setOverride(tb, e.ref, field, false))}>{t('events.backToParent', { parent: e.ref.cue })}</button>}
   </span>
 }
 
@@ -501,6 +515,18 @@ function SoundRequestField({ cue }: { cue: string }) {
       const settings = useEditorSettings.getState()
       settings.update({ soundPending: [...settings.soundPending, { cue, at: new Date().toISOString() }] })
     }} />
+}
+
+/**
+ * A child row's field it inherits (DEC-085 addendum): "same as <cue>" and one button that gives this situation its own
+ * copy (an override to edit here). Variation and the variants themselves stay in the Scene tab.
+ */
+function Inherited({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'haptics'; edit: Edit }) {
+  const { t } = useI18n()
+  return <p className="events-inherited">
+    <span>{t('events.inherited', { parent: e.ref.cue })}</span>
+    <button type="button" className="agent-icon-btn" title={t('events.overrideHereHint', { parent: e.ref.cue })} onClick={() => edit(tb => setOverride(tb, e.ref, field, true))}>{t('events.overrideHere')}</button>
+  </p>
 }
 
 /** ▸ / ▾ in a section heading. */

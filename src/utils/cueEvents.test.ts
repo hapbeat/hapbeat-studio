@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   addEventMark, addPositionRoute, fireShot, resetAllReviews, setNone, setReview, setUndecided, addVariant, simultaneousGroups, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
   effectiveEvent, eventSceneCues, jitterGain, listEvents, MaterialPicker, matchesName, materialUsers, needsRouteForm, overwriteUsers,
-  parseEventKey, removeVariant, representativeSound, candidateSound, resolveEventName, cueRoutePositions, materialRoutePositions, pairedClips, setOverride, setRouteClips, setSfxSounds, setVariation, trialEvent, trialsForEvent,
+  parseEventKey, removeVariant, representativeSound, candidateSound, hasOwnMaterials, resolveEventName, cueRoutePositions, materialRoutePositions, pairedClips, setOverride, setRouteClips, setSfxSounds, setVariation, trialEvent, trialsForEvent,
 } from './cueEvents'
 import { validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
 import { cueVoices, tableTargets } from './sceneHaptics'
@@ -340,6 +340,22 @@ describe('undecided vs none, loop cue sounds, preview sequences', () => {
     expect(fireShot(e, false, new MaterialPicker(() => 0), () => 0.5)).toMatchObject({ jitterDb: 0, pitchSt: 0, rate: 1 })
   })
 
+})
+
+describe('child rows of the editor (DEC-085 addendum)', () => {
+  it('shows a variant with its own sfx or haptics, not one changing only the variation / volume', () => {
+    const t = v2Table()
+    t.cues.button.variants!.loud = { variation: { gainJitterDb: 1 } }
+    expect(hasOwnMaterials(t, { cue: 'button', variant: 'soft' })).toBe(true)
+    expect(hasOwnMaterials(t, { cue: 'button', variant: 'plain' })).toBe(false)
+    expect(hasOwnMaterials(t, { cue: 'button', variant: 'loud' })).toBe(false)
+    expect(hasOwnMaterials(t, { cue: 'button', variant: null })).toBe(false)
+    // "Separate for this situation" makes an inheriting variant a child row; "back to button" hides it again.
+    const own = setOverride(t, { cue: 'button', variant: 'plain' }, 'sfx', true)
+    expect(hasOwnMaterials(own, { cue: 'button', variant: 'plain' })).toBe(true)
+    expect(effectiveEvent(own, { cue: 'button', variant: 'plain' })!.own).toMatchObject({ sfx: true, haptics: false })
+    expect(hasOwnMaterials(setOverride(own, { cue: 'button', variant: 'plain' }, 'sfx', false), { cue: 'button', variant: 'plain' })).toBe(false)
+  })
 })
 
 describe('the sound played with a haptic audition', () => {

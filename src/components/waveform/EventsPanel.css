@@ -27,6 +27,9 @@
 .events-row:hover { background: var(--bg-tertiary, rgba(255, 255, 255, 0.04)); }
 .events-row.selected { border-color: var(--accent); background: rgba(255, 255, 255, 0.06); }
 .events-row.variant { margin-left: 14px; width: calc(100% - 14px); border-left: 1px dashed var(--border-light); border-radius: 0 3px 3px 0; }
+/* A cue with its child variant rows (own sfx / haptics). */
+.events-family { display: flex; flex-direction: column; }
+.events-inherited { display: flex; align-items: center; gap: 8px; margin: 2px 0; color: var(--text-muted); }
 .events-row-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .events-row-name small { margin-left: 6px; font-weight: normal; color: var(--text-muted); }
 .events-row-badges { display: flex; gap: 4px; flex-shrink: 0; }

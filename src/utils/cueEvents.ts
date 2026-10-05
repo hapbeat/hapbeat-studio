@@ -90,6 +90,12 @@ function row(table: CueTable, lib: SceneLib, ref: EventRef, variants: EventRow[]
     haptic: status(e.decided.haptics, e.haptics.length > 0, e.review.haptics), variants }
 }
 
+/** A variant that writes its own sfx or haptics (shown in the editor as a child row of its cue; DEC-085 addendum). */
+export function hasOwnMaterials(table: CueTable, ref: EventRef): boolean {
+  const v = variantOf(table, ref)
+  return !!v && (v.sfx !== undefined || v.haptics !== undefined)
+}
+
 /** Every cue in table order, each with its variants nested. */
 export function listEvents(table: CueTable, lib: SceneLib): EventRow[] {
   return Object.keys(table.cues).map(cue => row(table, lib, { cue, variant: null },
