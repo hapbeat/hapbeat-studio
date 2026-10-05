@@ -81,6 +81,7 @@ export function EventsPanel() {
   }
   return <div className="editor-panel events-panel">
     <div className="events-top">
+      <span className="editor-beta-label" title={t('events.betaHint')}>BETA</span>
       <ProjectPicker />
       <EditorMenu label="⋯" title={t('events.menu')}>
         <EditorMenuItem disabled={!table} onSelect={() => void ask({ message: t('events.resetReviewsConfirm'), danger: true }).then(ok => { if (ok) useSceneStore.getState().edit(tb => resetAllReviews(tb)) })}>{t('events.resetReviews')}</EditorMenuItem>

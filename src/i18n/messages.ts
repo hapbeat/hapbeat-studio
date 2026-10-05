@@ -1253,6 +1253,8 @@ export const messages = defineMessages({
   'scene.event.pairedProblem': { ja: '組にできません: {problem}', en: 'Cannot pair: {problem}' },
   'events.pairedHaptic': { ja: '▶ 組の触覚', en: '▶ Paired haptic' },
   'events.pairedHapticHint': { ja: 'この音と組になる触覚を試聴します（{clips}）', en: 'Audition the haptic paired with this sound ({clips})' },
+  'editor.agent.betaHint': { ja: 'AI 試行は開発中のベータ機能です。操作や保存形式は今後更新されます。', en: 'AI trials are a beta feature. Their controls and file formats may change.' },
+  'events.betaHint': { ja: 'イベントパネルは開発中のベータ機能です。操作や cue 表の扱いは今後更新されます。', en: 'The Events panel is a beta feature. Its controls and cue table handling may change.' },
 })
 
 export type MessageId = keyof typeof messages
