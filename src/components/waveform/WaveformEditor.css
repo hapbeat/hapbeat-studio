@@ -964,9 +964,6 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 .agent-candidate .agent-comment { resize: none; overflow: hidden; min-height: 30px; }
 
 /* "Send to the agent": one row; the status keeps its width (no shift when "Sent" appears). */
-.agent-message { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 6px; }
-.agent-message-status { font-size: 12px; color: #8dd5b1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agent-message-status.error { color: #f08a8a; white-space: normal; }
 
 /* AI trials panel, fitted for 4–5 candidates without inner scroll: one-line top, header, prompt, candidates of 1–2 lines, one-line save. */
 .agent-panel { gap: 6px; }

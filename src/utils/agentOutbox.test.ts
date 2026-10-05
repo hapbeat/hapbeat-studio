@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { buildAgentMessage, MESSAGE_FORMAT, outboxFileName, writeOutboxMessage } from './agentOutbox'
 import { MemoryDirectory } from './memoryDirectory.testutil'
 import { guideMarkdown } from './agentGuide'
-import { sanitizeUiSettings } from './editorUiSettings'
 
 describe('agent outbox', () => {
   it('builds a message with optional context', () => {
@@ -45,11 +44,12 @@ describe('agent outbox', () => {
     await expect(writeOutboxMessage(broken.asHandle(), buildAgentMessage({ text: 'x', createdAt: 'c' }), 'd.json')).rejects.toThrow(/^open hapbeat-agent\/outbox\/: denied/)
   })
 
-  it('documents the outbox in the guide; auto-send is off by default', () => {
+  it('documents receiving ratings and the outbox (Scene tab requests) in the guide', () => {
     const guide = guideMarkdown('test')
+    expect(guide).toContain('## Receiving ratings')
+    expect(guide).toContain('haptic-knowledge/trials/**/rating.json')
     expect(guide).toContain('hapbeat-agent-message@1')
     expect(guide).toContain('outbox/_read/')
-    expect(sanitizeUiSettings({}).autoSendOnRating).toBe(false)
-    expect(sanitizeUiSettings({ autoSendOnRating: true }).autoSendOnRating).toBe(true)
+    expect(guide).not.toContain('Send to agent')
   })
 })

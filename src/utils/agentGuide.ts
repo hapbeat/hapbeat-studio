@@ -55,7 +55,7 @@ You help the user design vibration (haptic) clips for Hapbeat, a wearable vibrot
 
 1. Read \`haptic-knowledge/index.json\`, then the relevant \`terms/<slug>.json\` (compare \`exemplars\` and the feature differences between \`good\`, \`tooWeak\` and \`tooStrong\`) and the "Confirmed" section of \`insights.md\`.
 2. Pick ONE hypothesis axis and make 2–4 candidates along it (for example AM depth 0.4 / 0.7 / 0.95). Keep everything else fixed so the rating is interpretable.
-3. Write the request to \`hapbeat-agent/inbox/<trialId>.json\` and ask the user to rate it in Studio (Waveform editor → AI trials).
+3. Write the request to \`hapbeat-agent/inbox/<trialId>.json\` and ask the user to rate it in Studio (Waveform editor → AI trials). Wait for the rating as in "Receiving ratings".
 4. Read \`haptic-knowledge/trials/*/<trialId>/rating.json\`. Use \`overall\` (with its \`verdict\`), \`directions\` ("should be more …"), \`comment\` and \`useRange\` to build the next candidates, and set \`parentTrial\` to the previous trial id.
 5. When a tendency is consistent over 3 or more trials, append it to the "Proposed" section of \`insights.md\` with evidence (trialId/candidateId). Only the user moves items to "Confirmed".
 
@@ -132,15 +132,27 @@ Order of work:
 
 Processing: stereo sources are averaged to mono, effects are applied in order, the result is resampled to 48 kHz and, if its peak exceeds 1.0, normalized to 0.98 (recorded as \`autoNormalizedDb\`). A candidate that fails to render gets an \`error\` in its candidates/<cid>.json; the other candidates are still rendered. An invalid request is moved to \`inbox/_rejected/\` with an \`.error.txt\`; fix it and submit again under a new id.
 
+## Receiving ratings
+
+The user rates in Studio and presses Save — that is the signal (there is no separate "send").
+
+1. After a trial: \`wait_for_rating\` (MCP; waits for one trial).
+2. Several trials at once, or a long session: watch the files instead —
+   - \`haptic-knowledge/trials/**/rating.json\` (new or updated = a rating was saved),
+   - \`hapbeat-agent/outbox/*.json\` (requests from the Scene tab).
+   Claude Code: a Monitor loop that lists new / changed files every 5 s. A monitor times out: start it again while you work.
+3. Read each new outbox file, then move it to \`outbox/_read/\`.
+4. For a rating: read each candidate's \`overall\`, \`comment\`, \`useRange\` and the trial's \`comment\`. Assign candidates rated ★4+ (\`verdict\` "use") to the event's material candidates as tentative (already done when Studio's auto-assign is on). Then make the next candidates.
+
 ## Messages from Studio \`hapbeat-agent-message@1\` (Studio writes, you read)
 
-The user can send you a short message from the editor ("Send to agent" in the AI trials panel, or automatically when a rating is saved). Watch \`hapbeat-agent/outbox/\` for new \`*.json\` files:
+Only the Scene tab writes these ("Reassign…" on a firing). Files in \`hapbeat-agent/outbox/\`:
 
 \`\`\`json
-{ "format": "hapbeat-agent-message@1", "createdAt": "2026-10-05T15:42:00+09:00", "text": "T27 の評価を保存しました。レビューして次へ", "project": "trex-encounter", "trialIds": ["20261005-1530-breath-01"], "shortIds": ["T27"] }
+{ "format": "hapbeat-agent-message@1", "createdAt": "2026-10-05T15:42:00+09:00", "text": "振り分け変更の依頼: footstep の 17.37 s の発生を footstep:feeding にしてください", "project": "trex-encounter", "reassign": { "cue": "footstep", "atSec": 17.367, "to": "footstep:feeding" } }
 \`\`\`
 
-- \`text\` (≤ 4000 chars) is the instruction; \`project\`, \`trialIds\` and \`shortIds\` are optional context (read the named trials' \`rating.json\` first).
+- \`text\` (≤ 4000 chars) restates the request; \`project\` is context.
 - \`reassign\` (optional, from the Scene tab): \`{ "cue": "footstep", "atSec": 17.367, "to": "footstep:feeding", "comment": "…" }\` — the user says the firing of \`cue\` (a cue or \`cue:variant\`) at \`atSec\` of the full recording (\`full.events\` in \`viewer-data.json\`) should be \`to\` instead. It asks you to change the game's routing (which event the game fires there), not the cue table: the table never holds per-moment values. Add the variant to the table if \`to\` does not exist yet, and re-record the scene afterwards.
 - Files appear complete (the browser commits each \`*.json\` on close); ignore other names (e.g. the browser's \`*.crswap\`). Names sort by time.
 - After handling a message, move it to \`outbox/_read/\` (Studio never deletes outbox files).

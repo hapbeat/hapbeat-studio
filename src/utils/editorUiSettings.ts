@@ -47,8 +47,6 @@ export interface EditorUiSettings {
   autoAssignOnRating: boolean
   /** AI trials panel project filter: '' = all, ' ' = trials without a project, else a project name. */
   trialProjectFilter: string
-  /** Saving a rating also sends "Tn rated, review and continue" to the agent outbox. */
-  autoSendOnRating: boolean
   /** AI trials panel target filter: '' = all, 'sound', 'haptic'. */
   trialTargetFilter: '' | 'sound' | 'haptic'
 }
@@ -56,7 +54,7 @@ export interface EditorUiSettings {
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, autoAssignOnRating: true, trialProjectFilter: '', autoSendOnRating: false, trialTargetFilter: '',
+  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, autoAssignOnRating: true, trialProjectFilter: '', trialTargetFilter: '',
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -103,7 +101,6 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     eventsListHeight: clamp(v.eventsListHeight, 80, 1200, d.eventsListHeight),
     autoAssignOnRating: typeof v.autoAssignOnRating === 'boolean' ? v.autoAssignOnRating : d.autoAssignOnRating,
     trialProjectFilter: typeof v.trialProjectFilter === 'string' && v.trialProjectFilter.length <= 200 ? v.trialProjectFilter : d.trialProjectFilter,
-    autoSendOnRating: typeof v.autoSendOnRating === 'boolean' ? v.autoSendOnRating : d.autoSendOnRating,
     trialTargetFilter: v.trialTargetFilter === 'sound' || v.trialTargetFilter === 'haptic' ? v.trialTargetFilter : '',
   }
 }

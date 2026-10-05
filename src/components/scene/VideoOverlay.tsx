@@ -5,9 +5,8 @@ import './VideoOverlay.css'
 /**
  * Playback controls laid over the bottom edge of a video (like a web video player):
  * ⏸/▶, a thin seek bar with a tick at the cue mark, the time from the event start
- * (the mark = 0 s, two decimals) and ⓘ with the usage notes as its title. Shown
- * while hovered or while the video is paused / stopped; hidden during playback once
- * the pointer leaves. The overlay takes no layout space.
+ * (the mark = 0 s, two decimals) and ⓘ with the usage notes as its title. Always
+ * shown (the position stays visible); it takes no layout space.
  */
 export function VideoOverlay({ video, mark, marks, range, playing, onToggle, onSeek, info, target }: {
   /** The video element (read every frame for the bar and the time). */
@@ -20,7 +19,7 @@ export function VideoOverlay({ video, mark, marks, range, playing, onToggle, onS
   target?: string | null
   /** The stretch the bar spans (video times); default: the whole video. */
   range?: readonly [number, number] | null
-  /** Shows ⏸ (else ▶). The overlay stays visible while this is false. */
+  /** Shows ⏸ (else ▶). */
   playing: boolean
   onToggle: () => void
   /** Seek to this video time (seconds). */
@@ -54,7 +53,7 @@ export function VideoOverlay({ video, mark, marks, range, playing, onToggle, onS
   }
   const label = t(playing ? 'scene.overlay.pause' : 'scene.overlay.play')
   return <>{target && <span className="target-cue-badge video-overlay-target" title={t('editor.scene.targetHint')}>{t('editor.scene.rating', { name: target })}</span>}
-  <div className={`video-overlay ${playing ? '' : 'shown'}`} onClick={e => e.stopPropagation()}>
+  <div className="video-overlay" onClick={e => e.stopPropagation()}>
     <button type="button" className="video-overlay-btn" aria-label={label} title={label} onClick={onToggle}>{playing ? '⏸' : '▶'}</button>
     <div className="video-overlay-bar" role="slider" aria-label={t('scene.overlay.seek')} aria-valuemin={0} aria-valuemax={duration} tabIndex={-1}
       onPointerDown={e => { dragging.current = true; e.currentTarget.setPointerCapture(e.pointerId); seekAt(e) }}

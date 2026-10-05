@@ -112,7 +112,6 @@ export function AgentTrialsPanel() {
     if (next) pickTrial(next, false); else setSelectedId(null)
   }
   const prev = stepQueue(queue, record?.trial.id ?? null, -1), next = stepQueue(queue, record?.trial.id ?? null, 1)
-  const autoSend = useEditorSettings(s => s.autoSendOnRating)
   const { openSceneVideo } = useEditor()
   const { ask, dialog } = useConfirm()
   const [panelNotice, setPanelNotice] = useState('')
@@ -158,7 +157,6 @@ export function AgentTrialsPanel() {
         <option value="haptic">{t('editor.agent.targetHaptic')}</option>
       </select>
     </div>
-    {folder && <AgentMessageBox record={record ?? trials[0] ?? null} />}
     {/* One line: ‹ T9 › · what · [sound|haptic] · n left · History · Video · Dismiss. */}
     <div className="agent-queue-nav">
       <button type="button" className="toolbar-btn" disabled={!prev} aria-label={t('editor.agent.prevTrial')} title={t('editor.agent.prevTrial')} onClick={() => prev && pickTrial(prev)}>‹</button>
@@ -193,7 +191,6 @@ export function AgentTrialsPanel() {
         <button type="button" className="toolbar-btn" onClick={() => setDone(null)}>{t('common.close')}</button></div>
       {done.notes.map(n => <p key={n} className="agent-muted">{n}</p>)}
       {decided && decided.id === done.assignedId && <DecidedNotice result={decided} />}
-      {done.kind === 'rated' && !autoSend && <AgentMessageBox record={done.record} saved />}
     </div>}
     {record ? <TrialDetail key={record.trial.id} record={record} known={trials} audition={audition} onAudition={onAudition} deviceNames={deviceNames} onSelectTrial={setSelectedId}
       autoAudition={autoTrialId === record.trial.id} onAutoAuditioned={() => setAutoTrialId(null)} onDone={onDone} />
@@ -290,7 +287,6 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
   const edit = (update: (f: RatingForm) => RatingForm) => { const next = update(form); setForm(next); drafts.change(trial.id, next); setDirty(true); setSaveError(null) }
   const editCandidate = (cid: string, patch: Partial<CandidateRatingForm>) => edit(f => ({ ...f, candidates: { ...f.candidates, [cid]: { ...f.candidates[cid], ...patch } } }))
   const issue = ratingFormIssue(form)
-  const autoSend = useEditorSettings(s => s.autoSendOnRating)
   /** The best candidate becomes the sound / haptic of the trial's events (rating save with "assign on save"). */
   const autoAssign = useEditorSettings(s => s.autoAssignOnRating)
   const assignBest = async (best: string): Promise<{ note?: string; assignedId?: number }> => {
@@ -318,10 +314,6 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
     setSaving(false)
     const notes: string[] = []
     let assignedId: number | null = null
-    if (autoSend) {
-      try { await useAgentTrialStore.getState().sendAgentMessage(messageFor(record, t('editor.agent.msgSaved', { id: trialName(record) }))); notes.push(t('editor.agent.msgAutoSent')) }
-      catch (error) { notes.push(t('editor.agent.msgFailed', { message: message(error) })) }
-    }
     const usable = usableCandidates(withAuto)
     if (usable.length >= 2 && !body.best) notes.push(t('editor.agent.severalUsable', { ids: usable.map(id => record.shortId ? `${record.shortId}-${id}` : id).join(', ') }))
     // Auto-assign only a unique top "use" candidate (written as best); otherwise the notice above asks to consult the agent.
@@ -414,13 +406,11 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
       </fieldset>}
       {/* The comment on the whole trial: comparisons between candidates ("B is closest, heavier") — the agent's main input. */}
       <TrialComment value={form.comment} onChange={comment => edit(f => ({ ...f, comment }))} />
-      {/* One line: [Save and next] [Assign to event] [Send to AI] (toggles) · status (the full reason on hover). */}
+      {/* One line: [Save and next] [Assign to event] (toggle) · status (the full reason on hover). Saving is the agent's cue (it watches rating.json). */}
       <div className="agent-save">
         <span title={issue ? issueText : ''}><button className="apply-effects-btn" disabled={!!issue || saving || (!dirty && !!rating)} onClick={() => void save()}>{t('editor.agent.saveNext')}</button></span>
         {trial.scene && <button type="button" className="agent-save-toggle" aria-pressed={autoAssign} title={t('events.auto.hint')}
           onClick={() => useEditorSettings.getState().update({ autoAssignOnRating: !autoAssign })}>{t('editor.agent.assignShort')}</button>}
-        <button type="button" className="agent-save-toggle" aria-pressed={autoSend} title={t('editor.agent.msgAutoHint')}
-          onClick={() => useEditorSettings.getState().update({ autoSendOnRating: !autoSend })}>{t('editor.agent.sendShort')}</button>
         <span className={`agent-save-status ${saveError ? 'error' : !dirty && rating ? 'saved' : ''}`} role="status" title={saveStatus}>{shortStatus}</span>
       </div>
     </div>
@@ -481,33 +471,3 @@ function GrowingTextarea({ value, onChange, ...rest }: Omit<TextareaHTMLAttribut
   return <textarea ref={ref} {...rest} value={value} onChange={e => onChange(e.target.value)} />
 }
 
-/** Ids and project of a trial for an outbox message. */
-function messageFor(record: TrialRecord, text: string) {
-  const { trial } = record
-  return { text, project: trial.project ?? trial.scene?.project, trialIds: [trial.id], shortIds: record.shortId ? [record.shortId] : undefined }
-}
-const trialName = (record: TrialRecord) => record.shortId ?? record.trial.id
-
-/**
- * "Send to the agent": an optional short text (the default names the trial by
- * its short id) written to hapbeat-agent/outbox/ for the agent session to pick up.
- */
-function AgentMessageBox({ record, saved }: { record: TrialRecord | null; saved?: boolean }) {
-  const { t } = useI18n()
-  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null)
-  const [sending, setSending] = useState(false)
-  // The message refers to the trial shown (the agent reads its rating.json).
-  const body = !record ? t('editor.agent.msgGeneric') : saved || record.rating ? t('editor.agent.msgSaved', { id: trialName(record) }) : t('editor.agent.msgAbout', { id: trialName(record) })
-  const send = async () => {
-    setSending(true)
-    try {
-      await useAgentTrialStore.getState().sendAgentMessage(record ? messageFor(record, body) : { text: body })
-      setStatus({ ok: true, text: t('editor.agent.msgSent') })
-    } catch (error) { setStatus({ ok: false, text: t('editor.agent.msgFailed', { message: message(error) }) }) }
-    finally { setSending(false) }
-  }
-  return <div className="agent-message">
-    <button type="button" className="toolbar-btn" disabled={sending} title={`${t('editor.agent.msgHint')}\n${body}`} onClick={() => void send()}>{t('editor.agent.msgSend')}</button>
-    <span className={`agent-message-status ${status && !status.ok ? 'error' : ''}`} role="status">{status?.text ?? ''}</span>
-  </div>
-}
