@@ -32,6 +32,7 @@ import { useSceneStore } from '@/stores/sceneStore'
 import { useEventStore } from '@/stores/eventStore'
 import { showDockPanel } from '@/utils/dockPanels'
 import { trialTarget } from '@/utils/agentProtocol'
+import { waveformOnPc } from '@/utils/agentTrialUi'
 import { DecideDialog } from './DecideDialog'
 import { openEventDefault, repeatBuffer, useDecidedSoundSync } from './eventAudio'
 import { useAuditionPlan } from './EditorScenePanel'
@@ -211,6 +212,10 @@ export function WaveformEditor({ active }: { active: boolean }) {
     setRecipeDialog(null)
   }
   useEffect(() => { player.setMuted(muted) }, [player, muted])
+  // A haptic audition goes to the devices only; the PC plays the event's representative sound with it (not the haptic waveform).
+  const hapticOnPc = useEditorSettings(state => state.hapticOnPc)
+  const hapticAudition = (!!audition && !auditionIsSound) || (!audition && eventPreview?.target === 'haptic')
+  useEffect(() => { player.setOutput(waveformOnPc({ hapticAudition, hapticOnPc })) }, [player, hapticAudition, hapticOnPc])
   useEffect(() => { setOriginal(false); useAgentTrialStore.getState().clearAudition(); useEventStore.getState().clearPreview() }, [s.clip?.id])
   // MCP `audition` with play: true — the usual playback path (selected haptic targets, PC audio per the mute toggle).
   const playRequested = useAgentTrialStore(state => state.playRequested)

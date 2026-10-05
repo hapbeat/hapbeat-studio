@@ -454,3 +454,17 @@ export function fireShot(e: EffectiveEvent, loop: boolean, picker: MaterialPicke
 }
 
 export interface PlannedShot extends Shot { index: number; atSec: number }
+
+/**
+ * The sound the editor plays with a haptic audition: the event's representative (the first of its sound
+ * candidates), always the same, without jitter — picking among the pool and the variation are for the Scene
+ * tab's playback only.
+ */
+export function representativeSound<B>(table: CueTable, lib: SceneLib, names: readonly string[], buffers: Record<string, B>): { buffer: B; volume: number; loop: boolean } | null {
+  for (const name of names) {
+    const r = resolveEventName(table, name), e = r && effectiveEvent(table, r.ref)
+    const first = sfxSounds(e?.sfx)[0]
+    if (e?.sfx && first && buffers[first]) return { buffer: buffers[first], volume: e.sfx.volume, loop: isLoopCue(lib, e.ref.cue) }
+  }
+  return null
+}

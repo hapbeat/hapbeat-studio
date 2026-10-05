@@ -1232,6 +1232,8 @@ export const messages = defineMessages({
   'events.soundRequest.placeholder': { ja: 'どんな音か（例: ワニを撫でるような、少し湿ったカサカサ）。Enter で送信、Esc で閉じる', en: 'What it should sound like. Enter sends, Esc closes.' },
   'events.soundRequest.message': { ja: '音の依頼: {cue}: {comment}', en: 'Sound request: {cue}: {comment}' },
   'events.decide.duplicate': { ja: '{name} と同じ音なので追加しませんでした', en: 'Same sound as {name}: not added.' },
+  'editor.hapticOnPc': { ja: '触覚も PC で鳴らす', en: 'Haptics on the PC too' },
+  'editor.hapticOnPcHint': { ja: '触覚の試聴（AI の触覚候補・イベントの触覚素材）の波形も PC で鳴らします。オフでは PC はイベントの代表の音だけを鳴らし、触覚はデバイスへ送るだけです', en: 'Also play haptic auditions (AI haptic candidates, event haptic materials) on the PC. Off: the PC plays only the event’s representative sound; haptics go to the devices.' },
 })
 
 export type MessageId = keyof typeof messages

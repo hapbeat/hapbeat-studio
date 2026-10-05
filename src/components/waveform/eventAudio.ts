@@ -4,7 +4,7 @@ import { useEditorSettings } from '@/stores/editorSettings'
 import { useEventStore } from '@/stores/eventStore'
 import { useSceneStore } from '@/stores/sceneStore'
 import { trialTarget } from '@/utils/agentProtocol'
-import { effectiveEvent, parseEventKey, resolveEventName } from '@/utils/cueEvents'
+import { effectiveEvent, parseEventKey, representativeSound, resolveEventName } from '@/utils/cueEvents'
 import { isLoopCue, routeClips, sfxSounds } from '@/utils/sceneCueTable'
 import { RATE, resampleClip } from '@/utils/sceneHaptics'
 import type { EditorBufferPlayer } from '@/utils/editorBufferPlayer'
@@ -130,12 +130,7 @@ export function useDecidedSoundSync(player: EditorBufferPlayer) {
       const [project, ...cues] = auditionCues.split('\n')
       if (project === lib.project_name) names = cues
     } else if (!audition && preview?.target === 'haptic') names = [preview.event]
-    for (const name of names) {
-      const r = resolveEventName(table, name), e = r && effectiveEvent(table, r.ref)
-      const first = sfxSounds(e?.sfx)[0]
-      if (e?.sfx && first && buffers[first]) return { buffer: buffers[first], volume: e.sfx.volume, loop: isLoopCue(lib, e.ref.cue) }
-    }
-    return null
+    return representativeSound(table, lib, names, buffers)
   }, [audition, auditionCues, preview, table, lib, buffers])
   // A scene (DEC-085): each firing is its own source on the AudioContext clock — the event's sound on the rated
   // cue's firings (with a haptic audition) and the decided sound of the scene's other cues on theirs (no jitter).

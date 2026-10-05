@@ -225,3 +225,6 @@ export function requestAnswered(req: { cue: string; at: string }, target: 'sound
   const sent = Date.parse(req.at)
   return trials.some(r => (r.trial.target ?? 'haptic') === target && !!r.trial.scene?.cues.includes(req.cue) && Date.parse(r.trial.receivedAt) > sent)
 }
+
+/** Whether the editor plays the shown waveform on the PC: not a haptic audition (AI haptic candidate / event haptic material) unless "haptics on the PC too" is on. */
+export const waveformOnPc = (o: { hapticAudition: boolean; hapticOnPc: boolean }) => !o.hapticAudition || o.hapticOnPc

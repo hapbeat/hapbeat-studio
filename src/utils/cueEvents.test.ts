@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   addEventMark, addPositionRoute, decidedSubjects, fireShot, resetAllReviews, setNone, setReview, setUndecided, addVariant, simultaneousGroups, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
   effectiveEvent, eventSceneCues, jitterGain, listEvents, MaterialPicker, matchesName, materialUsers, needsRouteForm, overwriteUsers,
-  parseEventKey, removeVariant, resolveEventName, setOverride, setRouteClips, setSfxSounds, setVariation, trialEvent, trialsForEvent,
+  parseEventKey, removeVariant, representativeSound, resolveEventName, setOverride, setRouteClips, setSfxSounds, setVariation, trialEvent, trialsForEvent,
 } from './cueEvents'
 import { validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
 import { cueVoices, tableTargets } from './sceneHaptics'
@@ -348,4 +348,15 @@ describe('undecided vs none, loop cue sounds, preview sequences', () => {
     expect(fireShot(e, false, new MaterialPicker(() => 0), () => 0.5)).toMatchObject({ jitterDb: 0, pitchSt: 0, rate: 1 })
   })
 
+})
+
+describe('the sound played with a haptic audition', () => {
+  it('is always the representative (first of a pool of 4), whichever candidate is auditioned', () => {
+    const t = v2Table()
+    t.cues.grab.sfx = { sounds: ['GrowlA', 'GrowlB', 'GrowlC', 'GrowlD'], volume: 0.7 }
+    const buffers = { GrowlA: { id: 'A' }, GrowlB: { id: 'B' }, GrowlC: { id: 'C' }, GrowlD: { id: 'D' } }
+    const picks = ['candidate A', 'candidate B', 'candidate A'].map(() => representativeSound(t, sampleLib(), ['grab'], buffers))
+    expect(picks.every(p => p?.buffer === buffers.GrowlA && p.volume === 0.7)).toBe(true)
+    expect(representativeSound(t, sampleLib(), ['nope'], buffers)).toBeNull()
+  })
 })

@@ -10,6 +10,8 @@ export class EditorBufferPlayer {
   private began = 0
   private end = 0
   private muted = false
+  /** Connected to the PC speakers (off while a haptic is auditioned: it only goes to the devices). */
+  private output = true
   private disposed = false
   private revision = 0
   private listeners = new Map<string, Set<(time: number) => void>>()
@@ -26,11 +28,19 @@ export class EditorBufferPlayer {
   getCurrentTime() { return this.source && this.context ? Math.min(this.end, this.offset + this.context.currentTime - this.began) : this.offset }
   isPlaying() { return this.source !== null }
   setMuted(muted: boolean) { this.muted = muted; if (this.gain) this.gain.gain.value = muted ? 0 : 1 }
+  /** Connects / disconnects the PC output; playback (time, events, the device stream) runs either way. */
+  setOutput(on: boolean) {
+    if (on === this.output) return
+    this.output = on
+    if (!this.gain || !this.context) return
+    if (on) this.gain.connect(this.context.destination); else this.gain.disconnect()
+  }
   async unlock() {
     if (this.disposed) throw new Error('Editor player was closed')
     if (!this.context) {
       this.context = this.createContext(); this.gain = this.context.createGain()
-      this.gain.gain.value = this.muted ? 0 : 1; this.gain.connect(this.context.destination)
+      this.gain.gain.value = this.muted ? 0 : 1
+      if (this.output) this.gain.connect(this.context.destination)
     }
     if (this.context.state === 'suspended') await this.context.resume()
   }

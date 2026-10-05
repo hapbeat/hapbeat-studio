@@ -52,4 +52,16 @@ describe('editor buffer player (silent mock context)', () => {
     player.dispose(); player.activate(); e.context.state = 'running'; player.prepare(); await player.play()
     expect(player.isPlaying()).toBe(true); player.dispose()
   })
+
+  it('a haptic audition is not connected to the PC output (playback still runs); reconnects when allowed', async () => {
+    const e = engine(), player = new EditorBufferPlayer(audio(2), e.create)
+    ;(e.gain as unknown as { disconnect: () => void }).disconnect = vi.fn()
+    player.setOutput(false)
+    await player.play(0, 1)
+    expect(e.gain.connect).not.toHaveBeenCalled()
+    expect(e.sources[0].start).toHaveBeenCalled()
+    player.setOutput(true)
+    expect(e.gain.connect).toHaveBeenCalledWith(e.context.destination)
+    player.dispose()
+  })
 })

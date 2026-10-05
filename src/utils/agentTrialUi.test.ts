@@ -219,3 +219,12 @@ describe('haptic requests', () => {
     expect(requestAnswered(req, 'haptic', [trial(undefined, ['grab'], '2026-10-05T11:00:00.000Z')])).toBe(true)
   })
 })
+
+describe('PC audio of haptic auditions', () => {
+  it('the waveform plays on the PC only outside haptic auditions (or with haptics on the PC on)', async () => {
+    const { waveformOnPc } = await import('./agentTrialUi')
+    expect(waveformOnPc({ hapticAudition: true, hapticOnPc: false })).toBe(false)
+    expect(waveformOnPc({ hapticAudition: true, hapticOnPc: true })).toBe(true)
+    expect(waveformOnPc({ hapticAudition: false, hapticOnPc: false })).toBe(true)
+  })
+})

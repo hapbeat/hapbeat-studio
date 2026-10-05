@@ -18,6 +18,7 @@ export function EditorTopBar({ dockApi, notice, onNotice }: { dockApi: DockviewA
   const { openRecipe } = useEditor()
   const { toast } = useToast()
   const muted = useEditorSettings(state => state.muted)
+  const hapticOnPc = useEditorSettings(state => state.hapticOnPc)
   const sendHaptics = useEditorSettings(state => state.sendHaptics)
   const audioInput = useRef<HTMLInputElement>(null)
   const settingsInput = useRef<HTMLInputElement>(null)
@@ -78,6 +79,7 @@ export function EditorTopBar({ dockApi, notice, onNotice }: { dockApi: DockviewA
     <DevicePill selectionScope="kit" showWhenDisconnected modalExtra={<div className="editor-output-options">
       <label><input type="checkbox" checked={sendHaptics} onChange={e => useEditorSettings.getState().update({ sendHaptics: e.target.checked })} />{t('editor.sendHaptics')}</label>
       <label><input type="checkbox" checked={!muted} onChange={e => useEditorSettings.getState().update({ muted: !e.target.checked })} />{t('editor.sound')}</label>
+      <label title={t('editor.hapticOnPcHint')}><input type="checkbox" checked={hapticOnPc} onChange={e => useEditorSettings.getState().update({ hapticOnPc: e.target.checked })} />{t('editor.hapticOnPc')}</label>
     </div>} />
     <EditorMenu label={`${t('editor.viewMenu')} ▾`} disabled={!dockApi}>
       <EditorMenuSection label={t('editor.viewPanels')}>

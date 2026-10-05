@@ -42,6 +42,8 @@ export interface EditorUiSettings {
   eventMarks: Record<string, EventMark[]>
   /** Events panel: height (px) of the event list above the detail. */
   eventsListHeight: number
+  /** Haptic auditions (AI haptic candidates, event haptic materials) also play their waveform on the PC (off: devices only). */
+  hapticOnPc: boolean
   /** AI trials: saving a rating adds its ★4+ candidates to the material pool of the trial's first scene cue. */
   autoAssignOnRating: boolean
   /** Reserves per event (a trial's first scene cue): ★3 candidates kept aside, by reference — not in the cue table, never played by the game. */
@@ -63,7 +65,7 @@ export interface EditorUiSettings {
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
+  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, hapticOnPc: false, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -129,6 +131,7 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     revisePending: Array.isArray(v.revisePending) ? v.revisePending.filter((r): r is RevisePending => isRecord(r) && typeof r.cue === 'string' && typeof r.material === 'string' && typeof r.at === 'string'
       && (r.target === 'sound' || r.target === 'haptic')).slice(-200).map(r => ({ cue: r.cue, target: r.target, material: r.material, at: r.at })) : [],
     eventsListHeight: clamp(v.eventsListHeight, 80, 1200, d.eventsListHeight),
+    hapticOnPc: v.hapticOnPc === true,
     autoAssignOnRating: typeof v.autoAssignOnRating === 'boolean' ? v.autoAssignOnRating : d.autoAssignOnRating,
     trialProjectFilter: typeof v.trialProjectFilter === 'string' && v.trialProjectFilter.length <= 200 ? v.trialProjectFilter : d.trialProjectFilter,
     trialTargetFilter: v.trialTargetFilter === 'sound' || v.trialTargetFilter === 'haptic' ? v.trialTargetFilter : '',
