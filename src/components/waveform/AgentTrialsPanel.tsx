@@ -365,27 +365,34 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
         const sounding = active && (playing || pending)
         return <article key={requested.id} className={`agent-candidate ${active ? 'auditioning' : ''} ${sounding ? 'playing' : ''} ${buffer ? 'selectable' : ''}`} aria-current={active || undefined} onClick={select}
           tabIndex={0} data-trial-id={trial.id} data-candidate-id={requested.id}>
-          {/* Line 1: ▶ id label · overall ★ · derived verdict · marks / actions. Line 2: direction axes (grid) · comment · kept ranges. */}
-          <div className="agent-card-row">
-            <button className="toolbar-btn agent-play-btn" disabled={!file?.audio || !!file?.error} aria-label={t(sounding ? 'wave.stop' : 'wave.play')} title={t('editor.agent.playHint')}
-              onClick={() => toggleCandidate(trial.id, requested.id)}>
-              <span className="transport-label-stack" aria-hidden="true"><span style={{ visibility: sounding ? 'hidden' : 'visible' }}>▶</span><span style={{ visibility: sounding ? 'visible' : 'hidden' }}>■</span></span>
-            </button>
-            <strong className="agent-short-id" title={t('editor.agent.shortIdHint')}>{record.shortId ? `${record.shortId}-${requested.id}` : requested.id}</strong>
-            <span className="agent-card-name" title={[requested.label, requested.hypothesis, requested.method && t(`editor.agent.method.${requested.method}` as MessageId)].filter(Boolean).join('\n')}>{requested.label}</span>
-            <span className="agent-thumb" title={featureText(file?.features ?? null)}>{buffer ? <WaveformThumbnail buffer={buffer} />
-              : <small className={file?.error || loaded ? 'error' : ''}>{file?.error ? t('editor.agent.renderError', { message: file.error }) : loaded && 'error' in loaded ? loaded.error : file ? t('editor.agent.loadingAudio') : ''}</small>}</span>
-            <Stars value={form.candidates[requested.id].overall} onChange={overall => editCandidate(requested.id, { overall })} />
-            <VerdictTag overall={form.candidates[requested.id].overall} />
-            {(marks[`${trial.id}/${requested.id}`] ?? []).map(m => <span key={`${m.project}:${m.event}:${m.target}`} className="editor-event-badge" title={m.project}>{m.target === 'sound' ? '♪' : '≋'} {m.event}</span>)}
-            {/* By hand only (saving the rating assigns automatically): copy into the clip list / assign to the event. */}
-            <button type="button" className="agent-icon-btn" disabled={!editorFolder || processing} title={t('editor.agent.toClipHint')} aria-label={t('editor.agent.toClipHint')}
-              onClick={() => void adopt(requested.id, requested.label)}>{t('editor.agent.toClip')}</button>
-            <button type="button" className="agent-icon-btn" disabled={!buffer} title={t(target === 'sound' ? 'editor.agent.toEventSoundHint' : 'editor.agent.toEventHapticHint')}
-              aria-label={t(target === 'sound' ? 'editor.agent.toEventSoundHint' : 'editor.agent.toEventHapticHint')}
-              onClick={() => useEventStore.getState().requestDecide({ target, source: { kind: 'candidate', trialId: trial.id, candidateId: requested.id }, event })}>{t('editor.agent.toEvent')}</button>
-          </div>
-          <div className="agent-card-row2">
+          {/*
+            One grid, laid out by the card's own width (container query, not the viewport):
+            narrow — head / meta (waveform, ★) / axes / notes; wide — head | meta, axes | notes.
+          */}
+          <div className="agent-card">
+            <div className="agent-card-head">
+              <button className="toolbar-btn agent-play-btn" disabled={!file?.audio || !!file?.error} aria-label={t(sounding ? 'wave.stop' : 'wave.play')} title={t('editor.agent.playHint')}
+                onClick={() => toggleCandidate(trial.id, requested.id)}>
+                <span className="transport-label-stack" aria-hidden="true"><span style={{ visibility: sounding ? 'hidden' : 'visible' }}>▶</span><span style={{ visibility: sounding ? 'visible' : 'hidden' }}>■</span></span>
+              </button>
+              <strong className="agent-short-id" title={t('editor.agent.shortIdHint')}>{record.shortId ? `${record.shortId}-${requested.id}` : requested.id}</strong>
+              <span className="agent-card-name" title={[requested.label, requested.hypothesis, requested.method && t(`editor.agent.method.${requested.method}` as MessageId)].filter(Boolean).join('\n')}>{requested.label}</span>
+              {/* By hand only (saving the rating assigns automatically): copy into the clip list / assign to the event. */}
+              <span className="agent-card-actions">
+                <button type="button" className="agent-icon-btn" disabled={!editorFolder || processing} title={t('editor.agent.toClipHint')} aria-label={t('editor.agent.toClipHint')}
+                  onClick={() => void adopt(requested.id, requested.label)}>{t('editor.agent.toClip')}</button>
+                <button type="button" className="agent-icon-btn" disabled={!buffer} title={t(target === 'sound' ? 'editor.agent.toEventSoundHint' : 'editor.agent.toEventHapticHint')}
+                  aria-label={t(target === 'sound' ? 'editor.agent.toEventSoundHint' : 'editor.agent.toEventHapticHint')}
+                  onClick={() => useEventStore.getState().requestDecide({ target, source: { kind: 'candidate', trialId: trial.id, candidateId: requested.id }, event })}>{t('editor.agent.toEvent')}</button>
+              </span>
+            </div>
+            <div className="agent-card-meta">
+              <span className="agent-thumb" title={featureText(file?.features ?? null)}>{buffer ? <WaveformThumbnail buffer={buffer} />
+                : <small className={file?.error || loaded ? 'error' : ''}>{file?.error ? t('editor.agent.renderError', { message: file.error }) : loaded && 'error' in loaded ? loaded.error : file ? t('editor.agent.loadingAudio') : ''}</small>}</span>
+              <Stars value={form.candidates[requested.id].overall} onChange={overall => editCandidate(requested.id, { overall })} />
+              <VerdictTag overall={form.candidates[requested.id].overall} />
+              {(marks[`${trial.id}/${requested.id}`] ?? []).map(m => <span key={`${m.project}:${m.event}:${m.target}`} className="editor-event-badge" title={m.project}>{m.target === 'sound' ? '♪' : '≋'} {m.event}</span>)}
+            </div>
             <Directions value={form.candidates[requested.id]} axes={axes} onChange={patch => editCandidate(requested.id, patch)} />
             <CandidateNotes value={form.candidates[requested.id]} onChange={patch => editCandidate(requested.id, patch)} selection={active ? selection : null} />
           </div>

@@ -956,9 +956,6 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 .agent-short-id.large { font-size: 20px; }
 
 /* Candidate card rows (see the compact layout at the end). */
-.agent-card-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.agent-card-row .agent-play-btn { min-width: 0; width: 32px; padding: 3px 0; flex: none; }
-.agent-card-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-icon-btn { flex: none; padding: 1px 6px; border: 1px solid var(--border-light); border-radius: 4px; background: var(--bg-primary); color: var(--text-secondary); font-size: 11px; white-space: nowrap; cursor: pointer; }
 .agent-icon-btn:hover:not(:disabled) { color: var(--text-primary); border-color: var(--accent-light); }
 .agent-icon-btn:disabled { opacity: .5; cursor: default; }
@@ -988,10 +985,6 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 .agent-prompt .agent-link { margin-left: 6px; }
 .agent-candidates { gap: 4px; }
 .agent-candidate { padding: 5px 8px; gap: 3px; }
-.agent-card-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.agent-card-row .agent-thumb { flex: 0 0 64px; height: 18px; overflow: hidden; }
-.agent-card-row .agent-thumb .editor-thumbnail { height: 18px; }
-.agent-card-row2 { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
 .agent-stars { display: inline-flex; flex: none; }
 .agent-star { padding: 0 1px; border: 0; background: transparent; color: #4b5160; font-size: 17px; line-height: 1; cursor: pointer; }
 .agent-star.on { color: #fbbf24; }
@@ -1000,18 +993,37 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 .agent-verdict-tag.maybe { color: #e3c27a; }
 .agent-verdict-tag.no { color: #f08a8a; }
 /* Direction axes: `low [−][·][+] high`, 2–3 per row. */
-.agent-axes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 2px 10px; flex: 2 1 320px; min-width: 0; }
 .agent-axis { display: flex; align-items: center; gap: 2px; font-size: 11px; color: var(--text-secondary); min-width: 0; }
 .agent-axis-pole { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-axis-pole:first-child { text-align: right; }
 .agent-axis-btn { flex: none; width: 20px; height: 18px; padding: 0; border: 1px solid var(--border-light); border-radius: 4px; background: var(--bg-primary); color: var(--text-muted); font-size: 12px; line-height: 1; cursor: pointer; }
 .agent-axis-btn.selected { border-color: #a78bfa; background: rgba(167,139,250,.25); color: var(--text-primary); }
-.agent-notes { display: flex; align-items: flex-start; gap: 6px; flex: 1 1 200px; min-width: 0; }
 .agent-notes .agent-comment { flex: 1; min-width: 0; resize: none; overflow: hidden; min-height: 26px; padding: 3px 6px; }
-.agent-notes .agent-use-range { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 3px; font-size: 11px; max-width: 45%; }
 .agent-trial-rating { gap: 6px; padding: 8px 10px; }
 .agent-context { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 4px 8px; padding: 4px 8px; }
 .agent-field { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-secondary); min-width: 0; }
 .agent-field input { flex: 1; width: 100%; min-width: 0; box-sizing: border-box; min-height: 24px; padding: 2px 4px; }
 .agent-save { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .agent-save-status { flex: 1; min-width: 0; font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/*
+ * Candidate card: one CSS grid that follows the card's width (container query on the card, never the viewport).
+ * Narrow: head / meta (waveform, stars) / axes / notes, one under the other. Wide (≥ 560px): head | meta, axes | notes.
+ * Every track is minmax(0, …) and every child min-width: 0, so nothing leaves the card.
+ */
+.agent-candidate { container-type: inline-size; min-width: 0; }
+.agent-card { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: "head" "meta" "axes" "notes"; gap: 4px; min-width: 0; }
+@container (min-width: 560px) {
+  .agent-card { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "head meta" "axes notes"; column-gap: 12px; }
+}
+.agent-card-head { grid-area: head; display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 6px; min-width: 0; }
+.agent-card-head .agent-play-btn { min-width: 0; padding: 3px 8px; }
+.agent-card-head .agent-short-id { white-space: nowrap; }
+.agent-card-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-card-actions { display: flex; gap: 4px; min-width: 0; }
+.agent-card-meta { grid-area: meta; display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.agent-card-meta .agent-thumb { flex: 1 1 80px; min-width: 0; height: 20px; overflow: hidden; display: block; }
+.agent-card-meta .agent-thumb .editor-thumbnail { width: 100%; height: 20px; }
+.agent-card .agent-axes { grid-area: axes; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); gap: 2px 10px; min-width: 0; }
+.agent-card .agent-notes { grid-area: notes; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 6px; min-width: 0; }
+.agent-card .agent-use-range { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 3px; font-size: 11px; min-width: 0; }
