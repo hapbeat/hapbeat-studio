@@ -14,14 +14,14 @@ import { runDecision } from './eventDecide'
 import { DecidedNotice } from './DecideDialog'
 import { isLoopCue } from '@/utils/sceneCueTable'
 import { WaveformThumbnail } from './WaveformThumbnail'
+import { EditorMenu, EditorMenuItem } from './EditorMenu'
+import { nextAfter, stepQueue, trialQueue } from '@/utils/trialQueue'
 import { useEditor } from './editorContext'
 import { useSceneVideoTarget } from '@/utils/editorSceneSync'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useEditorSettings } from '@/stores/editorSettings'
 import { wantedSceneProject } from '@/utils/trialScene'
 
-/** Trial tiles shown before "Show more" (unrated first, newest first). */
-const TRIAL_TILE_LIMIT = 4
 /** Filter value for trials without a project (not a valid project name, so it cannot collide). */
 const UNASSIGNED_FILTER = ' '
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -44,7 +44,8 @@ export function AgentTrialsPanel() {
   const { playbackDevices, linkSceneProject } = useEditor()
   /** Trial picked by a click in the list: its first candidate is auditioned (not played) once its audio is loaded. */
   const [autoTrialId, setAutoTrialId] = useState<string | null>(null)
-  const pickTrial = (r: TrialRecord) => {
+  /** `interactive` (a click): may ask for the game folder; automatic opens only use an already permitted one. */
+  const pickTrial = (r: TrialRecord, interactive = true) => {
     setSelectedId(r.trial.id)
     setAutoTrialId(r.trial.id)
     // The Scene video (window or docked panel, never opened here) switches to this trial's moment.
@@ -52,7 +53,9 @@ export function AgentTrialsPanel() {
     const wanted = wantedSceneProject({ scene: r.trial.scene, saved: useEditorSettings.getState().trialScenes[r.trial.id], fallback: r.trial.project })
     const scene = useSceneStore.getState()
     // Same as "▶ Video": this click may grant the folder permission or link the folder once.
-    if (wanted && scene.lib?.project_name !== wanted) void linkSceneProject(wanted, { quietIfRefused: true })
+    if (wanted && scene.lib?.project_name !== wanted) {
+      if (interactive) void linkSceneProject(wanted, { quietIfRefused: true }); else void useSceneStore.getState().linkProject(wanted, false)
+    }
   }
   const deviceNames = useMemo(() => [...new Set(playbackDevices.map(device => device.name).filter(Boolean))], [playbackDevices])
   /** '' = every trial; otherwise the trial's `project` (UNASSIGNED_FILTER = trials without one). */
@@ -80,11 +83,24 @@ export function AgentTrialsPanel() {
   const record = trials.find(r => r.trial.id === selectedId) ?? null
   const projects = useMemo(() => [...new Set(trials.map(r => r.trial.project).filter((p): p is string => !!p))].sort((a, b) => a.localeCompare(b)), [trials])
   const shown = projectFilter === '' ? trials : trials.filter(r => (r.trial.project ?? UNASSIGNED_FILTER) === projectFilter)
-  const [showAll, setShowAll] = useState(false)
-  // Unrated trials first (newest first), then rated ones; the first few, the selected one and "Show more".
-  const ordered = [...shown.filter(r => !r.rating), ...shown.filter(r => r.rating)]
-  // Never more than the limit: a selected trial further down shows only in the heading below.
-  const listed = showAll ? ordered : ordered.slice(0, TRIAL_TILE_LIMIT)
+  // Work top-down: the unrated, not dismissed trials of the project, oldest first.
+  const queue = useMemo(() => trialQueue(shown), [shown])
+  const inQueue = !!record && queue.some(r => r.trial.id === record.trial.id)
+  // Opening the tab / changing project / finishing the shown trial: open the oldest unrated one (no folder prompt without a click).
+  useEffect(() => {
+    if (!folder || (record && shown.includes(record))) return
+    if (queue[0]) pickTrial(queue[0], false)
+  }, [folder, projectFilter, record, shown, queue])
+  const [done, setDone] = useState<(DoneInfo & { record: TrialRecord }) | null>(null)
+  const decided = useEventStore(s => s.result)
+  const onDone = (info: DoneInfo) => {
+    const finished = trials.find(r => r.trial.id === info.recordId)
+    if (finished) setDone({ ...info, record: finished })
+    const next = nextAfter(queue, info.recordId)
+    if (next) pickTrial(next, false); else setSelectedId(null)
+  }
+  const prev = stepQueue(queue, record?.trial.id ?? null, -1), next = stepQueue(queue, record?.trial.id ?? null, 1)
+  const autoSend = useEditorSettings(s => s.autoSendOnRating)
   return <div className="agent-panel">
     <div className={`agent-status ${storeError ? 'error' : ''}`} role="status">{storeError ?? t(!folder ? 'editor.agent.noFolder' : polling ? 'editor.agent.watching' : 'editor.agent.paused')}</div>
     <div className={`agent-mcp-status ${isConnected && folder ? 'ready' : ''}`} title={t('editor.agent.mcpHint')}>{t(!isConnected ? 'editor.agent.mcpHelperOff' : folder ? 'editor.agent.mcpReady' : 'editor.agent.mcpNoFolder')}</div>
@@ -100,38 +116,47 @@ export function AgentTrialsPanel() {
         {projects.map(name => <option key={name} value={name}>{name}</option>)}
         <option value={UNASSIGNED_FILTER}>{t('editor.unassigned')}</option>
       </select></label>}
-    {/* Tiles in the panel's own (single) scroll; a long list is cut to the newest few, plus the selected one. */}
-    <div className="agent-trial-list" aria-label={t('editor.agent.tab')}>
-      {trials.length === 0 && rejected.length === 0 && <p className="agent-muted">{t('editor.agent.empty')}</p>}
-      {listed.map(r => <button key={r.trial.id} className={`agent-trial-item ${r.trial.id === selectedId ? 'selected' : ''}`} aria-pressed={r.trial.id === selectedId} onClick={() => pickTrial(r)}
-        title={`${r.trial.id} · ${t('editor.agent.candidateCount', { count: r.trial.candidates.length })}`}>
-        {r.shortId && <span className="agent-short-id">{r.shortId}</span>}
-        {/* A trial for a game event is titled by the event (scene.cues); its words come second. */}
-        <strong>{r.trial.scene ? r.trial.scene.cues.join(' + ') : r.trial.terms.join(' · ')}</strong>
-        <small>{r.trial.scene ? r.trial.terms.join(' · ') : ''}</small>
-        <span className="agent-trial-badges">
-          <span className={`agent-badge ${r.rating ? 'rated' : 'unrated'}`}>{t(r.rating ? 'editor.agent.rated' : 'editor.agent.unrated')}</span>
-          {trialTarget(r.trial) === 'sound' && <span className="agent-badge">{t('editor.agent.targetSound')}</span>}
-        </span>
-        <small className="agent-trial-date">{new Date(r.trial.receivedAt).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small>
-      </button>)}
-      {shown.length > TRIAL_TILE_LIMIT && <button type="button" className="toolbar-btn agent-trial-more" onClick={() => setShowAll(!showAll)}>
-        {showAll ? t('editor.agent.showFewer') : t('editor.agent.showMore', { count: shown.length - listed.length })}</button>}
-      {rejected.map(r => <div key={`${r.file}\n${r.error}`} className="agent-rejected">
-        <strong>{t('editor.agent.rejected', { file: r.file })}</strong>
-        <button className="toolbar-btn" onClick={() => setRejected(list => list.filter(o => o !== r))}>{t('editor.agent.dismiss')}</button>
-        <small>{r.error}</small><small>{t('editor.agent.rejectedHint')}</small>
-      </div>)}
+    {/* Top-down: ‹ T27 · 3 left › and the history (rated / dismissed trials). */}
+    <div className="agent-queue-nav">
+      <button type="button" className="toolbar-btn" disabled={!prev} aria-label={t('editor.agent.prevTrial')} title={t('editor.agent.prevTrial')} onClick={() => prev && pickTrial(prev)}>‹</button>
+      <span className="agent-queue-pos"><span className="agent-short-id large">{record?.shortId ?? '—'}</span>
+        <span>{record && !inQueue ? t(record.dismissed ? 'editor.agent.fromHistoryDismissed' : 'editor.agent.fromHistory') : t('editor.agent.remaining', { count: queue.length })}</span></span>
+      <button type="button" className="toolbar-btn" disabled={!next} aria-label={t('editor.agent.nextTrial')} title={t('editor.agent.nextTrial')} onClick={() => next && pickTrial(next)}>›</button>
+      <EditorMenu label={`${t('editor.agent.history')} ▾`} title={t('editor.agent.historyHint')} className="agent-history">
+        {shown.length === 0 && <p className="editor-menu-note">{t('editor.agent.empty')}</p>}
+        {shown.map(r => <EditorMenuItem key={r.trial.id} checked={r.trial.id === selectedId} onSelect={() => pickTrial(r)}>
+          <span className="agent-short-id">{r.shortId ?? ''}</span> {r.trial.scene ? r.trial.scene.cues.join(' + ') : r.trial.terms.join(' · ')}
+          <small className="agent-history-state">{t(r.dismissed ? 'editor.agent.dismissedBadge' : r.rating ? 'editor.agent.rated' : 'editor.agent.unrated')}</small>
+        </EditorMenuItem>)}
+      </EditorMenu>
     </div>
+    {trials.length === 0 && rejected.length === 0 && <p className="agent-muted">{t('editor.agent.empty')}</p>}
+    {rejected.map(r => <div key={`${r.file}\n${r.error}`} className="agent-rejected">
+      <strong>{t('editor.agent.rejected', { file: r.file })}</strong>
+      <button className="toolbar-btn" onClick={() => setRejected(list => list.filter(o => o !== r))}>{t('editor.agent.dismiss')}</button>
+      <small>{r.error}</small><small>{t('editor.agent.rejectedHint')}</small>
+    </div>)}
+    {done && <div className="agent-done" role="status">
+      <div className="agent-done-head">{t(done.kind === 'dismissed' ? 'editor.agent.doneDismissed' : 'editor.agent.doneRated', { id: done.record.shortId ?? done.record.trial.id })}
+        <button type="button" className="toolbar-btn" onClick={() => setDone(null)}>{t('common.close')}</button></div>
+      {done.notes.map(n => <p key={n} className="agent-muted">{n}</p>)}
+      {decided && decided.id === done.assignedId && <DecidedNotice result={decided} />}
+      {done.kind === 'rated' && !autoSend && <AgentMessageBox record={done.record} saved />}
+    </div>}
     {record ? <TrialDetail key={record.trial.id} record={record} dimensions={dimensions} known={trials} audition={audition} onAudition={onAudition} deviceNames={deviceNames} onSelectTrial={setSelectedId}
-      autoAudition={autoTrialId === record.trial.id} onAutoAuditioned={() => setAutoTrialId(null)} />
-      : <p className="agent-muted">{t('editor.agent.selectTrial')}</p>}
+      autoAudition={autoTrialId === record.trial.id} onAutoAuditioned={() => setAutoTrialId(null)} onDone={onDone} />
+      : <p className="agent-muted">{t(trials.length ? 'editor.agent.allDone' : 'editor.agent.selectTrial')}</p>}
   </div>
 }
 
-function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNames, onSelectTrial, autoAudition, onAutoAuditioned }: {
+/** What the last save / dismissal did (shown by the panel above the next trial). */
+interface DoneInfo { recordId: string; notes: string[]; assignedId: number | null; kind: 'rated' | 'dismissed' }
+
+function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNames, onSelectTrial, autoAudition, onAutoAuditioned, onDone }: {
   record: TrialRecord; dimensions: DimensionsDoc | null; known: TrialRecord[]; audition: AuditionTarget | null
   onAudition: (target: AuditionTarget, buffer: AudioBuffer) => void; deviceNames: string[]; onSelectTrial: (id: string) => void
+  /** After a save or a dismissal: the panel moves on. */
+  onDone: (done: DoneInfo) => void
   /** Set after a click in the trial list: audition the first candidate (no playback) and bring the waveform forward. */
   autoAudition: boolean; onAutoAuditioned: () => void
 }) {
@@ -220,45 +245,50 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
   const edit = (update: (f: RatingForm) => RatingForm) => { touchedSinceMount.current = true; setForm(update); setDirty(true); setSaveError(null) }
   const editCandidate = (cid: string, patch: Partial<CandidateRatingForm>) => edit(f => ({ ...f, candidates: { ...f.candidates, [cid]: { ...f.candidates[cid], ...patch } } }))
   const issue = ratingFormIssue(form)
-  /** Shown after a save: "send to the agent" with "Tn rated, review and continue". */
-  const [justSaved, setJustSaved] = useState(false)
   const autoSend = useEditorSettings(s => s.autoSendOnRating)
+  /** The best candidate becomes the sound / haptic of the trial's events (rating save with "assign on save"). */
+  const autoAssign = useEditorSettings(s => s.autoAssignOnRating)
+  const assignBest = async (best: string): Promise<{ note?: string; assignedId?: number }> => {
+    const scene = useSceneStore.getState()
+    if (!scene.table || !scene.lib || scene.lib.project_name !== trial.scene!.project) return { note: t('events.auto.noProject', { project: trial.scene!.project }) }
+    const events = assignEventsForTrial(scene.table, scene.lib, trial.scene!.cues, target)
+    if (!events.length) return { note: t('events.auto.noEvents', { cues: trial.scene!.cues.join(', ') }) }
+    try {
+      const r = await runDecision({ target, source: { kind: 'candidate', trialId: trial.id, candidateId: best }, events, name: null, at: null, gain: 1 })
+      return r.ok ? { assignedId: r.result.id } : { note: t(r.notice.id, r.notice.params) }
+    } catch (error) { return { note: message(error) } }
+  }
+  /** Saves, then (auto-assign / auto-send) and hands over to the panel, which moves to the next unrated trial and shows what happened. */
   const save = async () => {
     if (issue || saving) return
     setSaving(true)
     const withAuto = target === 'sound' ? { ...form, context: EMPTY_CONTEXT } : { ...form, context: { ...form.context, ...(auto.device ? { device: auto.device } : {}),
       ...(auto.deviceWiper !== null ? { deviceWiper: String(auto.deviceWiper), volumeLabel: auto.volumeLabel } : { volumeLabel: '' }) } }
     const body = formToRating(withAuto, trial, localIsoString(new Date()))
-    let saved = false
     try {
-      await useAgentTrialStore.getState().saveRating(trial.id, body); if (target === 'haptic') rememberContext(withAuto.context); drafts.delete(trial.id); setDirty(false); setRestored(false); saved = true
+      await useAgentTrialStore.getState().saveRating(trial.id, body); if (target === 'haptic') rememberContext(withAuto.context); drafts.delete(trial.id); setDirty(false); setRestored(false)
       await clearRatingDraft(editorFolder?.root ?? null, trial.id).catch(() => {})
+    } catch (error) { setSaveError(message(error)); setSaving(false); return }
+    setSaving(false)
+    const notes: string[] = []
+    let assignedId: number | null = null
+    if (autoSend) {
+      try { await useAgentTrialStore.getState().sendAgentMessage(messageFor(record, t('editor.agent.msgSaved', { id: trialName(record) }))); notes.push(t('editor.agent.msgAutoSent')) }
+      catch (error) { notes.push(t('editor.agent.msgFailed', { message: message(error) })) }
     }
-    catch (error) { setSaveError(message(error)) }
-    finally { setSaving(false) }
-    if (saved) setJustSaved(true)
-    if (saved && autoSend) {
-      try { await useAgentTrialStore.getState().sendAgentMessage(messageFor(record, t('editor.agent.msgSaved', { id: trialName(record) }))); setNotice(t('editor.agent.msgAutoSent')) }
-      catch (error) { setNotice(t('editor.agent.msgFailed', { message: message(error) })) }
-    }
-    if (saved && usableCandidates(withAuto).length >= 2 && !body.best) setNotice(t('editor.agent.severalUsable', { ids: usableCandidates(withAuto).map(id => record.shortId ? `${record.shortId}-${id}` : id).join(', ') }))
+    const usable = usableCandidates(withAuto)
+    if (usable.length >= 2 && !body.best) notes.push(t('editor.agent.severalUsable', { ids: usable.map(id => record.shortId ? `${record.shortId}-${id}` : id).join(', ') }))
     // Auto-assign only a unique top "use" candidate (written as best); otherwise the notice above asks to consult the agent.
-    if (saved && body.best && trial.scene && autoAssign) await assignBest(body.best)
-    else if (saved && trial.scene && autoAssign && usableCandidates(withAuto).length === 1 && !body.best) setNotice(t('editor.agent.useNeedsOverall'))
+    if (body.best && trial.scene && autoAssign) { const r = await assignBest(body.best); if (r.note) notes.push(r.note); assignedId = r.assignedId ?? null }
+    else if (trial.scene && autoAssign && usable.length === 1 && !body.best) notes.push(t('editor.agent.useNeedsOverall'))
+    onDone({ recordId: trial.id, notes, assignedId, kind: 'rated' })
   }
-  /** The best candidate becomes the sound / haptic of the trial's events (rating save with "assign on save"). */
-  const autoAssign = useEditorSettings(s => s.autoAssignOnRating)
-  const [assignedId, setAssignedId] = useState<number | null>(null)
-  const lastResult = useEventStore(s => s.result)
-  const assignBest = async (best: string) => {
-    const scene = useSceneStore.getState()
-    if (!scene.table || !scene.lib || scene.lib.project_name !== trial.scene!.project) { setNotice(t('events.auto.noProject', { project: trial.scene!.project })); return }
-    const events = assignEventsForTrial(scene.table, scene.lib, trial.scene!.cues, target)
-    if (!events.length) { setNotice(t('events.auto.noEvents', { cues: trial.scene!.cues.join(', ') })); return }
-    try {
-      const r = await runDecision({ target, source: { kind: 'candidate', trialId: trial.id, candidateId: best }, events, name: null, at: null, gain: 1 })
-      if (r.ok) { setAssignedId(r.result.id); setNotice('') } else setNotice(t(r.notice.id, r.notice.params))
-    } catch (error) { setNotice(message(error)) }
+  const dismiss = async () => {
+    try { await useAgentTrialStore.getState().setDismissed(trial.id, true); drafts.delete(trial.id); await clearRatingDraft(editorFolder?.root ?? null, trial.id).catch(() => {}); onDone({ recordId: trial.id, notes: [], assignedId: null, kind: 'dismissed' }) }
+    catch (error) { setNotice(message(error)) }
+  }
+  const restore = async () => {
+    try { await useAgentTrialStore.getState().setDismissed(trial.id, false) } catch (error) { setNotice(message(error)) }
   }
   const adopt = async (cid: string, label: string) => {
     try { await useAgentTrialStore.getState().adoptCandidate(trial.id, cid); setNotice(t('editor.agent.adopted', { name: label })) }
@@ -282,6 +312,11 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
       <small>{t('editor.agent.received')}: {new Date(trial.receivedAt).toLocaleString()}{trial.agent && ` · ${t('editor.agent.agentName')}: ${[trial.agent.name, trial.agent.model].filter(Boolean).join(' / ')}`}</small>
       {trial.parentTrial && <small>{t('editor.agent.parent')}: {known.some(r => r.trial.id === trial.parentTrial)
         ? <button className="agent-link" onClick={() => onSelectTrial(trial.parentTrial!)}>{trial.parentTrial}</button> : trial.parentTrial}</small>}
+      <div className="agent-detail-actions">
+        {record.dismissed ? <><span className="agent-badge">{t('editor.agent.dismissedBadge')}</span>
+          <button className="toolbar-btn" onClick={() => void restore()}>{t('editor.agent.restore')}</button></>
+          : !rating && <button className="toolbar-btn" title={t('editor.agent.dismissHint')} onClick={() => void dismiss()}>{t('editor.agent.dismissTrial')}</button>}
+      </div>
       <button className="toolbar-btn agent-scene-btn" title={t('editor.scene.openHint')}
         onClick={() => openSceneVideo({ kind: 'trial', trialId: trial.id }, wantedSceneProject({ scene: trial.scene, saved: sceneSaved, fallback: trial.project }) ?? null)}>▶ {t('editor.scene.open')}</button>
     </div>
@@ -294,8 +329,6 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
     {target === 'sound' && <p className="agent-muted">{t('editor.agent.soundTrialNote')}</p>}
     {soundFirst && <p className="events-hint">{t('events.soundFirst')}</p>}
     <div className="agent-notice" role="status">{notice}</div>
-    {lastResult && lastResult.id === assignedId && <DecidedNotice result={lastResult} />}
-    {justSaved && !autoSend && <AgentMessageBox record={record} saved />}
     <div className="agent-candidates">
       {trial.candidates.map(requested => {
         const file = record.candidates.find(c => c.id === requested.id)

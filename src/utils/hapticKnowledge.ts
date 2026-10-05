@@ -67,7 +67,10 @@ export interface TrialRecord {
   month: string; trial: TrialFile; candidates: CandidateFile[]; rating: RatingFile | null
   /** Short id for conversation ("T27"; candidates "T27-B"): the trial's position in reception order in this folder. */
   shortId?: string
+  /** Set when the user dismissed the trial without rating it (`dismissed.json` in its folder): left out of the knowledge. */
+  dismissed?: string
 }
+export const DISMISSED_FILE = 'dismissed.json'
 
 /**
  * Short trial ids: T1, T2 … in reception order (receivedAt, then id). Trials are
@@ -108,7 +111,7 @@ export interface TermDoc {
 export interface KnowledgeIndex {
   format: 'hapbeat-knowledge-index@1'
   terms: { term: string; slug: string; trials: number; ratedCandidates: number; goodN: number; updatedAt: string | null }[]
-  trials: { id: string; shortId: string; month: string; intent: string; terms: string[]; rated: boolean; receivedAt: string }[]
+  trials: { id: string; shortId: string; month: string; intent: string; terms: string[]; rated: boolean; dismissed?: true; receivedAt: string }[]
 }
 
 function flattenFeatures(f: HapticFeatures): Record<string, number> {
@@ -139,7 +142,7 @@ const isGood = (c: { overall: number; termMatch: number | null }) => c.overall >
 
 /** Aggregates every rated candidate of the trials that target `slug`. Deterministic for the same inputs. */
 export function aggregateTerm(slug: string, dims: DimensionsDoc, records: TrialRecord[]): TermDoc {
-  const related = records.filter(r => trialSlugs(r.trial, dims).includes(slug)).sort((a, b) => a.trial.id.localeCompare(b.trial.id))
+  const related = records.filter(r => !r.dismissed && trialSlugs(r.trial, dims).includes(slug)).sort((a, b) => a.trial.id.localeCompare(b.trial.id))
   const entry = dims.terms.find(t => termSlug(t.term) === slug)
   const displayTerm = entry?.term ?? related.flatMap(r => r.trial.terms.map(t => canonicalTerm(t, dims))).find(t => t.slug === slug)?.term ?? slug
   const rated: (TermExample & { ratedAt: string; directions: Record<string, number> })[] = []
@@ -190,7 +193,7 @@ export function aggregateTerm(slug: string, dims: DimensionsDoc, records: TrialR
 
 /** Every slug known from dimensions.json plus every term used in a trial, sorted. */
 export function knownSlugs(dims: DimensionsDoc, records: TrialRecord[]): string[] {
-  return [...new Set([...dims.terms.map(t => termSlug(t.term)), ...records.flatMap(r => trialSlugs(r.trial, dims))])].sort()
+  return [...new Set([...dims.terms.map(t => termSlug(t.term)), ...records.filter(r => !r.dismissed).flatMap(r => trialSlugs(r.trial, dims))])].sort()
 }
 
 export function buildIndex(records: TrialRecord[], terms: TermDoc[]): KnowledgeIndex {
@@ -199,7 +202,7 @@ export function buildIndex(records: TrialRecord[], terms: TermDoc[]): KnowledgeI
     format: 'hapbeat-knowledge-index@1',
     terms: [...terms].sort((a, b) => a.slug.localeCompare(b.slug)).map(t => ({ term: t.term, slug: t.slug, trials: t.counts.trials, ratedCandidates: t.counts.ratedCandidates, goodN: t.good.n, updatedAt: t.updatedAt })),
     trials: [...records].sort((a, b) => Date.parse(b.trial.receivedAt) - Date.parse(a.trial.receivedAt) || a.trial.id.localeCompare(b.trial.id))
-      .map(r => ({ id: r.trial.id, shortId: shortIds.get(r.trial.id)!, month: r.month, intent: r.trial.intent, terms: r.trial.terms, rated: !!r.rating, receivedAt: r.trial.receivedAt })),
+      .map(r => ({ id: r.trial.id, shortId: shortIds.get(r.trial.id)!, month: r.month, intent: r.trial.intent, terms: r.trial.terms, rated: !!r.rating, ...(r.dismissed ? { dismissed: true } : {}), receivedAt: r.trial.receivedAt })),
   }
 }
 
@@ -351,11 +354,19 @@ export class KnowledgeFolder {
           const candDir = await subdir(dir, 'candidates')
           if (candDir) for (const name of await listEntries(candDir, 'file')) if (name.endsWith('.json')) candidates.push(JSON.parse((await readText(candDir, name))!))
           const ratingText = await readText(dir, 'rating.json')
-          records.push({ month, trial: JSON.parse(trialText), candidates, rating: ratingText === null ? null : JSON.parse(ratingText) })
+          const dismissedText = await readText(dir, DISMISSED_FILE)
+          const dismissedAt = dismissedText === null ? undefined : (() => { try { return String(JSON.parse(dismissedText).dismissedAt ?? 'yes') } catch { return 'yes' } })()
+          records.push({ month, trial: JSON.parse(trialText), candidates, rating: ratingText === null ? null : JSON.parse(ratingText), ...(dismissedAt ? { dismissed: dismissedAt } : {}) })
         } catch (error) { throw new Error(`haptic-knowledge/trials/${month}/${id}: ${error instanceof Error ? error.message : String(error)}`) }
       }
     }
     return withShortIds(records)
+  }
+  /** Marks a trial dismissed (not rated, left out of the knowledge). Undone by restoreTrial (Studio's own mark file). */
+  async dismissTrial(month: string, id: string, at: string) { await writeEditorFile(await this.trialDir(month, id), DISMISSED_FILE, json({ format: 'hapbeat-trial-dismissed@1', dismissedAt: at })) }
+  async restoreTrial(month: string, id: string) {
+    try { await (await this.trialDir(month, id)).removeEntry(DISMISSED_FILE) }
+    catch (error) { if (!isNotFound(error)) throw error }
   }
   /** Writes rating.json; the previous rating (without its history) is appended to history. */
   async saveRating(month: string, rating: RatingBody): Promise<RatingFile> {

@@ -33,8 +33,11 @@
 .events-row-desc { grid-column: 1 / -1; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Fixed width: the badge text changes between ✓ / 未 / — without moving the row. */
 .events-badge { display: inline-block; min-width: 4.6em; padding: 0 5px; border-radius: 4px; font-size: 11px; text-align: center; border: 1px solid var(--border-light); color: var(--text-secondary); }
-.events-badge.set { border-color: #4f9e7a; color: #8dd5b1; }
+.events-badge.approved { border-color: #4f9e7a; color: #8dd5b1; background: rgba(79,158,122,.15); }
+.events-badge.tentative { border-color: #6b8fd6; color: #a9c3f0; }
 .events-badge.unset { border-color: #c9a34a; color: #e3c27a; }
+.events-sec-head { display: flex; align-items: center; gap: 8px; }
+.events-review { display: inline-flex; align-items: center; gap: 4px; font-weight: normal; }
 .events-detail { display: flex; flex-direction: column; gap: 6px; }
 .events-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .events-assign { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }

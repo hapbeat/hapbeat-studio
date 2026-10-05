@@ -8,6 +8,7 @@ import { resolveTrialScene, sceneVideoTime, wantedSceneProject, type TrialSceneS
 import { setScenePreRoll, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
 import { useEditor } from './editorContext'
 import { useEventStore } from '@/stores/eventStore'
+import { onUserStop } from '@/utils/playerStops'
 import { eventSceneCues } from '@/utils/cueEvents'
 import './EditorScenePanel.css'
 
@@ -145,8 +146,8 @@ export function EditorScenePanel() {
       // After the lead-in the video is already running; only correct a visible drift.
       player.on('play', time => { const v = video.current; if (!v) return; if (v.paused || Math.abs(v.currentTime - at(time)) > 0.1) v.currentTime = at(time); void v.play().catch(() => {}) }),
       player.on('seeking', time => { const v = video.current; if (v) v.currentTime = at(time) }),
-      player.on('pause', () => video.current?.pause()),
-      player.on('finish', () => video.current?.pause()),
+      // The video runs on after the audio ends naturally (to the moment's end); a stop pauses it.
+      onUserStop(player, () => video.current?.pause()),
     ]
     return () => { setScenePreRoll(null); unsubs.forEach(unsub => unsub()); video.current?.pause() }
   }, [player, synced, chosen?.mark, lead])

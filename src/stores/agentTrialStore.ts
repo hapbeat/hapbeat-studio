@@ -42,6 +42,8 @@ interface AgentTrialState {
   /** Writes hapbeat-agent/catalog.json from the current editor documents now. */
   writeCatalog: () => Promise<void>
   saveRating: (trialId: string, rating: RatingBody) => Promise<void>
+  /** Dismisses (true) or restores (false) a trial: dismissed trials are not rated and stay out of the knowledge. */
+  setDismissed: (trialId: string, dismissed: boolean) => Promise<void>
   loadCandidateAudio: (trialId: string, candidateId: string) => Promise<AudioBuffer>
   /** Creates a new editor clip from a candidate: its source as the original, its effects as a not-yet-applied chain. */
   adoptCandidate: (trialId: string, candidateId: string) => Promise<{ clipId: string; name: string }>
@@ -168,6 +170,16 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
       if (error) throw new Error(error)
       await folder.saveRating(record.month, rating)
       const records = await folder.listTrials()
+      await folder.regenerate(records, dimensions, trialSlugs(record.trial, dimensions))
+      set({ trials: newestFirst(records), dimensions, error: null })
+    },
+    setDismissed: async (trialId, dismissed) => {
+      const folder = get().folder, record = get().trials.find(r => r.trial.id === trialId)
+      if (!folder || !record) throw new Error(`Trial "${trialId}" is not loaded`)
+      if (dismissed) await folder.dismissTrial(record.month, trialId, localIsoString(new Date()))
+      else await folder.restoreTrial(record.month, trialId)
+      const records = await folder.listTrials()
+      const dimensions = await folder.readDimensions()
       await folder.regenerate(records, dimensions, trialSlugs(record.trial, dimensions))
       set({ trials: newestFirst(records), dimensions, error: null })
     },

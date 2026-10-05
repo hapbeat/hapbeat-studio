@@ -12,8 +12,10 @@ import type { SceneLib } from '@/utils/sceneData'
 import {
   addPositionRoute, addVariant, effectiveEvent, eventFireCounts, eventKey, hasRepeatSettings, listEvents, parseEventKey, removeOwnRoute, removeVariant,
   setOverride, setOwnSfxVolume, setRouteClips, setSfxSounds, setVariation, simultaneousGroups, trialsForEvent, updateOwnRoute,
-  type EffectiveEvent, type EventRef, type EventRow,
+  resetAllReviews, setReview,
+  type EffectiveEvent, type EventRef, type EventRow, type SoundStatus,
 } from '@/utils/cueEvents'
+import { useConfirm } from '@/components/common/useConfirm'
 import { NumberField, formatGain, useAtLabel } from '@/components/scene/SceneCuePanels'
 import { useEditor } from './editorContext'
 import { DecidedNotice } from './DecideDialog'
@@ -52,6 +54,7 @@ export function EventsPanel() {
   const result = useEventStore(s => s.result)
   const selected = useEventStore(s => s.selected)
   const showAllRepeat = useEditorSettings(s => s.eventsShowAllRepeat)
+  const { ask, dialog } = useConfirm()
   const rows = useMemo(() => table && lib ? listEvents(table, lib) : [], [table, lib])
   const groups = useMemo(() => table && lib && data ? simultaneousGroups(table, data.clips, lib.ticks) : [], [table, lib, data])
   const counts = useMemo(() => table && data ? eventFireCounts(table, data.full.events) : {}, [table, data])
@@ -83,8 +86,10 @@ export function EventsPanel() {
       <ProjectPicker />
       <EditorMenu label="⋯" title={t('events.menu')}>
         <EditorMenuItem checked={showAllRepeat} onSelect={() => useEditorSettings.getState().update({ eventsShowAllRepeat: !showAllRepeat })}>{t('events.showAllRepeat')}</EditorMenuItem>
+        <EditorMenuItem disabled={!table} onSelect={() => void ask({ message: t('events.resetReviewsConfirm'), danger: true }).then(ok => { if (ok) useSceneStore.getState().edit(tb => resetAllReviews(tb)) })}>{t('events.resetReviews')}</EditorMenuItem>
       </EditorMenu>
     </div>
+    {dialog}
     {dirty && <div className="events-dirty" role="status">{t('events.unsaved')}
       <button type="button" className="toolbar-btn" disabled={busy} onClick={() => void useSceneStore.getState().save()}>{t('events.save')}</button>
       <button type="button" className="toolbar-btn" disabled={busy} onClick={() => void useSceneStore.getState().revert()}>{t('events.revert')}</button></div>}
@@ -160,7 +165,8 @@ function ProjectPicker() {
 function EventRowButton({ row, selected, onSelect }: { row: EventRow; selected: boolean; onSelect: (key: string) => void }) {
   const { t } = useI18n()
   const variant = row.ref.variant !== null
-  const badge = (label: string, state: 'set' | 'unset' | 'na') => <span className={`events-badge ${state}`}>{label} {state === 'set' ? '✓' : state === 'unset' ? t('events.notYet') : '—'}</span>
+  // 音 OK / 音 仮 / 音 未 (and — for a loop cue's sound); fixed width, colour per state.
+  const badge = (label: string, state: SoundStatus) => <span className={`events-badge ${state}`}>{label} {state === 'approved' ? t('events.reviewApproved') : state === 'tentative' ? t('events.reviewTentative') : state === 'unset' ? t('events.notYet') : '—'}</span>
   return <button type="button" role="option" aria-selected={selected} className={`events-row ${selected ? 'selected' : ''} ${variant ? 'variant' : ''}`} onClick={() => onSelect(row.key)} title={row.description ?? ''}>
     <span className="events-row-name">{variant ? <>{`:${row.ref.variant}`}<span className="events-tag variant">{t('events.variantTag')}</span></> : row.key}{row.loop && <small>{t('events.loop')}</small>}</span>
     <span className="events-row-badges">{badge(t('events.badge.sound'), row.sound)}{badge(t('events.badge.haptic'), row.haptic)}</span>
@@ -216,7 +222,7 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
   const key = eventKey(e.ref), sounds = sfxSounds(e.sfx), editable = e.own.sfx
   const open = () => { if (e.sfx && sounds[0] && !openEventSound(key, sounds[0], e.sfx.volume)) useWaveformStore.getState().setError(t('events.preview.missing', { name: sounds[0] })) }
   return <section className="events-sec">
-    <h4>{t('events.sound')}</h4>
+    <h4 className="events-sec-head">{t('events.sound')}{!loop && e.sfx && <ReviewToggle e={e} field="sfx" edit={edit} />}</h4>
     {loop ? <p className="agent-muted">{t('scene.sound.loopCue')}</p> : <>
       <OverrideBar e={e} field="sfx" edit={edit} />
       {!sounds.length && !editable && <p className="agent-muted">{t('events.soundNone')}</p>}
@@ -246,7 +252,7 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
   const open = (clip: string | undefined, gain: number, at: string) => { if (clip && !openEventHaptic(key, clip, gain, at)) useWaveformStore.getState().setError(t('events.preview.missing', { name: clip })) }
   const free = positionsForCue(lib, e.ref.cue).some(a => !e.haptics.some(r => r.at === a))
   return <section className="events-sec">
-    <h4>{t('events.haptic')}</h4>
+    <h4 className="events-sec-head">{t('events.haptic')}{e.haptics.length > 0 && <ReviewToggle e={e} field="haptics" edit={edit} />}</h4>
     {!loop && !e.sfx && <p className="events-hint">{t('events.soundFirst')}</p>}
     <OverrideBar e={e} field="haptics" edit={edit} />
     <p className="agent-muted">{t('events.hapticRowsHint')}</p>
@@ -399,4 +405,15 @@ function EditAsClipButton({ event, target, wav }: { event: string; target: Decid
     finally { setBusy(false) }
   }
   return <button type="button" className="agent-icon-btn events-edit-clip" disabled={busy} title={t('events.editAsClipHint')} onClick={() => void open()}>{t('events.editAsClip')}</button>
+}
+
+/** "Tentative" ↔ "OK" of an assigned sound / haptic (decisions start tentative; saved with the table). */
+function ReviewToggle({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'haptics'; edit: Edit }) {
+  const { t } = useI18n()
+  const approved = e.review[field] === 'approved'
+  return <span className="events-review">
+    <span className={`events-badge ${e.review[field]}`}>{t(approved ? 'events.reviewApproved' : 'events.reviewTentative')}</span>
+    <button type="button" className="agent-icon-btn" title={t(approved ? 'events.reviewBackHint' : 'events.reviewApproveHint')}
+      onClick={() => edit(tb => setReview(tb, e.ref, field, approved ? 'tentative' : 'approved'))}>{t(approved ? 'events.reviewBack' : 'events.reviewApprove')}</button>
+  </span>
 }

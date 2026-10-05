@@ -1,5 +1,6 @@
 import type { SceneLib } from './sceneData'
 import {
+  type CueReview, type ReviewState,
   clampNumber, isLoopCue, positionsForCue, routeClips, sfxSounds, VARIANT_NAME,
   type CueEntry, type CueRoute, type CueSfx, type CueTable, type CueVariant, type CueVariation, type PickMode,
 } from './sceneCueTable'
@@ -41,6 +42,8 @@ export interface EffectiveEvent {
   variation?: CueVariation
   /** Which fields the variant writes itself (always true for a cue). */
   own: { sfx: boolean; haptics: boolean; variation: boolean }
+  /** Review of the shown sfx / haptics (from the entry that writes them; missing = tentative). */
+  review: { sfx: ReviewState; haptics: ReviewState }
 }
 
 const variantOf = (table: CueTable, ref: EventRef): CueVariant | null => ref.variant === null ? null : table.cues[ref.cue]?.variants?.[ref.variant] ?? null
@@ -49,29 +52,33 @@ const variantOf = (table: CueTable, ref: EventRef): CueVariant | null => ref.var
 export function effectiveEvent(table: CueTable, ref: EventRef): EffectiveEvent | null {
   const cue = table.cues[ref.cue]
   if (!cue) return null
-  if (ref.variant === null) return { ref, description: cue.description, sfx: cue.sfx, haptics: cue.haptics, variation: cue.variation, own: { sfx: true, haptics: true, variation: true } }
+  const state = (entry: CueVariant | undefined, field: 'sfx' | 'haptics'): ReviewState => entry?.review?.[field] ?? 'tentative'
+  if (ref.variant === null) return { ref, description: cue.description, sfx: cue.sfx, haptics: cue.haptics, variation: cue.variation, own: { sfx: true, haptics: true, variation: true },
+    review: { sfx: state(cue, 'sfx'), haptics: state(cue, 'haptics') } }
   const v = variantOf(table, ref)
   if (!v) return null
   const own = { sfx: v.sfx !== undefined, haptics: v.haptics !== undefined, variation: v.variation !== undefined }
-  return { ref, description: v.description ?? cue.description, sfx: own.sfx ? v.sfx ?? null : cue.sfx, haptics: own.haptics ? v.haptics! : cue.haptics, variation: own.variation ? v.variation : cue.variation, own }
+  return { ref, description: v.description ?? cue.description, sfx: own.sfx ? v.sfx ?? null : cue.sfx, haptics: own.haptics ? v.haptics! : cue.haptics, variation: own.variation ? v.variation : cue.variation, own,
+    review: { sfx: state(own.sfx ? v : cue, 'sfx'), haptics: state(own.haptics ? v : cue, 'haptics') } }
 }
 
-/** Sound column: 'na' for loop cues (continuous layers have no cue sound). */
-export type SoundStatus = 'set' | 'unset' | 'na'
+/** Assigned and approved / assigned but tentative / nothing assigned; 'na' for a loop cue's sound (continuous layers have no cue sound). */
+export type MaterialStatus = ReviewState | 'unset'
+export type SoundStatus = MaterialStatus | 'na'
 export interface EventRow {
   key: string
   ref: EventRef
   description?: string
   loop: boolean
   sound: SoundStatus
-  haptic: 'set' | 'unset'
+  haptic: MaterialStatus
   /** The cue's variants (empty for a variant row). */
   variants: EventRow[]
 }
 
 function row(table: CueTable, lib: SceneLib, ref: EventRef, variants: EventRow[]): EventRow {
   const e = effectiveEvent(table, ref)!, loop = isLoopCue(lib, ref.cue)
-  return { key: eventKey(ref), ref, description: e.description, loop, sound: loop ? 'na' : e.sfx ? 'set' : 'unset', haptic: e.haptics.length ? 'set' : 'unset', variants }
+  return { key: eventKey(ref), ref, description: e.description, loop, sound: loop ? 'na' : e.sfx ? e.review.sfx : 'unset', haptic: e.haptics.length ? e.review.haptics : 'unset', variants }
 }
 
 /** Every cue in table order, each with its variants nested. */
@@ -192,13 +199,18 @@ export function applyHapticDecision(table: CueTable, lib: SceneLib, d: HapticDec
     if (routes.length) { const { clips: _drop, ...first } = routes[0]; routes[0] = { ...first, clip: d.clip } }
     else routes.push({ clip: d.clip, at: d.at, gain: clampNumber(d.gain, 0, 2) })
     entry.haptics = routes
+    // A decision is tentative until the user approves it.
+    entry.review = { ...(entry.review ?? {}), haptics: 'tentative' }
   })
   if (!next.clips[d.clip]) next.clips[d.clip] = { intensity: 1.0, loop: isLoopCue(lib, d.ref.cue), description: `Decided in Studio for ${eventKey(d.ref)}` }
   return next
 }
 /** The event's sound becomes `sound` (one sound; volume kept, 1.0 when it had none). */
 export function applySoundDecision(table: CueTable, ref: EventRef, sound: string): CueTable {
-  return edited(table, ref, (entry, effective) => { entry.sfx = { sound, volume: effective.sfx ? effective.sfx.volume : 1.0 } })
+  return edited(table, ref, (entry, effective) => {
+    entry.sfx = { sound, volume: effective.sfx ? effective.sfx.volume : 1.0 }
+    entry.review = { ...(entry.review ?? {}), sfx: 'tentative' }
+  })
 }
 
 // ── Events panel edits ──
@@ -365,4 +377,27 @@ export function addPositionRoute(table: CueTable, lib: SceneLib, ref: EventRef):
 /** Clip ids / `trialId/candidateId` whose decision put a material on `event` ("edit as clip" opens that clip instead of the bare WAV). */
 export function decidedSubjects(marks: Record<string, readonly { project: string; event: string; target: string }[]>, project: string, event: string, target: string): string[] {
   return Object.entries(marks).filter(([, list]) => list.some(m => m.project === project && m.event === event && m.target === target)).map(([subject]) => subject)
+}
+
+// ── Review (tentative / approved) ──
+
+/** Sets the review of the event's shown sfx / haptics on the entry that writes them (the cue when a variant inherits). Approved is written, tentative removes the mark (missing = tentative). */
+export function setReview(table: CueTable, ref: EventRef, field: 'sfx' | 'haptics', state: ReviewState): CueTable {
+  const e = effectiveEvent(table, ref)
+  if (!e) return table
+  const owner: EventRef = ref.variant !== null && e.own[field] ? ref : { cue: ref.cue, variant: null }
+  return edited(table, owner, entry => {
+    const review: CueReview = { ...(entry.review ?? {}) }
+    if (state === 'approved') review[field] = 'approved'; else delete review[field]
+    if (Object.keys(review).length) entry.review = review; else delete entry.review
+  })
+}
+/** "Set everything back to tentative": removes every review mark (cues and variants). */
+export function resetAllReviews(table: CueTable): CueTable {
+  const next = structuredClone(table)
+  for (const cue of Object.values(next.cues)) {
+    delete cue.review
+    for (const v of Object.values(cue.variants ?? {})) delete v.review
+  }
+  return next
 }

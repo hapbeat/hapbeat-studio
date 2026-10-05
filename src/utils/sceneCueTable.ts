@@ -25,11 +25,16 @@ export interface CueSfx { sound?: string; sounds?: string[]; volume: number; [ke
 export const PICK_MODES = ['random', 'roundRobin'] as const
 export type PickMode = typeof PICK_MODES[number]
 export interface CueVariation { gainJitterDb?: number; pitchJitterSt?: number; rateJitterPct?: number; pick?: PickMode; [key: string]: unknown }
+/** Whether an assigned sound / haptic is still tentative or approved by the user (missing = tentative). */
+export const REVIEW_STATES = ['tentative', 'approved'] as const
+export type ReviewState = typeof REVIEW_STATES[number]
+export interface CueReview { sfx?: ReviewState; haptics?: ReviewState }
 /** A field left out (undefined) is inherited from the cue; `sfx: null` overrides with "no sound". */
-export interface CueVariant { description?: string; sfx?: CueSfx | null; haptics?: CueRoute[]; variation?: CueVariation; [key: string]: unknown }
+export interface CueVariant { description?: string; sfx?: CueSfx | null; haptics?: CueRoute[]; variation?: CueVariation; review?: CueReview; [key: string]: unknown }
 export interface CueEntry {
   description?: string; sfx: CueSfx | null; haptics: CueRoute[]
   variants?: Record<string, CueVariant>; variation?: CueVariation
+  review?: CueReview
   [key: string]: unknown
 }
 /** Variant names (`<cue>:<variant>` in the game and in viewer-data events). */
@@ -160,6 +165,14 @@ function validateCueFields(err: string[], table: CueTable, ctx: CueTableContext,
     if (!lib.at.includes(r.at)) err.push(`${label}: at must be one of ${lib.at.join(', ')}`)
     else if (!positionsForCue(lib, cue).includes(r.at)) err.push(`${label}: continuous layers allow at = ${positionsForCue(lib, cue).join(', ')}`)
     if (!inRange(r.gain, 0, 2)) err.push(`${label}: gain must be 0..2`)
+  }
+  const review = entry.review as unknown
+  if (review !== undefined) {
+    if (!review || typeof review !== 'object' || Array.isArray(review)) err.push(`${label}: review must be an object`)
+    else for (const [key, state] of Object.entries(review)) {
+      if (key !== 'sfx' && key !== 'haptics') err.push(`${label}: review.${key} is not a field (sfx / haptics)`)
+      else if (!(REVIEW_STATES as readonly unknown[]).includes(state)) err.push(`${label}: review.${key} must be ${REVIEW_STATES.join(' or ')}`)
+    }
   }
   const v = entry.variation
   if (v !== undefined) {

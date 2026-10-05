@@ -8,6 +8,7 @@ import { effectiveEvent, parseEventKey, resolveEventName } from '@/utils/cueEven
 import { routeClips, sfxSounds } from '@/utils/sceneCueTable'
 import { RATE } from '@/utils/sceneHaptics'
 import type { EditorBufferPlayer } from '@/utils/editorBufferPlayer'
+import { onUserStop } from '@/utils/playerStops'
 
 /**
  * Event materials in the editor: an event's sound / haptic clip opened in the
@@ -89,8 +90,8 @@ export function useDecidedSoundSync(player: EditorBufferPlayer) {
     }
     const unsubs = [
       player.on('play', start),
-      player.on('pause', stop),
-      player.on('finish', stop),
+      // A natural end of the (shorter) clip lets the sound ring out; a stop stops it.
+      onUserStop(player, stop),
       player.on('seeking', time => { if (player.isPlaying()) start(time) }),
     ]
     return () => { unsubs.forEach(unsub => unsub()); stop() }
