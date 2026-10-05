@@ -13,6 +13,8 @@ export const RATING_FORMAT = 'hapbeat-rating@1'
 export const CANDIDATE_FORMAT = 'hapbeat-candidate@1'
 export const TRIAL_ID = /^[A-Za-z0-9_-]{1,80}$/
 export const CANDIDATE_ID = /^[A-Za-z0-9_-]{1,16}$/
+/** A candidate's `sound`: a WAV base name (no extension). */
+const CANDIDATE_SOUND = /^[A-Za-z0-9_-]{1,80}$/
 /** Game cue name in a Scene project's cue table (Unreal / Unity identifiers, contracts event-id characters), optionally `cue:variant` (cue table v2). */
 export const SCENE_CUE = /^[A-Za-z0-9_.-]{1,80}(:[a-z][a-z0-9_]{0,79})?$/
 /** What a trial designs: the event's sound effect (rendered full band, auditioned on the PC) or its haptic (the default). */
@@ -34,7 +36,11 @@ export type CandidateSource =
  */
 export const TRIAL_METHODS = ['synth', 'sfx', 'envelope', 'layered', 'onset', 'bandsplit'] as const
 export type TrialMethod = typeof TRIAL_METHODS[number]
-export interface TrialCandidate { id: string; label: string; hypothesis?: string; method?: TrialMethod; source: CandidateSource; effects: EffectParams[] }
+export interface TrialCandidate {
+  id: string; label: string; hypothesis?: string; method?: TrialMethod; source: CandidateSource; effects: EffectParams[]
+  /** Haptic trials: the sound of the scene cue's pool (WAV name without .wav) this candidate was made for; played with its audition (default: the representative). */
+  sound?: string
+}
 export interface TrialRequest {
   format: typeof TRIAL_FORMAT
   id: string
@@ -140,6 +146,7 @@ function candidateError(c: unknown, index: number): string | null {
   if (typeof c.label !== 'string' || !c.label.trim() || c.label.length > 80) return `${at}.label must be a non-empty string of at most 80 characters`
   if (!optString(c.hypothesis, 400)) return `${at}.hypothesis must be a string of at most 400 characters`
   if (c.method !== undefined && !(TRIAL_METHODS as readonly unknown[]).includes(c.method)) return `${at}.method must be one of ${TRIAL_METHODS.join(', ')}`
+  if (c.sound !== undefined && (typeof c.sound !== 'string' || !CANDIDATE_SOUND.test(c.sound))) return `${at}.sound must be a sound WAV name of the scene cue's pool without ".wav" (/^[A-Za-z0-9_-]{1,80}$/)`
   const s = c.source
   if (!isObject(s)) return `${at}.source must be an object`
   switch (s.kind) {

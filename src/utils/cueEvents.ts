@@ -197,7 +197,9 @@ function edited(table: CueTable, ref: EventRef, change: (entry: CueEntry | CueVa
   return next
 }
 
-export interface HapticDecision { ref: EventRef; clip: string; /** at / gain for a new route (used only when the event has none). */ at: string; gain: number; /** A new clip entry's intensity (default 1). */ intensity?: number }
+export interface HapticDecision { ref: EventRef; clip: string; /** at / gain for a new route (used only when the event has none). */ at: string; gain: number; /** A new clip entry's intensity (default 1). */ intensity?: number
+  /** The sound the clip was made for (an AI candidate's `sound`): with `variation.paired` it goes to that sound's position. */
+  pairSound?: string | null }
 /**
  * Clip entry (added with intensity 1.0 and the cue's loop kind; an existing
  * entry keeps its values) + the event's haptics: `clip` joins the first route's
@@ -205,12 +207,22 @@ export interface HapticDecision { ref: EventRef; clip: string; /** at / gain for
  * a clip already listed is not added again), or a new route when there is none.
  * A variant that inherited its haptics gets its own copy first. (DEC-085: adopting adds, never replaces.)
  */
+/**
+ * Where a new clip joins the first route's list: at the end, or — when the event's variation is `paired` and the
+ * clip was made for sound `pairSound` (index i of the sounds) — at position i: replacing the clip there (the pairs
+ * stay aligned), or appended when the list is not that long yet.
+ */
+function pairedSlot(clips: string[], clip: string, e: EffectiveEvent, pairSound: string | null | undefined): string[] {
+  const i = pairSound && e.variation?.paired === true ? sfxSounds(e.sfx).indexOf(pairSound) : -1
+  if (i < 0 || i >= clips.length) return [...clips, clip]
+  return clips.map((c, k) => k === i ? clip : c)
+}
 export function applyHapticDecision(table: CueTable, lib: SceneLib, d: HapticDecision): CueTable {
   const next = edited(table, d.ref, (entry, effective) => {
     const routes = effective.haptics
     if (routes.length) {
       const clips = routeClips(routes[0]), { clips: _drop, clip: _one, ...rest } = routes[0]
-      const next = clips.includes(d.clip) ? clips : [...clips, d.clip]
+      const next = clips.includes(d.clip) ? clips : pairedSlot(clips, d.clip, effective, d.pairSound)
       routes[0] = next.length === 1 ? { ...rest, clip: next[0] } : { ...rest, clips: next }
     }
     else routes.push({ clip: d.clip, at: d.at, gain: clampNumber(d.gain, 0, 2) })
@@ -458,17 +470,23 @@ export interface PlannedShot extends Shot { index: number; atSec: number }
 
 /**
  * The sound the editor plays with a haptic audition: the event's representative (the first of its sound
- * candidates), always the same, without jitter — picking among the pool and the variation are for the Scene
- * tab's playback only.
+ * candidates) or the one picked for an AI candidate (`prefer`), always the same, without jitter — picking among
+ * the pool and the variation are for the Scene tab's playback only.
  */
-export function representativeSound<B>(table: CueTable, lib: SceneLib, names: readonly string[], buffers: Record<string, B>): { buffer: B; volume: number; loop: boolean } | null {
+export function representativeSound<B>(table: CueTable, lib: SceneLib, names: readonly string[], buffers: Record<string, B>, prefer: string | null = null): { buffer: B; volume: number; loop: boolean } | null {
   for (const name of names) {
     const r = resolveEventName(table, name), e = r && effectiveEvent(table, r.ref)
-    const first = sfxSounds(e?.sfx)[0]
+    // `prefer`: a sound of the event's pool picked for what is shown (an AI candidate's `sound`), else the representative.
+    const sounds = sfxSounds(e?.sfx), first = prefer && sounds.includes(prefer) && buffers[prefer] ? prefer : sounds[0]
     // The editor plays a material at its base level only (DEC-086: sfx.volume is the scene multiplier).
     if (e?.sfx && first && buffers[first]) return { buffer: buffers[first], volume: soundIntensity(table, first), loop: isLoopCue(lib, e.ref.cue) }
   }
   return null
+}
+
+/** The sound played with AI candidate `cid`: the user's pick for it (`picks`, keyed `<trialId>/<cid>`), else its `sound`; null = the representative. */
+export function candidateSound(trial: { id: string; candidates: readonly { id: string; sound?: string }[] }, cid: string, picks: Record<string, string>): string | null {
+  return picks[`${trial.id}/${cid}`] ?? trial.candidates.find(c => c.id === cid)?.sound ?? null
 }
 
 /** The route positions (`at`) an audition of event `name` goes to: its haptic routes, else the project's default position; null for an unknown event. */

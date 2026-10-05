@@ -16,9 +16,9 @@ import { useToast } from '@/components/common/Toast'
 import { toFirstPlay } from '@/utils/sceneSegments'
 import { levelKey, useEventStore } from '@/stores/eventStore'
 import { LevelSlider } from './LevelSlider'
-import { assignEventsForTrial, effectiveEvent, parseEventKey, trialEvent, cueRoutePositions } from '@/utils/cueEvents'
+import { assignEventsForTrial, candidateSound, effectiveEvent, parseEventKey, trialEvent, cueRoutePositions } from '@/utils/cueEvents'
 import { runDecision } from './eventDecide'
-import { isLoopCue } from '@/utils/sceneCueTable'
+import { isLoopCue, sfxSounds } from '@/utils/sceneCueTable'
 import { WaveformThumbnail } from './WaveformThumbnail'
 import { EditorMenu, EditorMenuItem } from './EditorMenu'
 import { filterTrials, nextAfter, stepQueue, trialQueue } from '@/utils/trialQueue'
@@ -294,6 +294,9 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
   const target = trialTarget(trial)
   /** The event of the open Scene project this trial is for (its first scene cue), if any. */
   const event = sceneLib && sceneTable && trial.scene?.project === sceneLib.project_name ? trialEvent(sceneTable, trial.scene) : null
+  /** A haptic trial's cue sounds (the pool, representative first): the sound played with each candidate is picked from them. */
+  const soundPool = useMemo(() => target === 'haptic' && event && sceneTable ? sfxSounds(effectiveEvent(sceneTable, parseEventKey(event))?.sfx) : [], [target, event, sceneTable])
+  const soundPicks = useEditorSettings(s => s.candidateSounds)
   const soundFirst = target === 'haptic' && !!event && !!sceneLib && !!sceneTable && !isLoopCue(sceneLib, parseEventKey(event).cue) && !effectiveEvent(sceneTable, parseEventKey(event))?.sfx
   const marks = useEditorSettings(s => s.eventMarks)
   /** The waveform selection while a candidate is auditioned: recorded as its "use only this part" range. */
@@ -324,7 +327,8 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
     const added: string[] = [], excluded: { candidate: string; reason: string }[] = [], failures: string[] = []
     for (const id of ids) {
       try {
-        const r = await runDecision({ target, source: { kind: 'candidate', trialId: trial.id, candidateId: id }, events, name: null, at: null })
+        const r = await runDecision({ target, source: { kind: 'candidate', trialId: trial.id, candidateId: id }, events, name: null, at: null,
+          pairSound: target === 'haptic' ? candidateSound(trial, id, useEditorSettings.getState().candidateSounds) : null })
         if (r.ok) added.push(r.result.name)
         // A refusal that is not an error (the same sound is already there) is an exclusion, not a failure.
         else if (r.notice.error) failures.push(t(r.notice.id, r.notice.params))
@@ -418,10 +422,6 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
               </button>
               <strong className="agent-short-id" title={t('editor.agent.shortIdHint')}>{record.shortId ? `${record.shortId}-${requested.id}` : requested.id}</strong>
               <span className="agent-card-name" title={[requested.label, requested.hypothesis, requested.method && t(`editor.agent.method.${requested.method}` as MessageId)].filter(Boolean).join('\n')}>{requested.label}</span>
-              {/* The strength (saved in the rating as `intensity`): this candidate's audition gain, live. */}
-              <LevelSlider className="agent-card-level" levelKey={levelKey.candidate(trial.id, requested.id)} saved={form.candidates[requested.id].intensity}
-                label={t('editor.intensity')} title={t(target === 'sound' ? 'editor.agent.intensitySoundHint' : 'editor.agent.intensityHapticHint')}
-                onSave={intensity => { useEventStore.getState().setLevels({ [levelKey.candidate(trial.id, requested.id)]: intensity }); editCandidate(requested.id, { intensity }) }} />
               {/* By hand only (saving the rating assigns automatically): copy into the clip list / assign to the event. */}
               <span className="agent-card-actions">
                 <button type="button" className="agent-icon-btn" disabled={!editorFolder || processing} title={t('editor.agent.toClipHint')} aria-label={t('editor.agent.toClipHint')}
@@ -436,6 +436,16 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
                 : <small className={file?.error || loaded ? 'error' : ''}>{file?.error ? t('editor.agent.renderError', { message: file.error }) : loaded && 'error' in loaded ? loaded.error : file ? t('editor.agent.loadingAudio') : ''}</small>}</span>
               <Stars value={form.candidates[requested.id].overall} onChange={overall => editCandidate(requested.id, { overall })} />
               <VerdictTag overall={form.candidates[requested.id].overall} />
+              {/* The strength (saved in the rating as `intensity`): this candidate's audition gain, live. */}
+              <LevelSlider className="agent-card-level" levelKey={levelKey.candidate(trial.id, requested.id)} saved={form.candidates[requested.id].intensity}
+                label={t('editor.intensity')} title={t(target === 'sound' ? 'editor.agent.intensitySoundHint' : 'editor.agent.intensityHapticHint')}
+                onSave={intensity => { useEventStore.getState().setLevels({ [levelKey.candidate(trial.id, requested.id)]: intensity }); editCandidate(requested.id, { intensity }) }} />
+              {/* A haptic candidate's sound (the cue's pool; its `sound`, else the representative), picked per candidate. */}
+              {soundPool.length > 1 && <select className="agent-card-sound" aria-label={t('editor.agent.withSound')} title={t('editor.agent.withSoundHint')}
+                value={soundPool.includes(candidateSound(trial, requested.id, soundPicks) ?? '') ? candidateSound(trial, requested.id, soundPicks)! : soundPool[0]}
+                onChange={e => { const value = e.target.value; e.target.blur(); useEditorSettings.getState().update({ candidateSounds: { ...useEditorSettings.getState().candidateSounds, [`${trial.id}/${requested.id}`]: value } }) }}>
+                {soundPool.map((s, i) => <option key={s} value={s}>{i === 0 ? `★ ${s}` : s}</option>)}
+              </select>}
               {(marks[`${trial.id}/${requested.id}`] ?? []).map(m => <span key={`${m.project}:${m.event}:${m.target}`} className="editor-event-badge" title={m.project}>{m.target === 'sound' ? '♪' : '≋'} {m.event}</span>)}
             </div>
             <CandidateNotes value={form.candidates[requested.id]} onChange={patch => editCandidate(requested.id, patch)} selection={active ? selection : null} />

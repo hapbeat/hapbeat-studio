@@ -25,6 +25,8 @@ describe('agentProtocol', () => {
     expect(error(request({}, { effects: [{ type: 'explode' }] }))).toMatch(/effects\[0\]/)
     expect(error(request({}, { source: { kind: 'file', path: '../secret.wav' } }))).toMatch(/relative path/)
     expect(error(request({}, { source: { kind: 'recipe', recipe: { format: 'nope' } } }))).toMatch(/recipe/)
+    expect(error(request({}, { sound: 'breath.wav' }))).toMatch(/sound must be/)
+    expect(parseTrialRequest(request({}, { sound: 'breath_snort_m4st' }), 't-01').ok).toBe(true)
     expect(error(request({ candidates: [JSON.parse(request()).candidates[0], JSON.parse(request()).candidates[0]] }))).toMatch(/duplicated/)
   })
 

@@ -1009,17 +1009,19 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 @container (min-width: 560px) {
   .agent-card { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "head meta" "notes notes"; column-gap: 12px; }
 }
-.agent-card-head { grid-area: head; display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto auto; align-items: center; gap: 6px; min-width: 0; }
-/* The candidate's strength on the first line (fixed width: moving it never shifts the line). */
+.agent-card-head { grid-area: head; display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 6px; min-width: 0; }
+/* The candidate's strength and its sound sit in the wrapping meta line (fixed widths: moving the slider never shifts it). */
 .agent-card-level { gap: 4px; font-size: 11px; }
 .agent-card-level input { width: 72px; }
 .agent-card-level .editor-intensity-value { min-width: 8.5em; }
+.agent-card-sound { flex: 0 1 auto; min-width: 0; max-width: 100%; font-size: 12px; }
 .agent-card-head .agent-play-btn { min-width: 0; padding: 3px 8px; }
 .agent-card-head .agent-short-id { white-space: nowrap; }
 .agent-card-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-card-actions { display: flex; gap: 4px; min-width: 0; }
-.agent-card-meta { grid-area: meta; display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
-.agent-card-meta .agent-thumb { flex: 1 1 80px; min-width: 0; height: 20px; overflow: hidden; display: block; }
+.agent-card-meta { grid-area: meta; display: flex; align-items: center; gap: 4px 6px; min-width: 0; flex-wrap: wrap; }
+.agent-card-meta > * { flex-shrink: 0; }
+.agent-card-meta .agent-thumb { flex: 1 1 80px; flex-shrink: 1; min-width: 0; height: 20px; overflow: hidden; display: block; }
 .agent-card-meta .agent-thumb .editor-thumbnail { width: 100%; height: 20px; }
 .agent-card .agent-notes { grid-area: notes; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 6px; min-width: 0; }
 .agent-card .agent-use-range { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 3px; font-size: 11px; min-width: 0; }

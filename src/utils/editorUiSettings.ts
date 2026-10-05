@@ -40,6 +40,8 @@ export interface EditorUiSettings {
   clipScenes: Record<string, TrialSceneChoice>
   /** Decisions per editor clip id or AI candidate (`<trialId>/<candidateId>`); newest last. */
   eventMarks: Record<string, EventMark[]>
+  /** AI trials: the sound played with a haptic candidate, picked per `<trialId>/<candidateId>` (overrides the candidate's `sound`). */
+  candidateSounds: Record<string, string>
   /** Events panel: height (px) of the event list above the detail. */
   eventsListHeight: number
   /** Editor clips opened from an event material ("Edit as clip"): edits are written back to that WAV. */
@@ -67,7 +69,7 @@ export interface EditorUiSettings {
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, materialLinks: {}, hapticOnPc: false, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
+  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, candidateSounds: {}, eventsListHeight: 220, materialLinks: {}, hapticOnPc: false, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -128,6 +130,7 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     trialScenes: sceneChoices(v.trialScenes),
     clipScenes: sceneChoices(v.clipScenes),
     eventMarks: eventMarks(v.eventMarks),
+    candidateSounds: isRecord(v.candidateSounds) ? Object.fromEntries(Object.entries(v.candidateSounds).filter((e): e is [string, string] => typeof e[1] === 'string' && e[1].length <= 80).slice(-2000)) : {},
     eventReserves: reserves(v.eventReserves),
     reservesBackfilled: v.reservesBackfilled === true,
     hapticPending: Array.isArray(v.hapticPending) ? v.hapticPending.filter((r): r is { cue: string; at: string } => isRecord(r) && typeof r.cue === 'string' && typeof r.at === 'string').slice(-200).map(r => ({ cue: r.cue, at: r.at })) : [],

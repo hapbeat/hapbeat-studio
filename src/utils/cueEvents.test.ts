@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   addEventMark, addPositionRoute, fireShot, resetAllReviews, setNone, setReview, setUndecided, addVariant, simultaneousGroups, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
   effectiveEvent, eventSceneCues, jitterGain, listEvents, MaterialPicker, matchesName, materialUsers, needsRouteForm, overwriteUsers,
-  parseEventKey, removeVariant, representativeSound, resolveEventName, cueRoutePositions, materialRoutePositions, pairedClips, setOverride, setRouteClips, setSfxSounds, setVariation, trialEvent, trialsForEvent,
+  parseEventKey, removeVariant, representativeSound, candidateSound, resolveEventName, cueRoutePositions, materialRoutePositions, pairedClips, setOverride, setRouteClips, setSfxSounds, setVariation, trialEvent, trialsForEvent,
 } from './cueEvents'
 import { validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
 import { cueVoices, tableTargets } from './sceneHaptics'
@@ -352,6 +352,19 @@ describe('the sound played with a haptic audition', () => {
     expect(picks.every(p => p?.buffer === buffers.GrowlA && p.volume === 0.6)).toBe(true)
     expect(representativeSound(t, sampleLib(), ['nope'], buffers)).toBeNull()
   })
+
+  it('plays the sound a candidate was made for (its sound, else the user pick), the representative when not in the pool', () => {
+    const t = v2Table()
+    t.cues.grab.sfx = { sounds: ['GrowlA', 'GrowlB', 'GrowlC'], volume: 1 }
+    t.sounds = { GrowlC: { intensity: 0.5 } }
+    const buffers = { GrowlA: { id: 'A' }, GrowlB: { id: 'B' }, GrowlC: { id: 'C' } }
+    const trial = { id: 't1', candidates: [{ id: 'A', sound: 'GrowlA' }, { id: 'B', sound: 'GrowlB' }, { id: 'C', sound: 'GrowlC' }, { id: 'D' }] }
+    expect(['A', 'B', 'C'].map(cid => representativeSound(t, sampleLib(), ['grab'], buffers, candidateSound(trial, cid, {}))?.buffer)).toEqual([buffers.GrowlA, buffers.GrowlB, buffers.GrowlC])
+    expect(representativeSound(t, sampleLib(), ['grab'], buffers, 'GrowlC')?.volume).toBe(0.5)
+    expect(candidateSound(trial, 'D', {})).toBeNull()
+    expect(candidateSound(trial, 'B', { 't1/B': 'GrowlC' })).toBe('GrowlC')
+    expect(representativeSound(t, sampleLib(), ['grab'], buffers, 'Other')?.buffer).toBe(buffers.GrowlA)
+  })
 })
 
 describe('audition routing of an event', () => {
@@ -398,6 +411,15 @@ describe('paired sounds and haptics (variation.paired)', () => {
     // A third clip added by auto-assign: reported until the sounds match.
     t.cues.grab.haptics = [{ clips: ['click', 'thump', 'hum'], at: 'hand', gain: 1 }]
     expect(validateCueTable(t, okCtx)).toEqual(expect.arrayContaining(['grab: variation.paired: route 1 has 3 clip(s) for 2 sound(s)']))
+    // A candidate made for sound i of a paired cue goes to position i (replacing the clip there), else to the end.
+    t.cues.grab.haptics = [{ clips: ['click', 'thump'], at: 'hand', gain: 1 }]
+    const lib = sampleLib()
+    const at1 = applyHapticDecision(t, lib, { ref: { cue: 'grab', variant: null }, clip: 'hum', at: 'hand', gain: 1, pairSound: 'Clack' })
+    expect(at1.cues.grab.haptics![0].clips).toEqual(['click', 'hum'])
+    const noPair = applyHapticDecision(t, lib, { ref: { cue: 'grab', variant: null }, clip: 'hum', at: 'hand', gain: 1 })
+    expect(noPair.cues.grab.haptics![0].clips).toEqual(['click', 'thump', 'hum'])
+    const unpaired = structuredClone(t); unpaired.cues.grab.variation = {}
+    expect(applyHapticDecision(unpaired, lib, { ref: { cue: 'grab', variant: null }, clip: 'hum', at: 'hand', gain: 1, pairSound: 'Clack' }).cues.grab.haptics![0].clips).toEqual(['click', 'thump', 'hum'])
     t.cues.grab.variation = { paired: 'yes' as never }
     expect(validateCueTable(t, okCtx)).toEqual(expect.arrayContaining(['grab: variation.paired must be true/false']))
   })
