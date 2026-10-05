@@ -55,6 +55,8 @@ export interface EditorUiSettings {
   ratingShowAxes: boolean
   /** How many times every editor audition plays (AI trials / Events panel; no jitter). */
   listenTimes: ListenTimes
+  /** Repeated auditions per cue name ("on" / "off"; absent = automatic from the recording). Not in the cue table. */
+  listenRepeat: Record<string, 'on' | 'off'>
 }
 export const LISTEN_TIMES_OPTIONS = [1, 3, 5] as const
 export type ListenTimes = typeof LISTEN_TIMES_OPTIONS[number]
@@ -62,7 +64,7 @@ export type ListenTimes = typeof LISTEN_TIMES_OPTIONS[number]
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, autoAssignOnRating: true, trialProjectFilter: '', autoSendOnRating: false, trialTargetFilter: '', ratingShowAxes: false, listenTimes: 3,
+  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, autoAssignOnRating: true, trialProjectFilter: '', autoSendOnRating: false, trialTargetFilter: '', ratingShowAxes: false, listenTimes: 3, listenRepeat: {},
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -88,6 +90,8 @@ function eventMarks(value: unknown): Record<string, EventMark[]> {
 const isDockLayout = (value: unknown): value is Record<string, unknown> => isRecord(value) && isRecord(value.grid) && isRecord(value.panels)
 
 /** Field-by-field: an invalid or missing field falls back to its default, the rest is kept. */
+const isPlainRecord = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x)
+
 export function sanitizeUiSettings(value: unknown): EditorUiSettings {
   const v = isRecord(value) ? value : {}
   const d = DEFAULT_UI_SETTINGS
@@ -113,6 +117,7 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     trialTargetFilter: v.trialTargetFilter === 'sound' || v.trialTargetFilter === 'haptic' ? v.trialTargetFilter : '',
     ratingShowAxes: typeof v.ratingShowAxes === 'boolean' ? v.ratingShowAxes : d.ratingShowAxes,
     listenTimes: (LISTEN_TIMES_OPTIONS as readonly unknown[]).includes(v.listenTimes) ? v.listenTimes as ListenTimes : d.listenTimes,
+    listenRepeat: isPlainRecord(v.listenRepeat) ? Object.fromEntries(Object.entries(v.listenRepeat).filter((e): e is [string, 'on' | 'off'] => e[1] === 'on' || e[1] === 'off')) : d.listenRepeat,
   }
 }
 

@@ -10,7 +10,7 @@ import { RATE, resampleClip } from '@/utils/sceneHaptics'
 import type { EditorBufferPlayer } from '@/utils/editorBufferPlayer'
 import { onUserStop } from '@/utils/playerStops'
 import { CompanionSound, type SoundSource } from '@/utils/companionSound'
-import { listenOffsets } from '@/utils/sceneSegments'
+import { listenOffsets, repeatsFor } from '@/utils/sceneSegments'
 
 /**
  * Event materials in the editor: an event's sound / haptic clip opened in the
@@ -85,8 +85,16 @@ export function eventSoundSec(key: string): number {
   const sound = e?.sfx ? sfxSounds(e.sfx)[0] : undefined
   return (sound && s.sfx[sound]?.duration) || 1
 }
+/** Whether event `name` gets repeated auditions: its cue's override (editor settings), else automatic from the recording. */
+export function useRepeats(name: string | null): boolean {
+  const data = useSceneStore(s => s.data)
+  const override = useEditorSettings(s => name ? s.listenRepeat[parseEventKey(name).cue] : undefined)
+  return useMemo(() => !!name && repeatsFor(data?.full.events ?? null, name, override), [name, data, override])
+}
+
 /**
- * The plays of the current editor audition (an AI candidate, else an event material): `listenTimes` (×1 / ×3 / ×5)
+ * The plays of the current editor audition (an AI candidate, else an event material) of a cue that repeats
+ * (useRepeats; others play once whatever the setting): `listenTimes` (×1 / ×3 / ×5)
  * at the real gaps of its cue's run in the recording, else the sound's length + 0.4 s apart; null = once (×1, a
  * loop cue, or nothing auditioned). Shared by the waveform buffer, the event's sound and the Scene video marks.
  */
@@ -100,13 +108,14 @@ export function useListenOffsets(): number[] | null {
   const preview = useEventStore(s => s.preview)
   const data = useSceneStore(s => s.data)
   const lib = useSceneStore(s => s.lib)
+  const name = audition ? auditionEvent : preview?.event ?? null
+  const repeats = useRepeats(name)
   return useMemo(() => {
     const shown = audition?.buffer ?? preview?.buffer
-    if (!shown || times <= 1) return null
-    const name = audition ? auditionEvent : preview!.event
-    if (lib && name && isLoopCue(lib, parseEventKey(name).cue)) return null
+    if (!shown || times <= 1 || !name || !repeats) return null
+    if (lib && isLoopCue(lib, parseEventKey(name).cue)) return null
     return listenOffsets(data?.full.events ?? null, name, times, shown.duration)
-  }, [times, audition, auditionEvent, preview, data, lib])
+  }, [times, audition, preview, name, repeats, data, lib])
 }
 
 let ctx: AudioContext | null = null

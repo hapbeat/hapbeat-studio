@@ -57,16 +57,36 @@ export function representativeSegment(events: readonly SceneEvent[], name: strin
   return { name, start: Math.max(0, marks[0] - LEAD_SEC), end: marks[marks.length - 1] + tail, marks, run: !!run, total: times.length }
 }
 
+/** A cue that repeats in the recording (repeated auditions apply to it): ≥ 3 firings whose consecutive gaps have a median ≤ 2.5 s. */
+export const REPEAT_MIN = 3
+export const REPEAT_MEDIAN_GAP_SEC = 2.5
+export function medianGap(times: readonly number[]): number | null {
+  if (times.length < 2) return null
+  const gaps = times.slice(1).map((t, i) => t - times[i]).sort((a, b) => a - b), mid = gaps.length >> 1
+  return gaps.length % 2 ? gaps[mid] : (gaps[mid - 1] + gaps[mid]) / 2
+}
+export function isRepeating(events: readonly SceneEvent[] | null, name: string): boolean {
+  const times = events ? occurrences(events, name) : []
+  const gap = medianGap(times)
+  return times.length >= REPEAT_MIN && gap !== null && gap <= REPEAT_MEDIAN_GAP_SEC
+}
+/** Per-cue override of the automatic decision (editor UI settings, by cue name; absent = auto). */
+export type RepeatOverride = 'on' | 'off'
+export const repeatsFor = (events: readonly SceneEvent[] | null, name: string, override: RepeatOverride | undefined) =>
+  override === 'on' ? true : override === 'off' ? false : isRepeating(events, name)
+
 /**
  * The offsets of `times` plays of one material in an editor audition (no jitter): the real timing of the
- * cue's representative run (its first firings; a shorter run continues at its mean gap), else (a one-off
- * cue, no recording) `soundSec` + 0.4 s apart.
+ * cue's representative run (its first firings; a shorter run continues at its mean gap), else the median gap
+ * of a repeating cue (e.g. bite every 2 s), else (forced on, no recording) `soundSec` + 0.4 s apart.
  */
 export const LISTEN_PAUSE_SEC = 0.4
 export function listenOffsets(events: readonly SceneEvent[] | null, name: string, times: number, soundSec: number): number[] {
-  const run = events ? findRuns(occurrences(events, name))[0] : undefined
+  const all = events ? occurrences(events, name) : []
+  const run = findRuns(all)[0]
   const out = run ? run.slice(0, times).map(t => t - run[0]) : [0]
-  const gap = run && run.length > 1 ? (run[run.length - 1] - run[0]) / (run.length - 1) : Math.max(0, soundSec) + LISTEN_PAUSE_SEC
+  const median = isRepeating(events, name) ? medianGap(all) : null
+  const gap = run && run.length > 1 ? (run[run.length - 1] - run[0]) / (run.length - 1) : median ?? Math.max(0, soundSec) + LISTEN_PAUSE_SEC
   while (out.length < times) out.push(out[out.length - 1] + gap)
   return out
 }

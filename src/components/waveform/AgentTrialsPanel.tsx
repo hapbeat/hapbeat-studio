@@ -182,7 +182,7 @@ export function AgentTrialsPanel() {
       </EditorMenu>
       {record && <button className="toolbar-btn" title={t('editor.scene.openHint')}
         onClick={() => openSceneVideo({ kind: 'trial', trialId: record.trial.id }, wantedSceneProject({ scene: record.trial.scene, saved: useEditorSettings.getState().trialScenes[record.trial.id], fallback: record.trial.project }) ?? null)}>▶ {t('editor.agent.video')}</button>}
-      <ListenTimes />
+      <ListenTimes event={record?.trial.scene?.cues[0] ?? null} />
       <label className="agent-axes-toggle" title={t('editor.agent.axesToggleHint')}>
         <input type="checkbox" checked={showAxes} onChange={e => useEditorSettings.getState().update({ ratingShowAxes: e.target.checked })} />{t('editor.agent.axesToggle')}</label>
       {record && (record.dismissed ? <button className="toolbar-btn" onClick={() => void restore(record)}>{t('editor.agent.restore')}</button>

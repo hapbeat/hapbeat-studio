@@ -1230,11 +1230,18 @@ export const messages = defineMessages({
   'scene.event.run': { ja: '連続区間を再生（{at} s〜 ×{count}）', en: 'Play the run ({at} s, ×{count})' },
   'scene.event.runHint': { ja: '記録の通し映像を、このイベントの連続区間の先頭から再生します（実際の発生タイミングで、揺らぎを掛けて鳴ります）', en: 'Plays the full recording from the start of this event’s run (real firing times, with the variation).' },
   'editor.listenTimes': { ja: '試聴の回数', en: 'Plays per audition' },
-  'editor.listenTimesHint': { ja: 'エディタの試聴（▶・カード・Space）を何回繰り返すか。連続する cue は記録の実際の間隔、単発・記録なしは音の長さ＋0.4 秒の間隔で、揺らぎなしで鳴らします（停止で残りも止まります）', en: 'How many times every editor audition (▶, cards, Space) plays: at the real gaps of a repeated cue in the recording, else the sound length + 0.4 s apart, without jitter (Stop ends the rest).' },
+  'editor.listenTimesHint': { ja: '繰り返し起きる cue の試聴（▶・カード・Space）を何回鳴らすか。記録の実際の間隔（記録が無ければ音の長さ＋0.4 秒）で、揺らぎなし。停止で残りも止まります。1 回しか起きない cue は常に 1 回です', en: 'How many times auditions of a repeating cue (▶, cards, Space) play: at the real gaps of the recording (else sound length + 0.4 s), without jitter; Stop ends the rest. Cues that fire once always play once.' },
   'editor.dictation.start': { ja: '音声入力を開始（Ctrl+M）', en: 'Start dictation (Ctrl+M)' },
   'editor.dictation.stop': { ja: '音声入力を終了（Ctrl+M / Esc）', en: 'Stop dictation (Ctrl+M / Esc)' },
   'editor.dictation.privacy': { ja: '音声はブラウザの認識サーバー（Chrome は Google、Edge は Microsoft）へ送られます', en: 'The audio is sent to the browser’s speech service (Chrome: Google, Edge: Microsoft).' },
   'editor.dictation.error': { ja: '音声入力エラー: {code}', en: 'Dictation error: {code}' },
+  'editor.listenOnce': { ja: 'このイベントは 1 回（繰り返し起きない cue。イベントパネルの ⋯ で変更できます）', en: 'This event plays once (it does not repeat; change it in the Events panel ⋯).' },
+  'events.repeatListen': { ja: '繰り返し試聴', en: 'Repeated auditions' },
+  'events.repeatListen.auto': { ja: '繰り返し試聴：自動（記録から判定：{state}）', en: 'Repeated auditions: automatic (from the recording: {state})' },
+  'events.repeatListen.yes': { ja: 'する', en: 'on' },
+  'events.repeatListen.no': { ja: 'しない', en: 'off' },
+  'events.repeatListen.on': { ja: '繰り返し試聴：する', en: 'Repeated auditions: on' },
+  'events.repeatListen.off': { ja: '繰り返し試聴：しない', en: 'Repeated auditions: off' },
 })
 
 export type MessageId = keyof typeof messages

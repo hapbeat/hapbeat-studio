@@ -1053,3 +1053,4 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 .dictation-mic.error { border-color: #c9a34a; }
 .dictation-interim { position: absolute; left: 8px; right: 28px; bottom: 3px; color: var(--text-muted); opacity: .6; font-size: 12px; pointer-events: none;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.listen-times.once { opacity: .45; }
