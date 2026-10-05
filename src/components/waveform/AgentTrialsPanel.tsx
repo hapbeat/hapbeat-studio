@@ -9,11 +9,12 @@ import { clearRatingDraft, DraftKeeper, readFolderDraft, readLocalDraft, writeRa
 import { addUseRange, isFreePlanCandidate, poolCandidates, reserveCandidates, addReserves, autoRatingContext, EMPTY_CONTEXT, formToRating, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, trialKind, verdictFromOverall, type CandidateRatingForm, type RatingForm } from '@/utils/agentTrialUi'
 import { trialTarget, type TrialKind } from '@/utils/agentProtocol'
 import { useAuditionPlan } from './EditorScenePanel'
+import { appendActivity } from '@/utils/activityLog'
+import { useToast } from '@/components/common/Toast'
 import { toFirstPlay } from '@/utils/sceneSegments'
 import { useEventStore } from '@/stores/eventStore'
 import { assignEventsForTrial, effectiveEvent, parseEventKey, trialEvent } from '@/utils/cueEvents'
 import { runDecision } from './eventDecide'
-import { DecidedNotice } from './DecideDialog'
 import { isLoopCue } from '@/utils/sceneCueTable'
 import { WaveformThumbnail } from './WaveformThumbnail'
 import { EditorMenu, EditorMenuItem } from './EditorMenu'
@@ -104,11 +105,7 @@ export function AgentTrialsPanel() {
     if (!folder || (record && shown.includes(record))) return
     if (queue[0]) pickTrial(queue[0], false)
   }, [folder, projectFilter, targetFilter, record, shown, queue])
-  const [done, setDone] = useState<(DoneInfo & { record: TrialRecord }) | null>(null)
-  const decided = useEventStore(s => s.result)
   const onDone = (info: DoneInfo) => {
-    const finished = trials.find(r => r.trial.id === info.recordId)
-    if (finished) setDone({ ...info, record: finished })
     const next = nextAfter(queue, info.recordId)
     if (next) pickTrial(next, false); else setSelectedId(null)
   }
@@ -120,7 +117,9 @@ export function AgentTrialsPanel() {
     try {
       // "Later" keeps any draft: the trial comes back from History with what was typed.
       await useAgentTrialStore.getState().setDismissed(r.trial.id, true)
-      onDone({ recordId: r.trial.id, notes: [], assignedId: null, kind: 'dismissed' })
+      const root = useWaveformStore.getState().folder?.root
+      if (root) void appendActivity(root, { at: localIsoString(new Date()), kind: 'dismissed', trialId: r.trial.id, ...(r.shortId ? { shortId: r.shortId } : {}) }).catch(() => {})
+      onDone({ recordId: r.trial.id })
     } catch (error) { setPanelNotice(message(error)) }
   }
   const restore = async (r: TrialRecord) => {
@@ -187,12 +186,6 @@ export function AgentTrialsPanel() {
       <button className="toolbar-btn" onClick={() => setRejected(list => list.filter(o => o !== r))}>{t('editor.agent.dismiss')}</button>
       <small>{r.error}</small><small>{t('editor.agent.rejectedHint')}</small>
     </div>)}
-    {done && <div className="agent-done" role="status">
-      <div className="agent-done-head">{t(done.kind === 'dismissed' ? 'editor.agent.doneDismissed' : 'editor.agent.doneRated', { id: done.record.shortId ?? done.record.trial.id })}
-        <button type="button" className="toolbar-btn" onClick={() => setDone(null)}>{t('common.close')}</button></div>
-      {done.notes.map(n => <p key={n} className="agent-muted">{n}</p>)}
-      {decided && decided.id === done.assignedId && <DecidedNotice result={decided} />}
-    </div>}
     {record ? <TrialDetail key={record.trial.id} record={record} known={trials} audition={audition} onAudition={onAudition} deviceNames={deviceNames} onSelectTrial={setSelectedId}
       autoAudition={autoTrialId === record.trial.id} onAutoAuditioned={() => setAutoTrialId(null)} onDone={onDone} />
       : <p className="agent-muted">{t(trials.length ? 'editor.agent.allDone' : 'editor.agent.selectTrial')}</p>}
@@ -200,7 +193,7 @@ export function AgentTrialsPanel() {
 }
 
 /** What the last save / dismissal did (shown by the panel above the next trial). */
-interface DoneInfo { recordId: string; notes: string[]; assignedId: number | null; kind: 'rated' | 'dismissed' }
+interface DoneInfo { recordId: string }
 
 /** Once per editor folder: ★3 candidates of ratings saved before reserves existed join their event's reserves. */
 function useReserveBackfill(trials: TrialRecord[]) {
@@ -226,6 +219,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
   autoAudition: boolean; onAutoAuditioned: () => void
 }) {
   const { t } = useI18n()
+  const { toast } = useToast()
   const { focusEditorPanel, player, pending, toggleCandidate } = useEditor()
   /** The editor playback is sounding (the ▶ / ■ of the auditioned card). */
   const [playing, setPlaying] = useState(false)
@@ -309,21 +303,22 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
    * Adds the ★4+ candidates (best first, free-plan output excluded) to the material pool of the trial's first scene
    * cue, one decision each (each adds to the list: no duplicates, the existing representative stays first).
    */
-  const addToPool = async (ids: string[]): Promise<{ notes: string[]; assignedId: number | null }> => {
+  const addToPool = async (ids: string[]): Promise<{ added: string[]; excluded: { candidate: string; reason: string }[]; failures: string[] }> => {
     const scene = useSceneStore.getState()
-    if (!scene.table || !scene.lib || scene.lib.project_name !== trial.scene!.project) return { notes: [t('events.auto.noProject', { project: trial.scene!.project })], assignedId: null }
+    if (!scene.table || !scene.lib || scene.lib.project_name !== trial.scene!.project) return { added: [], excluded: [], failures: [t('events.auto.noProject', { project: trial.scene!.project })] }
     const events = assignEventsForTrial(scene.table, scene.lib, trial.scene!.cues.slice(0, 1), target)
-    if (!events.length) return { notes: [t('events.auto.noEvents', { cues: trial.scene!.cues[0] })], assignedId: null }
-    const notes: string[] = [], added: string[] = []
-    let assignedId: number | null = null
+    if (!events.length) return { added: [], excluded: [], failures: [t('events.auto.noEvents', { cues: trial.scene!.cues[0] })] }
+    const added: string[] = [], excluded: { candidate: string; reason: string }[] = [], failures: string[] = []
     for (const id of ids) {
       try {
         const r = await runDecision({ target, source: { kind: 'candidate', trialId: trial.id, candidateId: id }, events, name: null, at: null, gain: 1 })
-        if (r.ok) { added.push(r.result.name); assignedId = r.result.id } else notes.push(t(r.notice.id, r.notice.params))
-      } catch (error) { notes.push(message(error)) }
+        if (r.ok) added.push(r.result.name)
+        // A refusal that is not an error (the same sound is already there) is an exclusion, not a failure.
+        else if (r.notice.error) failures.push(t(r.notice.id, r.notice.params))
+        else excluded.push({ candidate: id, reason: t(r.notice.id, r.notice.params) })
+      } catch (error) { failures.push(message(error)) }
     }
-    if (added.length) notes.unshift(t('editor.agent.pooled', { count: added.length, event: events.join(', '), names: added.join(', ') }))
-    return { notes, assignedId }
+    return { added, excluded, failures }
   }
   /** Saves, then (auto-assign / auto-send) and hands over to the panel, which moves to the next unrated trial and shows what happened. */
   const save = async () => {
@@ -338,25 +333,26 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
       await drafts.done(trial.id).catch(() => {})
     } catch (error) { setSaveError(message(error)); setSaving(false); return }
     setSaving(false)
-    const notes: string[] = []
-    let assignedId: number | null = null
+    // What saving did goes to the operation log (console + .hapbeat-editor/activity-log.jsonl); only failures are shown.
+    const excluded: { candidate: string; reason: string }[] = [], failures: string[] = []
+    let added: string[] = []
     // Every ★4+ candidate joins the event's material pool (the pool, not one best, is what the game picks from).
     const pooled = poolCandidates(trial, body)
-    const skipped = trial.candidates.filter(c => (body.candidates[c.id]?.overall ?? 0) >= 4 && isFreePlanCandidate(c)).map(c => c.id)
-    const ids = (list: string[]) => list.map(id => record.shortId ? `${record.shortId}-${id}` : id).join(', ')
-    // Nothing is skipped silently: no scene, auto-assign off and every refusal of the decision say why.
-    if (pooled.length && !trial.scene) notes.push(t('editor.agent.poolNoScene', { ids: ids(pooled) }))
-    else if (pooled.length && !autoAssign) notes.push(t('editor.agent.poolOff', { ids: ids(pooled) }))
-    else if (pooled.length) { const r = await addToPool(pooled); notes.push(...r.notes); assignedId = r.assignedId }
-    if (trial.scene && skipped.length) notes.push(t('editor.agent.freePlanSkipped', { ids: ids(skipped) }))
+    for (const c of trial.candidates) if ((body.candidates[c.id]?.overall ?? 0) >= 4 && isFreePlanCandidate(c)) excluded.push({ candidate: c.id, reason: t('editor.agent.excludedFreePlan') })
+    if (pooled.length && !trial.scene) excluded.push(...pooled.map(candidate => ({ candidate, reason: t('editor.agent.excludedNoScene') })))
+    else if (pooled.length && !autoAssign) excluded.push(...pooled.map(candidate => ({ candidate, reason: t('editor.agent.excludedAssignOff') })))
+    else if (pooled.length) { const r = await addToPool(pooled); added = r.added; excluded.push(...r.excluded); failures.push(...r.failures) }
     // ★3: the event's reserves (by reference, in the editor settings; not the cue table).
-    const reserved = reserveCandidates(trial, body)
+    const reserved = trial.scene ? reserveCandidates(trial, body) : []
     if (trial.scene && reserved.length) {
       const key = trial.scene.cues[0], settings = useEditorSettings.getState()
       settings.update({ eventReserves: addReserves(settings.eventReserves, key, reserved.map(candidateId => ({ trialId: trial.id, candidateId, target }))) })
-      notes.push(t('editor.agent.reserved', { event: key, ids: ids(reserved) }))
     }
-    onDone({ recordId: trial.id, notes, assignedId, kind: 'rated' })
+    const root = useWaveformStore.getState().folder?.root
+    if (root) void appendActivity(root, { at: localIsoString(new Date()), kind: 'rated', trialId: trial.id, ...(record.shortId ? { shortId: record.shortId } : {}),
+      ...(added.length ? { added } : {}), ...(reserved.length ? { reserved } : {}), ...(excluded.length ? { excluded } : {}), ...(failures.length ? { failures } : {}) }).catch(error => console.warn('[activity] not written', error))
+    if (failures.length) toast(t('editor.agent.saveFailures', { id: record.shortId ?? trial.id, failures: failures.join(' / ') }), 'error')
+    onDone({ recordId: trial.id })
   }
   const adopt = async (cid: string, label: string) => {
     try { await useAgentTrialStore.getState().adoptCandidate(trial.id, cid); setNotice(t('editor.agent.adopted', { name: label })) }

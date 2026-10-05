@@ -1115,8 +1115,6 @@ export const messages = defineMessages({
   'editor.agent.dismissHint': { ja: '今は評価せずに後回しにして、次へ進みます（キューと知識の集計から外れ、入力中の下書きは残ります。「履歴」から戻せます）', en: 'Set this trial aside for now and go to the next one (out of the queue and the knowledge; any draft is kept; restore it from History).' },
   'editor.agent.dismissedBadge': { ja: '後回し', en: 'later' },
   'editor.agent.restore': { ja: '元に戻す', en: 'Restore' },
-  'editor.agent.doneRated': { ja: '{id} の評価を保存しました', en: '{id} rated' },
-  'editor.agent.doneDismissed': { ja: '{id} を後回しにしました', en: '{id} set aside for later' },
   'editor.agent.remaining': { ja: '残り {count} 件', en: '{count} left' },
   'editor.agent.fromHistory': { ja: '履歴（評価済み）', en: 'History (rated)' },
   'editor.agent.fromHistoryDismissed': { ja: '履歴（後回し）', en: 'History (later)' },
@@ -1201,11 +1199,6 @@ export const messages = defineMessages({
   'editor.scene.segmentRun': { ja: '{name} · {at} s〜（{count} 回）', en: '{name} · from {at} s ({count})' },
   'editor.scene.rating': { ja: '評価中: {name}', en: 'Rating: {name}' },
   'editor.scene.targetHint': { ja: '評価・試聴の対象の cue（映像の赤い印。灰色の印は同じ場面の他の cue で、決定済みの音を鳴らします）', en: 'The cue being rated / auditioned (red marks; grey marks are other cues of the scene, playing their decided sound).' },
-  'editor.agent.pooled': { ja: '{event} の素材候補に {count} 件追加（仮）: {names}', en: 'Added {count} to the material pool of {event} (tentative): {names}' },
-  'editor.agent.freePlanSkipped': { ja: '{ids} は無料プランの生成物（商用不可）のため素材候補に入れていません', en: '{ids}: free-plan output (not for commercial use), not added to the pool.' },
-  'editor.agent.reserved': { ja: '{event} の控えに {ids} を入れました（★3。ゲームでは鳴らしません）', en: '{ids} kept as reserves of {event} (★3; not played in the game).' },
-  'editor.agent.poolNoScene': { ja: '{ids} は ★4 以上ですが、この試行に scene が無いため素材候補に入れていません', en: '{ids} are ★4+ but this trial has no scene: not added to a pool.' },
-  'editor.agent.poolOff': { ja: '{ids} は ★4 以上ですが、「イベントへ割当」がオフのため素材候補に入れていません', en: '{ids} are ★4+ but “Assign to event” is off: not added to the pool.' },
   'events.reserves': { ja: '控え', en: 'Reserves' },
   'events.reservesHint': { ja: '控え（★3 の AI 候補）。ゲームでは鳴らしません。「採用」で素材候補の末尾に追加します', en: 'Reserves (★3 AI candidates), not played in the game. “Adopt” adds one to the end of the pool.' },
   'events.reserveAdopt': { ja: '採用', en: 'Adopt' },
@@ -1234,6 +1227,10 @@ export const messages = defineMessages({
   'events.decide.duplicate': { ja: '{name} と同じ音なので追加しませんでした', en: 'Same sound as {name}: not added.' },
   'editor.hapticOnPc': { ja: '触覚も PC で鳴らす', en: 'Haptics on the PC too' },
   'editor.hapticOnPcHint': { ja: '触覚の試聴（AI の触覚候補・イベントの触覚素材）の波形も PC で鳴らします。オフでは PC はイベントの代表の音だけを鳴らし、触覚はデバイスへ送るだけです', en: 'Also play haptic auditions (AI haptic candidates, event haptic materials) on the PC. Off: the PC plays only the event’s representative sound; haptics go to the devices.' },
+  'editor.agent.excludedFreePlan': { ja: '無料プランの生成物（商用不可）', en: 'free-plan output (not for commercial use)' },
+  'editor.agent.excludedNoScene': { ja: '試行に scene が無い', en: 'the trial has no scene' },
+  'editor.agent.excludedAssignOff': { ja: '「イベントへ割当」がオフ', en: '“Assign to event” is off' },
+  'editor.agent.saveFailures': { ja: '{id} の割当ができませんでした: {failures}', en: 'Could not assign {id}: {failures}' },
 })
 
 export type MessageId = keyof typeof messages
