@@ -8,7 +8,7 @@ import { familyColor } from '@/utils/sceneData'
 import { addVariant, allEventKeys, effectiveEvent, parseEventKey, resolveEventName } from '@/utils/cueEvents'
 import { VARIANT_NAME, type CueTable } from '@/utils/sceneCueTable'
 import { HapticIcon } from './HapticIcon'
-import { useHandLabel } from './SceneCuePanels'
+import { useMomentPlace } from './SceneCuePanels'
 import { useScene } from './sceneContext'
 
 /**
@@ -21,7 +21,7 @@ import { useScene } from './sceneContext'
 export function SceneMomentsPanel() {
   const { t } = useI18n()
   const { runtime } = useScene()
-  const handLabel = useHandLabel()
+  const placeOf = useMomentPlace()
   const lib = useSceneStore(s => s.lib)
   const items = useSceneStore(s => s.items)
   const table = useSceneStore(s => s.table)
@@ -45,7 +45,7 @@ export function SceneMomentsPanel() {
           onClick={e => { if ((e.target as HTMLElement).closest('.scene-occ-form, button')) return; runtime.audio(); runtime.playMoment(k, useSceneSettings.getState().leadSec) }}>
           <span className="scene-num">{k === 0 ? '▶' : String(k).padStart(2, '0')}</span>
           <span className="scene-dot" style={{ background: familyColor(lib, it.name) }} />
-          <span className="scene-name">{it.kind === 'full' ? t('scene.full') : <>{it.names.join(' + ')}<small>{handLabel(it.hand)}</small></>}</span>
+          <span className="scene-name">{it.kind === 'full' ? t('scene.full') : <>{it.names.join(' + ')}<small title={t('scene.placeHint')}>{placeOf(table, it.names, it.hand)}</small></>}</span>
           <span className="scene-kinds">{cues.length > 0 && <><span className="h">{cues.some(c => c.haptics.length) ? <HapticIcon /> : null}</span><span className="s">{cues.some(c => c.sfx) ? '♪' : ''}</span></>}</span>
           <span className="scene-num">{it.kind === 'full' ? '' : `${it.at.toFixed(1)}s`}</span>
           {it.kind === 'clip' && <button type="button" className="scene-icon-btn scene-open-editor" aria-expanded={open === k} title={`${t('scene.occ.reassignHint')}${sent[k] ? `\n${t('scene.occ.sent')}` : ''}`}

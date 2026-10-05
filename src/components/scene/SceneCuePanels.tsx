@@ -2,7 +2,8 @@ import { useEffect, useRef } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { familyColor, momentCues } from '@/utils/sceneData'
-import { resolveEventName } from '@/utils/cueEvents'
+import { effectiveEvent, resolveEventName } from '@/utils/cueEvents'
+import type { CueTable } from '@/utils/sceneCueTable'
 import { useScene } from './sceneContext'
 
 /**
@@ -13,10 +14,27 @@ export function useAtLabel() {
   const { t } = useI18n()
   return (at: string) => at === 'hand' ? t('scene.at.hand') : at === 'both' ? t('scene.at.both') : at.replace(/^pos_/, '')
 }
-/** The hand a recorded moment's haptics went to (viewer-data `hand`: both / right / left), in words. */
+/**
+ * The hand the player used in a recorded moment (viewer-data `hand`: both / right / left) — "with the right hand".
+ * Not where the haptics go: that is the cue table's route `at` (useMomentPlace).
+ */
 export function useHandLabel() {
   const { t } = useI18n()
   return (hand: string) => hand === 'both' ? t('scene.hand.both') : hand === 'right' ? t('scene.hand.right') : hand === 'left' ? t('scene.hand.left') : hand
+}
+/**
+ * Where a moment's haptics go, from the cue table's current routes of its cues (`at`: neck, the acting hand, both
+ * wrists …; several routes listed), plus the recorded hand only when a route goes to the acting hand ("hand (with
+ * the right hand)"). Empty when its cues have no haptics.
+ */
+export function useMomentPlace() {
+  const atLabel = useAtLabel(), handLabel = useHandLabel()
+  return (table: CueTable | null, names: readonly string[], hand: string) => {
+    if (!table) return ''
+    const ats = [...new Set(names.flatMap(n => { const r = resolveEventName(table, n), e = r && effectiveEvent(table, r.ref); return e ? e.haptics.map(route => route.at) : [] }))]
+    const where = ats.map(atLabel).join('・')
+    return ats.includes('hand') ? `${where}（${handLabel(hand)}）` : where
+  }
 }
 /** Gain / volume as shown next to its name ("gain 1.0", "gain 0.35"). */
 export const formatGain = (x: number) => Number.isInteger(x * 10) ? x.toFixed(1) : String(Math.round(x * 1000) / 1000)
