@@ -442,8 +442,15 @@ export function fireShot(e: EffectiveEvent, loop: boolean, picker: MaterialPicke
   const jitterDb = jitter(v.gainJitterDb, random), gain = 10 ** (jitterDb / 20)
   const pitchSt = loop ? 0 : jitter(v.pitchJitterSt, random)
   const rate = loop ? 1 : 1 + jitter(v.rateJitterPct, random) / 100
-  const sound = e.sfx ? picker.pick(`${key}#sfx`, sfxSounds(e.sfx), v.pick) ?? null : null
-  const routes = e.haptics.flatMap((r, i) => { const clip = picker.pick(`${key}#${i}`, routeClips(r), v.pick); return clip ? [{ clip, at: r.at, gain: r.gain * gain }] : [] })
+  const sounds = sfxSounds(e.sfx)
+  const sound = e.sfx ? picker.pick(`${key}#sfx`, sounds, v.pick) ?? null : null
+  // Paired: the clip with the sound's index on every route (when they line up), else each route picks on its own.
+  const index = v.paired === true && sound ? sounds.indexOf(sound) : -1
+  const routes = e.haptics.flatMap((r, i) => {
+    const clips = routeClips(r)
+    const clip = index >= 0 && clips.length === sounds.length ? clips[index] : picker.pick(`${key}#${i}`, clips, v.pick)
+    return clip ? [{ clip, at: r.at, gain: r.gain * gain }] : []
+  })
   return { sound, soundGain: (e.sfx?.volume ?? 0) * gain, pitchSt, jitterDb, rate, routes }
 }
 
@@ -476,4 +483,11 @@ export function materialRoutePositions(table: CueTable, lib: SceneLib, target: '
   const users = materialUsers(table, target === 'haptic' ? 'clip' : 'sound', wav)
   const all = [...new Set([...users, fallbackEvent])].flatMap(key => cueRoutePositions(table, lib, key) ?? [])
   return all.length ? [...new Set(all)] : null
+}
+
+/** For a paired event: the clip of each route that goes with sound `index` (empty when not paired or not lined up). */
+export function pairedClips(e: EffectiveEvent, index: number): { clip: string; at: string }[] {
+  if (e.variation?.paired !== true) return []
+  const n = sfxSounds(e.sfx).length
+  return e.haptics.flatMap(r => { const clips = routeClips(r); return clips.length === n && clips[index] ? [{ clip: clips[index], at: r.at }] : [] })
 }

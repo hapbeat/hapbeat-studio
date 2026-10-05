@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
-import { isLoopCue, PICK_MODES, routeClips, sfxSounds, soundAllowed, VARIANT_NAME, clipsForCue, type CueTable, type CueVariation, type VariationNumberKey } from '@/utils/sceneCueTable'
+import { isLoopCue, pairedProblem, PICK_MODES, routeClips, sfxSounds, soundAllowed, VARIANT_NAME, clipsForCue, type CueTable, type CueVariation, type VariationNumberKey } from '@/utils/sceneCueTable'
 import {
-  addVariant, effectiveEvent, eventKey, removeVariant, resolveEventName, setOverride, setRouteClips, setSfxSounds, setVariation,
+  addVariant, effectiveEvent, eventKey, pairedClips, removeVariant, resolveEventName, setOverride, setRouteClips, setSfxSounds, setVariation,
   type EffectiveEvent, type OverridableField,
 } from '@/utils/cueEvents'
 import { sceneSegment } from '@/utils/sceneSegments'
@@ -54,6 +54,7 @@ export function SceneEventPanel() {
       <h3>{t('events.variation')}</h3>
       <OverrideBar e={e} field="variation" edit={edit} />
       <Variation e={e} loop={loop} edit={edit} />
+      {!loop && <Paired e={e} edit={edit} />}
     </div>
   </div>
 }
@@ -157,5 +158,20 @@ function Variation({ e, loop, edit }: { e: EffectiveEvent; loop: boolean; edit: 
     {VARIATION_FIELDS.filter(f => !loop || f.loopOk).map(f => <label key={f.key} title={t(`events.variation.${f.key}.hint` as MessageId)}>{t(`events.variation.${f.key}` as MessageId)}
       <NumberField value={typeof v[f.key] === 'number' ? v[f.key] as number : 0} min={0} max={f.max} step={f.step} disabled={!own} label={t(`events.variation.${f.key}` as MessageId)}
         onCommit={x => set({ [f.key]: x > 0 ? Math.min(f.max, x) : undefined })} /></label>)}
+  </div>
+}
+
+/** "Pair sounds and haptics" (variation.paired): sound i plays with clip i of every route; the pairs, or why they do not line up. */
+function Paired({ e, edit }: { e: EffectiveEvent; edit: Edit }) {
+  const { t } = useI18n()
+  const atLabel = useAtLabel()
+  const own = e.ref.variant === null || e.own.variation
+  const on = e.variation?.paired === true
+  const problem = on ? pairedProblem(e.sfx, e.haptics) : null
+  const sounds = sfxSounds(e.sfx)
+  return <div className="scene-event-paired">
+    <label title={t('scene.event.pairedHint')}><input type="checkbox" checked={on} disabled={!own} onChange={ev => edit(tb => setVariation(tb, e.ref, { paired: ev.target.checked ? true : undefined }))} />{t('scene.event.paired')}</label>
+    {on && (problem ? <div className="scene-dirty">{t('scene.event.pairedProblem', { problem })}</div>
+      : <ul className="scene-event-pairs">{sounds.map((s, i) => <li key={s}><b>{s}</b> ↔ {pairedClips(e, i).map(p => `${p.clip} (${atLabel(p.at)})`).join(', ')}</li>)}</ul>)}
   </div>
 }

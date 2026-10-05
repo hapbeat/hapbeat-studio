@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   addEventMark, addPositionRoute, fireShot, resetAllReviews, setNone, setReview, setUndecided, addVariant, simultaneousGroups, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
   effectiveEvent, eventSceneCues, jitterGain, listEvents, MaterialPicker, matchesName, materialUsers, needsRouteForm, overwriteUsers,
-  parseEventKey, removeVariant, representativeSound, resolveEventName, cueRoutePositions, materialRoutePositions, setOverride, setRouteClips, setSfxSounds, setVariation, trialEvent, trialsForEvent,
+  parseEventKey, removeVariant, representativeSound, resolveEventName, cueRoutePositions, materialRoutePositions, pairedClips, setOverride, setRouteClips, setSfxSounds, setVariation, trialEvent, trialsForEvent,
 } from './cueEvents'
 import { validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
 import { cueVoices, tableTargets } from './sceneHaptics'
@@ -381,5 +381,24 @@ describe('routing of an adjusted material', () => {
     // Used by another cue too: the union of their positions.
     const shared = v2Table(); shared.cues.footstep = { sfx: null, haptics: [{ clip: 'thump', at: 'pos_neck', gain: 1 }] }
     expect(materialRoutePositions(shared, sampleLib(), 'haptic', 'thump', 'footstep')).toEqual(expect.arrayContaining(['pos_neck', 'pos_chest']))
+  })
+})
+
+describe('paired sounds and haptics (variation.paired)', () => {
+  it('plays the clip with the picked sound\'s index on every route, validated to line up', () => {
+    const t = v2Table()
+    t.cues.grab = { sfx: { sounds: ['Click', 'Clack'], volume: 1 }, haptics: [{ clips: ['click', 'thump'], at: 'hand', gain: 1 }], variation: { paired: true, pick: 'roundRobin' } }
+    const e = effectiveEvent(t, { cue: 'grab', variant: null })!
+    const picker = new MaterialPicker(() => 0)
+    const shots = [0, 1, 2].map(() => fireShot(e, false, picker, () => 0.5))
+    expect(shots.map(s => `${s.sound}:${s.routes[0].clip}`)).toEqual(['Click:click', 'Clack:thump', 'Click:click'])
+    expect(pairedClips(e, 1)).toEqual([{ clip: 'thump', at: 'hand' }])
+    const okCtx = ctx({ soundFiles: new Set(['Click', 'Clack']) })
+    expect(validateCueTable(t, okCtx).filter(p => p.includes('paired'))).toEqual([])
+    // A third clip added by auto-assign: reported until the sounds match.
+    t.cues.grab.haptics = [{ clips: ['click', 'thump', 'hum'], at: 'hand', gain: 1 }]
+    expect(validateCueTable(t, okCtx)).toEqual(expect.arrayContaining(['grab: variation.paired: route 1 has 3 clip(s) for 2 sound(s)']))
+    t.cues.grab.variation = { paired: 'yes' as never }
+    expect(validateCueTable(t, okCtx)).toEqual(expect.arrayContaining(['grab: variation.paired must be true/false']))
   })
 })

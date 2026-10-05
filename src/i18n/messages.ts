@@ -1248,6 +1248,11 @@ export const messages = defineMessages({
   'editor.intensity': { ja: '強さ', en: 'Strength' },
   'editor.intensityHint': { ja: 'この素材の基準の強さ（intensity、0〜1）。cue 表に保存され、ゲームでは WAV × 強さ × 場面の倍率で鳴ります。WAV は形だけを持ち、常にフルスケールで書かれます', en: 'This material’s base strength (intensity, 0–1), saved in the cue table; the game plays WAV × strength × scene multiplier. The WAV holds only the shape, always at full scale.' },
   'editor.gainNotStrength': { ja: '強さは「調整」の強さスライダーで変えてください。ゲインは形の調整用（書き戻すときにフルスケールへ正規化されます）', en: 'Change strength with the Adjust strength slider; gain is for the shape (written back normalized to full scale).' },
+  'scene.event.paired': { ja: '音と触覚を組にする', en: 'Pair sounds and haptics' },
+  'scene.event.pairedHint': { ja: 'オン: 選ばれた音の番号と同じ番号の clip を、各 route から鳴らします（音ごとに長さの違う breath など）。足音のように使い回すものはオフ', en: 'On: the clip with the picked sound’s index plays on every route (e.g. breath, whose sounds differ in length). Off for reused materials such as footsteps.' },
+  'scene.event.pairedProblem': { ja: '組にできません: {problem}', en: 'Cannot pair: {problem}' },
+  'events.pairedHaptic': { ja: '▶ 組の触覚', en: '▶ Paired haptic' },
+  'events.pairedHapticHint': { ja: 'この音と組になる触覚を試聴します（{clips}）', en: 'Audition the haptic paired with this sound ({clips})' },
 })
 
 export type MessageId = keyof typeof messages

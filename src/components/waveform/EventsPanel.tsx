@@ -10,7 +10,7 @@ import { useSceneVideoTarget } from '@/utils/editorSceneSync'
 import { clipsForCue, isLoopCue, soundAllowed, positionsForCue, routeClips, sfxSounds, type CueTable } from '@/utils/sceneCueTable'
 import type { SceneLib } from '@/utils/sceneData'
 import {
-  addPositionRoute, assignEventsForTrial, effectiveEvent, eventKey, listEvents, parseEventKey, removeOwnRoute,
+  addPositionRoute, assignEventsForTrial, effectiveEvent, eventKey, listEvents, pairedClips, parseEventKey, removeOwnRoute,
   setRouteClips, setSfxSounds, simultaneousGroups, trialsForEvent, updateOwnRoute,
   resetAllReviews, setNone, setReview, setUndecided,
   type EffectiveEvent, type EventRow, type SoundStatus,
@@ -229,7 +229,9 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
       {!sounds.length && <p className="agent-muted">{t(e.decided.sfx ? 'events.soundNone' : 'events.undecidedSound')}</p>}
       <MaterialList items={sounds} label={t('events.sound')} active={sounds.find(s => previewId === `${key}|sound|${s}`) ?? null} onPlay={play}
         onReorder={set} onRemove={set}
-        extra={s => <MaterialActions event={key} target="sound" wav={s} />}
+        extra={s => <>{e.variation?.paired === true && pairedClips(e, sounds.indexOf(s))[0] && <button type="button" className="agent-icon-btn" title={t('events.pairedHapticHint', { clips: pairedClips(e, sounds.indexOf(s)).map(p => p.clip).join(', ') })}
+          onClick={() => { const p = pairedClips(e, sounds.indexOf(s))[0]; if (!openEventHaptic(key, p.clip, p.at, true)) missing(p.clip) }}>{t('events.pairedHaptic')}</button>}
+          <MaterialActions event={key} target="sound" wav={s} /></>}
         below={s => <ReviseField cue={key} target="sound" material={s} />} />
       <Reserves cue={e.ref.cue} target="sound" />
       <select className="events-add-material" value="" aria-label={t('events.addSoundMulti')} title={t('events.soundDir', { dir: lib.paths.sounds })}

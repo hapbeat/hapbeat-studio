@@ -24,7 +24,8 @@ export interface CueRoute { clip?: string; clips?: string[]; at: string; gain: n
 export interface CueSfx { sound?: string; sounds?: string[]; volume: number; [key: string]: unknown }
 export const PICK_MODES = ['random', 'roundRobin'] as const
 export type PickMode = typeof PICK_MODES[number]
-export interface CueVariation { gainJitterDb?: number; pitchJitterSt?: number; rateJitterPct?: number; pick?: PickMode; [key: string]: unknown }
+/** `paired`: the clip with the picked sound's index is played on every route (sounds and each route's clips line up). */
+export interface CueVariation { gainJitterDb?: number; pitchJitterSt?: number; rateJitterPct?: number; pick?: PickMode; paired?: boolean; [key: string]: unknown }
 /** Whether an assigned sound / haptic is still tentative or approved by the user (missing = tentative). */
 export const REVIEW_STATES = ['tentative', 'approved'] as const
 export type ReviewState = typeof REVIEW_STATES[number]
@@ -206,7 +207,22 @@ function validateCueFields(err: string[], table: CueTable, ctx: CueTableContext,
   if (v !== undefined) {
     for (const [key, [lo, hi]] of Object.entries(VARIATION_RANGES)) if (v[key] !== undefined && !inRange(v[key], lo, hi)) err.push(`${label}: variation.${key} must be ${lo}..${hi}`)
     if (v.pick !== undefined && !(PICK_MODES as readonly unknown[]).includes(v.pick)) err.push(`${label}: variation.pick must be ${PICK_MODES.join(' or ')}`)
+    if (v.paired !== undefined && typeof v.paired !== 'boolean') err.push(`${label}: variation.paired must be true/false`)
   }
+  // Paired: as many clips on every route as sounds (checked on what this entry plays, inherited fields included).
+  const effective = { ...(table.cues[cue] ?? {}), ...entry } as CueVariant
+  if (effective.variation?.paired === true) {
+    const problem = pairedProblem(effective.sfx ?? null, effective.haptics ?? [])
+    if (problem) err.push(`${label}: variation.paired: ${problem}`)
+  }
+}
+
+/** Why sounds and clips cannot be paired (null when they line up): every route needs as many clips as there are sounds. */
+export function pairedProblem(sfx: CueSfx | null, routes: readonly CueRoute[]): string | null {
+  const n = sfxSounds(sfx).length
+  if (!n) return 'there is no sound to pair'
+  const bad = routes.map((r, i) => ({ i, count: routeClips(r).length })).filter(r => r.count !== n)
+  return bad.length ? bad.map(r => `route ${r.i + 1} has ${r.count} clip(s) for ${n} sound(s)`).join('; ') : null
 }
 
 // ── Edits ──
