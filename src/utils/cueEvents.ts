@@ -491,10 +491,14 @@ const jitter = (amount: number | undefined, random: () => number) => amount ? (r
  * multipliers on what it inherits (sfxVolume / hapticsGain), ramped to `rampTo` over a run (`progress` 0..1: which
  * firing of the run this is; Studio interpolates by count, see runProgress).
  */
+/** A variant's multipliers at `progress` (0..1 through its run) on what it inherits: 1 for own materials and for a cue. */
+export function scaleAt(e: EffectiveEvent, progress: number): { sfx: number; haptics: number } {
+  const at = (start: number) => e.scale.rampTo === null ? start : start + (e.scale.rampTo - start) * Math.max(0, Math.min(1, progress))
+  return { sfx: e.own.sfx ? 1 : at(e.scale.sfx), haptics: e.own.haptics ? 1 : at(e.scale.haptics) }
+}
 export function fireShot(e: EffectiveEvent, loop: boolean, picker: MaterialPicker, random: () => number = Math.random, progress = 0): Shot {
   const v = e.variation ?? {}, key = eventKey(e.ref)
-  const scaleAt = (start: number) => e.scale.rampTo === null ? start : start + (e.scale.rampTo - start) * Math.max(0, Math.min(1, progress))
-  const sfxScale = e.own.sfx ? 1 : scaleAt(e.scale.sfx), hapticScale = e.own.haptics ? 1 : scaleAt(e.scale.haptics)
+  const { sfx: sfxScale, haptics: hapticScale } = scaleAt(e, progress)
   const jitterDb = jitter(v.gainJitterDb, random), gain = 10 ** (jitterDb / 20)
   const pitchSt = loop ? 0 : jitter(v.pitchJitterSt, random)
   const rate = loop ? 1 : 1 + jitter(v.rateJitterPct, random) / 100

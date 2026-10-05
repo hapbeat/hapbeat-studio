@@ -56,9 +56,9 @@ export function SceneEventPanel() {
     <Clips table={table} e={e} edit={edit} />
     <div className="scene-sec">
       <h3>{t('events.variation')}</h3>
-      <OverrideBar e={e} field="variation" edit={edit} />
+      {e.ref.variant !== null && e.own.variation && <OverrideBar e={e} field="variation" edit={edit} />}
       <Variation e={e} loop={loop} edit={edit} />
-      {!loop && <Paired e={e} edit={edit} />}
+      {!loop && (e.ref.variant === null || e.own.variation) && <Paired e={e} edit={edit} />}
     </div>
   </div>
 }
@@ -99,21 +99,30 @@ function VariantScale({ e, edit }: { e: EffectiveEvent; edit: Edit }) {
   const { t } = useI18n()
   const table = useSceneStore(s => s.table)
   const kind = variantKind(e), v = table?.cues[e.ref.cue]?.variants?.[e.ref.variant!] ?? {}
-  const field = (key: 'sfxVolume' | 'hapticsGain' | 'rampTo', usable: boolean) => <label key={key} title={t(`scene.variant.${key}.hint` as MessageId)}>{t(`scene.variant.${key}` as MessageId)}
-    <NumberField value={typeof v[key] === 'number' ? v[key] as number : ''} min={0} max={2} step={0.05} disabled={!usable} label={t(`scene.variant.${key}` as MessageId)}
-      onCommit={x => edit(tb => setVariantScale(tb, e.ref, { [key]: x }))} />
-    <button type="button" className="scene-icon-btn" disabled={!usable || v[key] === undefined} aria-label={t('scene.variant.clear')} title={t('scene.variant.clear')}
-      onClick={() => edit(tb => setVariantScale(tb, e.ref, { [key]: undefined }))}>✕</button></label>
+  const ramp = typeof v.rampTo === 'number'
+  const rampField = <NumberField value={ramp ? v.rampTo as number : ''} min={0} max={2} step={0.05} label={t('scene.variant.rampTo')} onCommit={x => edit(tb => setVariantScale(tb, e.ref, { rampTo: x }))} />
+  // One line per inherited material: "Sound × 0.3 → 1.0" (the ramp target only while "gradually" is on).
+  const row = (key: 'sfxVolume' | 'hapticsGain') => <div key={key} className="scene-row scene-variant-scale" title={`${t(`scene.variant.${key}.hint` as MessageId)}\n${key}${ramp ? ' → rampTo' : ''}`}>
+    <span className="scene-grow">{t(`scene.variant.${key}` as MessageId)}</span>
+    <NumberField value={typeof v[key] === 'number' ? v[key] as number : 1} min={0} max={2} step={0.05} label={t(`scene.variant.${key}` as MessageId)}
+      onCommit={x => edit(tb => setVariantScale(tb, e.ref, { [key]: x === 1 ? undefined : x }))} />
+    {ramp && <><span aria-hidden="true">→</span>{rampField}</>}
+  </div>
+  const inherits = !e.own.sfx || !e.own.haptics
   return <>
     <div className="scene-event-variants" role="group" aria-label={t('scene.variant.kind')}>
       {(['scale', 'materials'] as const).map(k => <button key={k} type="button" className={`scene-toggle ${kind === k ? 'on' : ''}`} title={t(`scene.variant.kind.${k}.hint` as MessageId)}
         onClick={() => { if (kind !== k) edit(tb => setVariantKind(tb, e.ref, k)) }}>{t(`scene.variant.kind.${k}` as MessageId)}</button>)}
     </div>
-    <div className="scene-event-variation">
-      {field('sfxVolume', !e.own.sfx)}
-      {field('hapticsGain', !e.own.haptics)}
-      {field('rampTo', !(e.own.sfx && e.own.haptics))}
-    </div>
+    {inherits && <>
+      <h3>{t('scene.variant.scaleHeading', { cue: e.ref.cue })}</h3>
+      {!e.own.sfx && row('sfxVolume')}
+      {!e.own.haptics && row('hapticsGain')}
+      <label className="scene-row" title={`${t('scene.variant.rampTo.hint')}\nrampTo`}>
+        <input type="checkbox" checked={ramp} onChange={ev => edit(tb => setVariantScale(tb, e.ref, { rampTo: ev.target.checked ? 1 : undefined }))} />
+        {t('scene.variant.ramp')}
+      </label>
+    </>}
   </>
 }
 
@@ -184,6 +193,15 @@ function Variation({ e, loop, edit }: { e: EffectiveEvent; loop: boolean; edit: 
   const { t } = useI18n()
   const v: CueVariation = e.variation ?? {}, own = e.ref.variant === null || e.own.variation
   const set = (patch: Partial<CueVariation>) => edit(tb => setVariation(tb, e.ref, patch))
+  // A variant inheriting the cue's variation: what it is, and one button to change it for this situation only.
+  if (!own) {
+    const pick = t(v.pick ? `events.variation.pick.${v.pick}` as MessageId : 'events.variation.pick.default')
+    const jitters = VARIATION_FIELDS.filter(f => (!loop || f.loopOk) && typeof v[f.key] === 'number' && (v[f.key] as number) > 0).map(f => `${t(`events.variation.${f.key}` as MessageId)} ${v[f.key]}`)
+    return <div className="scene-row">
+      <span className="scene-dim scene-grow">{t('scene.variation.sameAs', { cue: e.ref.cue, summary: [pick, ...jitters, ...(v.paired ? [t('scene.event.paired')] : [])].join('・') })}</span>
+      <button type="button" className="scene-icon-btn" onClick={() => edit(tb => setOverride(tb, e.ref, 'variation', true))}>{t('scene.variation.override')}</button>
+    </div>
+  }
   return <div className="scene-event-variation">
     {!loop && <label title={t('events.variation.pick.hint')}>{t('events.variation.pick')}
       <select value={v.pick ?? ''} disabled={!own} onChange={ev => { const p = ev.target.value; ev.target.blur(); set({ pick: p ? p as CueVariation['pick'] : undefined }) }}>
