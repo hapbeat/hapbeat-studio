@@ -1223,6 +1223,12 @@ export const messages = defineMessages({
   'scene.autosave.merged': { ja: 'cue 表が外部で変更されていたので、取り込んで保存しました', en: 'The cue table had changed outside Studio: merged and saved.' },
   'scene.autosave.conflicts': { ja: 'cue 表の外部の変更と重なった項目は Studio 側を優先しました: {fields}', en: 'Changed outside Studio too, kept Studio’s value: {fields}' },
   'scene.autosave.reloaded': { ja: '{file} が外部で更新されたので読み直しました', en: '{file} changed outside Studio: reloaded.' },
+  'events.hapticRequest.button': { ja: '触覚へ進む', en: 'Go to haptics' },
+  'events.hapticRequest.hint': { ja: 'この cue の触覚をエージェントに依頼します（代表の音に合わせて。outbox）', en: 'Asks the agent for this cue’s haptic, matching its representative sound (outbox).' },
+  'events.hapticRequest.soundUndecided': { ja: '音が未定です', en: 'The sound is undecided.' },
+  'events.hapticRequest.pending': { ja: '触覚の依頼中', en: 'haptic requested' },
+  'events.hapticRequest.noSound': { ja: '音なし', en: 'no sound' },
+  'events.hapticRequest.message': { ja: '触覚の依頼: {cue}（音: {sound}）', en: 'Haptic request: {cue} (sound: {sound})' },
 })
 
 export type MessageId = keyof typeof messages

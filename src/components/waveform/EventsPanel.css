@@ -101,3 +101,5 @@
 /* The remake comment: one full-width line under its row. */
 .events-revise { grid-column: 1 / -1; display: flex; gap: 6px; align-items: center; min-width: 0; }
 .events-revise input { flex: 1; min-width: 0; }
+/* "Go to haptics" at the right end of the haptic heading (its "requested" mark keeps its place). */
+.events-haptic-request { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; flex: none; font-weight: normal; }

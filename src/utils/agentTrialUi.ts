@@ -219,3 +219,9 @@ export function reviseAnswered(req: { cue: string; at: string }, trials: readonl
   const sent = Date.parse(req.at)
   return trials.some(r => !!r.trial.scene?.cues.includes(req.cue) && Date.parse(r.trial.receivedAt) > sent)
 }
+
+/** A "go to haptics" request is answered once a haptic trial naming the cue (`scene.cues`) is received after it. */
+export function hapticAnswered(req: { cue: string; at: string }, trials: readonly { trial: { receivedAt: string; target?: 'sound' | 'haptic'; scene?: { cues: string[] } } }[]): boolean {
+  const sent = Date.parse(req.at)
+  return trials.some(r => (r.trial.target ?? 'haptic') === 'haptic' && !!r.trial.scene?.cues.includes(req.cue) && Date.parse(r.trial.receivedAt) > sent)
+}

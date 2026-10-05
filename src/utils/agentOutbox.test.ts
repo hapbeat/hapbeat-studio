@@ -12,6 +12,11 @@ describe('agent outbox', () => {
     expect(() => buildAgentMessage({ text: 'x'.repeat(4001), createdAt: 'c' })).toThrow(/4000/)
   })
 
+  it('carries a haptic request (sound or none) from the Events panel', () => {
+    expect(buildAgentMessage({ text: 'h', createdAt: 'c', haptic: { cue: 'grab', sound: null } }).haptic).toEqual({ cue: 'grab', sound: null })
+    expect(buildAgentMessage({ text: 'h', createdAt: 'c', haptic: { cue: 'bite', sound: 'bite_01', comment: ' wet ' } }).haptic).toEqual({ cue: 'bite', sound: 'bite_01', comment: 'wet' })
+  })
+
   it('carries a remake request from the Events panel', () => {
     expect(buildAgentMessage({ text: 'remake', createdAt: 'c', revise: { cue: 'bite:tear', target: 'sound', material: 'bite_tear_02', comment: ' wetter ' } }).revise)
       .toEqual({ cue: 'bite:tear', target: 'sound', material: 'bite_tear_02', comment: 'wetter' })

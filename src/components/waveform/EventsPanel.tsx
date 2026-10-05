@@ -23,7 +23,7 @@ import { EditorMenu, EditorMenuItem } from './EditorMenu'
 import { openEventDefault, openEventHaptic, openEventSound } from './eventAudio'
 import { MaterialList } from './MaterialList'
 import { runDecision } from './eventDecide'
-import { removeReserve, reviseAnswered } from '@/utils/agentTrialUi'
+import { hapticAnswered, removeReserve, reviseAnswered } from '@/utils/agentTrialUi'
 import { create } from 'zustand'
 import { openEventMaterialForEditing } from './eventEditing'
 import './EventsPanel.css'
@@ -244,7 +244,7 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
   const missing = (name: string) => useWaveformStore.getState().setError(t('events.preview.missing', { name }))
   const free = positionsForCue(lib, e.ref.cue).some(a => !e.haptics.some(r => r.at === a))
   return <section className="events-sec">
-    <h4 className="events-sec-head">{t('events.haptic')}<ReviewToggle e={e} field="haptics" edit={edit} /><DecisionBar e={e} field="haptics" edit={edit} /></h4>
+    <h4 className="events-sec-head">{t('events.haptic')}<ReviewToggle e={e} field="haptics" edit={edit} /><DecisionBar e={e} field="haptics" edit={edit} /><HapticRequestButton e={e} /></h4>
     {!loop && !e.decided.sfx && <p className="events-hint">{t('events.soundFirst')}</p>}
     {!e.haptics.length && <p className="agent-muted">{t(e.decided.haptics ? 'events.hapticNone' : 'events.undecidedHaptic')}</p>}
     {e.haptics.map((r, i) => {
@@ -428,4 +428,38 @@ function ReviseField({ cue, target, material }: { cue: string; target: 'sound' |
       onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void send() } else if (e.key === 'Escape') { e.preventDefault(); close() } }} />
     {error && <small className="events-warn">{error}</small>}
   </div>
+}
+
+/**
+ * "Go to haptics" (right end of the haptic heading): asks the agent for this cue's haptic, matching its
+ * representative sound (outbox `haptic`). "Haptic requested" shows until a haptic trial for the cue arrives.
+ * Allowed without a sound ("none", e.g. grab); with the sound undecided the title warns.
+ */
+function HapticRequestButton({ e }: { e: EffectiveEvent }) {
+  const { t } = useI18n()
+  const cue = eventKey(e.ref)
+  const pending = useEditorSettings(s => s.hapticPending)
+  const trials = useAgentTrialStore(s => s.trials)
+  const [error, setError] = useState<string | null>(null)
+  const mine = pending.filter(r => r.cue === cue)
+  const waiting = mine.some(r => !hapticAnswered(r, trials))
+  useEffect(() => {
+    if (!mine.length || mine.some(r => !hapticAnswered(r, trials))) return
+    useEditorSettings.getState().update({ hapticPending: useEditorSettings.getState().hapticPending.filter(r => r.cue !== cue) })
+  }, [mine.length, cue, trials])
+  const sound = sfxSounds(e.sfx)[0] ?? null
+  const send = async () => {
+    setError(null)
+    try {
+      const project = useSceneStore.getState().lib?.project_name
+      await useAgentTrialStore.getState().sendAgentMessage({ text: t('events.hapticRequest.message', { cue, sound: sound ?? t('events.hapticRequest.noSound') }), project, haptic: { cue, sound } })
+      const settings = useEditorSettings.getState()
+      settings.update({ hapticPending: [...settings.hapticPending, { cue, at: new Date().toISOString() }] })
+    } catch (err) { setError(t('events.revise.failed', { error: err instanceof Error ? err.message : String(err) })) }
+  }
+  const title = [t('events.hapticRequest.hint'), ...(e.decided.sfx ? [] : [t('events.hapticRequest.soundUndecided')]), ...(error ? [error] : [])].join('\n')
+  return <span className="events-haptic-request">
+    <small className="events-revise-pending" style={{ visibility: waiting ? 'visible' : 'hidden' }}>{t('events.hapticRequest.pending')}</small>
+    <button type="button" className={`agent-icon-btn ${error ? 'error' : ''}`} title={title} onClick={() => void send()}>{t('events.hapticRequest.button')}</button>
+  </span>
 }
