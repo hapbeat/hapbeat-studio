@@ -1,92 +1,61 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
-import { useEventStore } from '@/stores/eventStore'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { familyColor } from '@/utils/sceneData'
-import { addVariant, allEventKeys, effectiveEvent, parseEventKey, resolveEventName, scaleAt } from '@/utils/cueEvents'
+import { addVariant, allEventKeys, effectiveEvent, parseEventKey, resolveEventName } from '@/utils/cueEvents'
 import { VARIANT_NAME, type CueTable } from '@/utils/sceneCueTable'
-import { runPosition } from '@/utils/sceneSegments'
 import { HapticIcon } from './HapticIcon'
+import { useHandLabel } from './SceneCuePanels'
 import { useScene } from './sceneContext'
 
 /**
- * "Moments and events": every firing of the recording (viewer-data `full.events`, ticks left out) in time order,
- * one line each — number · time · event (`cue:variant`) · ▶ · "Change event…" — with its effective multiplier
- * (a variant's multipliers ramped by which firing of its run it is) at the right. One filter on top (all / one
- * event; it follows the cue selected in the Event panel or the timeline). ▶ plays the full replay from the
- * lead-in setting before the firing and selects its event. "Change event…" opens a one-line request over the
- * rows (nothing moves): an existing cue / variant or a new variant name, a comment, "Request" — a new variant is
- * made in the cue table at once (multipliers only, 1 / 1) so it can be tuned here, and the agent gets a
+ * "Moments and events": the full replay, then one clip per cue moment, with which outputs its cues use. A click on
+ * a row jumps to that moment (from the lead-in setting before its mark) and plays it. "Change" opens a one-line
+ * request over the rows (nothing moves): an existing event or a new `cue:variant`, a comment, "Request" — a new
+ * variant is made in the cue table at once (multipliers only, 1 / 1) so it can be tuned here, and the agent gets a
  * hapbeat-agent-message@1 `reassign` (the game's routing changes; the table holds no per-moment values).
  */
 export function SceneMomentsPanel() {
   const { t } = useI18n()
   const { runtime } = useScene()
+  const handLabel = useHandLabel()
   const lib = useSceneStore(s => s.lib)
-  const data = useSceneStore(s => s.data)
+  const items = useSceneStore(s => s.items)
   const table = useSceneStore(s => s.table)
-  const filter = useEventStore(s => s.sceneOccurrences) ?? ''
-  // The event selected elsewhere (Event panel, timeline) filters the list; a ▶ here selects too and must not narrow it.
-  const ownSelect = useRef(false)
-  const selected = useSceneStore(s => s.sel?.name ?? null)
-  useEffect(() => {
-    if (ownSelect.current) { ownSelect.current = false; return }
-    if (selected && selected !== useEventStore.getState().sceneOccurrences) useEventStore.setState({ sceneOccurrences: selected })
-  }, [selected])
-  const firings = useMemo(() => (data?.full.events ?? []).filter(e => !lib?.ticks.includes(e.name)).sort((a, b) => a.t - b.t), [data, lib])
-  const names = useMemo(() => [...new Set(firings.map(f => f.name))].sort(), [firings])
-  const [open, setOpen] = useState<string | null>(null)
-  const [sent, setSent] = useState<Record<string, true>>({})
-  const [status, setStatus] = useState('')
-  if (!lib || !data) return <div className="scene-panel-empty">{t('scene.noProject')}</div>
-  const multiplier = (name: string, at: number) => {
-    const r = table ? resolveEventName(table, name) : null, e = r && table ? effectiveEvent(table, r.ref) : null
-    if (!e || (e.scale.sfx === 1 && e.scale.haptics === 1 && e.scale.rampTo === null && !e.scale.steps)) return null
-    const m = scaleAt(e, runPosition(data.full.events, { t: at, name }))
-    return m.sfx === m.haptics ? `×${m.sfx.toFixed(2)}` : `♪×${m.sfx.toFixed(2)} ≋×${m.haptics.toFixed(2)}`
-  }
-  const play = (name: string, at: number) => {
-    runtime.audio(); ownSelect.current = true
-    useSceneStore.getState().selectCue(name, at)
-    runtime.playFull(Math.max(0, at - useSceneSettings.getState().leadSec))
-  }
-  const shown = filter ? firings.filter(f => f.name === filter) : firings
+  const cur = useSceneStore(s => s.cur)
+  const list = useRef<HTMLDivElement>(null)
+  const [open, setOpen] = useState<number | null>(null)
+  const [sent, setSent] = useState<Record<number, true>>({})
+  useEffect(() => { list.current?.querySelector('.scene-item.sel')?.scrollIntoView({ block: 'nearest' }) }, [cur])
+  if (!lib) return <div className="scene-panel-empty">{t('scene.noProject')}</div>
   return <div className="scene-moments">
     <div className="scene-legend">
       {lib.families.map(f => <span key={f.label}><i style={{ background: f.color }} />{f.label}</span>)}
       <span><b className="scene-kinds"><span className="h"><HapticIcon /></span></b> {t('scene.legend.haptics')}</span>
       <span><b className="scene-kinds"><span className="s">♪</span></b> {t('scene.legend.sound')}</span>
     </div>
-    <label className="scene-occ-pick" title={t('scene.occ.hint')}>
-      <span className="scene-dim">{t('scene.occ.label')}</span>
-      <select value={filter} aria-label={t('scene.occ.label')} onChange={e => { const v = e.target.value; e.target.blur(); setOpen(null); useEventStore.setState({ sceneOccurrences: v || null }) }}>
-        <option value="">{t('scene.occ.all', { count: firings.length })}</option>
-        {[...new Set([...names, ...(filter && !names.includes(filter) ? [filter] : [])])].map(n => <option key={n} value={n}>{t('scene.occ.count', { name: n, count: firings.filter(f => f.name === n).length })}</option>)}
-      </select>
-    </label>
-    <div className="scene-occ-status scene-dim" role="status">{status}</div>
-    <ol className="scene-occ-list">
-      {shown.map(f => {
-        const key = `${f.name}@${f.t}`, index = firings.indexOf(f) + 1, m = multiplier(f.name, f.t)
-        return <li key={key} className="scene-occ-row">
-          <span className="scene-num">{index}</span>
-          <span className="scene-num">{f.t.toFixed(2)}s</span>
-          <span className="scene-name" title={f.name}><i className="scene-dot" style={{ background: familyColor(lib, f.name) }} />{f.name}</span>
-          <button type="button" className="scene-icon-btn" title={t('scene.occ.playHint')} aria-label={t('scene.occ.playHint')} onClick={e => { e.currentTarget.blur(); play(f.name, f.t) }}>▶</button>
-          <button type="button" className="scene-icon-btn" aria-expanded={open === key} title={t('scene.occ.reassignHint')} onClick={() => setOpen(open === key ? null : key)}>{t('scene.occ.reassign')}</button>
-          <span className="scene-occ-tail">
-            {sent[key] && <span className="scene-on">{t('scene.occ.sent')}</span>}
-            {m && <small className="scene-dim" title={t('scene.occ.multiplierHint')}>{m}</small>}
-          </span>
-          {open === key && table && <ChangeEventForm from={f.name} at={f.t} table={table}
+    <div ref={list}>
+      {items.map((it, k) => {
+        // `cue:variant` names resolve like the game (an unknown variant plays its cue).
+        const cues = it.kind === 'clip' && table ? it.names.map(n => { const r = resolveEventName(table, n); return r && effectiveEvent(table, r.ref) }).filter(e => !!e) : []
+        return <div key={k} className={`scene-item ${k === cur ? 'sel' : ''}`} title={t('scene.moment.playHint')}
+          onClick={e => { if ((e.target as HTMLElement).closest('.scene-occ-form, button')) return; runtime.audio(); runtime.playMoment(k, useSceneSettings.getState().leadSec) }}>
+          <span className="scene-num">{k === 0 ? '▶' : String(k).padStart(2, '0')}</span>
+          <span className="scene-dot" style={{ background: familyColor(lib, it.name) }} />
+          <span className="scene-name">{it.kind === 'full' ? t('scene.full') : <>{it.names.join(' + ')}<small>{handLabel(it.hand)}</small></>}</span>
+          <span className="scene-kinds">{cues.length > 0 && <><span className="h">{cues.some(c => c.haptics.length) ? <HapticIcon /> : null}</span><span className="s">{cues.some(c => c.sfx) ? '♪' : ''}</span></>}</span>
+          <span className="scene-num">{it.kind === 'full' ? '' : `${it.at.toFixed(1)}s`}</span>
+          {it.kind === 'clip' && <button type="button" className="scene-icon-btn scene-open-editor" aria-expanded={open === k} title={`${t('scene.occ.reassignHint')}${sent[k] ? `\n${t('scene.occ.sent')}` : ''}`}
+            onClick={e => { e.stopPropagation(); e.currentTarget.blur(); setOpen(open === k ? null : k) }}>{sent[k] ? `✓ ${t('scene.moment.change')}` : t('scene.moment.change')}</button>}
+          {open === k && it.kind === 'clip' && table && <ChangeEventForm from={it.name} at={it.at} table={table}
             onClose={() => setOpen(null)}
-            onSent={() => { setSent(s => ({ ...s, [key]: true })); setOpen(null); setStatus(t('scene.occ.sentStatus', { name: f.name, at: f.t.toFixed(2) })) }}
-            onError={message => setStatus(message)} />}
-        </li>
+            onSent={() => { setSent(s => ({ ...s, [k]: true })); setOpen(null); useSceneStore.getState().note({ id: 'scene.occ.sentStatus', params: { name: it.name, at: it.at.toFixed(2) } }) }}
+            onError={message => useSceneStore.getState().note({ id: 'scene.occ.failed', params: { message }, error: true })} />}
+        </div>
       })}
-    </ol>
+    </div>
   </div>
 }
 

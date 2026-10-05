@@ -94,7 +94,7 @@ export class SceneRuntime {
     this.video.loop = this.loopOn()
     this.video.onloadedmetadata = () => {
       this.video.playbackRate = SPEEDS[this.speedIndex]
-      const start = it.kind === 'full' ? this.pendingStart : null
+      const start = this.pendingStart
       this.pendingStart = null
       // Only a user's ▶ (playFull) starts it; loading a moment (reload, opening a project, selecting) leaves it paused.
       if (start !== null) { this.seek(start); void this.video.play().catch(() => {}) }
@@ -124,6 +124,15 @@ export class SceneRuntime {
       if (e) { this.partAB = [Math.max(0, e.t - 0.5), e.t + 0.5]; this.seek(this.partAB[0]); if (play) void this.video.play().catch(() => {}) }
     }
     this.applyLoop()
+  }
+  /** Plays moment `index` from `leadSec` before its mark (the full replay from its start), loading it first when another is shown. */
+  playMoment(index: number, leadSec: number) {
+    const s = useSceneStore.getState(), it = s.items[index]
+    if (!it) return
+    const t = it.kind === 'clip' ? Math.max(0, it.event - leadSec) : 0
+    if (s.cur === index && this.video.readyState >= 1) { this.seek(t); void this.video.play().catch(() => {}); return }
+    this.pendingStart = t
+    s.select(index)
   }
   /** Plays the full replay (moment 0) from replay time `t`, switching to it first when another moment is shown. */
   playFull(t: number) {
