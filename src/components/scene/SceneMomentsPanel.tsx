@@ -65,7 +65,7 @@ export function SceneMomentsPanel() {
           <span className="scene-num">{k === 0 ? '▶' : String(k).padStart(2, '0')}</span>
           <span className="scene-dot" style={{ background: familyColor(lib, it.name) }} />
           <span className="scene-name">{it.kind === 'full' ? t('scene.full') : <>{(it as OverriddenClip).from
-            ? <span className="scene-overridden" title={t('scene.override.hint', { from: (it as OverriddenClip).from! })}>{it.names.join(' + ')}<i aria-hidden="true">◌</i></span>
+            ? <span className="scene-overridden" title={t('scene.override.hint', { from: (it as OverriddenClip).from! })}><i aria-hidden="true">◌</i>{it.names.join(' + ')}</span>
             : it.names.join(' + ')}{(() => { const p = placeOf(table, it.names, it.hand); return <small title={`${p.title}\n${t('scene.placeHint')}`}>{p.text}</small> })()}</>}</span>
           <span className="scene-kinds">{cues.length > 0 && <><span className="h">{cues.some(c => c.haptics.length) ? <HapticIcon /> : null}</span><span className="s">{cues.some(c => c.sfx) ? '♪' : ''}</span></>}</span>
           <span className="scene-num">{it.kind === 'full' ? '' : `${it.at.toFixed(1)}s`}</span>
