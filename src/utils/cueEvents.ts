@@ -46,7 +46,10 @@ export interface EffectiveEvent {
   review: { sfx: ReviewState; haptics: ReviewState }
   /** Decided (key present: a material, or none = null / []) vs undecided (no key on the cue). */
   decided: { sfx: boolean; haptics: boolean }
+  /** A variant's scene multipliers on what it inherits (1 = none; own fields are never scaled) and its ramp target (null = none). */
+  scale: { sfx: number; haptics: number; rampTo: number | null }
 }
+const NO_SCALE = { sfx: 1, haptics: 1, rampTo: null }
 
 const variantOf = (table: CueTable, ref: EventRef): CueVariant | null => ref.variant === null ? null : table.cues[ref.cue]?.variants?.[ref.variant] ?? null
 
@@ -57,13 +60,14 @@ export function effectiveEvent(table: CueTable, ref: EventRef): EffectiveEvent |
   const state = (entry: CueVariant | undefined, field: 'sfx' | 'haptics'): ReviewState => entry?.review?.[field] ?? 'tentative'
   const cueDecided = { sfx: cue.sfx !== undefined, haptics: cue.haptics !== undefined }
   if (ref.variant === null) return { ref, description: cue.description, sfx: cue.sfx ?? null, haptics: cue.haptics ?? [], variation: cue.variation, own: { sfx: true, haptics: true, variation: true },
-    review: { sfx: state(cue, 'sfx'), haptics: state(cue, 'haptics') }, decided: cueDecided }
+    review: { sfx: state(cue, 'sfx'), haptics: state(cue, 'haptics') }, decided: cueDecided, scale: NO_SCALE }
   const v = variantOf(table, ref)
   if (!v) return null
   const own = { sfx: v.sfx !== undefined, haptics: v.haptics !== undefined, variation: v.variation !== undefined }
   return { ref, description: v.description ?? cue.description, sfx: own.sfx ? v.sfx ?? null : cue.sfx ?? null, haptics: own.haptics ? v.haptics! : cue.haptics ?? [], variation: own.variation ? v.variation : cue.variation, own,
     review: { sfx: state(own.sfx ? v : cue, 'sfx'), haptics: state(own.haptics ? v : cue, 'haptics') },
-    decided: { sfx: own.sfx || cueDecided.sfx, haptics: own.haptics || cueDecided.haptics } }
+    decided: { sfx: own.sfx || cueDecided.sfx, haptics: own.haptics || cueDecided.haptics },
+    scale: { sfx: own.sfx ? 1 : v.sfxVolume ?? 1, haptics: own.haptics ? 1 : v.hapticsGain ?? 1, rampTo: own.sfx && own.haptics ? null : v.rampTo ?? null } }
 }
 
 /** Undecided (no key) / decided as none (null / []) / a material; each decided state is tentative or approved. */
@@ -200,6 +204,13 @@ function edited(table: CueTable, ref: EventRef, change: (entry: CueEntry | CueVa
   const next = structuredClone(table), entry = ownEntry(next, ref), effective = effectiveEvent(next, ref)
   if (!entry || !effective) throw new Error(`unknown event ${eventKey(ref)}`)
   change(entry, structuredClone(effective))
+  // A variant that now writes its own sfx / haptics has no multiplier for it (they are for inherited materials only).
+  if (ref.variant !== null) {
+    const v = entry as CueVariant
+    if (v.sfx !== undefined) delete v.sfxVolume
+    if (v.haptics !== undefined) delete v.hapticsGain
+    if (v.sfx !== undefined && v.haptics !== undefined) delete v.rampTo
+  }
   return next
 }
 
@@ -274,11 +285,27 @@ export function setOverride(table: CueTable, ref: EventRef, field: OverridableFi
   if (ref.variant === null) return table
   return edited(table, ref, (entry, effective) => {
     if (!on) { delete entry[field]; return }
-    if (field === 'sfx') entry.sfx = effective.sfx
-    else if (field === 'haptics') entry.haptics = effective.haptics
+    // The copy keeps how it sounded: the multiplier (sfxVolume / hapticsGain) goes into the copied volume / gains.
+    if (field === 'sfx') entry.sfx = effective.sfx && { ...effective.sfx, volume: clampNumber(effective.sfx.volume * effective.scale.sfx, 0, 2) }
+    else if (field === 'haptics') entry.haptics = effective.haptics.map(r => ({ ...r, gain: clampNumber(r.gain * effective.scale.haptics, 0, 2) }))
     else entry.variation = effective.variation ?? {}
   })
 }
+/** A variant's scene multipliers (DEC-086 3rd layer for inherited materials): undefined clears one. */
+export function setVariantScale(table: CueTable, ref: EventRef, patch: Partial<Pick<CueVariant, 'sfxVolume' | 'hapticsGain' | 'rampTo'>>): CueTable {
+  if (ref.variant === null) return table
+  return edited(table, ref, entry => {
+    for (const [k, value] of Object.entries(patch) as [keyof typeof patch, number | undefined][]) if (value === undefined) delete entry[k]; else entry[k] = clampNumber(value, 0, 2)
+  })
+}
+/** Variant kinds: "materials" (own sfx + haptics, a copy of the inherited ones) or "scale" (inherits both; multipliers only). */
+export function setVariantKind(table: CueTable, ref: EventRef, kind: 'materials' | 'scale'): CueTable {
+  if (ref.variant === null) return table
+  if (kind === 'materials') return setOverride(setOverride(table, ref, 'sfx', true), ref, 'haptics', true)
+  return edited(table, ref, entry => { delete entry.sfx; delete entry.haptics })
+}
+/** The kind of variant `ref`: own materials (either field) or multipliers only. */
+export const variantKind = (e: EffectiveEvent): 'materials' | 'scale' => e.own.sfx || e.own.haptics ? 'materials' : 'scale'
 /** Sets / clears (undefined) `variation` fields of what `ref` writes; an emptied variation is removed (a variant then inherits again only through setOverride). */
 export function setVariation(table: CueTable, ref: EventRef, patch: Partial<CueVariation>): CueTable {
   return edited(table, ref, entry => {
@@ -310,6 +337,10 @@ export function removeOwnRoute(table: CueTable, ref: EventRef, index: number): C
   return edited(table, ref, entry => { entry.haptics?.splice(index, 1) })
 }
 /** The sfx `ref` writes plays `sounds` (one = `sound`, several = `sounds`; empty = no sound); volume kept (1.0 when new). */
+/** The scene multiplier of the sound `ref` writes (sfx.volume, 0..2; DEC-086 3rd layer). */
+export function setOwnSfxVolume(table: CueTable, ref: EventRef, volume: number): CueTable {
+  return edited(table, ref, entry => { if (entry.sfx) entry.sfx = { ...entry.sfx, volume: clampNumber(volume, 0, 2) } })
+}
 export function setSfxSounds(table: CueTable, ref: EventRef, sounds: string[]): CueTable {
   return edited(table, ref, entry => {
     const volume = entry.sfx ? entry.sfx.volume : 1.0
@@ -455,8 +486,15 @@ export interface Shot {
 const jitter = (amount: number | undefined, random: () => number) => amount ? (random() * 2 - 1) * amount : 0
 
 /** One firing: materials picked per `variation.pick` (never the previous one at random), gain / pitch / rate jitter drawn. Loop cues: only the gain jitter. */
-export function fireShot(e: EffectiveEvent, loop: boolean, picker: MaterialPicker, random: () => number = Math.random): Shot {
+/**
+ * One firing as the game plays it: pick (variation.pick), paired index, gain / pitch / rate jitter, and a variant's
+ * multipliers on what it inherits (sfxVolume / hapticsGain), ramped to `rampTo` over a run (`progress` 0..1: which
+ * firing of the run this is; Studio interpolates by count, see runProgress).
+ */
+export function fireShot(e: EffectiveEvent, loop: boolean, picker: MaterialPicker, random: () => number = Math.random, progress = 0): Shot {
   const v = e.variation ?? {}, key = eventKey(e.ref)
+  const scaleAt = (start: number) => e.scale.rampTo === null ? start : start + (e.scale.rampTo - start) * Math.max(0, Math.min(1, progress))
+  const sfxScale = e.own.sfx ? 1 : scaleAt(e.scale.sfx), hapticScale = e.own.haptics ? 1 : scaleAt(e.scale.haptics)
   const jitterDb = jitter(v.gainJitterDb, random), gain = 10 ** (jitterDb / 20)
   const pitchSt = loop ? 0 : jitter(v.pitchJitterSt, random)
   const rate = loop ? 1 : 1 + jitter(v.rateJitterPct, random) / 100
@@ -467,9 +505,9 @@ export function fireShot(e: EffectiveEvent, loop: boolean, picker: MaterialPicke
   const routes = e.haptics.flatMap((r, i) => {
     const clips = routeClips(r)
     const clip = index >= 0 && clips.length === sounds.length ? clips[index] : picker.pick(`${key}#${i}`, clips, v.pick)
-    return clip ? [{ clip, at: r.at, gain: r.gain * gain }] : []
+    return clip ? [{ clip, at: r.at, gain: r.gain * hapticScale * gain }] : []
   })
-  return { sound, soundGain: (e.sfx?.volume ?? 0) * gain, pitchSt, jitterDb, rate, routes }
+  return { sound, soundGain: (e.sfx?.volume ?? 0) * sfxScale * gain, pitchSt, jitterDb, rate, routes }
 }
 
 export interface PlannedShot extends Shot { index: number; atSec: number }

@@ -6,6 +6,7 @@ import { useSceneStore } from '@/stores/sceneStore'
 import { useScene } from './sceneContext'
 import { useSceneProjectActions } from './useSceneProjectActions'
 import { VideoOverlay } from './VideoOverlay'
+import type { FiredShot } from './sceneRuntime'
 
 /** The clip / replay video (the runtime's element, moved in here) with the time-to-cue badge, or the "open a project" start screen. */
 export function SceneVideoPanel() {
@@ -24,6 +25,12 @@ export function SceneVideoPanel() {
     return () => { v.removeEventListener('play', sync); v.removeEventListener('pause', sync) }
   }, [runtime])
   const mark = useSceneStore(s => { const it = s.items[s.cur]; return it?.kind === 'clip' ? it.event : null })
+  // What each firing plays, shown over the video while it sounds (the latest few; a seek back drops the later ones).
+  const [fired, setFired] = useState<FiredShot[]>([])
+  useEffect(() => runtime.onFired(f => setFired(list => [...list.filter(x => x.at <= f.at && f.at - x.at < 10), f].slice(-12))), [runtime])
+  useEffect(() => { setFired([]) }, [mark])
+  const marks = [...(mark === null ? [] : [{ t: mark, target: true }]),
+    ...fired.map(f => ({ t: f.at, target: false, name: f.name, material: f.materials.join(' + '), durSec: Math.max(0.3, f.durSec) }))]
 
   useEffect(() => {
     const host = stage.current
@@ -62,7 +69,7 @@ export function SceneVideoPanel() {
 
   return <div className="scene-stage" ref={stage} onClick={() => { if (!hasItems) return; runtime.audio(); runtime.togglePlay() }}>
     <div className="scene-badge" ref={badge} hidden={!hasItems} />
-    {hasItems && <VideoOverlay video={runtime.video} mark={mark} playing={playing} info={t('scene.keys')}
+    {hasItems && <VideoOverlay video={runtime.video} mark={mark} marks={marks} playing={playing} info={t('scene.keys')}
       onToggle={() => { runtime.audio(); runtime.togglePlay() }} onSeek={time => runtime.seek(time)} />}
     {!hasItems && <div className="scene-empty" onClick={e => e.stopPropagation()}>
       <div className="scene-empty-message">{empty ? t(empty.id, empty.params) : t('scene.empty.intro')}</div>

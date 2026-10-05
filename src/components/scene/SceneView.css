@@ -77,8 +77,6 @@
 .scene-row { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
 .scene-sec { padding: 10px 12px; border-bottom: 1px solid var(--border); }
 .scene-sec h3 { margin: 0 0 6px; font-size: 12px; font-weight: 600; color: var(--text-muted); }
-.scene-ints { display: grid; grid-template-columns: 1fr; gap: 4px; color: var(--text-muted); }
-.scene-ints label { display: grid; grid-template-columns: 1fr 64px; gap: 8px; align-items: center; }
 .scene-cmd { display: block; margin: 6px 0; padding: 5px 6px; background: #111316; border: 1px solid var(--border); border-radius: 3px;
   white-space: pre-wrap; word-break: break-all; font: 12px var(--font-mono); color: var(--text-secondary); }
 .scene-dirty-note { margin-left: 8px; color: var(--warning); }

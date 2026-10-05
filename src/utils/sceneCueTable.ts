@@ -31,7 +31,14 @@ export const REVIEW_STATES = ['tentative', 'approved'] as const
 export type ReviewState = typeof REVIEW_STATES[number]
 export interface CueReview { sfx?: ReviewState; haptics?: ReviewState }
 /** A field left out (undefined) is inherited from the cue; `sfx: null` overrides with "no sound". */
-export interface CueVariant { description?: string; sfx?: CueSfx | null; haptics?: CueRoute[]; variation?: CueVariation; review?: CueReview; [key: string]: unknown }
+export interface CueVariant {
+  description?: string; sfx?: CueSfx | null; haptics?: CueRoute[]; variation?: CueVariation; review?: CueReview
+  /** A variant that inherits the materials (no own sfx / haptics): scene multipliers on the inherited sfx volume / every route gain (0..2). */
+  sfxVolume?: number; hapticsGain?: number
+  /** Over a run of firings the multipliers go linearly from sfxVolume / hapticsGain (default 1) to this (0..2). */
+  rampTo?: number
+  [key: string]: unknown
+}
 /**
  * Undecided vs none: a cue without the `sfx` / `haptics` key has not been decided yet;
  * `sfx: null` = no sound and `haptics: []` = no haptic (both decided). The game plays neither.
@@ -85,6 +92,7 @@ export function parseCueTable(text: string): CueTable {
         if (variant.haptics !== undefined && !(Array.isArray(variant.haptics) && variant.haptics.every(isRecord))) throw new Error(`cue table: ${at}.haptics must be a list`)
         if (variant.sfx !== undefined && variant.sfx !== null && !isRecord(variant.sfx)) throw new Error(`cue table: ${at}.sfx must be an object or null`)
         if (variant.variation !== undefined && !isRecord(variant.variation)) throw new Error(`cue table: ${at}.variation must be an object`)
+        for (const k of ['sfxVolume', 'hapticsGain', 'rampTo'] as const) if (variant[k] !== undefined && typeof variant[k] !== 'number') throw new Error(`cue table: ${at}.${k} must be a number`)
       }
     }
   }
@@ -157,9 +165,18 @@ export function validateCueTable(table: CueTable, ctx: CueTableContext): string[
     for (const [vn, variant] of Object.entries(cue.variants ?? {})) {
       if (!VARIANT_NAME.test(vn)) err.push(`${name}: variant name ${vn} must match ${VARIANT_NAME.source}`)
       validateCueFields(err, table, ctx, name, `${name}:${vn}`, variant)
+      validateVariantScale(err, `${name}:${vn}`, variant)
     }
   }
   return err
+}
+
+/** A variant's scene multipliers: 0..2, only on what it inherits (with its own sfx / haptics they cannot be used). */
+function validateVariantScale(err: string[], label: string, v: CueVariant): void {
+  for (const k of ['sfxVolume', 'hapticsGain', 'rampTo'] as const) if (v[k] !== undefined && !inRange(v[k], 0, 2)) err.push(`${label}: ${k} must be 0..2`)
+  if (v.sfxVolume !== undefined && v.sfx !== undefined) err.push(`${label}: sfxVolume is for an inherited sfx (this variant has its own sfx)`)
+  if (v.hapticsGain !== undefined && v.haptics !== undefined) err.push(`${label}: hapticsGain is for inherited haptics (this variant has its own haptics)`)
+  if (v.rampTo !== undefined && v.sfx !== undefined && v.haptics !== undefined) err.push(`${label}: rampTo needs an inherited sfx or haptics`)
 }
 
 /**

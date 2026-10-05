@@ -97,3 +97,18 @@ export function toFirstPlay(sel: { start: number; end: number } | null, offsets:
   const start = Math.max(0, sel.start - o), end = Math.min(duration, sel.end - o)
   return end > start ? { start, end } : null
 }
+
+/**
+ * Where firing `ev` is in its run (the same name firing again within CHAIN_GAP_SEC): 0 for the first, 1 for the
+ * last, linear by count in between (a variant's `rampTo`; the game interpolates by how far the scene has gone).
+ * A single firing is 0.
+ */
+export function runProgress(events: readonly SceneEvent[], ev: { t: number; name: string }): number {
+  const times = events.filter(e => e.name === ev.name).map(e => e.t).sort((a, b) => a - b)
+  const i = times.indexOf(ev.t)
+  if (i < 0) return 0
+  let first = i, last = i
+  while (first > 0 && times[first] - times[first - 1] <= CHAIN_GAP_SEC) first--
+  while (last < times.length - 1 && times[last + 1] - times[last] <= CHAIN_GAP_SEC) last++
+  return last === first ? 0 : (i - first) / (last - first)
+}

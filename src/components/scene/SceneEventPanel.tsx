@@ -3,7 +3,8 @@ import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { isLoopCue, pairedProblem, PICK_MODES, routeClips, sfxSounds, soundAllowed, VARIANT_NAME, clipsForCue, type CueTable, type CueVariation, type VariationNumberKey } from '@/utils/sceneCueTable'
 import {
-  addVariant, effectiveEvent, eventKey, pairedClips, removeVariant, resolveEventName, setOverride, setRouteClips, setSfxSounds, setVariation,
+  addVariant, effectiveEvent, eventKey, pairedClips, removeVariant, resolveEventName, setOverride, setOwnSfxVolume, setRouteClips, setSfxSounds, setVariation,
+  setVariantKind, setVariantScale, updateOwnRoute, variantKind,
   type EffectiveEvent, type OverridableField,
 } from '@/utils/cueEvents'
 import { sceneSegment } from '@/utils/sceneSegments'
@@ -21,10 +22,11 @@ const VARIATION_FIELDS: { key: VariationNumberKey; max: number; step: number; lo
 
 /**
  * "Event" details of the selected cue / variant (DEC-085 addendum: the editor only picks materials; how they
- * are used by situation is decided here): its variants and their sfx / haptics overrides, the variation
- * (pick, gain / pitch / rate jitter), the order of the material candidates (★ = representative) and removal,
- * and playing the event's run of the recording through (its real firings, with the variation). Edits go to
- * the same table and are saved with it.
+ * are used by situation is decided here): its variants and their kind (own materials, or multipliers only:
+ * sfxVolume / hapticsGain / rampTo), the scene multipliers (sfx.volume, route gain; DEC-086 3rd layer), the
+ * variation (pick, gain / pitch / rate jitter, paired), the order of the material candidates (★ = representative)
+ * and removal, and playing the event's run of the recording through (its real firings, as the game computes
+ * them). Edits go to the same table and are saved with it.
  */
 export function SceneEventPanel() {
   const { t } = useI18n()
@@ -45,6 +47,7 @@ export function SceneEventPanel() {
   return <div className="scene-cue-panel scene-event">
     <div className="scene-sec">
       <Variants table={table} e={e} select={select} edit={edit} />
+      {e.ref.variant !== null && <VariantScale e={e} edit={edit} />}
       {run?.repeating && <button type="button" className="scene-icon-btn scene-event-run" title={t('scene.event.runHint')}
         onClick={ev => { ev.currentTarget.blur(); runtime.audio(); runtime.playFull(run.start) }}>{t('scene.event.run', { at: run.marks[0].t.toFixed(1), count: run.marks.filter(m => m.target).length })}</button>}
     </div>
@@ -86,6 +89,33 @@ function Variants({ table, e, select, edit }: { table: CueTable; e: EffectiveEve
   </>
 }
 
+/**
+ * A variant's kind — own materials (overrides its sfx / haptics) or multipliers only (inherits the materials) — and
+ * the multipliers on what it inherits: sfxVolume, hapticsGain and rampTo (over a run of firings the multipliers go
+ * linearly to rampTo; here by which firing of the run it is).
+ */
+function VariantScale({ e, edit }: { e: EffectiveEvent; edit: Edit }) {
+  const { t } = useI18n()
+  const table = useSceneStore(s => s.table)
+  const kind = variantKind(e), v = table?.cues[e.ref.cue]?.variants?.[e.ref.variant!] ?? {}
+  const field = (key: 'sfxVolume' | 'hapticsGain' | 'rampTo', usable: boolean) => <label key={key} title={t(`scene.variant.${key}.hint` as MessageId)}>{t(`scene.variant.${key}` as MessageId)}
+    <NumberField value={typeof v[key] === 'number' ? v[key] as number : ''} min={0} max={2} step={0.05} disabled={!usable} label={t(`scene.variant.${key}` as MessageId)}
+      onCommit={x => edit(tb => setVariantScale(tb, e.ref, { [key]: x }))} />
+    <button type="button" className="scene-icon-btn" disabled={!usable || v[key] === undefined} aria-label={t('scene.variant.clear')} title={t('scene.variant.clear')}
+      onClick={() => edit(tb => setVariantScale(tb, e.ref, { [key]: undefined }))}>✕</button></label>
+  return <>
+    <div className="scene-event-variants" role="group" aria-label={t('scene.variant.kind')}>
+      {(['scale', 'materials'] as const).map(k => <button key={k} type="button" className={`scene-toggle ${kind === k ? 'on' : ''}`} title={t(`scene.variant.kind.${k}.hint` as MessageId)}
+        onClick={() => { if (kind !== k) edit(tb => setVariantKind(tb, e.ref, k)) }}>{t(`scene.variant.kind.${k}` as MessageId)}</button>)}
+    </div>
+    <div className="scene-event-variation">
+      {field('sfxVolume', !e.own.sfx)}
+      {field('hapticsGain', !e.own.haptics)}
+      {field('rampTo', !(e.own.sfx && e.own.haptics))}
+    </div>
+  </>
+}
+
 /** For a variant: "inherited from the cue" with an override button, or "own" with a button back to inheriting. */
 function OverrideBar({ e, field, edit }: { e: EffectiveEvent; field: OverridableField; edit: Edit }) {
   const { t } = useI18n()
@@ -108,6 +138,8 @@ function Sounds({ e, edit, allowed }: { e: EffectiveEvent; edit: Edit; allowed: 
   return <div className="scene-sec">
     <h3>{t('events.repeat.sounds')}</h3>
     <OverrideBar e={e} field="sfx" edit={edit} />
+    {own && e.sfx && <label className="scene-row" title={t('scene.event.volumeHint')}><span className="scene-dim scene-grow">{t('scene.sound.volume')}</span>
+      <NumberField value={e.sfx.volume} min={0} max={2} step={0.05} label={t('scene.sound.volume')} onCommit={x => edit(tb => setOwnSfxVolume(tb, e.ref, x))} /></label>}
     {!sounds.length ? <div className="scene-dim">{t('events.soundNone')}</div>
       : <MaterialList items={sounds} label={t('events.repeat.sounds')} onReorder={own ? set : null} onRemove={own ? set : null}
         onPlay={s => { runtime.audio(); runtime.testSound({ sound: s, volume: e.sfx?.volume ?? 1 }) }} />}
@@ -132,7 +164,9 @@ function Clips({ table, e, edit }: { table: CueTable; e: EffectiveEvent; edit: E
     {e.haptics.map((r, i) => {
       const clips = routeClips(r), set = (list: string[]) => edit(tb => setRouteClips(tb, e.ref, i, list))
       return <div key={i}>
-        <div className="scene-dim">{atLabel(r.at)} · gain {r.gain}</div>
+        <label className="scene-row" title={t('scene.event.gainHint')}><span className="scene-dim scene-grow">{atLabel(r.at)} · {t('scene.route.gain')}</span>
+          {own ? <NumberField value={r.gain} min={0} max={2} step={0.05} label={t('scene.route.gain')} onCommit={x => edit(tb => updateOwnRoute(tb, e.ref, i, { gain: x }))} />
+            : <span className="scene-dim">{r.gain}</span>}</label>
         <MaterialList items={clips} label={atLabel(r.at)} onReorder={own ? set : null} onRemove={own ? set : null} minItems={1}
           onPlay={c => runtime.testRoute({ clip: c, at: r.at, gain: r.gain })} />
         {own && <select value="" aria-label={t('events.addClipMulti')} onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) set([...clips, x]) }}>

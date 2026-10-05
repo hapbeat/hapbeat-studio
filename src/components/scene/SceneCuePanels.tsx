@@ -3,7 +3,7 @@ import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { familyColor, momentCues, type SceneLib } from '@/utils/sceneData'
-import { addRoute, assignSound, clipsForCue, isLoopCue, positionsForCue, removeRoute, routeClips, setClipIntensity, setSoundVolume, sfxSounds, updateRoute } from '@/utils/sceneCueTable'
+import { addRoute, assignSound, clipsForCue, isLoopCue, positionsForCue, removeRoute, routeClips, setSoundVolume, sfxSounds, updateRoute } from '@/utils/sceneCueTable'
 import { effectiveEvent, resolveEventName } from '@/utils/cueEvents'
 import { useEventStore } from '@/stores/eventStore'
 import { useScene } from './sceneContext'
@@ -108,7 +108,7 @@ function useSelectedCue() {
     overrides: { sfx: !!own?.sfx, haptics: !!own?.haptics } }
 }
 
-/** Haptic routes of the selected cue: clip × body position × gain, plus the intensity of the clips it uses. */
+/** Haptic routes of the selected cue: clip × body position × gain (a clip's intensity is the editor's strength slider, DEC-086). */
 export function SceneHapticsPanel() {
   const { t } = useI18n()
   const { runtime, helperConnected, pickWav } = useScene()
@@ -133,7 +133,7 @@ export function SceneHapticsPanel() {
     store.note({ id: 'scene.test.sent', params: { clip: routeClips(route)[0] ?? '', at: atLabel(route.at), count } })
   }
   const cue = name ? table.cues[name] : null
-  const used = cue ? [...new Set((cue.haptics ?? []).flatMap(routeClips))].filter(c => table.clips[c]) : []
+
   return <div className="scene-cue-panel">
     <CuePicker />
     {!name || !cue ? <div className="scene-sec scene-dim">{t('scene.selectCue')}</div> : <div className="scene-cue">
@@ -161,14 +161,6 @@ export function SceneHapticsPanel() {
         <span className="scene-dim">{t('scene.route.dropHint')}</span>
       </DropZone>
     </div>}
-    <div className="scene-sec">
-      <h3>{t('scene.intensity.heading')}</h3>
-      <div className="scene-ints">
-        {used.length ? used.map(c => <label key={c}><span>{c}</span>
-          <NumberField value={table.clips[c].intensity} min={0} max={1} step={0.05} label={c} onCommit={x => store.edit(tb => setClipIntensity(tb, c, x))} />
-        </label>) : <span>—</span>}
-      </div>
-    </div>
   </div>
 }
 

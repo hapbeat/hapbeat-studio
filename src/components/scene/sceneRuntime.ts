@@ -4,6 +4,7 @@ import { useSceneSettings } from '@/stores/sceneSettings'
 import { clipEnd, focusEvent, itemEvents, levelAt, offsetOf, type SceneItem, type VisibleEvent } from '@/utils/sceneData'
 import { isLoopCue, routeClips, sfxSounds, type CueRoute, type CueSfx, soundIntensity } from '@/utils/sceneCueTable'
 import { effectiveEvent, fireShot, MaterialPicker, resolveEventName } from '@/utils/cueEvents'
+import { runProgress } from '@/utils/sceneSegments'
 import { buildLoopVoices, shotVoices, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, SceneHapticMixer, targetsOf, type HapticDevice, type HelperSend } from '@/utils/sceneHaptics'
 
 export const SPEEDS = [1, 0.5, 0.25]
@@ -15,6 +16,9 @@ export const SPEEDS = [1, 0.5, 0.25]
  * hapbeat-helper. A 10 ms tick fires the cues the video is about to reach.
  * Ported from the standalone viewer's tick() / fire() / pumpHaptics().
  */
+/** One firing as played: video time, the event's short name (variant or cue) and its sound / clips. */
+export interface FiredShot { at: number; name: string; materials: string[]; durSec: number }
+
 export class SceneRuntime {
   readonly video: HTMLVideoElement
   speedIndex = 0
@@ -34,6 +38,9 @@ export class SceneRuntime {
   private unsubscribe: (() => void) | null = null
   /** Multi-material picks (v2 `clips` / `sounds`), per event. */
   private picker = new MaterialPicker()
+  /** Called for every firing with its video time, event and what it plays (the overlay's "bite: bite_t51_a"). */
+  private firedListeners = new Set<(fired: FiredShot) => void>()
+  onFired(listener: (fired: FiredShot) => void) { this.firedListeners.add(listener); return () => { this.firedListeners.delete(listener) } }
 
   constructor() {
     this.video = document.createElement('video')
@@ -159,8 +166,15 @@ export class SceneRuntime {
     const s = useSceneStore.getState(), resolved = s.table && resolveEventName(s.table, ev.name), e = resolved && s.table && effectiveEvent(s.table, resolved.ref)
     if (!e || !s.table || !s.lib) return
     const loop = isLoopCue(s.lib, e.ref.cue)
-    const shot = fireShot(e, loop, this.picker)
+    // A variant's ramp (rampTo) by which firing of its run this is in the recording.
+    const shot = fireShot(e, loop, this.picker, Math.random, 't' in ev && s.data ? runProgress(s.data.full.events, ev) : 0)
     if (shot.sound && !loop) this.playSfx(shot.sound, shot.soundGain, delay, false, 2 ** (shot.pitchSt / 12))
+    if (this.firedListeners.size) {
+      const materials = [...(shot.sound && !loop ? [shot.sound] : []), ...shot.routes.map(r => r.clip)]
+      const durSec = Math.max(shot.sound && !loop ? s.sfx[shot.sound]?.duration ?? 0 : 0, ...shot.routes.map(r => (s.pcm[r.clip]?.length ?? 0) / RATE))
+      const fired: FiredShot = { at: this.video.currentTime + delay * this.video.playbackRate, name: e.ref.variant ?? e.ref.cue, materials, durSec }
+      if (materials.length) for (const l of this.firedListeners) l(fired)
+    }
     if (!useSceneSettings.getState().sendHaptics) return
     this.mixer.voices.push(...shotVoices(s.table, s.pcm, shot, ev.hand, ev.gain ?? 1, performance.now() + delay * 1000))
   }
