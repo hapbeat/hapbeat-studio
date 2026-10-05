@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findRuns, occurrences, planSegmentShots, representativeSegment } from './sceneSegments'
+import { findRuns, listenOffsets, occurrences, planSegmentShots, representativeSegment } from './sceneSegments'
 import { effectiveEvent } from './cueEvents'
 import { sampleTable } from './sceneTestFixtures'
 import type { SceneEvent } from './sceneData'
@@ -40,5 +40,13 @@ describe('representative segment (DEC-085)', () => {
     expect(representativeSegment(T_REX, 'bite', 1)).toBeNull()
     expect(findRuns([0, 1, 5, 6, 7, 20])).toEqual([[5, 6, 7]])
     expect(findRuns([0, 1])).toEqual([])
+  })
+
+  it('×5: the real gaps of the cue run (first five firings), else 0.9 s apart, no jitter', () => {
+    expect(listenOffsets(T_REX, 'footstep:approach').map(x => +x.toFixed(3))).toEqual([0, 0.866, 1.7, 2.566, 3.433])
+    expect(listenOffsets(T_REX, 'footstep').map(x => +x.toFixed(3))).toEqual([0, 0.833, 1.7, 2.566, 3.433])
+    expect(listenOffsets(T_REX, 'roar').map(x => +x.toFixed(2))).toEqual([0, 0.9, 1.8, 2.7, 3.6]) // one-off
+    expect(listenOffsets(null, 'bite').map(x => +x.toFixed(2))).toEqual([0, 0.9, 1.8, 2.7, 3.6]) // no recording
+    expect(listenOffsets([0, 1, 2].map(t => ({ t, name: 'x', hand: 'both' })), 'x')).toEqual([0, 1, 2, 3, 4]) // a 3-firing run continues at its gap
   })
 })

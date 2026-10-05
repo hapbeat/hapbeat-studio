@@ -1,0 +1,40 @@
+import type { ReactNode } from 'react'
+import { useI18n } from '@/i18n/I18nProvider'
+import './EventsPanel.css'
+
+/**
+ * An event's candidate materials (`sfx.sounds` / a route's `clips`; the first is the representative,
+ * DEC-085). One grid row each: ▶, the name, ★ (make it the representative), ×5, remove, plus `extra`.
+ * Used by the editor's Events panel and the Scene tab's event details.
+ */
+export function MaterialList({ items, active, onPlay, onReorder, onFive, onRemove, minItems, extra, label }: {
+  items: readonly string[]
+  /** The row shown in the waveform panel (highlighted). */
+  active?: string | null
+  onPlay: (name: string) => void
+  /** New order (★ moves a material first); null = read only. */
+  onReorder: ((items: string[]) => void) | null
+  /** "×5"; null hides it (loop cues). */
+  onFive: ((name: string) => void) | null
+  /** Removes one (offered only while more than `minItems` remain); null = read only. */
+  onRemove: ((items: string[]) => void) | null
+  minItems?: number
+  extra?: (name: string) => ReactNode
+  label: string
+}) {
+  const { t } = useI18n()
+  const removable = (minItems: number) => items.length > minItems
+  return <ul className="events-materials" aria-label={label}>
+    {items.map((name, i) => <li key={name} className={`events-mat ${active === name ? 'active' : ''}`}>
+      <button type="button" className="agent-icon-btn" aria-label={t('events.mat.play', { name })} title={t('events.mat.play', { name })} onClick={() => onPlay(name)}>▶</button>
+      <span className="events-mat-name" title={name}>{name}</span>
+      {onReorder ? <button type="button" className={`agent-icon-btn events-mat-star ${i === 0 ? 'on' : ''}`} disabled={i === 0}
+        aria-label={t(i === 0 ? 'events.mat.representative' : 'events.mat.makeRepresentative')} title={t(i === 0 ? 'events.mat.representative' : 'events.mat.makeRepresentative')}
+        onClick={() => onReorder([name, ...items.filter(x => x !== name)])}>{i === 0 ? '★' : '☆'}</button>
+        : <span className="events-mat-star on" title={i === 0 ? t('events.mat.representative') : ''}>{i === 0 ? '★' : ''}</span>}
+      {onFive ? <button type="button" className="agent-icon-btn" title={t('events.mat.fiveHint')} onClick={() => onFive(name)}>{t('events.mat.five')}</button> : <span />}
+      {onRemove && removable(minItems ?? 0) ? <button type="button" className="agent-icon-btn" title={t('events.mat.removeHint')} onClick={() => onRemove(items.filter(x => x !== name))}>{t('events.mat.remove')}</button> : <span />}
+      {extra ? extra(name) : <span />}
+    </li>)}
+  </ul>
+}

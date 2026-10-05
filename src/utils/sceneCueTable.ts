@@ -30,7 +30,7 @@ export const REVIEW_STATES = ['tentative', 'approved'] as const
 export type ReviewState = typeof REVIEW_STATES[number]
 export interface CueReview { sfx?: ReviewState; haptics?: ReviewState }
 /** A field left out (undefined) is inherited from the cue; `sfx: null` overrides with "no sound". */
-export interface CueVariant { description?: string; sfx?: CueSfx | null; haptics?: CueRoute[]; variation?: CueVariation; review?: CueReview; preview?: CuePreview; [key: string]: unknown }
+export interface CueVariant { description?: string; sfx?: CueSfx | null; haptics?: CueRoute[]; variation?: CueVariation; review?: CueReview; [key: string]: unknown }
 /**
  * Undecided vs none: a cue without the `sfx` / `haptics` key has not been decided yet;
  * `sfx: null` = no sound and `haptics: []` = no haptic (both decided). The game plays neither.
@@ -39,12 +39,8 @@ export interface CueEntry {
   description?: string; sfx?: CueSfx | null; haptics?: CueRoute[]
   variants?: Record<string, CueVariant>; variation?: CueVariation
   review?: CueReview
-  preview?: CuePreview
   [key: string]: unknown
 }
-/** Studio's event preview only: fire the event `repeat` times, `intervalSec` apart (± `intervalJitterPct`), each with its variation. Not used in the game, nor for loop cues. */
-export interface CuePreview { repeat: number; intervalSec?: number; intervalJitterPct?: number }
-export const PREVIEW_RANGES = { repeat: [1, 32], intervalSec: [0.05, 10], intervalJitterPct: [0, 50] } as const
 /** Variant names (`<cue>:<variant>` in the game and in viewer-data events). */
 export const VARIANT_NAME = /^[a-z][a-z0-9_]*$/
 /** Ranges of the numeric `variation` fields. */
@@ -183,17 +179,8 @@ function validateCueFields(err: string[], table: CueTable, ctx: CueTableContext,
       else if (!(REVIEW_STATES as readonly unknown[]).includes(state)) err.push(`${label}: review.${key} must be ${REVIEW_STATES.join(' or ')}`)
     }
   }
-  const pv = entry.preview as unknown
-  if (pv !== undefined) {
-    if (!pv || typeof pv !== 'object' || Array.isArray(pv)) err.push(`${label}: preview must be an object`)
-    else {
-      const p = pv as Record<string, unknown>
-      for (const key of Object.keys(p)) if (!(key in PREVIEW_RANGES)) err.push(`${label}: preview.${key} is unknown`)
-      if (!(typeof p.repeat === 'number' && Number.isInteger(p.repeat) && inRange(p.repeat, ...PREVIEW_RANGES.repeat))) err.push(`${label}: preview.repeat must be an integer 1..32`)
-      if (p.intervalSec !== undefined && !inRange(p.intervalSec, ...PREVIEW_RANGES.intervalSec)) err.push(`${label}: preview.intervalSec must be 0.05..10`)
-      if (p.intervalJitterPct !== undefined && !inRange(p.intervalJitterPct, ...PREVIEW_RANGES.intervalJitterPct)) err.push(`${label}: preview.intervalJitterPct must be 0..50`)
-    }
-  }
+  // `preview` (Studio's repeated preview) was removed (DEC-085): repetition is heard with "×5" and the recording's real firings.
+  if (entry.preview !== undefined) err.push(`${label}: preview is not a field (removed; use the recording or ×5 in Studio)`)
   const v = entry.variation
   if (v !== undefined) {
     for (const [key, [lo, hi]] of Object.entries(VARIATION_RANGES)) if (v[key] !== undefined && !inRange(v[key], lo, hi)) err.push(`${label}: variation.${key} must be ${lo}..${hi}`)

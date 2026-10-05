@@ -99,3 +99,10 @@
 .scene-occ-form { display: flex; gap: 4px; padding: 2px 0 4px 28px; min-width: 0; }
 .scene-occ-form input { flex: 1 1 0; min-width: 0; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-light); border-radius: 4px; padding: 1px 4px; font-size: 12px; }
 .scene-occ-status { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Event details (variants, candidates, variation). */
+.scene-event-variants { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.scene-event-run { margin-top: 6px; }
+.scene-event-variation { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 12px; }
+.scene-event-variation label { display: flex; align-items: center; justify-content: space-between; gap: 6px; white-space: nowrap; }
+.scene-event select { max-width: 100%; }

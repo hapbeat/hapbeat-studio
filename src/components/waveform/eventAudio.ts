@@ -1,23 +1,23 @@
 import { useEffect, useMemo } from 'react'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useEditorSettings } from '@/stores/editorSettings'
-import { useEventStore } from '@/stores/eventStore'
+import { useEventStore, type DecideTarget } from '@/stores/eventStore'
 import { useSceneStore } from '@/stores/sceneStore'
 import { trialTarget } from '@/utils/agentProtocol'
-import { effectiveEvent, parseEventKey, planSequence, resolveEventName, type PlannedShot } from '@/utils/cueEvents'
+import { effectiveEvent, parseEventKey, resolveEventName } from '@/utils/cueEvents'
 import { isLoopCue, routeClips, sfxSounds } from '@/utils/sceneCueTable'
 import { RATE, resampleClip } from '@/utils/sceneHaptics'
 import type { EditorBufferPlayer } from '@/utils/editorBufferPlayer'
 import { onUserStop } from '@/utils/playerStops'
 import { CompanionSound, type SoundSource } from '@/utils/companionSound'
-import { planSegmentShots, representativeSegment, type SceneSegment } from '@/utils/sceneSegments'
+import { listenOffsets } from '@/utils/sceneSegments'
 import { useSceneSegmentShots } from '@/utils/editorSceneSync'
 
 /**
  * Event materials in the editor: an event's sound / haptic clip opened in the
- * waveform panel (played by the normal playback), a rendered preview sequence
- * (`preview.repeat` firings with their variation), and the event's sound played
- * on the PC with a haptic audition of the same event.
+ * waveform panel (played by the normal playback), "×5" (one material five times
+ * at the cue's real timing), and the event's sound played on the PC with a
+ * haptic audition of the same event.
  */
 
 /** Loop cue previews repeat their material to this length (the player has no endless loop). */
@@ -33,21 +33,31 @@ function scaled(channels: Float32Array[], rate: number, factor: number, loopToSe
 const factorText = (x: number) => Number.isInteger(x * 10) ? x.toFixed(1) : String(Math.round(x * 1000) / 1000)
 const loopCue = (key: string) => { const lib = useSceneStore.getState().lib; return !!lib && isLoopCue(lib, parseEventKey(key).cue) }
 
-/** Opens route clip `clip` of event `key` in the waveform panel, at the level the game plays it (clip intensity × route gain). A loop cue's clip repeats. */
-export function openEventHaptic(key: string, clip: string, gain: number, at: string): boolean {
+/** Route clip `clip` of event `key` at the level the game plays it (clip intensity × route gain); null when not loaded. `loopSec`: a loop cue's clip repeats to that length. */
+function hapticBuffer(clip: string, gain: number, loopSec: number): { buffer: AudioBuffer; factor: number } | null {
   const s = useSceneStore.getState(), pcm = s.pcm[clip], entry = s.table?.clips[clip]
-  if (!pcm || !entry) return false
-  const factor = entry.intensity * gain, loop = loopCue(key)
-  useEventStore.getState().showPreview({ id: `${key}|haptic|${clip}|${at}`, event: key, target: 'haptic', label: `${key} · ${clip}.wav × ${factorText(factor)}`, buffer: scaled([pcm], RATE, factor, loop ? LOOP_PREVIEW_SEC : 0) })
+  if (!pcm || !entry) return null
+  const factor = entry.intensity * gain
+  return { buffer: scaled([pcm], RATE, factor, loopSec), factor }
+}
+/** Sound `sound` at `volume`; null when not loaded. */
+function soundBuffer(sound: string, volume: number, loopSec: number): AudioBuffer | null {
+  const b = useSceneStore.getState().sfx[sound]
+  if (!b) return null
+  return scaled(Array.from({ length: b.numberOfChannels }, (_, c) => b.getChannelData(c)), b.sampleRate, volume, loopSec)
+}
+/** Opens route clip `clip` of event `key` in the waveform panel, at the level the game plays it (clip intensity × route gain). A loop cue's clip repeats. */
+export function openEventHaptic(key: string, clip: string, gain: number, at: string, autoplay = false): boolean {
+  const made = hapticBuffer(clip, gain, loopCue(key) ? LOOP_PREVIEW_SEC : 0)
+  if (!made) return false
+  useEventStore.getState().showPreview({ id: `${key}|haptic|${clip}|${at}`, event: key, target: 'haptic', label: `${key} · ${clip}.wav × ${factorText(made.factor)}`, buffer: made.buffer, autoplay })
   return true
 }
 /** Opens sound `sound` of event `key` in the waveform panel, at its volume (PC playback only). A loop cue's sound repeats. */
-export function openEventSound(key: string, sound: string, volume: number): boolean {
-  const b = useSceneStore.getState().sfx[sound]
-  if (!b) return false
-  const channels = Array.from({ length: b.numberOfChannels }, (_, c) => b.getChannelData(c))
-  useEventStore.getState().showPreview({ id: `${key}|sound|${sound}`, event: key, target: 'sound', label: `${key} · ${sound}.wav × ${factorText(volume)}`,
-    buffer: scaled(channels, b.sampleRate, volume, loopCue(key) ? LOOP_PREVIEW_SEC : 0) })
+export function openEventSound(key: string, sound: string, volume: number, autoplay = false): boolean {
+  const buffer = soundBuffer(sound, volume, loopCue(key) ? LOOP_PREVIEW_SEC : 0)
+  if (!buffer) return false
+  useEventStore.getState().showPreview({ id: `${key}|sound|${sound}`, event: key, target: 'sound', label: `${key} · ${sound}.wav × ${factorText(volume)}`, buffer, autoplay })
   return true
 }
 
@@ -76,49 +86,32 @@ export function eventSoundSec(key: string): number {
   const sound = e?.sfx ? sfxSounds(e.sfx)[0] : undefined
   return (sound && s.sfx[sound]?.duration) || 1
 }
-/** The repeated run of event `key` in the open recording (DEC-085), or null for a one-off / absent event. */
-export function eventRun(key: string): SceneSegment | null {
-  const data = useSceneStore.getState().data
-  const seg = data ? representativeSegment(data.full.events, key, eventSoundSec(key)) : null
-  return seg?.run ? seg : null
-}
-
 /**
- * "Repeat ×N ▶": renders the event's preview sequence — each firing with its own
- * picks and jitter — into one haptic buffer (16 kHz; the routes summed) shown in
- * the waveform panel (normal playback: devices per "send haptics"), and one
- * sound buffer played with it on the PC. Returns the shots for the read-out.
- * A repeated event of the recording uses its real firing times (the representative
- * run, DEC-085); `preview` is the stand-in when there is no recording of it.
+ * "×5" (DEC-085 addendum): one material five times, at the real timing of the cue's representative run in the
+ * recording (else 0.9 s apart), without jitter — how it sounds repeated, as a material choice. `buffer` is
+ * already at the game's level. With a haptic, the event's representative sound plays on the same marks.
  */
-export function openEventSequence(key: string): PlannedShot[] | null {
-  const s = useSceneStore.getState(), table = s.table, lib = s.lib
-  const e = table ? effectiveEvent(table, parseEventKey(key)) : null
-  if (!e || !table || !lib) return null
-  const run = eventRun(key)
-  const shots = run ? planSegmentShots(e, run.marks, isLoopCue(lib, e.ref.cue)) : planSequence(e, isLoopCue(lib, e.ref.cue))
-  // Haptics: every route of every shot (clip intensity × route gain × jitter), at the shot's rate.
-  const hapticParts = shots.flatMap(shot => shot.routes.flatMap(r => {
-    const pcm = s.pcm[r.clip], clip = table.clips[r.clip]
-    return pcm && clip ? [{ start: Math.round(shot.atSec * RATE), data: resampleClip(pcm, shot.rate), gain: clip.intensity * r.gain }] : []
-  }))
-  // Sound: the picked sound per shot, pitch as a rate change, volume × jitter.
-  const first = shots.map(sh => sh.sound && s.sfx[sh.sound]).find(Boolean) || null
-  const soundRate = first ? first.sampleRate : 48000, channels = first ? first.numberOfChannels : 1
-  const soundParts = shots.flatMap(shot => {
-    const b = shot.sound ? s.sfx[shot.sound] : undefined
-    if (!b) return []
-    const rate = 2 ** (shot.pitchSt / 12) * (b.sampleRate / soundRate)
-    return [{ start: Math.round(shot.atSec * soundRate), data: Array.from({ length: channels }, (_, c) => resampleClip(b.getChannelData(Math.min(c, b.numberOfChannels - 1)), rate)), gain: shot.soundGain }]
-  })
-  const mix = mixParts
-  const hapticBuf = hapticParts.length ? mix(hapticParts.map(p => ({ ...p, data: [p.data] })), RATE, 1) : null
-  const soundBuf = soundParts.length ? mix(soundParts, soundRate, channels) : null
-  const label = `${key} · ×${shots.length}`
-  if (hapticBuf) useEventStore.getState().showPreview({ id: `${key}|seq`, event: key, target: 'haptic', label, buffer: hapticBuf, shots, companion: soundBuf ? { buffer: soundBuf, volume: 1 } : undefined, autoplay: true })
-  else if (soundBuf) useEventStore.getState().showPreview({ id: `${key}|seq`, event: key, target: 'sound', label, buffer: soundBuf, shots, autoplay: true })
-  else return null
-  return shots
+export function listenFive(o: { id: string; event: string; target: DecideTarget; label: string; buffer: AudioBuffer }) {
+  const s = useSceneStore.getState()
+  const plays = listenOffsets(s.data?.full.events ?? null, o.event).map(atSec => ({ atSec, gain: 1, rate: 1 }))
+  let companion: SoundSource | undefined
+  if (o.target === 'haptic' && s.table) {
+    const r = resolveEventName(s.table, o.event), e = r && effectiveEvent(s.table, r.ref), first = e?.sfx ? sfxSounds(e.sfx)[0] : undefined
+    const sound = first && e?.sfx ? soundBuffer(first, e.sfx.volume, 0) : null
+    if (sound) companion = { buffer: repeatBuffer(sound, plays), volume: 1 }
+  }
+  useEventStore.getState().showPreview({ id: `${o.id}|x5`, event: o.event, target: o.target, label: `${o.label} ×${plays.length}`, buffer: repeatBuffer(o.buffer, plays), companion, repeated: true, autoplay: true })
+}
+/** "×5" of route clip `clip` / sound `sound` of event `key` (false when the WAV is not loaded). */
+export function listenFiveHaptic(key: string, clip: string, gain: number): boolean {
+  const made = hapticBuffer(clip, gain, 0)
+  if (made) listenFive({ id: `${key}|haptic|${clip}`, event: key, target: 'haptic', label: `${key} · ${clip}.wav`, buffer: made.buffer })
+  return !!made
+}
+export function listenFiveSound(key: string, sound: string, volume: number): boolean {
+  const buffer = soundBuffer(sound, volume, 0)
+  if (buffer) listenFive({ id: `${key}|sound|${sound}`, event: key, target: 'sound', label: `${key} · ${sound}.wav`, buffer })
+  return !!buffer
 }
 
 let ctx: AudioContext | null = null

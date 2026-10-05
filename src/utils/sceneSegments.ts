@@ -57,6 +57,18 @@ export function representativeSegment(events: readonly SceneEvent[], name: strin
   return { name, start: Math.max(0, marks[0] - LEAD_SEC), end: marks[marks.length - 1] + tail, marks, run: !!run, total: times.length }
 }
 
+/** "×5": the offsets of five plays of one material (DEC-085 addendum) — the cue's representative run's real
+ * timing (its first five firings; a shorter run continues at its mean gap), else a fixed 0.9 s apart. No jitter. */
+export const LISTEN_TIMES = 5
+export const LISTEN_GAP_SEC = 0.9
+export function listenOffsets(events: readonly SceneEvent[] | null, name: string): number[] {
+  const run = events ? findRuns(occurrences(events, name))[0] : undefined
+  const out = run ? run.slice(0, LISTEN_TIMES).map(t => t - run[0]) : [0]
+  const gap = run && run.length > 1 ? (run[run.length - 1] - run[0]) / (run.length - 1) : LISTEN_GAP_SEC
+  while (out.length < LISTEN_TIMES) out.push(out[out.length - 1] + gap)
+  return out
+}
+
 /**
  * One firing per mark, at the game's timing (offsets from the first mark), each with
  * its own variation draw (picks, gain / pitch / rate jitter). Loop cues: the jitter of a loop.

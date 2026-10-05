@@ -8,12 +8,13 @@ import { SceneTimelinePanel } from './SceneTimelinePanel'
 import { SceneMomentsPanel } from './SceneMomentsPanel'
 import { SceneHapticsPanel, SceneSoundPanel } from './SceneCuePanels'
 import { SceneProjectPanel } from './SceneProjectPanel'
+import { SceneEventPanel } from './SceneEventPanel'
 
-export const SCENE_PANELS = ['video', 'timeline', 'moments', 'haptics', 'sound', 'project'] as const
+export const SCENE_PANELS = ['video', 'timeline', 'moments', 'haptics', 'sound', 'event', 'project'] as const
 export type ScenePanelId = typeof SCENE_PANELS[number]
 export const SCENE_PANEL_TITLES: Record<ScenePanelId, MessageId> = {
   video: 'scene.panel.video', timeline: 'scene.panel.timeline', moments: 'scene.panel.moments',
-  haptics: 'scene.panel.haptics', sound: 'scene.panel.sound', project: 'scene.panel.project',
+  haptics: 'scene.panel.haptics', sound: 'scene.panel.sound', event: 'scene.panel.event', project: 'scene.panel.project',
 }
 type Translate = (id: MessageId, params?: Record<string, string | number>) => string
 
@@ -24,6 +25,7 @@ const COMPONENTS: Record<ScenePanelId, FunctionComponent<IDockviewPanelProps>> =
   moments: () => <SceneMomentsPanel />,
   haptics: () => <SceneHapticsPanel />,
   sound: () => <SceneSoundPanel />,
+  event: () => <SceneEventPanel />,
   project: () => <SceneProjectPanel />,
 }
 
@@ -38,6 +40,7 @@ function addPanel(api: DockviewApi, id: ScenePanelId, t: Translate, inactive = f
     case 'moments': return api.addPanel({ ...base, position: { direction: 'left' }, initialWidth: 270 })
     case 'haptics': return api.addPanel({ ...base, ...(near('sound', 'above') ?? { position: { direction: 'right' } }), initialWidth: 420 })
     case 'sound': return api.addPanel({ ...base, ...(near('haptics', 'below') ?? { position: { direction: 'right' } }), initialWidth: 420 })
+    case 'event': return api.addPanel({ ...base, ...(near('sound', 'within') ?? near('haptics', 'within') ?? { position: { direction: 'right' } }), initialWidth: 420 })
     case 'project': return api.addPanel({ ...base, ...(near('sound', 'within') ?? near('haptics', 'within') ?? { position: { direction: 'right' } }), initialWidth: 420 })
   }
 }
@@ -49,6 +52,7 @@ export function buildDefaultSceneLayout(api: DockviewApi, t: Translate) {
   addPanel(api, 'moments', t)
   addPanel(api, 'haptics', t)
   addPanel(api, 'sound', t)
+  addPanel(api, 'event', t, true)
   addPanel(api, 'project', t, true)
   api.getPanel('video')?.api.setActive()
 }
@@ -58,11 +62,17 @@ export function toggleScenePanel(api: DockviewApi, id: ScenePanelId, t: Translat
   if (panel) panel.api.close(); else addPanel(api, id, t)
 }
 
+/** The layout as saved, with the panels this Studio knows (later Studios add their new panels once). */
+const savedLayout = (api: DockviewApi): Record<string, unknown> => ({ ...(api.toJSON() as unknown as Record<string, unknown>), knownPanels: [...SCENE_PANELS] })
+
 function applySavedLayout(api: DockviewApi, layout: Record<string, unknown> | null, t: Translate): boolean {
   if (!layout) { buildDefaultSceneLayout(api, t); return true }
   try {
     api.fromJSON(layout as unknown as Parameters<DockviewApi['fromJSON']>[0])
     if (!api.panels.length) buildDefaultSceneLayout(api, t)
+    // Panels added in a later Studio (not known when the layout was saved) join it once; a panel the user closed stays closed.
+    const known = Array.isArray(layout.knownPanels) ? layout.knownPanels as string[] : SCENE_PANELS.filter(id => id !== 'event')
+    for (const id of SCENE_PANELS) if (!known.includes(id) && !api.getPanel(id)) addPanel(api, id, t, true)
     return true
   } catch (error) {
     console.warn('[scene] saved dock layout could not be restored', error)
@@ -90,7 +100,7 @@ export function SceneDockLayout({ onApi, onNotice }: { onApi: (api: DockviewApi 
     try {
       if (!applySavedLayout(api, useSceneSettings.getState().dockLayout, tRef.current)) callbacks.current.onNotice(tRef.current('editor.settings.layoutReset'))
     } finally { applying.current = false }
-    useSceneSettings.getState().update({ dockLayout: api.toJSON() as unknown as Record<string, unknown> })
+    useSceneSettings.getState().update({ dockLayout: savedLayout(api) })
     setBuilt(n => n + 1)
   }
 
@@ -102,7 +112,7 @@ export function SceneDockLayout({ onApi, onNotice }: { onApi: (api: DockviewApi 
     api.onDidLayoutChange(() => {
       if (applying.current) return
       clearTimeout(timer)
-      timer = setTimeout(() => { if (apiRef.current === api) useSceneSettings.getState().update({ dockLayout: api.toJSON() as unknown as Record<string, unknown> }) }, 300)
+      timer = setTimeout(() => { if (apiRef.current === api) useSceneSettings.getState().update({ dockLayout: savedLayout(api) }) }, 300)
     })
     callbacks.current.onApi(api)
   }

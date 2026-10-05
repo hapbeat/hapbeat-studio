@@ -43,7 +43,6 @@ export interface EditorUiSettings {
   /** Events panel: height (px) of the event list above the detail. */
   eventsListHeight: number
   /** Events panel: show the "Repetition" section for every event, not only those that fire repeatedly in the recording. */
-  eventsShowAllRepeat: boolean
   /** AI trials: saving a rating with a best candidate assigns it to the trial's events. */
   autoAssignOnRating: boolean
   /** AI trials panel project filter: '' = all, ' ' = trials without a project, else a project name. */
@@ -59,7 +58,7 @@ export interface EditorUiSettings {
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, eventsShowAllRepeat: false, autoAssignOnRating: true, trialProjectFilter: '', autoSendOnRating: false, trialTargetFilter: '', ratingShowAxes: false,
+  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, autoAssignOnRating: true, trialProjectFilter: '', autoSendOnRating: false, trialTargetFilter: '', ratingShowAxes: false,
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -104,7 +103,6 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     clipScenes: sceneChoices(v.clipScenes),
     eventMarks: eventMarks(v.eventMarks),
     eventsListHeight: clamp(v.eventsListHeight, 80, 1200, d.eventsListHeight),
-    eventsShowAllRepeat: typeof v.eventsShowAllRepeat === 'boolean' ? v.eventsShowAllRepeat : d.eventsShowAllRepeat,
     autoAssignOnRating: typeof v.autoAssignOnRating === 'boolean' ? v.autoAssignOnRating : d.autoAssignOnRating,
     trialProjectFilter: typeof v.trialProjectFilter === 'string' && v.trialProjectFilter.length <= 200 ? v.trialProjectFilter : d.trialProjectFilter,
     autoSendOnRating: typeof v.autoSendOnRating === 'boolean' ? v.autoSendOnRating : d.autoSendOnRating,

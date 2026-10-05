@@ -112,7 +112,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const segmentShots = useSceneSegmentShots(state => state.shots)
   const repeatSound = auditionIsSound || eventPreview?.target === 'sound'
   const audioBuffer = useMemo(() => {
-    if (!shownBuffer || !segmentShots || segmentShots.length < 2 || !(audition || (eventPreview && !eventPreview.shots))) return shownBuffer
+    if (!shownBuffer || !segmentShots || segmentShots.length < 2 || !(audition || (eventPreview && !eventPreview.repeated))) return shownBuffer
     return repeatBuffer(shownBuffer, segmentShots.map(shot => ({ atSec: shot.atSec, gain: 10 ** (shot.jitterDb / 20), rate: repeatSound ? 2 ** (shot.pitchSt / 12) : shot.rate })))
   }, [shownBuffer, segmentShots, audition, eventPreview, repeatSound])
   const player = useMemo(() => new EditorBufferPlayer(null, undefined, s.setError), [s.clip?.id, original, auditionKey])
@@ -139,11 +139,11 @@ export function WaveformEditor({ active }: { active: boolean }) {
   }, [player, targetKey, send, s.setError])
   // The Scene video panel's lead-in (audio / haptics start on the cue mark).
   playback.preRoll = scenePreRoll
-  // A preview sequence (Events panel "Repeat ×N ▶") plays once from the start as soon as it is shown.
-  const autoplayed = useRef<string | null>(null)
+  // "×5" plays once from the start as soon as it is shown.
+  const autoplayed = useRef<AudioBuffer | null>(null)
   useEffect(() => {
-    if (!eventPreview?.autoplay || autoplayed.current === eventPreview.id + String(eventPreview.buffer.length)) return
-    autoplayed.current = eventPreview.id + String(eventPreview.buffer.length)
+    if (!eventPreview?.autoplay || autoplayed.current === eventPreview.buffer) return
+    autoplayed.current = eventPreview.buffer
     if (active && !useWaveformStore.getState().isProcessing) { useStartMarker.getState().set(null); void playback.play(0, player.getDuration(), true).catch(s.setError) }
   }, [eventPreview, playback, player, active, s.setError])
   useEffect(() => () => playback?.stop(), [playback])

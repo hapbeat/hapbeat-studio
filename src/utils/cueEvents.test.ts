@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  addEventMark, addPositionRoute, decidedSubjects, fireShot, planSequence, resetAllReviews, setNone, setPreview, setReview, setUndecided, addVariant, eventFireCounts, hasRepeatSettings, simultaneousGroups, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
+  addEventMark, addPositionRoute, decidedSubjects, fireShot, resetAllReviews, setNone, setReview, setUndecided, addVariant, simultaneousGroups, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
   effectiveEvent, eventSceneCues, jitterGain, listEvents, MaterialPicker, matchesName, materialUsers, needsRouteForm, overwriteUsers,
   parseEventKey, removeVariant, resolveEventName, setOverride, setRouteClips, setSfxSounds, setVariation, trialEvent, trialsForEvent,
 } from './cueEvents'
@@ -144,17 +144,19 @@ describe('decide', () => {
     expect(overwriteUsers(t, 'clip', 'fresh', ['grab'])).toEqual([])
   })
 
-  it('haptic: replaces the first route clip keeping at / gain, or adds a route; adds the clip entry', () => {
+  it('haptic: adds to the first route candidates keeping at / gain (no duplicates), or adds a route; adds the clip entry', () => {
     const lib = sampleLib()
     const kept = applyHapticDecision(v2Table(), lib, { ref: { cue: 'button', variant: 'soft' }, clip: 'press2', at: 'hand', gain: 1 })
-    expect(kept.cues.button.variants!.soft.haptics).toEqual([{ clip: 'press2', at: 'pos_neck', gain: 0.4 }])
+    expect(kept.cues.button.variants!.soft.haptics).toEqual([{ clips: ['click', 'thump', 'press2'], at: 'pos_neck', gain: 0.4 }])
+    const again = applyHapticDecision(kept, lib, { ref: { cue: 'button', variant: 'soft' }, clip: 'thump', at: 'hand', gain: 1 })
+    expect(again.cues.button.variants!.soft.haptics![0].clips).toEqual(['click', 'thump', 'press2'])
     expect(kept.clips.press2).toMatchObject({ intensity: 1, loop: false })
     const added = applyHapticDecision(v2Table(), lib, { ref: { cue: 'grab', variant: null }, clip: 'thump', at: 'pos_chest', gain: 0.7 })
     expect(added.cues.grab.haptics).toEqual([{ clip: 'thump', at: 'pos_chest', gain: 0.7 }])
     expect(added.clips.thump.intensity).toBe(0.5) // an existing entry keeps its intensity
     // An inheriting variant gets its own copy; the cue is untouched.
     const own = applyHapticDecision(v2Table(), lib, { ref: { cue: 'button', variant: 'plain' }, clip: 'thump', at: 'hand', gain: 1 })
-    expect(own.cues.button.variants!.plain.haptics).toEqual([{ clip: 'thump', at: 'hand', gain: 1 }])
+    expect(own.cues.button.variants!.plain.haptics).toEqual([{ clips: ['click', 'thump'], at: 'hand', gain: 1 }])
     expect(own.cues.button.haptics![0].clip).toBe('click')
     expect(needsRouteForm(v2Table(), { cue: 'grab', variant: null })).toBe(true)
     expect(needsRouteForm(v2Table(), { cue: 'button', variant: 'plain' })).toBe(false)
@@ -162,11 +164,14 @@ describe('decide', () => {
     expect(validateCueTable(table, ctx({ clipFiles: new Set(['click', 'thump', 'hum', 'grab']) }))).toEqual([])
   })
 
-  it('sound: sets one sound keeping the volume (1.0 when new)', () => {
-    expect(applySoundDecision(v2Table(), { cue: 'button', variant: null }, 'Clack').cues.button.sfx).toEqual({ sound: 'Clack', volume: 0.6 })
+  it('sound: adds to the candidate list (first = representative, no duplicates), keeping the volume (1.0 when new)', () => {
+    const button = v2Table().cues.button.sfx!
+    expect(applySoundDecision(v2Table(), { cue: 'button', variant: null }, 'Clack').cues.button.sfx).toEqual({ sounds: [...button.sound ? [button.sound] : button.sounds!, 'Clack'], volume: button.volume })
     expect(applySoundDecision(v2Table(), { cue: 'grab', variant: null }, 'Clack').cues.grab.sfx).toEqual({ sound: 'Clack', volume: 1 })
     const t = v2Table()
     t.cues.grab.sfx = { sounds: ['Click', 'Clack'], volume: 0.8 }
+    expect(applySoundDecision(t, { cue: 'grab', variant: null }, 'Click').cues.grab.sfx).toEqual({ sounds: ['Click', 'Clack'], volume: 0.8 })
+    t.cues.grab.sfx = { sound: 'Click', volume: 0.8 }
     expect(applySoundDecision(t, { cue: 'grab', variant: null }, 'Click').cues.grab.sfx).toEqual({ sound: 'Click', volume: 0.8 })
   })
 
@@ -244,22 +249,13 @@ describe('playback picks and links', () => {
   })
 })
 
-describe('recording: repetition and simultaneous groups', () => {
-  it('counts firings per event and groups cues of the same moment', () => {
+describe('recording: simultaneous groups', () => {
+  it('groups cues of the same moment', () => {
     const t = v2Table()
-    const events = [{ name: 'button' }, { name: 'button:soft' }, { name: 'button' }, { name: 'button:loud' }, { name: 'nope' }]
-    expect(eventFireCounts(t, events)).toEqual({ button: 3, 'button:soft': 1 })
     const moments = [{ names: ['button', 'grab'] }, { names: ['detent', 'grab'] }, { names: ['feed_loop'] }, { names: ['button:soft', 'nope'] }]
     // detent is a tick: left out; grab joins button.
     expect(simultaneousGroups(t, moments, ['detent'])).toEqual([['button', 'grab']])
     expect(simultaneousGroups(t, moments, [])).toEqual([['button', 'grab', 'detent']])
-  })
-
-  it('knows when an event already has repetition settings', () => {
-    const t = v2Table()
-    expect(hasRepeatSettings(effectiveEvent(t, { cue: 'button', variant: null })!)).toBe(true) // variation
-    expect(hasRepeatSettings(effectiveEvent(t, { cue: 'detent', variant: null })!)).toBe(false)
-    expect(hasRepeatSettings(effectiveEvent(t, { cue: 'button', variant: 'soft' })!)).toBe(true) // clips list
   })
 })
 
@@ -336,27 +332,20 @@ describe('undecided vs none, loop cue sounds, preview sequences', () => {
     expect(listEvents(sampleTable(), { ...sampleLib(), loop_cue_sounds: true }).find(r => r.key === 'feed_loop')!.sound).toMatchObject({ state: 'none' })
   })
 
-  it('preview sequences: validated, edited, planned with per-firing variation (shared with the Scene tab)', () => {
-    let t = setPreview(v2Table(), { cue: 'button', variant: 'soft' }, { repeat: 6, intervalSec: 0.9, intervalJitterPct: 10 })
-    expect(t.cues.button.variants!.soft.preview).toEqual({ repeat: 6, intervalSec: 0.9, intervalJitterPct: 10 })
-    expect(validateCueTable(t, ctx())).toEqual([])
-    const bad = structuredClone(t); bad.cues.button.preview = { repeat: 40, intervalSec: 0.01, extra: 1 } as never
-    expect(validateCueTable(bad, ctx())).toEqual(expect.arrayContaining(['button: preview.extra is unknown', 'button: preview.repeat must be an integer 1..32', 'button: preview.intervalSec must be 0.05..10']))
+  it('preview was removed (DEC-085): rejected by the validator; fireShot draws one firing\'s variation', () => {
+    const bad = v2Table(); (bad.cues.button as Record<string, unknown>).preview = { repeat: 6 }
+    expect(validateCueTable(bad, ctx())).toEqual(expect.arrayContaining([expect.stringMatching(/^button: preview is not a field/)]))
+    const t = v2Table()
     t.cues.button.variants!.soft.variation = { gainJitterDb: 3, pitchJitterSt: 2, rateJitterPct: 10, pick: 'random' }
     const e = effectiveEvent(t, { cue: 'button', variant: 'soft' })!
     let k = 0
     const random = () => [0.9, 0.1, 0.5, 0.3, 0.7][k++ % 5]
-    const shots = planSequence(e, false, random)
-    expect(shots).toHaveLength(6)
-    expect(shots[1].atSec).toBeGreaterThan(0.8); expect(shots[1].atSec).toBeLessThan(1.0)
+    const picker = new MaterialPicker(random)
+    const shots = Array.from({ length: 6 }, () => fireShot(e, false, picker, random))
     for (let i = 1; i < shots.length; i++) expect(shots[i].routes[0].clip).not.toBe(shots[i - 1].routes[0].clip) // click / thump, never twice
     for (const sh of shots) { expect(Math.abs(sh.jitterDb)).toBeLessThanOrEqual(3); expect(Math.abs(sh.pitchSt)).toBeLessThanOrEqual(2); expect(Math.abs(sh.rate - 1)).toBeLessThanOrEqual(0.1) }
-    // Loop cues: one firing, gain jitter only.
-    const loopShots = planSequence({ ...e, preview: { repeat: 6 } }, true, random)
-    expect(loopShots).toHaveLength(1)
-    expect(loopShots[0]).toMatchObject({ pitchSt: 0, rate: 1 })
+    expect(fireShot(e, true, new MaterialPicker(random), random)).toMatchObject({ pitchSt: 0, rate: 1 }) // loop: gain jitter only
     expect(fireShot(e, false, new MaterialPicker(() => 0), () => 0.5)).toMatchObject({ jitterDb: 0, pitchSt: 0, rate: 1 })
-    t = setPreview(t, { cue: 'button', variant: 'soft' }, { repeat: 1, intervalSec: undefined, intervalJitterPct: undefined })
-    expect(t.cues.button.variants!.soft.preview).toBeUndefined()
   })
+
 })
