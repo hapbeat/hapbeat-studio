@@ -21,6 +21,7 @@ import { useEditor } from './editorContext'
 import { EditorMenu, EditorMenuItem } from './EditorMenu'
 import { openEventDefault, openEventHaptic, openEventSound } from './eventAudio'
 import { MaterialList } from './MaterialList'
+import { useToast } from '@/components/common/Toast'
 import { runDecision } from './eventDecide'
 import { removeReserve, requestAnswered, reviseAnswered } from '@/utils/agentTrialUi'
 import { create } from 'zustand'
@@ -416,32 +417,54 @@ function useOpenRequests(): Set<string> {
     ...openSound.map(r => `${parseEventKey(r.cue).cue}|sound`)]), [openRevise, openHaptic, openSound])
 }
 
-/** The one-line remake comment under a material row: Enter sends (hapbeat-agent-message@1 `revise`), Esc closes. */
+/** The one-line remake comment under a material row (outbox `revise`). */
 function ReviseField({ cue, target, material }: { cue: string; target: 'sound' | 'haptic'; material: string }) {
   const { t } = useI18n()
-  const open = useReviseOpen(s => s.open === reviseKey(cue, target, material))
-  const [comment, setComment] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  if (!open) return null
-  const close = () => { useReviseOpen.getState().set(null); setComment(''); setError(null) }
-  const send = async () => {
-    if (!comment.trim() || busy) return
-    setBusy(true)
-    try {
+  return <RequestField fieldKey={reviseKey(cue, target, material)} placeholder={t('events.revise.placeholder')} hint={t('events.revise.hint')}
+    send={async comment => {
       const project = useSceneStore.getState().lib?.project_name
-      await useAgentTrialStore.getState().sendAgentMessage({ text: t('events.revise.message', { cue, material, comment: comment.trim() }), project, revise: { cue, target, material, comment } })
+      await useAgentTrialStore.getState().sendAgentMessage({ text: t('events.revise.message', { cue, material, comment }), project, revise: { cue, target, material, comment } })
       const settings = useEditorSettings.getState()
       settings.update({ revisePending: [...settings.revisePending, { cue, target, material, at: new Date().toISOString() }] })
-      close()
-    } catch (err) { setError(t('events.revise.failed', { error: err instanceof Error ? err.message : String(err) })) }
+    }} />
+}
+
+/** Unsent request comments by field (kept when a field is closed, back when it opens again). */
+const DRAFTS_KEY = 'hapbeat-request-drafts'
+const readDrafts = (): Record<string, string> => { try { return JSON.parse(localStorage.getItem(DRAFTS_KEY) ?? '{}') as Record<string, string> } catch { return {} } }
+const writeDraft = (key: string, text: string) => {
+  const drafts = readDrafts()
+  if (text) drafts[key] = text; else delete drafts[key]
+  try { localStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts)) } catch { /* a draft only */ }
+}
+
+/**
+ * A one-line request to the agent with a fixed-width "Request" button (Enter does the same, Esc closes).
+ * Sending closes it (the list badge turns "requested"); closing keeps what was typed as a draft.
+ * Only a failure is announced (toast).
+ */
+function RequestField({ fieldKey, placeholder, hint, send }: { fieldKey: string; placeholder: string; hint: string; send: (comment: string) => Promise<void> }) {
+  const { t } = useI18n()
+  const { toast } = useToast()
+  const open = useReviseOpen(s => s.open === fieldKey)
+  const [comment, setComment] = useState(() => readDrafts()[fieldKey] ?? '')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { if (open) setComment(readDrafts()[fieldKey] ?? '') }, [open, fieldKey])
+  if (!open) return null
+  const close = () => useReviseOpen.getState().set(null)
+  const submit = async () => {
+    const text = comment.trim()
+    if (!text || busy) return
+    setBusy(true)
+    try { await send(text); writeDraft(fieldKey, ''); setComment(''); close() }
+    catch (err) { toast(t('events.revise.failed', { error: err instanceof Error ? err.message : String(err) }), 'error') }
     finally { setBusy(false) }
   }
   return <div className="events-revise">
-    <input autoFocus value={comment} disabled={busy} placeholder={t('events.revise.placeholder')} aria-label={t('events.revise.placeholder')} title={error ?? t('events.revise.hint')}
-      onChange={e => { setComment(e.target.value); setError(null) }}
-      onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void send() } else if (e.key === 'Escape') { e.preventDefault(); close() } }} />
-    {error && <small className="events-warn">{error}</small>}
+    <input autoFocus value={comment} disabled={busy} placeholder={placeholder} aria-label={placeholder} title={hint}
+      onChange={e => { setComment(e.target.value); writeDraft(fieldKey, e.target.value) }}
+      onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void submit() } else if (e.key === 'Escape') { e.preventDefault(); close() } }} />
+    <button type="button" className="agent-icon-btn events-request-send" disabled={busy || !comment.trim()} onClick={() => void submit()}>{t('events.request.send')}</button>
   </div>
 }
 
@@ -453,48 +476,30 @@ function ReviseField({ cue, target, material }: { cue: string; target: 'sound' |
 function HapticRequestButton({ e }: { e: EffectiveEvent }) {
   const { t } = useI18n()
   const cue = eventKey(e.ref)
-  const [error, setError] = useState<string | null>(null)
+  const { toast } = useToast()
   const sound = sfxSounds(e.sfx)[0] ?? null
   const send = async () => {
-    setError(null)
     try {
       const project = useSceneStore.getState().lib?.project_name
       await useAgentTrialStore.getState().sendAgentMessage({ text: t('events.hapticRequest.message', { cue, sound: sound ?? t('events.hapticRequest.noSound') }), project, haptic: { cue, sound } })
       const settings = useEditorSettings.getState()
       settings.update({ hapticPending: [...settings.hapticPending, { cue, at: new Date().toISOString() }] })
-    } catch (err) { setError(t('events.revise.failed', { error: err instanceof Error ? err.message : String(err) })) }
+    } catch (err) { toast(t('events.revise.failed', { error: err instanceof Error ? err.message : String(err) }), 'error') }
   }
-  const title = [t('events.hapticRequest.hint'), ...(e.decided.sfx ? [] : [t('events.hapticRequest.soundUndecided')]), ...(error ? [error] : [])].join('\n')
-  return <button type="button" className={`agent-icon-btn ${error ? 'error' : ''}`} title={title} onClick={() => void send()}>{t('events.hapticRequest.button')}</button>
+  const title = [t('events.hapticRequest.hint'), ...(e.decided.sfx ? [] : [t('events.hapticRequest.soundUndecided')])].join('\n')
+  return <button type="button" className="agent-icon-btn" title={title} onClick={() => void send()}>{t('events.hapticRequest.button')}</button>
 }
 
-/** The one-line sound request under the sound heading: Enter sends (outbox `sound`), Esc closes. */
+/** The one-line sound request under the sound heading (outbox `sound`). */
 function SoundRequestField({ cue }: { cue: string }) {
   const { t } = useI18n()
-  const open = useReviseOpen(s => s.open === `sound|${cue}`)
-  const [comment, setComment] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  if (!open) return null
-  const close = () => { useReviseOpen.getState().set(null); setComment(''); setError(null) }
-  const send = async () => {
-    if (!comment.trim() || busy) return
-    setBusy(true)
-    try {
+  return <RequestField fieldKey={`sound|${cue}`} placeholder={t('events.soundRequest.placeholder')} hint={t('events.soundRequest.hint')}
+    send={async comment => {
       const project = useSceneStore.getState().lib?.project_name
-      await useAgentTrialStore.getState().sendAgentMessage({ text: t('events.soundRequest.message', { cue, comment: comment.trim() }), project, sound: { cue, comment } })
+      await useAgentTrialStore.getState().sendAgentMessage({ text: t('events.soundRequest.message', { cue, comment }), project, sound: { cue, comment } })
       const settings = useEditorSettings.getState()
       settings.update({ soundPending: [...settings.soundPending, { cue, at: new Date().toISOString() }] })
-      close()
-    } catch (err) { setError(t('events.revise.failed', { error: err instanceof Error ? err.message : String(err) })) }
-    finally { setBusy(false) }
-  }
-  return <div className="events-revise">
-    <input autoFocus value={comment} disabled={busy} placeholder={t('events.soundRequest.placeholder')} aria-label={t('events.soundRequest.placeholder')} title={error ?? t('events.soundRequest.hint')}
-      onChange={e => { setComment(e.target.value); setError(null) }}
-      onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void send() } else if (e.key === 'Escape') { e.preventDefault(); close() } }} />
-    {error && <small className="events-warn">{error}</small>}
-  </div>
+    }} />
 }
 
 /** ▸ / ▾ in a section heading. */

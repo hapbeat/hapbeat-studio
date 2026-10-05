@@ -106,3 +106,4 @@
 .events-haptic-request { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; flex: none; font-weight: normal; }
 .events-head-field + .events-haptic-request { margin-left: 8px; }
 .events-fold { flex: none; width: 18px; padding: 0; border: none; background: none; color: var(--text-secondary); cursor: pointer; }
+.events-request-send { flex: none; width: 6em; justify-content: center; }

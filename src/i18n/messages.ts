@@ -1196,7 +1196,7 @@ export const messages = defineMessages({
   'events.reserveAdoptHint': { ja: 'WAV を書き出して素材候補の末尾に追加し（仮）、控えから外します', en: 'Writes the WAV, adds it to the end of the pool (tentative) and drops it from the reserves.' },
   'events.reserveRemoveHint': { ja: '控えから外します（試行と評価は残ります）', en: 'Drops it from the reserves (the trial and its rating stay).' },
   'events.revise.open': { ja: '再作成', en: 'Remake' },
-  'events.revise.placeholder': { ja: 'どう作り直すか（Enter で送信、Esc で閉じる）', en: 'How to remake it (Enter sends, Esc closes)' },
+  'events.revise.placeholder': { ja: 'どう作り直すか', en: 'How to remake it' },
   'events.revise.hint': { ja: 'エージェントに作り直しを依頼します（outbox）。素材は「仮」のまま残ります', en: 'Asks the agent for another take (outbox). The material stays tentative.' },
   'events.revise.message': { ja: '作り直し依頼: {cue} の {material}: {comment}', en: 'Remake request: {material} of {cue}: {comment}' },
   'events.revise.failed': { ja: '送信できません: {error}', en: 'Could not send: {error}' },
@@ -1211,7 +1211,7 @@ export const messages = defineMessages({
   'events.requested.hint': { ja: 'エージェントに依頼を送りました。試行が届くと消えます', en: 'Sent to the agent. Clears when its trial arrives.' },
   'events.soundRequest.button': { ja: '音を依頼…', en: 'Request a sound…' },
   'events.soundRequest.hint': { ja: 'この cue の音（追加の候補）をエージェントに依頼します（outbox）', en: 'Asks the agent for (more) sound candidates for this cue (outbox).' },
-  'events.soundRequest.placeholder': { ja: 'どんな音か（例: ワニを撫でるような、少し湿ったカサカサ）。Enter で送信、Esc で閉じる', en: 'What it should sound like. Enter sends, Esc closes.' },
+  'events.soundRequest.placeholder': { ja: 'どんな音か（例: ワニを撫でるような、少し湿ったカサカサ）', en: 'What it should sound like' },
   'events.soundRequest.message': { ja: '音の依頼: {cue}: {comment}', en: 'Sound request: {cue}: {comment}' },
   'events.decide.duplicate': { ja: '{name} と同じ音なので追加しませんでした', en: 'Same sound as {name}: not added.' },
   'editor.hapticOnPc': { ja: '触覚も PC で鳴らす', en: 'Haptics on the PC too' },
@@ -1244,6 +1244,7 @@ export const messages = defineMessages({
   'events.adjust': { ja: '調整', en: 'Adjust' },
   'events.adjustHint': { ja: 'この素材をその場でエフェクト（音量・LPF など）で調整します。変更はすぐイベントの WAV に反映され（元の音声とチェーンは残ります。チェーンを空にすれば元に戻ります）、レビューは「仮」に戻ります', en: 'Adjust this material in place with effects (volume, LPF …). Changes go straight to the event’s WAV (the original and the chain are kept; an empty chain restores it); its review goes back to tentative.' },
   'editor.adjusting': { ja: 'イベント: {event} · {file}（調整中）', en: 'Event: {event} · {file} (adjusting)' },
+  'events.request.send': { ja: '依頼する', en: 'Request' },
 })
 
 export type MessageId = keyof typeof messages
