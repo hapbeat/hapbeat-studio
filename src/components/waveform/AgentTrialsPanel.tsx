@@ -14,7 +14,6 @@ import { runDecision } from './eventDecide'
 import { DecidedNotice } from './DecideDialog'
 import { isLoopCue } from '@/utils/sceneCueTable'
 import { WaveformThumbnail } from './WaveformThumbnail'
-import { EditorMenu, EditorMenuItem } from './EditorMenu'
 import { useEditor } from './editorContext'
 import { useSceneVideoTarget } from '@/utils/editorSceneSync'
 import { useSceneStore } from '@/stores/sceneStore'
@@ -321,12 +320,12 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
                 <strong className="agent-short-id" title={t('editor.agent.shortIdHint')}>{record.shortId ? `${record.shortId}-${requested.id}` : requested.id}</strong>
                 <span className="agent-card-name" title={requested.label}>{requested.label}</span>
                 {requested.method && <small className="agent-method" title={t('editor.agent.methodHint')}>{t(`editor.agent.method.${requested.method}` as MessageId)}</small>}
-                {/* Adopt / decide by hand only; saving the rating assigns automatically. */}
-                <EditorMenu label="⋯" title={t('editor.agent.cardMenu')} className="agent-card-menu">
-                  <EditorMenuItem disabled={!editorFolder || processing} onSelect={() => void adopt(requested.id, requested.label)}>{t('editor.agent.adopt')}</EditorMenuItem>
-                  <EditorMenuItem disabled={!buffer} onSelect={() => useEventStore.getState().requestDecide({ target, source: { kind: 'candidate', trialId: trial.id, candidateId: requested.id }, event })}>
-                    {t(target === 'sound' ? 'events.decideSound' : 'events.decideHaptic')}</EditorMenuItem>
-                </EditorMenu>
+                {/* By hand only (saving the rating assigns automatically): copy into the clip list / assign to the event. */}
+                <button type="button" className="agent-icon-btn" disabled={!editorFolder || processing} title={t('editor.agent.toClipHint')} aria-label={t('editor.agent.toClipHint')}
+                  onClick={() => void adopt(requested.id, requested.label)}>{t('editor.agent.toClip')}</button>
+                <button type="button" className="agent-icon-btn" disabled={!buffer} title={t(target === 'sound' ? 'editor.agent.toEventSoundHint' : 'editor.agent.toEventHapticHint')}
+                  aria-label={t(target === 'sound' ? 'editor.agent.toEventSoundHint' : 'editor.agent.toEventHapticHint')}
+                  onClick={() => useEventStore.getState().requestDecide({ target, source: { kind: 'candidate', trialId: trial.id, candidateId: requested.id }, event })}>{t('editor.agent.toEvent')}</button>
               </div>
               {requested.hypothesis && <p className="agent-hypothesis" title={requested.hypothesis}>{requested.hypothesis}</p>}
               <div className="agent-thumb">{buffer ? <WaveformThumbnail buffer={buffer} />

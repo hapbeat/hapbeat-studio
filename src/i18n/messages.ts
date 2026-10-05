@@ -1159,7 +1159,6 @@ export const messages = defineMessages({
   'editor.agent.severalUsable': { ja: '複数を採用候補にしています（{ids}）。素材を複数にしてランダムに鳴らす（繰り返しの揺らぎ）か、別バリエーションにするか、エージェントに相談してください。', en: 'Several candidates are marked usable ({ids}). Ask the agent whether to use them as several materials played at random (repetition variation) or as separate variants.' },
   'editor.agent.useNeedsOverall': { ja: '「使える」の候補に総合点を付けると、イベントへ自動で割り当てます。', en: 'Give the "use" candidate an overall score to assign it to the event automatically.' },
   'editor.agent.termMatchHint': { ja: 'この音・振動が、狙いの言葉にどれだけ合うか（−2 足りない … 0 ちょうど … +2 強すぎ）', en: 'How well this sound / vibration matches the target word (−2 too weak … 0 just right … +2 too strong)' },
-  'editor.agent.cardMenu': { ja: '候補の操作（手動の採用・決定）', en: 'Candidate actions (adopt / decide by hand)' },
   'editor.agent.msgSend': { ja: 'エージェントに送る', en: 'Send to agent' },
   'editor.agent.msgHint': { ja: 'エージェントのセッションへ短いメッセージを送ります（hapbeat-agent/outbox/ に書きます）。空欄なら薄く表示された文を送ります', en: 'Sends a short message to the agent session (written to hapbeat-agent/outbox/). Empty sends the greyed-out text.' },
   'editor.agent.msgSaved': { ja: '{id} の評価を保存しました。レビューして次へ', en: '{id} rated. Please review and continue.' },
@@ -1170,6 +1169,11 @@ export const messages = defineMessages({
   'editor.agent.msgAuto': { ja: '保存時にエージェントへ送る', en: 'Send to the agent on save' },
   'editor.agent.msgAutoHint': { ja: '評価を保存すると「T27 の評価を保存しました。レビューして次へ」をエージェントへ送ります', en: 'Saving a rating sends "T27 rated. Please review and continue." to the agent.' },
   'editor.agent.msgAutoSent': { ja: 'エージェントに送信しました', en: 'Sent to the agent' },
+  'editor.agent.toClip': { ja: '＋クリップ', en: '+ Clip' },
+  'editor.agent.toClipHint': { ja: 'エディタのクリップ一覧へコピーして編集できるようにします（ゲームには影響しません）', en: 'Copies it into the editor clip list for editing (does not affect the game)' },
+  'editor.agent.toEvent': { ja: '→イベント', en: '→ Event' },
+  'editor.agent.toEventHapticHint': { ja: 'このイベントの触覚として割り当てます（ゲームの WAV とイベント表に書き込み）', en: 'Assigns it as the event haptic (writes the game WAV and cue table)' },
+  'editor.agent.toEventSoundHint': { ja: 'このイベントの音として割り当てます（ゲームの WAV とイベント表に書き込み）', en: 'Assigns it as the event sound (writes the game WAV and cue table)' },
 })
 
 export type MessageId = keyof typeof messages
