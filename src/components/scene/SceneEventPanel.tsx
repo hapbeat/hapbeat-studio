@@ -2,10 +2,10 @@ import { useState } from 'react'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
-import { isLoopCue, pairedProblem, PICK_MODES, routeClips, sfxSounds, soundAllowed, VARIANT_NAME, clipsForCue, type CueTable, type CueVariation, type VariationNumberKey, RAMP_CURVES, type RampCurve } from '@/utils/sceneCueTable'
+import { isLoopCue, pairedProblem, PICK_MODES, routeClips, sfxSounds, soundAllowed, VARIANT_NAME, clipsForCue, type CueTable, type CueVariation, type VariationNumberKey, RAMP_CURVES, type RampCurve, type DistanceFalloff } from '@/utils/sceneCueTable'
 import {
   addVariant, effectiveEvent, eventKey, pairedClips, removeVariant, resolveEventName, setOverride, setOwnSfxVolume, setRouteClips, setSfxSounds, setVariation,
-  setVariantKind, setVariantScale, updateOwnRoute, variantKind, curveAt, rampValue,
+  setVariantKind, setVariantScale, updateOwnRoute, variantKind, curveAt, rampValue, setDistanceFalloff,
   type EffectiveEvent, type OverridableField,
 } from '@/utils/cueEvents'
 import { longestRun, sceneSegment } from '@/utils/sceneSegments'
@@ -50,6 +50,7 @@ export function SceneEventPanel() {
     <div className="scene-sec">
       <Variants table={table} e={e} select={select} edit={edit} />
       {e.ref.variant !== null && <VariantScale e={e} edit={edit} />}
+      <Falloff table={table} e={e} edit={edit} />
       {run?.repeating && <button type="button" className="scene-icon-btn scene-event-run" title={t('scene.event.runHint')}
         onClick={ev => { ev.currentTarget.blur(); runtime.audio(); runtime.playFull(Math.max(0, run.marks[0].t - useSceneSettings.getState().leadSec)) }}>{t('scene.event.run', { at: run.marks[0].t.toFixed(1), count: run.marks.filter(m => m.target).length })}</button>}
     </div>
@@ -150,6 +151,54 @@ function VariantScale({ e, edit }: { e: EffectiveEvent; edit: Edit }) {
       </div>}
     </>}
   </>
+}
+
+const DEFAULT_FALLOFF: DistanceFalloff = { nearCm: 560, farCm: 2000, farGain: 0.15 }
+/**
+ * Distance falloff (distanceFalloff): the scene multiplier by the distance to the player, on sound and haptics.
+ * A cue: on / off. A variant: the cue's, its own, or none (fixed). Near / far (cm), the gain far away, the shape,
+ * and a small curve (left = near, right = far). Studio applies it with the recorded `dist` of each firing.
+ */
+function Falloff({ table, e, edit }: { table: CueTable; e: EffectiveEvent; edit: Edit }) {
+  const { t } = useI18n()
+  const entry = e.ref.variant === null ? table.cues[e.ref.cue] : table.cues[e.ref.cue]?.variants?.[e.ref.variant]
+  const own = entry?.distanceFalloff
+  const mode: 'inherit' | 'own' | 'none' = e.ref.variant !== null && own === undefined ? 'inherit' : own ? 'own' : 'none'
+  const f = e.falloff
+  const set = (value: DistanceFalloff | null | undefined) => edit(tb => setDistanceFalloff(tb, e.ref, value))
+  const field = (key: 'nearCm' | 'farCm' | 'farGain', step: number, max: number) => <label key={key} title={`${t(`scene.falloff.${key}.hint` as MessageId)}\n${key}`}><span>{t(`scene.falloff.${key}` as MessageId)}</span>
+    <NumberField value={own ? own[key] : ''} min={0} max={max} step={step} label={t(`scene.falloff.${key}` as MessageId)} onCommit={x => own && set({ ...own, [key]: x })} /></label>
+  return <div className="scene-sec">
+    <h3 title={`${t('scene.falloff.hint')}\ndistanceFalloff`}>{t('scene.falloff.heading')}</h3>
+    <div className="scene-row">
+      {e.ref.variant === null
+        ? <label><input type="checkbox" checked={!!own} onChange={ev => set(ev.target.checked ? DEFAULT_FALLOFF : null)} />{t('scene.falloff.on')}</label>
+        : <select value={mode} aria-label={t('scene.falloff.heading')} onChange={ev => { const m = ev.target.value; ev.target.blur(); set(m === 'inherit' ? undefined : m === 'none' ? null : f ?? DEFAULT_FALLOFF) }}>
+          <option value="inherit">{t('scene.falloff.inherit', { cue: e.ref.cue })}</option>
+          <option value="own">{t('scene.falloff.own')}</option>
+          <option value="none">{t('scene.falloff.none')}</option>
+        </select>}
+      {f && <FalloffPreview f={f} />}
+      {f && !own && <span className="scene-dim">{`${f.nearCm}–${f.farCm} cm → ×${f.farGain}`}</span>}
+    </div>
+    {own && <div className="scene-event-variation">
+      {field('nearCm', 10, 100000)}{field('farCm', 10, 100000)}{field('farGain', 0.05, 2)}
+      <label title={`${t('scene.variant.curve.hint')}\ncurve`}><span>{t('scene.variant.curve')}</span>
+        <select value={own.curve ?? 'linear'} onChange={ev => { const c = ev.target.value as RampCurve; ev.target.blur(); set(c === 'linear' ? (({ curve: _c, ...rest }) => rest)(own) : { ...own, curve: c }) }}>
+          {RAMP_CURVES.map(c => <option key={c} value={c}>{t(`scene.variant.curve.${c}` as MessageId)}</option>)}
+        </select></label>
+    </div>}
+  </div>
+}
+/** The falloff as a small line: left = nearCm (×1), right = farCm (×farGain); the gain scale is 0..max(1, farGain). */
+function FalloffPreview({ f }: { f: DistanceFalloff }) {
+  const top = Math.max(1, f.farGain)
+  const y = (g: number) => (26 - g / top * 24).toFixed(1)
+  const points = Array.from({ length: 25 }, (_, i) => `${(i / 24 * 116 + 2).toFixed(1)},${y(1 + (f.farGain - 1) * curveAt(f.curve ?? 'linear', i / 24))}`).join(' ')
+  return <svg className="scene-curve" width={120} height={28} viewBox="0 0 120 28" aria-hidden="true">
+    <rect x={2} y={2} width={116} height={24} fill="none" stroke="currentColor" strokeOpacity={0.2} />
+    <polyline points={points} fill="none" stroke="currentColor" strokeWidth={1.5} />
+  </svg>
 }
 
 /** The ramp shape (curveAt) as a small line, 0 → 1 left to right, bottom to top. */

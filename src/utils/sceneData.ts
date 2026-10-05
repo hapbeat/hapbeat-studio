@@ -46,7 +46,8 @@ export interface SceneLib {
   import_command: string
   record_command?: string
 }
-export interface SceneEvent { t: number; name: string; hand: string; gain?: number }
+/** `dist`: the distance to the player when it fired (cm), when the game logged it (distanceFalloff). */
+export interface SceneEvent { t: number; name: string; hand: string; gain?: number; dist?: number }
 export interface SceneClip {
   file: string
   /** The moment's first cue (the clip was cut for it). */
@@ -116,7 +117,7 @@ export function parseViewerData(text: string): SceneData {
   const full = v.full
   if (!isRecord(full) || !isString(full.file) || !isLevels(full.levels)) fail('full')
   const events = (full as Record<string, unknown>).events
-  if (!Array.isArray(events) || !events.every(e => isRecord(e) && isNumber(e.t) && isString(e.name) && isString(e.hand) && (e.gain === undefined || isNumber(e.gain)))) fail('full.events')
+  if (!Array.isArray(events) || !events.every(e => isRecord(e) && isNumber(e.t) && isString(e.name) && isString(e.hand) && (e.gain === undefined || isNumber(e.gain)) && (e.dist === undefined || isNumber(e.dist)))) fail('full.events')
   if (!Array.isArray(v.clips) || !v.clips.every(c => isRecord(c) && isString(c.file) && isString(c.name) && isStrings(c.names) && isString(c.hand)
     && isNumber(c.at) && isNumber(c.event) && isLevels(c.levels) && (c.note === undefined || isString(c.note)))) fail('clips')
   const data = v as unknown as SceneData

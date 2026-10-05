@@ -2,7 +2,7 @@ import type { SceneLib } from './sceneData'
 import {
   type CueReview, type ReviewState,
   clampNumber, isLoopCue, soundAllowed, soundIntensity, positionsForCue, routeClips, sfxSounds, VARIANT_NAME,
-  type CueEntry, type CueRoute, type CueSfx, type CueTable, type CueVariant, type CueVariation, type PickMode, type RampCurve,
+  type CueEntry, type CueRoute, type CueSfx, type CueTable, type CueVariant, type CueVariation, type PickMode, type RampCurve, type DistanceFalloff,
 } from './sceneCueTable'
 
 /**
@@ -48,6 +48,8 @@ export interface EffectiveEvent {
   decided: { sfx: boolean; haptics: boolean }
   /** A variant's scene multipliers on what it inherits (1 = none; own fields are never scaled) and its ramp target (null = none). */
   scale: VariantScale
+  /** Scene multiplier by distance (the variant's own, else the cue's; null = none). */
+  falloff: DistanceFalloff | null
 }
 /** A variant's multipliers: start values, and a ramp (to rampTo along rampCurve) or one value per firing (steps). */
 export interface VariantScale { sfx: number; haptics: number; rampTo: number | null; curve: RampCurve; steps: number[] | null }
@@ -62,7 +64,7 @@ export function effectiveEvent(table: CueTable, ref: EventRef): EffectiveEvent |
   const state = (entry: CueVariant | undefined, field: 'sfx' | 'haptics'): ReviewState => entry?.review?.[field] ?? 'tentative'
   const cueDecided = { sfx: cue.sfx !== undefined, haptics: cue.haptics !== undefined }
   if (ref.variant === null) return { ref, description: cue.description, sfx: cue.sfx ?? null, haptics: cue.haptics ?? [], variation: cue.variation, own: { sfx: true, haptics: true, variation: true },
-    review: { sfx: state(cue, 'sfx'), haptics: state(cue, 'haptics') }, decided: cueDecided, scale: NO_SCALE }
+    review: { sfx: state(cue, 'sfx'), haptics: state(cue, 'haptics') }, decided: cueDecided, scale: NO_SCALE, falloff: cue.distanceFalloff ?? null }
   const v = variantOf(table, ref)
   if (!v) return null
   const own = { sfx: v.sfx !== undefined, haptics: v.haptics !== undefined, variation: v.variation !== undefined }
@@ -70,7 +72,8 @@ export function effectiveEvent(table: CueTable, ref: EventRef): EffectiveEvent |
     review: { sfx: state(own.sfx ? v : cue, 'sfx'), haptics: state(own.haptics ? v : cue, 'haptics') },
     decided: { sfx: own.sfx || cueDecided.sfx, haptics: own.haptics || cueDecided.haptics },
     scale: { sfx: own.sfx ? 1 : v.sfxVolume ?? 1, haptics: own.haptics ? 1 : v.hapticsGain ?? 1, rampTo: own.sfx && own.haptics ? null : v.rampTo ?? null,
-      curve: v.rampCurve ?? 'linear', steps: own.sfx && own.haptics ? null : v.rampSteps ?? null } }
+      curve: v.rampCurve ?? 'linear', steps: own.sfx && own.haptics ? null : v.rampSteps ?? null },
+    falloff: v.distanceFalloff !== undefined ? v.distanceFalloff : cue.distanceFalloff ?? null }
 }
 
 /** Undecided (no key) / decided as none (null / []) / a material; each decided state is tentative or approved. */
@@ -524,9 +527,20 @@ export function scaleAt(e: EffectiveEvent, run: RunPosition = ONE): { sfx: numbe
   const at = (start: number) => s.steps?.length ? s.steps[Math.min(run.index, s.steps.length - 1)] : s.rampTo === null ? start : rampValue(start, s.rampTo, s.curve, run)
   return { sfx: e.own.sfx ? 1 : at(s.sfx), haptics: e.own.haptics ? 1 : at(s.haptics) }
 }
-export function fireShot(e: EffectiveEvent, loop: boolean, picker: MaterialPicker, random: () => number = Math.random, run: RunPosition = ONE): Shot {
+/** The distance multiplier at `distCm` (1 without a falloff or without a recorded distance). */
+export function falloffGain(f: DistanceFalloff | null, distCm: number | undefined): number {
+  if (!f || distCm === undefined || !(f.farCm > f.nearCm)) return 1
+  return 1 + (f.farGain - 1) * curveAt(f.curve ?? 'linear', (distCm - f.nearCm) / (f.farCm - f.nearCm))
+}
+/** Sets (an object), turns off here (null) or — on a variant — goes back to the cue's (undefined) distance falloff. */
+export function setDistanceFalloff(table: CueTable, ref: EventRef, value: DistanceFalloff | null | undefined): CueTable {
+  return edited(table, ref, entry => { if (value === undefined || (value === null && ref.variant === null)) delete entry.distanceFalloff; else entry.distanceFalloff = value })
+}
+export function fireShot(e: EffectiveEvent, loop: boolean, picker: MaterialPicker, random: () => number = Math.random, run: RunPosition = ONE, distCm?: number): Shot {
   const v = e.variation ?? {}, key = eventKey(e.ref)
-  const { sfx: sfxScale, haptics: hapticScale } = scaleAt(e, run)
+  const d = falloffGain(e.falloff, distCm)
+  const { sfx: sfxScaleRaw, haptics: hapticScaleRaw } = scaleAt(e, run)
+  const sfxScale = sfxScaleRaw * d, hapticScale = hapticScaleRaw * d
   const jitterDb = jitter(v.gainJitterDb, random), gain = 10 ** (jitterDb / 20)
   const pitchSt = loop ? 0 : jitter(v.pitchJitterSt, random)
   const rate = loop ? 1 : 1 + jitter(v.rateJitterPct, random) / 100

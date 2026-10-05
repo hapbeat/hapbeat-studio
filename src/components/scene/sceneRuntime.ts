@@ -178,7 +178,7 @@ export class SceneRuntime {
     if (!e || !s.table || !s.lib) return
     const loop = isLoopCue(s.lib, e.ref.cue)
     // A variant's ramp (rampTo / rampCurve / rampSteps) by which firing of its run this is in the recording.
-    const shot = fireShot(e, loop, this.picker, Math.random, 't' in ev && s.data ? runPosition(s.data.full.events, ev) : undefined)
+    const shot = fireShot(e, loop, this.picker, Math.random, 't' in ev && s.data ? runPosition(s.data.full.events, ev) : undefined, 'dist' in ev ? ev.dist : undefined)
     if (shot.sound && !loop) this.playSfx(shot.sound, shot.soundGain, delay, false, 2 ** (shot.pitchSt / 12))
     if (this.firedListeners.size) {
       const materials = [...(shot.sound && !loop ? [shot.sound] : []), ...shot.routes.map(r => r.clip)]

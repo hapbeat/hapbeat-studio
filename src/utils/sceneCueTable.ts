@@ -41,14 +41,23 @@ export interface CueVariant {
   rampCurve?: RampCurve
   /** One multiplier per firing of a run (1–64, 0..2; past the end the last one) — instead of rampTo / rampCurve. */
   rampSteps?: number[]
+  /** Scene multiplier by distance (own; null = none here; absent = the cue's). */
+  distanceFalloff?: DistanceFalloff | null
   [key: string]: unknown
 }
+/**
+ * Scene multiplier by the distance to the player, on sound and haptics: 1 + (farGain − 1) × curve(t),
+ * t = clamp((distance − nearCm) / (farCm − nearCm)). The game uses the live distance; Studio the recorded `dist`.
+ */
+export interface DistanceFalloff { nearCm: number; farCm: number; farGain: number; curve?: RampCurve }
 /**
  * Undecided vs none: a cue without the `sfx` / `haptics` key has not been decided yet;
  * `sfx: null` = no sound and `haptics: []` = no haptic (both decided). The game plays neither.
  */
 export interface CueEntry {
   description?: string; sfx?: CueSfx | null; haptics?: CueRoute[]
+  /** Scene multiplier by distance (null / absent = none). */
+  distanceFalloff?: DistanceFalloff | null
   variants?: Record<string, CueVariant>; variation?: CueVariation
   review?: CueReview
   [key: string]: unknown
@@ -91,6 +100,7 @@ export function parseCueTable(text: string): CueTable {
     if (cue.haptics !== undefined && !(Array.isArray(cue.haptics) && cue.haptics.every(isRecord))) throw new Error(`cue table: ${name}.haptics must be a list`)
     if (cue.sfx !== undefined && cue.sfx !== null && !isRecord(cue.sfx)) throw new Error(`cue table: ${name}.sfx must be an object or null`)
     if (cue.variation !== undefined && !isRecord(cue.variation)) throw new Error(`cue table: ${name}.variation must be an object`)
+    if (cue.distanceFalloff !== undefined && cue.distanceFalloff !== null && !isRecord(cue.distanceFalloff)) throw new Error(`cue table: ${name}.distanceFalloff must be an object or null`)
     if (cue.variants !== undefined) {
       if (!isRecord(cue.variants)) throw new Error(`cue table: ${name}.variants must be an object`)
       for (const [vn, variant] of Object.entries(cue.variants)) {
@@ -100,6 +110,7 @@ export function parseCueTable(text: string): CueTable {
         if (variant.sfx !== undefined && variant.sfx !== null && !isRecord(variant.sfx)) throw new Error(`cue table: ${at}.sfx must be an object or null`)
         if (variant.variation !== undefined && !isRecord(variant.variation)) throw new Error(`cue table: ${at}.variation must be an object`)
         for (const k of ['sfxVolume', 'hapticsGain', 'rampTo'] as const) if (variant[k] !== undefined && typeof variant[k] !== 'number') throw new Error(`cue table: ${at}.${k} must be a number`)
+        if (variant.distanceFalloff !== undefined && variant.distanceFalloff !== null && !isRecord(variant.distanceFalloff)) throw new Error(`cue table: ${at}.distanceFalloff must be an object or null`)
         if (variant.rampCurve !== undefined && typeof variant.rampCurve !== 'string') throw new Error(`cue table: ${at}.rampCurve must be a string`)
         if (variant.rampSteps !== undefined && !(Array.isArray(variant.rampSteps) && variant.rampSteps.every(x => typeof x === 'number'))) throw new Error(`cue table: ${at}.rampSteps must be a list of numbers`)
       }
@@ -227,6 +238,12 @@ function validateCueFields(err: string[], table: CueTable, ctx: CueTableContext,
     if (!lib.at.includes(r.at)) err.push(`${label}: at must be one of ${lib.at.join(', ')}`)
     else if (!positionsForCue(lib, cue).includes(r.at)) err.push(`${label}: continuous layers allow at = ${positionsForCue(lib, cue).join(', ')}`)
     if (!inRange(r.gain, 0, 2)) err.push(`${label}: gain must be 0..2`)
+  }
+  const df = entry.distanceFalloff
+  if (df) {
+    if (!inRange(df.nearCm, 0, 1e6) || !inRange(df.farCm, 0, 1e6) || !(df.farCm > df.nearCm)) err.push(`${label}: distanceFalloff needs 0 <= nearCm < farCm`)
+    if (!inRange(df.farGain, 0, 2)) err.push(`${label}: distanceFalloff.farGain must be 0..2`)
+    if (df.curve !== undefined && !(RAMP_CURVES as readonly string[]).includes(df.curve)) err.push(`${label}: distanceFalloff.curve must be one of ${RAMP_CURVES.join(', ')}`)
   }
   const review = entry.review as unknown
   if (review !== undefined) {
