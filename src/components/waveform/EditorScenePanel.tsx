@@ -62,7 +62,7 @@ export function useAuditionPlan(): AuditionPlan | null {
   const lib = useSceneStore(s => s.lib)
   const subject: SceneSubject = audition ? { kind: 'trial', trialId: audition.trialId } : previewEvent ? { kind: 'event', key: previewEvent } : { kind: 'clip', clipId: null }
   const { chosen } = useSceneChoice(subject)
-  return useMemo(() => {
+  const plan = useMemo((): AuditionPlan | null => {
     if (!chosen?.segment || (!audition && !previewEvent)) return null
     if (lib && chosen.cue && isLoopCue(lib, parseEventKey(chosen.cue).cue)) return null
     return {
@@ -70,6 +70,12 @@ export function useAuditionPlan(): AuditionPlan | null {
       others: chosen.marks.filter(m => !m.target).map(m => ({ atSec: m.t - chosen.mark, name: m.name })),
     }
   }, [chosen, audition, previewEvent, lib])
+  // By value: the AI trials poll replaces the trial objects every 2 s, which recomputes the same plan;
+  // keeping the same object keeps the repeated buffer and the scheduled sounds playing.
+  const stable = useRef<{ key: string; plan: AuditionPlan | null }>({ key: 'null', plan: null })
+  const key = JSON.stringify(plan)
+  if (stable.current.key !== key) stable.current = { key, plan }
+  return stable.current.plan
 }
 
 const OTHER_SCENES = '\u0000scene-tab'

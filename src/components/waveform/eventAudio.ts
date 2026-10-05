@@ -10,6 +10,7 @@ import { RATE, resampleClip } from '@/utils/sceneHaptics'
 import type { EditorBufferPlayer } from '@/utils/editorBufferPlayer'
 import { onUserStop } from '@/utils/playerStops'
 import { CompanionSound, type SoundSource } from '@/utils/companionSound'
+import { FiringScheduler, type Firing } from '@/utils/firingScheduler'
 import { useAuditionPlan } from './EditorScenePanel'
 
 /**
@@ -136,35 +137,37 @@ export function useDecidedSoundSync(player: EditorBufferPlayer) {
     }
     return null
   }, [audition, auditionCues, preview, table, lib, buffers])
-  // A scene (DEC-085): the event's sound on each target firing (with a haptic audition) and the decided sound of
-  // the other cues of the scene at theirs, so the scene is heard as in the game (no jitter).
+  // A scene (DEC-085): each firing is its own source on the AudioContext clock — the event's sound on the rated
+  // cue's firings (with a haptic audition) and the decided sound of the scene's other cues on theirs (no jitter).
   const plan = useAuditionPlan()
-  const sound = useMemo((): SoundSource | null => {
-    if (!plan || picked?.loop || !table) return picked
-    const parts: { buffer: AudioBuffer; atSec: number; gain: number }[] = []
-    if (picked) for (const atSec of plan.targets) parts.push({ buffer: picked.buffer, atSec, gain: picked.volume })
+  const firings = useMemo((): Firing[] | null => {
+    if (!plan || picked?.loop || !table) return null
+    const out: Firing[] = []
+    if (picked) for (const atSec of plan.targets) out.push({ buffer: picked.buffer, atSec, gain: picked.volume })
     for (const o of plan.others) {
       const r = resolveEventName(table, o.name), e = r && effectiveEvent(table, r.ref), first = sfxSounds(e?.sfx)[0], b = first ? buffers[first] : undefined
-      if (e?.sfx && b) parts.push({ buffer: b, atSec: o.atSec, gain: e.sfx.volume })
+      if (e?.sfx && b) out.push({ buffer: b, atSec: o.atSec, gain: e.sfx.volume })
     }
-    if (!parts.length) return picked
-    const rate = parts[0].buffer.sampleRate, nCh = Math.max(...parts.map(p => p.buffer.numberOfChannels))
-    return { buffer: mixParts(parts.map(p => ({ start: Math.round(p.atSec * rate), gain: p.gain,
-      data: Array.from({ length: nCh }, (_, c) => { const ch = p.buffer.getChannelData(Math.min(c, p.buffer.numberOfChannels - 1)); return p.buffer.sampleRate === rate ? ch : resampleClip(ch, p.buffer.sampleRate / rate) }) })), rate, nCh), volume: 1 }
+    return out
   }, [plan, picked, table, buffers])
   const companion = useMemo(() => new CompanionSound(startOnPc), [])
-  // By value: the same buffer / volume / loop keeps playing (see CompanionSound).
-  useEffect(() => { companion.setSource(muted ? null : sound) }, [companion, muted, sound?.buffer, sound?.volume, sound?.loop])
+  const scheduler = useMemo(() => new FiringScheduler(() => audio()), [])
+  // By value (see CompanionSound / FiringScheduler): recomputing the same sounds keeps them playing.
   useEffect(() => {
+    scheduler.setFirings(muted || !firings ? [] : firings)
+    companion.setSource(muted || firings ? null : picked)
+  }, [companion, scheduler, muted, firings, picked?.buffer, picked?.volume, picked?.loop])
+  useEffect(() => {
+    const play = (time: number) => { companion.play(time); scheduler.play(time) }
     const unsubs = [
-      player.on('play', time => companion.play(time)),
-      player.on('seeking', time => { if (player.isPlaying()) companion.play(time) }),
-      // A natural end lets a one-shot sound ring out (a loop stops with it); a stop stops it.
+      player.on('play', play),
+      player.on('seeking', time => { if (player.isPlaying()) play(time) }),
+      // A natural end lets one-shot sounds ring out (a loop stops with it); a stop stops them.
       player.on('finish', () => { if (companion.loops) companion.stop() }),
-      onUserStop(player, () => companion.stop()),
+      onUserStop(player, () => { companion.stop(); scheduler.stop() }),
     ]
-    return () => { unsubs.forEach(unsub => unsub()); companion.stop() }
-  }, [player, companion])
+    return () => { unsubs.forEach(unsub => unsub()); companion.stop(); scheduler.stop() }
+  }, [player, companion, scheduler])
 }
 
 /** On selecting an event: the waveform panel shows its haptic (first route's clip), else its sound, else the editor clip again. */
