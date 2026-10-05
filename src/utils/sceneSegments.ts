@@ -1,4 +1,3 @@
-import { fireShot, MaterialPicker, type EffectiveEvent, type PlannedShot } from './cueEvents'
 import type { SceneEvent } from './sceneData'
 
 /**
@@ -7,8 +6,9 @@ import type { SceneEvent } from './sceneData'
  * among recorded clips.
  *
  * - One-off event: from 1 s before its first firing to the sound's length + 0.5 s after it.
- * - Repeated event (the same name ≥ 3 times, ≤ 1.5 s apart): the first such run, up to
- *   6 firings; every firing in it is a mark, and each mark fires sound and haptics.
+ * - Repeated event (the same name ≥ 3 times, ≤ 1.5 s apart): the first such run, up to 6 firings.
+ *   The editor shows its first firing like a one-off; "×5" plays a material on its marks (no jitter);
+ *   the run with the variation is played in the Scene tab.
  */
 export const RUN_GAP_SEC = 1.5
 export const RUN_MIN = 3
@@ -67,13 +67,4 @@ export function listenOffsets(events: readonly SceneEvent[] | null, name: string
   const gap = run && run.length > 1 ? (run[run.length - 1] - run[0]) / (run.length - 1) : LISTEN_GAP_SEC
   while (out.length < LISTEN_TIMES) out.push(out[out.length - 1] + gap)
   return out
-}
-
-/**
- * One firing per mark, at the game's timing (offsets from the first mark), each with
- * its own variation draw (picks, gain / pitch / rate jitter). Loop cues: the jitter of a loop.
- */
-export function planSegmentShots(e: EffectiveEvent, marks: readonly number[], loop: boolean, random: () => number = Math.random): PlannedShot[] {
-  const picker = new MaterialPicker(random)
-  return marks.map((t, index) => ({ index, atSec: t - marks[0], ...fireShot(e, loop, picker, random) }))
 }

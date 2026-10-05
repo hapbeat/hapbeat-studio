@@ -36,8 +36,9 @@ export interface EventPreview {
   id: string; event: string; target: DecideTarget; label: string; buffer: AudioBuffer
   /** A rendered sound to play with it ("×5") instead of the event's decided sound. */
   companion?: SoundSource
-  /** Already one play per firing ("×5"): the editor does not repeat it on the run's marks again. */
+  /** "×5": already one play per firing; `listenOffsets` are their times from the first (the Scene video shows them as marks). */
   repeated?: boolean
+  listenOffsets?: number[]
   /** Play it once from the start as soon as it is shown ("×5"). */
   autoplay?: boolean
 }

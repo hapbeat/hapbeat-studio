@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { findRuns, listenOffsets, occurrences, planSegmentShots, representativeSegment } from './sceneSegments'
-import { effectiveEvent } from './cueEvents'
-import { sampleTable } from './sceneTestFixtures'
+import { findRuns, listenOffsets, occurrences, representativeSegment } from './sceneSegments'
+import { representativeOption } from './trialScene'
+import { sampleData } from './sceneTestFixtures'
 import type { SceneEvent } from './sceneData'
 
 /** The footstep firings of the T-Rex encounter recording (viewer-data.json full.events, 2026-10-05). */
@@ -13,17 +13,17 @@ const T_REX: SceneEvent[] = [
 ]
 
 describe('representative segment (DEC-085)', () => {
-  it('footstep:approach: the whole approach run, 5 marks, one firing per mark at the game timing', () => {
+  it('footstep:approach: the run is the 5 approach steps; the editor shows only its first step (one mark, one window)', () => {
     const seg = representativeSegment(T_REX, 'footstep:approach', 0.6)!
     expect(seg.run).toBe(true)
     expect(seg.marks).toEqual([1.267, 2.133, 2.967, 3.833, 4.7])
     expect(seg.start).toBeCloseTo(0.267)
     expect(seg.end).toBeCloseTo(4.7 + 0.6 + 0.5)
-    const e = effectiveEvent(sampleTable(), { cue: 'button', variant: null })!
-    const shots = planSegmentShots(e, seg.marks, false, () => 0.5)
-    expect(shots).toHaveLength(5)
-    expect(shots.map(s => +s.atSec.toFixed(3))).toEqual([0, 0.866, 1.7, 2.566, 3.433])
-    expect(shots.every(s => s.routes.length > 0)).toBe(true) // haptics on every mark
+    const data = { ...sampleData(), full: { ...sampleData().full, events: T_REX } }
+    const option = representativeOption(data, ['footstep:approach'], () => 0.6)!
+    expect(option.marks).toEqual([1.267])
+    expect(option.end).toBeCloseTo(1.267 + 0.6 + 0.5)
+    expect(option.segment?.marks).toHaveLength(5) // kept for ×5
   })
 
   it('footstep: the exit walk (53.77 s, first run of ≥ 3), not a lone footstep while feeding; at most 6 marks', () => {

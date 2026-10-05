@@ -27,13 +27,13 @@ import { EditorContext, type EditorShared } from './editorContext'
 import { EditorDockLayout, focusPanel, POPOUT_URL } from './EditorDockLayout'
 import { EditorTopBar } from './EditorTopBar'
 import { playStart, useStartMarker } from '@/utils/editorStartMarker'
-import { scenePause, scenePreRoll, useSceneSegmentShots, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
+import { scenePause, scenePreRoll, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useEventStore } from '@/stores/eventStore'
 import { showDockPanel } from '@/utils/dockPanels'
 import { trialTarget } from '@/utils/agentProtocol'
 import { DecideDialog } from './DecideDialog'
-import { openEventDefault, repeatBuffer, useDecidedSoundSync } from './eventAudio'
+import { openEventDefault, useDecidedSoundSync } from './eventAudio'
 
 export function WaveformEditor({ active }: { active: boolean }) {
   const { t } = useI18n()
@@ -106,15 +106,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   // "Send haptics" off → no targets, so EditorPlayback never opens a stream (PC-only audition).
   const targets = useMemo(() => isConnected && sendHaptics && !auditionIsSound && eventPreview?.target !== 'sound' ? resolvePlaybackTargets(devices, kitSelectedIps).map(device => device.ipAddress) : [], [isConnected, sendHaptics, auditionIsSound, eventPreview?.target, devices, kitSelectedIps])
   const targetKey = targets.join(',')
-  const shownBuffer = audition ? audition.buffer : eventPreview ? eventPreview.buffer : original ? s.clip?.originalBuffer : previewActive ? (preview.buffer ?? s.clip?.buffer) : s.clip?.buffer
-  // A repeated event shown with its run in the Scene video panel (DEC-085): an audition / event material plays once
-  // per mark at the game's timing with each firing's jitter (a rendered sequence already has its firings).
-  const segmentShots = useSceneSegmentShots(state => state.shots)
-  const repeatSound = auditionIsSound || eventPreview?.target === 'sound'
-  const audioBuffer = useMemo(() => {
-    if (!shownBuffer || !segmentShots || segmentShots.length < 2 || !(audition || (eventPreview && !eventPreview.repeated))) return shownBuffer
-    return repeatBuffer(shownBuffer, segmentShots.map(shot => ({ atSec: shot.atSec, gain: 10 ** (shot.jitterDb / 20), rate: repeatSound ? 2 ** (shot.pitchSt / 12) : shot.rate })))
-  }, [shownBuffer, segmentShots, audition, eventPreview, repeatSound])
+  const audioBuffer = audition ? audition.buffer : eventPreview ? eventPreview.buffer : original ? s.clip?.originalBuffer : previewActive ? (preview.buffer ?? s.clip?.buffer) : s.clip?.buffer
   const player = useMemo(() => new EditorBufferPlayer(null, undefined, s.setError), [s.clip?.id, original, auditionKey])
   useEffect(() => {player.activate(); return () => player.dispose()}, [player])
   useDecidedSoundSync(player)

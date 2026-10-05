@@ -11,7 +11,6 @@ import type { EditorBufferPlayer } from '@/utils/editorBufferPlayer'
 import { onUserStop } from '@/utils/playerStops'
 import { CompanionSound, type SoundSource } from '@/utils/companionSound'
 import { listenOffsets } from '@/utils/sceneSegments'
-import { useSceneSegmentShots } from '@/utils/editorSceneSync'
 
 /**
  * Event materials in the editor: an event's sound / haptic clip opened in the
@@ -93,14 +92,14 @@ export function eventSoundSec(key: string): number {
  */
 export function listenFive(o: { id: string; event: string; target: DecideTarget; label: string; buffer: AudioBuffer }) {
   const s = useSceneStore.getState()
-  const plays = listenOffsets(s.data?.full.events ?? null, o.event).map(atSec => ({ atSec, gain: 1, rate: 1 }))
+  const offsets = listenOffsets(s.data?.full.events ?? null, o.event), plays = offsets.map(atSec => ({ atSec, gain: 1, rate: 1 }))
   let companion: SoundSource | undefined
   if (o.target === 'haptic' && s.table) {
     const r = resolveEventName(s.table, o.event), e = r && effectiveEvent(s.table, r.ref), first = e?.sfx ? sfxSounds(e.sfx)[0] : undefined
     const sound = first && e?.sfx ? soundBuffer(first, e.sfx.volume, 0) : null
     if (sound) companion = { buffer: repeatBuffer(sound, plays), volume: 1 }
   }
-  useEventStore.getState().showPreview({ id: `${o.id}|x5`, event: o.event, target: o.target, label: `${o.label} ×${plays.length}`, buffer: repeatBuffer(o.buffer, plays), companion, repeated: true, autoplay: true })
+  useEventStore.getState().showPreview({ id: `${o.id}|x5`, event: o.event, target: o.target, label: `${o.label} ×${plays.length}`, buffer: repeatBuffer(o.buffer, plays), companion, repeated: true, listenOffsets: offsets, autoplay: true })
 }
 /** "×5" of route clip `clip` / sound `sound` of event `key` (false when the WAV is not loaded). */
 export function listenFiveHaptic(key: string, clip: string, gain: number): boolean {
@@ -166,22 +165,9 @@ export function useDecidedSoundSync(player: EditorBufferPlayer) {
     }
     return null
   }, [audition, auditionCues, preview, table, lib, buffers])
-  // A repeated event shown with its run (Scene video panel): the sound fires on every mark, each with its own pick and jitter.
-  const segmentShots = useSceneSegmentShots(s => s.shots)
-  const repeated = useMemo((): SoundSource | null => {
-    if (!picked || preview?.companion || !segmentShots || segmentShots.length < 2 || picked.loop) return picked
-    const sfx = useSceneStore.getState().sfx
-    const parts = segmentShots.flatMap(shot => {
-      const b = (shot.sound && sfx[shot.sound]) || picked.buffer
-      if (b.sampleRate !== picked.buffer.sampleRate) return []
-      const rate = 2 ** (shot.pitchSt / 12)
-      return [{ start: Math.round(shot.atSec * b.sampleRate), data: Array.from({ length: picked.buffer.numberOfChannels }, (_, c) => resampleClip(b.getChannelData(Math.min(c, b.numberOfChannels - 1)), rate)), gain: shot.soundGain }]
-    })
-    return parts.length ? { buffer: mixParts(parts, picked.buffer.sampleRate, picked.buffer.numberOfChannels), volume: 1 } : picked
-  }, [picked, preview?.companion, segmentShots])
   const companion = useMemo(() => new CompanionSound(startOnPc), [])
   // By value: the same buffer / volume / loop keeps playing (see CompanionSound).
-  useEffect(() => { companion.setSource(muted ? null : repeated) }, [companion, muted, repeated?.buffer, repeated?.volume, repeated?.loop])
+  useEffect(() => { companion.setSource(muted ? null : picked) }, [companion, muted, picked?.buffer, picked?.volume, picked?.loop])
   useEffect(() => {
     const unsubs = [
       player.on('play', time => companion.play(time)),

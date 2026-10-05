@@ -1,7 +1,7 @@
 import { buildItems, itemEvents, type SceneData, type SceneLib } from './sceneData'
 import type { TrialScene } from './agentProtocol'
 import type { TrialSceneChoice } from './editorUiSettings'
-import { representativeSegment, type SceneSegment } from './sceneSegments'
+import { representativeSegment, TAIL_SEC, type SceneSegment } from './sceneSegments'
 
 /**
  * Editor Scene video panel: which recorded clip of the Scene tab project shows
@@ -58,11 +58,16 @@ export function wantedSceneProject(o: { scene?: TrialScene; saved?: TrialSceneCh
   return o.scene?.project ?? o.saved?.project ?? o.fallback
 }
 
-/** The representative stretch of the first of `cues` that fires in the recording, as a moment of the full replay. */
+/**
+ * The representative moment of the first of `cues` that fires in the recording, cut from the full replay: one
+ * firing (a repeated event: the first of its run) from 1 s before to the sound's length + 0.5 s after — one mark,
+ * played once. `segment` keeps the run (its marks) for "×5".
+ */
 export function representativeOption(data: SceneData, cues: readonly string[], soundSec: (name: string) => number): SceneClipOption | null {
   for (const name of cues) {
     const segment = representativeSegment(data.full.events, name, soundSec(name))
-    if (segment) return { file: data.full.file, label: `${name} (${segment.marks[0].toFixed(1)} s)`, at: segment.marks[0], mark: segment.marks[0], cue: name, marks: segment.marks, end: segment.end, segment }
+    const first = segment?.marks[0]
+    if (segment && first !== undefined) return { file: data.full.file, label: `${name} (${first.toFixed(1)} s)`, at: first, mark: first, cue: name, marks: [first], end: first + Math.max(0, soundSec(name)) + TAIL_SEC, segment }
   }
   return null
 }
