@@ -9,6 +9,7 @@ import { CURRENT_STUDIO_VERSION } from '@/utils/studioVersions'
 import { ratingError, type RatingBody } from '@/utils/agentProtocol'
 import { processInbox, readAgentBytes, submitTrialRequest, encodePcm16Wav, type AcceptResult, type InboxDeps, type InboxResult } from '@/utils/agentInbox'
 import { buildCatalog } from '@/utils/agentGuide'
+import { buildAgentMessage, outboxFileName, writeOutboxMessage } from '@/utils/agentOutbox'
 import { KnowledgeFolder, localIsoString, trialSlugs, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
 
 const POLL_MS = 2000
@@ -52,6 +53,8 @@ interface AgentTrialState {
   clearPlayRequest: () => void
   /** Accepts one hapbeat-trial@1 object immediately (MCP `submit_trial`) with the same processing as the inbox. */
   submitTrial: (trial: unknown) => Promise<AcceptResult>
+  /** Writes a message for the agent session into hapbeat-agent/outbox/ (returns the file name). */
+  sendAgentMessage: (message: { text: string; project?: string; trialIds?: string[]; shortIds?: string[] }) => Promise<string>
   /** Appends an agent proposal to the "Proposed" section of insights.md. */
   appendInsight: (statement: string, evidence: string[]) => Promise<void>
 }
@@ -233,6 +236,11 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
       set({ trials: newestFirst(records), dimensions: dimensions ?? get().dimensions })
       return result
     }),
+    sendAgentMessage: async message => {
+      const folder = await openFolder()
+      const now = new Date()
+      return writeOutboxMessage(folder.agent, buildAgentMessage({ ...message, createdAt: localIsoString(now) }), outboxFileName(now))
+    },
     appendInsight: (statement, evidence) => exclusive(async () => {
       await (await openFolder()).appendInsight(statement, evidence, localIsoString(new Date()))
     }),

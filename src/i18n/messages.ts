@@ -1160,6 +1160,16 @@ export const messages = defineMessages({
   'editor.agent.useNeedsOverall': { ja: '「使える」の候補に総合点を付けると、イベントへ自動で割り当てます。', en: 'Give the "use" candidate an overall score to assign it to the event automatically.' },
   'editor.agent.termMatchHint': { ja: 'この音・振動が、狙いの言葉にどれだけ合うか（−2 足りない … 0 ちょうど … +2 強すぎ）', en: 'How well this sound / vibration matches the target word (−2 too weak … 0 just right … +2 too strong)' },
   'editor.agent.cardMenu': { ja: '候補の操作（手動の採用・決定）', en: 'Candidate actions (adopt / decide by hand)' },
+  'editor.agent.msgSend': { ja: 'エージェントに送る', en: 'Send to agent' },
+  'editor.agent.msgHint': { ja: 'エージェントのセッションへ短いメッセージを送ります（hapbeat-agent/outbox/ に書きます）。空欄なら薄く表示された文を送ります', en: 'Sends a short message to the agent session (written to hapbeat-agent/outbox/). Empty sends the greyed-out text.' },
+  'editor.agent.msgSaved': { ja: '{id} の評価を保存しました。レビューして次へ', en: '{id} rated. Please review and continue.' },
+  'editor.agent.msgAbout': { ja: '{id} を見てください', en: 'Please look at {id}.' },
+  'editor.agent.msgGeneric': { ja: 'Studio からの連絡です', en: 'Message from Studio.' },
+  'editor.agent.msgSent': { ja: '送信しました', en: 'Sent' },
+  'editor.agent.msgFailed': { ja: '送信できませんでした: {message}', en: 'Could not send: {message}' },
+  'editor.agent.msgAuto': { ja: '保存時にエージェントへ送る', en: 'Send to the agent on save' },
+  'editor.agent.msgAutoHint': { ja: '評価を保存すると「T27 の評価を保存しました。レビューして次へ」をエージェントへ送ります', en: 'Saving a rating sends "T27 rated. Please review and continue." to the agent.' },
+  'editor.agent.msgAutoSent': { ja: 'エージェントに送信しました', en: 'Sent to the agent' },
 })
 
 export type MessageId = keyof typeof messages

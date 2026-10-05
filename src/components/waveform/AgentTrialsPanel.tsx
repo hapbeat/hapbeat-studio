@@ -89,6 +89,7 @@ export function AgentTrialsPanel() {
   return <div className="agent-panel">
     <div className={`agent-status ${storeError ? 'error' : ''}`} role="status">{storeError ?? t(!folder ? 'editor.agent.noFolder' : polling ? 'editor.agent.watching' : 'editor.agent.paused')}</div>
     <div className={`agent-mcp-status ${isConnected && folder ? 'ready' : ''}`} title={t('editor.agent.mcpHint')}>{t(!isConnected ? 'editor.agent.mcpHelperOff' : folder ? 'editor.agent.mcpReady' : 'editor.agent.mcpNoFolder')}</div>
+    {folder && <AgentMessageBox record={record ?? trials[0] ?? null} />}
     {projects.length > 0 && <label className="agent-project-filter">{t('editor.project')}
       <select value={projectFilter} onChange={e => {
         const value = e.target.value
@@ -220,6 +221,9 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
   const edit = (update: (f: RatingForm) => RatingForm) => { touchedSinceMount.current = true; setForm(update); setDirty(true); setSaveError(null) }
   const editCandidate = (cid: string, patch: Partial<CandidateRatingForm>) => edit(f => ({ ...f, candidates: { ...f.candidates, [cid]: { ...f.candidates[cid], ...patch } } }))
   const issue = ratingFormIssue(form)
+  /** Shown after a save: "send to the agent" with "Tn rated, review and continue". */
+  const [justSaved, setJustSaved] = useState(false)
+  const autoSend = useEditorSettings(s => s.autoSendOnRating)
   const save = async () => {
     if (issue || saving) return
     setSaving(true)
@@ -233,6 +237,11 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
     }
     catch (error) { setSaveError(message(error)) }
     finally { setSaving(false) }
+    if (saved) setJustSaved(true)
+    if (saved && autoSend) {
+      try { await useAgentTrialStore.getState().sendAgentMessage(messageFor(record, t('editor.agent.msgSaved', { id: trialName(record) }))); setNotice(t('editor.agent.msgAutoSent')) }
+      catch (error) { setNotice(t('editor.agent.msgFailed', { message: message(error) })) }
+    }
     if (saved && usableCandidates(withAuto).length >= 2 && !body.best) setNotice(t('editor.agent.severalUsable', { ids: usableCandidates(withAuto).map(id => record.shortId ? `${record.shortId}-${id}` : id).join(', ') }))
     // Auto-assign only a unique top "use" candidate (written as best); otherwise the notice above asks to consult the agent.
     if (saved && body.best && trial.scene && autoAssign) await assignBest(body.best)
@@ -287,6 +296,7 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
     {soundFirst && <p className="events-hint">{t('events.soundFirst')}</p>}
     <div className="agent-notice" role="status">{notice}</div>
     {lastResult && lastResult.id === assignedId && <DecidedNotice result={lastResult} />}
+    {justSaved && !autoSend && <AgentMessageBox record={record} saved />}
     <div className="agent-candidates">
       {trial.candidates.map(requested => {
         const file = record.candidates.find(c => c.id === requested.id)
@@ -347,6 +357,8 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
       </fieldset>}
       <div className="agent-save">
         <button className="apply-effects-btn" disabled={!!issue || saving || (!dirty && !!rating)} onClick={() => void save()}>{t('editor.agent.save')}</button>
+        <label className="agent-auto-assign" title={t('editor.agent.msgAutoHint')}>
+          <input type="checkbox" checked={autoSend} onChange={e => useEditorSettings.getState().update({ autoSendOnRating: e.target.checked })} />{t('editor.agent.msgAuto')}</label>
         {trial.scene && <label className="agent-auto-assign" title={t('events.auto.hint')}>
           <input type="checkbox" checked={autoAssign} onChange={e => useEditorSettings.getState().update({ autoAssignOnRating: e.target.checked })} />{t('events.auto.label')}</label>}
         <span className={`agent-save-status ${saveError ? 'error' : !dirty && rating ? 'saved' : ''}`} role="status">{saveStatus}</span>
@@ -448,5 +460,39 @@ function CandidateNotes({ value, onChange, selection }: {
       {value.useRange.map((r, i) => <span key={`${r[0]}-${r[1]}`} className="agent-chip">{r[0].toFixed(3)}–{r[1].toFixed(3)} s
         <button className="agent-chip-remove" aria-label={t('editor.agent.useRangeRemove')} title={t('editor.agent.useRangeRemove')} onClick={() => onChange({ useRange: value.useRange.filter((_, k) => k !== i) })}>✕</button></span>)}
     </div>
+  </div>
+}
+
+/** Ids and project of a trial for an outbox message. */
+function messageFor(record: TrialRecord, text: string) {
+  const { trial } = record
+  return { text, project: trial.project ?? trial.scene?.project, trialIds: [trial.id], shortIds: record.shortId ? [record.shortId] : undefined }
+}
+const trialName = (record: TrialRecord) => record.shortId ?? record.trial.id
+
+/**
+ * "Send to the agent": an optional short text (the default names the trial by
+ * its short id) written to hapbeat-agent/outbox/ for the agent session to pick up.
+ */
+function AgentMessageBox({ record, saved }: { record: TrialRecord | null; saved?: boolean }) {
+  const { t } = useI18n()
+  const [text, setText] = useState('')
+  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null)
+  const [sending, setSending] = useState(false)
+  const fallback = !record ? t('editor.agent.msgGeneric') : saved || record.rating ? t('editor.agent.msgSaved', { id: trialName(record) }) : t('editor.agent.msgAbout', { id: trialName(record) })
+  const send = async () => {
+    setSending(true)
+    try {
+      const body = (text.trim() || fallback)
+      await useAgentTrialStore.getState().sendAgentMessage(record ? messageFor(record, body) : { text: body })
+      setText(''); setStatus({ ok: true, text: t('editor.agent.msgSent') })
+    } catch (error) { setStatus({ ok: false, text: t('editor.agent.msgFailed', { message: message(error) }) }) }
+    finally { setSending(false) }
+  }
+  return <div className="agent-message" title={t('editor.agent.msgHint')}>
+    <input value={text} placeholder={fallback} aria-label={t('editor.agent.msgSend')} maxLength={4000}
+      onChange={e => { setText(e.target.value); setStatus(null) }} onKeyDown={e => { if (e.key === 'Enter' && !sending) void send() }} />
+    <button type="button" className="toolbar-btn" disabled={sending} onClick={() => void send()}>{t('editor.agent.msgSend')}</button>
+    <span className={`agent-message-status ${status && !status.ok ? 'error' : ''}`} role="status">{status?.text ?? ''}</span>
   </div>
 }

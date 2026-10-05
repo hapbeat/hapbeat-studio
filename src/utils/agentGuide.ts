@@ -35,6 +35,8 @@ You help the user design vibration (haptic) clips for Hapbeat, a wearable vibrot
     inbox/                Put trial requests here: <trialId>.json
     inbox/_rejected/      Invalid requests are moved here with <trialId>.error.txt explaining why.
     sources/              Put source audio you generated (WAV) here.
+    outbox/               Messages from the user in Studio to you: <YYYYMMDD-HHmmss>-<rand>.json (see "Messages from Studio").
+    outbox/_read/         Move each message here after reading it.
   haptic-knowledge/
     README.md             Structure of the knowledge base (generated).
     dimensions.json       Perceptual dimensions and vocabulary (human-edited source of truth).
@@ -129,6 +131,18 @@ Order of work:
 2. In the first haptic trial of an event, line up candidates made by DIFFERENT methods (for example \`sfx\`, \`envelope\`, \`onset\`, \`synth\`). Then refine within the method that rated best, one axis at a time (the "Recommended workflow" above). \`terms/<slug>.json\` → \`byMethod\` shows which methods tend to work for a term.
 
 Processing: stereo sources are averaged to mono, effects are applied in order, the result is resampled to 48 kHz and, if its peak exceeds 1.0, normalized to 0.98 (recorded as \`autoNormalizedDb\`). A candidate that fails to render gets an \`error\` in its candidates/<cid>.json; the other candidates are still rendered. An invalid request is moved to \`inbox/_rejected/\` with an \`.error.txt\`; fix it and submit again under a new id.
+
+## Messages from Studio \`hapbeat-agent-message@1\` (Studio writes, you read)
+
+The user can send you a short message from the editor ("Send to agent" in the AI trials panel, or automatically when a rating is saved). Watch \`hapbeat-agent/outbox/\` for new \`*.json\` files:
+
+\`\`\`json
+{ "format": "hapbeat-agent-message@1", "createdAt": "2026-10-05T15:42:00+09:00", "text": "T27 の評価を保存しました。レビューして次へ", "project": "trex-encounter", "trialIds": ["20261005-1530-breath-01"], "shortIds": ["T27"] }
+\`\`\`
+
+- \`text\` (≤ 4000 chars) is the instruction; \`project\`, \`trialIds\` and \`shortIds\` are optional context (read the named trials' \`rating.json\` first).
+- Files appear atomically (written as \`*.json.tmp\`, then renamed); ignore \`*.tmp\`. Names sort by time.
+- After handling a message, move it to \`outbox/_read/\` (Studio never deletes outbox files).
 
 ## Rating \`hapbeat-rating@1\` (Studio writes, you read)
 
