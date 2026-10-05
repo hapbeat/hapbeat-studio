@@ -43,3 +43,15 @@ describe('paired cue: the sound that goes with a haptic (breath)', () => {
     expect(companionSoundName(t, { audition: { trial: { ...trial, candidates: [{ id: 'A', sound: 'breath_snort_m4' }] }, candidateId: 'A', picks: {} }, material: null })).toBe('breath_snort_m4')
   })
 })
+
+describe('moving a pair (paired list)', () => {
+  it('moves the sound and the clip of every same-length route together', async () => {
+    const { movePair } = await import('./cueEvents')
+    const t = table()
+    t.cues.breath.haptics!.push({ clips: ['breath_t56_c', 'breath_t56_b', 'breath_t56_a'], at: 'pos_chest', gain: 1 }, { clip: 'breath_t56_a', at: 'hand', gain: 1 })
+    const moved = movePair(t, { cue: 'breath', variant: null }, 2, -1)
+    expect(moved.cues.breath.sfx).toEqual({ sounds: ['breath_snort_m4', 'breath_huff2_m4', 'breath_snort_m7'], volume: 1 })
+    expect(moved.cues.breath.haptics!.map(r => r.clips ?? [r.clip])).toEqual([['breath_t56_a', 'breath_t56_c', 'breath_t56_b'], ['breath_t56_c', 'breath_t56_a', 'breath_t56_b'], ['breath_t56_a']])
+    expect(movePair(t, { cue: 'breath', variant: null }, 0, -1)).toEqual(t)
+  })
+})

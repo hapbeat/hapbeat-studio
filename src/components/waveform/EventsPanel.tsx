@@ -10,7 +10,7 @@ import { useSceneVideoTarget } from '@/utils/editorSceneSync'
 import { clipsForCue, isLoopCue, soundAllowed, positionsForCue, routeClips, sfxSounds, type CueTable } from '@/utils/sceneCueTable'
 import type { SceneLib } from '@/utils/sceneData'
 import {
-  addPositionRoute, assignEventsForTrial, effectiveEvent, eventKey, listEvents, pairedClips, parseEventKey, removeOwnRoute,
+  addPositionRoute, assignEventsForTrial, effectiveEvent, eventKey, listEvents, parseEventKey, removeOwnRoute,
   setRouteClips, setSfxSounds, simultaneousGroups, trialsForEvent, updateOwnRoute,
   resetAllReviews, setNone, setOverride, setReview, setUndecided, hasOwnMaterials,
   type EffectiveEvent, type EventRow, type SoundStatus,
@@ -21,6 +21,7 @@ import { useEditor } from './editorContext'
 import { EditorMenu, EditorMenuItem } from './EditorMenu'
 import { openEventDefault, openEventHaptic, openEventSound } from './eventAudio'
 import { MaterialList } from './MaterialList'
+import { PairedList } from './PairedList'
 import { useToast } from '@/components/common/Toast'
 import { runDecision } from './eventDecide'
 import { removeReserve, requestAnswered, reviseAnswered } from '@/utils/agentTrialUi'
@@ -240,12 +241,11 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
     {!open ? null : !allowed ? <p className="agent-muted">{t('scene.sound.loopCue')}</p> : !e.own.sfx ? <Inherited e={e} field="sfx" edit={edit} /> : <>
       {loop && <p className="agent-muted">{t('events.loopSoundHint')}</p>}
       {!sounds.length && <p className="agent-muted">{t(e.decided.sfx ? 'events.soundNone' : 'events.undecidedSound')}</p>}
-      <MaterialList items={sounds} label={t('events.sound')} active={sounds.find(s => previewId === `${key}|sound|${s}`) ?? null} onPlay={play} onSelect={show}
+      {/* A paired cue's sounds are listed as pairs in the haptic section. */}
+      {e.variation?.paired === true ? sounds.length > 0 && <p className="agent-muted">{t('events.pair.inHaptics')}</p> : <MaterialList items={sounds} label={t('events.sound')} active={sounds.find(s => previewId === `${key}|sound|${s}`) ?? null} onPlay={play} onSelect={show}
         onReorder={set} onRemove={set}
-        extra={s => <>{e.variation?.paired === true && pairedClips(e, sounds.indexOf(s))[0] && <button type="button" className="agent-icon-btn" title={t('events.pairedHapticHint', { clips: pairedClips(e, sounds.indexOf(s)).map(p => p.clip).join(', ') })}
-          onClick={() => { const p = pairedClips(e, sounds.indexOf(s))[0]; if (!openEventHaptic(key, p.clip, p.at, true)) missing(p.clip) }}>{t('events.pairedHaptic')}</button>}
-          <MaterialActions event={key} target="sound" wav={s} /></>}
-        below={s => <ReviseField cue={key} target="sound" material={s} />} />
+        extra={s => <MaterialActions event={key} target="sound" wav={s} />}
+        below={s => <ReviseField cue={key} target="sound" material={s} />} />}
       <Reserves cue={e.ref.cue} target="sound" />
       <select className="events-add-material" value="" aria-label={t('events.addSoundMulti')} title={t('events.soundDir', { dir: lib.paths.sounds })}
         onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) set([...sounds, x]) }}>
@@ -286,10 +286,15 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
           </select>
           <button type="button" className="scene-icon-btn" aria-label={t('scene.route.remove')} title={t('scene.route.remove')} onClick={() => edit(tb => removeOwnRoute(tb, e.ref, i))}>✕</button>
         </div>
-        <MaterialList items={clips} label={t('scene.route.clip')} active={clips.find(c => previewId === `${key}|haptic|${c}|${r.at}`) ?? null}
+        {e.variation?.paired === true && i === 0 ? <PairedList e={e} edit={edit}
+          active={previewId ? previewId.split('|')[2] ?? null : null}
+          onPlay={(_, sound, clip, at) => { if (clip && at) { if (!openEventHaptic(key, clip, at, true)) missing(clip) } else if (sound && !openEventSound(key, sound, true)) missing(sound) }}
+          onShow={(target, name, at) => { if (target === 'haptic' ? !openEventHaptic(key, name, at ?? r.at) : !openEventSound(key, name)) missing(name) }}
+          extra={(target, name) => <MaterialActions event={key} target={target} wav={name} />} />
+        : <MaterialList items={clips} label={t('scene.route.clip')} active={clips.find(c => previewId === `${key}|haptic|${c}|${r.at}`) ?? null}
           onPlay={c => { if (!openEventHaptic(key, c, r.at, true)) missing(c) }} onSelect={c => { if (!openEventHaptic(key, c, r.at)) missing(c) }} onReorder={set} onRemove={set} minItems={1}
           extra={c => <MaterialActions event={key} target="haptic" wav={c} />}
-          below={c => <ReviseField cue={key} target="haptic" material={c} />} />
+          below={c => <ReviseField cue={key} target="haptic" material={c} />} />}
       </div>
     })}
     <Reserves cue={e.ref.cue} target="haptic" />

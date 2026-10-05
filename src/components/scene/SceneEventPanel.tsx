@@ -10,6 +10,7 @@ import {
 } from '@/utils/cueEvents'
 import { longestRun, sceneSegment } from '@/utils/sceneSegments'
 import { MaterialList } from '@/components/waveform/MaterialList'
+import { PairedList } from '@/components/waveform/PairedList'
 import { CuePicker, NumberField, useAtLabel } from './SceneCuePanels'
 import { useScene } from './sceneContext'
 
@@ -235,6 +236,7 @@ function Sounds({ e, edit, allowed }: { e: EffectiveEvent; edit: Edit; allowed: 
     {own && e.sfx && <label className="scene-row" title={t('scene.event.volumeHint')}><span className="scene-dim scene-grow">{t('scene.sound.volume')}</span>
       <NumberField value={e.sfx.volume} min={0} max={2} step={0.05} label={t('scene.sound.volume')} onCommit={x => edit(tb => setOwnSfxVolume(tb, e.ref, x))} /></label>}
     {!sounds.length ? <div className="scene-dim">{t('events.soundNone')}</div>
+      : e.variation?.paired === true ? <div className="scene-dim">{t('events.pair.inHaptics')}</div>
       : <MaterialList items={sounds} label={t('events.repeat.sounds')} onReorder={own ? set : null} onRemove={own ? set : null}
         onPlay={s => { runtime.audio(); runtime.testSound({ sound: s, volume: e.sfx?.volume ?? 1 }) }} />}
     {own && <select value="" aria-label={t('events.addSoundMulti')} onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) set([...sounds, x]) }}>
@@ -261,8 +263,14 @@ function Clips({ table, e, edit }: { table: CueTable; e: EffectiveEvent; edit: E
         <label className="scene-row" title={t('scene.event.gainHint')}><span className="scene-dim scene-grow">{atLabel(r.at)} · {t('scene.route.gain')}</span>
           {own ? <NumberField value={r.gain} min={0} max={2} step={0.05} label={t('scene.route.gain')} onCommit={x => edit(tb => updateOwnRoute(tb, e.ref, i, { gain: x }))} />
             : <span className="scene-dim">{r.gain}</span>}</label>
-        <MaterialList items={clips} label={atLabel(r.at)} onReorder={own ? set : null} onRemove={own ? set : null} minItems={1}
-          onPlay={c => runtime.testRoute({ clip: c, at: r.at, gain: r.gain })} />
+        {e.variation?.paired === true && i === 0
+          ? <PairedList e={e} edit={edit} onPlay={(_, sound, clip) => {
+            runtime.audio()
+            if (sound) runtime.testSound({ sound, volume: e.sfx?.volume ?? 1 })
+            if (clip) runtime.testRoute({ clip, at: r.at, gain: r.gain })
+          }} />
+          : <MaterialList items={clips} label={atLabel(r.at)} onReorder={own ? set : null} onRemove={own ? set : null} minItems={1}
+            onPlay={c => runtime.testRoute({ clip: c, at: r.at, gain: r.gain })} />}
         {own && <select value="" aria-label={t('events.addClipMulti')} onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) set([...clips, x]) }}>
           <option value="">{t('events.addClipMulti')}</option>
           {clipsForCue(table, lib, e.ref.cue).filter(c => !clips.includes(c)).map(c => <option key={c} value={c}>{c}</option>)}

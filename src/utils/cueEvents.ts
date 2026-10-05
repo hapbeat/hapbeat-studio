@@ -329,6 +329,26 @@ export function setVariation(table: CueTable, ref: EventRef, patch: Partial<CueV
     else delete entry.variation
   })
 }
+/**
+ * Moves pair `index` of a paired event one place (`dir` −1 / +1): its sound and, on every route with as many clips
+ * as sounds, its clip (the pairs stay together). Out of range: unchanged.
+ */
+export function movePair(table: CueTable, ref: EventRef, index: number, dir: -1 | 1): CueTable {
+  const j = index + dir
+  return edited(table, ref, (entry, effective) => {
+    const sounds = sfxSounds(effective.sfx)
+    if (j < 0 || j >= sounds.length || index >= sounds.length) return
+    const swap = <T,>(list: T[]) => { const next = [...list]; [next[index], next[j]] = [next[j], next[index]]; return next }
+    const nextSounds = swap(sounds)
+    entry.sfx = effective.sfx && (nextSounds.length === 1 ? { sound: nextSounds[0], volume: effective.sfx.volume } : { sounds: nextSounds, volume: effective.sfx.volume })
+    entry.haptics = effective.haptics.map(r => {
+      const clips = routeClips(r)
+      if (clips.length !== sounds.length) return r
+      const { clip: _c, clips: _cs, ...rest } = r
+      return { ...rest, clips: swap(clips) }
+    })
+  })
+}
 /** Route `index` of what `ref` writes plays `clips` (one = `clip`, several = `clips`). */
 export function setRouteClips(table: CueTable, ref: EventRef, index: number, clips: string[]): CueTable {
   if (!clips.length) return table

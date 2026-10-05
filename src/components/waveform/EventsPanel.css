@@ -115,3 +115,15 @@
 .events-head-field + .events-haptic-request { margin-left: 8px; }
 .events-fold { flex: none; width: 18px; padding: 0; border: none; background: none; color: var(--text-secondary); cursor: pointer; }
 .events-request-send { flex: none; width: 6em; justify-content: center; }
+/* Paired cue: one line per pair — number, ▶, ♪ sound (strength) ↔ ≋ clip (strength), ↑ ↓; wraps when narrow. */
+.events-pairs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.events-pair { display: grid; grid-template-columns: 18px auto minmax(0, 1fr) auto minmax(0, 1fr) auto; align-items: center; gap: 4px 6px; min-height: 38px; box-sizing: border-box; padding: 2px 6px; border: 1px solid var(--border); border-radius: 4px; }
+.events-pair-num { color: var(--text-muted); text-align: right; font-variant-numeric: tabular-nums; }
+.events-pair-side { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; min-width: 0; }
+.events-pair-side.active { outline: 1px solid #67e8f9; outline-offset: 1px; border-radius: 3px; }
+.events-pair-kind { color: var(--text-muted); }
+.events-pair-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.events-pair-level { width: 46px; }
+.events-pair-arrow { color: var(--text-muted); }
+.events-pair-missing { color: #f08a8a; font-size: 12px; }
+.events-pair-move { display: inline-flex; gap: 2px; }
