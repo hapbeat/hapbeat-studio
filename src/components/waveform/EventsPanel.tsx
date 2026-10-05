@@ -23,7 +23,7 @@ import { EditorMenu, EditorMenuItem } from './EditorMenu'
 import { openEventDefault, openEventHaptic, openEventSound } from './eventAudio'
 import { MaterialList } from './MaterialList'
 import { runDecision } from './eventDecide'
-import { hapticAnswered, removeReserve, reviseAnswered } from '@/utils/agentTrialUi'
+import { removeReserve, requestAnswered, reviseAnswered } from '@/utils/agentTrialUi'
 import { create } from 'zustand'
 import { openEventMaterialForEditing } from './eventEditing'
 import './EventsPanel.css'
@@ -221,8 +221,11 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
     <h4 className="events-sec-head">{t('events.sound')}{allowed && <><ReviewToggle e={e} field="sfx" edit={edit} /><DecisionBar e={e} field="sfx" edit={edit} /></>}
       {allowed && e.sfx && <span className="events-field events-head-field">{t('scene.sound.volume')}
         <NumberField value={e.sfx.volume} min={0} max={2} step={0.05} label={t('scene.sound.volume')} onCommit={x => edit(tb => setOwnSfxVolume(tb, e.ref, x))} /></span>}
-      {/* After checking the sound (OK): on to the haptic — also for a cue without a sound. */}
-      <HapticRequestButton e={e} /></h4>
+      {/* Ask for (more) sound candidates; after checking the sound (OK): on to the haptic — also for a cue without a sound. */}
+      <span className="events-haptic-request"><button type="button" className="agent-icon-btn" title={t('events.soundRequest.hint')}
+        onClick={() => { const k = `sound|${key}`; useReviseOpen.getState().set(useReviseOpen.getState().open === k ? null : k) }}>{t('events.soundRequest.button')}</button>
+      <HapticRequestButton e={e} /></span></h4>
+    <SoundRequestField cue={key} />
     {!allowed ? <p className="agent-muted">{t('scene.sound.loopCue')}</p> : <>
       {loop && <p className="agent-muted">{t('events.loopSoundHint')}</p>}
       {!sounds.length && <p className="agent-muted">{t(e.decided.sfx ? 'events.soundNone' : 'events.undecidedSound')}</p>}
@@ -397,13 +400,17 @@ function MaterialActions({ event, target, wav }: { event: string; target: Decide
 function useOpenRequests(): Set<string> {
   const revise = useEditorSettings(s => s.revisePending)
   const haptic = useEditorSettings(s => s.hapticPending)
+  const sound = useEditorSettings(s => s.soundPending)
   const trials = useAgentTrialStore(s => s.trials)
   const openRevise = useMemo(() => revise.filter(r => !reviseAnswered(r, trials)), [revise, trials])
-  const openHaptic = useMemo(() => haptic.filter(r => !hapticAnswered(r, trials)), [haptic, trials])
+  const openHaptic = useMemo(() => haptic.filter(r => !requestAnswered(r, 'haptic', trials)), [haptic, trials])
+  const openSound = useMemo(() => sound.filter(r => !requestAnswered(r, 'sound', trials)), [sound, trials])
   useEffect(() => {
-    if (openRevise.length !== revise.length || openHaptic.length !== haptic.length) useEditorSettings.getState().update({ revisePending: openRevise, hapticPending: openHaptic })
-  }, [openRevise, openHaptic, revise.length, haptic.length])
-  return useMemo(() => new Set([...openRevise.map(r => `${parseEventKey(r.cue).cue}|${r.target}`), ...openHaptic.map(r => `${parseEventKey(r.cue).cue}|haptic`)]), [openRevise, openHaptic])
+    if (openRevise.length !== revise.length || openHaptic.length !== haptic.length || openSound.length !== sound.length)
+      useEditorSettings.getState().update({ revisePending: openRevise, hapticPending: openHaptic, soundPending: openSound })
+  }, [openRevise, openHaptic, openSound, revise.length, haptic.length, sound.length])
+  return useMemo(() => new Set([...openRevise.map(r => `${parseEventKey(r.cue).cue}|${r.target}`), ...openHaptic.map(r => `${parseEventKey(r.cue).cue}|haptic`),
+    ...openSound.map(r => `${parseEventKey(r.cue).cue}|sound`)]), [openRevise, openHaptic, openSound])
 }
 
 /** The one-line remake comment under a material row: Enter sends (hapbeat-agent-message@1 `revise`), Esc closes. */
@@ -455,7 +462,34 @@ function HapticRequestButton({ e }: { e: EffectiveEvent }) {
     } catch (err) { setError(t('events.revise.failed', { error: err instanceof Error ? err.message : String(err) })) }
   }
   const title = [t('events.hapticRequest.hint'), ...(e.decided.sfx ? [] : [t('events.hapticRequest.soundUndecided')]), ...(error ? [error] : [])].join('\n')
-  return <span className="events-haptic-request">
-    <button type="button" className={`agent-icon-btn ${error ? 'error' : ''}`} title={title} onClick={() => void send()}>{t('events.hapticRequest.button')}</button>
-  </span>
+  return <button type="button" className={`agent-icon-btn ${error ? 'error' : ''}`} title={title} onClick={() => void send()}>{t('events.hapticRequest.button')}</button>
+}
+
+/** The one-line sound request under the sound heading: Enter sends (outbox `sound`), Esc closes. */
+function SoundRequestField({ cue }: { cue: string }) {
+  const { t } = useI18n()
+  const open = useReviseOpen(s => s.open === `sound|${cue}`)
+  const [comment, setComment] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  if (!open) return null
+  const close = () => { useReviseOpen.getState().set(null); setComment(''); setError(null) }
+  const send = async () => {
+    if (!comment.trim() || busy) return
+    setBusy(true)
+    try {
+      const project = useSceneStore.getState().lib?.project_name
+      await useAgentTrialStore.getState().sendAgentMessage({ text: t('events.soundRequest.message', { cue, comment: comment.trim() }), project, sound: { cue, comment } })
+      const settings = useEditorSettings.getState()
+      settings.update({ soundPending: [...settings.soundPending, { cue, at: new Date().toISOString() }] })
+      close()
+    } catch (err) { setError(t('events.revise.failed', { error: err instanceof Error ? err.message : String(err) })) }
+    finally { setBusy(false) }
+  }
+  return <div className="events-revise">
+    <input autoFocus value={comment} disabled={busy} placeholder={t('events.soundRequest.placeholder')} aria-label={t('events.soundRequest.placeholder')} title={error ?? t('events.soundRequest.hint')}
+      onChange={e => { setComment(e.target.value); setError(null) }}
+      onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void send() } else if (e.key === 'Escape') { e.preventDefault(); close() } }} />
+    {error && <small className="events-warn">{error}</small>}
+  </div>
 }

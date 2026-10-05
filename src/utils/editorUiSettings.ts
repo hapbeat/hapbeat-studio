@@ -52,6 +52,8 @@ export interface EditorUiSettings {
   revisePending: RevisePending[]
   /** "Go to haptics" requests (cue, sent at), shown until a haptic trial for the cue arrives. */
   hapticPending: { cue: string; at: string }[]
+  /** "Request a sound" requests (cue, sent at), shown until a sound trial for the cue arrives. */
+  soundPending: { cue: string; at: string }[]
   /** AI trials panel project filter: '' = all, ' ' = trials without a project, else a project name. */
   trialProjectFilter: string
   /** AI trials panel target filter: '' = all, 'sound', 'haptic'. */
@@ -61,7 +63,7 @@ export interface EditorUiSettings {
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], trialProjectFilter: '', trialTargetFilter: '',
+  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -123,6 +125,7 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     eventReserves: reserves(v.eventReserves),
     reservesBackfilled: v.reservesBackfilled === true,
     hapticPending: Array.isArray(v.hapticPending) ? v.hapticPending.filter((r): r is { cue: string; at: string } => isRecord(r) && typeof r.cue === 'string' && typeof r.at === 'string').slice(-200).map(r => ({ cue: r.cue, at: r.at })) : [],
+    soundPending: Array.isArray(v.soundPending) ? v.soundPending.filter((r): r is { cue: string; at: string } => isRecord(r) && typeof r.cue === 'string' && typeof r.at === 'string').slice(-200).map(r => ({ cue: r.cue, at: r.at })) : [],
     revisePending: Array.isArray(v.revisePending) ? v.revisePending.filter((r): r is RevisePending => isRecord(r) && typeof r.cue === 'string' && typeof r.material === 'string' && typeof r.at === 'string'
       && (r.target === 'sound' || r.target === 'haptic')).slice(-200).map(r => ({ cue: r.cue, target: r.target, material: r.material, at: r.at })) : [],
     eventsListHeight: clamp(v.eventsListHeight, 80, 1200, d.eventsListHeight),

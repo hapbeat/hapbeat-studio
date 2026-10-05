@@ -1227,6 +1227,10 @@ export const messages = defineMessages({
   'events.hapticRequest.message': { ja: '触覚の依頼: {cue}（音: {sound}）', en: 'Haptic request: {cue} (sound: {sound})' },
   'events.requested': { ja: '依頼済み', en: 'requested' },
   'events.requested.hint': { ja: 'エージェントに依頼を送りました。試行が届くと消えます', en: 'Sent to the agent. Clears when its trial arrives.' },
+  'events.soundRequest.button': { ja: '音を依頼…', en: 'Request a sound…' },
+  'events.soundRequest.hint': { ja: 'この cue の音（追加の候補）をエージェントに依頼します（outbox）', en: 'Asks the agent for (more) sound candidates for this cue (outbox).' },
+  'events.soundRequest.placeholder': { ja: 'どんな音か（例: ワニを撫でるような、少し湿ったカサカサ）。Enter で送信、Esc で閉じる', en: 'What it should sound like. Enter sends, Esc closes.' },
+  'events.soundRequest.message': { ja: '音の依頼: {cue}: {comment}', en: 'Sound request: {cue}: {comment}' },
 })
 
 export type MessageId = keyof typeof messages

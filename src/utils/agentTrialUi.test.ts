@@ -210,11 +210,12 @@ describe('remake requests', () => {
 })
 
 describe('haptic requests', () => {
-  it('stay pending until a haptic trial for the cue arrives after them', async () => {
-    const { hapticAnswered } = await import('./agentTrialUi')
+  it('stay pending until a trial of the target for the cue arrives after them', async () => {
+    const { requestAnswered } = await import('./agentTrialUi')
     const req = { cue: 'grab', at: '2026-10-05T10:00:00.000Z' }
     const trial = (target: 'sound' | 'haptic' | undefined, cues: string[], receivedAt: string) => ({ trial: { receivedAt, target, scene: { cues } } })
-    expect(hapticAnswered(req, [trial('sound', ['grab'], '2026-10-05T11:00:00.000Z'), trial('haptic', ['grab'], '2026-10-05T09:00:00.000Z')])).toBe(false)
-    expect(hapticAnswered(req, [trial(undefined, ['grab'], '2026-10-05T11:00:00.000Z')])).toBe(true)
+    expect(requestAnswered(req, 'haptic', [trial('sound', ['grab'], '2026-10-05T11:00:00.000Z'), trial('haptic', ['grab'], '2026-10-05T09:00:00.000Z')])).toBe(false)
+    expect(requestAnswered(req, 'sound', [trial('sound', ['grab'], '2026-10-05T11:00:00.000Z')])).toBe(true)
+    expect(requestAnswered(req, 'haptic', [trial(undefined, ['grab'], '2026-10-05T11:00:00.000Z')])).toBe(true)
   })
 })
