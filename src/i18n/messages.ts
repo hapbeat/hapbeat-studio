@@ -1174,6 +1174,8 @@ export const messages = defineMessages({
   'editor.agent.toEvent': { ja: '→イベント', en: '→ Event' },
   'editor.agent.toEventHapticHint': { ja: 'このイベントの触覚として割り当てます（ゲームの WAV とイベント表に書き込み）', en: 'Assigns it as the event haptic (writes the game WAV and cue table)' },
   'editor.agent.toEventSoundHint': { ja: 'このイベントの音として割り当てます（ゲームの WAV とイベント表に書き込み）', en: 'Assigns it as the event sound (writes the game WAV and cue table)' },
+  'events.editAsClip': { ja: '編集用にクリップへ', en: 'Edit as clip' },
+  'events.editAsClipHint': { ja: 'この WAV をエディタのクリップとして開き、エフェクトで加工できるようにします（決定したときのクリップが分かればそれを開きます）。加工後はクリップの「→イベント」で割り当て直します', en: 'Opens this WAV as an editor clip to process with effects (the clip it was decided from, when known). Assign it back with the clip menu.' },
 })
 
 export type MessageId = keyof typeof messages

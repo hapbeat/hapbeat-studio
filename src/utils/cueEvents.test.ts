@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  addEventMark, addPositionRoute, addVariant, eventFireCounts, hasRepeatSettings, simultaneousGroups, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
+  addEventMark, addPositionRoute, decidedSubjects, addVariant, eventFireCounts, hasRepeatSettings, simultaneousGroups, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
   effectiveEvent, eventSceneCues, jitterGain, listEvents, MaterialPicker, matchesName, materialUsers, needsRouteForm, overwriteUsers,
   parseEventKey, removeVariant, resolveEventName, setOverride, setRouteClips, setSfxSounds, setVariation, trialEvent, trialsForEvent,
 } from './cueEvents'
@@ -259,5 +259,18 @@ describe('recording: repetition and simultaneous groups', () => {
     expect(hasRepeatSettings(effectiveEvent(t, { cue: 'button', variant: null })!)).toBe(true) // variation
     expect(hasRepeatSettings(effectiveEvent(t, { cue: 'detent', variant: null })!)).toBe(false)
     expect(hasRepeatSettings(effectiveEvent(t, { cue: 'button', variant: 'soft' })!)).toBe(true) // clips list
+  })
+})
+
+describe('edit as clip', () => {
+  it('finds the clips / candidates an event material was decided from', () => {
+    const marks = {
+      c1: [{ project: 'trex', event: 'roar', target: 'haptic' }],
+      't1/B': [{ project: 'trex', event: 'roar', target: 'sound' }, { project: 'trex', event: 'roar', target: 'haptic' }],
+      c2: [{ project: 'mill', event: 'roar', target: 'haptic' }],
+    }
+    expect(decidedSubjects(marks, 'trex', 'roar', 'haptic')).toEqual(['c1', 't1/B'])
+    expect(decidedSubjects(marks, 'trex', 'roar', 'sound')).toEqual(['t1/B'])
+    expect(decidedSubjects(marks, 'trex', 'bite', 'haptic')).toEqual([])
   })
 })

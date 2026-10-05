@@ -5,6 +5,7 @@ import { useEventStore, type DecideRequest, type DecideResult } from '@/stores/e
 import { useSceneStore } from '@/stores/sceneStore'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useWaveformStore } from '@/stores/waveformStore'
+import { useEditorSettings } from '@/stores/editorSettings'
 import { isLoopCue, positionsForCue } from '@/utils/sceneCueTable'
 import { allEventKeys, defaultAt, effectiveEvent, matchesName, needsRouteForm, overwriteUsers, parseEventKey, sameBytes, trialEvent } from '@/utils/cueEvents'
 import { useAtLabel } from '@/components/scene/SceneCuePanels'
@@ -58,6 +59,7 @@ function DecideForm({ request }: { request: DecideRequest }) {
   const selected = useEventStore(s => s.selected)
   const trials = useAgentTrialStore(s => s.trials)
   const documents = useWaveformStore(s => s.documents)
+  const marks = useEditorSettings(s => s.eventMarks)
   const close = () => useEventStore.getState().closeDecide()
   const { target, source } = request
   const record = source.kind === 'candidate' ? trials.find(r => r.trial.id === source.trialId) : undefined
@@ -65,7 +67,10 @@ function DecideForm({ request }: { request: DecideRequest }) {
     : `${source.trialId} / ${source.candidateId} ${record?.trial.candidates.find(c => c.id === source.candidateId)?.label ?? ''}`
   const events = useMemo(() => table && lib ? allEventKeys(table).filter(k => target === 'haptic' || !isLoopCue(lib, parseEventKey(k).cue)) : [], [table, lib, target])
   const [event, setEvent] = useState(() => {
-    const wanted = [request.event, record && table ? trialEvent(table, record.trial.scene) : null, selected]
+    // A clip opened from an event ("edit as clip") or decided before goes back to that event by default.
+    const subject = source.kind === 'clip' ? source.clipId : `${source.trialId}/${source.candidateId}`
+    const marked = lib ? (marks[subject] ?? []).filter(m => m.project === lib.project_name && m.target === target).map(m => m.event).pop() : undefined
+    const wanted = [request.event, marked, record && table ? trialEvent(table, record.trial.scene) : null, selected]
     return wanted.find((k): k is string => !!k && events.includes(k)) ?? events[0] ?? ''
   })
   const ref = parseEventKey(event)

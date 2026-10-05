@@ -19,6 +19,7 @@ import { useEditor } from './editorContext'
 import { DecidedNotice } from './DecideDialog'
 import { EditorMenu, EditorMenuItem } from './EditorMenu'
 import { openEventDefault, openEventHaptic, openEventSound } from './eventAudio'
+import { openEventMaterialForEditing } from './eventEditing'
 import './EventsPanel.css'
 
 const LAST_PROJECT_KEY = 'hapbeat-events-project'
@@ -228,6 +229,7 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
         {e.sfx && <span className="events-field">{t('scene.sound.volume')} {editable
           ? <NumberField value={e.sfx.volume} min={0} max={2} step={0.05} label={t('scene.sound.volume')} onCommit={x => edit(tb => setOwnSfxVolume(tb, e.ref, x))} />
           : formatGain(e.sfx.volume)}</span>}
+        {sounds[0] && <EditAsClipButton event={key} target="sound" wav={sounds[0]} />}
       </div>}
       <p className="agent-muted">{t('events.soundDir', { dir: lib.paths.sounds })}</p>
     </>}
@@ -263,6 +265,7 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
           <span className="events-field">gain <NumberField value={r.gain} min={0} max={2} step={0.05} label={t('scene.route.gain')} onCommit={x => edit(tb => updateOwnRoute(tb, e.ref, i, { gain: x }))} /></span>
           <button type="button" className="scene-icon-btn" aria-label={t('scene.route.remove')} title={t('scene.route.remove')} onClick={() => edit(tb => removeOwnRoute(tb, e.ref, i))}>✕</button>
         </> : <span>{clips.length > 1 ? t('events.multiClips', { count: clips.length }) : first} × {atLabel(r.at)} × gain {formatGain(r.gain)}</span>}
+        {first && <EditAsClipButton event={key} target="haptic" wav={first} />}
       </div>
     })}
     {editable && <button type="button" className="toolbar-btn events-add" disabled={!free} title={t('events.addPositionHint')}
@@ -382,4 +385,18 @@ function TrialsSection({ project, eventKey: key }: { project: string; eventKey: 
     <h5>{t('events.trials.sound')}</h5>{list(linked.sound, t('events.trials.none'))}
     <h5>{t('events.trials.haptic')}</h5>{list(linked.haptic, t('events.trials.none'))}
   </section>
+}
+
+/** Opens the material in the editor as a clip to process with effects (the clip it was decided from when known); "→ Event" on it assigns it back. */
+function EditAsClipButton({ event, target, wav }: { event: string; target: DecideTarget; wav: string }) {
+  const { t } = useI18n()
+  const { focusEditorPanel } = useEditor()
+  const [busy, setBusy] = useState(false)
+  const open = async () => {
+    setBusy(true)
+    try { await openEventMaterialForEditing(event, target, wav); focusEditorPanel('waveform') }
+    catch (error) { useWaveformStore.getState().setError(error) }
+    finally { setBusy(false) }
+  }
+  return <button type="button" className="agent-icon-btn events-edit-clip" disabled={busy} title={t('events.editAsClipHint')} onClick={() => void open()}>{t('events.editAsClip')}</button>
 }
