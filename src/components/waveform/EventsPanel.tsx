@@ -66,7 +66,9 @@ export function EventsPanel() {
   // Cues only: a variant opened from elsewhere (Scene tab, an AI trial) shows its cue.
   const cue = selected ? parseEventKey(selected).cue : null
   const effective = table && cue ? effectiveEvent(table, { cue, variant: null }) : null
-  const block = (r: EventRow) => <EventRowButton key={r.key} row={r} selected={cue === r.key} onSelect={select} />
+  const requested = useOpenRequests()
+  const block = (r: EventRow) => <EventRowButton key={r.key} row={r} selected={cue === r.key} onSelect={select}
+    requested={{ sound: requested.has(`${r.key}|sound`), haptic: requested.has(`${r.key}|haptic`) }} />
   const listItems: ReactNode[] = [], done = new Set<string>()
   for (const r of rows) {
     if (done.has(r.key)) continue
@@ -157,15 +159,17 @@ function ProjectPicker() {
   </div>
 }
 
-function EventRowButton({ row, selected, onSelect }: { row: EventRow; selected: boolean; onSelect: (key: string) => void }) {
+function EventRowButton({ row, selected, onSelect, requested }: { row: EventRow; selected: boolean; onSelect: (key: string) => void; requested: { sound: boolean; haptic: boolean } }) {
   const { t } = useI18n()
-  // 音 未定 (yellow) / 音 なし 仮|OK (grey) / 音 仮|OK (blue | green); — for a loop cue's sound where the project has none. Fixed width.
-  const badge = (label: string, status: SoundStatus) => status === 'na' ? <span className="events-badge na">{label} —</span>
+  // 音 未定 (yellow) / 音 なし 仮|OK (grey) / 音 仮|OK (blue | green); — for a loop cue's sound where the project has none;
+  // 「依頼済み」 (purple) while a request to the agent for it is open. Fixed width.
+  const badge = (label: string, status: SoundStatus, asked: boolean) => asked ? <span className="events-badge requested" title={t('events.requested.hint')}>{label} {t('events.requested')}</span>
+    : status === 'na' ? <span className="events-badge na">{label} —</span>
     : <span className={`events-badge ${status.state} ${status.state === 'undecided' ? '' : status.review}`}>{label} {status.state === 'undecided' ? t('events.undecided')
       : `${status.state === 'none' ? `${t('events.noneShort')} ` : ''}${t(status.review === 'approved' ? 'events.reviewApproved' : 'events.reviewTentative')}`}</span>
   return <button type="button" role="option" aria-selected={selected} className={`events-row ${selected ? 'selected' : ''}`} onClick={() => onSelect(row.key)} title={row.description ?? ''}>
     <span className="events-row-name">{row.key}{row.loop && <small>{t('events.loop')}</small>}</span>
-    <span className="events-row-badges">{badge(t('events.badge.sound'), row.sound)}{badge(t('events.badge.haptic'), row.haptic)}</span>
+    <span className="events-row-badges">{badge(t('events.badge.sound'), row.sound, requested.sound)}{badge(t('events.badge.haptic'), row.haptic, requested.haptic)}</span>
     {row.description && <small className="events-row-desc">{row.description}</small>}
   </button>
 }
@@ -224,7 +228,7 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
       {!sounds.length && <p className="agent-muted">{t(e.decided.sfx ? 'events.soundNone' : 'events.undecidedSound')}</p>}
       <MaterialList items={sounds} label={t('events.sound')} active={sounds.find(s => previewId === `${key}|sound|${s}`) ?? null} onPlay={play}
         onReorder={set} onRemove={set}
-        extra={s => <MaterialActions event={key} target="sound" wav={s} />} badge={s => <RevisePendingBadge cue={key} target="sound" material={s} />}
+        extra={s => <MaterialActions event={key} target="sound" wav={s} />}
         below={s => <ReviseField cue={key} target="sound" material={s} />} />
       <Reserves cue={e.ref.cue} target="sound" />
       <select className="events-add-material" value="" aria-label={t('events.addSoundMulti')} title={t('events.soundDir', { dir: lib.paths.sounds })}
@@ -265,7 +269,7 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
         </div>
         <MaterialList items={clips} label={t('scene.route.clip')} active={clips.find(c => previewId === `${key}|haptic|${c}|${r.at}`) ?? null}
           onPlay={c => { if (!openEventHaptic(key, c, r.gain, r.at, true)) missing(c) }} onReorder={set} onRemove={set} minItems={1}
-          extra={c => <MaterialActions event={key} target="haptic" wav={c} />} badge={c => <RevisePendingBadge cue={key} target="haptic" material={c} />}
+          extra={c => <MaterialActions event={key} target="haptic" wav={c} />}
           below={c => <ReviseField cue={key} target="haptic" material={c} />} />
       </div>
     })}
@@ -386,19 +390,20 @@ function MaterialActions({ event, target, wav }: { event: string; target: Decide
   </span>
 }
 
-/** "Remake requested" on a material until a trial for its cue arrives (the request is then dropped). */
-function RevisePendingBadge({ cue, target, material }: { cue: string; target: 'sound' | 'haptic'; material: string }) {
-  const { t } = useI18n()
-  const pending = useEditorSettings(s => s.revisePending)
+/**
+ * Open requests to the agent per cue (`<cue>|sound` / `<cue>|haptic`): remakes (by the material's target) and
+ * "go to haptics"; answered ones (a trial for the cue arrived after them, a haptic one for haptics) are dropped.
+ */
+function useOpenRequests(): Set<string> {
+  const revise = useEditorSettings(s => s.revisePending)
+  const haptic = useEditorSettings(s => s.hapticPending)
   const trials = useAgentTrialStore(s => s.trials)
-  const mine = pending.filter(r => r.cue === cue && r.target === target && r.material === material)
-  const open = mine.filter(r => !reviseAnswered(r, trials))
+  const openRevise = useMemo(() => revise.filter(r => !reviseAnswered(r, trials)), [revise, trials])
+  const openHaptic = useMemo(() => haptic.filter(r => !hapticAnswered(r, trials)), [haptic, trials])
   useEffect(() => {
-    if (mine.length === open.length) return
-    const all = useEditorSettings.getState().revisePending
-    useEditorSettings.getState().update({ revisePending: all.filter(r => !(r.cue === cue && r.target === target && r.material === material && reviseAnswered(r, trials))) })
-  }, [mine.length, open.length, cue, target, material, trials])
-  return open.length ? <small className="events-revise-pending" title={t('events.requested.hint')}>{t('events.requested')}</small> : null
+    if (openRevise.length !== revise.length || openHaptic.length !== haptic.length) useEditorSettings.getState().update({ revisePending: openRevise, hapticPending: openHaptic })
+  }, [openRevise, openHaptic, revise.length, haptic.length])
+  return useMemo(() => new Set([...openRevise.map(r => `${parseEventKey(r.cue).cue}|${r.target}`), ...openHaptic.map(r => `${parseEventKey(r.cue).cue}|haptic`)]), [openRevise, openHaptic])
 }
 
 /** The one-line remake comment under a material row: Enter sends (hapbeat-agent-message@1 `revise`), Esc closes. */
@@ -438,15 +443,7 @@ function ReviseField({ cue, target, material }: { cue: string; target: 'sound' |
 function HapticRequestButton({ e }: { e: EffectiveEvent }) {
   const { t } = useI18n()
   const cue = eventKey(e.ref)
-  const pending = useEditorSettings(s => s.hapticPending)
-  const trials = useAgentTrialStore(s => s.trials)
   const [error, setError] = useState<string | null>(null)
-  const mine = pending.filter(r => r.cue === cue)
-  const waiting = mine.some(r => !hapticAnswered(r, trials))
-  useEffect(() => {
-    if (!mine.length || mine.some(r => !hapticAnswered(r, trials))) return
-    useEditorSettings.getState().update({ hapticPending: useEditorSettings.getState().hapticPending.filter(r => r.cue !== cue) })
-  }, [mine.length, cue, trials])
   const sound = sfxSounds(e.sfx)[0] ?? null
   const send = async () => {
     setError(null)
@@ -459,7 +456,6 @@ function HapticRequestButton({ e }: { e: EffectiveEvent }) {
   }
   const title = [t('events.hapticRequest.hint'), ...(e.decided.sfx ? [] : [t('events.hapticRequest.soundUndecided')]), ...(error ? [error] : [])].join('\n')
   return <span className="events-haptic-request">
-    <small className="events-revise-pending" style={{ visibility: waiting ? 'visible' : 'hidden' }} title={t('events.requested.hint')}>{t('events.requested')}</small>
     <button type="button" className={`agent-icon-btn ${error ? 'error' : ''}`} title={title} onClick={() => void send()}>{t('events.hapticRequest.button')}</button>
   </span>
 }

@@ -32,13 +32,15 @@
 .events-row-badges { display: flex; gap: 4px; flex-shrink: 0; }
 .events-row-desc { grid-column: 1 / -1; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Fixed width: the badge text changes between ✓ / 未 / — without moving the row. */
-.events-badge { display: inline-block; white-space: nowrap; min-width: 6.2em; padding: 0 5px; border-radius: 4px; font-size: 11px; text-align: center; border: 1px solid var(--border-light); color: var(--text-secondary); }
+.events-badge { display: inline-block; white-space: nowrap; min-width: 7.6em; padding: 0 5px; border-radius: 4px; font-size: 11px; text-align: center; border: 1px solid var(--border-light); color: var(--text-secondary); }
 .events-badge.undecided { border-color: #c9a34a; color: #e3c27a; }
 .events-badge.none { border-color: #6b7280; color: #9ca3af; }
 .events-badge.none.approved { background: rgba(107,114,128,.18); }
 .events-badge.set.approved, .events-badge.approved { border-color: #4f9e7a; color: #8dd5b1; background: rgba(79,158,122,.15); }
 .events-badge.set.tentative, .events-badge.tentative:not(.none) { border-color: #6b8fd6; color: #a9c3f0; }
 .events-badge.unset { border-color: #c9a34a; color: #e3c27a; }
+/* A request to the agent is open (remake / go to haptics). */
+.events-badge.requested { border-color: #a78bfa; color: #c4b5fd; background: rgba(167,139,250,.15); }
 .events-sec-head { display: flex; align-items: center; gap: 8px; }
 .events-review { display: inline-flex; align-items: center; gap: 4px; font-weight: normal; }
 .events-detail { display: flex; flex-direction: column; gap: 6px; }
@@ -97,10 +99,9 @@
 .events-reserves:hover { opacity: .9; }
 .events-reserve { border-style: dashed; }
 .events-mat-actions { display: inline-flex; align-items: center; gap: 2px; }
-.events-revise-pending { margin-left: 6px; padding: 0 5px; border-radius: 6px; border: 1px solid #6b8fd6; color: #a9c3f0; font-size: 10px; }
 /* The remake comment: one full-width line under its row. */
 .events-revise { grid-column: 1 / -1; display: flex; gap: 6px; align-items: center; min-width: 0; }
 .events-revise input { flex: 1; min-width: 0; }
-/* "Go to haptics" at the right end of the haptic heading (its "requested" mark keeps its place). */
+/* "Go to haptics" at the right end of the sound heading. */
 .events-haptic-request { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; flex: none; font-weight: normal; }
 .events-head-field + .events-haptic-request { margin-left: 8px; }
