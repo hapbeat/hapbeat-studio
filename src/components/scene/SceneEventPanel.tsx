@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
+import { useSceneSettings } from '@/stores/sceneSettings'
 import { isLoopCue, pairedProblem, PICK_MODES, routeClips, sfxSounds, soundAllowed, VARIANT_NAME, clipsForCue, type CueTable, type CueVariation, type VariationNumberKey, RAMP_CURVES, type RampCurve } from '@/utils/sceneCueTable'
 import {
   addVariant, effectiveEvent, eventKey, pairedClips, removeVariant, resolveEventName, setOverride, setOwnSfxVolume, setRouteClips, setSfxSounds, setVariation,
@@ -50,7 +51,7 @@ export function SceneEventPanel() {
       <Variants table={table} e={e} select={select} edit={edit} />
       {e.ref.variant !== null && <VariantScale e={e} edit={edit} />}
       {run?.repeating && <button type="button" className="scene-icon-btn scene-event-run" title={t('scene.event.runHint')}
-        onClick={ev => { ev.currentTarget.blur(); runtime.audio(); runtime.playFull(run.start) }}>{t('scene.event.run', { at: run.marks[0].t.toFixed(1), count: run.marks.filter(m => m.target).length })}</button>}
+        onClick={ev => { ev.currentTarget.blur(); runtime.audio(); runtime.playFull(Math.max(0, run.marks[0].t - useSceneSettings.getState().leadSec)) }}>{t('scene.event.run', { at: run.marks[0].t.toFixed(1), count: run.marks.filter(m => m.target).length })}</button>}
     </div>
     {!loop || lib.loop_cue_sounds ? <Sounds e={e} edit={edit} allowed={soundAllowed(lib, e.ref.cue)} /> : null}
     <Clips table={table} e={e} edit={edit} />

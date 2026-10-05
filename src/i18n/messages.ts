@@ -333,6 +333,7 @@ export const messages = defineMessages({
   'scene.revert': { ja: '未保存の変更を破棄', en: 'Discard unsaved changes' },
   'scene.confirmDiscard': { ja: '未保存の割り当て変更を捨てて、プロジェクトの内容を読み込み直しますか？', en: 'Discard the unsaved cue changes and reload the project?' },
   'scene.sendHaptics': { ja: '触覚を送信する（シーン確認の再生のみ）', en: 'Send haptics (Scene playback only)' },
+  'scene.leadHint': { ja: '発生を選んで再生するとき（タイムライン・発生一覧の ▶・イベントの全発生の通し再生）、印の何秒前から始めるか（既定 1 秒）', en: 'How many seconds before the mark playing a firing starts (timeline, occurrences ▶, an event’s run; default 1 s).' },
   'scene.pcSound': { ja: 'PC で効果音を鳴らす', en: 'Play cue sounds on this PC' },
   'scene.settings.heading': { ja: 'シーン確認の設定（レイアウト等）', en: 'Scene settings (layout etc.)' },
   'scene.settings.unreadable': { ja: 'プロジェクト内の設定を読めないため、ブラウザの設定を使います（{error}）。元のファイルは {file} として残しました。', en: 'The settings in the project are unreadable, so the browser copy is used ({error}). The original was kept as {file}.' },

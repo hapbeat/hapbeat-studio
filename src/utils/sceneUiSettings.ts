@@ -1,5 +1,5 @@
 /**
- * Scene tab UI preferences (dock layout, PC sound, haptic lead, loop, send haptics). Kept in
+ * Scene tab UI preferences (dock layout, PC sound, haptic lead, loop, send haptics, lead-in before a mark). Kept in
  * three places like the editor's: localStorage, `Saved/HapticViewer/studio-scene-ui.json`
  * in the opened game project, and a user-exported JSON file. "Send haptics" is on by
  * default and keeps its last state across reloads.
@@ -16,11 +16,13 @@ export interface SceneUiSettings {
   loop: boolean
   /** Send haptics to the devices during Scene playback (on by default; kept across reloads). */
   sendHaptics: boolean
+  /** Playing a firing (timeline, occurrences ▶, an event's run) starts this many seconds before its mark (0..10). */
+  leadSec: number
   /** dockview `toJSON()` output; null = default layout. */
   dockLayout: Record<string, unknown> | null
 }
 
-export const DEFAULT_SCENE_UI: SceneUiSettings = { pcSound: true, hapticLeadMs: 0, loop: true, sendHaptics: true, dockLayout: null }
+export const DEFAULT_SCENE_UI: SceneUiSettings = { pcSound: true, hapticLeadMs: 0, loop: true, sendHaptics: true, leadSec: 1, dockLayout: null }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const isDockLayout = (value: unknown): value is Record<string, unknown> => isRecord(value) && isRecord(value.grid) && isRecord(value.panels)
@@ -34,6 +36,7 @@ export function sanitizeSceneUi(value: unknown): SceneUiSettings {
     hapticLeadMs: typeof v.hapticLeadMs === 'number' && Number.isFinite(v.hapticLeadMs) ? Math.max(-200, Math.min(400, v.hapticLeadMs)) : d.hapticLeadMs,
     loop: typeof v.loop === 'boolean' ? v.loop : d.loop,
     sendHaptics: typeof v.sendHaptics === 'boolean' ? v.sendHaptics : d.sendHaptics,
+    leadSec: typeof v.leadSec === 'number' && Number.isFinite(v.leadSec) ? Math.max(0, Math.min(10, v.leadSec)) : d.leadSec,
     dockLayout: isDockLayout(v.dockLayout) ? v.dockLayout : d.dockLayout,
   }
 }

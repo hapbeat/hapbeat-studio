@@ -127,7 +127,7 @@ export function SceneTimelinePanel() {
     if (!useSceneStore.getState().items.length) return
     const r = event.currentTarget.getBoundingClientRect(), x = event.clientX - r.left, y = event.clientY - r.top
     const hit = hits.current.filter(m => y >= m.y0 && y <= m.y1 && Math.abs(m.x - x) <= 5).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0]
-    if (hit) { useSceneStore.getState().selectCue(hit.name, hit.t); runtime.video.pause(); runtime.seek(hit.t - 0.5); return }
+    if (hit) { useSceneStore.getState().selectCue(hit.name, hit.t); runtime.video.pause(); runtime.seek(hit.t - useSceneSettings.getState().leadSec); return }
     runtime.seek(x / r.width * (runtime.video.duration || 0))
   }
 

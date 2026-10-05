@@ -8,6 +8,7 @@ import { sceneUiSettings, useSceneSettings } from '@/stores/sceneSettings'
 import { parseSceneUiFile, serializeSceneUi } from '@/utils/sceneUiSettings'
 import { SCENE_PANELS, SCENE_PANEL_TITLES, toggleScenePanel } from './SceneDockLayout'
 import { useScene } from './sceneContext'
+import '@/components/waveform/EditorScenePanel.css'
 import { useSceneProjectActions } from './useSceneProjectActions'
 
 /** Scene header: project ▾ · save, the shared device pill, View and "…" menus. Everything else lives in panels. */
@@ -20,6 +21,7 @@ export function SceneTopBar({ dockApi, notice }: { dockApi: DockviewApi | null; 
   const dirty = useSceneStore(s => s.dirty)
   const sendHaptics = useSceneSettings(s => s.sendHaptics)
   const pcSound = useSceneSettings(s => s.pcSound)
+  const leadSec = useSceneSettings(s => s.leadSec)
   const settingsInput = useRef<HTMLInputElement>(null)
   const [openPanels, setOpenPanels] = useState<string[]>([])
   useEffect(() => {
@@ -58,6 +60,11 @@ export function SceneTopBar({ dockApi, notice }: { dockApi: DockviewApi | null; 
       <label><input type="checkbox" checked={sendHaptics} onChange={e => useSceneSettings.getState().update({ sendHaptics: e.target.checked })} />{t('scene.sendHaptics')}</label>
       <label><input type="checkbox" checked={pcSound} onChange={e => useSceneSettings.getState().update({ pcSound: e.target.checked })} />{t('scene.pcSound')}</label>
     </div>} />
+    {/* Where playing a firing starts (timeline, occurrences ▶, an event's run), as in the editor. */}
+    <label className="editor-scene-lead" title={t('scene.leadHint')}>{t('editor.scene.lead')}
+      <input type="number" min={0} max={10} step={0.5} value={leadSec} aria-label={t('scene.leadHint')}
+        onChange={e => { const x = parseFloat(e.target.value); if (Number.isFinite(x)) useSceneSettings.getState().update({ leadSec: Math.max(0, Math.min(10, x)) }) }} />
+      {t('editor.scene.leadUnit')}</label>
     <EditorMenu label={`${t('editor.viewMenu')} ▾`} disabled={!dockApi}>
       <EditorMenuSection label={t('editor.viewPanels')}>
         {SCENE_PANELS.map(id => <EditorMenuItem key={id} keepOpen checked={openPanels.includes(id)} onSelect={() => dockApi && toggleScenePanel(dockApi, id, t)}>{t(SCENE_PANEL_TITLES[id])}</EditorMenuItem>)}

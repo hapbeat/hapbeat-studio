@@ -6,10 +6,11 @@ import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { allEventKeys, effectiveEvent, resolveEventName, scaleAt } from '@/utils/cueEvents'
 import { occurrences, runPosition } from '@/utils/sceneSegments'
 import { useScene } from './sceneContext'
+import { useSceneSettings } from '@/stores/sceneSettings'
 
 /**
  * Every firing of one event in the recording (DEC-085: moments are checked here, not in the
- * editor). ▶ plays the full replay from 1 s before it and selects the cue, so the Event panel edits that
+ * editor). ▶ plays the full replay from the lead-in setting before it and selects the cue, so the Event panel edits that
  * event's values (multipliers, materials — per event, never per moment). Each row shows the firing's effective
  * multiplier (a variant's sfxVolume / hapticsGain ramped to rampTo along rampCurve, or its rampSteps, by which firing of its run it is).
  * "Reassign" sends the agent a request to make that firing another event / variant
@@ -39,7 +40,7 @@ export function SceneOccurrences() {
   const [sent, setSent] = useState<Record<string, true>>({})
   const [status, setStatus] = useState('')
   if (!data || !counts.length) return null
-  const play = (at: number) => { runtime.audio(); useSceneStore.getState().selectCue(name!, at); runtime.playFull(Math.max(0, at - 1)) }
+  const play = (at: number) => { runtime.audio(); useSceneStore.getState().selectCue(name!, at); runtime.playFull(Math.max(0, at - useSceneSettings.getState().leadSec)) }
   return <div className="scene-occ">
     <label className="scene-occ-pick" title={t('scene.occ.hint')}>
       <span className="scene-dim">{t('scene.occ.label')}</span>
