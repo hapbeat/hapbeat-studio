@@ -309,7 +309,7 @@ export const messages = defineMessages({
   "editor.agent.termMatch": { ja: "「{term}」らしさ", en: "Match for \"{term}\"" },
   "editor.agent.tooWeak": { ja: "足りない", en: "too weak" },
   "editor.agent.justRight": { ja: "ちょうど", en: "just right" },
-  "editor.agent.tooStrong": { ja: "過剰", en: "too strong" },
+  "editor.agent.tooStrong": { ja: "強すぎ", en: "too strong" },
   "editor.agent.notSet": { ja: "未設定", en: "not set" },
   "editor.agent.clear": { ja: "クリア", en: "Clear" },
   "editor.agent.directions": { ja: "どう変えると良いか", en: "What should change" },
@@ -1147,8 +1147,6 @@ export const messages = defineMessages({
   'editor.agent.useRangeRemove': { ja: 'この範囲を削除', en: 'Remove this range' },
   'editor.agent.playHint': { ja: 'この候補を試聴して再生（Space でも可）。PC 音・触覚の送信は通常の再生と同じ設定に従います', en: 'Audition and play this candidate (Space works too). PC audio and haptics follow the normal playback settings.' },
   'editor.agent.draftRestored': { ja: '保存前の評価があります（下書きを復元しました）。', en: 'Unsaved rating restored from a draft.' },
-  'editor.agent.moreRating': { ja: '詳しく（方向・使う範囲・コメント）', en: 'More (directions, kept range, comment)' },
-  'editor.agent.moreSet': { ja: '{count} 件入力済み', en: '{count} set' },
   'editor.agent.showMore': { ja: 'さらに表示（{count} 件）', en: 'Show {count} more' },
   'editor.agent.showFewer': { ja: '新しいものだけ表示', en: 'Show only the newest' },
   'editor.agent.shortIdHint': { ja: 'エージェントとの会話で使う短い番号（試行 T27、候補 T27-B）', en: 'Short id for talking with the agent (trial T27, candidate T27-B)' },
@@ -1160,6 +1158,8 @@ export const messages = defineMessages({
   'editor.agent.useForPlaceholder': { ja: '用途（例: 待機中の唸り、息を吐くとき）', en: 'Good for (e.g. idle growl, on the out-breath)' },
   'editor.agent.severalUsable': { ja: '複数を採用候補にしています（{ids}）。素材を複数にしてランダムに鳴らす（繰り返しの揺らぎ）か、別バリエーションにするか、エージェントに相談してください。', en: 'Several candidates are marked usable ({ids}). Ask the agent whether to use them as several materials played at random (repetition variation) or as separate variants.' },
   'editor.agent.useNeedsOverall': { ja: '「使える」の候補に総合点を付けると、イベントへ自動で割り当てます。', en: 'Give the "use" candidate an overall score to assign it to the event automatically.' },
+  'editor.agent.termMatchHint': { ja: 'この音・振動が、狙いの言葉にどれだけ合うか（−2 足りない … 0 ちょうど … +2 強すぎ）', en: 'How well this sound / vibration matches the target word (−2 too weak … 0 just right … +2 too strong)' },
+  'editor.agent.cardMenu': { ja: '候補の操作（手動の採用・決定）', en: 'Candidate actions (adopt / decide by hand)' },
 })
 
 export type MessageId = keyof typeof messages
