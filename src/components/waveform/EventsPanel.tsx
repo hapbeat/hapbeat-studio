@@ -212,11 +212,10 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
   const play = (s: string) => { if (!e.sfx || !openEventSound(key, s, e.sfx.volume, true)) missing(s) }
   const set = (list: string[]) => edit(tb => setSfxSounds(tb, e.ref, list))
   return <section className="events-sec">
-    <h4 className="events-sec-head">{t('events.sound')}{allowed && e.decided.sfx && <ReviewToggle e={e} field="sfx" edit={edit} />}
+    <h4 className="events-sec-head">{t('events.sound')}{allowed && <><ReviewToggle e={e} field="sfx" edit={edit} /><DecisionBar e={e} field="sfx" edit={edit} /></>}
       {allowed && e.sfx && <span className="events-field events-head-field">{t('scene.sound.volume')}
         <NumberField value={e.sfx.volume} min={0} max={2} step={0.05} label={t('scene.sound.volume')} onCommit={x => edit(tb => setOwnSfxVolume(tb, e.ref, x))} /></span>}</h4>
     {!allowed ? <p className="agent-muted">{t('scene.sound.loopCue')}</p> : <>
-      <DecisionBar e={e} field="sfx" edit={edit} />
       {loop && <p className="agent-muted">{t('events.loopSoundHint')}</p>}
       {!sounds.length && <p className="agent-muted">{t(e.decided.sfx ? 'events.soundNone' : 'events.undecidedSound')}</p>}
       <MaterialList items={sounds} label={t('events.sound')} active={sounds.find(s => previewId === `${key}|sound|${s}`) ?? null} onPlay={play}
@@ -241,9 +240,8 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
   const missing = (name: string) => useWaveformStore.getState().setError(t('events.preview.missing', { name }))
   const free = positionsForCue(lib, e.ref.cue).some(a => !e.haptics.some(r => r.at === a))
   return <section className="events-sec">
-    <h4 className="events-sec-head">{t('events.haptic')}{e.decided.haptics && <ReviewToggle e={e} field="haptics" edit={edit} />}</h4>
+    <h4 className="events-sec-head">{t('events.haptic')}<ReviewToggle e={e} field="haptics" edit={edit} /><DecisionBar e={e} field="haptics" edit={edit} /></h4>
     {!loop && !e.decided.sfx && <p className="events-hint">{t('events.soundFirst')}</p>}
-    <DecisionBar e={e} field="haptics" edit={edit} />
     {!e.haptics.length && <p className="agent-muted">{t(e.decided.haptics ? 'events.hapticNone' : 'events.undecidedHaptic')}</p>}
     {e.haptics.map((r, i) => {
       const clips = routeClips(r), set = (list: string[]) => edit(tb => setRouteClips(tb, e.ref, i, list))
@@ -301,11 +299,11 @@ function EditAsClipButton({ event, target, wav }: { event: string; target: Decid
   return <button type="button" className="agent-icon-btn events-edit-clip" disabled={busy} title={t('events.editAsClipHint')} onClick={() => void open()}>{t('events.editAsClip')}</button>
 }
 
-/** "Tentative" ↔ "OK" of an assigned sound / haptic (decisions start tentative; saved with the table). */
+/** "Tentative" ↔ "OK" of an assigned sound / haptic (decisions start tentative; saved with the table). Kept in place (hidden) while undecided. */
 function ReviewToggle({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'haptics'; edit: Edit }) {
   const { t } = useI18n()
   const approved = e.review[field] === 'approved'
-  return <span className="events-review">
+  return <span className="events-review" style={{ visibility: e.decided[field] ? 'visible' : 'hidden' }}>
     <span className={`events-badge ${e.review[field]}`}>{t(approved ? 'events.reviewApproved' : 'events.reviewTentative')}</span>
     <button type="button" className="agent-icon-btn" title={t(approved ? 'events.reviewBackHint' : 'events.reviewApproveHint')}
       onClick={() => edit(tb => setReview(tb, e.ref, field, approved ? 'tentative' : 'approved'))}>{t(approved ? 'events.reviewBack' : 'events.reviewApprove')}</button>
@@ -319,8 +317,9 @@ function ReviewToggle({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'h
 function DecisionBar({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'haptics'; edit: Edit }) {
   const { t } = useI18n()
   const isNone = e.decided[field] && (field === 'sfx' ? !e.sfx : e.haptics.length === 0)
-  return <div className="events-decision">
-    {!isNone && <button type="button" className="agent-icon-btn" title={t(field === 'sfx' ? 'events.setNoneSoundHint' : 'events.setNoneHapticHint')} onClick={() => edit(tb => setNone(tb, e.ref, field))}>{t('events.setNone')}</button>}
-    {e.ref.variant === null && e.decided[field] && <button type="button" className="agent-icon-btn" title={t('events.setUndecidedHint')} onClick={() => edit(tb => setUndecided(tb, e.ref.cue, field))}>{t('events.setUndecided')}</button>}
-  </div>
+  // Fixed slots on the section's head line: a button that does not apply is hidden, not removed (nothing moves).
+  return <span className="events-decision">
+    <button type="button" className="agent-icon-btn" style={{ visibility: isNone ? 'hidden' : 'visible' }} title={t(field === 'sfx' ? 'events.setNoneSoundHint' : 'events.setNoneHapticHint')} onClick={() => edit(tb => setNone(tb, e.ref, field))}>{t('events.setNone')}</button>
+    <button type="button" className="agent-icon-btn" style={{ visibility: e.ref.variant === null && e.decided[field] ? 'visible' : 'hidden' }} title={t('events.setUndecidedHint')} onClick={() => edit(tb => setUndecided(tb, e.ref.cue, field))}>{t('events.setUndecided')}</button>
+  </span>
 }

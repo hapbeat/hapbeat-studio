@@ -75,7 +75,10 @@
 .editor-event-badges { display: flex; flex-wrap: wrap; gap: 3px; }
 .editor-event-badge { padding: 0 5px; border-radius: 4px; font-size: 10px; font-weight: normal; border: 1px solid #4f9e7a; color: #8dd5b1; }
 
-.events-decision { display: flex; gap: 4px; }
+.events-decision { display: inline-flex; gap: 4px; flex: none; font-weight: normal; }
+/* Fixed widths: the head line never shifts when a decision or review changes. */
+.events-review .agent-icon-btn, .events-decision .agent-icon-btn { width: 6.5em; justify-content: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.events-sec-head { flex-wrap: wrap; }
 
 /* Material candidates (MaterialList): ▶ · name (shrinks) · ★ · remove · extra — one grid row each. */
 .events-materials { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }

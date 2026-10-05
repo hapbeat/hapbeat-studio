@@ -26,7 +26,8 @@ export function MaterialList({ items, active, onPlay, onReorder, onRemove, minIt
     {items.map((name, i) => <li key={name} className={`events-mat ${active === name ? 'active' : ''}`}>
       <button type="button" className="agent-icon-btn" aria-label={t('events.mat.play', { name })} title={t('events.mat.play', { name })} onClick={() => onPlay(name)}>▶</button>
       <span className="events-mat-name" title={name}>{name}</span>
-      {onReorder ? <button type="button" className={`agent-icon-btn events-mat-star ${i === 0 ? 'on' : ''}`} disabled={i === 0}
+      {/* ★ only with two or more candidates (one is trivially the representative). */}
+      {items.length < 2 ? <span /> : onReorder ? <button type="button" className={`agent-icon-btn events-mat-star ${i === 0 ? 'on' : ''}`} disabled={i === 0}
         aria-label={t(i === 0 ? 'events.mat.representative' : 'events.mat.makeRepresentative')} title={t(i === 0 ? 'events.mat.representative' : 'events.mat.makeRepresentative')}
         onClick={() => onReorder([name, ...items.filter(x => x !== name)])}>{i === 0 ? '★' : '☆'}</button>
         : <span className="events-mat-star on" title={i === 0 ? t('events.mat.representative') : ''}>{i === 0 ? '★' : ''}</span>}
