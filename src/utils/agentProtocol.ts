@@ -79,7 +79,8 @@ export interface CandidateFile {
   renderedAt: string
 }
 export interface CandidateRating {
-  overall: number
+  /** 1–5; absent = "no score" (the candidate was only commented on). */
+  overall?: number
   termMatch?: Record<string, number>
   directions?: Record<string, -1 | 0 | 1>
   comment?: string
@@ -117,6 +118,8 @@ export interface RatingBody {
   best?: string
   /** "Every other candidate is about the same as the best": the others may be left unrated. Recorded only; aggregation does not infer scores from it. */
   othersSimilar?: true
+  /** The user's comment on the whole trial (comparing candidates, "B is closest, heavier"), ≤ 4000 characters. */
+  comment?: string
   candidates: Record<string, CandidateRating>
 }
 /** trials/<YYYY-MM>/<id>/rating.json — latest rating plus every previous one. */
@@ -206,9 +209,11 @@ export function ratingError(rating: RatingBody, trial: TrialRequest, dimensionId
     if ('volume' in ctx || 'volumeWiper' in ctx) return 'context.volume was replaced by deviceWiper / volumeLabel'
   }
   if (!isObject(rating.candidates)) return 'candidates must be an object'
+  if (!optString(rating.comment, 4000)) return 'comment is too long'
   for (const [cid, r] of Object.entries(rating.candidates)) {
     if (!cids.has(cid)) return `Unknown candidate "${cid}"`
-    if (!Number.isInteger(r.overall) || r.overall < 1 || r.overall > 5) return `${cid}: overall must be 1-5`
+    if (r.overall !== undefined && (!Number.isInteger(r.overall) || r.overall < 1 || r.overall > 5)) return `${cid}: overall must be 1-5`
+    if (r.overall === undefined && !(r.comment?.trim() || r.directions || r.useRange || r.termMatch || r.useFor)) return `${cid}: give an overall score or a comment`
     for (const v of Object.values(r.termMatch ?? {})) if (!Number.isFinite(v) || v < -2 || v > 2) return `${cid}: termMatch must be -2..+2`
     for (const [dim, v] of Object.entries(r.directions ?? {})) if (!dimensionIds.includes(dim) || ![-1, 0, 1].includes(v)) return `${cid}: invalid direction "${dim}"`
     if (!optString(r.comment, 4000)) return `${cid}: comment is too long`

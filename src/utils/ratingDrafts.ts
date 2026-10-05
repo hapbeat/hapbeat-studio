@@ -11,7 +11,7 @@ import { writeEditorFile } from './editorFolder'
  */
 export const DRAFT_FORMAT = 'hapbeat-rating-draft@1'
 export const DRAFT_DIR = 'rating-drafts'
-export const DRAFT_DEBOUNCE_MS = 600
+export const DRAFT_DEBOUNCE_MS = 300
 const storageKey = (trialId: string) => `hapbeat-rating-draft:${trialId}`
 
 export interface RatingDraft { format: typeof DRAFT_FORMAT; trialId: string; savedAt: string; form: RatingForm }
@@ -38,6 +38,7 @@ export function parseRatingDraft(text: string | null, trial: Pick<TrialRequest, 
     candidates[id] = { overall, termMatch, directions, comment: str(c.comment), useRange, verdict, useFor: str(c.useFor).slice(0, 200) }
   }
   const form: RatingForm = {
+    comment: str(f.comment).slice(0, 4000),
     context: { device: str(ctx.device), position: str(ctx.position), deviceWiper: str(ctx.deviceWiper), volumeLabel: str(ctx.volumeLabel), note: str(ctx.note) },
     candidates,
   }
@@ -70,4 +71,70 @@ export async function clearRatingDraft(root: FileSystemDirectoryHandle | null, t
   if (!root) return
   try { await (await draftDir(root, false)).removeEntry(`${trialId}.json`) }
   catch (error) { if (!(error instanceof DOMException && error.name === 'NotFoundError')) throw error }
+}
+
+type DraftTrial = Pick<TrialRequest, 'id' | 'candidates' | 'terms'>
+export interface DraftStores {
+  readLocal: (trial: DraftTrial) => RatingDraft | null
+  readFolder: (trial: DraftTrial) => Promise<RatingDraft | null>
+  /** Writes both copies (the localStorage one synchronously). */
+  write: (trialId: string, form: RatingForm, savedAt: string) => Promise<void>
+  clear: (trialId: string) => Promise<void>
+}
+
+/**
+ * Keeps unsaved rating forms across trial switches, reloads and restarts.
+ * Opening a trial always restores: this page's memory, else the stored draft
+ * (localStorage now, the newer folder copy when it arrives — unless the user
+ * typed meanwhile). Every change is written after `delayMs` (and at once on
+ * flush, e.g. when the page is hidden); only `done` (saved, moving on) removes it.
+ * Nothing here depends on React effects, so a double-run effect (StrictMode)
+ * or an auto-open racing the restore cannot wipe a draft.
+ */
+export class DraftKeeper {
+  private memory = new Map<string, { form: RatingForm; savedAt: string }>()
+  private pending = new Map<string, { timer: ReturnType<typeof setTimeout>; form: RatingForm; savedAt: string }>()
+  constructor(private stores: DraftStores, private now: () => string = () => new Date().toISOString(), private delayMs = DRAFT_DEBOUNCE_MS) {}
+
+  /** What to show when `trial` opens; `savedAt` identifies the version shown (null = fresh form). */
+  open(trial: DraftTrial, fresh: () => RatingForm): { form: RatingForm; restored: boolean; savedAt: string | null } {
+    const m = this.memory.get(trial.id)
+    if (m) return { form: m.form, restored: true, savedAt: m.savedAt }
+    const local = this.stores.readLocal(trial)
+    if (local) { this.memory.set(trial.id, { form: local.form, savedAt: local.savedAt }); return { form: local.form, restored: true, savedAt: local.savedAt } }
+    return { form: fresh(), restored: false, savedAt: null }
+  }
+  /** The folder copy when it is newer than the version shown and nothing was typed since; it becomes the current draft. */
+  async newerFromFolder(trial: DraftTrial, shownSavedAt: string | null): Promise<RatingDraft | null> {
+    const found = await this.stores.readFolder(trial)
+    if (!found) return null
+    const current = this.memory.get(trial.id)
+    if ((current?.savedAt ?? null) !== shownSavedAt) return null
+    if (shownSavedAt && Date.parse(found.savedAt) <= Date.parse(shownSavedAt)) return null
+    this.memory.set(trial.id, { form: found.form, savedAt: found.savedAt })
+    return found
+  }
+  /** Records a change: memory now, the stores after the debounce. */
+  change(trialId: string, form: RatingForm) {
+    const savedAt = this.now()
+    this.memory.set(trialId, { form, savedAt })
+    const before = this.pending.get(trialId)
+    if (before) clearTimeout(before.timer)
+    const timer = setTimeout(() => { this.pending.delete(trialId); void this.stores.write(trialId, form, savedAt).catch(() => {}) }, this.delayMs)
+    this.pending.set(trialId, { timer, form, savedAt })
+  }
+  /** Writes pending changes now (page hide / unload). */
+  flush() {
+    for (const [trialId, p] of this.pending) { clearTimeout(p.timer); void this.stores.write(trialId, p.form, p.savedAt).catch(() => {}) }
+    this.pending.clear()
+  }
+  /** The rating was saved: the draft goes (memory, pending write, both stored copies). */
+  async done(trialId: string) {
+    const p = this.pending.get(trialId)
+    if (p) clearTimeout(p.timer)
+    this.pending.delete(trialId)
+    this.memory.delete(trialId)
+    await this.stores.clear(trialId)
+  }
+  has(trialId: string) { return this.memory.has(trialId) }
 }

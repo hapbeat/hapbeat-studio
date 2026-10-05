@@ -118,6 +118,18 @@ describe('KnowledgeFolder', () => {
     expect((await root.json<{ trials: unknown[] }>('haptic-knowledge/index.json')).trials).toHaveLength(1)
     expect(await new Response(await folder.readCandidateAudio('2026-09', 't1', 'A')).text()).toBe('wav')
   })
+
+  it('sets a trial aside for later (reason "later") and restores it', async () => {
+    const root = new MemoryDirectory('root')
+    const folder = await KnowledgeFolder.open(root.asHandle())
+    const r = record('t1', ['ごわごわ'], null)
+    await folder.writeTrial('2026-09', r.trial)
+    await folder.dismissTrial('2026-09', 't1', '2026-10-05T10:00:00+09:00')
+    expect(await root.json('haptic-knowledge/trials/2026-09/t1/dismissed.json')).toEqual({ format: 'hapbeat-trial-dismissed@1', reason: 'later', dismissedAt: '2026-10-05T10:00:00+09:00' })
+    expect((await folder.listTrials())[0].dismissed).toBe('2026-10-05T10:00:00+09:00')
+    await folder.restoreTrial('2026-09', 't1')
+    expect((await folder.listTrials())[0].dismissed).toBeUndefined()
+  })
 })
 
 describe('appendProposedInsight', () => {

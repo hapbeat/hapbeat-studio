@@ -22,7 +22,8 @@ export interface CandidateRatingForm {
 /** Text fields of the conditions; `deviceWiper` is typed only when the helper cannot report it. */
 export interface RatingContextForm { device: string; position: string; deviceWiper: string; volumeLabel: string; note: string }
 /** No trial-level "best" input: `best` is derived on save (autoBest). */
-export interface RatingForm { context: RatingContextForm; candidates: Record<string, CandidateRatingForm> }
+/** `comment`: the comment on the whole trial (comparisons). */
+export interface RatingForm { context: RatingContextForm; comment: string; candidates: Record<string, CandidateRatingForm> }
 
 export const EMPTY_CONTEXT: RatingContextForm = { device: '', position: '', deviceWiper: '', volumeLabel: '', note: '' }
 export const POSITION_SUGGESTIONS = ['neck', 'chest', 'back', 'wrist', 'waist'] as const
@@ -38,40 +39,39 @@ export function ratingToForm(trial: TrialRequest, rating: RatingBody | null, rem
   const candidates: Record<string, CandidateRatingForm> = {}
   for (const c of trial.candidates) {
     const saved = rating?.candidates[c.id]
-    candidates[c.id] = saved ? { overall: saved.overall, termMatch: { ...saved.termMatch }, directions: { ...saved.directions }, comment: saved.comment ?? '', useRange: (saved.useRange ?? []).map(r => [r[0], r[1]] as [number, number]), verdict: saved.verdict ?? null, useFor: saved.useFor ?? '' } : emptyCandidate()
+    candidates[c.id] = saved ? { overall: saved.overall ?? null, termMatch: { ...saved.termMatch }, directions: { ...saved.directions }, comment: saved.comment ?? '', useRange: (saved.useRange ?? []).map(r => [r[0], r[1]] as [number, number]), verdict: saved.verdict ?? null, useFor: saved.useFor ?? '' } : emptyCandidate()
   }
-  return { context, candidates }
+  return { context, comment: rating?.comment ?? '', candidates }
 }
 
-const touched = (c: CandidateRatingForm) => Object.keys(c.termMatch).length > 0 || Object.keys(c.directions).length > 0 || c.comment.trim() !== '' || c.useRange.length > 0 || c.verdict !== null || c.useFor.trim() !== ''
+const touched = (c: CandidateRatingForm) => Object.keys(c.termMatch).length > 0 || Object.keys(c.directions).length > 0 || c.comment.trim() !== '' || c.useRange.length > 0 || c.useFor.trim() !== ''
 
 /** Why the form cannot be saved yet: nothing rated, or a candidate has inputs but no overall score. */
-export function ratingFormIssue(form: RatingForm): { kind: 'none-rated' } | { kind: 'missing-overall'; candidateId: string } | { kind: 'bad-wiper' } | null {
+/** Why the form cannot be saved yet: nothing at all (no score and no comment anywhere), or a bad wiper. A candidate without a score is saved as "no score". */
+export function ratingFormIssue(form: RatingForm): { kind: 'none-rated' } | { kind: 'bad-wiper' } | null {
   const wiper = form.context.deviceWiper.trim()
   if (wiper && parseWiper(wiper) === null) return { kind: 'bad-wiper' }
-  const entries = Object.entries(form.candidates)
-  const missing = entries.find(([, c]) => c.overall === null && touched(c))
-  if (missing) return { kind: 'missing-overall', candidateId: missing[0] }
-  return entries.some(([, c]) => c.overall !== null) ? null : { kind: 'none-rated' }
+  const anything = form.comment.trim() !== '' || Object.values(form.candidates).some(c => c.overall !== null || touched(c))
+  return anything ? null : { kind: 'none-rated' }
 }
 
-/** Builds the rating body. Only candidates with an overall score are included; unset fields are omitted. */
+/** Builds the rating body. Candidates with a score or any input are included (no score = `overall` absent); unset fields are omitted. */
 export function formToRating(form: RatingForm, trial: TrialRequest, ratedAt: string): RatingBody {
   const best = autoBest(form, trial.candidates.map(c => c.id))
   const candidates: RatingBody['candidates'] = {}
   for (const c of trial.candidates) {
     const f = form.candidates[c.id]
-    if (!f || f.overall === null) continue
+    if (!f || (f.overall === null && !touched(f))) continue
     const termMatch = Object.fromEntries(trial.terms.filter(term => f.termMatch[term] !== undefined).map(term => [term, f.termMatch[term]]))
     const comment = f.comment.trim()
     candidates[c.id] = {
-      overall: f.overall,
+      ...(f.overall !== null ? { overall: f.overall } : {}),
       ...(Object.keys(termMatch).length ? { termMatch } : {}),
       ...(Object.keys(f.directions).length ? { directions: { ...f.directions } } : {}),
       ...(comment ? { comment } : {}),
       ...(f.useRange.length ? { useRange: f.useRange.map(r => [round3(r[0]), round3(r[1])] as [number, number]) } : {}),
       // Derived from the overall score (no separate input).
-      verdict: verdictFromOverall(f.overall)!,
+      ...(f.overall !== null ? { verdict: verdictFromOverall(f.overall)! } : {}),
       ...(f.useFor.trim() ? { useFor: f.useFor.trim().slice(0, 200) } : {}),
     }
   }
@@ -83,6 +83,7 @@ export function formToRating(form: RatingForm, trial: TrialRequest, ratedAt: str
     format: RATING_FORMAT, trialId: trial.id, ratedAt,
     ...(Object.keys(context).length ? { context } : {}),
     ...(best ? { best } : {}),
+    ...(form.comment.trim() ? { comment: form.comment.trim().slice(0, 4000) } : {}),
     candidates,
   }
 }
@@ -141,14 +142,16 @@ export const visibleDimensions = <T extends Pick<Dimension, 'id'>>(dimensions: T
   dimensions.filter(d => !HIDDEN_DIMENSIONS.includes(d.id) && (kind === 'loop' || kind === 'sequence' || !REPETITION_DIMENSIONS.includes(d.id)))
 
 /**
- * Axes of a sound trial (target "sound"): weight (bass), sharpness, strength (volume), length.
+ * Axes of a sound trial (target "sound"): weight (bass), roughness, sharpness, strength (volume), length, regularity (always).
  * Sound ratings never enter the haptic knowledge, so `length` needs no entry in dimensions.json.
  */
 export const SOUND_DIMENSIONS: Dimension[] = [
   { id: 'weight', ja: '重さ（低音）', en: 'Weight (bass)', poles: { ja: ['軽い', '重い'], en: ['light', 'heavy'] } },
+  { id: 'roughness', ja: '粗さ', en: 'Roughness', poles: { ja: ['滑らか', '粗い'], en: ['smooth', 'rough'] } },
   { id: 'sharpness', ja: '鋭さ', en: 'Sharpness', poles: { ja: ['鈍い', '鋭い'], en: ['dull', 'sharp'] } },
   { id: 'intensity', ja: '強さ（音量）', en: 'Strength (volume)', poles: { ja: ['弱い', '強い'], en: ['weak', 'strong'] } },
   { id: 'length', ja: '長さ', en: 'Length', poles: { ja: ['短い', '長い'], en: ['short', 'long'] } },
+  { id: 'regularity', ja: '規則性', en: 'Regularity', poles: { ja: ['規則的', 'ランダム'], en: ['regular', 'random'] } },
 ]
 
 /** The verdict the form writes, from the overall score: 4–5 use, 3 maybe, 1–2 no. */

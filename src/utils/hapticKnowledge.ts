@@ -150,10 +150,12 @@ export function aggregateTerm(slug: string, dims: DimensionsDoc, records: TrialR
   for (const r of related) {
     if (!r.rating) continue
     for (const [cid, cr] of Object.entries(r.rating.candidates).sort(([a], [b]) => a.localeCompare(b))) {
+      // Only scored candidates are aggregated (a candidate may be saved with a comment only).
+      if (cr.overall === undefined) continue
       const cand = r.candidates.find(c => c.id === cid), requested = r.trial.candidates.find(c => c.id === cid)
       const tmKey = Object.keys(cr.termMatch ?? {}).find(k => canonicalTerm(k, dims).slug === slug)
       rated.push({
-        trialId: r.trial.id, candidateId: cid, overall: cr.overall, termMatch: tmKey === undefined ? null : cr.termMatch![tmKey],
+        trialId: r.trial.id, candidateId: cid, overall: cr.overall!, termMatch: tmKey === undefined ? null : cr.termMatch![tmKey],
         ...(requested?.method ? { method: requested.method } : {}),
         spec: cand?.spec ?? { source: requested?.source ?? { kind: 'file', path: '?' }, effects: requested?.effects ?? [] },
         features: cand?.features ?? null, comment: cr.comment, ratedAt: r.rating.ratedAt, directions: cr.directions ?? {},
@@ -363,8 +365,11 @@ export class KnowledgeFolder {
     }
     return withShortIds(records)
   }
-  /** Marks a trial dismissed (not rated, left out of the knowledge). Undone by restoreTrial (Studio's own mark file). */
-  async dismissTrial(month: string, id: string, at: string) { await writeEditorFile(await this.trialDir(month, id), DISMISSED_FILE, json({ format: 'hapbeat-trial-dismissed@1', dismissedAt: at })) }
+  /**
+   * Sets a trial aside for later (`reason: "later"` — "not now", not "bad material"): out of the queue and the
+   * knowledge until restored (restoreTrial removes Studio's own mark file).
+   */
+  async dismissTrial(month: string, id: string, at: string) { await writeEditorFile(await this.trialDir(month, id), DISMISSED_FILE, json({ format: 'hapbeat-trial-dismissed@1', reason: 'later', dismissedAt: at })) }
   async restoreTrial(month: string, id: string) {
     try { await (await this.trialDir(month, id)).removeEntry(DISMISSED_FILE) }
     catch (error) { if (!isNotFound(error)) throw error }

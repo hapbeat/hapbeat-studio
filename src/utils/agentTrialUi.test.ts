@@ -26,13 +26,25 @@ describe('derived clip effect chain', () => {
 })
 
 describe('rating form', () => {
-  it('requires at least one overall score and an overall for every touched candidate', () => {
+  it('saves with any score or comment; a candidate without stars is saved as "no score"', () => {
     const form = ratingToForm(trial, null)
     expect(ratingFormIssue(form)).toEqual({ kind: 'none-rated' })
     form.candidates.B.comment = 'too light'
-    expect(ratingFormIssue(form)).toEqual({ kind: 'missing-overall', candidateId: 'B' })
-    form.candidates.B.overall = 3
     expect(ratingFormIssue(form)).toBeNull()
+    const body = formToRating(form, trial, '2026-10-05T10:00:00+09:00')
+    expect(body.candidates).toEqual({ B: { comment: 'too light' } })
+    expect(ratingError(body, trial, [])).toBeNull()
+    expect(ratingToForm(trial, body).candidates.B.overall).toBeNull()
+    // The trial-level comment alone is enough, and is saved / restored.
+    const only = ratingToForm(trial, null)
+    only.comment = '  B is closest, heavier '
+    expect(ratingFormIssue(only)).toBeNull()
+    const trialBody = formToRating(only, trial, '2026-10-05T10:00:00+09:00')
+    expect(trialBody.comment).toBe('B is closest, heavier')
+    expect(trialBody.candidates).toEqual({})
+    expect(ratingToForm(trial, trialBody).comment).toBe('B is closest, heavier')
+    expect(ratingError({ ...trialBody, candidates: { A: {} } }, trial, [])).toMatch(/overall score or a comment/)
+    expect(ratingError({ ...trialBody, comment: 'x'.repeat(4001) }, trial, [])).toMatch(/comment/)
   })
 
   it('omits unrated candidates and unset fields, and passes protocol validation', () => {
@@ -120,7 +132,7 @@ describe('use only this part (useRange)', () => {
     expect(ranges).toEqual([[0.01, 0.05], [0.1, 0.523]])
     const form = ratingToForm(trial, null)
     form.candidates.A.useRange = ranges
-    expect(ratingFormIssue(form)).toEqual({ kind: 'missing-overall', candidateId: 'A' })
+    expect(ratingFormIssue(form)).toBeNull()
     form.candidates.A.overall = 4
     const body = formToRating(form, trial, '2026-10-05T10:00:00+09:00')
     expect(body.candidates.A.useRange).toEqual([[0.01, 0.05], [0.1, 0.523]])
@@ -144,17 +156,17 @@ describe('verdict / useFor (several usable candidates, best optional)', () => {
     expect(ratingToForm(trial, body).candidates.A).toMatchObject({ verdict: 'use', useFor: 'idle growl' })
     expect(ratingError({ ...body, candidates: { A: { overall: 4, verdict: 'great' as never } } }, trial, [])).toMatch(/verdict/)
     expect(ratingError({ ...body, candidates: { A: { overall: 4, useFor: 'x'.repeat(201) } } }, trial, [])).toMatch(/useFor/)
-    // A verdict alone still needs an overall score.
+    // A verdict alone (it is derived from the stars) is not an input.
     const only = ratingToForm(trial, null)
     only.candidates.A.verdict = 'no'
-    expect(ratingFormIssue(only)).toEqual({ kind: 'missing-overall', candidateId: 'A' })
+    expect(ratingFormIssue(only)).toEqual({ kind: 'none-rated' })
   })
 })
 
 describe('sound trial axes', () => {
-  it('rates weight / sharpness / strength / length, validated against the sound axes', async () => {
+  it('rates weight / roughness / sharpness / strength / length / regularity, validated against the sound axes', async () => {
     const { SOUND_DIMENSIONS } = await import('./agentTrialUi')
-    expect(SOUND_DIMENSIONS.map(d => d.id)).toEqual(['weight', 'sharpness', 'intensity', 'length'])
+    expect(SOUND_DIMENSIONS.map(d => d.id)).toEqual(['weight', 'roughness', 'sharpness', 'intensity', 'length', 'regularity'])
     const form = ratingToForm(trial, null)
     form.candidates.A = { ...form.candidates.A, overall: 4, directions: { length: -1 } }
     const body = formToRating(form, trial, '2026-10-05T10:00:00+09:00')
