@@ -1110,8 +1110,6 @@ export const messages = defineMessages({
   'editor.agent.verdict.use': { ja: '使える', en: 'Use' },
   'editor.agent.verdict.maybe': { ja: '条件付き', en: 'Maybe' },
   'editor.agent.verdict.no': { ja: '無し', en: 'No' },
-  'editor.agent.severalUsable': { ja: '複数を採用候補にしています（{ids}）。素材を複数にしてランダムに鳴らす（繰り返しの揺らぎ）か、別バリエーションにするか、エージェントに相談してください。', en: 'Several candidates are marked usable ({ids}). Ask the agent whether to use them as several materials played at random (repetition variation) or as separate variants.' },
-  'editor.agent.useNeedsOverall': { ja: '「使える」の候補に総合点を付けると、イベントへ自動で割り当てます。', en: 'Give the "use" candidate an overall score to assign it to the event automatically.' },
   'editor.agent.toClip': { ja: '＋クリップ', en: '+ Clip' },
   'editor.agent.toClipHint': { ja: 'エディタのクリップ一覧へコピーして編集できるようにします（ゲームには影響しません）', en: 'Copies it into the editor clip list for editing (does not affect the game)' },
   'editor.agent.toEvent': { ja: '→イベント', en: '→ Event' },
@@ -1210,6 +1208,8 @@ export const messages = defineMessages({
   'editor.scene.segmentRun': { ja: '{name} · {at} s〜（{count} 回）', en: '{name} · from {at} s ({count})' },
   'editor.scene.rating': { ja: '評価中: {name}', en: 'Rating: {name}' },
   'editor.scene.targetHint': { ja: '評価・試聴の対象の cue（映像の赤い印。灰色の印は同じ場面の他の cue で、決定済みの音を鳴らします）', en: 'The cue being rated / auditioned (red marks; grey marks are other cues of the scene, playing their decided sound).' },
+  'editor.agent.pooled': { ja: '{event} の素材候補に {count} 件追加（仮）: {names}', en: 'Added {count} to the material pool of {event} (tentative): {names}' },
+  'editor.agent.freePlanSkipped': { ja: '{ids} は無料プランの生成物（商用不可）のため素材候補に入れていません', en: '{ids}: free-plan output (not for commercial use), not added to the pool.' },
 })
 
 export type MessageId = keyof typeof messages

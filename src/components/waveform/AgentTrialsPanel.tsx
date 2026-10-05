@@ -6,7 +6,7 @@ import { useWaveformStore } from '@/stores/waveformStore'
 import { localIsoString, type TrialRecord } from '@/utils/hapticKnowledge'
 import type { HapticFeatures } from '@/utils/hapticFeatures'
 import { clearRatingDraft, DraftKeeper, readFolderDraft, readLocalDraft, writeRatingDraft } from '@/utils/ratingDrafts'
-import { addUseRange, usableCandidates, autoRatingContext, EMPTY_CONTEXT, formToRating, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, trialKind, verdictFromOverall, type CandidateRatingForm, type RatingForm } from '@/utils/agentTrialUi'
+import { addUseRange, isFreePlanCandidate, poolCandidates, autoRatingContext, EMPTY_CONTEXT, formToRating, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, trialKind, verdictFromOverall, type CandidateRatingForm, type RatingForm } from '@/utils/agentTrialUi'
 import { trialTarget, type TrialKind } from '@/utils/agentProtocol'
 import { useAuditionPlan } from './EditorScenePanel'
 import { toFirstPlay } from '@/utils/sceneSegments'
@@ -289,15 +289,25 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
   const issue = ratingFormIssue(form)
   /** The best candidate becomes the sound / haptic of the trial's events (rating save with "assign on save"). */
   const autoAssign = useEditorSettings(s => s.autoAssignOnRating)
-  const assignBest = async (best: string): Promise<{ note?: string; assignedId?: number }> => {
+  /**
+   * Adds the ★4+ candidates (best first, free-plan output excluded) to the material pool of the trial's first scene
+   * cue, one decision each (each adds to the list: no duplicates, the existing representative stays first).
+   */
+  const addToPool = async (ids: string[]): Promise<{ notes: string[]; assignedId: number | null }> => {
     const scene = useSceneStore.getState()
-    if (!scene.table || !scene.lib || scene.lib.project_name !== trial.scene!.project) return { note: t('events.auto.noProject', { project: trial.scene!.project }) }
-    const events = assignEventsForTrial(scene.table, scene.lib, trial.scene!.cues, target)
-    if (!events.length) return { note: t('events.auto.noEvents', { cues: trial.scene!.cues.join(', ') }) }
-    try {
-      const r = await runDecision({ target, source: { kind: 'candidate', trialId: trial.id, candidateId: best }, events, name: null, at: null, gain: 1 })
-      return r.ok ? { assignedId: r.result.id } : { note: t(r.notice.id, r.notice.params) }
-    } catch (error) { return { note: message(error) } }
+    if (!scene.table || !scene.lib || scene.lib.project_name !== trial.scene!.project) return { notes: [t('events.auto.noProject', { project: trial.scene!.project })], assignedId: null }
+    const events = assignEventsForTrial(scene.table, scene.lib, trial.scene!.cues.slice(0, 1), target)
+    if (!events.length) return { notes: [t('events.auto.noEvents', { cues: trial.scene!.cues[0] })], assignedId: null }
+    const notes: string[] = [], added: string[] = []
+    let assignedId: number | null = null
+    for (const id of ids) {
+      try {
+        const r = await runDecision({ target, source: { kind: 'candidate', trialId: trial.id, candidateId: id }, events, name: null, at: null, gain: 1 })
+        if (r.ok) { added.push(r.result.name); assignedId = r.result.id } else notes.push(t(r.notice.id, r.notice.params))
+      } catch (error) { notes.push(message(error)) }
+    }
+    if (added.length) notes.unshift(t('editor.agent.pooled', { count: added.length, event: events.join(', '), names: added.join(', ') }))
+    return { notes, assignedId }
   }
   /** Saves, then (auto-assign / auto-send) and hands over to the panel, which moves to the next unrated trial and shows what happened. */
   const save = async () => {
@@ -314,11 +324,11 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
     setSaving(false)
     const notes: string[] = []
     let assignedId: number | null = null
-    const usable = usableCandidates(withAuto)
-    if (usable.length >= 2 && !body.best) notes.push(t('editor.agent.severalUsable', { ids: usable.map(id => record.shortId ? `${record.shortId}-${id}` : id).join(', ') }))
-    // Auto-assign only a unique top "use" candidate (written as best); otherwise the notice above asks to consult the agent.
-    if (body.best && trial.scene && autoAssign) { const r = await assignBest(body.best); if (r.note) notes.push(r.note); assignedId = r.assignedId ?? null }
-    else if (trial.scene && autoAssign && usable.length === 1 && !body.best) notes.push(t('editor.agent.useNeedsOverall'))
+    // Every ★4+ candidate joins the event's material pool (the pool, not one best, is what the game picks from).
+    const pooled = poolCandidates(trial, body)
+    const skipped = trial.candidates.filter(c => (body.candidates[c.id]?.overall ?? 0) >= 4 && isFreePlanCandidate(c)).map(c => c.id)
+    if (trial.scene && autoAssign && pooled.length) { const r = await addToPool(pooled); notes.push(...r.notes); assignedId = r.assignedId }
+    if (trial.scene && autoAssign && skipped.length) notes.push(t('editor.agent.freePlanSkipped', { ids: skipped.map(id => record.shortId ? `${record.shortId}-${id}` : id).join(', ') }))
     onDone({ recordId: trial.id, notes, assignedId, kind: 'rated' })
   }
   const adopt = async (cid: string, label: string) => {

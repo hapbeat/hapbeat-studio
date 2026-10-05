@@ -3,7 +3,7 @@
  * chain and the rating form ↔ hapbeat-rating@1 conversion.
  */
 import type { EffectEntry, EffectParams } from '@/types/waveform'
-import { RATING_FORMAT, DEVICE_WIPER_MAX, MAX_USE_RANGES, type Verdict, type RatingBody, type RatingContext, type TrialKind, type TrialRequest } from '@/utils/agentProtocol'
+import { RATING_FORMAT, DEVICE_WIPER_MAX, MAX_USE_RANGES, type Verdict, type RatingBody, type RatingContext, type TrialKind, type TrialRequest, type TrialCandidate } from '@/utils/agentProtocol'
 import type { Dimension } from '@/utils/hapticKnowledge'
 import type { DeviceInfo } from '@/types/manager'
 
@@ -166,8 +166,6 @@ export function autoRatingContext(devices: DeviceInfo[], targetIps: string[]): {
   return { device, deviceWiper, volumeLabel: deviceWiper !== null && labels.length === 1 ? labels[0] : '' }
 }
 
-/** Candidates the user marked "use": with two or more, the notice suggests asking the agent (several materials with variation, or separate variants). */
-export const usableCandidates = (form: RatingForm) => Object.entries(form.candidates).filter(([, c]) => verdictFromOverall(c.overall) === 'use').map(([id]) => id)
 
 /**
  * The trial's `best` (kept in hapbeat-rating@1 for compatibility; there is no input for it):
@@ -179,4 +177,21 @@ export function autoBest(form: RatingForm, ids: readonly string[]): string | nul
   const top = Math.max(...usable.map(id => form.candidates[id].overall!))
   const leaders = usable.filter(id => form.candidates[id].overall === top)
   return leaders.length === 1 ? leaders[0] : null
+}
+
+/** ElevenLabs free-plan output (not for commercial use): its label or source names "free plan" / "(free)". Never pooled automatically. */
+export function isFreePlanCandidate(c: Pick<TrialCandidate, 'label' | 'source'>): boolean {
+  const text = `${c.label} ${JSON.stringify(c.source)}`.toLowerCase()
+  return text.includes('free plan') || text.includes('(free)')
+}
+
+/**
+ * Candidates a saved rating adds to the event's material pool: every one rated ★4+ (verdict "use"), best
+ * first (overall descending, then id), except free-plan output. The pool's existing representative stays first.
+ */
+export function poolCandidates(trial: Pick<TrialRequest, 'candidates'>, rating: Pick<RatingBody, 'candidates'>): string[] {
+  return trial.candidates
+    .filter(c => (rating.candidates[c.id]?.overall ?? 0) >= 4 && !isFreePlanCandidate(c))
+    .sort((a, b) => (rating.candidates[b.id]!.overall! - rating.candidates[a.id]!.overall!) || a.id.localeCompare(b.id))
+    .map(c => c.id)
 }

@@ -131,12 +131,10 @@ describe('use only this part (useRange)', () => {
 })
 
 describe('verdict / useFor (several usable candidates, best optional)', () => {
-  it('saves verdict and useFor, validates them, and lists the usable candidates', async () => {
-    const { usableCandidates } = await import('./agentTrialUi')
+  it('saves verdict and useFor and validates them', async () => {
     const form = ratingToForm(trial, null)
     form.candidates.A = { ...form.candidates.A, overall: 4, verdict: 'use', useFor: '  idle growl ' }
     form.candidates.B = { ...form.candidates.B, overall: 5, verdict: 'no' } // the stored verdict is ignored: 5 → use
-    expect(usableCandidates(form)).toEqual(['A', 'B'])
     const body = formToRating(form, trial, '2026-10-05T10:00:00+09:00')
     expect(body.best).toBe('B') // the unique top "use" (5 > 4)
     expect(body.candidates.A).toMatchObject({ verdict: 'use', useFor: 'idle growl' })
@@ -160,5 +158,23 @@ describe('sound trial axes', () => {
     const body = formToRating(form, trial, '2026-10-05T10:00:00+09:00')
     expect(ratingError(body, trial, SOUND_DIMENSIONS.map(d => d.id))).toBeNull()
     expect(ratingError(body, trial, ['weight'])).toMatch(/direction/)
+  })
+})
+
+describe('material pool on save', () => {
+  it('adds every ★4+ candidate, best first, except free-plan output', async () => {
+    const { poolCandidates, isFreePlanCandidate } = await import('./agentTrialUi')
+    const src = (path: string) => ({ kind: 'file' as const, path })
+    const t = { candidates: [
+      { id: 'A', label: 'growl low', source: src('sources/a.wav'), effects: [] },
+      { id: 'B', label: 'growl (free)', source: src('sources/b.wav'), effects: [] },
+      { id: 'C', label: 'growl mid', source: src('sources/eleven-free plan/c.wav'), effects: [] },
+      { id: 'D', label: 'growl high', source: src('sources/d.wav'), effects: [] },
+      { id: 'E', label: 'growl', source: src('sources/e.wav'), effects: [] },
+    ] }
+    const rating = { candidates: { A: { overall: 4 }, B: { overall: 5 }, C: { overall: 5 }, D: { overall: 5 }, E: { overall: 3 } } }
+    expect(poolCandidates(t, rating)).toEqual(['D', 'A'])
+    expect(t.candidates.map(isFreePlanCandidate)).toEqual([false, true, true, false, false])
+    expect(poolCandidates(t, { candidates: { E: { comment: 'x' } } })).toEqual([])
   })
 })
