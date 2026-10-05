@@ -416,13 +416,13 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
       </fieldset>}
       {/* The comment on the whole trial: comparisons between candidates ("B is closest, heavier") — the agent's main input. */}
       <TrialComment value={form.comment} onChange={comment => edit(f => ({ ...f, comment }))} />
-      {/* One line: [Save and next] ☑ assign ☑ send · status (the full reason on hover). */}
+      {/* One line: [Save and next] [Assign to event] [Send to AI] (toggles) · status (the full reason on hover). */}
       <div className="agent-save">
         <span title={issue ? issueText : ''}><button className="apply-effects-btn" disabled={!!issue || saving || (!dirty && !!rating)} onClick={() => void save()}>{t('editor.agent.saveNext')}</button></span>
-        {trial.scene && <label className="agent-auto-assign" title={t('events.auto.hint')}>
-          <input type="checkbox" checked={autoAssign} onChange={e => useEditorSettings.getState().update({ autoAssignOnRating: e.target.checked })} />{t('editor.agent.assignShort')}</label>}
-        <label className="agent-auto-assign" title={t('editor.agent.msgAutoHint')}>
-          <input type="checkbox" checked={autoSend} onChange={e => useEditorSettings.getState().update({ autoSendOnRating: e.target.checked })} />{t('editor.agent.sendShort')}</label>
+        {trial.scene && <button type="button" className="agent-save-toggle" aria-pressed={autoAssign} title={t('events.auto.hint')}
+          onClick={() => useEditorSettings.getState().update({ autoAssignOnRating: !autoAssign })}>{t('editor.agent.assignShort')}</button>}
+        <button type="button" className="agent-save-toggle" aria-pressed={autoSend} title={t('editor.agent.msgAutoHint')}
+          onClick={() => useEditorSettings.getState().update({ autoSendOnRating: !autoSend })}>{t('editor.agent.sendShort')}</button>
         <span className={`agent-save-status ${saveError ? 'error' : !dirty && rating ? 'saved' : ''}`} role="status" title={saveStatus}>{shortStatus}</span>
       </div>
     </div>

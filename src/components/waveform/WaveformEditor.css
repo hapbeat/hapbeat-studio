@@ -1035,3 +1035,9 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 /* AI trials: the "Directions" toggle in the header and the comment on the whole trial. */
 .agent-axes-toggle { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; color: var(--text-secondary); white-space: nowrap; cursor: pointer; }
 .agent-trial-comment { resize: none; overflow: hidden; min-height: 44px; margin-top: 6px; }
+
+/* Save line toggles: on = filled, off = outline; fixed width so the state never moves the line. */
+.agent-save-toggle { flex: none; width: 9.5em; padding: 3px 6px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center;
+  background: transparent; color: var(--text-secondary); border: 1px solid var(--border-light); border-radius: 5px; cursor: pointer; }
+.agent-save-toggle:hover { border-color: var(--accent-light); color: var(--text-primary); }
+.agent-save-toggle[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
