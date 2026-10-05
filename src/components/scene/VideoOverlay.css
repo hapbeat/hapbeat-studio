@@ -10,5 +10,7 @@
 .video-overlay-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent-light, #b9a8ff); }
 /* The cue mark (sound start = 0 s). */
 .video-overlay-mark { position: absolute; top: 1px; bottom: 1px; width: 2px; margin-left: -1px; background: #ff4d4f; pointer-events: none; }
+/* Another cue of the scene (plays its decided sound). */
+.video-overlay-mark.other { background: #9aa0a6; }
 .video-overlay-time { flex: none; min-width: 7ch; text-align: right; font-variant-numeric: tabular-nums; }
 .video-overlay-info { flex: none; opacity: .8; cursor: help; }

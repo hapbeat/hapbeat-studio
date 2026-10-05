@@ -25,7 +25,7 @@ describe('trial scene clips', () => {
     // DEC-085: the representative stretch of the full replay (grab fires once at 3.1 s), no list of recorded clips.
     const auto = resolveTrialScene({ lib, data, scene: { project: 'mill', cues: ['grab'] }, soundSec: () => 0.4 })
     expect(auto.kind === 'ready' && auto.options.map(o => o.file)).toEqual(['full_replay.mp4'])
-    expect(auto.kind === 'ready' && auto.chosen).toMatchObject({ file: 'full_replay.mp4', mark: 3.1, marks: [3.1], segment: { run: false } })
+    expect(auto.kind === 'ready' && auto.chosen).toMatchObject({ file: 'full_replay.mp4', mark: 3.1, marks: [{ t: 3.1, name: 'grab', target: true }], segment: { repeating: false } })
     expect(auto.kind === 'ready' && auto.chosen!.end).toBeCloseTo(3.1 + 0.4 + 0.5)
     // The user's pick of a recorded clip still wins (listed after the representative).
     const saved = resolveTrialScene({ lib, data, scene: { project: 'mill', cues: ['grab'] }, saved: { project: 'mill', file: '02_grab.mp4' } })

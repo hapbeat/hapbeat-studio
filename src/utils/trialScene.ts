@@ -1,7 +1,7 @@
 import { buildItems, itemEvents, type SceneData, type SceneLib } from './sceneData'
 import type { TrialScene } from './agentProtocol'
 import type { TrialSceneChoice } from './editorUiSettings'
-import { representativeSegment, TAIL_SEC, type SceneSegment } from './sceneSegments'
+import { sceneSegment, type SceneMark, type SceneSegment } from './sceneSegments'
 
 /**
  * Editor Scene video panel: which recorded clip of the Scene tab project shows
@@ -20,8 +20,8 @@ export interface SceneClipOption {
   at: number
   /** The cue (of `cues`) the clip was matched by; null when any clip is offered. */
   cue: string | null
-  /** Every firing shown and played (video times; a clip: its mark only). */
-  marks: number[]
+  /** Firings shown and played (video times; red = the targets, grey = other cues of the family; a clip: its mark). */
+  marks: SceneMark[]
   /** Video time the moment ends (the video pauses there); null = the video's end. */
   end: number | null
   /** The representative stretch of the full replay (DEC-085); null for a recorded clip. */
@@ -38,7 +38,7 @@ export function trialSceneOptions(data: SceneData, cues: string[] | null): Scene
     const cue = cues ? cues.find(c => it.names.includes(c)) ?? null : null
     // Event names and time only ("03 roar (7.9 s)"); the haptic route (both / right) is not part of the moment's name.
     const mark = own ? own.t : it.event
-    out.push({ file: it.file, label: `${String(index).padStart(2, '0')} ${it.names.join(' + ')} (${it.at.toFixed(1)} s)`, at: it.at, mark, cue, marks: [mark], end: null, segment: null })
+    out.push({ file: it.file, label: `${String(index).padStart(2, '0')} ${it.names.join(' + ')} (${it.at.toFixed(1)} s)`, at: it.at, mark, cue, marks: [{ t: mark, name: cue ?? it.name, target: true }], end: null, segment: null })
   })
   return out
 }
@@ -59,17 +59,16 @@ export function wantedSceneProject(o: { scene?: TrialScene; saved?: TrialSceneCh
 }
 
 /**
- * The representative moment of the first of `cues` that fires in the recording, cut from the full replay: one
- * firing (a repeated event: the first of its run) from 1 s before to the sound's length + 0.5 s after — one mark,
- * played once. `segment` keeps the run (its marks) for "×5".
+ * The representative scene of `targets` cut from the full replay (sceneSegment): a one-off firing, or a
+ * repeating cue's continuous scene. The playback's 0 s is its first firing (`mark`).
  */
-export function representativeOption(data: SceneData, cues: readonly string[], soundSec: (name: string) => number): SceneClipOption | null {
-  for (const name of cues) {
-    const segment = representativeSegment(data.full.events, name, soundSec(name))
-    const first = segment?.marks[0]
-    if (segment && first !== undefined) return { file: data.full.file, label: `${name} (${first.toFixed(1)} s)`, at: first, mark: first, cue: name, marks: [first], end: first + Math.max(0, soundSec(name)) + TAIL_SEC, segment }
-  }
-  return null
+export function representativeOption(data: SceneData, targets: readonly string[], soundSec: (name: string) => number): SceneClipOption | null {
+  const named = targets.filter(n => data.full.events.some(e => e.name === n))
+  if (!named.length) return null
+  const segment = sceneSegment(data.full.events, named, soundSec(named[0]))
+  if (!segment) return null
+  const first = segment.marks[0].t
+  return { file: data.full.file, label: `${named[0]} (${first.toFixed(1)} s)`, at: first, mark: first, cue: named[0], marks: segment.marks, end: segment.end, segment }
 }
 
 /**
@@ -79,12 +78,12 @@ export function representativeOption(data: SceneData, cues: readonly string[], s
  * the earliest recorded clip of any of them. Without `scene` (an editor clip): every recorded clip.
  * `soundSec`: the length of an event's sound (one-off stretches end after it).
  */
-export function resolveTrialScene(o: { lib: SceneLib | null; data: SceneData | null; scene?: TrialScene; saved?: TrialSceneChoice; project?: string; soundSec?: (name: string) => number }): TrialSceneState {
+export function resolveTrialScene(o: { lib: SceneLib | null; data: SceneData | null; scene?: TrialScene; saved?: TrialSceneChoice; project?: string; soundSec?: (name: string) => number; targets?: readonly string[] }): TrialSceneState {
   const wanted = o.project ?? wantedSceneProject(o)
   if (!o.lib || !o.data) return wanted ? { kind: 'noProject', project: wanted } : { kind: 'noProject' }
   if (wanted && wanted !== o.lib.project_name) return { kind: 'otherProject', project: wanted }
   const options = trialSceneOptions(o.data, o.scene?.cues ?? null)
-  const rep = o.scene ? representativeOption(o.data, o.scene.cues, o.soundSec ?? (() => 1)) : null
+  const rep = o.scene ? representativeOption(o.data, o.targets ?? o.scene.cues, o.soundSec ?? (() => 1)) : null
   if (o.scene && !options.length && !rep) return { kind: 'noClips', cues: o.scene.cues }
   const savedFile = o.saved && o.saved.project === o.lib.project_name ? o.saved.file : undefined
   if (rep) {

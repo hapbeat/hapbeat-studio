@@ -33,7 +33,8 @@ import { useEventStore } from '@/stores/eventStore'
 import { showDockPanel } from '@/utils/dockPanels'
 import { trialTarget } from '@/utils/agentProtocol'
 import { DecideDialog } from './DecideDialog'
-import { openEventDefault, repeatBuffer, useDecidedSoundSync, useListenOffsets } from './eventAudio'
+import { openEventDefault, repeatBuffer, useDecidedSoundSync } from './eventAudio'
+import { useAuditionPlan } from './EditorScenePanel'
 
 export function WaveformEditor({ active }: { active: boolean }) {
   const { t } = useI18n()
@@ -107,10 +108,11 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const targets = useMemo(() => isConnected && sendHaptics && !auditionIsSound && eventPreview?.target !== 'sound' ? resolvePlaybackTargets(devices, kitSelectedIps).map(device => device.ipAddress) : [], [isConnected, sendHaptics, auditionIsSound, eventPreview?.target, devices, kitSelectedIps])
   const targetKey = targets.join(',')
   const shownBuffer = audition ? audition.buffer : eventPreview ? eventPreview.buffer : original ? s.clip?.originalBuffer : previewActive ? (preview.buffer ?? s.clip?.buffer) : s.clip?.buffer
-  // Auditions (AI candidate / event material) play ×1 / ×3 / ×5 at the cue's real gaps, without jitter; one buffer, so Stop ends every play.
-  const listenOffsets = useListenOffsets()
-  const audioBuffer = useMemo(() => shownBuffer && listenOffsets && (audition || eventPreview)
-    ? repeatBuffer(shownBuffer, listenOffsets.map(atSec => ({ atSec, gain: 1, rate: 1 }))) : shownBuffer, [shownBuffer, listenOffsets, audition, eventPreview])
+  // Auditions (AI candidate / event material) play at the scene's timing: on every target firing, without jitter
+  // (DEC-085); one buffer, so Stop ends them all and seeks follow the video.
+  const plan = useAuditionPlan()
+  const audioBuffer = useMemo(() => shownBuffer && plan && (audition || eventPreview) && !(plan.targets.length === 1 && plan.targets[0] === 0)
+    ? repeatBuffer(shownBuffer, plan.targets.map(atSec => ({ atSec, gain: 1, rate: 1 }))) : shownBuffer, [shownBuffer, plan, audition, eventPreview])
   const player = useMemo(() => new EditorBufferPlayer(null, undefined, s.setError), [s.clip?.id, original, auditionKey])
   useEffect(() => {player.activate(); return () => player.dispose()}, [player])
   useDecidedSoundSync(player)

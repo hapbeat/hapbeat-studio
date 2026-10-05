@@ -10,7 +10,7 @@ import { RATE, resampleClip } from '@/utils/sceneHaptics'
 import type { EditorBufferPlayer } from '@/utils/editorBufferPlayer'
 import { onUserStop } from '@/utils/playerStops'
 import { CompanionSound, type SoundSource } from '@/utils/companionSound'
-import { listenOffsets, repeatsFor } from '@/utils/sceneSegments'
+import { useAuditionPlan } from './EditorScenePanel'
 
 /**
  * Event materials in the editor: an event's sound / haptic clip opened in the
@@ -85,39 +85,6 @@ export function eventSoundSec(key: string): number {
   const sound = e?.sfx ? sfxSounds(e.sfx)[0] : undefined
   return (sound && s.sfx[sound]?.duration) || 1
 }
-/** Whether event `name` gets repeated auditions: its cue's override (editor settings), else automatic from the recording. */
-export function useRepeats(name: string | null): boolean {
-  const data = useSceneStore(s => s.data)
-  const override = useEditorSettings(s => name ? s.listenRepeat[parseEventKey(name).cue] : undefined)
-  return useMemo(() => !!name && repeatsFor(data?.full.events ?? null, name, override), [name, data, override])
-}
-
-/**
- * The plays of the current editor audition (an AI candidate, else an event material) of a cue that repeats
- * (useRepeats; others play once whatever the setting): `listenTimes` (×1 / ×3 / ×5)
- * at the real gaps of its cue's run in the recording, else the sound's length + 0.4 s apart; null = once (×1, a
- * loop cue, or nothing auditioned). Shared by the waveform buffer, the event's sound and the Scene video marks.
- */
-export function useListenOffsets(): number[] | null {
-  const times = useEditorSettings(s => s.listenTimes)
-  const audition = useAgentTrialStore(s => s.audition)
-  const auditionEvent = useAgentTrialStore(s => {
-    const trial = s.audition ? s.trials.find(r => r.trial.id === s.audition!.trialId)?.trial : undefined
-    return trial?.scene?.cues[0] ?? ''
-  })
-  const preview = useEventStore(s => s.preview)
-  const data = useSceneStore(s => s.data)
-  const lib = useSceneStore(s => s.lib)
-  const name = audition ? auditionEvent : preview?.event ?? null
-  const repeats = useRepeats(name)
-  return useMemo(() => {
-    const shown = audition?.buffer ?? preview?.buffer
-    if (!shown || times <= 1 || !name || !repeats) return null
-    if (lib && isLoopCue(lib, parseEventKey(name).cue)) return null
-    return listenOffsets(data?.full.events ?? null, name, times, shown.duration)
-  }, [times, audition, preview, name, repeats, data, lib])
-}
-
 let ctx: AudioContext | null = null
 const audio = () => {
   if (!ctx) ctx = new AudioContext()
@@ -169,9 +136,22 @@ export function useDecidedSoundSync(player: EditorBufferPlayer) {
     }
     return null
   }, [audition, auditionCues, preview, table, lib, buffers])
-  // The audition's plays (×3 / ×5): the event's sound on each, like the haptic.
-  const offsets = useListenOffsets()
-  const sound = useMemo(() => picked && offsets && !picked.loop ? { ...picked, buffer: repeatBuffer(picked.buffer, offsets.map(atSec => ({ atSec, gain: 1, rate: 1 }))) } : picked, [picked, offsets])
+  // A scene (DEC-085): the event's sound on each target firing (with a haptic audition) and the decided sound of
+  // the other cues of the scene at theirs, so the scene is heard as in the game (no jitter).
+  const plan = useAuditionPlan()
+  const sound = useMemo((): SoundSource | null => {
+    if (!plan || picked?.loop || !table) return picked
+    const parts: { buffer: AudioBuffer; atSec: number; gain: number }[] = []
+    if (picked) for (const atSec of plan.targets) parts.push({ buffer: picked.buffer, atSec, gain: picked.volume })
+    for (const o of plan.others) {
+      const r = resolveEventName(table, o.name), e = r && effectiveEvent(table, r.ref), first = sfxSounds(e?.sfx)[0], b = first ? buffers[first] : undefined
+      if (e?.sfx && b) parts.push({ buffer: b, atSec: o.atSec, gain: e.sfx.volume })
+    }
+    if (!parts.length) return picked
+    const rate = parts[0].buffer.sampleRate, nCh = Math.max(...parts.map(p => p.buffer.numberOfChannels))
+    return { buffer: mixParts(parts.map(p => ({ start: Math.round(p.atSec * rate), gain: p.gain,
+      data: Array.from({ length: nCh }, (_, c) => { const ch = p.buffer.getChannelData(Math.min(c, p.buffer.numberOfChannels - 1)); return p.buffer.sampleRate === rate ? ch : resampleClip(ch, p.buffer.sampleRate / rate) }) })), rate, nCh), volume: 1 }
+  }, [plan, picked, table, buffers])
   const companion = useMemo(() => new CompanionSound(startOnPc), [])
   // By value: the same buffer / volume / loop keeps playing (see CompanionSound).
   useEffect(() => { companion.setSource(muted ? null : sound) }, [companion, muted, sound?.buffer, sound?.volume, sound?.loop])

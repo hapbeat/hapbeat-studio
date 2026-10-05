@@ -14,8 +14,8 @@ export function VideoOverlay({ video, mark, marks, range, playing, onToggle, onS
   video: HTMLVideoElement | null
   /** Video time of the cue mark (seconds); null = no mark (time shown as the video time). */
   mark: number | null
-  /** Ticks on the bar (video times); default: `mark`. */
-  marks?: readonly number[]
+  /** Ticks on the bar (video times; `target` false = grey); default: `mark`. */
+  marks?: readonly { t: number; target?: boolean }[]
   /** The stretch the bar spans (video times); default: the whole video. */
   range?: readonly [number, number] | null
   /** Shows ⏸ (else ▶). The overlay stays visible while this is false. */
@@ -44,7 +44,7 @@ export function VideoOverlay({ video, mark, marks, range, playing, onToggle, onS
     return () => cancelAnimationFrame(frame)
   }, [video, mark, duration, range?.[0], range?.[1]])
   const [from, to] = range ?? [0, duration]
-  const ticks = marks ?? (mark === null ? [] : [mark])
+  const ticks = marks ?? (mark === null ? [] : [{ t: mark, target: true }])
   const dragging = useRef(false)
   const seekAt = (event: React.PointerEvent<HTMLDivElement>) => {
     const r = event.currentTarget.getBoundingClientRect()
@@ -59,7 +59,7 @@ export function VideoOverlay({ video, mark, marks, range, playing, onToggle, onS
       onPointerUp={e => { dragging.current = false; if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId) }}
       onPointerCancel={() => { dragging.current = false }}>
       <div className="video-overlay-track"><div className="video-overlay-fill" ref={fill} /></div>
-      {to > from && ticks.filter(x => x >= from && x <= to).map(x => <div key={x} className="video-overlay-mark" style={{ left: `${(x - from) / (to - from) * 100}%` }} />)}
+      {to > from && ticks.filter(x => x.t >= from && x.t <= to).map(x => <div key={x.t} className={`video-overlay-mark ${x.target === false ? 'other' : ''}`} style={{ left: `${(x.t - from) / (to - from) * 100}%` }} />)}
     </div>
     <span className="video-overlay-time" ref={time} />
     <span className="video-overlay-info" title={info} aria-label={info}>ⓘ</span>

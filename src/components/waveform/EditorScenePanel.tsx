@@ -6,7 +6,9 @@ import { useWaveformStore } from '@/stores/waveformStore'
 import { sceneVideoUrl, useSceneStore } from '@/stores/sceneStore'
 import { resolveTrialScene, sceneEventTime, sceneVideoTime, stepSceneFrame, wantedSceneProject, type TrialSceneState } from '@/utils/trialScene'
 import { setScenePause, setScenePreRoll, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
-import { eventSoundSec, useListenOffsets } from './eventAudio'
+import { eventSoundSec } from './eventAudio'
+import { isLoopCue } from '@/utils/sceneCueTable'
+import { parseEventKey } from '@/utils/cueEvents'
 import { isTypingTarget } from '@/utils/playbackShortcut'
 import { VideoOverlay } from '@/components/scene/VideoOverlay'
 import { useEditor } from './editorContext'
@@ -36,7 +38,9 @@ export function useSceneChoice(subject: SceneSubject) {
   /** The Scene project this subject needs (trial: `scene.project`, saved pick, `project` label; clip: saved pick; event: the open one). */
   const wanted = wantedSceneProject({ scene, saved, fallback: trial?.project })
   const sfx = useSceneStore(s => s.sfx)
-  const state: TrialSceneState = useMemo(() => resolveTrialScene({ lib, data, scene, saved, project: wanted, soundSec: eventSoundSec }), [lib, data, scene, saved, wanted, table, sfx])
+  // The targets: the trial's scene cues, or the event open in the Events panel (its variants are other cues of the scene).
+  const targets = useMemo(() => subject.kind === 'event' && id ? [id] : undefined, [subject.kind, id])
+  const state: TrialSceneState = useMemo(() => resolveTrialScene({ lib, data, scene, saved, project: wanted, soundSec: eventSoundSec, targets }), [lib, data, scene, saved, wanted, table, sfx, targets])
   const choose = (file: string) => {
     if (!lib || !id) return
     if (subject.kind === 'event') { useEventStore.getState().pickScene(id, file ? { project: lib.project_name, file } : null); return }
@@ -46,6 +50,25 @@ export function useSceneChoice(subject: SceneSubject) {
     useEditorSettings.getState().update({ [key]: choices })
   }
   return { id, trial, scene, wanted, state, chosen: state.kind === 'ready' ? state.chosen : null, choose }
+}
+
+/** What the current editor audition plays at the scene's timing (offsets from its first firing): the auditioned material at the targets' firings, the decided sound of the other cues at theirs. */
+export interface AuditionPlan { targets: number[]; others: { atSec: number; name: string }[] }
+/** The plan of the current audition (an AI candidate, else an event material); null = once (a recorded clip, a loop cue, nothing shown). */
+export function useAuditionPlan(): AuditionPlan | null {
+  const audition = useAgentTrialStore(s => s.audition)
+  const previewEvent = useEventStore(s => s.preview?.event ?? null)
+  const lib = useSceneStore(s => s.lib)
+  const subject: SceneSubject = audition ? { kind: 'trial', trialId: audition.trialId } : previewEvent ? { kind: 'event', key: previewEvent } : { kind: 'clip', clipId: null }
+  const { chosen } = useSceneChoice(subject)
+  return useMemo(() => {
+    if (!chosen?.segment || (!audition && !previewEvent)) return null
+    if (lib && chosen.cue && isLoopCue(lib, parseEventKey(chosen.cue).cue)) return null
+    return {
+      targets: chosen.marks.filter(m => m.target).map(m => m.t - chosen.mark),
+      others: chosen.marks.filter(m => !m.target).map(m => ({ atSec: m.t - chosen.mark, name: m.name })),
+    }
+  }, [chosen, audition, previewEvent, lib])
 }
 
 const OTHER_SCENES = '\u0000scene-tab'
@@ -60,12 +83,12 @@ export function SceneChoiceSelect({ choice, label }: { choice: ReturnType<typeof
   if (state.kind !== 'ready') return <select aria-label={label} disabled><option>{t(state.kind === 'noProject' ? 'editor.scene.noProjectShort' : 'editor.scene.unavailable')}</option></select>
   const segment = state.options[0]?.segment
   return <select aria-label={label} value={chosen?.file ?? ''} title={segment ? t('editor.scene.segmentHint') : undefined}
-    onChange={e => { if (e.target.value === OTHER_SCENES) { if (segment) useEventStore.getState().openInScene(segment.name) } else choose(e.target.value) }}>
+    onChange={e => { if (e.target.value === OTHER_SCENES) { if (segment) useEventStore.getState().openInScene(segment.names[0]) } else choose(e.target.value) }}>
     {!scene && <option value="">{t('editor.scene.pick')}</option>}
     {state.options.map(o => <option key={o.file} value={o.file}>{o.segment
-      ? t('editor.scene.segmentOne', { name: o.segment.name, at: o.segment.marks[0].toFixed(1) })
+      ? t(o.segment.repeating ? 'editor.scene.segmentRun' : 'editor.scene.segmentOne', { name: o.segment.names[0], at: o.segment.marks[0].t.toFixed(1), count: o.segment.marks.filter(m => m.target).length })
       : o.label}</option>)}
-    {segment && <option value={OTHER_SCENES}>{t('editor.scene.otherScenes', { name: segment.name, count: segment.total })}</option>}
+    {segment && <option value={OTHER_SCENES}>{t('editor.scene.otherScenes', { name: segment.names[0], count: segment.total })}</option>}
   </select>
 }
 
@@ -134,7 +157,7 @@ export function EditorScenePanel() {
     return () => { cancelled = true }
   }, [needsLink, wanted])
   const clipName = useWaveformStore(s => s.clip?.name ?? '')
-  const lead = useEditorSettings(s => s.sceneLeadSec)
+  const leadSetting = useEditorSettings(s => s.sceneLeadSec)
   const [src, setSrc] = useState<string | null>(null)
   /** A clip video that cannot be read (missing file, or a name the folder cannot hold such as `:`) is reported instead of "loading" forever. */
   const [videoError, setVideoError] = useState<string | null>(null)
@@ -145,6 +168,8 @@ export function EditorScenePanel() {
     sceneVideoUrl(root, chosen.file).then(url => { if (!cancelled) setSrc(url) }, error => { if (!cancelled) { setSrc(null); setVideoError(error instanceof Error ? error.message : String(error)) } })
     return () => { cancelled = true }
   }, [root, chosen?.file])
+  /** Lead-in before the first firing: a scene of the full replay starts at its window (1 s / 1.5 s before); a recorded clip uses the setting. */
+  const lead = chosen?.segment ? chosen.mark - chosen.segment.start : leadSetting
   // Show the start frame (lead before the mark) whenever the clip or lead changes.
   const cue = () => { setPausedAt(null); const v = video.current; if (v && chosen) { v.pause(); v.currentTime = sceneVideoTime(chosen.mark, -lead) } }
   /** Paused at this time: seconds from the event start (the mark = 0; negative in the lead-in). null = not paused. */
@@ -211,11 +236,8 @@ export function EditorScenePanel() {
   useEffect(cue, [src, chosen?.mark, lead, audition?.candidateId, audition?.trialId, previewId])
   // A trial follows its auditions; a clip follows the editor playback while no candidate is auditioned.
   const synced = !!chosen && (subject.kind === 'trial' ? audition?.trialId === subject.trialId : !audition)
-  // The audition's plays (×3 / ×5): a mark per play and a window long enough for them; ×1: the one firing.
-  const plays = useListenOffsets()
-  const repeated = synced && !!plays && !!chosen?.segment
-  const marks = chosen ? (repeated ? plays!.map(o => chosen.mark + o) : chosen.marks) : []
-  const end = chosen?.end == null ? null : chosen.end + (repeated ? plays![plays!.length - 1] : 0)
+  const marks = chosen?.marks ?? []
+  const end = chosen?.end ?? null
   useEffect(() => {
     if (!synced || !chosen) return
     const at = (time: number) => sceneVideoTime(chosen.mark, time)
@@ -267,7 +289,7 @@ export function EditorScenePanel() {
         {focused ? t('editor.scene.modeVideo', { seconds: lead }) : t('editor.scene.modeWave')}</span>}
       {!message && <SceneChoiceSelect choice={choice} label={t('editor.scene.clip')} />}
       {!message && <label className="editor-scene-lead">{t('editor.scene.lead')}
-        <input type="number" min={0} max={10} step={0.5} value={lead} onChange={e => { const x = parseFloat(e.target.value); if (Number.isFinite(x)) useEditorSettings.getState().update({ sceneLeadSec: Math.max(0, Math.min(10, x)) }) }} />
+        <input type="number" min={0} max={10} step={0.5} value={leadSetting} disabled={!!chosen?.segment} onChange={e => { const x = parseFloat(e.target.value); if (Number.isFinite(x)) useEditorSettings.getState().update({ sceneLeadSec: Math.max(0, Math.min(10, x)) }) }} />
         {t('editor.scene.leadUnit')}</label>}
     </div>
     {message ? <p className="agent-muted">{message}</p> : <>

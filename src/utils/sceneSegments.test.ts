@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findRuns, isRepeating, listenOffsets, occurrences, repeatsFor, representativeSegment, toFirstPlay } from './sceneSegments'
-import { representativeOption } from './trialScene'
-import { sampleData } from './sceneTestFixtures'
+import { isRepeating, occurrences, sceneSegment, toFirstPlay } from './sceneSegments'
 import type { SceneEvent } from './sceneData'
 
 /** The footstep firings of the T-Rex encounter recording (viewer-data.json full.events, 2026-10-05). */
@@ -22,62 +20,41 @@ const T_REX_ALL: SceneEvent[] = [
   }).flatMap(([name, times]) => times.map(t => ({ t, name, hand: 'both' }))),
 ]
 
-describe('representative segment (DEC-085)', () => {
-  it('footstep:approach: the run is the 5 approach steps; the editor shows only its first step (one mark, one window)', () => {
-    const seg = representativeSegment(T_REX, 'footstep:approach', 0.6)!
-    expect(seg.run).toBe(true)
-    expect(seg.marks).toEqual([1.267, 2.133, 2.967, 3.833, 4.7])
-    expect(seg.start).toBeCloseTo(0.267)
-    expect(seg.end).toBeCloseTo(4.7 + 0.6 + 0.5)
-    const data = { ...sampleData(), full: { ...sampleData().full, events: T_REX } }
-    const option = representativeOption(data, ['footstep:approach'], () => 0.6)!
-    expect(option.marks).toEqual([1.267])
-    expect(option.end).toBeCloseTo(1.267 + 0.6 + 0.5)
-    expect(option.segment?.marks).toHaveLength(5) // kept for ×5
+describe('representative scene (DEC-085)', () => {
+  const marksOf = (seg: ReturnType<typeof sceneSegment>) => seg!.marks.map(m => `${m.target ? 'R' : 'G'} ${m.name} ${m.t}`)
+
+  it('bite: the meal from 1.5 s before the first bite, 3 bite marks (red) and 3 bite:tear marks (grey)', () => {
+    const seg = sceneSegment(T_REX_ALL, ['bite'], 0.8)!
+    expect(seg.repeating).toBe(true)
+    expect(seg.start).toBeCloseTo(21.367 - 1.5)
+    expect(seg.end).toBeCloseTo(26.0 + 0.8 + 1)
+    expect(marksOf(seg)).toEqual(['R bite 21.367', 'G bite:tear 21.967', 'R bite 23.4', 'G bite:tear 24', 'R bite 25.4', 'G bite:tear 26'])
   })
 
-  it('footstep: the exit walk (53.77 s, first run of ≥ 3), not a lone footstep while feeding; at most 6 marks', () => {
-    const seg = representativeSegment(T_REX, 'footstep', 0.6)!
-    expect(seg.run).toBe(true)
-    expect(seg.marks[0]).toBeCloseTo(53.767)
-    expect(seg.marks).toHaveLength(6)
-    expect(seg.total).toBe(24)
-    expect(occurrences(T_REX, 'footstep')).toHaveLength(24)
+  it('footstep:approach: 5 marks; footstep: the exit walk, cut after its 6th step; a trial naming both cues', () => {
+    const approach = sceneSegment(T_REX_ALL, ['footstep:approach'], 0.3)!
+    expect(approach.marks.filter(m => m.target).map(m => m.t)).toEqual([1.267, 2.133, 2.967, 3.833, 4.7])
+    expect(approach.marks.every(m => m.target)).toBe(true)
+    expect(approach.start).toBe(0) // 1.5 s before 1.267 s, clamped to the recording's start
+    const exit = sceneSegment(T_REX_ALL, ['footstep'], 0.3)!
+    expect(exit.marks.map(m => m.t)).toEqual([53.767, 54.6, 55.467, 56.333, 57.2, 58.033])
+    expect(exit.total).toBe(24)
+    // T19 (scene.cues footstep + footstep:approach): both are targets; the first chain with 3 of them is the approach.
+    expect(sceneSegment(T_REX_ALL, ['footstep', 'footstep:approach'], 0.3)!.marks.length).toBe(5)
   })
 
-  it('a one-off event: 1 s before to the sound length + 0.5 s after; absent events have none', () => {
-    expect(representativeSegment(T_REX, 'roar', 3)).toEqual({ name: 'roar', start: 6.9, end: 11.4, marks: [7.9], run: false, total: 1 })
-    expect(representativeSegment(T_REX, 'bite', 1)).toBeNull()
-    expect(findRuns([0, 1, 5, 6, 7, 20])).toEqual([[5, 6, 7]])
-    expect(findRuns([0, 1])).toEqual([])
+  it('a one-off cue: one mark, from 1 s before to the sound + 0.5 s; a cue that never fires: none', () => {
+    expect(sceneSegment(T_REX_ALL, ['roar'], 3)).toEqual({ names: ['roar'], start: 6.9, end: 11.4, marks: [{ t: 7.9, name: 'roar', target: true }], repeating: false, total: 1 })
+    expect(sceneSegment(T_REX_ALL, ['breath'], 1)!.marks).toHaveLength(1) // every 5 s: not repeating
+    expect(sceneSegment(T_REX_ALL, ['growl'], 1)).toBeNull()
+    for (const name of ['footstep:approach', 'footstep', 'bite', 'bite:tear', 'breath:stroke']) expect(isRepeating(T_REX_ALL, [name]), name).toBe(true)
+    for (const name of ['roar', 'breath', 'keeper_cue', 'grab', 'bone_taken', 'growl']) expect(isRepeating(T_REX_ALL, [name]), name).toBe(false)
+    expect(occurrences(T_REX_ALL, 'footstep')).toHaveLength(24)
   })
 
-  it('audition plays: the real gaps of the cue run, else sound length + 0.4 s apart, no jitter', () => {
-    expect(listenOffsets(T_REX, 'footstep:approach', 5, 0.3).map(x => +x.toFixed(3))).toEqual([0, 0.866, 1.7, 2.566, 3.433])
-    expect(listenOffsets(T_REX, 'footstep', 3, 0.3).map(x => +x.toFixed(3))).toEqual([0, 0.833, 1.7])
-    expect(listenOffsets(T_REX, 'roar', 3, 2).map(x => +x.toFixed(2))).toEqual([0, 2.4, 4.8]) // one-off: sound + 0.4 s
-    expect(listenOffsets(null, 'bite', 3, 0.5).map(x => +x.toFixed(2))).toEqual([0, 0.9, 1.8]) // no recording
-    expect(listenOffsets(T_REX, 'footstep', 1, 0.3)).toEqual([0])
-    expect(listenOffsets([0, 1, 2].map(t => ({ t, name: 'x', hand: 'both' })), 'x', 5, 0)).toEqual([0, 1, 2, 3, 4]) // a 3-firing run continues at its gap
-  })
-
-  it('a selection on a repeated audition maps to seconds of one play', () => {
+  it('a selection on a scene audition maps to seconds of one play', () => {
     expect(toFirstPlay({ start: 1.0, end: 1.2 }, [0, 0.9, 1.8], 0.5)).toEqual({ start: expect.closeTo(0.1), end: expect.closeTo(0.3) })
-    expect(toFirstPlay({ start: 0.1, end: 0.8 }, [0, 0.9], 0.5)).toEqual({ start: 0.1, end: 0.5 })
-    expect(toFirstPlay({ start: 0.6, end: 0.8 }, [0, 0.9], 0.5)).toBeNull() // the pause between plays
+    expect(toFirstPlay({ start: 0.6, end: 0.8 }, [0, 0.9], 0.5)).toBeNull()
     expect(toFirstPlay({ start: 0.1, end: 0.3 }, null, 0.5)).toEqual({ start: 0.1, end: 0.3 })
-  })
-
-
-  it('repeated auditions only for cues that repeat (≥ 3 firings, median gap ≤ 2.5 s); a per-cue override wins', () => {
-    for (const name of ['footstep:approach', 'footstep', 'bite', 'bite:tear', 'breath:stroke']) expect(isRepeating(T_REX_ALL, name), name).toBe(true)
-    for (const name of ['roar', 'breath', 'keeper_cue', 'grab', 'bone_taken', 'growl', 'bone_drop']) expect(isRepeating(T_REX_ALL, name), name).toBe(false)
-    expect(isRepeating(null, 'footstep')).toBe(false)
-    expect(repeatsFor(T_REX_ALL, 'roar', 'on')).toBe(true)
-    expect(repeatsFor(T_REX_ALL, 'footstep', 'off')).toBe(false)
-    expect(repeatsFor(T_REX_ALL, 'footstep', undefined)).toBe(true)
-    // bite: no run within 1.5 s, so its plays use its median gap (2.0 s); forced on without a recording: sound + 0.4 s.
-    expect(listenOffsets(T_REX_ALL, 'bite', 3, 0.5).map(x => +x.toFixed(2))).toEqual([0, 2.02, 4.03])
-    expect(listenOffsets(T_REX_ALL, 'growl', 3, 1).map(x => +x.toFixed(2))).toEqual([0, 1.4, 2.8])
   })
 })

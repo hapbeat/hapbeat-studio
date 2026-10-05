@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type TextareaHTMLAttributes } from 'react'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useAgentTrialStore, type AuditionTarget } from '@/stores/agentTrialStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
@@ -8,9 +8,7 @@ import type { HapticFeatures } from '@/utils/hapticFeatures'
 import { clearRatingDraft, DraftKeeper, readFolderDraft, readLocalDraft, writeRatingDraft } from '@/utils/ratingDrafts'
 import { addUseRange, usableCandidates, autoRatingContext, EMPTY_CONTEXT, formToRating, jaPolePhrase, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, SOUND_DIMENSIONS, trialKind, verdictFromOverall, visibleDimensions, type CandidateRatingForm, type Direction, type RatingForm } from '@/utils/agentTrialUi'
 import { trialTarget, type TrialKind } from '@/utils/agentProtocol'
-import { useListenOffsets } from './eventAudio'
-import { ListenTimes } from './ListenTimes'
-import { DictationField } from './DictationField'
+import { useAuditionPlan } from './EditorScenePanel'
 import { toFirstPlay } from '@/utils/sceneSegments'
 import { useEventStore } from '@/stores/eventStore'
 import { assignEventsForTrial, effectiveEvent, parseEventKey, trialEvent } from '@/utils/cueEvents'
@@ -182,7 +180,6 @@ export function AgentTrialsPanel() {
       </EditorMenu>
       {record && <button className="toolbar-btn" title={t('editor.scene.openHint')}
         onClick={() => openSceneVideo({ kind: 'trial', trialId: record.trial.id }, wantedSceneProject({ scene: record.trial.scene, saved: useEditorSettings.getState().trialScenes[record.trial.id], fallback: record.trial.project }) ?? null)}>▶ {t('editor.agent.video')}</button>}
-      <ListenTimes event={record?.trial.scene?.cues[0] ?? null} />
       <label className="agent-axes-toggle" title={t('editor.agent.axesToggleHint')}>
         <input type="checkbox" checked={showAxes} onChange={e => useEditorSettings.getState().update({ ratingShowAxes: e.target.checked })} />{t('editor.agent.axesToggle')}</label>
       {record && (record.dismissed ? <button className="toolbar-btn" onClick={() => void restore(record)}>{t('editor.agent.restore')}</button>
@@ -292,10 +289,10 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
   const showAxes = useEditorSettings(s => s.ratingShowAxes)
   /** The waveform selection while a candidate is auditioned: recorded as its "use only this part" range. */
   const region = useWaveformStore(s => s.selectedRegion)
-  // On a repeated audition (×3 / ×5) the range is taken as seconds of one play.
-  const plays = useListenOffsets()
+  // On a stretch played at several firings the range is taken as seconds of one play.
+  const plan = useAuditionPlan()
   const auditionSec = useAgentTrialStore(s => s.audition?.buffer.duration ?? 0)
-  const selection = useMemo(() => toFirstPlay(region, plays, auditionSec), [region, plays, auditionSec])
+  const selection = useMemo(() => toFirstPlay(region, plan?.targets ?? null, auditionSec), [region, plan, auditionSec])
   /** Every change goes to the draft keeper (memory now, the stores after 300 ms). */
   const edit = (update: (f: RatingForm) => RatingForm) => { const next = update(form); setForm(next); drafts.change(trial.id, next); setDirty(true); setSaveError(null) }
   const editCandidate = (cid: string, patch: Partial<CandidateRatingForm>) => edit(f => ({ ...f, candidates: { ...f.candidates, [cid]: { ...f.candidates[cid], ...patch } } }))
@@ -501,7 +498,7 @@ function CandidateNotes({ value, onChange, selection, showRanges }: {
 }) {
   const { t } = useI18n()
   return <div className="agent-notes">
-    <DictationField className="agent-comment" rows={1} placeholder={t('editor.agent.comment')} aria-label={t('editor.agent.comment')} value={value.comment} onChange={comment => onChange({ comment })} />
+    <GrowingTextarea className="agent-comment" rows={1} placeholder={t('editor.agent.comment')} aria-label={t('editor.agent.comment')} value={value.comment} onChange={comment => onChange({ comment })} />
     {(showRanges || value.useRange.length > 0) && <span className="agent-use-range">
       <button className="agent-icon-btn" disabled={!selection || selection.end <= selection.start} title={t('editor.agent.useRangeHint')}
         onClick={() => { if (selection) onChange({ useRange: addUseRange(value.useRange, selection.start, selection.end) }) }}>{t('editor.agent.useRangeShort')}</button>
@@ -514,8 +511,15 @@ function CandidateNotes({ value, onChange, selection, showRanges }: {
 /** The comment on the whole trial (grows with the text; the user often dictates it). */
 function TrialComment({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const { t } = useI18n()
-  return <DictationField className="agent-comment agent-trial-comment" rows={2} placeholder={t('editor.agent.trialComment')} aria-label={t('editor.agent.trialComment')}
+  return <GrowingTextarea className="agent-comment agent-trial-comment" rows={2} placeholder={t('editor.agent.trialComment')} aria-label={t('editor.agent.trialComment')}
     value={value} onChange={onChange} />
+}
+
+/** A comment textarea that grows with its text (one or two lines at rest). */
+function GrowingTextarea({ value, onChange, ...rest }: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'value' | 'onChange'> & { value: string; onChange: (value: string) => void }) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => { const el = ref.current; if (el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px` } }, [value])
+  return <textarea ref={ref} {...rest} value={value} onChange={e => onChange(e.target.value)} />
 }
 
 /** Ids and project of a trial for an outbox message. */

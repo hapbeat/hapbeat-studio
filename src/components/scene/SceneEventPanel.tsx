@@ -6,7 +6,7 @@ import {
   addVariant, effectiveEvent, eventKey, removeVariant, resolveEventName, setOverride, setRouteClips, setSfxSounds, setVariation,
   type EffectiveEvent, type OverridableField,
 } from '@/utils/cueEvents'
-import { representativeSegment } from '@/utils/sceneSegments'
+import { sceneSegment } from '@/utils/sceneSegments'
 import { MaterialList } from '@/components/waveform/MaterialList'
 import { NumberField, useAtLabel } from './SceneCuePanels'
 import { useScene } from './sceneContext'
@@ -41,12 +41,12 @@ export function SceneEventPanel() {
   const edit: Edit = change => useSceneStore.getState().edit(change)
   const select = (name: string) => useSceneStore.getState().selectCue(name, sel?.t ?? null)
   const sound = e.sfx ? sfxSounds(e.sfx)[0] : undefined
-  const run = data ? representativeSegment(data.full.events, key, (sound && useSceneStore.getState().sfx[sound]?.duration) || 1) : null
+  const run = data ? sceneSegment(data.full.events, [key], (sound && useSceneStore.getState().sfx[sound]?.duration) || 1) : null
   return <div className="scene-cue-panel scene-event">
     <div className="scene-sec">
       <Variants table={table} e={e} select={select} edit={edit} />
-      {run?.run && <button type="button" className="scene-icon-btn scene-event-run" title={t('scene.event.runHint')}
-        onClick={ev => { ev.currentTarget.blur(); runtime.audio(); runtime.playFull(run.start) }}>{t('scene.event.run', { at: run.marks[0].toFixed(1), count: run.marks.length })}</button>}
+      {run?.repeating && <button type="button" className="scene-icon-btn scene-event-run" title={t('scene.event.runHint')}
+        onClick={ev => { ev.currentTarget.blur(); runtime.audio(); runtime.playFull(run.start) }}>{t('scene.event.run', { at: run.marks[0].t.toFixed(1), count: run.marks.filter(m => m.target).length })}</button>}
     </div>
     {!loop || lib.loop_cue_sounds ? <Sounds e={e} edit={edit} allowed={soundAllowed(lib, e.ref.cue)} /> : null}
     <Clips table={table} e={e} edit={edit} />

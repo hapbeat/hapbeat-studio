@@ -20,8 +20,7 @@ import { NumberField, useAtLabel } from '@/components/scene/SceneCuePanels'
 import { useEditor } from './editorContext'
 import { DecidedNotice } from './DecideDialog'
 import { EditorMenu, EditorMenuItem } from './EditorMenu'
-import { openEventDefault, openEventHaptic, openEventSound, useRepeats } from './eventAudio'
-import { ListenTimes } from './ListenTimes'
+import { openEventDefault, openEventHaptic, openEventSound } from './eventAudio'
 import { MaterialList } from './MaterialList'
 import { openEventMaterialForEditing } from './eventEditing'
 import './EventsPanel.css'
@@ -78,7 +77,6 @@ export function EventsPanel() {
   return <div className="editor-panel events-panel">
     <div className="events-top">
       <ProjectPicker />
-      <ListenTimes event={selected ? parseEventKey(selected).cue : null} />
       <EditorMenu label="⋯" title={t('events.menu')}>
         <EditorMenuItem disabled={!table} onSelect={() => void ask({ message: t('events.resetReviewsConfirm'), danger: true }).then(ok => { if (ok) useSceneStore.getState().edit(tb => resetAllReviews(tb)) })}>{t('events.resetReviews')}</EditorMenuItem>
       </EditorMenu>
@@ -186,7 +184,6 @@ function EventDetail({ table, lib, e }: { table: CueTable; lib: SceneLib; e: Eff
   return <div className="events-detail">
     <div className="events-detail-head">
       <strong>{key}</strong>
-      <RepeatMenu cue={e.ref.cue} />
       <button type="button" className="toolbar-btn" title={t('editor.scene.openHint')} onClick={() => openSceneVideo({ kind: 'event', key }, lib.project_name)}>▶ {t('editor.scene.open')}</button>
     </div>
     {e.description && <p className="agent-muted">{e.description}</p>}
@@ -325,21 +322,4 @@ function DecisionBar({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'ha
     {!isNone && <button type="button" className="agent-icon-btn" title={t(field === 'sfx' ? 'events.setNoneSoundHint' : 'events.setNoneHapticHint')} onClick={() => edit(tb => setNone(tb, e.ref, field))}>{t('events.setNone')}</button>}
     {e.ref.variant === null && e.decided[field] && <button type="button" className="agent-icon-btn" title={t('events.setUndecidedHint')} onClick={() => edit(tb => setUndecided(tb, e.ref.cue, field))}>{t('events.setUndecided')}</button>}
   </div>
-}
-
-/** Per cue ⋯: repeated auditions automatic (from the recording) / on / off — Studio's editor settings, not the cue table. */
-function RepeatMenu({ cue }: { cue: string }) {
-  const { t } = useI18n()
-  const value = useEditorSettings(s => s.listenRepeat[cue])
-  const auto = useRepeats(cue) // the effective state, shown next to "Automatic"
-  const set = (next: 'on' | 'off' | undefined) => {
-    const map = { ...useEditorSettings.getState().listenRepeat }
-    if (next) map[cue] = next; else delete map[cue]
-    useEditorSettings.getState().update({ listenRepeat: map })
-  }
-  return <EditorMenu label="⋯" title={t('events.repeatListen')}>
-    <EditorMenuItem checked={!value} onSelect={() => set(undefined)}>{t('events.repeatListen.auto', { state: t(auto ? 'events.repeatListen.yes' : 'events.repeatListen.no') })}</EditorMenuItem>
-    <EditorMenuItem checked={value === 'on'} onSelect={() => set('on')}>{t('events.repeatListen.on')}</EditorMenuItem>
-    <EditorMenuItem checked={value === 'off'} onSelect={() => set('off')}>{t('events.repeatListen.off')}</EditorMenuItem>
-  </EditorMenu>
 }
