@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useEditorSettings } from '@/stores/editorSettings'
@@ -7,6 +7,7 @@ import { sceneVideoUrl, useSceneStore } from '@/stores/sceneStore'
 import { resolveTrialScene, sceneEventTime, sceneVideoTime, stepSceneFrame, wantedSceneProject, type TrialSceneState } from '@/utils/trialScene'
 import { setScenePause, setScenePreRoll, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
 import { isTypingTarget } from '@/utils/playbackShortcut'
+import { VideoOverlay } from '@/components/scene/VideoOverlay'
 import { useEditor } from './editorContext'
 import { useEventStore } from '@/stores/eventStore'
 import { onUserStop } from '@/utils/playerStops'
@@ -96,7 +97,10 @@ export function EditorScenePanel() {
     sync()
     return () => { for (const [target, name] of events) target.removeEventListener(name, later) }
   })
-  const video = useRef<HTMLVideoElement>(null)
+  const video = useRef<HTMLVideoElement | null>(null)
+  /** The same element as state, so the overlay gets it once it is mounted. */
+  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null)
+  const videoRef = useCallback((el: HTMLVideoElement | null) => { video.current = el; setVideoEl(el) }, [])
   const root = useSceneStore(s => s.root)
   useEffect(() => { void useSceneStore.getState().restore() }, [])
   const audition = useAgentTrialStore(s => s.audition)
@@ -170,6 +174,18 @@ export function EditorScenePanel() {
     else playFromStart(true)
   }
   const togglePauseRef = useRef(togglePause); togglePauseRef.current = togglePause
+  /** Seek bar: while playing, the waveform moves (the video follows); otherwise video and waveform pause together there. */
+  const seekVideo = (videoTime: number) => {
+    const v = video.current
+    if (!v || !chosen) return
+    const time = sceneEventTime(chosen.mark, videoTime)
+    if (pausedRef.current === null && isPlaybackActive() && time >= 0 && time < player.getDuration()) { player.setTime(time); return }
+    v.pause()
+    playback.stop()
+    v.currentTime = videoTime
+    seekWaveform(time)
+    setPausedAt(time)
+  }
   const stepFrame = (direction: 1 | -1) => {
     const v = video.current, time = pausedRef.current
     if (!v || !chosen || time === null) return
@@ -214,29 +230,28 @@ export function EditorScenePanel() {
     </div>
   }
   const message = state.kind === 'noClips' ? t('editor.scene.noClips', { cues: state.cues.join(', ') }) : null
+  /** Usage notes: the video's title and the overlay's ⓘ (no paragraph under the video). */
+  const hint = synced ? `${t('editor.scene.synced')}\n${t('editor.scene.stepHint')}` : subject.kind === 'trial' && !trial ? '' : subject.kind === 'trial' ? t('editor.scene.auditionHint') : t('editor.scene.clipHint')
   const title = subject.kind === 'trial' ? t('editor.scene.forTrial', { id: choice.id }) : subject.kind === 'event' ? t('editor.scene.forEvent', { name: choice.id ?? '' }) : t('editor.scene.forClip', { name: clipName })
   return <div className="editor-scene-panel" ref={rootRef} tabIndex={-1}
     onKeyDown={e => { if (pausedRef.current === null || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') || isTypingTarget(e.target)) return; e.preventDefault(); stepFrame(e.key === 'ArrowRight' ? 1 : -1) }}>
-    <div className="editor-scene-title" title={title}>{title}
-      {synced && <span className={`editor-scene-mode ${focused ? 'video' : ''}`}>{focused ? t('editor.scene.modeVideo', { seconds: lead }) : t('editor.scene.modeWave')}</span>}</div>
+    {/* One wrapping row: title, play mode, moment, lead-in (the details are in the titles). */}
+    <div className="editor-scene-head">
+      <span className="editor-scene-title" title={title}>{title}</span>
+      {synced && <span className={`editor-scene-mode ${focused ? 'video' : ''}`} title={focused ? t('editor.scene.modeVideoHint', { seconds: lead }) : t('editor.scene.modeWaveHint')}>
+        {focused ? t('editor.scene.modeVideo', { seconds: lead }) : t('editor.scene.modeWave')}</span>}
+      {!message && <SceneChoiceSelect choice={choice} label={t('editor.scene.clip')} />}
+      {!message && <label className="editor-scene-lead">{t('editor.scene.lead')}
+        <input type="number" min={0} max={10} step={0.5} value={lead} onChange={e => { const x = parseFloat(e.target.value); if (Number.isFinite(x)) useEditorSettings.getState().update({ sceneLeadSec: Math.max(0, Math.min(10, x)) }) }} />
+        {t('editor.scene.leadUnit')}</label>}
+    </div>
     {message ? <p className="agent-muted">{message}</p> : <>
-      <div className="editor-scene-bar">
-        <SceneChoiceSelect choice={choice} label={t('editor.scene.clip')} />
-        <label className="editor-scene-lead">{t('editor.scene.lead')}
-          <input type="number" min={0} max={10} step={0.5} value={lead} onChange={e => { const x = parseFloat(e.target.value); if (Number.isFinite(x)) useEditorSettings.getState().update({ sceneLeadSec: Math.max(0, Math.min(10, x)) }) }} />
-          {t('editor.scene.leadUnit')}</label>
-      </div>
-      <div className="editor-scene-stage" onClick={e => { e.currentTarget.closest<HTMLElement>('.editor-scene-panel')?.focus(); focusedRef.current = true; setFocused(true); if (synced) togglePause() }}>
-        {chosen && src && !videoError ? <video ref={video} src={src} muted playsInline preload="auto" onLoadedMetadata={cue} onPlay={() => setVideoRunning(true)} onPause={() => setVideoRunning(false)} onError={e => setVideoError(e.currentTarget.error?.message || `MediaError ${e.currentTarget.error?.code ?? ''}`)} />
+      <div className="editor-scene-stage" title={hint} onClick={e => { e.currentTarget.closest<HTMLElement>('.editor-scene-panel')?.focus(); focusedRef.current = true; setFocused(true); if (synced) togglePause() }}>
+        {chosen && src && !videoError ? <video ref={videoRef} src={src} muted playsInline preload="auto" onLoadedMetadata={cue} onPlay={() => setVideoRunning(true)} onPause={() => setVideoRunning(false)} onError={e => setVideoError(e.currentTarget.error?.message || `MediaError ${e.currentTarget.error?.code ?? ''}`)} />
           : <p className="agent-muted">{chosen && videoError ? t('editor.scene.unreadable', { file: chosen.file, error: videoError }) : chosen ? t('editor.scene.loading') : t('editor.scene.pickHint')}</p>}
+        {synced && chosen && src && !videoError && <VideoOverlay video={videoEl} mark={chosen.mark} playing={videoRunning}
+          onToggle={() => { focusedRef.current = true; setFocused(true); togglePause() }} onSeek={seekVideo} info={hint} />}
       </div>
-      {synced && chosen && src && !videoError && <div className="editor-scene-controls">
-        <button className="toolbar-btn editor-scene-pause" onClick={() => { focusedRef.current = true; setFocused(true); togglePause() }}
-          title={t(videoRunning ? 'editor.scene.pause' : pausedAt !== null ? 'editor.scene.resume' : 'editor.scene.playLead')} aria-label={t(videoRunning ? 'editor.scene.pause' : pausedAt !== null ? 'editor.scene.resume' : 'editor.scene.playLead')}>{videoRunning ? '⏸' : '▶'}</button>
-        <span className="editor-scene-time">{pausedAt !== null ? t('editor.scene.pausedAt', { time: pausedAt.toFixed(2) }) : ''}</span>
-        <span className="agent-muted editor-scene-step">{pausedAt !== null ? t('editor.scene.stepHint') : ''}</span>
-      </div>}
-      <p className="agent-muted editor-scene-hint">{synced ? t('editor.scene.synced') : subject.kind === 'trial' && !trial ? '' : subject.kind === 'trial' ? t('editor.scene.auditionHint') : t('editor.scene.clipHint')}</p>
     </>}
   </div>
 }

@@ -1,23 +1,18 @@
 /* ---- Editor: Scene video panel ---- */
-.editor-scene-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 8px; gap: 6px; font-size: 13px; }
-.editor-scene-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.editor-scene-bar select { flex: 1; min-width: 0; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-light); border-radius: 4px; padding: 2px 4px; }
+.editor-scene-panel { display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 6px; gap: 4px; font-size: 13px; box-sizing: border-box; }
+/* Title, mode, moment and lead-in share one row (wrapping only when narrow). */
+.editor-scene-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.editor-scene-head select { flex: 1 1 100px; min-width: 0; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-light); border-radius: 4px; padding: 2px 4px; }
 .editor-scene-lead { display: inline-flex; gap: 4px; align-items: center; color: var(--text-muted); white-space: nowrap; }
-.editor-scene-lead input { width: 56px; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-light); border-radius: 4px; padding: 2px 4px; }
-.editor-scene-stage { flex: 1; min-height: 80px; display: flex; align-items: center; justify-content: center; background: #000; border-radius: 4px; overflow: hidden; }
+.editor-scene-lead input { width: 44px; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-light); border-radius: 4px; padding: 2px 4px; }
+.editor-scene-stage { position: relative; flex: 1; min-height: 80px; display: flex; align-items: center; justify-content: center; background: #000; border-radius: 4px; overflow: hidden; }
 .editor-scene-stage video { max-width: 100%; max-height: 100%; display: block; }
-.editor-scene-hint { font-size: 12px; }
 .editor-scene-panel:focus { outline: none; }
 .editor-scene-stage { cursor: pointer; }
-.editor-scene-mode { margin-left: 8px; padding: 0 6px; border-radius: 8px; font-size: 11px; font-weight: 400; color: var(--text-muted); border: 1px solid var(--border-light); }
+.editor-scene-mode { flex: none; white-space: nowrap; padding: 0 6px; border-radius: 8px; font-size: 11px; font-weight: 400; color: var(--text-muted); border: 1px solid var(--border-light); }
 .editor-scene-mode.video { color: var(--accent-light); border-color: var(--accent-light); }
-.editor-scene-title { font-weight: 600; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.editor-scene-title { flex: 0 1 auto; min-width: 0; font-weight: 600; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .editor-scene-link { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .editor-scene-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; font-size: 13px; }
 .editor-scene-row select { flex: 1; min-width: 120px; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-light); border-radius: 4px; padding: 2px 4px; }
 .agent-scene-btn { align-self: flex-start; margin-top: 4px; }
-/* ⏸/▶ under the video; the time keeps its width so the hint does not move. */
-.editor-scene-controls { display: flex; align-items: center; gap: 8px; min-height: 24px; }
-.editor-scene-pause { min-width: 32px; justify-content: center; }
-.editor-scene-time { min-width: 9ch; font-variant-numeric: tabular-nums; color: var(--text-primary); }
-.editor-scene-step { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useScene } from './sceneContext'
 import { useSceneProjectActions } from './useSceneProjectActions'
+import { VideoOverlay } from './VideoOverlay'
 
 /** The clip / replay video (the runtime's element, moved in here) with the time-to-cue badge, or the "open a project" start screen. */
 export function SceneVideoPanel() {
@@ -13,6 +14,14 @@ export function SceneVideoPanel() {
   const hasItems = useSceneStore(s => s.items.length > 0)
   const empty = useSceneStore(s => s.empty)
   const { open, reopen, rememberedName, busy } = useSceneProjectActions()
+  // Overlay: ⏸/▶ follows the runtime's video; the bar's mark is the clip's cue (the full recording has none).
+  const [playing, setPlaying] = useState(false)
+  useEffect(() => {
+    const v = runtime.video, sync = () => setPlaying(!v.paused)
+    v.addEventListener('play', sync); v.addEventListener('pause', sync); sync()
+    return () => { v.removeEventListener('play', sync); v.removeEventListener('pause', sync) }
+  }, [runtime])
+  const mark = useSceneStore(s => { const it = s.items[s.cur]; return it?.kind === 'clip' ? it.event : null })
 
   useEffect(() => {
     const host = stage.current
@@ -42,6 +51,8 @@ export function SceneVideoPanel() {
 
   return <div className="scene-stage" ref={stage} onClick={() => { if (!hasItems) return; runtime.audio(); runtime.togglePlay() }}>
     <div className="scene-badge" ref={badge} hidden={!hasItems} />
+    {hasItems && <VideoOverlay video={runtime.video} mark={mark} playing={playing} info={t('scene.keys')}
+      onToggle={() => { runtime.audio(); runtime.togglePlay() }} onSeek={time => runtime.seek(time)} />}
     {!hasItems && <div className="scene-empty" onClick={e => e.stopPropagation()}>
       <div className="scene-empty-message">{empty ? t(empty.id, empty.params) : t('scene.empty.intro')}</div>
       <div className="scene-empty-actions">
