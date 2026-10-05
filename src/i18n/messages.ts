@@ -1231,6 +1231,7 @@ export const messages = defineMessages({
   'events.soundRequest.hint': { ja: 'この cue の音（追加の候補）をエージェントに依頼します（outbox）', en: 'Asks the agent for (more) sound candidates for this cue (outbox).' },
   'events.soundRequest.placeholder': { ja: 'どんな音か（例: ワニを撫でるような、少し湿ったカサカサ）。Enter で送信、Esc で閉じる', en: 'What it should sound like. Enter sends, Esc closes.' },
   'events.soundRequest.message': { ja: '音の依頼: {cue}: {comment}', en: 'Sound request: {cue}: {comment}' },
+  'events.decide.duplicate': { ja: '{name} と同じ音なので追加しませんでした', en: 'Same sound as {name}: not added.' },
 })
 
 export type MessageId = keyof typeof messages
