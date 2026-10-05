@@ -10,6 +10,7 @@ import { addUseRange, usableCandidates, autoRatingContext, EMPTY_CONTEXT, formTo
 import { trialTarget, type TrialKind } from '@/utils/agentProtocol'
 import { useListenOffsets } from './eventAudio'
 import { ListenTimes } from './ListenTimes'
+import { DictationField } from './DictationField'
 import { toFirstPlay } from '@/utils/sceneSegments'
 import { useEventStore } from '@/stores/eventStore'
 import { assignEventsForTrial, effectiveEvent, parseEventKey, trialEvent } from '@/utils/cueEvents'
@@ -499,10 +500,8 @@ function CandidateNotes({ value, onChange, selection, showRanges }: {
   showRanges: boolean
 }) {
   const { t } = useI18n()
-  const ref = useRef<HTMLTextAreaElement>(null)
-  useEffect(() => { const el = ref.current; if (el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px` } }, [value.comment])
   return <div className="agent-notes">
-    <textarea ref={ref} className="agent-comment" rows={1} placeholder={t('editor.agent.comment')} aria-label={t('editor.agent.comment')} value={value.comment} onChange={e => onChange({ comment: e.target.value })} />
+    <DictationField className="agent-comment" rows={1} placeholder={t('editor.agent.comment')} aria-label={t('editor.agent.comment')} value={value.comment} onChange={comment => onChange({ comment })} />
     {(showRanges || value.useRange.length > 0) && <span className="agent-use-range">
       <button className="agent-icon-btn" disabled={!selection || selection.end <= selection.start} title={t('editor.agent.useRangeHint')}
         onClick={() => { if (selection) onChange({ useRange: addUseRange(value.useRange, selection.start, selection.end) }) }}>{t('editor.agent.useRangeShort')}</button>
@@ -515,10 +514,8 @@ function CandidateNotes({ value, onChange, selection, showRanges }: {
 /** The comment on the whole trial (grows with the text; the user often dictates it). */
 function TrialComment({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const { t } = useI18n()
-  const ref = useRef<HTMLTextAreaElement>(null)
-  useEffect(() => { const el = ref.current; if (el) { el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px` } }, [value])
-  return <textarea ref={ref} className="agent-comment agent-trial-comment" rows={2} placeholder={t('editor.agent.trialComment')} aria-label={t('editor.agent.trialComment')}
-    value={value} onChange={e => onChange(e.target.value)} />
+  return <DictationField className="agent-comment agent-trial-comment" rows={2} placeholder={t('editor.agent.trialComment')} aria-label={t('editor.agent.trialComment')}
+    value={value} onChange={onChange} />
 }
 
 /** Ids and project of a trial for an outbox message. */

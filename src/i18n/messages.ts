@@ -1231,6 +1231,10 @@ export const messages = defineMessages({
   'scene.event.runHint': { ja: '記録の通し映像を、このイベントの連続区間の先頭から再生します（実際の発生タイミングで、揺らぎを掛けて鳴ります）', en: 'Plays the full recording from the start of this event’s run (real firing times, with the variation).' },
   'editor.listenTimes': { ja: '試聴の回数', en: 'Plays per audition' },
   'editor.listenTimesHint': { ja: 'エディタの試聴（▶・カード・Space）を何回繰り返すか。連続する cue は記録の実際の間隔、単発・記録なしは音の長さ＋0.4 秒の間隔で、揺らぎなしで鳴らします（停止で残りも止まります）', en: 'How many times every editor audition (▶, cards, Space) plays: at the real gaps of a repeated cue in the recording, else the sound length + 0.4 s apart, without jitter (Stop ends the rest).' },
+  'editor.dictation.start': { ja: '音声入力を開始（Ctrl+M）', en: 'Start dictation (Ctrl+M)' },
+  'editor.dictation.stop': { ja: '音声入力を終了（Ctrl+M / Esc）', en: 'Stop dictation (Ctrl+M / Esc)' },
+  'editor.dictation.privacy': { ja: '音声はブラウザの認識サーバー（Chrome は Google、Edge は Microsoft）へ送られます', en: 'The audio is sent to the browser’s speech service (Chrome: Google, Edge: Microsoft).' },
+  'editor.dictation.error': { ja: '音声入力エラー: {code}', en: 'Dictation error: {code}' },
 })
 
 export type MessageId = keyof typeof messages
