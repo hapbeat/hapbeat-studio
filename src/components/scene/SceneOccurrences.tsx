@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useEventStore } from '@/stores/eventStore'
@@ -23,6 +23,9 @@ export function SceneOccurrences() {
   const table = useSceneStore(s => s.table)
   const lib = useSceneStore(s => s.lib)
   const name = useEventStore(s => s.sceneOccurrences)
+  // The cue / variant selected in the Event panel or the timeline: its firings are listed (never left at "—").
+  const selected = useSceneStore(s => s.sel?.name ?? null)
+  useEffect(() => { if (selected && selected !== useEventStore.getState().sceneOccurrences) useEventStore.setState({ sceneOccurrences: selected }) }, [selected])
   const counts = useMemo(() => {
     const out = new Map<string, number>()
     for (const e of data?.full.events ?? []) if (!lib?.ticks.includes(e.name)) out.set(e.name, (out.get(e.name) ?? 0) + 1)

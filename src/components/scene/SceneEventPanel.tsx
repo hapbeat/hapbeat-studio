@@ -238,12 +238,12 @@ function Variation({ e, loop, edit }: { e: EffectiveEvent; loop: boolean; edit: 
     </div>
   }
   return <div className="scene-event-variation">
-    {!loop && <label title={t('events.variation.pick.hint')}>{t('events.variation.pick')}
+    {!loop && <label className="scene-variation-pick" title={t('events.variation.pick.hint')}><span>{t('events.variation.pick')}</span>
       <select value={v.pick ?? ''} disabled={!own} onChange={ev => { const p = ev.target.value; ev.target.blur(); set({ pick: p ? p as CueVariation['pick'] : undefined }) }}>
         <option value="">{t('events.variation.pick.default')}</option>
         {PICK_MODES.map(p => <option key={p} value={p}>{t(`events.variation.pick.${p}` as MessageId)}</option>)}
       </select></label>}
-    {VARIATION_FIELDS.filter(f => !loop || f.loopOk).map(f => <label key={f.key} title={t(`events.variation.${f.key}.hint` as MessageId)}>{t(`events.variation.${f.key}` as MessageId)}
+    {VARIATION_FIELDS.filter(f => !loop || f.loopOk).map(f => <label key={f.key} title={t(`events.variation.${f.key}.hint` as MessageId)}><span>{t(`events.variation.${f.key}` as MessageId)}</span>
       <NumberField value={typeof v[f.key] === 'number' ? v[f.key] as number : 0} min={0} max={f.max} step={f.step} disabled={!own} label={t(`events.variation.${f.key}` as MessageId)}
         onCommit={x => set({ [f.key]: x > 0 ? Math.min(f.max, x) : undefined })} /></label>)}
   </div>

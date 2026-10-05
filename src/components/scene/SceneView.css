@@ -90,8 +90,12 @@
 /* Event details (variants, candidates, variation). */
 .scene-event-variants { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .scene-event-run { margin-top: 6px; }
-.scene-event-variation { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 12px; }
-.scene-event-variation label { display: flex; align-items: center; justify-content: space-between; gap: 6px; white-space: nowrap; }
+/* Fixed columns: each field is "label | control" in its own cell; the pick select spans the row (its option texts are long). */
+.scene-event-variation { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 4px 12px; min-width: 0; }
+.scene-event-variation label { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; }
+.scene-event-variation label > :first-child { overflow: hidden; text-overflow: ellipsis; }
+.scene-event-variation .scene-variation-pick { grid-column: 1 / -1; grid-template-columns: auto minmax(0, 1fr); }
+.scene-event-variation select { min-width: 0; max-width: 100%; width: 100%; }
 .scene-event select { max-width: 100%; }
 .scene-event-paired { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
 .scene-event-pairs { margin: 0; padding-left: 16px; font-size: 12px; color: var(--text-secondary); }

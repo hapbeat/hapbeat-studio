@@ -322,7 +322,7 @@ export const messages = defineMessages({
   'scene.betaHint': { ja: 'ゲームの録画に合わせて触覚・効果音の割り当てを確認・編集します（試験提供中）', en: 'Check and edit haptic / sound cue assignments against recorded gameplay (beta).' },
   'scene.panel.video': { ja: '映像', en: 'Video' },
   'scene.panel.timeline': { ja: 'タイムライン', en: 'Timeline' },
-  'scene.panel.moments': { ja: 'クリップ', en: 'Moments' },
+  'scene.panel.moments': { ja: '場面と発生', en: 'Moments and firings' },
   'scene.panel.project': { ja: '出力・反映', en: 'Output / apply' },
   'scene.projectMenu': { ja: 'プロジェクト', en: 'Project' },
   'scene.open': { ja: 'プロジェクトを開く…', en: 'Open project…' },
