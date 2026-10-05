@@ -49,14 +49,22 @@ describe('trial scene clips', () => {
 })
 
 describe('event moments (cue table v2)', () => {
-  it('defaults to a moment of the first cue listed, before its variants', () => {
+  it('defaults to the earliest moment of any listed cue; scene.clip names one; the user pick wins', () => {
     const data = sampleData()
     data.clips = [
-      { ...data.clips[0], file: '01_button-soft.mp4', name: 'button:soft', names: ['button:soft'] },
-      { ...data.clips[0], file: '02_button.mp4', name: 'button', names: ['button'] },
+      { ...data.clips[0], file: '01_button-soft.mp4', name: 'button:soft', names: ['button:soft'], at: 1.3 },
+      { ...data.clips[0], file: '02_button.mp4', name: 'button', names: ['button'], at: 17.4 },
     ]
-    const state = resolveTrialScene({ lib: sampleLib(), data, scene: { project: 'mill', cues: ['button', 'button:soft'] } })
-    expect(state.kind === 'ready' && state.chosen?.file).toBe('02_button.mp4')
+    const scene = { project: 'mill', cues: ['button', 'button:soft'] }
+    const state = resolveTrialScene({ lib: sampleLib(), data, scene })
+    expect(state.kind === 'ready' && state.chosen?.file).toBe('01_button-soft.mp4')
     expect(state.kind === 'ready' && state.options.map(o => o.cue)).toEqual(['button:soft', 'button'])
+    expect(state.kind === 'ready' && state.options.map(o => o.label)).toEqual(['01 button:soft (1.3 s)', '02 button (17.4 s)'])
+    const named = resolveTrialScene({ lib: sampleLib(), data, scene: { ...scene, clip: '02_button.mp4' } })
+    expect(named.kind === 'ready' && named.chosen?.file).toBe('02_button.mp4')
+    const missing = resolveTrialScene({ lib: sampleLib(), data, scene: { ...scene, clip: '99_none.mp4' } })
+    expect(missing.kind === 'ready' && missing.chosen?.file).toBe('01_button-soft.mp4')
+    const picked = resolveTrialScene({ lib: sampleLib(), data, scene: { ...scene, clip: '02_button.mp4' }, saved: { project: 'mill', file: '01_button-soft.mp4' } })
+    expect(picked.kind === 'ready' && picked.chosen?.file).toBe('01_button-soft.mp4')
   })
 })

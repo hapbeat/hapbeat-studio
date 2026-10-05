@@ -15,6 +15,8 @@ export interface SceneClipOption {
   label: string
   /** Time of the cue mark in the clip video (seconds). */
   mark: number
+  /** When the moment happens in the full recording (seconds). */
+  at: number
   /** The cue (of `cues`) the clip was matched by; null when any clip is offered. */
   cue: string | null
 }
@@ -27,7 +29,8 @@ export function trialSceneOptions(data: SceneData, cues: string[] | null): Scene
     if (it.kind !== 'clip' || (cues && !it.names.some(n => cues.includes(n)))) return
     const own = itemEvents(it, data.full.events, data.fps).find(e => e.own && (!cues || cues.includes(e.name)))
     const cue = cues ? cues.find(c => it.names.includes(c)) ?? null : null
-    out.push({ file: it.file, label: `${String(index).padStart(2, '0')} ${it.names.join(' + ')} · ${it.hand} (${it.at.toFixed(1)} s)`, mark: own ? own.t : it.event, cue })
+    // Event names and time only ("03 roar (7.9 s)"); the haptic route (both / right) is not part of the moment's name.
+    out.push({ file: it.file, label: `${String(index).padStart(2, '0')} ${it.names.join(' + ')} (${it.at.toFixed(1)} s)`, at: it.at, mark: own ? own.t : it.event, cue })
   })
   return out
 }
@@ -54,9 +57,11 @@ export function resolveTrialScene(o: { lib: SceneLib | null; data: SceneData | n
   const options = trialSceneOptions(o.data, o.scene?.cues ?? null)
   if (o.scene && !options.length) return { kind: 'noClips', cues: o.scene.cues }
   const saved = o.saved && o.saved.project === o.lib.project_name ? options.find(x => x.file === o.saved!.file) : undefined
-  // Default: a moment of the first cue listed (an event's own cue before its variants), else the first match.
-  const first = o.scene ? options.find(x => x.cue === o.scene!.cues[0]) ?? options[0] : null
-  return { kind: 'ready', options, chosen: saved ?? first }
+  // The user's pick for this trial, else the trial's own `scene.clip`, else the earliest moment of any of its
+  // cues (footstep → the T-Rex walking in, not a later footstep hidden behind the meat).
+  const named = o.scene?.clip ? options.find(x => x.file === o.scene!.clip) : undefined
+  const earliest = o.scene ? options.reduce<SceneClipOption | null>((best, x) => !best || x.at < best.at ? x : best, null) : null
+  return { kind: 'ready', options, chosen: saved ?? named ?? earliest }
 }
 
 /** Video time for editor playback time `playerTime`: playback time 0 sounds on the cue mark. */

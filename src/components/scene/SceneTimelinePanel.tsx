@@ -7,6 +7,7 @@ import { effectiveEvent, resolveEventName } from '@/utils/cueEvents'
 import { useScene } from './sceneContext'
 import { SPEEDS } from './sceneRuntime'
 import { SceneOutputToggles } from './SceneOutputToggles'
+import { useHandLabel } from './SceneCuePanels'
 
 const SOUND_COLOR = '#36c5c0'
 type Hit = { x: number; y0: number; y1: number; name: string; t: number }
@@ -26,6 +27,8 @@ export function SceneTimelinePanel() {
   const levels = useRef<HTMLSpanElement>(null)
   const state = useRef<HTMLSpanElement>(null)
   const tRef = useRef(t); tRef.current = t
+  const handLabel = useHandLabel()
+  const handRef = useRef(handLabel); handRef.current = handLabel
 
   useEffect(() => {
     let frame = 0
@@ -102,7 +105,7 @@ export function SceneTimelinePanel() {
       ctx.fillStyle = '#fff'; ctx.fillRect(X(v.currentTime) - 0.5, 0, 1.5, h)
       // Read-outs.
       const time = v.currentTime, f = L[frameAt(it, fps, time)]
-      if (title.current) title.current.textContent = it.kind === 'full' ? tr('scene.full') : `${it.names.join(' + ')} · ${it.hand}`
+      if (title.current) title.current.textContent = it.kind === 'full' ? tr('scene.full') : `${it.names.join(' + ')} · ${handRef.current(it.hand)}`
       if (note.current) note.current.textContent = it.kind === 'full' ? tr('scene.cueCount', { count: data.full.events.length }) : `${it.note}  ${tr('scene.replayAt', { seconds: it.at.toFixed(1) })}`
       if (levels.current) levels.current.textContent = f ? layers.filter(l => l.gain.some(i => f[i] > 0)).map(l => `${l.cue} L ${f[l.gain[0]].toFixed(2)} R ${f[l.gain[1]].toFixed(2)}`
         + (l.rate ? ` (rate ${f[l.rate[0]].toFixed(2)} / ${f[l.rate[1]].toFixed(2)})` : '')).join('　') : ''

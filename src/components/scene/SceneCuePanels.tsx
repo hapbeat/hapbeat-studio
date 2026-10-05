@@ -16,6 +16,11 @@ export function useAtLabel() {
   const { t } = useI18n()
   return (at: string) => at === 'hand' ? t('scene.at.hand') : at === 'both' ? t('scene.at.both') : at.replace(/^pos_/, '')
 }
+/** The hand a recorded moment's haptics went to (viewer-data `hand`: both / right / left), in words. */
+export function useHandLabel() {
+  const { t } = useI18n()
+  return (hand: string) => hand === 'both' ? t('scene.hand.both') : hand === 'right' ? t('scene.hand.right') : hand === 'left' ? t('scene.hand.left') : hand
+}
 /** Gain / volume as shown next to its name ("gain 1.0", "gain 0.35"). */
 export const formatGain = (x: number) => Number.isInteger(x * 10) ? x.toFixed(1) : String(Math.round(x * 1000) / 1000)
 

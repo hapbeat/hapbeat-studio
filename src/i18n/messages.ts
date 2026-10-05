@@ -394,8 +394,8 @@ export const messages = defineMessages({
   'scene.output.selectionHint': { ja: '送信先はデバイス選択（右上）で選んだデバイスのうち、アドレスの部位が一致するものです。', en: 'Haptics go to the devices picked in the device selection (top right) whose address matches a route position.' },
   'scene.legend.haptics': { ja: '触覚あり', en: 'haptics' },
   'scene.legend.sound': { ja: '音声あり', en: 'sound' },
-  "scene.at.hand": { ja: "hand（acting）", en: "hand (acting)" },
-  "scene.at.both": { ja: "both wrists", en: "both wrists" },
+  "scene.at.hand": { ja: "動かしている手", en: "hand (acting)" },
+  "scene.at.both": { ja: "両手首", en: "both wrists" },
   'scene.editing': { ja: '編集中の cue', en: 'Editing cue' },
   'scene.pickHint': { ja: '（タイムラインの印をクリックして選択）', en: '(click a marker on the timeline)' },
   'scene.sameMoment': { ja: '同時に鳴る cue: ', en: 'Same moment: ' },
@@ -1213,6 +1213,9 @@ export const messages = defineMessages({
   'editor.scene.playLead': { ja: '印の手前から再生（Space）', en: 'Play from before the mark (Space)' },
   'editor.scene.pausedAt': { ja: '{time} s', en: '{time} s' },
   'editor.scene.stepHint': { ja: '←/→ で 1/30 秒送り・波形クリックで移動（音の開始 = 0 s）', en: '←/→ step 1/30 s, click the waveform to seek (sound start = 0 s)' },
+  'scene.hand.both': { ja: '両手首', en: 'both wrists' },
+  'scene.hand.right': { ja: '右手', en: 'right hand' },
+  'scene.hand.left': { ja: '左手', en: 'left hand' },
 })
 
 export type MessageId = keyof typeof messages

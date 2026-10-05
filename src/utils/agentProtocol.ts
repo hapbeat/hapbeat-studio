@@ -58,7 +58,10 @@ export interface TrialRequest {
   target?: TrialTarget
   candidates: TrialCandidate[]
 }
-export interface TrialScene { project: string; cues: string[] }
+/** `clip` (optional): the recorded clip's file name (Saved/HapticViewer/<clip>) to show by default. */
+export interface TrialScene { project: string; cues: string[]; clip?: string }
+/** A recorded clip file name: no path, 1–200 characters. */
+export const SCENE_CLIP = /^[A-Za-z0-9_.+-]{1,200}$/
 /** trials/<YYYY-MM>/<id>/trial.json */
 export interface TrialFile extends TrialRequest { receivedAt: string; studioVersion: string }
 /** trials/<YYYY-MM>/<id>/candidates/<cid>.json */
@@ -174,7 +177,8 @@ export function trialRequestError(data: unknown, fileId?: string): string | null
   if (data.kind !== undefined && !(TRIAL_KINDS as readonly unknown[]).includes(data.kind)) return 'kind must be "oneshot", "loop" or "sequence"'
   if (data.target !== undefined && !(TRIAL_TARGETS as readonly unknown[]).includes(data.target)) return 'target must be "sound" or "haptic"'
   if (data.scene !== undefined && (!isObject(data.scene) || !isProjectName(data.scene.project) || !Array.isArray(data.scene.cues) || data.scene.cues.length < 1 || data.scene.cues.length > 20
-    || !data.scene.cues.every(c => typeof c === 'string' && SCENE_CUE.test(c)))) return 'scene must be { project: string (1-80 characters), cues: 1-20 cue names matching /^[A-Za-z0-9_.-]{1,80}$/, optionally "cue:variant" }'
+    || !data.scene.cues.every(c => typeof c === 'string' && SCENE_CUE.test(c))
+    || (data.scene.clip !== undefined && (typeof data.scene.clip !== 'string' || !SCENE_CLIP.test(data.scene.clip))))) return 'scene must be { project: string (1-80 characters), cues: 1-20 cue names matching /^[A-Za-z0-9_.-]{1,80}$/, optionally "cue:variant", clip?: a recorded clip file name (/^[A-Za-z0-9_.+-]{1,200}$/) }'
   if (data.knowledgeUsed !== undefined && (!Array.isArray(data.knowledgeUsed) || data.knowledgeUsed.length > 50 || !data.knowledgeUsed.every(k => typeof k === 'string' && k.length <= 200))) return 'knowledgeUsed must be an array of strings'
   if (!Array.isArray(data.candidates) || data.candidates.length < 1 || data.candidates.length > 6) return 'candidates must contain 1-6 items'
   const ids = new Set<string>()
