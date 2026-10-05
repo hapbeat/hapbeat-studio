@@ -46,7 +46,7 @@ describe('strength slider (DEC-086 intensity) during loop playback', () => {
     const sent: number[] = []
     for (let i = 1; i <= 10; i++) {
       move(1 - i * 0.05)
-      sent.push(control!.getIntensity!()) // the next chunk the stream sends
+      sent.push(control!.getIntensity!(0)) // the next chunk the stream sends
       expect(e.gain.gain.value).toBeCloseTo(1 - i * 0.05)
       await vi.advanceTimersByTimeAsync(100)
     }

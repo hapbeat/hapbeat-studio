@@ -61,11 +61,14 @@ export function sceneSegment(events: readonly SceneEvent[], targets: readonly st
   const own = events.filter(e => names.includes(e.name)).sort((a, b) => a.t - b.t)
   if (!own.length) return null
   const sound = Math.max(0, soundSec)
-  if (!isRepeating(events, names)) {
-    const t = own[0].t
-    return { names, start: Math.max(0, t - LEAD_SEC), end: t + sound + TAIL_SEC, marks: [{ t, name: own[0].name, target: true }], repeating: false, total: own.length }
-  }
   const family = new Set(names.map(cueOf))
+  if (!isRepeating(events, names)) {
+    const t = own[0].t, start = Math.max(0, t - LEAD_SEC), end = t + sound + TAIL_SEC
+    // The rest of the group (the cue and its variants: bite around bite:tear) firing in the stretch is in it too (grey).
+    const marks: SceneMark[] = events.filter(e => e === own[0] || (family.has(cueOf(e.name)) && !names.includes(e.name) && e.t >= start && e.t <= end))
+      .sort((a, b) => a.t - b.t).map(e => ({ t: e.t, name: e.name, target: e === own[0] }))
+    return { names, start, end, marks, repeating: false, total: own.length }
+  }
   const fired = events.filter(e => family.has(cueOf(e.name))).sort((a, b) => a.t - b.t)
   const chains: SceneEvent[][] = []
   for (const e of fired) {

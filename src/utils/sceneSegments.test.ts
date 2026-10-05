@@ -29,6 +29,11 @@ describe('representative scene (DEC-085)', () => {
     expect(seg.start).toBeCloseTo(21.367 - 1.5)
   })
 
+  it('a one-off firing keeps the rest of its group inside the stretch (grey), not other cues', () => {
+    const events: SceneEvent[] = [{ t: 9.5, name: 'grab', hand: 'both' }, { t: 9.6, name: 'bite', hand: 'both' }, { t: 10, name: 'bite:tear', hand: 'both' }, { t: 10.9, name: 'bite', hand: 'both' }, { t: 14, name: 'bite', hand: 'both' }]
+    expect(marksOf(sceneSegment(events, ['bite:tear'], 0.5))).toEqual(['G bite 9.6', 'R bite:tear 10', 'G bite 10.9'])
+  })
+
   it('bite: the meal from 1.5 s before the first bite, 3 bite marks (red) and 3 bite:tear marks (grey)', () => {
     const seg = sceneSegment(T_REX_ALL, ['bite'], 0.8)!
     expect(seg.repeating).toBe(true)

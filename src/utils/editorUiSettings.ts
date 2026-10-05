@@ -40,6 +40,8 @@ export interface EditorUiSettings {
   clipScenes: Record<string, TrialSceneChoice>
   /** Decisions per editor clip id or AI candidate (`<trialId>/<candidateId>`); newest last. */
   eventMarks: Record<string, EventMark[]>
+  /** Events panel auditions play the whole group (cue + its variants) at the stretch; false = only the shown row (others: sound only). */
+  groupPlayback: boolean
   /** AI trials: the sound played with a haptic candidate, picked per `<trialId>/<candidateId>` (overrides the candidate's `sound`). */
   candidateSounds: Record<string, string>
   /** Events panel: height (px) of the event list above the detail. */
@@ -69,7 +71,7 @@ export interface EditorUiSettings {
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, candidateSounds: {}, eventsListHeight: 220, materialLinks: {}, hapticOnPc: false, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
+  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, groupPlayback: true, candidateSounds: {}, eventsListHeight: 220, materialLinks: {}, hapticOnPc: false, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -130,6 +132,7 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     trialScenes: sceneChoices(v.trialScenes),
     clipScenes: sceneChoices(v.clipScenes),
     eventMarks: eventMarks(v.eventMarks),
+    groupPlayback: typeof v.groupPlayback === 'boolean' ? v.groupPlayback : d.groupPlayback,
     candidateSounds: isRecord(v.candidateSounds) ? Object.fromEntries(Object.entries(v.candidateSounds).filter((e): e is [string, string] => typeof e[1] === 'string' && e[1].length <= 80).slice(-2000)) : {},
     eventReserves: reserves(v.eventReserves),
     reservesBackfilled: v.reservesBackfilled === true,

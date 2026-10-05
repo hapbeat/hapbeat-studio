@@ -92,6 +92,7 @@ export function EventsPanel() {
     <div className="events-top">
       <span className="editor-beta-label" title={t('events.betaHint')}>BETA</span>
       <ProjectPicker />
+      <GroupPlaybackToggle />
       <EditorMenu label="⋯" title={t('events.menu')}>
         <EditorMenuItem disabled={!table} onSelect={() => void ask({ message: t('events.resetReviewsConfirm'), danger: true }).then(ok => { if (ok) useSceneStore.getState().edit(tb => resetAllReviews(tb)) })}>{t('events.resetReviews')}</EditorMenuItem>
       </EditorMenu>
@@ -527,6 +528,16 @@ function Inherited({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'hapt
     <span>{t('events.inherited', { parent: e.ref.cue })}</span>
     <button type="button" className="agent-icon-btn" title={t('events.overrideHereHint', { parent: e.ref.cue })} onClick={() => edit(tb => setOverride(tb, e.ref, field, true))}>{t('events.overrideHere')}</button>
   </p>
+}
+
+/** "Play the group" / "This row only" (editor setting, default the group): what an audition plays at the stretch. Fixed width. */
+function GroupPlaybackToggle() {
+  const { t } = useI18n()
+  const on = useEditorSettings(s => s.groupPlayback)
+  return <button type="button" className="agent-save-toggle events-group-toggle" aria-pressed={on} aria-label={t(on ? 'events.groupPlayback.group' : 'events.groupPlayback.row')} title={t('events.groupPlayback.hint')}
+    onClick={() => useEditorSettings.getState().update({ groupPlayback: !on })}>
+    <span className="transport-label-stack" aria-hidden="true"><span style={{ visibility: on ? 'visible' : 'hidden' }}>{t('events.groupPlayback.group')}</span><span style={{ visibility: on ? 'hidden' : 'visible' }}>{t('events.groupPlayback.row')}</span></span>
+  </button>
 }
 
 /** ▸ / ▾ in a section heading. */

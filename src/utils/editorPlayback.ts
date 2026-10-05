@@ -16,8 +16,8 @@ interface Player {
  */
 export interface PlaybackPreRoll { seconds: number; begin: (start: number) => void; cancel: () => void }
 export class EditorPlayback {
-  /** The device stream's gain (DEC-086 intensity), read for every chunk sent: a change applies mid-stream without restarting. */
-  level: (() => number) | null = null
+  /** The device stream's gain (DEC-086 intensity) at `time` (seconds of the player), read for every chunk sent: a change applies mid-stream without restarting. */
+  level: ((time: number) => number) | null = null
   /** Read at every play; null or 0 s = start at once. */
   preRoll: (() => PlaybackPreRoll | null) | null = null
   // Finish the previous stream_end before starting another clip or target set.
@@ -137,7 +137,7 @@ export class EditorPlayback {
             if (this.controller === controller) { this.stop(); this.failed(error) }
           })
         }
-      }, {signal: controller.signal, control: {consumeSeek: () => {const seek = this.seekRequest; this.seekRequest = null; return seek}, getIntensity: () => this.level?.() ?? 1}})
+      }, {signal: controller.signal, control: {consumeSeek: () => {const seek = this.seekRequest; this.seekRequest = null; return seek}, getIntensity: at => this.level?.(range.start + at) ?? 1}})
     } catch (error) {
       if (!controller.signal.aborted) {
         if (this.controller === controller) this.stop()

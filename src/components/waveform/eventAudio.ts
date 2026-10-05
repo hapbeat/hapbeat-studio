@@ -5,7 +5,8 @@ import { useEventStore, type EventPreview } from '@/stores/eventStore'
 import { useSceneStore } from '@/stores/sceneStore'
 import { trialTarget } from '@/utils/agentProtocol'
 import { candidateSound, effectiveEvent, parseEventKey, representativeSound, resolveEventName } from '@/utils/cueEvents'
-import { isLoopCue, routeClips, sfxSounds, soundIntensity } from '@/utils/sceneCueTable'
+import { groupFirings } from '@/utils/groupPlayback'
+import { isLoopCue, routeClips, sfxSounds } from '@/utils/sceneCueTable'
 import { RATE, resampleClip } from '@/utils/sceneHaptics'
 import type { EditorBufferPlayer } from '@/utils/editorBufferPlayer'
 import { onUserStop } from '@/utils/playerStops'
@@ -155,10 +156,8 @@ export function useDecidedSoundSync(player: EditorBufferPlayer) {
     if (!plan || picked?.loop || !table) return null
     const out: Firing[] = []
     if (picked) for (const atSec of plan.targets) out.push({ buffer: picked.buffer, atSec, gain: picked.volume })
-    for (const o of plan.others) {
-      const r = resolveEventName(table, o.name), e = r && effectiveEvent(table, r.ref), first = sfxSounds(e?.sfx)[0], b = first ? buffers[first] : undefined
-      if (e?.sfx && b) out.push({ buffer: b, atSec: o.atSec, gain: soundIntensity(table, first!) })
-    }
+    // The other firings' sounds (group members and other cues alike; their haptics go with the device stream, groupPlayback).
+    for (const f of groupFirings(table, plan, { event: '', target: 'haptic', material: '' }, false).sounds) { const b = buffers[f.sound]; if (b) out.push({ buffer: b, atSec: f.atSec, gain: f.gain }) }
     return out
   }, [plan, picked, table, buffers])
   const companion = useMemo(() => new CompanionSound(startOnPc), [])

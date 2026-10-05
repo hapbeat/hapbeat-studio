@@ -57,8 +57,8 @@ export interface StreamControl {
   /** Live intensity multiplier (typically 0..2). Read each chunk and
    *  applied before send, so a slider above the player can boost or
    *  cut the haptic level mid-stream. When absent, falls back to the
-   *  static `intensity` option (frozen at start). */
-  getIntensity?: () => number
+   *  static `intensity` option (frozen at start). `atSec`: the chunk's position in the stream (seconds). */
+  getIntensity?: (atSec: number) => number
   /** Called after every chunk send with the current read position. */
   onProgress?: (currentFrames: number, totalFrames: number, sampleRate: number) => void
 }
@@ -171,7 +171,7 @@ export async function streamClip(
 
     // Apply current intensity per-chunk. `slice` already returned a
     // new buffer so this mutation doesn't affect the source pcm16.
-    const liveIntensity = control?.getIntensity?.() ?? intensity
+    const liveIntensity = control?.getIntensity?.(frameOffset / targetRate) ?? intensity
     if (liveIntensity !== 1.0) {
       for (let i = 0; i < chunk.length; i++) {
         let val = Math.round(chunk[i] * liveIntensity)

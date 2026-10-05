@@ -38,6 +38,8 @@ import { waveformOnPc } from '@/utils/agentTrialUi'
 import { DecideDialog } from './DecideDialog'
 import { useAdjustPersistence, useMaterialWriteBack } from './eventEditing'
 import { openEventDefault, repeatBuffer, useDecidedSoundSync } from './eventAudio'
+import { groupFirings, inSpans, mixGroupHaptics, shownSpans, type HapticPart } from '@/utils/groupPlayback'
+import { RATE as HAPTIC_RATE } from '@/utils/sceneHaptics'
 import { useAuditionPlan } from './EditorScenePanel'
 
 export function WaveformEditor({ active }: { active: boolean }) {
@@ -132,10 +134,6 @@ export function WaveformEditor({ active }: { active: boolean }) {
     return adjusting && adjusting.project === sceneLib.project_name ? materialRoutePositions(sceneTable, sceneLib, adjusting.target, adjusting.wav, adjusting.event) : null
   }, [sceneTable, sceneLib, audition, routedCue, eventPreview, adjusting])
   const routing = useMemo(() => routePlaybackTargets(isConnected ? resolvePlaybackTargets(devices, kitSelectedIps) : [], routeAts), [isConnected, devices, kitSelectedIps, routeAts])
-  // A sound (AI sound candidate, event sound, adjusted sound material) plays on the PC only.
-  const soundShown = auditionIsSound || eventPreview?.target === 'sound' || adjusting?.target === 'sound'
-  const targets = useMemo(() => isConnected && sendHaptics && !soundShown ? routing.devices.map(device => device.ipAddress) : [], [isConnected, sendHaptics, soundShown, routing])
-  const targetKey = targets.join(',')
   const shownBuffer = audition ? audition.buffer : eventPreview ? eventPreview.buffer : original ? s.clip?.originalBuffer : previewActive ? (preview.buffer ?? s.clip?.buffer) : s.clip?.buffer
   // Auditions (AI candidate / event material) play at the scene's timing: on every target firing, without jitter
   // (DEC-085); one buffer, so Stop ends them all and seeks follow the video.
@@ -143,6 +141,31 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const stretched = !!shownBuffer && !!plan && (!!audition || !!eventPreview || !!adjusting) && !(plan.targets.length === 1 && plan.targets[0] === 0)
   const audioBuffer = useMemo(() => shownBuffer && stretched && plan
     ? repeatBuffer(shownBuffer, plan.targets.map(atSec => ({ atSec, gain: 1, rate: 1 }))) : shownBuffer, [stretched, shownBuffer, plan])
+  // The group of the shown event material (its cue and the cue's variants: bite and bite:tear) plays together at the stretch
+  // (editor setting, default on): each member's firing with its representative sound and haptic at their intensities.
+  const groupOn = useEditorSettings(state => state.groupPlayback)
+  const groupShown = !audition && sceneLib ? eventPreview ? { event: eventPreview.event, target: eventPreview.target, material: eventPreview.material }
+    : adjusting && adjusting.project === sceneLib.project_name ? { event: adjusting.event, target: adjusting.target, material: adjusting.wav } : null : null
+  const groupKey = groupOn && groupShown && plan && sceneTable ? JSON.stringify(groupFirings(sceneTable, plan, groupShown, true).haptics) : '[]'
+  const scenePcm = useSceneStore(state => state.pcm)
+  // By value (groupKey): saving a strength rewrites the table but not these parts, so nothing is mixed again for it.
+  const groupStream = useMemo(() => {
+    const parts = JSON.parse(groupKey) as HapticPart[]
+    if (!parts.length || !audioBuffer || !groupShown) return null
+    const base = groupShown.target === 'haptic' ? { data: audioBuffer.getChannelData(0), rate: audioBuffer.sampleRate } : null
+    const mixed = mixGroupHaptics(base, parts, scenePcm, audioBuffer.duration)
+    const buffer = new AudioBuffer({ numberOfChannels: 1, length: mixed.length, sampleRate: HAPTIC_RATE })
+    buffer.getChannelData(0).set(mixed)
+    return buffer
+  }, [groupKey, audioBuffer, scenePcm, groupShown?.target])
+  const streamRef = useRef<AudioBuffer | null>(null); streamRef.current = groupStream
+  // A sound (AI sound candidate, event sound, adjusted sound material) plays on the PC only — except its group's haptics.
+  const soundShown = auditionIsSound || eventPreview?.target === 'sound' || adjusting?.target === 'sound'
+  const targets = useMemo(() => isConnected && sendHaptics && (!soundShown || !!groupStream) ? routing.devices.map(device => device.ipAddress) : [], [isConnected, sendHaptics, soundShown, !!groupStream, routing])
+  /** Where the live strength applies in the stream: the shown haptic's firings (the group's parts keep their own); nowhere for a shown sound. */
+  const levelSpans = groupStream ? groupShown?.target === 'haptic' && shownBuffer ? shownSpans(stretched && plan ? plan.targets : null, shownBuffer.duration) : [] : null
+  const spansRef = useRef(levelSpans); spansRef.current = levelSpans
+  const targetKey = targets.join(',')
   // The shown material's strength (DEC-086: WAV × intensity): a gain on the PC output and the device stream and a scale
   // of the "edited" drawing, changed live by the strength slider; the buffer is never rendered again for it.
   // An AI candidate's comes from its rating form (published by the AI trials panel).
@@ -174,7 +197,8 @@ export function WaveformEditor({ active }: { active: boolean }) {
     let cached: {buffer: AudioBuffer; start: number; end: number; blob: Promise<Blob>} | null = null
     const keys = new WeakMap<Blob, string>()
     return new EditorPlayback(player, (start, end) => {
-      const buffer = player.getBuffer()
+      // The devices get the group's haptic mix when there is one (same length as the player's buffer), else what is played.
+      const buffer = streamRef.current ?? player.getBuffer()
       if (!buffer) return Promise.reject(new Error('Select a clip first'))
       if (!cached || cached.buffer !== buffer || cached.start !== start || cached.end !== end) cached = {buffer, start, end, blob: encodeWavBlob(start === 0 && end === buffer.duration ? buffer : cropBuffer(buffer, start, end), buffer.sampleRate as SampleRate)}
       return cached.blob
@@ -185,7 +209,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   }, [player, targetKey, send, s.setError])
   // The Scene video panel's lead-in (audio / haptics start on the cue mark).
   playback.preRoll = scenePreRoll
-  playback.level = () => levelRef.current
+  playback.level = time => spansRef.current === null || inSpans(spansRef.current, time) ? levelRef.current : 1
   // ▶ on a material plays it once from the start (again on the material already shown).
   const autoplayed = useRef<{ buffer: AudioBuffer; request: number } | null>(null)
   useEffect(() => {
