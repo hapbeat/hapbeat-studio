@@ -23,6 +23,12 @@ interface EditorState {
   rememberedFolder: FileSystemDirectoryHandle | null
   restored: boolean
   restoreFolder: () => Promise<void>
+  /**
+   * The editor folder for writing (outbox) from anywhere, e.g. the Scene tab: the open one, else the remembered one
+   * (IndexedDB) — restored silently when permitted, else permission asked (call it from a user action). False when
+   * none is remembered or permission is refused (then offer openFolder).
+   */
+  ensureFolder: () => Promise<boolean>
   reconnectFolder: () => Promise<void>
   folder: EditorFolder | null
   documents: EditorDocument[]
@@ -111,6 +117,16 @@ export const useWaveformStore = create<EditorState>((set, get) => {
         if (root && await root.queryPermission({mode: 'readwrite'}) === 'granted') await adoptFolder(root)
       } catch (error) { get().setError(error) }
       finally { set({ isProcessing: false }) }
+    },
+    ensureFolder: async () => {
+      if (get().folder) return true
+      if (!get().restored) await get().restoreFolder()
+      if (get().folder) return true
+      const root = get().rememberedFolder ?? await loadDirectoryHandle('editordir').catch(() => null)
+      if (!root) return false
+      set({ rememberedFolder: root })
+      await get().reconnectFolder()
+      return !!get().folder
     },
     reconnectFolder: async () => {
       const root = get().rememberedFolder

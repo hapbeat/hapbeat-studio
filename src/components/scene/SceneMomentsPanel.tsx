@@ -3,6 +3,7 @@ import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
+import { useWaveformStore } from '@/stores/waveformStore'
 import { familyColor } from '@/utils/sceneData'
 import { addVariant, allEventKeys, effectiveEvent, parseEventKey, resolveEventName } from '@/utils/cueEvents'
 import { VARIANT_NAME, type CueTable } from '@/utils/sceneCueTable'
@@ -68,6 +69,8 @@ function ChangeEventForm({ from, at, table, onSent, onError, onClose }: { from: 
   const [to, setTo] = useState('')
   const [comment, setComment] = useState('')
   const [busy, setBusy] = useState(false)
+  /** No editor folder could be restored: "Open the editor folder" is offered, and the request continues once chosen. */
+  const [needFolder, setNeedFolder] = useState(false)
   const project = useSceneStore(s => s.lib?.project_name)
   const target = to.trim()
   const ref = EVENT_NAME.test(target) ? parseEventKey(target) : null
@@ -78,6 +81,7 @@ function ChangeEventForm({ from, at, table, onSent, onError, onClose }: { from: 
   const send = async () => {
     setBusy(true)
     try {
+      // The cue table first (the game project; no editor folder needed): a new variant exists at once.
       if (newVariant && ref) {
         const made = useSceneStore.getState().edit(tb => {
           const next = addVariant(tb, ref.cue, ref.variant!)
@@ -86,6 +90,9 @@ function ChangeEventForm({ from, at, table, onSent, onError, onClose }: { from: 
         })
         if (!made) throw new Error(t('scene.noProject'))
       }
+      // The outbox lives in the editor folder: the remembered one (asking permission within this click), else pick one.
+      if (!await useWaveformStore.getState().ensureFolder()) { setNeedFolder(true); return }
+      setNeedFolder(false)
       const text = t('scene.occ.message', { name: from, at: at.toFixed(2), to: target }) + (comment.trim() ? `\n${comment.trim()}` : '')
       await useAgentTrialStore.getState().sendAgentMessage({ text, project, reassign: { cue: from, atSec: at, to: target, comment } })
       onSent()
@@ -98,6 +105,8 @@ function ChangeEventForm({ from, at, table, onSent, onError, onClose }: { from: 
     <datalist id={listId}>{allEventKeys(table).filter(k => k !== from).map(k => <option key={k} value={k} />)}</datalist>
     <input value={comment} placeholder={t('scene.occ.comment')} aria-label={t('scene.occ.comment')} onChange={e => setComment(e.target.value)}
       onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing && valid && !busy) void send() }} />
-    <button type="button" className="scene-icon-btn" disabled={busy || !valid} onClick={() => void send()}>{t('scene.occ.send')}</button>
+    {needFolder ? <button type="button" className="scene-icon-btn" title={t('scene.occ.needFolderHint')} disabled={busy}
+      onClick={() => void useWaveformStore.getState().openFolder().then(() => { if (useWaveformStore.getState().folder) void send() })}>{t('scene.occ.openFolder')}</button>
+      : <button type="button" className="scene-icon-btn" disabled={busy || !valid} onClick={() => void send()}>{t('scene.occ.send')}</button>}
   </div>
 }

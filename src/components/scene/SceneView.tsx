@@ -8,6 +8,7 @@ import type { SettingsSyncNotice } from '@/hooks/useEditorSettingsFolderSync'
 import { useConfirm } from '@/components/common/useConfirm'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useSceneStore } from '@/stores/sceneStore'
+import { useWaveformStore } from '@/stores/waveformStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { resolvePlaybackTargets } from '@/utils/playbackDevices'
 import { matchesAddress, tableTargets, type HapticDevice } from '@/utils/sceneHaptics'
@@ -38,7 +39,7 @@ export function SceneView({ active }: { active: boolean }) {
     if (active && visible) runtime.start()
     else { runtime.video.pause(); runtime.stop() }
   }, [active, visible, runtime])
-  useEffect(() => { void useSceneStore.getState().restore() }, [])
+  useEffect(() => { void useSceneStore.getState().restore(); void useWaveformStore.getState().restoreFolder() }, [])
 
   const root = useSceneStore(s => s.root)
   const table = useSceneStore(s => s.table)
