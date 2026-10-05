@@ -49,7 +49,9 @@
 .scene-item:hover { background: var(--bg-hover); }
 .scene-item-actions { display: inline-flex; gap: 4px; }
 /* A firing shown as another event until the scene is re-recorded. */
-.scene-overridden { font-style: italic; }
+.scene-overridden i { font-style: normal; margin-left: 3px; color: var(--text-muted); font-size: 10px; }
+/* A row's right-click menu, over the rows below (nothing moves). */
+.scene-row-menu { grid-template-columns: auto; justify-content: start; }
 /* The moment of the firing selected on the timeline / here. */
 .scene-item.picked { outline: 1px solid var(--accent-light); outline-offset: -1px; }
 .scene-item.sel { background: rgba(124,92,191,.22); box-shadow: inset 3px 0 0 var(--accent-light); }

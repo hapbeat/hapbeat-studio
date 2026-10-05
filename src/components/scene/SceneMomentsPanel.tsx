@@ -32,6 +32,8 @@ export function SceneMomentsPanel() {
   const list = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState<number | null>(null)
   const [sent, setSent] = useState<Record<number, true>>({})
+  /** The row whose right-click menu ("Undo" of a changed firing) is open. */
+  const [menu, setMenu] = useState<number | null>(null)
   // The firing selected here or on the timeline (Event panel follows it too): its moment's row is marked and scrolled to.
   const sel = useSceneStore(s => s.sel)
   const picked = useMemo(() => {
@@ -53,6 +55,7 @@ export function SceneMomentsPanel() {
         // `cue:variant` names resolve like the game (an unknown variant plays its cue).
         const cues = it.kind === 'clip' && table ? it.names.map(n => { const r = resolveEventName(table, n); return r && effectiveEvent(table, r.ref) }).filter(e => !!e) : []
         return <div key={k} className={`scene-item ${k === cur ? 'sel' : ''} ${k === picked ? 'picked' : ''}`} title={t('scene.moment.playHint')}
+          onContextMenu={e => { if (!(it as OverriddenClip).from) return; e.preventDefault(); setMenu(menu === k ? null : k) }}
           onClick={e => {
             if ((e.target as HTMLElement).closest('.scene-occ-form, button')) return
             runtime.audio(); runtime.playMoment(k, useSceneSettings.getState().leadSec)
@@ -62,17 +65,19 @@ export function SceneMomentsPanel() {
           <span className="scene-num">{k === 0 ? '▶' : String(k).padStart(2, '0')}</span>
           <span className="scene-dot" style={{ background: familyColor(lib, it.name) }} />
           <span className="scene-name">{it.kind === 'full' ? t('scene.full') : <>{(it as OverriddenClip).from
-            ? <span className="scene-overridden" title={t('scene.override.hint')}>{(it as OverriddenClip).from} → {it.names.join(' + ')}</span>
+            ? <span className="scene-overridden" title={t('scene.override.hint', { from: (it as OverriddenClip).from! })}>{it.names.join(' + ')}<i aria-hidden="true">◌</i></span>
             : it.names.join(' + ')}{(() => { const p = placeOf(table, it.names, it.hand); return <small title={`${p.title}\n${t('scene.placeHint')}`}>{p.text}</small> })()}</>}</span>
           <span className="scene-kinds">{cues.length > 0 && <><span className="h">{cues.some(c => c.haptics.length) ? <HapticIcon /> : null}</span><span className="s">{cues.some(c => c.sfx) ? '♪' : ''}</span></>}</span>
           <span className="scene-num">{it.kind === 'full' ? '' : `${it.at.toFixed(1)}s`}</span>
           {it.kind === 'clip' && <span className="scene-item-actions">
-            {(it as OverriddenClip).from && <button type="button" className="scene-icon-btn" title={t('scene.override.undoHint')}
-              onClick={e => { e.stopPropagation(); e.currentTarget.blur(); const from = (it as OverriddenClip).from!
-                void saveSceneOverrides(removeOverride(useSceneStore.getState().overrides, from, it.at)).catch(error => useSceneStore.getState().note({ id: 'scene.occ.failed', params: { message: error instanceof Error ? error.message : String(error) }, error: true })) }}>{t('scene.override.undo')}</button>}
             <button type="button" className="scene-icon-btn scene-open-editor" aria-expanded={open === k} title={`${t('scene.occ.reassignHint')}${sent[k] ? `\n${t('scene.occ.sent')}` : ''}`}
             onClick={e => { e.stopPropagation(); e.currentTarget.blur(); setOpen(open === k ? null : k) }}>{sent[k] ? `✓ ${t('scene.moment.change')}` : t('scene.moment.change')}</button>
           </span>}
+          {menu === k && (it as OverriddenClip).from && <div className="scene-occ-form scene-row-menu" role="menu" onKeyDown={e => { if (e.key === 'Escape') setMenu(null) }}>
+            <button type="button" role="menuitem" className="scene-icon-btn" autoFocus title={t('scene.override.undoHint')}
+              onClick={e => { e.stopPropagation(); setMenu(null); const from = (it as OverriddenClip).from!
+                void saveSceneOverrides(removeOverride(useSceneStore.getState().overrides, from, it.at)).catch(error => changeFailed(error instanceof Error ? error.message : String(error))) }}>{t('scene.override.undoTo', { from: (it as OverriddenClip).from! })}</button>
+          </div>}
           {open === k && it.kind === 'clip' && table && <ChangeEventForm from={(it as OverriddenClip).from ?? it.name} at={it.at} table={table}
             onClose={() => setOpen(null)}
             onSent={to => { setSent(s => ({ ...s, [k]: true })); setOpen(null); changedFiring((it as OverriddenClip).from ?? it.name, it.at, to) }}

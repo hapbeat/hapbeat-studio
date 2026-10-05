@@ -21,8 +21,8 @@ type View = { key: string; start: number; zoom: number; fit: boolean }
 const MAX_ZOOM = 2000
 
 /**
- * Timeline: continuous-layer levels behind two lanes, haptics (upper) and
- * sound (lower); a cue shows in each lane it uses. Click a marker to edit
+ * Timeline: continuous-layer levels behind two lanes, sound (upper) and
+ * haptics (lower), as in the editor; a cue shows in each lane it uses. Click a marker to edit
  * that cue (the moments list marks it too), elsewhere to seek; right-click a marker to change its event.
  * Ctrl + wheel zooms around the pointer, wheel / Shift + wheel pans (like the editor's waveform), also while playing.
  * Read-outs and output toggles above it.
@@ -102,9 +102,10 @@ export function SceneTimelinePanel() {
       const events = runtime.events()
       // `cue:variant` names resolve like the game (variant fields, else the cue's).
       const effective = (name: string) => { const r = table ? resolveEventName(table, name) : null; return r && table ? effectiveEvent(table, r.ref) : null }
+      // Sound above, haptics below (as in the editor).
       const lanes: [number, number, (name: string) => boolean, (name: string) => string][] = [
-        [top, mid, name => { const e = effective(name); return !!e && (e.haptics.length > 0 || lib.loop_cues.includes(e.ref.cue)) }, name => familyColor(lib, name)],
-        [mid + 1, base, name => !!effective(name)?.sfx, () => SOUND_COLOR],
+        [top, mid, name => !!effective(name)?.sfx, () => SOUND_COLOR],
+        [mid + 1, base, name => { const e = effective(name); return !!e && (e.haptics.length > 0 || lib.loop_cues.includes(e.ref.cue)) }, name => familyColor(lib, name)],
       ]
       const found: Hit[] = []
       for (const [y0, y1, has, color] of lanes) {
@@ -124,7 +125,7 @@ export function SceneTimelinePanel() {
       }
       hits.current = found
       ctx.globalAlpha = 1
-      ctx.fillStyle = '#5c636c'; ctx.fillText(tr('scene.lane.haptics'), 3, top + 24); ctx.fillText(tr('scene.lane.sound'), 3, mid + 24)
+      ctx.fillStyle = '#5c636c'; ctx.fillText(tr('scene.lane.sound'), 3, top + 24); ctx.fillText(tr('scene.lane.haptics'), 3, mid + 24)
       // Playhead.
       ctx.fillStyle = '#fff'; ctx.fillRect(X(v.currentTime) - 0.5, 0, 1.5, h)
       // Read-outs.
