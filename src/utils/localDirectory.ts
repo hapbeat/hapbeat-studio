@@ -395,11 +395,15 @@ export async function renameClipFile(
   }
 
   const oldHandle = await dir.getFileHandle(filename)
-  // 優先: FileSystemFileHandle.move(name) (Chromium ≥ 108)
+  // 優先: FileSystemFileHandle.move(name) (Chromium ≥ 108)。ユーザーが選んだローカルフォルダでは
+  // Chrome が move を拒否することがある（"not allowed by the user agent or the platform"）ので、失敗したらコピーで代替する。
   const moveFn = (oldHandle as unknown as { move?: (name: string) => Promise<void> }).move
+  let moved = false
   if (typeof moveFn === 'function') {
-    await moveFn.call(oldHandle, dest)
-  } else {
+    try { await moveFn.call(oldHandle, dest); moved = true }
+    catch (error) { console.warn('[renameClipFile] move refused; copying instead', error) }
+  }
+  if (!moved) {
     // Fallback move: copy completes before the source is removed.
     const file = await oldHandle.getFile()
     const blob = new Blob([await file.arrayBuffer()], { type: file.type || 'audio/wav' })

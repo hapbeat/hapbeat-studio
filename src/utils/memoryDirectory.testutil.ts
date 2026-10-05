@@ -3,6 +3,8 @@ export class MemoryDirectory {
   readonly kind = 'directory'
   readonly files = new Map<string, { blob: Blob; lastModified: number }>()
   readonly dirs = new Map<string, MemoryDirectory>()
+  /** When set, file handles have move(name) running this (e.g. throwing like Chrome in a local folder). */
+  fileMove: ((from: string, to: string) => Promise<void>) | null = null
   constructor(readonly name: string, private readonly clock: { now: number } = { now: 0 }) {}
   async getDirectoryHandle(name: string, options?: { create?: boolean }) {
     let dir = this.dirs.get(name)
@@ -25,6 +27,7 @@ export class MemoryDirectory {
           abort: async () => {},
         }
       },
+      ...(this.fileMove ? { move: (to: string) => this.fileMove!(name, to) } : {}),
     }
   }
   async getFileHandle(name: string, options?: { create?: boolean }) {
@@ -38,6 +41,9 @@ export class MemoryDirectory {
   async *entries() {
     for (const [name, dir] of this.dirs) yield [name, dir] as const
     for (const name of this.files.keys()) yield [name, this.fileHandle(name)] as const
+  }
+  async *values() {
+    for await (const [, handle] of this.entries()) yield handle
   }
   async removeEntry(name: string) {
     if (!this.files.delete(name) && !this.dirs.delete(name)) throw new DOMException('missing', 'NotFoundError')

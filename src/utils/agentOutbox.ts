@@ -5,10 +5,10 @@ import { writeEditorFile } from './editorFolder'
  * The agent watches the folder, reads each `*.json` and moves it to
  * `outbox/_read/`; Studio only adds files and never removes them.
  *
- * A message is written as `<name>.json.tmp` first and then renamed to
- * `<name>.json` (FileSystemFileHandle.move), so a watcher never sees a half
- * written `.json`. Where `move` is missing the `.json` is written directly: the
- * browser commits a writable only on close (swap file), which is also atomic.
+ * A message is written straight to `<name>.json`: the browser commits a
+ * writable only on close() (a swap file is renamed into place), so a watcher
+ * never sees a half written `.json`. No temporary file + move(): Chrome may
+ * refuse FileSystemFileHandle.move() in a user-picked local folder.
  */
 export const MESSAGE_FORMAT = 'hapbeat-agent-message@1'
 export const OUTBOX_DIR = 'outbox'
@@ -47,22 +47,13 @@ export function outboxFileName(date: Date, random: () => number = Math.random): 
   return `${stamp}-${rand}.json`
 }
 
-type MovableHandle = FileSystemFileHandle & { move?: (name: string) => Promise<void> }
-
-/** Writes one message into `<agent dir>/outbox/` and returns its file name. */
+/** Writes one message into `<agent dir>/outbox/` and returns its file name. Errors name the step that failed. */
 export async function writeOutboxMessage(agentDir: FileSystemDirectoryHandle, message: AgentMessage, name: string): Promise<string> {
-  const outbox = await agentDir.getDirectoryHandle(OUTBOX_DIR, { create: true })
-  await outbox.getDirectoryHandle('_read', { create: true })
-  const text = `${JSON.stringify(message, null, 2)}\n`
-  const tmp = await outbox.getFileHandle(`${name}.tmp`, { create: true }) as MovableHandle
-  if (typeof tmp.move === 'function') {
-    const stream = await tmp.createWritable()
-    try { await stream.write(text); await stream.close() } catch (error) { await stream.abort().catch(() => {}); throw error }
-    await tmp.move(name)
-  } else {
-    // No rename: the temporary entry is Studio's own empty file; write the final name directly (committed on close).
-    await outbox.removeEntry(`${name}.tmp`).catch(() => {})
-    await writeEditorFile(outbox, name, text)
+  const step = async <T>(what: string, run: () => Promise<T>): Promise<T> => {
+    try { return await run() } catch (error) { throw new Error(`${what}: ${error instanceof Error ? error.message : String(error)}`) }
   }
+  const outbox = await step(`open hapbeat-agent/${OUTBOX_DIR}/`, () => agentDir.getDirectoryHandle(OUTBOX_DIR, { create: true }))
+  await step(`create ${OUTBOX_DIR}/_read/`, () => outbox.getDirectoryHandle('_read', { create: true }))
+  await step(`write ${OUTBOX_DIR}/${name}`, () => writeEditorFile(outbox, name, `${JSON.stringify(message, null, 2)}\n`))
   return name
 }

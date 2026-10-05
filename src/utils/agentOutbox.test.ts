@@ -23,28 +23,26 @@ describe('agent outbox', () => {
     expect(outboxFileName(new Date(2026, 9, 5, 9, 4, 7), () => 0.5)).toMatch(/^20261005-090407-[0-9a-z]{4}\.json$/)
   })
 
-  it('writes through a temporary file renamed into place (or directly when rename is missing), never deleting messages', async () => {
+  it('writes the message straight to its final name (no temporary file, no move), never deleting messages', async () => {
     const agent = new MemoryDirectory('hapbeat-agent')
     const message = buildAgentMessage({ text: 'hello', createdAt: 'c' })
-    // MemoryDirectory file handles have no move(): the direct path.
-    await writeOutboxMessage(agent as unknown as FileSystemDirectoryHandle, message, 'a.json')
-    expect(agent.has('outbox/a.json')).toBe(true)
+    await writeOutboxMessage(agent.asHandle(), message, 'a.json')
+    await writeOutboxMessage(agent.asHandle(), message, 'b.json')
+    expect(agent.has('outbox/a.json') && agent.has('outbox/b.json')).toBe(true)
     expect(agent.has('outbox/a.json.tmp')).toBe(false)
     expect(agent.has('outbox/_read')).toBe(true)
-    expect(JSON.parse(await (await (await (await agent.getDirectoryHandle('outbox')).getFileHandle('a.json')).getFile()).text())).toEqual(message)
-    // With move(): the .tmp entry is renamed.
-    const outbox = await agent.getDirectoryHandle('outbox')
-    const original = outbox.getFileHandle.bind(outbox)
-    const moved: string[] = []
-    outbox.getFileHandle = (async (name: string, options?: { create?: boolean }) => {
-      const handle = await original(name, options)
-      return { ...handle, move: async (to: string) => { const text = await (await handle.getFile()).text(); outbox.files.delete(name); const w = await (await original(to, { create: true })).createWritable(); await w.write(text); await w.close(); moved.push(`${name}→${to}`) } }
-    }) as typeof outbox.getFileHandle
-    agent.getDirectoryHandle = (async () => outbox) as typeof agent.getDirectoryHandle
-    await writeOutboxMessage(agent as unknown as FileSystemDirectoryHandle, message, 'b.json')
-    expect(moved).toEqual(['b.json.tmp→b.json'])
-    expect(outbox.files.has('b.json')).toBe(true)
-    expect(outbox.files.has('a.json')).toBe(true)
+    expect(await agent.json('outbox/a.json')).toEqual(message)
+  })
+
+  it('works where move() is refused (Chrome, user-picked local folder) and names the failing step', async () => {
+    const agent = new MemoryDirectory('hapbeat-agent')
+    const outbox = await agent.getDirectoryHandle('outbox', { create: true })
+    outbox.fileMove = async () => { throw new DOMException('The request is not allowed by the user agent or the platform in the current context.', 'NotAllowedError') }
+    await writeOutboxMessage(agent.asHandle(), buildAgentMessage({ text: 'x', createdAt: 'c' }), 'c.json')
+    expect(agent.has('outbox/c.json')).toBe(true)
+    const broken = new MemoryDirectory('hapbeat-agent')
+    broken.getDirectoryHandle = (async () => { throw new DOMException('denied', 'NotAllowedError') }) as typeof broken.getDirectoryHandle
+    await expect(writeOutboxMessage(broken.asHandle(), buildAgentMessage({ text: 'x', createdAt: 'c' }), 'd.json')).rejects.toThrow(/^open hapbeat-agent\/outbox\/: denied/)
   })
 
   it('documents the outbox in the guide; auto-send is off by default', () => {
