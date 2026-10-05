@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useEditorSettings } from '@/stores/editorSettings'
-import { useEventStore } from '@/stores/eventStore'
+import { useEventStore, type EventPreview } from '@/stores/eventStore'
 import { useSceneStore } from '@/stores/sceneStore'
 import { trialTarget } from '@/utils/agentProtocol'
 import { effectiveEvent, parseEventKey, representativeSound, resolveEventName } from '@/utils/cueEvents'
@@ -26,43 +26,47 @@ import { decidedSoundEvents } from '@/utils/decidedSound'
 /** Loop cue previews repeat their material to this length (the player has no endless loop). */
 export const LOOP_PREVIEW_SEC = 8
 
-function scaled(channels: Float32Array[], rate: number, factor: number, loopToSec = 0): AudioBuffer {
+/** The WAV as it is, a loop cue's repeated to `loopToSec` (the intensity is a playback gain, never baked in). */
+function looped(channels: Float32Array[], rate: number, loopToSec = 0): AudioBuffer {
   const source = channels[0]?.length ?? 0
   const length = loopToSec > 0 && source > 0 ? Math.max(source, Math.round(loopToSec * rate)) : source
   const buffer = new AudioBuffer({ numberOfChannels: Math.max(1, channels.length), length: Math.max(1, length), sampleRate: rate })
-  channels.forEach((data, c) => { const out = buffer.getChannelData(c); for (let i = 0; i < length; i++) out[i] = Math.max(-1, Math.min(1, data[i % source] * factor)) })
+  channels.forEach((data, c) => { const out = buffer.getChannelData(c); for (let i = 0; i < length; i++) out[i] = data[i % source] })
   return buffer
 }
-const factorText = (x: number) => Number.isInteger(x * 10) ? x.toFixed(1) : String(Math.round(x * 1000) / 1000)
 const loopCue = (key: string) => { const lib = useSceneStore.getState().lib; return !!lib && isLoopCue(lib, parseEventKey(key).cue) }
 
-/** Clip `clip` at its base level (DEC-086: WAV × intensity; the route gain is a scene multiplier, not applied in the editor); null when not loaded. `loopSec`: a loop cue's clip repeats to that length. */
-function hapticBuffer(clip: string, loopSec: number): { buffer: AudioBuffer; factor: number } | null {
-  const s = useSceneStore.getState(), pcm = s.pcm[clip], entry = s.table?.clips[clip]
-  if (!pcm || !entry) return null
-  const factor = entry.intensity
-  return { buffer: scaled([pcm], RATE, factor, loopSec), factor }
+/** Clip `clip`'s WAV; null when not loaded. `loopSec`: a loop cue's clip repeats to that length. */
+function hapticBuffer(clip: string, loopSec: number): AudioBuffer | null {
+  const s = useSceneStore.getState(), pcm = s.pcm[clip]
+  return pcm && s.table?.clips[clip] ? looped([pcm], RATE, loopSec) : null
 }
-/** Sound `sound` at its base level (WAV × intensity; sfx.volume is a scene multiplier); null when not loaded. */
+/** Sound `sound`'s WAV; null when not loaded. */
 function soundBuffer(sound: string, loopSec: number): AudioBuffer | null {
   const s = useSceneStore.getState(), b = s.sfx[sound]
-  if (!b || !s.table) return null
-  const volume = soundIntensity(s.table, sound)
-  return scaled(Array.from({ length: b.numberOfChannels }, (_, c) => b.getChannelData(c)), b.sampleRate, volume, loopSec)
+  return b && s.table ? looped(Array.from({ length: b.numberOfChannels }, (_, c) => b.getChannelData(c)), b.sampleRate, loopSec) : null
 }
-/** Opens clip `clip` of event `key` in the waveform panel at its base level (WAV × intensity). A loop cue's clip repeats. */
+/**
+ * Opens clip `clip` of event `key` in the waveform panel, played and drawn at its base level (DEC-086: WAV × intensity
+ * as a gain; the route gain is a scene multiplier, not applied in the editor). A loop cue's clip repeats.
+ * When it is already shown, only `autoplay` acts (the shown buffer stays).
+ */
 export function openEventHaptic(key: string, clip: string, at: string, autoplay = false): boolean {
-  const made = hapticBuffer(clip, loopCue(key) ? LOOP_PREVIEW_SEC : 0)
-  if (!made) return false
-  useEventStore.getState().showPreview({ id: `${key}|haptic|${clip}|${at}`, event: key, target: 'haptic', label: `${key} · ${clip}.wav × ${factorText(made.factor)}`, buffer: made.buffer, autoplay })
-  return true
+  return showMaterial({ id: `${key}|haptic|${clip}|${at}`, event: key, target: 'haptic', label: `${key} · ${clip}.wav`, material: clip }, () => hapticBuffer(clip, loopCue(key) ? LOOP_PREVIEW_SEC : 0), autoplay)
 }
 /** Opens sound `sound` of event `key` in the waveform panel at its base level (PC playback only). A loop cue's sound repeats. */
 export function openEventSound(key: string, sound: string, autoplay = false): boolean {
-  const buffer = soundBuffer(sound, loopCue(key) ? LOOP_PREVIEW_SEC : 0)
-  const table = useSceneStore.getState().table
-  if (!buffer || !table) return false
-  useEventStore.getState().showPreview({ id: `${key}|sound|${sound}`, event: key, target: 'sound', label: `${key} · ${sound}.wav × ${factorText(soundIntensity(table, sound))}`, buffer, autoplay })
+  return showMaterial({ id: `${key}|sound|${sound}`, event: key, target: 'sound', label: `${key} · ${sound}.wav`, material: sound }, () => soundBuffer(sound, loopCue(key) ? LOOP_PREVIEW_SEC : 0), autoplay)
+}
+function showMaterial(preview: Omit<EventPreview, 'buffer' | 'autoplay'>, make: () => AudioBuffer | null, autoplay: boolean): boolean {
+  const shown = useEventStore.getState().preview
+  if (shown?.id === preview.id) {
+    if (autoplay) useEventStore.getState().showPreview({ ...shown, autoplay: true, playRequest: (shown.playRequest ?? 0) + 1 })
+    return true
+  }
+  const buffer = make()
+  if (!buffer) return false
+  useEventStore.getState().showPreview({ ...preview, buffer, autoplay })
   return true
 }
 

@@ -31,7 +31,7 @@ import { EditorTopBar } from './EditorTopBar'
 import { playStart, useStartMarker } from '@/utils/editorStartMarker'
 import { scenePause, scenePreRoll, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
 import { useSceneStore } from '@/stores/sceneStore'
-import { useEventStore } from '@/stores/eventStore'
+import { levelKey, useEventStore } from '@/stores/eventStore'
 import { showDockPanel } from '@/utils/dockPanels'
 import { trialTarget } from '@/utils/agentProtocol'
 import { waveformOnPc } from '@/utils/agentTrialUi'
@@ -141,12 +141,20 @@ export function WaveformEditor({ active }: { active: boolean }) {
   // (DEC-085); one buffer, so Stop ends them all and seeks follow the video.
   const plan = useAuditionPlan()
   const stretched = !!shownBuffer && !!plan && (!!audition || !!eventPreview || !!adjusting) && !(plan.targets.length === 1 && plan.targets[0] === 0)
-  // An adjusted material is shown and played at its intensity (DEC-086: WAV × intensity); its file does not change.
-  const adjustIntensity = useSceneStore(state => adjusting && state.table ? materialIntensity(state.table, adjusting.target, adjusting.wav) : 1)
-  const audioBuffer = useMemo(() => shownBuffer && (stretched || adjustIntensity !== 1)
-    ? repeatBuffer(shownBuffer, (stretched && plan ? plan.targets : [0]).map(atSec => ({ atSec, gain: adjustIntensity, rate: 1 }))) : shownBuffer, [stretched, shownBuffer, plan, adjustIntensity])
+  const audioBuffer = useMemo(() => shownBuffer && stretched && plan
+    ? repeatBuffer(shownBuffer, plan.targets.map(atSec => ({ atSec, gain: 1, rate: 1 }))) : shownBuffer, [stretched, shownBuffer, plan])
+  // The shown material's strength (DEC-086: WAV × intensity): a gain on the PC output and the device stream and a scale
+  // of the "edited" drawing, changed live by the strength slider; the buffer is never rendered again for it.
+  const levelKeyShown = eventPreview ? levelKey.material(eventPreview.target, eventPreview.material) : adjusting ? levelKey.material(adjusting.target, adjusting.wav) : null
+  const levelMaterial = eventPreview ? { target: eventPreview.target, wav: eventPreview.material } : adjusting ?? null
+  const savedLevel = useSceneStore(state => levelMaterial && state.table ? materialIntensity(state.table, levelMaterial.target, levelMaterial.wav) : 1)
+  const liveLevel = useEventStore(state => levelKeyShown && state.liveLevel?.key === levelKeyShown ? state.liveLevel.value : null)
+  // "Original" is the file as it is: drawn and played without it.
+  const level = levelKeyShown && !original ? liveLevel ?? savedLevel : 1
+  const levelRef = useRef(level); levelRef.current = level
   const player = useMemo(() => new EditorBufferPlayer(null, undefined, s.setError), [s.clip?.id, original, auditionKey])
   useEffect(() => {player.activate(); return () => player.dispose()}, [player])
+  useEffect(() => { player.setLevel(level) }, [player, level])
   useDecidedSoundSync(player)
   useAdjustPersistence()
   // An adjusted event material: what its chain renders (live preview, or the clip without pending changes) goes back to the WAV.
@@ -173,11 +181,12 @@ export function WaveformEditor({ active }: { active: boolean }) {
   }, [player, targetKey, send, s.setError])
   // The Scene video panel's lead-in (audio / haptics start on the cue mark).
   playback.preRoll = scenePreRoll
-  // "×5" plays once from the start as soon as it is shown.
-  const autoplayed = useRef<AudioBuffer | null>(null)
+  playback.level = () => levelRef.current
+  // ▶ on a material plays it once from the start (again on the material already shown).
+  const autoplayed = useRef<{ buffer: AudioBuffer; request: number } | null>(null)
   useEffect(() => {
-    if (!eventPreview?.autoplay || autoplayed.current === eventPreview.buffer) return
-    autoplayed.current = eventPreview.buffer
+    if (!eventPreview?.autoplay || (autoplayed.current?.buffer === eventPreview.buffer && autoplayed.current.request === (eventPreview.playRequest ?? 0))) return
+    autoplayed.current = { buffer: eventPreview.buffer, request: eventPreview.playRequest ?? 0 }
     if (active && !useWaveformStore.getState().isProcessing) { useStartMarker.getState().set(null); void playback.play(0, player.getDuration(), true).catch(s.setError) }
   }, [eventPreview, playback, player, active, s.setError])
   useEffect(() => () => playback?.stop(), [playback])
@@ -330,7 +339,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   }, [dockApi, t, s.setError, linkSceneProject])
   const focusEditorPanel = useCallback((id: Parameters<EditorShared['focusEditorPanel']>[0]) => { if (dockApi) focusPanel(dockApi, id, t) }, [dockApi, t])
   const shared: EditorShared = {
-    active, original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, player, playback, pending, togglePlay, playAt, stopPlayback, isPlaybackActive, playFromStart, toggleCandidate,
+    active, original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, level, player, playback, pending, togglePlay, playAt, stopPlayback, isPlaybackActive, playFromStart, toggleCandidate,
     openRecipe, provenanceText, isConnected, playbackDevices, targets, routing, setVisibleClipIds, openSceneVideo, linkSceneProject, focusEditorPanel,
   }
   return <EditorContext.Provider value={shared}>

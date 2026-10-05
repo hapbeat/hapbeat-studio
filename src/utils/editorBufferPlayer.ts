@@ -11,6 +11,8 @@ export class EditorBufferPlayer {
   private began = 0
   private end = 0
   private muted = false
+  /** The material's strength (DEC-086 intensity) as the output gain: changed live, the buffer is never re-rendered for it. */
+  private level = 1
   /** Connected to the PC speakers (off while a haptic is auditioned: it only goes to the devices). */
   private output = true
   private disposed = false
@@ -28,7 +30,11 @@ export class EditorBufferPlayer {
   getDuration() { return this.desired?.duration ?? 0 }
   getCurrentTime() { return this.source && this.context ? Math.min(this.end, this.offset + this.context.currentTime - this.began) : this.offset }
   isPlaying() { return this.source !== null }
-  setMuted(muted: boolean) { this.muted = muted; if (this.gain) this.gain.gain.value = muted ? 0 : 1 }
+  setMuted(muted: boolean) { this.muted = muted; this.applyGain() }
+  /** Sets the playback gain at once, also while playing (nothing restarts). */
+  setLevel(level: number) { this.level = Math.max(0, level); this.applyGain() }
+  getLevel() { return this.level }
+  private applyGain() { if (this.gain) this.gain.gain.value = this.muted ? 0 : this.level }
   /** Connects / disconnects the PC output; playback (time, events, the device stream) runs either way. */
   setOutput(on: boolean) {
     if (on === this.output) return
@@ -40,7 +46,7 @@ export class EditorBufferPlayer {
     if (this.disposed) throw new Error('Editor player was closed')
     if (!this.context) {
       this.context = this.createContext(); perfTrack('audioContexts', 1); this.gain = this.context.createGain()
-      this.gain.gain.value = this.muted ? 0 : 1
+      this.applyGain()
       if (this.output) this.gain.connect(this.context.destination)
     }
     if (this.context.state === 'suspended') await this.context.resume()

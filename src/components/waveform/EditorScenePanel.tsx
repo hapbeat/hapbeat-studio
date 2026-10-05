@@ -28,21 +28,22 @@ export type SceneSubject = { kind: 'trial'; trialId: string | null } | { kind: '
 export function useSceneChoice(subject: SceneSubject) {
   const lib = useSceneStore(s => s.lib)
   const data = useSceneStore(s => s.data)
-  const table = useSceneStore(s => s.table)
+  // The cues only: a strength (intensity) change touches clips / sounds and must not re-resolve the scene.
+  const cues = useSceneStore(s => s.table?.cues)
   const trials = useAgentTrialStore(s => s.trials)
   const id = subject.kind === 'trial' ? subject.trialId : subject.kind === 'clip' ? subject.clipId : subject.key
   const trial = subject.kind === 'trial' ? trials.find(r => r.trial.id === id)?.trial ?? null : null
   const eventPick = useEventStore(s => subject.kind === 'event' && id ? s.scenePicks[id] : undefined)
   const savedChoice = useEditorSettings(s => !id || subject.kind === 'event' ? undefined : subject.kind === 'trial' ? s.trialScenes[id] : s.clipScenes[id])
   const saved = subject.kind === 'event' ? eventPick : savedChoice
-  const eventScene = useMemo(() => subject.kind === 'event' && id && lib && table ? { project: lib.project_name, cues: eventSceneCues(table, id) } : undefined, [subject.kind, id, lib, table])
+  const eventScene = useMemo(() => { const table = useSceneStore.getState().table; return subject.kind === 'event' && id && lib && table ? { project: lib.project_name, cues: eventSceneCues(table, id) } : undefined }, [subject.kind, id, lib, cues])
   const scene = trial?.scene ?? eventScene
   /** The Scene project this subject needs (trial: `scene.project`, saved pick, `project` label; clip: saved pick; event: the open one). */
   const wanted = wantedSceneProject({ scene, saved, fallback: trial?.project })
   const sfx = useSceneStore(s => s.sfx)
   // The targets: the trial's scene cues, or the event open in the Events panel (its variants are other cues of the scene).
   const targets = useMemo(() => subject.kind === 'event' && id ? [id] : undefined, [subject.kind, id])
-  const state: TrialSceneState = useMemo(() => resolveTrialScene({ lib, data, scene, saved, project: wanted, soundSec: eventSoundSec, targets }), [lib, data, scene, saved, wanted, table, sfx, targets])
+  const state: TrialSceneState = useMemo(() => resolveTrialScene({ lib, data, scene, saved, project: wanted, soundSec: eventSoundSec, targets }), [lib, data, scene, saved, wanted, cues, sfx, targets])
   const choose = (file: string) => {
     if (!lib || !id) return
     if (subject.kind === 'event') { useEventStore.getState().pickScene(id, file ? { project: lib.project_name, file } : null); return }
@@ -104,13 +105,21 @@ export function SceneChoiceSelect({ choice, label }: { choice: ReturnType<typeof
   </select>
 }
 
-/** Which subject the panel shows: an auditioned candidate's trial, else the last "▶ Video" target. */
+/**
+ * Which subject the panel shows: what the editor plays — an auditioned candidate's trial, an event material
+ * shown or being adjusted (its event, the same subject as useAuditionPlan) — else the last "▶ Video" target.
+ */
 function useShownSubject(): SceneSubject {
   const audition = useAgentTrialStore(s => s.audition)
   const selectedTrialId = useAgentTrialStore(s => s.selectedTrialId)
   const target: SceneVideoTarget = useSceneVideoTarget(s => s.target)
   const clipId = useWaveformStore(s => s.clip?.id ?? null)
+  const previewEvent = useEventStore(s => s.preview?.event ?? null)
+  const adjusting = useAdjustingLink()
+  const project = useSceneStore(s => s.lib?.project_name ?? null)
   if (audition) return { kind: 'trial', trialId: audition.trialId }
+  if (previewEvent) return { kind: 'event', key: previewEvent }
+  if (adjusting && adjusting.project === project) return { kind: 'event', key: adjusting.event }
   if (target.kind === 'trial') return { kind: 'trial', trialId: target.trialId ?? selectedTrialId }
   if (target.kind === 'event') return { kind: 'event', key: target.key }
   return { kind: 'clip', clipId }

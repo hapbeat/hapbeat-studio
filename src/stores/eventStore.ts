@@ -24,12 +24,26 @@ export interface DecideResult {
 /**
  * An event's sound / haptic clip shown in the waveform panel instead of the editor clip (read only,
  * like an AI audition) and played by the normal playback: haptics go to the devices per "send haptics",
- * a sound plays on the PC only. `buffer` already carries the volume / intensity × gain the game applies.
+ * a sound plays on the PC only.
  */
 export interface EventPreview {
-  id: string; event: string; target: DecideTarget; label: string; buffer: AudioBuffer
+  id: string; event: string; target: DecideTarget; label: string
+  /** The material (WAV name without .wav). */
+  material: string
+  /** The WAV as it is (a loop cue's repeated); its intensity is a playback gain and a drawing scale (DEC-086), never baked in. */
+  buffer: AudioBuffer
   /** Play it from the start as soon as it is shown (▶ on a material). */
   autoplay?: boolean
+  /** Bumped by ▶ on the material already shown: plays it again without reopening it. */
+  playRequest?: number
+}
+
+/** A strength slider while it moves, before its value is saved (`key`: see `levelKey`). */
+export interface LiveLevel { key: string; value: number }
+/** Whose strength a slider sets: an event material (cue table intensity) or an AI candidate (its rating). */
+export const levelKey = {
+  material: (target: DecideTarget, wav: string) => `material:${target}:${wav}`,
+  candidate: (trialId: string, candidateId: string) => `candidate:${trialId}/${candidateId}`,
 }
 
 interface EventState {
@@ -40,6 +54,9 @@ interface EventState {
   /** Scene video moment picked per event key (this session). */
   scenePicks: Record<string, TrialSceneChoice>
   preview: EventPreview | null
+  /** The strength slider being moved: applied to the playback gain and the drawing at once, saved debounced. */
+  liveLevel: LiveLevel | null
+  setLiveLevel: (level: LiveLevel | null) => void
   select: (key: string | null) => void
   /** Shows an event material in the waveform panel (ends an AI audition). */
   showPreview: (preview: EventPreview) => void
@@ -59,7 +76,8 @@ interface EventState {
 export const OPEN_TAB_EVENT = 'studio:open-tab'
 
 export const useEventStore = create<EventState>((set, get) => ({
-  selected: null, focusRequest: 0, decide: null, scenePicks: {}, preview: null, sceneOccurrences: null,
+  selected: null, focusRequest: 0, decide: null, scenePicks: {}, preview: null, liveLevel: null, sceneOccurrences: null,
+  setLiveLevel: liveLevel => set({ liveLevel }),
   openInScene: key => {
     set({ sceneOccurrences: key })
     if (key) window.dispatchEvent(new CustomEvent(OPEN_TAB_EVENT, { detail: 'scene' }))

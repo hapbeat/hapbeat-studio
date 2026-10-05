@@ -206,7 +206,7 @@ function EventDetail({ table, lib, e }: { table: CueTable; lib: SceneLib; e: Eff
   </div>
 }
 
-/** The event's sound candidates (`sfx.sounds`; ★ = representative): ▶ opens one in the waveform panel and plays it (PC only), ×5 plays it five times. */
+/** The event's sound candidates (`sfx.sounds`; ★ = representative): a row click shows one in the waveform panel, ▶ plays it (PC only). */
 function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent; loop: boolean; edit: Edit }) {
   const { t } = useI18n()
   const allowed = soundAllowed(lib, e.ref.cue)
@@ -215,6 +215,7 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
   const key = eventKey(e.ref), sounds = sfxSounds(e.sfx)
   const missing = (name: string) => useWaveformStore.getState().setError(t('events.preview.missing', { name }))
   const play = (s: string) => { if (!openEventSound(key, s, true)) missing(s) }
+  const show = (s: string) => { if (!openEventSound(key, s)) missing(s) }
   const set = (list: string[]) => edit(tb => setSfxSounds(tb, e.ref, list))
   // An approved sound is folded (its heading line stays); ▸ opens it.
   const [open, setOpen] = useState(e.review.sfx !== 'approved')
@@ -228,7 +229,7 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
     {!open ? null : !allowed ? <p className="agent-muted">{t('scene.sound.loopCue')}</p> : <>
       {loop && <p className="agent-muted">{t('events.loopSoundHint')}</p>}
       {!sounds.length && <p className="agent-muted">{t(e.decided.sfx ? 'events.soundNone' : 'events.undecidedSound')}</p>}
-      <MaterialList items={sounds} label={t('events.sound')} active={sounds.find(s => previewId === `${key}|sound|${s}`) ?? null} onPlay={play}
+      <MaterialList items={sounds} label={t('events.sound')} active={sounds.find(s => previewId === `${key}|sound|${s}`) ?? null} onPlay={play} onSelect={show}
         onReorder={set} onRemove={set}
         extra={s => <>{e.variation?.paired === true && pairedClips(e, sounds.indexOf(s))[0] && <button type="button" className="agent-icon-btn" title={t('events.pairedHapticHint', { clips: pairedClips(e, sounds.indexOf(s)).map(p => p.clip).join(', ') })}
           onClick={() => { const p = pairedClips(e, sounds.indexOf(s))[0]; if (!openEventHaptic(key, p.clip, p.at, true)) missing(p.clip) }}>{t('events.pairedHaptic')}</button>}
@@ -274,7 +275,7 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
           <button type="button" className="scene-icon-btn" aria-label={t('scene.route.remove')} title={t('scene.route.remove')} onClick={() => edit(tb => removeOwnRoute(tb, e.ref, i))}>✕</button>
         </div>
         <MaterialList items={clips} label={t('scene.route.clip')} active={clips.find(c => previewId === `${key}|haptic|${c}|${r.at}`) ?? null}
-          onPlay={c => { if (!openEventHaptic(key, c, r.at, true)) missing(c) }} onReorder={set} onRemove={set} minItems={1}
+          onPlay={c => { if (!openEventHaptic(key, c, r.at, true)) missing(c) }} onSelect={c => { if (!openEventHaptic(key, c, r.at)) missing(c) }} onReorder={set} onRemove={set} minItems={1}
           extra={c => <MaterialActions event={key} target="haptic" wav={c} />}
           below={c => <ReviseField cue={key} target="haptic" material={c} />} />
       </div>

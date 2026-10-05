@@ -17,6 +17,8 @@ export interface EditorShared {
   /** `trialId/candidateId` of the AI candidate shown instead of the clip, if any. */
   auditionKey: string | null
   audioBuffer: AudioBuffer | undefined
+  /** The shown material's / AI candidate's strength (intensity, live while its slider moves): playback gain and "edited" drawing scale. */
+  level: number
   player: EditorBufferPlayer
   playback: EditorPlayback
   pending: boolean

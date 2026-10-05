@@ -269,15 +269,12 @@ export function setSoundVolume(table: CueTable, cue: string, volume: number): Cu
 }
 
 /** Sets a sound's base level (adds its `sounds` entry). */
+// Intensity setters share every untouched part (cues stay the same object): a strength change re-resolves nothing that reads only the cues.
 export function setSoundIntensity(table: CueTable, sound: string, intensity: number): CueTable {
-  const next = clone(table)
-  next.sounds = { ...(next.sounds ?? {}), [sound]: { ...(next.sounds?.[sound] ?? {}), intensity: clampNumber(intensity, 0, 1) } }
-  return next
+  return { ...table, sounds: { ...(table.sounds ?? {}), [sound]: { ...(table.sounds?.[sound] ?? {}), intensity: clampNumber(intensity, 0, 1) } } }
 }
 export function setClipIntensity(table: CueTable, clip: string, intensity: number): CueTable {
-  const next = clone(table)
-  next.clips[clip].intensity = clampNumber(intensity, 0, 1)
-  return next
+  return { ...table, clips: { ...table.clips, [clip]: { ...table.clips[clip], intensity: clampNumber(intensity, 0, 1) } } }
 }
 
 export function addClipEntry(table: CueTable, name: string, loop: boolean, sourceFile: string): CueTable {

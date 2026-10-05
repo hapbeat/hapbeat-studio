@@ -20,8 +20,9 @@ type OverviewMode = 'left' | 'right' | 'move' | 'seek'
  * `viewKey` identifies what is shown (defaults to the clip id); a new key re-fits the zoom.
  * Mouse playback: a click plays from there (a click while playing stops), a drag selects a
  * range, a double click plays from the start. `transport` sits right under the waveform.
+ * `scale` multiplies the drawing only (a material's intensity): a change redraws, nothing is decoded or rendered.
  */
-export function WaveformDisplay({ original, bufferOverride, player, viewKey, transport }: { original: boolean; bufferOverride?: AudioBuffer; player: EditorBufferPlayer; viewKey?: string; transport?: ReactNode }) {
+export function WaveformDisplay({ original, bufferOverride, player, viewKey, transport, scale = 1 }: { original: boolean; bufferOverride?: AudioBuffer; player: EditorBufferPlayer; viewKey?: string; transport?: ReactNode; scale?: number }) {
   const { t } = useI18n()
   const { playAt, stopPlayback, isPlaybackActive, playFromStart } = useEditor()
   const height = useEditorSettings(s => s.height)
@@ -33,6 +34,7 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
   const drag = useRef<{ anchor: number; x: number; moved: boolean; time: number; wasPlaying: boolean } | null>(null)
   const anchor = useRef(0)
   const [ready, setReady] = useState(false)
+  const drawScale = useRef(scale)
   /** Overview frame drag: resize from either edge, move from inside, seek outside. */
   const overviewDrag = useRef<{ mode: OverviewMode; x: number; view: { start: number; end: number } } | null>(null)
   const [overviewHover, setOverviewHover] = useState<OverviewMode>('seek')
@@ -51,7 +53,7 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
     if (!container.current) return
     const plugin = RegionsPlugin.create()
     regions.current = plugin
-    const instance = WaveSurfer.create({ container: container.current, height: 180, waveColor: '#9a88d2', progressColor: '#9a88d2', cursorColor: '#fff', normalize: false, interact: false, hideScrollbar: true, renderFunction: renderSampleWaveform, plugins: [plugin] })
+    const instance = WaveSurfer.create({ container: container.current, height: 180, waveColor: '#9a88d2', progressColor: '#9a88d2', cursorColor: '#fff', normalize: false, interact: false, hideScrollbar: true, renderFunction: (channels, ctx) => renderSampleWaveform(channels, ctx, drawScale.current), plugins: [plugin] })
     instance.setMuted(true); ws.current = instance
     const removeScroll = instance.on('scroll', (start, end) => setViewport({start, end}))
     const removeTime = instance.on('timeupdate', setTime)
@@ -97,6 +99,8 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
     setViewport({start, end: Math.min(duration, start + container.current.clientWidth / zoom)})
   }, [ready, zoom, duration, player])
   useEffect(() => { ws.current?.setOptions({height}) }, [height])
+  // Redraw from the loaded data (WaveSurfer re-renders on setOptions; barHeight itself is unused by the custom renderFunction).
+  useEffect(() => { if (drawScale.current === scale) return; drawScale.current = scale; if (ready) ws.current?.setOptions({barHeight: scale}) }, [scale, ready])
   useEffect(() => {
     if (!ready) return
     const update = (time: number) => {ws.current?.setTime(Math.min(duration, time)); setTime(Math.min(duration, time))}

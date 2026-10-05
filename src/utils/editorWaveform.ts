@@ -25,8 +25,8 @@ export function sampleLine(data: Float32Array | number[], width: number): {x: nu
   return points
 }
 
-/** Draw signed PCM channels in separate lanes, without mirrored peak filling. */
-export function renderSampleWaveform(channels: Array<Float32Array | number[]>, ctx: CanvasRenderingContext2D) {
+/** Draw signed PCM channels in separate lanes, without mirrored peak filling. `scale` multiplies the drawn values only (a material's intensity). */
+export function renderSampleWaveform(channels: Array<Float32Array | number[]>, ctx: CanvasRenderingContext2D, scale = 1) {
   const {width, height} = ctx.canvas
   if (!channels.length) return
   const lane = height / channels.length
@@ -41,7 +41,7 @@ export function renderSampleWaveform(channels: Array<Float32Array | number[]>, c
     ctx.globalAlpha = 1
     ctx.beginPath()
     sampleLine(data, width).forEach(({x, value}, index) => {
-      const y = center - value * amplitude
+      const y = center - value * scale * amplitude
       if (index === 0) ctx.moveTo(x,y); else ctx.lineTo(x,y)
     })
     ctx.stroke(); ctx.restore()
