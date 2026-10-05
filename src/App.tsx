@@ -29,10 +29,12 @@ const DEFAULT_TAB: Tab = 'kit'
 const BETA_TABS: Tab[] = ['editor', 'scene']
 
 /**
- * Tab shown on load: `?tab=<id>` in the URL (e.g. `/?tab=scene`, used by the
- * haptic authoring launcher) wins, then the last tab used, then Kit.
+ * Tab shown on load: the URL hash (`#editor`, `#scene`, `#kit`, `#display`, `#devices`; kept in sync, so a
+ * reload stays on the tab), then `?tab=<id>` (the haptic authoring launcher), then the last tab used, then Kit.
  */
 function initialTab(): Tab {
+  const hash = window.location.hash.replace(/^#/, '')
+  if ((TABS as string[]).includes(hash)) return hash as Tab
   let wanted: string | null = null
   try { wanted = new URLSearchParams(window.location.search).get('tab') } catch { /* no URL params */ }
   if (wanted && (TABS as string[]).includes(wanted)) return wanted as Tab
@@ -90,12 +92,17 @@ export function App() {
     try { localStorage.setItem('hapbeat-studio-header-collapsed', headerCollapsed ? '1' : '0') } catch { /* preference only */ }
   }, [headerCollapsed])
 
-  // `?tab=` only picks the first tab: drop it so a reload keeps the tab used last.
+  // The URL names the tab (#editor, #scene …): a reload comes back to it. `?tab=` is turned into the hash.
   useEffect(() => {
     const url = new URL(window.location.href)
-    if (!url.searchParams.has('tab')) return
     url.searchParams.delete('tab')
-    window.history.replaceState(window.history.state, '', url)
+    url.hash = activeTab
+    if (url.href !== window.location.href) window.history.replaceState(window.history.state, '', url)
+  }, [activeTab])
+  useEffect(() => {
+    const onHash = () => { const hash = window.location.hash.replace(/^#/, ''); if ((TABS as string[]).includes(hash)) setActiveTab(hash as Tab) }
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
   }, [])
   useEffect(() => {
     localStorage.setItem('hapbeat-studio-tab', activeTab)

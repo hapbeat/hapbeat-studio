@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
+import { pageVisible, perfTrack } from '@/utils/perfRegistry'
 import './VideoOverlay.css'
 
 /**
@@ -32,17 +33,31 @@ export function VideoOverlay({ video, mark, marks, range, playing, onToggle, onS
   const time = useRef<HTMLSpanElement>(null)
   const [duration, setDuration] = useState(0)
   useEffect(() => {
+    if (!video) return
     let frame = 0
     const draw = () => {
-      const d = video && Number.isFinite(video.duration) ? video.duration : 0
+      const d = Number.isFinite(video.duration) ? video.duration : 0
       if (d !== duration) setDuration(d)
       const [from, to] = range ?? [0, d]
-      if (video && fill.current) fill.current.style.width = to > from ? `${Math.max(0, Math.min(100, (video.currentTime - from) / (to - from) * 100))}%` : '0%'
-      if (video && time.current) time.current.textContent = `${(mark === null ? video.currentTime : video.currentTime - mark).toFixed(2)} s`
-      frame = requestAnimationFrame(draw)
+      if (fill.current) fill.current.style.width = to > from ? `${Math.max(0, Math.min(100, (video.currentTime - from) / (to - from) * 100))}%` : '0%'
+      if (time.current) time.current.textContent = `${(mark === null ? video.currentTime : video.currentTime - mark).toFixed(2)} s`
     }
-    frame = requestAnimationFrame(draw)
-    return () => cancelAnimationFrame(frame)
+    // Animated only while the video plays (and the page is visible); otherwise redrawn on the video's events.
+    const loop = () => { draw(); frame = requestAnimationFrame(loop) }
+    const start = () => { if (!frame && !video.paused && pageVisible()) { perfTrack('rafLoops', 1); frame = requestAnimationFrame(loop) } }
+    const stop = () => { if (frame) { cancelAnimationFrame(frame); frame = 0; perfTrack('rafLoops', -1) } draw() }
+    const onVisibility = () => { if (pageVisible()) start(); else stop() }
+    const events = ['play', 'playing'] as const, still = ['pause', 'seeked', 'timeupdate', 'loadedmetadata', 'durationchange', 'ended'] as const
+    for (const e of events) video.addEventListener(e, start)
+    for (const e of still) video.addEventListener(e, e === 'pause' || e === 'ended' ? stop : draw)
+    document.addEventListener('visibilitychange', onVisibility)
+    draw(); start()
+    return () => {
+      stop()
+      for (const e of events) video.removeEventListener(e, start)
+      for (const e of still) video.removeEventListener(e, e === 'pause' || e === 'ended' ? stop : draw)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [video, mark, duration, range?.[0], range?.[1]])
   const [from, to] = range ?? [0, duration]
   const ticks = marks ?? (mark === null ? [] : [{ t: mark, target: true }])

@@ -1,4 +1,6 @@
 import { useEffect, useRef } from 'react'
+import { usePageVisible } from '@/hooks/usePageVisible'
+import { perfTrack } from '@/utils/perfRegistry'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
@@ -30,7 +32,12 @@ export function SceneTimelinePanel() {
   const handLabel = useHandLabel()
   const handRef = useRef(handLabel); handRef.current = handLabel
 
+  // Drawn only while the Scene tab is shown and the page visible.
+  const { active } = useScene()
+  const visible = usePageVisible()
+  const live = active && visible
   useEffect(() => {
+    if (!live) return
     let frame = 0
     const draw = () => {
       frame = requestAnimationFrame(draw)
@@ -112,8 +119,9 @@ export function SceneTimelinePanel() {
       if (state.current) state.current.textContent = `${SPEEDS[runtime.speedIndex]}x　loop ${runtime.part ? '±0.5s' : useSceneSettings.getState().loop ? 'on' : 'off'}　${Math.floor(time * fps)}f`
     }
     frame = requestAnimationFrame(draw)
-    return () => cancelAnimationFrame(frame)
-  }, [runtime])
+    perfTrack('rafLoops', 1)
+    return () => { cancelAnimationFrame(frame); perfTrack('rafLoops', -1) }
+  }, [runtime, live])
 
   const onMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
     if (!useSceneStore.getState().items.length) return

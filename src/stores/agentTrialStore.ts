@@ -10,6 +10,7 @@ import { ratingError, trialTarget, type RatingBody } from '@/utils/agentProtocol
 import { SOUND_DIMENSIONS } from '@/utils/agentTrialUi'
 import { processInbox, readAgentBytes, submitTrialRequest, encodePcm16Wav, type AcceptResult, type InboxDeps, type InboxResult } from '@/utils/agentInbox'
 import { buildCatalog } from '@/utils/agentGuide'
+import { pageVisible, perfTrack } from '@/utils/perfRegistry'
 import { buildAgentMessage, outboxFileName, writeOutboxMessage, type HapticRequest, type Reassign, type Revise, type SoundRequest } from '@/utils/agentOutbox'
 import { KnowledgeFolder, localIsoString, trialSlugs, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
 
@@ -145,7 +146,13 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
     startPolling: () => {
       if (pollTimer !== undefined) return
       set({ polling: true })
-      pollTimer = setInterval(() => { if (!document.hidden) void get().refresh() }, POLL_MS)
+      // A hot reload keeps the previous module's timer alive: stop it (one poll per page).
+      const w = window as unknown as { __trialPoll?: () => void }
+      w.__trialPoll?.()
+      pollTimer = setInterval(() => { if (pageVisible()) void get().refresh() }, POLL_MS)
+      perfTrack('intervals', 1)
+      const mine = pollTimer
+      w.__trialPoll = () => { clearInterval(mine); perfTrack('intervals', -1) }
       unsubscribeDocuments = useWaveformStore.subscribe((state, previous) => {
         if (state.documents === previous.documents) return
         clearTimeout(catalogTimer)
@@ -154,7 +161,8 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
       void get().refresh()
     },
     stopPolling: () => {
-      clearInterval(pollTimer); pollTimer = undefined
+      if (pollTimer !== undefined) { (window as unknown as { __trialPoll?: () => void }).__trialPoll?.(); (window as unknown as { __trialPoll?: () => void }).__trialPoll = undefined }
+      pollTimer = undefined
       clearTimeout(catalogTimer); catalogTimer = undefined
       unsubscribeDocuments?.(); unsubscribeDocuments = undefined
       set({ polling: false })

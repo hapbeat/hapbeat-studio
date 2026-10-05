@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { usePageVisible } from '@/hooks/usePageVisible'
+import { perfTrack } from '@/utils/perfRegistry'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useScene } from './sceneContext'
@@ -27,6 +29,14 @@ export function SceneVideoPanel() {
     const host = stage.current
     if (!host) return
     host.appendChild(runtime.video)
+    return () => { if (runtime.video.parentElement === host) host.removeChild(runtime.video) }
+  }, [runtime])
+  // The badge is drawn only while the Scene tab is shown and the page visible.
+  const { active } = useScene()
+  const visible = usePageVisible()
+  const live = active && visible
+  useEffect(() => {
+    if (!live) return
     let frame = 0
     const draw = () => {
       const s = useSceneStore.getState(), it = s.items[s.cur], el = badge.current, v = runtime.video
@@ -46,8 +56,9 @@ export function SceneVideoPanel() {
       frame = requestAnimationFrame(draw)
     }
     frame = requestAnimationFrame(draw)
-    return () => { cancelAnimationFrame(frame); if (runtime.video.parentElement === host) host.removeChild(runtime.video) }
-  }, [runtime])
+    perfTrack('rafLoops', 1)
+    return () => { cancelAnimationFrame(frame); perfTrack('rafLoops', -1) }
+  }, [runtime, live])
 
   return <div className="scene-stage" ref={stage} onClick={() => { if (!hasItems) return; runtime.audio(); runtime.togglePlay() }}>
     <div className="scene-badge" ref={badge} hidden={!hasItems} />

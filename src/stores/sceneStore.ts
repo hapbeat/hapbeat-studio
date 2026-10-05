@@ -5,6 +5,7 @@ import { buildItems, VIEWER_DIR, type SceneData, type SceneItem, type SceneLib }
 import { addClipEntry, clipNameFromFile, encodePcm16Wav, soundNameFromFile, validateCueTable, type CueTable } from '@/utils/sceneCueTable'
 import { listWavs, openSceneProject, readProjectFile, readSceneTable, writeProjectFile, writeSceneSave, type PendingWavs } from '@/utils/sceneProject'
 import { CueTableSync } from '@/utils/cueTableSync'
+import { pageVisible, perfTrack } from '@/utils/perfRegistry'
 import { RATE } from '@/utils/sceneHaptics'
 import { lookupSceneProject, registerSceneProject } from '@/utils/sceneRegistry'
 
@@ -131,6 +132,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
   // ── Autosave and outside changes ──
   const sync = new CueTableSync<PendingWavs>({
     read: async () => { const { root, lib } = get(); const f = await readProjectFile(root!, lib!.paths.cues); return { text: await f.text(), mtime: f.lastModified } },
+    mtime: async () => { const { root, lib } = get(); return (await readProjectFile(root!, lib!.paths.cues)).lastModified },
     write: async (table, pending) => {
       const { root, lib } = get()
       await writeSceneSave(root!, lib!, table, pending)
@@ -180,7 +182,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
   /** Reads the file again when it changed outside Studio and nothing is unsaved (every 2 s and on focus). */
   const checkOutside = async () => {
     const { root, lib, dirty, busy } = get()
-    if (!root || !lib || dirty || busy || saving || !sync.known) return
+    if (!root || !lib || dirty || busy || saving || !sync.known || !pageVisible()) return
     try {
       if (await sync.changedOnDisk() === null) return
       await loadTable()
@@ -188,10 +190,16 @@ export const useSceneStore = create<SceneState>((set, get) => {
     } catch { /* checked again later */ }
   }
   if (typeof window !== 'undefined') {
-    setInterval(() => void checkOutside(), 2000)
-    window.addEventListener('focus', () => void checkOutside())
+    // One watcher per page: a hot reload of this module replaces the previous one instead of adding another.
+    const w = window as unknown as { __sceneWatch?: () => void }
+    w.__sceneWatch?.()
+    const timer = setInterval(() => void checkOutside(), 2000)
+    const onFocus = () => void checkOutside()
     // Leaving the page writes what is pending.
-    window.addEventListener('pagehide', () => { if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; void saveNow() } })
+    const onHide = () => { if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; void saveNow() } }
+    window.addEventListener('focus', onFocus); window.addEventListener('pagehide', onHide)
+    perfTrack('intervals', 1)
+    w.__sceneWatch = () => { clearInterval(timer); window.removeEventListener('focus', onFocus); window.removeEventListener('pagehide', onHide); perfTrack('intervals', -1) }
   }
 
   /** Opens a project folder; a folder with a lib is remembered even when the recording is missing (one click after recording). */

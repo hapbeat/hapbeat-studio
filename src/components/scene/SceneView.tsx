@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { usePageVisible } from '@/hooks/usePageVisible'
 import type { DockviewApi } from 'dockview-react'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
@@ -39,8 +40,13 @@ export function SceneView({ active }: { active: boolean }) {
   const [dockApi, setDockApi] = useState<DockviewApi | null>(null)
   const [layoutNotice, setLayoutNotice] = useState<string | null>(null)
   const runtime = useMemo(() => new SceneRuntime(), [])
-  useEffect(() => { runtime.start(); return () => runtime.dispose() }, [runtime])
-  useEffect(() => { if (!active) runtime.video.pause() }, [active, runtime])
+  useEffect(() => () => runtime.dispose(), [runtime])
+  // The runtime (10 ms tick, video) runs only while this tab is shown and the page is visible.
+  const visible = usePageVisible()
+  useEffect(() => {
+    if (active && visible) runtime.start()
+    else { runtime.video.pause(); runtime.stop() }
+  }, [active, visible, runtime])
   useEffect(() => { void useSceneStore.getState().restore() }, [])
 
   const root = useSceneStore(s => s.root)

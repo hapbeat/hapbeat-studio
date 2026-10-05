@@ -1,4 +1,5 @@
 import { useSceneStore, sceneVideoUrl } from '@/stores/sceneStore'
+import { perfTrack } from '@/utils/perfRegistry'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { clipEnd, focusEvent, itemEvents, levelAt, offsetOf, type SceneItem, type VisibleEvent } from '@/utils/sceneData'
 import { isLoopCue, routeClips, sfxSounds, type CueRoute, type CueSfx } from '@/utils/sceneCueTable'
@@ -44,6 +45,7 @@ export class SceneRuntime {
   start() {
     if (this.timer) return
     this.timer = setInterval(() => this.tick(), 10)
+    perfTrack('intervals', 1)
     let prev = useSceneStore.getState()
     this.unsubscribe = useSceneStore.subscribe(state => {
       if (state.cur !== prev.cur || state.items !== prev.items) this.loadItem()
@@ -54,14 +56,14 @@ export class SceneRuntime {
     if (useSceneStore.getState().items.length) this.loadItem()
   }
   stop() {
-    if (this.timer) clearInterval(this.timer)
+    if (this.timer) { clearInterval(this.timer); perfTrack('intervals', -1) }
     this.timer = null
     this.unsubscribe?.(); this.unsubscribe = null
     this.video.pause()
     this.flush()
     this.mixer.endSessions()
   }
-  dispose() { this.stop(); void this.actx?.close(); this.actx = null }
+  dispose() { this.stop(); if (this.actx) { void this.actx.close(); perfTrack('audioContexts', -1) } this.actx = null }
 
   setHelper(helper: { send: HelperSend; connected: boolean; devices: HapticDevice[] }) { this.helper = helper }
   get streaming() { return this.mixer.streaming }
@@ -74,7 +76,7 @@ export class SceneRuntime {
 
   /** Unlocks Web Audio (call from a user gesture). */
   audio(): AudioContext {
-    if (!this.actx) this.actx = new AudioContext()
+    if (!this.actx) { this.actx = new AudioContext(); perfTrack('audioContexts', 1) }
     if (this.actx.state === 'suspended') void this.actx.resume()
     return this.actx
   }

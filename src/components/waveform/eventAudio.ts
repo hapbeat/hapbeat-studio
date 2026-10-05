@@ -11,6 +11,7 @@ import type { EditorBufferPlayer } from '@/utils/editorBufferPlayer'
 import { onUserStop } from '@/utils/playerStops'
 import { CompanionSound, type SoundSource } from '@/utils/companionSound'
 import { FiringScheduler, type Firing } from '@/utils/firingScheduler'
+import { perfTrack } from '@/utils/perfRegistry'
 import { useAuditionPlan } from './EditorScenePanel'
 
 /**
@@ -87,8 +88,10 @@ export function eventSoundSec(key: string): number {
   return (sound && s.sfx[sound]?.duration) || 1
 }
 let ctx: AudioContext | null = null
+// A hot reload of this module must not leave its AudioContext running.
+import.meta.hot?.dispose(() => { if (ctx) { void ctx.close(); perfTrack('audioContexts', -1); ctx = null } })
 const audio = () => {
-  if (!ctx) ctx = new AudioContext()
+  if (!ctx) { ctx = new AudioContext(); perfTrack('audioContexts', 1) }
   if (ctx.state === 'suspended') void ctx.resume()
   return ctx
 }

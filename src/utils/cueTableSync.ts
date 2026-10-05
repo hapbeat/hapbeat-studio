@@ -60,6 +60,8 @@ export function mergeCueTables(base: CueTable, ours: CueTable, theirs: CueTable)
 export interface CueTableIo<P> {
   /** The file now (text and its last-modified time). */
   read(): Promise<{ text: string; mtime: number }>
+  /** Its last-modified time only (cheap: polled every 2 s). */
+  mtime?(): Promise<number>
   /** Writes the table (after `pending` files); returns the new last-modified time. */
   write(table: CueTable, pending: P): Promise<number>
 }
@@ -89,6 +91,8 @@ export class CueTableSync<P> {
 
   /** The file changed outside Studio since it was last read / written (last-modified time first, then the text). */
   async changedOnDisk(): Promise<string | null> {
+    // The text is read only when the last-modified time moved.
+    if (this.io.mtime && await this.io.mtime() === this.baseMtime) return null
     const disk = await this.io.read()
     if (disk.mtime === this.baseMtime || disk.text === this.baseText) { this.baseMtime = disk.mtime; return null }
     return disk.text

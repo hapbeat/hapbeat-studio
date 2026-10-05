@@ -1,3 +1,4 @@
+import { perfTrack } from './perfRegistry'
 /** Audio output is independent of waveform redraws and offline preview rendering. */
 export class EditorBufferPlayer {
   private desired: AudioBuffer | null
@@ -38,7 +39,7 @@ export class EditorBufferPlayer {
   async unlock() {
     if (this.disposed) throw new Error('Editor player was closed')
     if (!this.context) {
-      this.context = this.createContext(); this.gain = this.context.createGain()
+      this.context = this.createContext(); perfTrack('audioContexts', 1); this.gain = this.context.createGain()
       this.gain.gain.value = this.muted ? 0 : 1
       if (this.output) this.gain.connect(this.context.destination)
     }
@@ -81,5 +82,5 @@ export class EditorBufferPlayer {
     this.emit('timeupdate'); this.emit('play')
   }
   activate() { this.disposed = false }
-  dispose() { this.disposed = true; this.pause(); this.listeners.clear(); const context = this.context; this.context = null; this.gain = null; void context?.close() }
+  dispose() { this.disposed = true; this.pause(); this.listeners.clear(); const context = this.context; this.context = null; this.gain = null; if (context) { perfTrack('audioContexts', -1); void context.close() } }
 }
