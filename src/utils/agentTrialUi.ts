@@ -213,3 +213,9 @@ export function removeReserve<R extends { trialId: string; candidateId: string }
   if (list.length) next[key] = list; else delete next[key]
   return next
 }
+
+/** A remake request is answered once a trial for its cue (in `scene.cues`) is received after it was sent. */
+export function reviseAnswered(req: { cue: string; at: string }, trials: readonly { trial: { receivedAt: string; scene?: { cues: string[] } } }[]): boolean {
+  const sent = Date.parse(req.at)
+  return trials.some(r => !!r.trial.scene?.cues.includes(req.cue) && Date.parse(r.trial.receivedAt) > sent)
+}

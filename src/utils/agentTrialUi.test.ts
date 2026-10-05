@@ -198,3 +198,13 @@ describe('reserves (★3)', () => {
     expect(removeReserve(removeReserve(map, 'bite:tear', ref), 'bite:tear', { trialId: 't1', candidateId: 'C' })).toEqual({})
   })
 })
+
+describe('remake requests', () => {
+  it('stay pending until a trial for the cue arrives after them', async () => {
+    const { reviseAnswered } = await import('./agentTrialUi')
+    const req = { cue: 'bite:tear', at: '2026-10-05T10:00:00.000Z' }
+    const trial = (cues: string[], receivedAt: string) => ({ trial: { receivedAt, scene: { cues } } })
+    expect(reviseAnswered(req, [trial(['bite:tear'], '2026-10-05T09:00:00.000Z'), trial(['bite'], '2026-10-05T11:00:00.000Z')])).toBe(false)
+    expect(reviseAnswered(req, [trial(['bite:tear'], '2026-10-05T11:00:00.000Z')])).toBe(true)
+  })
+})

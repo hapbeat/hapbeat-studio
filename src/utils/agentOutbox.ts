@@ -22,11 +22,15 @@ export interface AgentMessage {
   shortIds?: string[]
   /** "This firing should be another event / variant" (Scene tab, DEC-085): a request to change the game's routing (Director). */
   reassign?: Reassign
+  /** "Remake this material" (Events panel): the user wants another take of one material of an event. */
+  revise?: Revise
 }
+/** A material (`material`: WAV name without .wav) of `cue` (a cue or `cue:variant`) to remake, with the user's comment. */
+export interface Revise { cue: string; target: 'sound' | 'haptic'; material: string; comment: string }
 /** One firing of `cue` (a cue or `cue:variant`) at `atSec` of the full recording, proposed to become `to`. */
 export interface Reassign { cue: string; atSec: number; to: string; comment?: string }
 
-export function buildAgentMessage(o: { text: string; createdAt: string; project?: string; trialIds?: string[]; shortIds?: string[]; reassign?: Reassign }): AgentMessage {
+export function buildAgentMessage(o: { text: string; createdAt: string; project?: string; trialIds?: string[]; shortIds?: string[]; reassign?: Reassign; revise?: Revise }): AgentMessage {
   const text = o.text.trim()
   if (!text) throw new Error('message text is empty')
   if (text.length > 4000) throw new Error('message text is longer than 4000 characters')
@@ -35,6 +39,7 @@ export function buildAgentMessage(o: { text: string; createdAt: string; project?
     ...(o.project ? { project: o.project } : {}),
     ...(o.trialIds?.length ? { trialIds: [...o.trialIds] } : {}),
     ...(o.shortIds?.length ? { shortIds: [...o.shortIds] } : {}),
+    ...(o.revise ? { revise: { cue: o.revise.cue, target: o.revise.target, material: o.revise.material, comment: o.revise.comment.trim().slice(0, 1000) } } : {}),
     ...(o.reassign ? { reassign: { cue: o.reassign.cue, atSec: Math.round(o.reassign.atSec * 1000) / 1000, to: o.reassign.to, ...(o.reassign.comment?.trim() ? { comment: o.reassign.comment.trim().slice(0, 1000) } : {}) } } : {}),
   }
 }

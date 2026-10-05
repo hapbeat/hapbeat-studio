@@ -23,7 +23,8 @@ import { EditorMenu, EditorMenuItem } from './EditorMenu'
 import { openEventDefault, openEventHaptic, openEventSound } from './eventAudio'
 import { MaterialList } from './MaterialList'
 import { runDecision } from './eventDecide'
-import { removeReserve } from '@/utils/agentTrialUi'
+import { removeReserve, reviseAnswered } from '@/utils/agentTrialUi'
+import { create } from 'zustand'
 import { openEventMaterialForEditing } from './eventEditing'
 import './EventsPanel.css'
 import '@/components/scene/VideoOverlay.css'
@@ -222,7 +223,8 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
       {!sounds.length && <p className="agent-muted">{t(e.decided.sfx ? 'events.soundNone' : 'events.undecidedSound')}</p>}
       <MaterialList items={sounds} label={t('events.sound')} active={sounds.find(s => previewId === `${key}|sound|${s}`) ?? null} onPlay={play}
         onReorder={set} onRemove={set}
-        extra={s => <EditAsClipButton event={key} target="sound" wav={s} />} />
+        extra={s => <MaterialActions event={key} target="sound" wav={s} />} badge={s => <RevisePendingBadge cue={key} target="sound" material={s} />}
+        below={s => <ReviseField cue={key} target="sound" material={s} />} />
       <Reserves cue={e.ref.cue} target="sound" />
       <select className="events-add-material" value="" aria-label={t('events.addSoundMulti')} title={t('events.soundDir', { dir: lib.paths.sounds })}
         onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) set([...sounds, x]) }}>
@@ -262,7 +264,8 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
         </div>
         <MaterialList items={clips} label={t('scene.route.clip')} active={clips.find(c => previewId === `${key}|haptic|${c}|${r.at}`) ?? null}
           onPlay={c => { if (!openEventHaptic(key, c, r.gain, r.at, true)) missing(c) }} onReorder={set} onRemove={set} minItems={1}
-          extra={c => <EditAsClipButton event={key} target="haptic" wav={c} />} />
+          extra={c => <MaterialActions event={key} target="haptic" wav={c} />} badge={c => <RevisePendingBadge cue={key} target="haptic" material={c} />}
+          below={c => <ReviseField cue={key} target="haptic" material={c} />} />
       </div>
     })}
     <Reserves cue={e.ref.cue} target="haptic" />
@@ -367,4 +370,63 @@ function Reserves({ cue, target }: { cue: string; target: 'sound' | 'haptic' }) 
       </li>
     })}
   </ul>
+}
+
+/** Which material's remake comment field is open (one at a time). */
+const useReviseOpen = create<{ open: string | null; set: (open: string | null) => void }>(set => ({ open: null, set: open => set({ open }) }))
+const reviseKey = (cue: string, target: string, material: string) => `${cue}|${target}|${material}`
+
+/** "Edit as clip" and ⋯ (Remake…) of one material row. */
+function MaterialActions({ event, target, wav }: { event: string; target: DecideTarget; wav: string }) {
+  const { t } = useI18n()
+  return <span className="events-mat-actions">
+    <EditAsClipButton event={event} target={target} wav={wav} />
+    <EditorMenu label="⋯" title={t('events.revise.menu')}>
+      <EditorMenuItem onSelect={() => useReviseOpen.getState().set(reviseKey(event, target, wav))}>{t('events.revise.open')}</EditorMenuItem>
+    </EditorMenu>
+  </span>
+}
+
+/** "Remake requested" on a material until a trial for its cue arrives (the request is then dropped). */
+function RevisePendingBadge({ cue, target, material }: { cue: string; target: 'sound' | 'haptic'; material: string }) {
+  const { t } = useI18n()
+  const pending = useEditorSettings(s => s.revisePending)
+  const trials = useAgentTrialStore(s => s.trials)
+  const mine = pending.filter(r => r.cue === cue && r.target === target && r.material === material)
+  const open = mine.filter(r => !reviseAnswered(r, trials))
+  useEffect(() => {
+    if (mine.length === open.length) return
+    const all = useEditorSettings.getState().revisePending
+    useEditorSettings.getState().update({ revisePending: all.filter(r => !(r.cue === cue && r.target === target && r.material === material && reviseAnswered(r, trials))) })
+  }, [mine.length, open.length, cue, target, material, trials])
+  return open.length ? <small className="events-revise-pending" title={t('events.revise.pendingHint')}>{t('events.revise.pending')}</small> : null
+}
+
+/** The one-line remake comment under a material row: Enter sends (hapbeat-agent-message@1 `revise`), Esc closes. */
+function ReviseField({ cue, target, material }: { cue: string; target: 'sound' | 'haptic'; material: string }) {
+  const { t } = useI18n()
+  const open = useReviseOpen(s => s.open === reviseKey(cue, target, material))
+  const [comment, setComment] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  if (!open) return null
+  const close = () => { useReviseOpen.getState().set(null); setComment(''); setError(null) }
+  const send = async () => {
+    if (!comment.trim() || busy) return
+    setBusy(true)
+    try {
+      const project = useSceneStore.getState().lib?.project_name
+      await useAgentTrialStore.getState().sendAgentMessage({ text: t('events.revise.message', { cue, material, comment: comment.trim() }), project, revise: { cue, target, material, comment } })
+      const settings = useEditorSettings.getState()
+      settings.update({ revisePending: [...settings.revisePending, { cue, target, material, at: new Date().toISOString() }] })
+      close()
+    } catch (err) { setError(t('events.revise.failed', { error: err instanceof Error ? err.message : String(err) })) }
+    finally { setBusy(false) }
+  }
+  return <div className="events-revise">
+    <input autoFocus value={comment} disabled={busy} placeholder={t('events.revise.placeholder')} aria-label={t('events.revise.placeholder')} title={error ?? t('events.revise.hint')}
+      onChange={e => { setComment(e.target.value); setError(null) }}
+      onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void send() } else if (e.key === 'Escape') { e.preventDefault(); close() } }} />
+    {error && <small className="events-warn">{error}</small>}
+  </div>
 }

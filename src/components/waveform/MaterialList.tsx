@@ -7,7 +7,7 @@ import './EventsPanel.css'
  * DEC-085). One grid row each: ▶, the name, ★ (make it the representative), remove, plus `extra`.
  * Used by the editor's Events panel and the Scene tab's event details.
  */
-export function MaterialList({ items, active, onPlay, onReorder, onRemove, minItems, extra, label }: {
+export function MaterialList({ items, active, onPlay, onReorder, onRemove, minItems, extra, badge, below, label }: {
   items: readonly string[]
   /** The row shown in the waveform panel (highlighted). */
   active?: string | null
@@ -18,6 +18,10 @@ export function MaterialList({ items, active, onPlay, onReorder, onRemove, minIt
   onRemove: ((items: string[]) => void) | null
   minItems?: number
   extra?: (name: string) => ReactNode
+  /** Small status after the name (e.g. "remake requested"). */
+  badge?: (name: string) => ReactNode
+  /** A full-width line under the row (e.g. the remake comment field); null = none. */
+  below?: (name: string) => ReactNode
   label: string
 }) {
   const { t } = useI18n()
@@ -25,7 +29,7 @@ export function MaterialList({ items, active, onPlay, onReorder, onRemove, minIt
   return <ul className="events-materials" aria-label={label}>
     {items.map((name, i) => <li key={name} className={`events-mat ${active === name ? 'active' : ''}`}>
       <button type="button" className="agent-icon-btn" aria-label={t('events.mat.play', { name })} title={t('events.mat.play', { name })} onClick={() => onPlay(name)}>▶</button>
-      <span className="events-mat-name" title={name}>{name}</span>
+      <span className="events-mat-name" title={name}>{name}{badge?.(name)}</span>
       {/* ★ only with two or more candidates (one is trivially the representative). */}
       {items.length < 2 ? <span /> : onReorder ? <button type="button" className={`agent-icon-btn events-mat-star ${i === 0 ? 'on' : ''}`} disabled={i === 0}
         aria-label={t(i === 0 ? 'events.mat.representative' : 'events.mat.makeRepresentative')} title={t(i === 0 ? 'events.mat.representative' : 'events.mat.makeRepresentative')}
@@ -33,6 +37,7 @@ export function MaterialList({ items, active, onPlay, onReorder, onRemove, minIt
         : <span className="events-mat-star on" title={i === 0 ? t('events.mat.representative') : ''}>{i === 0 ? '★' : ''}</span>}
       {onRemove && removable(minItems ?? 0) ? <button type="button" className="agent-icon-btn" title={t('events.mat.removeHint')} onClick={() => onRemove(items.filter(x => x !== name))}>{t('events.mat.remove')}</button> : <span />}
       {extra ? extra(name) : <span />}
+      {below?.(name)}
     </li>)}
   </ul>
 }

@@ -48,6 +48,8 @@ export interface EditorUiSettings {
   eventReserves: Record<string, ReserveRef[]>
   /** The one-time backfill of ★3 ratings saved before reserves existed has run. */
   reservesBackfilled: boolean
+  /** "Remake" requests sent from the Events panel, shown on their material until a new trial for the cue arrives. */
+  revisePending: RevisePending[]
   /** AI trials panel project filter: '' = all, ' ' = trials without a project, else a project name. */
   trialProjectFilter: string
   /** AI trials panel target filter: '' = all, 'sound', 'haptic'. */
@@ -57,10 +59,12 @@ export interface EditorUiSettings {
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, trialProjectFilter: '', trialTargetFilter: '',
+  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, revisePending: [], trialProjectFilter: '', trialTargetFilter: '',
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
+/** A "remake" request: the material of `cue`, sent at `at` (ISO). */
+export interface RevisePending { cue: string; target: 'sound' | 'haptic'; material: string; at: string }
 /** A reserved AI candidate: trial id + candidate id, and whether it is a sound or a haptic. */
 export interface ReserveRef { trialId: string; candidateId: string; target: 'sound' | 'haptic' }
 function reserves(value: unknown): Record<string, ReserveRef[]> {
@@ -116,6 +120,8 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     eventMarks: eventMarks(v.eventMarks),
     eventReserves: reserves(v.eventReserves),
     reservesBackfilled: v.reservesBackfilled === true,
+    revisePending: Array.isArray(v.revisePending) ? v.revisePending.filter((r): r is RevisePending => isRecord(r) && typeof r.cue === 'string' && typeof r.material === 'string' && typeof r.at === 'string'
+      && (r.target === 'sound' || r.target === 'haptic')).slice(-200).map(r => ({ cue: r.cue, target: r.target, material: r.material, at: r.at })) : [],
     eventsListHeight: clamp(v.eventsListHeight, 80, 1200, d.eventsListHeight),
     autoAssignOnRating: typeof v.autoAssignOnRating === 'boolean' ? v.autoAssignOnRating : d.autoAssignOnRating,
     trialProjectFilter: typeof v.trialProjectFilter === 'string' && v.trialProjectFilter.length <= 200 ? v.trialProjectFilter : d.trialProjectFilter,

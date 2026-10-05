@@ -146,7 +146,7 @@ The user rates in Studio and presses Save — that is the signal (there is no se
 
 ## Messages from Studio \`hapbeat-agent-message@1\` (Studio writes, you read)
 
-Only the Scene tab writes these ("Reassign…" on a firing). Files in \`hapbeat-agent/outbox/\`:
+Two kinds, from the user's clicks: "Reassign…" on a firing (Scene tab, \`reassign\`) and "Remake…" on a material (Events panel, \`revise\`). Files in \`hapbeat-agent/outbox/\`:
 
 \`\`\`json
 { "format": "hapbeat-agent-message@1", "createdAt": "2026-10-05T15:42:00+09:00", "text": "振り分け変更の依頼: footstep の 17.37 s の発生を footstep:feeding にしてください", "project": "trex-encounter", "reassign": { "cue": "footstep", "atSec": 17.367, "to": "footstep:feeding" } }
@@ -154,6 +154,7 @@ Only the Scene tab writes these ("Reassign…" on a firing). Files in \`hapbeat-
 
 - \`text\` (≤ 4000 chars) restates the request; \`project\` is context.
 - \`reassign\` (optional, from the Scene tab): \`{ "cue": "footstep", "atSec": 17.367, "to": "footstep:feeding", "comment": "…" }\` — the user says the firing of \`cue\` (a cue or \`cue:variant\`) at \`atSec\` of the full recording (\`full.events\` in \`viewer-data.json\`) should be \`to\` instead. It asks you to change the game's routing (which event the game fires there), not the cue table: the table never holds per-moment values. Add the variant to the table if \`to\` does not exist yet, and re-record the scene afterwards.
+- \`revise\` (optional, from the Events panel): \`{ "cue": "bite:tear", "target": "sound", "material": "bite_tear_02", "comment": "…" }\` — remake that material of the event (WAV name without .wav) as the comment says: submit a new trial with \`scene.cues\` naming the cue (Studio clears its "remake requested" mark when such a trial arrives). The material stays in the pool as tentative.
 - Files appear complete (the browser commits each \`*.json\` on close); ignore other names (e.g. the browser's \`*.crswap\`). Names sort by time.
 - After handling a message, move it to \`outbox/_read/\` (Studio never deletes outbox files).
 

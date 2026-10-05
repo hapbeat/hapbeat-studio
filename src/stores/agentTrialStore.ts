@@ -10,7 +10,7 @@ import { ratingError, trialTarget, type RatingBody } from '@/utils/agentProtocol
 import { SOUND_DIMENSIONS } from '@/utils/agentTrialUi'
 import { processInbox, readAgentBytes, submitTrialRequest, encodePcm16Wav, type AcceptResult, type InboxDeps, type InboxResult } from '@/utils/agentInbox'
 import { buildCatalog } from '@/utils/agentGuide'
-import { buildAgentMessage, outboxFileName, writeOutboxMessage, type Reassign } from '@/utils/agentOutbox'
+import { buildAgentMessage, outboxFileName, writeOutboxMessage, type Reassign, type Revise } from '@/utils/agentOutbox'
 import { KnowledgeFolder, localIsoString, trialSlugs, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
 
 const POLL_MS = 2000
@@ -59,7 +59,7 @@ interface AgentTrialState {
   /** Accepts one hapbeat-trial@1 object immediately (MCP `submit_trial`) with the same processing as the inbox. */
   submitTrial: (trial: unknown) => Promise<AcceptResult>
   /** Writes a message for the agent session into hapbeat-agent/outbox/ (returns the file name). */
-  sendAgentMessage: (message: { text: string; project?: string; trialIds?: string[]; shortIds?: string[]; reassign?: Reassign }) => Promise<string>
+  sendAgentMessage: (message: { text: string; project?: string; trialIds?: string[]; shortIds?: string[]; reassign?: Reassign; revise?: Revise }) => Promise<string>
   /** Appends an agent proposal to the "Proposed" section of insights.md. */
   appendInsight: (statement: string, evidence: string[]) => Promise<void>
 }
