@@ -59,6 +59,10 @@ interface EventState {
   pickScene: (key: string, choice: TrialSceneChoice | null) => void
   /** Selects `key`, switches to the editor tab and focuses the Events panel. */
   openInEditor: (key: string) => void
+  /** The event whose firings the Scene tab lists (DEC-085: every moment of an event is checked there). */
+  sceneOccurrences: string | null
+  /** Lists event `key`'s firings in the Scene tab and switches to it. */
+  openInScene: (key: string | null) => void
   requestDecide: (request: DecideRequest) => void
   closeDecide: () => void
   setResult: (result: DecideResult | null) => void
@@ -68,7 +72,11 @@ interface EventState {
 export const OPEN_TAB_EVENT = 'studio:open-tab'
 
 export const useEventStore = create<EventState>((set, get) => ({
-  selected: null, focusRequest: 0, decide: null, result: null, scenePicks: {}, preview: null,
+  selected: null, focusRequest: 0, decide: null, result: null, scenePicks: {}, preview: null, sceneOccurrences: null,
+  openInScene: key => {
+    set({ sceneOccurrences: key })
+    if (key) window.dispatchEvent(new CustomEvent(OPEN_TAB_EVENT, { detail: 'scene' }))
+  },
   select: selected => set({ selected }),
   showPreview: preview => { useAgentTrialStore.getState().clearAudition(); set({ preview }) },
   clearPreview: () => { if (get().preview) set({ preview: null }) },

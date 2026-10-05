@@ -1,0 +1,44 @@
+import { describe, expect, it } from 'vitest'
+import { findRuns, occurrences, planSegmentShots, representativeSegment } from './sceneSegments'
+import { effectiveEvent } from './cueEvents'
+import { sampleTable } from './sceneTestFixtures'
+import type { SceneEvent } from './sceneData'
+
+/** The footstep firings of the T-Rex encounter recording (viewer-data.json full.events, 2026-10-05). */
+const T_REX: SceneEvent[] = [
+  ...[1.267, 2.133, 2.967, 3.833, 4.7].map(t => ({ t, name: 'footstep:approach', hand: 'both' })),
+  ...[17.367, 19.067, 22.533, 30.567, 48.4, 53.767, 54.6, 55.467, 56.333, 57.2, 58.033, 58.9, 59.767, 60.6, 61.467, 62.333, 63.2, 64.033, 64.9, 65.767, 66.6, 67.467, 68.333, 69.233]
+    .map(t => ({ t, name: 'footstep', hand: 'both' })),
+  { t: 7.9, name: 'roar', hand: 'both' },
+]
+
+describe('representative segment (DEC-085)', () => {
+  it('footstep:approach: the whole approach run, 5 marks, one firing per mark at the game timing', () => {
+    const seg = representativeSegment(T_REX, 'footstep:approach', 0.6)!
+    expect(seg.run).toBe(true)
+    expect(seg.marks).toEqual([1.267, 2.133, 2.967, 3.833, 4.7])
+    expect(seg.start).toBeCloseTo(0.267)
+    expect(seg.end).toBeCloseTo(4.7 + 0.6 + 0.5)
+    const e = effectiveEvent(sampleTable(), { cue: 'button', variant: null })!
+    const shots = planSegmentShots(e, seg.marks, false, () => 0.5)
+    expect(shots).toHaveLength(5)
+    expect(shots.map(s => +s.atSec.toFixed(3))).toEqual([0, 0.866, 1.7, 2.566, 3.433])
+    expect(shots.every(s => s.routes.length > 0)).toBe(true) // haptics on every mark
+  })
+
+  it('footstep: the exit walk (53.77 s, first run of ≥ 3), not a lone footstep while feeding; at most 6 marks', () => {
+    const seg = representativeSegment(T_REX, 'footstep', 0.6)!
+    expect(seg.run).toBe(true)
+    expect(seg.marks[0]).toBeCloseTo(53.767)
+    expect(seg.marks).toHaveLength(6)
+    expect(seg.total).toBe(24)
+    expect(occurrences(T_REX, 'footstep')).toHaveLength(24)
+  })
+
+  it('a one-off event: 1 s before to the sound length + 0.5 s after; absent events have none', () => {
+    expect(representativeSegment(T_REX, 'roar', 3)).toEqual({ name: 'roar', start: 6.9, end: 11.4, marks: [7.9], run: false, total: 1 })
+    expect(representativeSegment(T_REX, 'bite', 1)).toBeNull()
+    expect(findRuns([0, 1, 5, 6, 7, 20])).toEqual([[5, 6, 7]])
+    expect(findRuns([0, 1])).toEqual([])
+  })
+})

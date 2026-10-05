@@ -20,9 +20,13 @@ export interface AgentMessage {
   project?: string
   trialIds?: string[]
   shortIds?: string[]
+  /** "This firing should be another event / variant" (Scene tab, DEC-085): a request to change the game's routing (Director). */
+  reassign?: Reassign
 }
+/** One firing of `cue` (a cue or `cue:variant`) at `atSec` of the full recording, proposed to become `to`. */
+export interface Reassign { cue: string; atSec: number; to: string; comment?: string }
 
-export function buildAgentMessage(o: { text: string; createdAt: string; project?: string; trialIds?: string[]; shortIds?: string[] }): AgentMessage {
+export function buildAgentMessage(o: { text: string; createdAt: string; project?: string; trialIds?: string[]; shortIds?: string[]; reassign?: Reassign }): AgentMessage {
   const text = o.text.trim()
   if (!text) throw new Error('message text is empty')
   if (text.length > 4000) throw new Error('message text is longer than 4000 characters')
@@ -31,6 +35,7 @@ export function buildAgentMessage(o: { text: string; createdAt: string; project?
     ...(o.project ? { project: o.project } : {}),
     ...(o.trialIds?.length ? { trialIds: [...o.trialIds] } : {}),
     ...(o.shortIds?.length ? { shortIds: [...o.shortIds] } : {}),
+    ...(o.reassign ? { reassign: { cue: o.reassign.cue, atSec: Math.round(o.reassign.atSec * 1000) / 1000, to: o.reassign.to, ...(o.reassign.comment?.trim() ? { comment: o.reassign.comment.trim().slice(0, 1000) } : {}) } } : {}),
   }
 }
 

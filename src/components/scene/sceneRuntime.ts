@@ -27,6 +27,8 @@ export class SceneRuntime {
   private cursor: number | null = null
   private lastVt = 0
   private lastItem = -1
+  /** Full replay time to start from once its video has loaded (playFull while another moment was shown). */
+  private pendingStart: number | null = null
   private timer: ReturnType<typeof setInterval> | null = null
   private unsubscribe: (() => void) | null = null
   /** Multi-material picks (v2 `clips` / `sounds`), per event. */
@@ -81,7 +83,13 @@ export class SceneRuntime {
     const s = useSceneStore.getState(), it = s.items[s.cur], root = s.root, cur = s.cur
     if (!it || !root) { this.video.removeAttribute('src'); this.video.load(); return }
     this.video.loop = this.loopOn()
-    this.video.onloadedmetadata = () => { this.video.playbackRate = SPEEDS[this.speedIndex]; if (this.part) this.setPart(true); else void this.video.play().catch(() => {}) }
+    this.video.onloadedmetadata = () => {
+      this.video.playbackRate = SPEEDS[this.speedIndex]
+      const start = it.kind === 'full' ? this.pendingStart : null
+      this.pendingStart = null
+      if (start !== null) { this.seek(start); void this.video.play().catch(() => {}) }
+      else if (this.part) this.setPart(true); else void this.video.play().catch(() => {})
+    }
     sceneVideoUrl(root, it.file).then(url => { if (useSceneStore.getState().cur === cur && this.video.src !== url) this.video.src = url },
       error => useSceneStore.getState().note({ id: 'scene.video.unreadable', params: { file: it.file, error: error instanceof Error ? error.message : String(error) }, error: true }))
   }
@@ -105,6 +113,14 @@ export class SceneRuntime {
       if (e) { this.partAB = [Math.max(0, e.t - 0.5), e.t + 0.5]; this.seek(this.partAB[0]); void this.video.play().catch(() => {}) }
     }
     this.applyLoop()
+  }
+  /** Plays the full replay (moment 0) from replay time `t`, switching to it first when another moment is shown. */
+  playFull(t: number) {
+    const s = useSceneStore.getState()
+    if (s.items[s.cur]?.kind === 'full' && this.video.readyState >= 1) { this.seek(t); void this.video.play().catch(() => {}); return }
+    this.pendingStart = t
+    const index = s.items.findIndex(it => it.kind === 'full')
+    if (index >= 0) s.select(index)
   }
   restart() { this.seek(this.part && this.partAB ? this.partAB[0] : 0); void this.video.play().catch(() => {}) }
 

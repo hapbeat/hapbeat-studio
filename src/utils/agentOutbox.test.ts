@@ -13,6 +13,12 @@ describe('agent outbox', () => {
     expect(() => buildAgentMessage({ text: 'x'.repeat(4001), createdAt: 'c' })).toThrow(/4000/)
   })
 
+  it('carries a reassignment request from the Scene tab (cue, firing time, proposed event, comment)', () => {
+    expect(buildAgentMessage({ text: 'reassign', createdAt: 'c', project: 'trex-encounter', reassign: { cue: 'footstep', atSec: 17.3671, to: 'footstep:feeding', comment: '  hidden by the meat ' } }).reassign)
+      .toEqual({ cue: 'footstep', atSec: 17.367, to: 'footstep:feeding', comment: 'hidden by the meat' })
+    expect(buildAgentMessage({ text: 'x', createdAt: 'c', reassign: { cue: 'bite', atSec: 1, to: 'bite:tear', comment: ' ' } }).reassign).toEqual({ cue: 'bite', atSec: 1, to: 'bite:tear' })
+  })
+
   it('names files by local time plus a random suffix', () => {
     expect(outboxFileName(new Date(2026, 9, 5, 9, 4, 7), () => 0.5)).toMatch(/^20261005-090407-[0-9a-z]{4}\.json$/)
   })

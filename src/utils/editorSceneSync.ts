@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { PlaybackPreRoll } from './editorPlayback'
+import type { PlannedShot } from './cueEvents'
 
 /**
  * The editor's Scene video panel registers its pre-roll here while it is
@@ -30,4 +31,14 @@ export type SceneVideoTarget = { kind: 'trial'; trialId: string } | { kind: 'cli
 export const useSceneVideoTarget = create<{ target: SceneVideoTarget; setTarget: (target: SceneVideoTarget) => void }>(set => ({
   target: { kind: 'clip' },
   setTarget: target => set({ target }),
+}))
+
+/**
+ * The firings of the repeated event the synced Scene video panel shows (DEC-085: one per mark, offsets from
+ * the first mark, each with its variation draw). The editor plays the shown sound / haptic once per firing
+ * and the event's sound with them; null = one firing (a one-off event, or a recorded clip).
+ */
+export const useSceneSegmentShots = create<{ key: string | null; shots: PlannedShot[] | null; set: (key: string | null, shots: PlannedShot[] | null) => void }>(set => ({
+  key: null, shots: null,
+  set: (key, shots) => set({ key, shots }),
 }))

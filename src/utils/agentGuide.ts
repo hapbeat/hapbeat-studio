@@ -141,6 +141,7 @@ The user can send you a short message from the editor ("Send to agent" in the AI
 \`\`\`
 
 - \`text\` (≤ 4000 chars) is the instruction; \`project\`, \`trialIds\` and \`shortIds\` are optional context (read the named trials' \`rating.json\` first).
+- \`reassign\` (optional, from the Scene tab): \`{ "cue": "footstep", "atSec": 17.367, "to": "footstep:feeding", "comment": "…" }\` — the user says the firing of \`cue\` (a cue or \`cue:variant\`) at \`atSec\` of the full recording (\`full.events\` in \`viewer-data.json\`) should be \`to\` instead. It asks you to change the game's routing (which event the game fires there), not the cue table: the table never holds per-moment values. Add the variant to the table if \`to\` does not exist yet, and re-record the scene afterwards.
 - Files appear atomically (written as \`*.json.tmp\`, then renamed); ignore \`*.tmp\`. Names sort by time.
 - After handling a message, move it to \`outbox/_read/\` (Studio never deletes outbox files).
 

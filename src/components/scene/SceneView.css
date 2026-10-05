@@ -87,3 +87,15 @@
   border: 1px solid var(--border); border-radius: 3px; padding: 6px; font: 11px/1.35 var(--font-mono); }
 .scene-view select, .scene-view input[type=number] { background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-light); border-radius: 4px; padding: 2px 4px; font: inherit; }
 .scene-view .dv-content-container { overflow: auto; }
+
+/* Firings of one event (DEC-085): pick, then one compact row per firing. */
+.scene-occ { border-bottom: 1px solid var(--border); padding: 4px 12px; display: flex; flex-direction: column; gap: 2px; }
+.scene-occ-pick { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.scene-occ-pick > span { flex: none; white-space: nowrap; }
+.scene-occ-pick select { flex: 1; min-width: 0; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-light); border-radius: 4px; padding: 1px 4px; }
+.scene-occ-list { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow: auto; }
+.scene-occ-row { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
+.scene-occ-row .scene-num { width: 22px; flex: none; text-align: right; }
+.scene-occ-form { display: flex; gap: 4px; padding: 2px 0 4px 28px; min-width: 0; }
+.scene-occ-form input { flex: 1 1 0; min-width: 0; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-light); border-radius: 4px; padding: 1px 4px; font-size: 12px; }
+.scene-occ-status { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

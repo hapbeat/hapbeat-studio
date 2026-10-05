@@ -5,13 +5,16 @@ import { useEditorSettings } from '@/stores/editorSettings'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { sceneVideoUrl, useSceneStore } from '@/stores/sceneStore'
 import { resolveTrialScene, sceneEventTime, sceneVideoTime, stepSceneFrame, wantedSceneProject, type TrialSceneState } from '@/utils/trialScene'
-import { setScenePause, setScenePreRoll, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
+import { setScenePause, setScenePreRoll, useSceneSegmentShots, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
+import { planSegmentShots } from '@/utils/sceneSegments'
+import { isLoopCue } from '@/utils/sceneCueTable'
+import { eventSoundSec } from './eventAudio'
 import { isTypingTarget } from '@/utils/playbackShortcut'
 import { VideoOverlay } from '@/components/scene/VideoOverlay'
 import { useEditor } from './editorContext'
 import { useEventStore } from '@/stores/eventStore'
 import { onUserStop } from '@/utils/playerStops'
-import { eventSceneCues } from '@/utils/cueEvents'
+import { effectiveEvent, eventSceneCues, resolveEventName } from '@/utils/cueEvents'
 import './EditorScenePanel.css'
 
 export type SceneSubject = { kind: 'trial'; trialId: string | null } | { kind: 'clip'; clipId: string | null } | { kind: 'event'; key: string | null }
@@ -34,7 +37,8 @@ export function useSceneChoice(subject: SceneSubject) {
   const scene = trial?.scene ?? eventScene
   /** The Scene project this subject needs (trial: `scene.project`, saved pick, `project` label; clip: saved pick; event: the open one). */
   const wanted = wantedSceneProject({ scene, saved, fallback: trial?.project })
-  const state: TrialSceneState = useMemo(() => resolveTrialScene({ lib, data, scene, saved, project: wanted }), [lib, data, scene, saved, wanted])
+  const sfx = useSceneStore(s => s.sfx)
+  const state: TrialSceneState = useMemo(() => resolveTrialScene({ lib, data, scene, saved, project: wanted, soundSec: eventSoundSec }), [lib, data, scene, saved, wanted, table, sfx])
   const choose = (file: string) => {
     if (!lib || !id) return
     if (subject.kind === 'event') { useEventStore.getState().pickScene(id, file ? { project: lib.project_name, file } : null); return }
@@ -46,14 +50,24 @@ export function useSceneChoice(subject: SceneSubject) {
   return { id, trial, scene, wanted, state, chosen: state.kind === 'ready' ? state.chosen : null, choose }
 }
 
-/** Moment picker (a trial with `scene` always has one, so it offers no "none"). */
+const OTHER_SCENES = '\u0000scene-tab'
+/**
+ * Moment picker (a trial with `scene` always has one, so it offers no "none"). For an event / trial with
+ * `scene`: the representative stretch first, then a recorded clip only when picked or named by the trial,
+ * and one item that opens the event's firings in the Scene tab (DEC-085: no list of moments here).
+ */
 export function SceneChoiceSelect({ choice, label }: { choice: ReturnType<typeof useSceneChoice>; label: string }) {
   const { t } = useI18n()
   const { state, chosen, scene, choose } = choice
   if (state.kind !== 'ready') return <select aria-label={label} disabled><option>{t(state.kind === 'noProject' ? 'editor.scene.noProjectShort' : 'editor.scene.unavailable')}</option></select>
-  return <select aria-label={label} value={chosen?.file ?? ''} onChange={e => choose(e.target.value)}>
+  const segment = state.options[0]?.segment
+  return <select aria-label={label} value={chosen?.file ?? ''} title={segment ? t('editor.scene.segmentHint') : undefined}
+    onChange={e => { if (e.target.value === OTHER_SCENES) { if (segment) useEventStore.getState().openInScene(segment.name) } else choose(e.target.value) }}>
     {!scene && <option value="">{t('editor.scene.pick')}</option>}
-    {state.options.map(o => <option key={o.file} value={o.file}>{o.label}</option>)}
+    {state.options.map(o => <option key={o.file} value={o.file}>{o.segment
+      ? t(o.segment.run ? 'editor.scene.segmentRun' : 'editor.scene.segmentOne', { name: o.segment.name, at: o.segment.marks[0].toFixed(1), count: o.segment.marks.length })
+      : o.label}</option>)}
+    {segment && <option value={OTHER_SCENES}>{t('editor.scene.otherScenes', { name: segment.name, count: segment.total })}</option>}
   </select>
 }
 
@@ -209,6 +223,11 @@ export function EditorScenePanel() {
       cancel: () => video.current?.pause(),
     })
     setScenePause({ paused: () => pausedRef.current !== null, toggle: () => togglePauseRef.current() })
+    // A repeated event: one firing per mark (the editor repeats the shown sound / haptic and the event's sound).
+    const scene = useSceneStore.getState(), name = chosen.segment?.name
+    const resolved = name && scene.table ? resolveEventName(scene.table, name) : null
+    const e = resolved && scene.table ? effectiveEvent(scene.table, resolved.ref) : null
+    useSceneSegmentShots.getState().set(name ?? null, e && scene.lib && chosen.marks.length > 1 ? planSegmentShots(e, chosen.marks, isLoopCue(scene.lib, e.ref.cue)) : null)
     const unsubs = [
       // After the lead-in the video is already running; only correct a visible drift. Any play ends a pause.
       player.on('play', time => { setPausedAt(null); const v = video.current; if (!v) return; if (v.paused || Math.abs(v.currentTime - at(time)) > 0.1) v.currentTime = at(time); void v.play().catch(() => {}) }),
@@ -217,8 +236,16 @@ export function EditorScenePanel() {
       // The video runs on after the audio ends naturally (to the moment's end); a stop pauses it.
       onUserStop(player, () => video.current?.pause()),
     ]
-    return () => { setScenePreRoll(null); setScenePause(null); setPausedAt(null); unsubs.forEach(unsub => unsub()); video.current?.pause() }
-  }, [player, synced, chosen?.mark, lead])
+    return () => { setScenePreRoll(null); setScenePause(null); setPausedAt(null); useSceneSegmentShots.getState().set(null, null); unsubs.forEach(unsub => unsub()); video.current?.pause() }
+  }, [player, synced, chosen?.mark, chosen?.marks.length, lead])
+  // A stretch of the full replay ends at its end (the replay itself runs on).
+  useEffect(() => {
+    const v = videoEl, end = chosen?.end
+    if (!v || end == null) return
+    const stop = () => { if (!v.paused && v.currentTime >= end) v.pause() }
+    v.addEventListener('timeupdate', stop)
+    return () => v.removeEventListener('timeupdate', stop)
+  }, [videoEl, chosen?.end])
 
   if (!choice.id) return <div className="editor-scene-panel"><p className="agent-muted">{t('editor.scene.noSubject')}</p></div>
   if (needsLink) {
@@ -249,7 +276,7 @@ export function EditorScenePanel() {
       <div className="editor-scene-stage" title={hint} onClick={e => { e.currentTarget.closest<HTMLElement>('.editor-scene-panel')?.focus(); focusedRef.current = true; setFocused(true); if (synced) togglePause() }}>
         {chosen && src && !videoError ? <video ref={videoRef} src={src} muted playsInline preload="auto" onLoadedMetadata={cue} onPlay={() => setVideoRunning(true)} onPause={() => setVideoRunning(false)} onError={e => setVideoError(e.currentTarget.error?.message || `MediaError ${e.currentTarget.error?.code ?? ''}`)} />
           : <p className="agent-muted">{chosen && videoError ? t('editor.scene.unreadable', { file: chosen.file, error: videoError }) : chosen ? t('editor.scene.loading') : t('editor.scene.pickHint')}</p>}
-        {synced && chosen && src && !videoError && <VideoOverlay video={videoEl} mark={chosen.mark} playing={videoRunning}
+        {synced && chosen && src && !videoError && <VideoOverlay video={videoEl} mark={chosen.mark} marks={chosen.marks} range={chosen.segment ? [chosen.segment.start, chosen.segment.end] : null} playing={videoRunning}
           onToggle={() => { focusedRef.current = true; setFocused(true); togglePause() }} onSeek={seekVideo} info={hint} />}
       </div>
     </>}

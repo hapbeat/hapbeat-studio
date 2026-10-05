@@ -6,6 +6,7 @@ import { HapticIcon } from './HapticIcon'
 import { useHandLabel } from './SceneCuePanels'
 import { effectiveEvent, resolveEventName } from '@/utils/cueEvents'
 import { useEventStore } from '@/stores/eventStore'
+import { SceneOccurrences } from './SceneOccurrences'
 
 /** The moments list: the full replay, then one clip per cue moment, with which outputs its cues use. */
 export function SceneMomentsPanel() {
@@ -24,6 +25,7 @@ export function SceneMomentsPanel() {
       <span><b className="scene-kinds"><span className="h"><HapticIcon /></span></b> {t('scene.legend.haptics')}</span>
       <span><b className="scene-kinds"><span className="s">♪</span></b> {t('scene.legend.sound')}</span>
     </div>
+    <SceneOccurrences />
     <div ref={list}>
       {items.map((it, k) => {
         // `cue:variant` names resolve like the game (an unknown variant plays its cue).

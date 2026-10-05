@@ -20,7 +20,7 @@ import { NumberField, formatGain, useAtLabel } from '@/components/scene/SceneCue
 import { useEditor } from './editorContext'
 import { DecidedNotice } from './DecideDialog'
 import { EditorMenu, EditorMenuItem } from './EditorMenu'
-import { openEventDefault, openEventHaptic, openEventSequence, openEventSound } from './eventAudio'
+import { eventRun, openEventDefault, openEventHaptic, openEventSequence, openEventSound } from './eventAudio'
 import { openEventMaterialForEditing } from './eventEditing'
 import './EventsPanel.css'
 
@@ -453,13 +453,16 @@ function SequenceSection({ e, edit }: { e: EffectiveEvent; edit: Edit }) {
   const [time, setTime] = useState(0)
   useEffect(() => player.on('timeupdate', setTime), [player])
   const p = e.preview, repeat = p?.repeat ?? 1
+  // A repeated event of the recording plays its real firings (DEC-085); `preview` is the stand-in without a recording.
+  useSceneStore(s => s.data)
+  const run = eventRun(key)
   const current = shots ? [...shots].reverse().find(sh => time >= sh.atSec) ?? null : null
   const set = (patch: Partial<NonNullable<EffectiveEvent['preview']>>) => edit(tb => setPreview(tb, e.ref, patch))
   const play = () => { if (!openEventSequence(key)) useWaveformStore.getState().setError(t('events.sequenceEmpty')) }
   const db = (x: number) => `${x >= 0 ? '+' : ''}${x.toFixed(1)} dB`
   return <section className="events-sec">
     <div className="events-sequence">
-      <button type="button" className="toolbar-btn" title={t('events.sequenceHint')} onClick={play}>{t('events.sequencePlay', { count: repeat })}</button>
+      <button type="button" className="toolbar-btn" title={t(run ? 'events.sequenceRunHint' : 'events.sequenceHint')} onClick={play}>{t('events.sequencePlay', { count: run ? run.marks.length : repeat })}</button>
       <label>{t('events.sequenceRepeat')} <NumberField value={repeat} min={PREVIEW_RANGES.repeat[0]} max={PREVIEW_RANGES.repeat[1]} step={1} label={t('events.sequenceRepeat')}
         onCommit={x => set({ repeat: Math.max(1, Math.min(32, Math.round(x))) })} /></label>
       <label>{t('events.sequenceInterval')} <NumberField value={p?.intervalSec ?? 1} min={PREVIEW_RANGES.intervalSec[0]} max={PREVIEW_RANGES.intervalSec[1]} step={0.05} label={t('events.sequenceInterval')}
