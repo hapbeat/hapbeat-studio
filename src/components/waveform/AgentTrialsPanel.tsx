@@ -6,14 +6,16 @@ import { useWaveformStore } from '@/stores/waveformStore'
 import { localIsoString, type TrialRecord } from '@/utils/hapticKnowledge'
 import type { HapticFeatures } from '@/utils/hapticFeatures'
 import { clearRatingDraft, DraftKeeper, readFolderDraft, readLocalDraft, writeRatingDraft } from '@/utils/ratingDrafts'
-import { addUseRange, isFreePlanCandidate, poolCandidates, reserveCandidates, addReserves, autoRatingContext, EMPTY_CONTEXT, formToRating, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, trialKind, verdictFromOverall, type CandidateRatingForm, type RatingForm } from '@/utils/agentTrialUi'
+import { addUseRange, isFreePlanCandidate, poolCandidates, reserveCandidates, addReserves, autoRatingContext, EMPTY_CONTEXT, formToRating, loadRememberedContext, ratingFormIssue, ratingToForm, rememberContext, trialKind, verdictFromOverall, type CandidateRatingForm, type RatingForm } from '@/utils/agentTrialUi'
 import { trialTarget, type TrialKind } from '@/utils/agentProtocol'
 import { useAuditionPlan } from './EditorScenePanel'
+import { BODY_POSITIONS, resolvePlaybackTargets, routePlaybackTargets } from '@/utils/playbackDevices'
+import { useDeviceStore } from '@/stores/deviceStore'
 import { appendActivity } from '@/utils/activityLog'
 import { useToast } from '@/components/common/Toast'
 import { toFirstPlay } from '@/utils/sceneSegments'
 import { useEventStore } from '@/stores/eventStore'
-import { assignEventsForTrial, effectiveEvent, parseEventKey, trialEvent } from '@/utils/cueEvents'
+import { assignEventsForTrial, effectiveEvent, parseEventKey, trialEvent, cueRoutePositions } from '@/utils/cueEvents'
 import { runDecision } from './eventDecide'
 import { isLoopCue } from '@/utils/sceneCueTable'
 import { WaveformThumbnail } from './WaveformThumbnail'
@@ -274,11 +276,16 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
   }, [autoAudition, first, firstAudio])
 
   // Device names and body volume come from the helper (playback targets); typed only when it cannot tell.
-  const { targets } = useEditor()
+  // The devices this trial's auditions go to (the selected connected ones at its first scene cue's positions).
   const { devices } = useHelperConnection()
-  const auto = useMemo(() => autoRatingContext(devices, targets), [devices, targets])
   const sceneLib = useSceneStore(s => s.lib)
   const sceneTable = useSceneStore(s => s.table)
+  const kitSelectedIps = useDeviceStore(s => s.kitSelectedIps)
+  const routedIps = useMemo(() => {
+    const ats = sceneLib && sceneTable && trial.scene && trial.scene.project === sceneLib.project_name ? cueRoutePositions(sceneTable, sceneLib, trial.scene.cues[0]) : null
+    return routePlaybackTargets(resolvePlaybackTargets(devices, kitSelectedIps), ats).devices.map(d => d.ipAddress)
+  }, [devices, kitSelectedIps, sceneLib, sceneTable, trial.scene])
+  const auto = useMemo(() => autoRatingContext(devices, routedIps), [devices, routedIps])
   const kind: TrialKind | null = trialKind(trial, record.candidates.map(c => c.features?.durationSec),
     sceneLib && trial.scene?.project === sceneLib.project_name ? sceneLib.loop_cues : [])
   /** Sound trials rate overall / term match / comment only (no haptic dimensions or device conditions). */
@@ -324,7 +331,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
   const save = async () => {
     if (issue || saving) return
     setSaving(true)
-    const withAuto = target === 'sound' ? { ...form, context: EMPTY_CONTEXT } : { ...form, context: { ...form.context, ...(auto.device ? { device: auto.device } : {}),
+    const withAuto = target === 'sound' ? { ...form, context: EMPTY_CONTEXT } : { ...form, context: { ...form.context, ...(auto.device ? { device: auto.device } : {}), ...(auto.position ? { position: auto.position } : {}),
       ...(auto.deviceWiper !== null ? { deviceWiper: String(auto.deviceWiper), volumeLabel: auto.volumeLabel } : { volumeLabel: '' }) } }
     const body = formToRating(withAuto, trial, localIsoString(new Date()))
     try {
@@ -429,13 +436,16 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
     <div className="agent-trial-rating">
       {target === 'haptic' && <fieldset className="agent-context" title={t('editor.agent.context')}>
         {auto.device ? <div className="agent-field agent-field-auto" title={t('editor.agent.autoHint')}>{t('editor.agent.device')}<output>{auto.device}</output></div> : contextField('device', t('editor.agent.device'), `${ids}-devices`)}
-        {contextField('position', t('editor.agent.position'), `${ids}-positions`)}
+        {auto.position ? <div className="agent-field agent-field-auto" title={t('editor.agent.autoHint')}>{t('editor.agent.position')}<output>{auto.position.split(', ').map(p => t(`position.${p}` as MessageId)).join(', ')}</output></div>
+          : <label className="agent-field">{t('editor.agent.position')}<select value={form.context.position} onChange={e => { const value = e.target.value; edit(f => ({ ...f, context: { ...f.context, position: value } })) }}>
+            <option value="">—</option>
+            {BODY_POSITIONS.map(p => <option key={p} value={p}>{t(`position.${p}` as MessageId)}</option>)}
+          </select></label>}
         {auto.deviceWiper !== null
           ? <div className="agent-field agent-field-auto" title={t('editor.agent.autoHint')}>{t('editor.agent.volume')}<output>{volumeText(auto.deviceWiper, auto.volumeLabel)}</output></div>
           : <label className="agent-field" title={t('editor.agent.wiperHint')}>{t('editor.agent.deviceWiper')}<input type="number" min={0} max={127} step={1} value={form.context.deviceWiper} onChange={e => { const value = e.target.value; edit(f => ({ ...f, context: { ...f.context, deviceWiper: value } })) }} /></label>}
         {contextField('note', t('editor.agent.note'))}
         <datalist id={`${ids}-devices`}>{deviceNames.map(name => <option key={name} value={name} />)}</datalist>
-        <datalist id={`${ids}-positions`}>{POSITION_SUGGESTIONS.map(p => <option key={p} value={p} />)}</datalist>
       </fieldset>}
       {/* The comment on the whole trial: comparisons between candidates ("B is closest, heavier") — the agent's main input. */}
       <TrialComment value={form.comment} onChange={comment => edit(f => ({ ...f, comment }))} />

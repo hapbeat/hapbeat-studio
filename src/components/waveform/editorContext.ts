@@ -40,6 +40,8 @@ export interface EditorShared {
   playbackDevices: DeviceInfo[]
   /** Resolved haptic target IPs for playback. */
   targets: string[]
+  /** How they were chosen: the cue's positions (null = no cue: as selected), the devices, and those left out for having no position. */
+  routing: { devices: DeviceInfo[]; unknown: DeviceInfo[]; positions: string[] | null }
   /** Clips in the order the clip list shows them (↑↓ navigation follows it). */
   setVisibleClipIds: (ids: string[]) => void
   /** "▶ Video": shows the Scene video panel for the target in its own window, linking the Scene project `project` first if needed. Call from a click. */

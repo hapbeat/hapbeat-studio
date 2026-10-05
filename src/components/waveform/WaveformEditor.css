@@ -1034,3 +1034,6 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 .agent-panel :is(.toolbar-btn, .agent-icon-btn, .apply-effects-btn, .agent-save-toggle, .agent-play-btn, select, input:not([type="checkbox"]):not([type="radio"])) {
   height: var(--ctl-h); min-height: var(--ctl-h); box-sizing: border-box; border: var(--ctl-border); border-radius: var(--ctl-radius); padding-top: 0; padding-bottom: 0; line-height: 1; }
 .agent-panel :is(.toolbar-btn, .agent-icon-btn, .apply-effects-btn, .agent-save-toggle, .agent-play-btn) { display: inline-flex; align-items: center; justify-content: center; }
+/* Where auditions go (by the cue's positions): one line next to the output options. */
+.editor-routing { flex: 0 1 auto; min-width: 0; max-width: 40%; font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.editor-routing.empty { color: #e3c27a; }

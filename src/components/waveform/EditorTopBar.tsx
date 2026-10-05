@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import type { DockviewApi } from 'dockview-react'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { useToast } from '@/components/common/Toast'
+import { devicePosition } from '@/utils/playbackDevices'
 import { DevicePill } from '@/components/devices/DevicePill'
 import type { SampleRate } from '@/types/waveform'
 import { editorUiSettings, useEditorSettings } from '@/stores/editorSettings'
-import { useI18n } from '@/i18n/I18nProvider'
+import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { parseUiSettingsFile, serializeUiSettings } from '@/utils/editorUiSettings'
 import { EditorMenu, EditorMenuItem, EditorMenuSection } from './EditorMenu'
 import { EDITOR_PANELS, PANEL_TITLES, togglePanel } from './EditorDockLayout'
@@ -81,6 +82,7 @@ export function EditorTopBar({ dockApi, notice, onNotice }: { dockApi: DockviewA
       <label><input type="checkbox" checked={!muted} onChange={e => useEditorSettings.getState().update({ muted: !e.target.checked })} />{t('editor.sound')}</label>
       <label title={t('editor.hapticOnPcHint')}><input type="checkbox" checked={hapticOnPc} onChange={e => useEditorSettings.getState().update({ hapticOnPc: e.target.checked })} />{t('editor.hapticOnPc')}</label>
     </div>} />
+    <RoutingLine />
     <EditorMenu label={`${t('editor.viewMenu')} ▾`} disabled={!dockApi}>
       <EditorMenuSection label={t('editor.viewPanels')}>
         {EDITOR_PANELS.map(id => <EditorMenuItem key={id} keepOpen checked={openPanels.includes(id)} onSelect={() => dockApi && togglePanel(dockApi, id, t)}>{t(PANEL_TITLES[id])}</EditorMenuItem>)}
@@ -95,4 +97,25 @@ export function EditorTopBar({ dockApi, notice, onNotice }: { dockApi: DockviewA
       </EditorMenuSection>
     </EditorMenu>
   </div>
+}
+
+/** Where auditions go now, in one line next to the output options ("Neck: DuoWL-1 / Both wrists: BandWL ×2"). */
+function RoutingLine() {
+  const { t } = useI18n()
+  const { routing, isConnected } = useEditor()
+  const sendHaptics = useEditorSettings(state => state.sendHaptics)
+  if (!isConnected || !sendHaptics) return null
+  const label = (pos: string) => t(`position.${pos}` as MessageId)
+  const byPos = new Map<string, string[]>()
+  for (const d of routing.devices) { const p = devicePosition(d.address) ?? ''; byPos.set(p, [...(byPos.get(p) ?? []), d.name || d.ipAddress]) }
+  const l = byPos.get('pos_l_wrist'), r = byPos.get('pos_r_wrist')
+  const parts: string[] = []
+  if (l && r) { parts.push(`${t('position.bothWrists')}: ${[...l, ...r].join(', ')}`); byPos.delete('pos_l_wrist'); byPos.delete('pos_r_wrist') }
+  for (const [pos, names] of byPos) parts.push(`${pos ? label(pos) : t('position.unknown')}: ${names.join(', ')}`)
+  const text = routing.positions && !routing.devices.length
+    ? t('editor.routing.none', { positions: routing.positions.map(label).join(', ') })
+    : `${t('editor.routing.to')} ${parts.join(' / ') || '—'}`
+  const unknown = routing.positions && routing.unknown.length ? t('editor.routing.unknown', { count: routing.unknown.length, names: routing.unknown.map(d => d.name || d.ipAddress).join(', ') }) : ''
+  return <span className={`editor-routing ${routing.positions && !routing.devices.length ? 'empty' : ''}`} role="status" title={[t('editor.routing.hint'), unknown].filter(Boolean).join('\n')}>
+    {text}{unknown ? ` · ${t('editor.routing.unknownShort', { count: routing.unknown.length })}` : ''}</span>
 }

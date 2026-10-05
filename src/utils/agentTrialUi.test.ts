@@ -82,11 +82,12 @@ describe('trial kind and rating wording', () => {
 
 
   it('fills device names and the volume wiper from the helper, empty when unknown', () => {
-    const dev = (ip: string, name: string, wiper: number | null, level: number | null, steps: number | null) => ({ ipAddress: ip, name, volumeWiper: wiper, volumeLevel: level, volumeSteps: steps }) as DeviceInfo
-    expect(autoRatingContext([dev('a', 'neck', 64, 5, 10), dev('b', 'wrist', 64, 5, 10)], ['a', 'b'])).toEqual({ device: 'neck, wrist', deviceWiper: 64, volumeLabel: '5/10' })
-    expect(autoRatingContext([dev('a', 'neck', 64, null, null)], ['a'])).toEqual({ device: 'neck', deviceWiper: 64, volumeLabel: '' })
+    const dev = (ip: string, name: string, wiper: number | null, level: number | null, steps: number | null, address = '') => ({ ipAddress: ip, name, address, volumeWiper: wiper, volumeLevel: level, volumeSteps: steps }) as DeviceInfo
+    expect(autoRatingContext([dev('a', 'neck', 64, 5, 10, 'player_1/pos_neck/group_1'), dev('b', 'wrist', 64, 5, 10, 'player_1/pos_r_wrist')], ['a', 'b']))
+      .toEqual({ device: 'neck, wrist', position: 'pos_neck, pos_r_wrist', deviceWiper: 64, volumeLabel: '5/10' })
+    expect(autoRatingContext([dev('a', 'neck', 64, null, null)], ['a'])).toEqual({ device: 'neck', position: '', deviceWiper: 64, volumeLabel: '' })
     expect(autoRatingContext([dev('a', 'neck', 64, 5, 10), dev('b', 'wrist', 80, 6, 10)], ['a', 'b']).deviceWiper).toBeNull()
-    expect(autoRatingContext([], [])).toEqual({ device: '', deviceWiper: null, volumeLabel: '' })
+    expect(autoRatingContext([], [])).toEqual({ device: '', position: '', deviceWiper: null, volumeLabel: '' })
   })
 
   it('derives best from a unique top "use" candidate, and checks the wiper', async () => {

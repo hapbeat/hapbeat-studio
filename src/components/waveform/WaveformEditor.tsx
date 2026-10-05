@@ -20,7 +20,8 @@ import { useAgentEndpoint } from '@/hooks/useAgentEndpoint'
 import { isDemoMode } from '@/demo/isDemoMode'
 import { lookupMaterials, provenanceLine } from '@/utils/materials'
 import type { WaveformClip } from '@/types/waveform'
-import { onlinePlaybackDevices, resolvePlaybackTargets } from '@/utils/playbackDevices'
+import { onlinePlaybackDevices, resolvePlaybackTargets, routePlaybackTargets } from '@/utils/playbackDevices'
+import { cueRoutePositions } from '@/utils/cueEvents'
 import { handlePlaybackShortcut, isTypingTarget } from '@/utils/playbackShortcut'
 import { useEditorSettingsFolderSync, type SettingsSyncNotice } from '@/hooks/useEditorSettingsFolderSync'
 import { EditorContext, type EditorShared } from './editorContext'
@@ -106,7 +107,26 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const sendHaptics = useEditorSettings(state => state.sendHaptics)
   const playbackDevices = useMemo(() => isConnected ? onlinePlaybackDevices(devices) : [], [isConnected, devices])
   // "Send haptics" off → no targets, so EditorPlayback never opens a stream (PC-only audition).
-  const targets = useMemo(() => isConnected && sendHaptics && !auditionIsSound && eventPreview?.target !== 'sound' ? resolvePlaybackTargets(devices, kitSelectedIps).map(device => device.ipAddress) : [], [isConnected, sendHaptics, auditionIsSound, eventPreview?.target, devices, kitSelectedIps])
+  // Where an audition goes: the selected connected devices (all by default) whose address position fits the cue's
+  // routes (the trial's first scene cue / the event); without a cue, every selected device.
+  const routedCue = useAgentTrialStore(state => {
+    const shown = state.audition
+    const trial = shown ? state.trials.find(r => r.trial.id === shown.trialId)?.trial : undefined
+    return trial?.scene ? `${trial.scene.project}\n${trial.scene.cues[0]}` : null
+  })
+  const sceneTable = useSceneStore(state => state.table)
+  const sceneLib = useSceneStore(state => state.lib)
+  const routeAts = useMemo(() => {
+    if (!sceneTable || !sceneLib) return null
+    if (audition) {
+      if (!routedCue) return null
+      const [project, cue] = routedCue.split('\n')
+      return project === sceneLib.project_name ? cueRoutePositions(sceneTable, sceneLib, cue) : null
+    }
+    return eventPreview ? cueRoutePositions(sceneTable, sceneLib, eventPreview.event) : null
+  }, [sceneTable, sceneLib, audition, routedCue, eventPreview])
+  const routing = useMemo(() => routePlaybackTargets(isConnected ? resolvePlaybackTargets(devices, kitSelectedIps) : [], routeAts), [isConnected, devices, kitSelectedIps, routeAts])
+  const targets = useMemo(() => isConnected && sendHaptics && !auditionIsSound && eventPreview?.target !== 'sound' ? routing.devices.map(device => device.ipAddress) : [], [isConnected, sendHaptics, auditionIsSound, eventPreview?.target, routing])
   const targetKey = targets.join(',')
   const shownBuffer = audition ? audition.buffer : eventPreview ? eventPreview.buffer : original ? s.clip?.originalBuffer : previewActive ? (preview.buffer ?? s.clip?.buffer) : s.clip?.buffer
   // Auditions (AI candidate / event material) play at the scene's timing: on every target firing, without jitter
@@ -295,7 +315,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const focusEditorPanel = useCallback((id: Parameters<EditorShared['focusEditorPanel']>[0]) => { if (dockApi) focusPanel(dockApi, id, t) }, [dockApi, t])
   const shared: EditorShared = {
     active, original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, player, playback, pending, togglePlay, playAt, stopPlayback, isPlaybackActive, playFromStart, toggleCandidate,
-    openRecipe, provenanceText, isConnected, playbackDevices, targets, setVisibleClipIds, openSceneVideo, linkSceneProject, focusEditorPanel,
+    openRecipe, provenanceText, isConnected, playbackDevices, targets, routing, setVisibleClipIds, openSceneVideo, linkSceneProject, focusEditorPanel,
   }
   return <EditorContext.Provider value={shared}>
     <div className="waveform-editor" onDragOver={e => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' } }}

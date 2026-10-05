@@ -5,6 +5,7 @@
 import type { EffectEntry, EffectParams } from '@/types/waveform'
 import { RATING_FORMAT, DEVICE_WIPER_MAX, MAX_USE_RANGES, type Verdict, type RatingBody, type RatingContext, type TrialKind, type TrialRequest, type TrialCandidate } from '@/utils/agentProtocol'
 import type { Dimension } from '@/utils/hapticKnowledge'
+import { devicePosition } from './playbackDevices'
 import type { DeviceInfo } from '@/types/manager'
 
 /** Candidate effects as a NOT-yet-applied editor chain (fresh ids, enabled) so the user can keep tweaking. */
@@ -26,7 +27,6 @@ export interface RatingContextForm { device: string; position: string; deviceWip
 export interface RatingForm { context: RatingContextForm; comment: string; candidates: Record<string, CandidateRatingForm> }
 
 export const EMPTY_CONTEXT: RatingContextForm = { device: '', position: '', deviceWiper: '', volumeLabel: '', note: '' }
-export const POSITION_SUGGESTIONS = ['neck', 'chest', 'back', 'wrist', 'waist'] as const
 
 const emptyCandidate = (): CandidateRatingForm => ({ overall: null, termMatch: {}, directions: {}, comment: '', useRange: [], verdict: null, useFor: '' })
 
@@ -157,13 +157,15 @@ export const verdictFromOverall = (overall: number | null): Verdict | null => ov
  * volume wiper (only when every target reports the same value) and the level
  * label "level/steps" when known. Empty / null when unknown.
  */
-export function autoRatingContext(devices: DeviceInfo[], targetIps: string[]): { device: string; deviceWiper: number | null; volumeLabel: string } {
+export function autoRatingContext(devices: DeviceInfo[], targetIps: string[]): { device: string; position: string; deviceWiper: number | null; volumeLabel: string } {
   const targets = targetIps.map(ip => devices.find(d => d.ipAddress === ip)).filter((d): d is DeviceInfo => !!d)
   const device = targets.map(d => d.name).filter(Boolean).join(', ')
   const wipers = [...new Set(targets.map(d => d.volumeWiper))]
   const deviceWiper = targets.length && wipers.length === 1 && typeof wipers[0] === 'number' ? wipers[0] : null
   const labels = [...new Set(targets.map(d => typeof d.volumeLevel === 'number' && typeof d.volumeSteps === 'number' ? `${d.volumeLevel}/${d.volumeSteps}` : ''))]
-  return { device, deviceWiper, volumeLabel: deviceWiper !== null && labels.length === 1 ? labels[0] : '' }
+  // The positions the audition went to, from the device addresses (several allowed).
+  const position = [...new Set(targets.map(d => devicePosition(d.address)).filter((p): p is string => !!p))].join(', ')
+  return { device, position, deviceWiper, volumeLabel: deviceWiper !== null && labels.length === 1 ? labels[0] : '' }
 }
 
 

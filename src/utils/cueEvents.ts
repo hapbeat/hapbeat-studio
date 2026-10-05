@@ -468,3 +468,10 @@ export function representativeSound<B>(table: CueTable, lib: SceneLib, names: re
   }
   return null
 }
+
+/** The route positions (`at`) an audition of event `name` goes to: its haptic routes, else the project's default position; null for an unknown event. */
+export function cueRoutePositions(table: CueTable, lib: SceneLib, name: string): string[] | null {
+  const r = resolveEventName(table, name), e = r && effectiveEvent(table, r.ref)
+  if (!r || !e) return null
+  return e.haptics.length ? [...new Set(e.haptics.map(route => route.at))] : [defaultAt(lib, r.ref.cue)]
+}
