@@ -122,18 +122,19 @@ export function SceneHapticsPanel() {
     if (!name) return
     if (!useSceneSettings.getState().sendHaptics) { store.note({ id: 'scene.test.hapticsOff', error: true }); return }
     if (!helperConnected) { store.note({ id: 'scene.test.noHelper', error: true }); return }
-    const route = table.cues[name].haptics[index]
+    const route = table.cues[name].haptics?.[index]
+    if (!route) return
     const count = runtime.testRoute(route)
     store.note({ id: 'scene.test.sent', params: { clip: routeClips(route)[0] ?? '', at: atLabel(route.at), count } })
   }
   const cue = name ? table.cues[name] : null
-  const used = cue ? [...new Set(cue.haptics.flatMap(routeClips))].filter(c => table.clips[c]) : []
+  const used = cue ? [...new Set((cue.haptics ?? []).flatMap(routeClips))].filter(c => table.clips[c]) : []
   return <div className="scene-cue-panel">
     <CuePicker />
     {!name || !cue ? <div className="scene-sec scene-dim">{t('scene.selectCue')}</div> : <div className="scene-cue">
       <CueHead lib={lib} name={name} description={cue.description} field="haptics" />
-      {cue.haptics.length > 0 && <div className="scene-heads"><span>{t('scene.route.clip')}</span><span>{t('scene.route.at')}</span><span>{t('scene.route.gain')}</span></div>}
-      {cue.haptics.map((r, i) => <DropZone key={i} className="scene-route" onFile={file => void replaceWithWav(i, file)}>
+      {(cue.haptics ?? []).length > 0 && <div className="scene-heads"><span>{t('scene.route.clip')}</span><span>{t('scene.route.at')}</span><span>{t('scene.route.gain')}</span></div>}
+      {(cue.haptics ?? []).map((r, i) => <DropZone key={i} className="scene-route" onFile={file => void replaceWithWav(i, file)}>
         {/* A multi-clip route (v2 `clips`) is edited in the editor's Events panel; picking one clip here replaces the list. */}
         <select value={routeClips(r).length > 1 ? '' : routeClips(r)[0]} aria-label={t('scene.route.clip')} title={routeClips(r).join(', ')} onChange={e => { e.target.blur(); store.edit(tb => updateRoute(tb, name, i, { clip: e.target.value })) }}>
           {routeClips(r).length > 1 && <option value="" disabled>{t('scene.route.multi', { count: routeClips(r).length })}</option>}

@@ -30,13 +30,21 @@ export const REVIEW_STATES = ['tentative', 'approved'] as const
 export type ReviewState = typeof REVIEW_STATES[number]
 export interface CueReview { sfx?: ReviewState; haptics?: ReviewState }
 /** A field left out (undefined) is inherited from the cue; `sfx: null` overrides with "no sound". */
-export interface CueVariant { description?: string; sfx?: CueSfx | null; haptics?: CueRoute[]; variation?: CueVariation; review?: CueReview; [key: string]: unknown }
+export interface CueVariant { description?: string; sfx?: CueSfx | null; haptics?: CueRoute[]; variation?: CueVariation; review?: CueReview; preview?: CuePreview; [key: string]: unknown }
+/**
+ * Undecided vs none: a cue without the `sfx` / `haptics` key has not been decided yet;
+ * `sfx: null` = no sound and `haptics: []` = no haptic (both decided). The game plays neither.
+ */
 export interface CueEntry {
-  description?: string; sfx: CueSfx | null; haptics: CueRoute[]
+  description?: string; sfx?: CueSfx | null; haptics?: CueRoute[]
   variants?: Record<string, CueVariant>; variation?: CueVariation
   review?: CueReview
+  preview?: CuePreview
   [key: string]: unknown
 }
+/** Studio's event preview only: fire the event `repeat` times, `intervalSec` apart (± `intervalJitterPct`), each with its variation. Not used in the game, nor for loop cues. */
+export interface CuePreview { repeat: number; intervalSec?: number; intervalJitterPct?: number }
+export const PREVIEW_RANGES = { repeat: [1, 32], intervalSec: [0.05, 10], intervalJitterPct: [0, 50] } as const
 /** Variant names (`<cue>:<variant>` in the game and in viewer-data events). */
 export const VARIANT_NAME = /^[a-z][a-z0-9_]*$/
 /** Ranges of the numeric `variation` fields. */
@@ -75,8 +83,7 @@ export function parseCueTable(text: string): CueTable {
     }
   }
   const table = v as unknown as CueTable
-  // Missing `haptics` / `sfx` read as empty, as the demo scripts do (`cue.get(...)`).
-  for (const cue of Object.values(table.cues)) { cue.haptics ??= []; cue.sfx ??= null }
+  // A missing `sfx` / `haptics` stays missing: it means "not decided yet" (see CueEntry).
   return table
 }
 
@@ -84,6 +91,8 @@ export function parseCueTable(text: string): CueTable {
 export const serializeCueTable = (table: CueTable) => JSON.stringify(table, null, 2) + '\n'
 
 export const isLoopCue = (lib: SceneLib, name: string) => lib.loop_cues.includes(name)
+/** A cue may have a sound: one-shot cues always; loop cues only where the project allows looping cue sounds (lib.loop_cue_sounds, T-Rex). */
+export const soundAllowed = (lib: SceneLib, name: string) => !isLoopCue(lib, name) || lib.loop_cue_sounds === true
 
 /** Positions a cue's routes may use: lib.at, narrowed by lib.loop_at for loop cues. */
 export const positionsForCue = (lib: SceneLib, name: string) =>
@@ -145,7 +154,7 @@ function validateCueFields(err: string[], table: CueTable, ctx: CueTableContext,
   const sfx = entry.sfx
   if (sfx) {
     const hasOne = sfx.sound !== undefined, hasMany = sfx.sounds !== undefined
-    if (isLoopCue(lib, cue)) err.push(`${label}: continuous layers have no cue sound`)
+    if (isLoopCue(lib, cue) && !lib.loop_cue_sounds) err.push(`${label}: continuous layers have no cue sound`)
     else if (hasOne === hasMany) err.push(`${label}: sfx needs exactly one of sound / sounds`)
     else if (hasMany && !(Array.isArray(sfx.sounds) && sfx.sounds.length > 0)) err.push(`${label}: sfx.sounds must be a non-empty list`)
     else for (const sound of hasMany ? sfx.sounds! : [sfx.sound]) {
@@ -174,6 +183,17 @@ function validateCueFields(err: string[], table: CueTable, ctx: CueTableContext,
       else if (!(REVIEW_STATES as readonly unknown[]).includes(state)) err.push(`${label}: review.${key} must be ${REVIEW_STATES.join(' or ')}`)
     }
   }
+  const pv = entry.preview as unknown
+  if (pv !== undefined) {
+    if (!pv || typeof pv !== 'object' || Array.isArray(pv)) err.push(`${label}: preview must be an object`)
+    else {
+      const p = pv as Record<string, unknown>
+      for (const key of Object.keys(p)) if (!(key in PREVIEW_RANGES)) err.push(`${label}: preview.${key} is unknown`)
+      if (!(typeof p.repeat === 'number' && Number.isInteger(p.repeat) && inRange(p.repeat, ...PREVIEW_RANGES.repeat))) err.push(`${label}: preview.repeat must be an integer 1..32`)
+      if (p.intervalSec !== undefined && !inRange(p.intervalSec, ...PREVIEW_RANGES.intervalSec)) err.push(`${label}: preview.intervalSec must be 0.05..10`)
+      if (p.intervalJitterPct !== undefined && !inRange(p.intervalJitterPct, ...PREVIEW_RANGES.intervalJitterPct)) err.push(`${label}: preview.intervalJitterPct must be 0..50`)
+    }
+  }
   const v = entry.variation
   if (v !== undefined) {
     for (const [key, [lo, hi]] of Object.entries(VARIATION_RANGES)) if (v[key] !== undefined && !inRange(v[key], lo, hi)) err.push(`${label}: variation.${key} must be ${lo}..${hi}`)
@@ -187,7 +207,8 @@ const clone = (table: CueTable): CueTable => structuredClone(table)
 export const clampNumber = (value: number, lo: number, hi: number) => Number.isFinite(value) ? Math.max(lo, Math.min(hi, value)) : lo
 
 export function updateRoute(table: CueTable, cue: string, index: number, patch: Partial<CueRoute>): CueTable {
-  const next = clone(table), route = next.cues[cue].haptics[index]
+  const next = clone(table), route = next.cues[cue].haptics?.[index]
+  if (!route) return next
   Object.assign(route, patch)
   // A single clip replaces a multi-clip list (exactly one of clip / clips).
   if (patch.clip !== undefined) delete route.clips
@@ -200,13 +221,13 @@ export function addRoute(table: CueTable, lib: SceneLib, cue: string, clip?: str
   const chosen = clip ?? Object.keys(table.clips).find(c => table.clips[c].loop === isLoopCue(lib, cue))
   if (!chosen) return null
   const next = clone(table), positions = positionsForCue(lib, cue)
-  next.cues[cue].haptics.push({ clip: chosen, at: positions.includes('hand') ? 'hand' : positions[0] ?? 'hand', gain: 1.0 })
+  ;(next.cues[cue].haptics ??= []).push({ clip: chosen, at: positions.includes('hand') ? 'hand' : positions[0] ?? 'hand', gain: 1.0 })
   return next
 }
 
 export function removeRoute(table: CueTable, cue: string, index: number): CueTable {
   const next = clone(table)
-  next.cues[cue].haptics.splice(index, 1)
+  next.cues[cue].haptics?.splice(index, 1)
   return next
 }
 

@@ -6,7 +6,7 @@ import { useSceneStore } from '@/stores/sceneStore'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { useEditorSettings } from '@/stores/editorSettings'
-import { isLoopCue, positionsForCue } from '@/utils/sceneCueTable'
+import { isLoopCue, positionsForCue, soundAllowed } from '@/utils/sceneCueTable'
 import { allEventKeys, defaultAt, effectiveEvent, matchesName, needsRouteForm, overwriteUsers, parseEventKey, sameBytes, trialEvent } from '@/utils/cueEvents'
 import { useAtLabel } from '@/components/scene/SceneCuePanels'
 import { autoWavName, decideSourceBuffer, encodeDecided, existingWav, runDecision, undoDecision } from './eventDecide'
@@ -65,7 +65,7 @@ function DecideForm({ request }: { request: DecideRequest }) {
   const record = source.kind === 'candidate' ? trials.find(r => r.trial.id === source.trialId) : undefined
   const sourceLabel = source.kind === 'clip' ? documents.find(d => d.clip.id === source.clipId)?.clip.name ?? source.clipId
     : `${source.trialId} / ${source.candidateId} ${record?.trial.candidates.find(c => c.id === source.candidateId)?.label ?? ''}`
-  const events = useMemo(() => table && lib ? allEventKeys(table).filter(k => target === 'haptic' || !isLoopCue(lib, parseEventKey(k).cue)) : [], [table, lib, target])
+  const events = useMemo(() => table && lib ? allEventKeys(table).filter(k => target === 'haptic' || soundAllowed(lib, parseEventKey(k).cue)) : [], [table, lib, target])
   const [event, setEvent] = useState(() => {
     // A clip opened from an event ("edit as clip") or decided before goes back to that event by default.
     const subject = source.kind === 'clip' ? source.clipId : `${source.trialId}/${source.candidateId}`

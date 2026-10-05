@@ -1,5 +1,5 @@
 import { routeClips, type CueTable } from './sceneCueTable'
-import { effectiveEvent, eventKey, MaterialPicker, resolveEventName } from './cueEvents'
+import { effectiveEvent, eventKey, MaterialPicker, resolveEventName, type Shot } from './cueEvents'
 import type { SceneLib } from './sceneData'
 
 /**
@@ -40,7 +40,7 @@ export function targetsOf(at: string, hand?: string): string[] {
 export function tableTargets(table: CueTable): string[] {
   const out = new Set<string>()
   for (const cue of Object.values(table.cues)) {
-    const routes = [...cue.haptics, ...Object.values(cue.variants ?? {}).flatMap(v => v.haptics ?? [])]
+    const routes = [...(cue.haptics ?? []), ...Object.values(cue.variants ?? {}).flatMap(v => v.haptics ?? [])]
     for (const r of routes) for (const t of targetsOf(r.at)) out.add(t)
   }
   return [...out]
@@ -84,6 +84,23 @@ export function cueVoices(table: CueTable, pcm: Record<string, Float32Array>, ev
     out.push({ pcm: pcm[name], targets: targetsOf(r.at, ev.hand), gain: clip.intensity * r.gain * (ev.gain ?? 1) * (opts.jitter ?? 1), start, cue: true })
   })
   return out
+}
+
+/** Linear resample of a clip by `rate` (> 1 = faster: higher and shorter). */
+export function resampleClip(data: Float32Array, rate: number): Float32Array {
+  if (rate === 1 || !data.length) return data
+  const out = new Float32Array(Math.max(1, Math.floor((data.length - 1) / rate) + 1))
+  for (let i = 0; i < out.length; i++) { const p = i * rate, j = Math.floor(p), f = p - j; out[i] = j + 1 < data.length ? data[j] + (data[j + 1] - data[j]) * f : data[j] }
+  return out
+}
+
+/** Voices of one firing (fireShot): its picked one-shot clips at the shot's rate, clip intensity × route gain (× jitter) × cue gain. */
+export function shotVoices(table: CueTable, pcm: Record<string, Float32Array>, shot: Shot, hand: string, cueGain: number, start: number): OneShotVoice[] {
+  return shot.routes.flatMap(r => {
+    const clip = table.clips[r.clip], data = pcm[r.clip]
+    if (!clip || !data || clip.loop) return []
+    return [{ pcm: resampleClip(data, shot.rate), targets: targetsOf(r.at, hand), gain: clip.intensity * r.gain * cueGain, start, cue: true }]
+  })
 }
 
 /**

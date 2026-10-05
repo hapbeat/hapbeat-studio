@@ -1,9 +1,9 @@
 import { useSceneStore, sceneVideoUrl } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { clipEnd, focusEvent, itemEvents, levelAt, offsetOf, type SceneItem, type VisibleEvent } from '@/utils/sceneData'
-import { routeClips, sfxSounds, type CueRoute, type CueSfx } from '@/utils/sceneCueTable'
-import { effectiveEvent, eventKey, jitterGain, MaterialPicker, resolveEventName } from '@/utils/cueEvents'
-import { buildLoopVoices, cueVoices, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, SceneHapticMixer, targetsOf, type HapticDevice, type HelperSend } from '@/utils/sceneHaptics'
+import { isLoopCue, routeClips, sfxSounds, type CueRoute, type CueSfx } from '@/utils/sceneCueTable'
+import { effectiveEvent, fireShot, MaterialPicker, resolveEventName } from '@/utils/cueEvents'
+import { buildLoopVoices, shotVoices, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, SceneHapticMixer, targetsOf, type HapticDevice, type HelperSend } from '@/utils/sceneHaptics'
 
 export const SPEEDS = [1, 0.5, 0.25]
 
@@ -120,28 +120,29 @@ export class SceneRuntime {
     return this.helper.devices.filter(d => targetsOf(r.at).some(tg => matchesAddress(tg, d.address))).length
   }
 
-  private playSfx(sound: string, volume: number, delay: number, force: boolean) {
+  private playSfx(sound: string, volume: number, delay: number, force: boolean, rate = 1) {
     const b = useSceneStore.getState().sfx[sound]
     if (!b || (!force && !useSceneSettings.getState().pcSound)) return
     const c = this.audio(), src = c.createBufferSource(), g = c.createGain()
-    src.buffer = b; g.gain.value = volume; src.connect(g).connect(c.destination)
+    src.buffer = b; src.playbackRate.value = rate; g.gain.value = volume; src.connect(g).connect(c.destination)
     const at = c.currentTime + delay
     src.start(at)
     if (!force) this.scheduledSfx.push({ src, at }) // cue sounds are cancelled on seek; a ▶ test is not
   }
   /**
-   * One cue occurrence (`cue` or `cue:variant`): its sound and haptics, with
-   * one gain jitter for both (v2 `variation.gainJitterDb`). Multi-material
-   * routes / sounds pick per `variation.pick`; pitch / rate jitter are not previewed here.
+   * One cue occurrence (`cue` or `cue:variant`): one firing (fireShot, shared with
+   * the editor's preview sequence) — picks per `variation.pick`, one gain jitter
+   * for sound and haptics, the sound's pitch jitter as its playback rate and the
+   * haptic rate jitter. Loop cues are layer driven (no cue sound here).
    */
   private fire(ev: VisibleEvent | { name: string; hand: string; gain?: number }, delay: number) {
     const s = useSceneStore.getState(), resolved = s.table && resolveEventName(s.table, ev.name), e = resolved && s.table && effectiveEvent(s.table, resolved.ref)
-    if (!e || !s.table) return
-    const jitter = jitterGain(e.variation?.gainJitterDb)
-    const sound = this.picker.pick(`${eventKey(e.ref)}#sfx`, sfxSounds(e.sfx), e.variation?.pick)
-    if (e.sfx && sound) this.playSfx(sound, e.sfx.volume * jitter, delay, false)
+    if (!e || !s.table || !s.lib) return
+    const loop = isLoopCue(s.lib, e.ref.cue)
+    const shot = fireShot(e, loop, this.picker)
+    if (shot.sound && !loop) this.playSfx(shot.sound, shot.soundGain, delay, false, 2 ** (shot.pitchSt / 12))
     if (!useSceneSettings.getState().sendHaptics) return
-    this.mixer.voices.push(...cueVoices(s.table, s.pcm, ev, performance.now() + delay * 1000, { picker: this.picker, jitter }))
+    this.mixer.voices.push(...shotVoices(s.table, s.pcm, shot, ev.hand, ev.gain ?? 1, performance.now() + delay * 1000))
   }
   private flush() {
     if (this.actx) for (const x of this.scheduledSfx) if (x.at > this.actx.currentTime) try { x.src.stop() } catch { /* already ended */ }

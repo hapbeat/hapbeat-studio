@@ -1,7 +1,7 @@
 import type { SceneLib } from './sceneData'
 import {
-  type CueReview, type ReviewState,
-  clampNumber, isLoopCue, positionsForCue, routeClips, sfxSounds, VARIANT_NAME,
+  type CueReview, type CuePreview, type ReviewState,
+  clampNumber, isLoopCue, soundAllowed, positionsForCue, routeClips, sfxSounds, VARIANT_NAME,
   type CueEntry, type CueRoute, type CueSfx, type CueTable, type CueVariant, type CueVariation, type PickMode,
 } from './sceneCueTable'
 
@@ -44,6 +44,10 @@ export interface EffectiveEvent {
   own: { sfx: boolean; haptics: boolean; variation: boolean }
   /** Review of the shown sfx / haptics (from the entry that writes them; missing = tentative). */
   review: { sfx: ReviewState; haptics: ReviewState }
+  /** Decided (key present: a material, or none = null / []) vs undecided (no key on the cue). */
+  decided: { sfx: boolean; haptics: boolean }
+  /** Studio's repeated preview (variant's, else the cue's; absent = once). */
+  preview?: CuePreview
 }
 
 const variantOf = (table: CueTable, ref: EventRef): CueVariant | null => ref.variant === null ? null : table.cues[ref.cue]?.variants?.[ref.variant] ?? null
@@ -53,17 +57,21 @@ export function effectiveEvent(table: CueTable, ref: EventRef): EffectiveEvent |
   const cue = table.cues[ref.cue]
   if (!cue) return null
   const state = (entry: CueVariant | undefined, field: 'sfx' | 'haptics'): ReviewState => entry?.review?.[field] ?? 'tentative'
-  if (ref.variant === null) return { ref, description: cue.description, sfx: cue.sfx, haptics: cue.haptics, variation: cue.variation, own: { sfx: true, haptics: true, variation: true },
-    review: { sfx: state(cue, 'sfx'), haptics: state(cue, 'haptics') } }
+  const cueDecided = { sfx: cue.sfx !== undefined, haptics: cue.haptics !== undefined }
+  if (ref.variant === null) return { ref, description: cue.description, sfx: cue.sfx ?? null, haptics: cue.haptics ?? [], variation: cue.variation, own: { sfx: true, haptics: true, variation: true },
+    review: { sfx: state(cue, 'sfx'), haptics: state(cue, 'haptics') }, decided: cueDecided, preview: cue.preview }
   const v = variantOf(table, ref)
   if (!v) return null
   const own = { sfx: v.sfx !== undefined, haptics: v.haptics !== undefined, variation: v.variation !== undefined }
-  return { ref, description: v.description ?? cue.description, sfx: own.sfx ? v.sfx ?? null : cue.sfx, haptics: own.haptics ? v.haptics! : cue.haptics, variation: own.variation ? v.variation : cue.variation, own,
-    review: { sfx: state(own.sfx ? v : cue, 'sfx'), haptics: state(own.haptics ? v : cue, 'haptics') } }
+  return { ref, description: v.description ?? cue.description, sfx: own.sfx ? v.sfx ?? null : cue.sfx ?? null, haptics: own.haptics ? v.haptics! : cue.haptics ?? [], variation: own.variation ? v.variation : cue.variation, own,
+    review: { sfx: state(own.sfx ? v : cue, 'sfx'), haptics: state(own.haptics ? v : cue, 'haptics') },
+    decided: { sfx: own.sfx || cueDecided.sfx, haptics: own.haptics || cueDecided.haptics }, preview: v.preview ?? cue.preview }
 }
 
-/** Assigned and approved / assigned but tentative / nothing assigned; 'na' for a loop cue's sound (continuous layers have no cue sound). */
-export type MaterialStatus = ReviewState | 'unset'
+/** Undecided (no key) / decided as none (null / []) / a material; each decided state is tentative or approved. */
+export type MaterialState = 'undecided' | 'none' | 'set'
+export interface MaterialStatus { state: MaterialState; review: ReviewState }
+/** 'na': a loop cue's sound where the project has no looping cue sounds. */
 export type SoundStatus = MaterialStatus | 'na'
 export interface EventRow {
   key: string
@@ -78,7 +86,10 @@ export interface EventRow {
 
 function row(table: CueTable, lib: SceneLib, ref: EventRef, variants: EventRow[]): EventRow {
   const e = effectiveEvent(table, ref)!, loop = isLoopCue(lib, ref.cue)
-  return { key: eventKey(ref), ref, description: e.description, loop, sound: loop ? 'na' : e.sfx ? e.review.sfx : 'unset', haptic: e.haptics.length ? e.review.haptics : 'unset', variants }
+  const status = (decided: boolean, has: boolean, review: ReviewState): MaterialStatus => ({ state: !decided ? 'undecided' : has ? 'set' : 'none', review })
+  return { key: eventKey(ref), ref, description: e.description, loop,
+    sound: soundAllowed(lib, ref.cue) ? status(e.decided.sfx, !!e.sfx, e.review.sfx) : 'na',
+    haptic: status(e.decided.haptics, e.haptics.length > 0, e.review.haptics), variants }
 }
 
 /** Every cue in table order, each with its variants nested. */
@@ -400,4 +411,72 @@ export function resetAllReviews(table: CueTable): CueTable {
     for (const v of Object.values(cue.variants ?? {})) delete v.review
   }
   return next
+}
+
+// ── Undecided / none ──
+
+/** "None" for the event's sound / haptic (sfx: null, haptics: []) on what `ref` writes; tentative like any decision. */
+export function setNone(table: CueTable, ref: EventRef, field: 'sfx' | 'haptics'): CueTable {
+  return edited(table, ref, entry => {
+    if (field === 'sfx') entry.sfx = null; else entry.haptics = []
+    entry.review = { ...(entry.review ?? {}), [field]: 'tentative' }
+  })
+}
+/** Back to undecided (a cue only: the key and its review go; a variant uses "inherit" instead). */
+export function setUndecided(table: CueTable, cue: string, field: 'sfx' | 'haptics'): CueTable {
+  return edited(table, { cue, variant: null }, entry => {
+    delete entry[field]
+    if (entry.review) { delete entry.review[field]; if (!Object.keys(entry.review).length) delete entry.review }
+  })
+}
+/** Sets / clears (undefined) `preview` fields on what `ref` writes; an emptied preview (or repeat 1 without more) is removed. */
+export function setPreview(table: CueTable, ref: EventRef, patch: Partial<CuePreview>): CueTable {
+  return edited(table, ref, (entry, effective) => {
+    const p: Partial<CuePreview> = { ...(entry.preview ?? effective.preview ?? {}) }
+    for (const [key, value] of Object.entries(patch) as [keyof CuePreview, number | undefined][]) if (value === undefined) delete p[key]; else p[key] = value
+    if (!p.repeat || (p.repeat <= 1 && p.intervalSec === undefined && p.intervalJitterPct === undefined)) delete entry.preview
+    else entry.preview = { repeat: p.repeat, ...(p.intervalSec !== undefined ? { intervalSec: p.intervalSec } : {}), ...(p.intervalJitterPct !== undefined ? { intervalJitterPct: p.intervalJitterPct } : {}) }
+  })
+}
+
+// ── One firing and a preview sequence (shared by the Scene tab and the editor preview) ──
+
+/** What one firing of an event plays: picked materials and this firing's jitter (variation). */
+export interface Shot {
+  sound: string | null
+  /** sfx volume × gain jitter. */
+  soundGain: number
+  /** Pitch shift of the sound in semitones (played as a rate change). */
+  pitchSt: number
+  /** The gain jitter of this firing in dB (sound and haptics). */
+  jitterDb: number
+  /** Haptic playback rate (frequency and length together). */
+  rate: number
+  routes: { clip: string; at: string; /** route gain × gain jitter (× clip intensity is applied by the player). */ gain: number }[]
+}
+const jitter = (amount: number | undefined, random: () => number) => amount ? (random() * 2 - 1) * amount : 0
+
+/** One firing: materials picked per `variation.pick` (never the previous one at random), gain / pitch / rate jitter drawn. Loop cues: only the gain jitter. */
+export function fireShot(e: EffectiveEvent, loop: boolean, picker: MaterialPicker, random: () => number = Math.random): Shot {
+  const v = e.variation ?? {}, key = eventKey(e.ref)
+  const jitterDb = jitter(v.gainJitterDb, random), gain = 10 ** (jitterDb / 20)
+  const pitchSt = loop ? 0 : jitter(v.pitchJitterSt, random)
+  const rate = loop ? 1 : 1 + jitter(v.rateJitterPct, random) / 100
+  const sound = e.sfx ? picker.pick(`${key}#sfx`, sfxSounds(e.sfx), v.pick) ?? null : null
+  const routes = e.haptics.flatMap((r, i) => { const clip = picker.pick(`${key}#${i}`, routeClips(r), v.pick); return clip ? [{ clip, at: r.at, gain: r.gain * gain }] : [] })
+  return { sound, soundGain: (e.sfx?.volume ?? 0) * gain, pitchSt, jitterDb, rate, routes }
+}
+
+export interface PlannedShot extends Shot { index: number; atSec: number }
+/** The preview sequence: `preview.repeat` firings (1 when absent), `intervalSec` apart (default 1 s) ± `intervalJitterPct`. Loop cues: one firing. */
+export function planSequence(e: EffectiveEvent, loop: boolean, random: () => number = Math.random): PlannedShot[] {
+  const picker = new MaterialPicker(random), p = loop ? undefined : e.preview
+  const repeat = Math.max(1, Math.min(32, p?.repeat ?? 1)), interval = p?.intervalSec ?? 1
+  const out: PlannedShot[] = []
+  let at = 0
+  for (let index = 0; index < repeat; index++) {
+    out.push({ index, atSec: at, ...fireShot(e, loop, picker, random) })
+    at += Math.max(0.01, interval * (1 + jitter(p?.intervalJitterPct, random) / 100))
+  }
+  return out
 }

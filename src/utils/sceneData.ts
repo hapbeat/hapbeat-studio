@@ -36,6 +36,8 @@ export interface SceneLib {
   loop_sounds: string[]
   /** Positions a loop-cue route may use (optional; absent = any of `at`). T-Rex: ['hand']. */
   loop_at?: string[]
+  /** Loop cues may carry a (looping) cue sound (optional, default false). T-Rex: true; Safety Mill: no. */
+  loop_cue_sounds?: boolean
   clip_name: string
   sound_name: string
   layers: SceneLayer[]
@@ -89,6 +91,7 @@ export function parseViewerLib(text: string): SceneLib {
   if (!isRecord(paths) || !isString(paths.cues) || !isString(paths.clips) || !isString(paths.sounds)) fail('paths')
   for (const key of ['at', 'loop_cues', 'loop_sounds', 'ticks'] as const) if (!isStrings(v[key])) fail(key)
   if (v.loop_at !== undefined && !isStrings(v.loop_at)) fail('loop_at')
+  if (v.loop_cue_sounds !== undefined && typeof v.loop_cue_sounds !== 'boolean') fail('loop_cue_sounds')
   for (const key of ['clip_name', 'sound_name'] as const) {
     if (!isString(v[key])) fail(key)
     try { new RegExp(v[key] as string) } catch { fail(key) }

@@ -45,7 +45,7 @@ describe('scene cue table validation (the demos\' validate())', () => {
     expect(validateCueTable(t, ctx({ lib }))).toEqual(['feed_loop: continuous layers allow at = hand'])
     expect(positionsForCue(lib, 'feed_loop')).toEqual(['hand'])
     expect(positionsForCue(lib, 'button')).toEqual(lib.at)
-    expect(addRoute(sampleTable(), { ...sampleLib(), loop_at: ['pos_chest'] }, 'feed_loop')?.cues.feed_loop.haptics[1].at).toBe('pos_chest')
+    expect(addRoute(sampleTable(), { ...sampleLib(), loop_at: ['pos_chest'] }, 'feed_loop')?.cues.feed_loop.haptics![1].at).toBe('pos_chest')
   })
 
   it('requires the WAV of every clip and cue sound', () => {
@@ -61,8 +61,8 @@ describe('scene cue table edits', () => {
   it('edits immutably and clamps values', () => {
     const t = sampleTable()
     const a = updateRoute(t, 'button', 0, { gain: 5, at: 'both' })
-    expect(a.cues.button.haptics[0]).toEqual({ clip: 'click', at: 'both', gain: 2 })
-    expect(t.cues.button.haptics[0].gain).toBe(1)
+    expect(a.cues.button.haptics![0]).toEqual({ clip: 'click', at: 'both', gain: 2 })
+    expect(t.cues.button.haptics![0].gain).toBe(1)
     expect(setClipIntensity(t, 'click', -1).clips.click.intensity).toBe(0)
     expect(setSoundVolume(t, 'button', 1.5).cues.button.sfx).toEqual({ sound: 'Click', volume: 1.5 })
     expect(removeRoute(t, 'button', 0).cues.button.haptics).toEqual([])
@@ -71,7 +71,7 @@ describe('scene cue table edits', () => {
   it('adds routes with a clip that fits the cue', () => {
     const lib = sampleLib()
     expect(addRoute(sampleTable(), lib, 'grab')?.cues.grab.haptics).toEqual([{ clip: 'click', at: 'hand', gain: 1 }])
-    expect(addRoute(sampleTable(), lib, 'feed_loop')?.cues.feed_loop.haptics[1].clip).toBe('hum')
+    expect(addRoute(sampleTable(), lib, 'feed_loop')?.cues.feed_loop.haptics![1].clip).toBe('hum')
     const noLoops = sampleTable(); delete noLoops.clips.hum
     expect(addRoute(noLoops, lib, 'feed_loop')).toBeNull()
     expect(clipsForCue(sampleTable(), lib, 'button')).toEqual(['click', 'thump'])
@@ -99,7 +99,8 @@ describe('scene cue table edits', () => {
     expect(text).toContain('\n  "kit": "mill-kit"')
     expect(parseCueTable(text)).toEqual(sampleTable())
     expect(() => parseCueTable('{"clips":[]}')).toThrow(/clips and cues/)
-    expect(parseCueTable('{"clips":{},"cues":{"a":{}}}').cues.a).toEqual({ haptics: [], sfx: null })
+    // Missing sfx / haptics stay missing (undecided), and serialize back as missing.
+    expect(parseCueTable('{"clips":{},"cues":{"a":{}}}').cues.a).toEqual({})
   })
 
   it('writes PCM16 WAV headers', () => {

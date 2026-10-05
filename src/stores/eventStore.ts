@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import type { TrialSceneChoice } from '@/utils/editorUiSettings'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import type { PendingWavs } from '@/utils/sceneProject'
+import type { SoundSource } from '@/utils/companionSound'
+import type { PlannedShot } from '@/utils/cueEvents'
 
 /**
  * Event-centred authoring (DEC-083) state shared by the editor's Events panel,
@@ -31,7 +33,15 @@ export interface DecideResult {
  * like an AI audition) and played by the normal playback: haptics go to the devices per "send haptics",
  * a sound plays on the PC only. `buffer` already carries the volume / intensity × gain the game applies.
  */
-export interface EventPreview { id: string; event: string; target: DecideTarget; label: string; buffer: AudioBuffer }
+export interface EventPreview {
+  id: string; event: string; target: DecideTarget; label: string; buffer: AudioBuffer
+  /** A rendered sound to play with it (preview sequence) instead of the event's decided sound. */
+  companion?: SoundSource
+  /** The firings of a preview sequence (read-out of which one is sounding). */
+  shots?: PlannedShot[]
+  /** Play it once from the start as soon as it is shown (the sequence ▶). */
+  autoplay?: boolean
+}
 
 interface EventState {
   selected: string | null

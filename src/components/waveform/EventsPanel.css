@@ -32,9 +32,12 @@
 .events-row-badges { display: flex; gap: 4px; }
 .events-row-desc { grid-column: 1 / -1; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Fixed width: the badge text changes between ✓ / 未 / — without moving the row. */
-.events-badge { display: inline-block; min-width: 4.6em; padding: 0 5px; border-radius: 4px; font-size: 11px; text-align: center; border: 1px solid var(--border-light); color: var(--text-secondary); }
-.events-badge.approved { border-color: #4f9e7a; color: #8dd5b1; background: rgba(79,158,122,.15); }
-.events-badge.tentative { border-color: #6b8fd6; color: #a9c3f0; }
+.events-badge { display: inline-block; min-width: 6.2em; padding: 0 5px; border-radius: 4px; font-size: 11px; text-align: center; border: 1px solid var(--border-light); color: var(--text-secondary); }
+.events-badge.undecided { border-color: #c9a34a; color: #e3c27a; }
+.events-badge.none { border-color: #6b7280; color: #9ca3af; }
+.events-badge.none.approved { background: rgba(107,114,128,.18); }
+.events-badge.set.approved, .events-badge.approved { border-color: #4f9e7a; color: #8dd5b1; background: rgba(79,158,122,.15); }
+.events-badge.set.tentative, .events-badge.tentative:not(.none) { border-color: #6b8fd6; color: #a9c3f0; }
 .events-badge.unset { border-color: #c9a34a; color: #e3c27a; }
 .events-sec-head { display: flex; align-items: center; gap: 8px; }
 .events-review { display: inline-flex; align-items: center; gap: 4px; font-weight: normal; }
@@ -79,3 +82,11 @@
 /* Clip list: decided-for badges. */
 .editor-event-badges { display: flex; flex-wrap: wrap; gap: 3px; }
 .editor-event-badge { padding: 0 5px; border-radius: 4px; font-size: 10px; font-weight: normal; border: 1px solid #4f9e7a; color: #8dd5b1; }
+
+.events-decision { display: flex; gap: 4px; }
+.events-sequence { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.events-sequence label { display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); }
+.events-shots { margin: 0; padding-left: 0; list-style: none; font-size: 12px; font-variant-numeric: tabular-nums; }
+.events-shots li { padding: 1px 4px; border-left: 2px solid transparent; }
+.events-shots li.current { border-left-color: #67e8f9; background: rgba(103,232,249,.08); }
+.events-shots small { color: var(--text-muted); }

@@ -131,6 +131,13 @@ export function WaveformEditor({ active }: { active: boolean }) {
   }, [player, targetKey, send, s.setError])
   // The Scene video panel's lead-in (audio / haptics start on the cue mark).
   playback.preRoll = scenePreRoll
+  // A preview sequence (Events panel "Repeat ×N ▶") plays once from the start as soon as it is shown.
+  const autoplayed = useRef<string | null>(null)
+  useEffect(() => {
+    if (!eventPreview?.autoplay || autoplayed.current === eventPreview.id + String(eventPreview.buffer.length)) return
+    autoplayed.current = eventPreview.id + String(eventPreview.buffer.length)
+    if (active && !useWaveformStore.getState().isProcessing) { useStartMarker.getState().set(null); void playback.play(0, player.getDuration(), true).catch(s.setError) }
+  }, [eventPreview, playback, player, active, s.setError])
   useEffect(() => () => playback?.stop(), [playback])
   useEffect(() => { if (!active) playback?.stop() }, [active, playback])
   useEffect(() => {

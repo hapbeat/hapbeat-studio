@@ -1196,6 +1196,23 @@ export const messages = defineMessages({
   'events.reviewBackHint': { ja: 'この割り当てを仮に戻します', en: 'Marks this assignment tentative again.' },
   'events.resetReviews': { ja: 'すべて仮に戻す', en: 'Set all back to tentative' },
   'events.resetReviewsConfirm': { ja: 'すべてのイベントの音・触覚を「仮」に戻します（表を保存すると反映）。よろしいですか？', en: 'Set every event sound / haptic back to tentative (applied when the table is saved)?' },
+  'events.undecided': { ja: '未定', en: 'undecided' },
+  'events.noneShort': { ja: 'なし', en: 'none' },
+  'events.undecidedSound': { ja: '音は未定です', en: 'Sound not decided yet.' },
+  'events.undecidedHaptic': { ja: '触覚は未定です', en: 'Haptic not decided yet.' },
+  'events.setNone': { ja: 'なしにする', en: 'Set to none' },
+  'events.setNoneSoundHint': { ja: 'このイベントは音を鳴らさない、と決めます（仮）', en: 'Decide that this event plays no sound (tentative).' },
+  'events.setNoneHapticHint': { ja: 'このイベントは触覚を出さない、と決めます（仮）', en: 'Decide that this event plays no haptic (tentative).' },
+  'events.setUndecided': { ja: '未定に戻す', en: 'Back to undecided' },
+  'events.setUndecidedHint': { ja: '決定を取り消して未定に戻します（表からキーを消します）', en: 'Removes the decision (the key leaves the table).' },
+  'events.loopSoundHint': { ja: 'ループ cue の音はループして鳴ります（試聴ではレベル追従なし）', en: 'A loop cue sound loops (the preview does not follow the level).' },
+  'events.sequencePlay': { ja: '連続 ×{count} ▶', en: 'Repeat ×{count} ▶' },
+  'events.sequenceHint': { ja: '設定した回数・間隔で、発火ごとに揺らぎを掛けて連続で鳴らします（触覚は「触覚を送信」に従ってデバイスへ）', en: 'Fires the event the set number of times with its variation on each firing (haptics go to the devices per "Send haptics").' },
+  'events.sequenceRepeat': { ja: '回数', en: 'Times' },
+  'events.sequenceInterval': { ja: '間隔 s', en: 'Interval s' },
+  'events.sequenceJitter': { ja: '間隔の揺らぎ %', en: 'Interval jitter %' },
+  'events.sequenceShots': { ja: '発火ごとの内容', en: 'Each firing' },
+  'events.sequenceEmpty': { ja: 'このイベントには鳴らす音・触覚がありません', en: 'This event has no sound or haptic to play.' },
 })
 
 export type MessageId = keyof typeof messages
