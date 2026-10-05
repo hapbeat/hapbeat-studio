@@ -55,7 +55,7 @@ export class SceneRuntime {
     perfTrack('intervals', 1)
     let prev = useSceneStore.getState()
     this.unsubscribe = useSceneStore.subscribe(state => {
-      if (state.cur !== prev.cur || state.items !== prev.items) this.loadItem()
+      if (state.cur !== prev.cur || state.items[state.cur]?.file !== prev.items[prev.cur]?.file || (state.items !== prev.items && !state.items.length)) this.loadItem()
       if (state.table !== prev.table || state.lib !== prev.lib) this.rebuildLoops()
       prev = state
     })

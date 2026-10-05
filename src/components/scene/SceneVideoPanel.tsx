@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePageVisible } from '@/hooks/usePageVisible'
 import { perfTrack } from '@/utils/perfRegistry'
 import { useI18n } from '@/i18n/I18nProvider'
@@ -7,6 +7,7 @@ import { useScene } from './sceneContext'
 import { useSceneProjectActions } from './useSceneProjectActions'
 import { VideoOverlay } from './VideoOverlay'
 import type { FiredShot } from './sceneRuntime'
+import { itemEvents } from '@/utils/sceneData'
 
 /** The clip / replay video (the runtime's element, moved in here) with the time-to-cue badge, or the "open a project" start screen. */
 export function SceneVideoPanel() {
@@ -29,8 +30,14 @@ export function SceneVideoPanel() {
   const [fired, setFired] = useState<FiredShot[]>([])
   useEffect(() => runtime.onFired(f => setFired(list => [...list.filter(x => x.at <= f.at && f.at - x.at < 10), f].slice(-12))), [runtime])
   useEffect(() => { setFired([]) }, [mark])
-  const marks = [...(mark === null ? [] : [{ t: mark, target: true }]),
-    ...fired.map(f => ({ t: f.at, target: false, name: f.name, material: f.materials.join(' + '), durSec: Math.max(0.3, f.durSec) }))]
+  // Every firing of the shown moment / full replay is a pin from the start (the recording's plan, not what has played);
+  // what a firing played is added to its pin once it fires (the overlay's "name: material").
+  const items = useSceneStore(s => s.items), cur = useSceneStore(s => s.cur), data = useSceneStore(s => s.data), ticks = useSceneStore(s => s.lib?.ticks)
+  const planned = useMemo(() => { const it = items[cur]; return it && data ? itemEvents(it, data.full.events, data.fps).filter(e => !ticks?.includes(e.name)) : [] }, [items, cur, data, ticks])
+  const marks = planned.map(e => {
+    const f = fired.find(x => Math.abs(x.at - e.t) < 0.05 && x.name === (e.name.split(':')[1] ?? e.name))
+    return { t: e.t, target: mark !== null && Math.abs(e.t - mark) < 0.05, name: e.name, ...(f ? { material: f.materials.join(' + '), durSec: Math.max(0.3, f.durSec) } : {}) }
+  })
 
   useEffect(() => {
     const host = stage.current

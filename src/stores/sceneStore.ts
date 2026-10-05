@@ -5,6 +5,7 @@ import { buildItems, VIEWER_DIR, type SceneData, type SceneItem, type SceneLib }
 import { validateCueTable, type CueTable } from '@/utils/sceneCueTable'
 import { listWavs, openSceneProject, readProjectFile, readSceneTable, writeProjectFile, writeSceneSave, type PendingWavs } from '@/utils/sceneProject'
 import { CueTableSync } from '@/utils/cueTableSync'
+import { applyOverrides, type SceneOverride } from '@/utils/sceneOverrides'
 import { pageVisible, perfTrack } from '@/utils/perfRegistry'
 import { RATE } from '@/utils/sceneHaptics'
 import { lookupSceneProject, registerSceneProject } from '@/utils/sceneRegistry'
@@ -29,7 +30,14 @@ interface SceneState {
   restored: boolean
   busy: boolean
   lib: SceneLib | null
+  /** The recording as Studio uses it: `recorded` with the firings the user changed (sceneOverrides) already renamed. */
   data: SceneData | null
+  /** The recording as read from the project (viewer-data). */
+  recorded: SceneData | null
+  /** Firings changed in the Scene tab ("Change"), until the scene is re-recorded (editor folder scene-overrides/). */
+  overrides: SceneOverride[]
+  /** Replaces the overrides (data / items recomputed; the caller saves the file). */
+  setOverrides: (overrides: SceneOverride[]) => void
   items: SceneItem[]
   table: CueTable | null
   /** kit and cue names as loaded (the tab never changes them; save checks it). */
@@ -219,7 +227,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
       return false
     }
     clearVideoUrls()
-    set({ root: handle, lib: opened.lib, data: opened.data, items: buildItems(opened.data), sel: null, cur: 0, empty: null, table: null })
+    set({ root: handle, lib: opened.lib, recorded: opened.data, overrides: [], data: opened.data, items: buildItems(opened.data), sel: null, cur: 0, empty: null, table: null })
     await loadTable()
     let start = 1
     try { start = Number(localStorage.getItem(clipKey(opened.lib.project_name))) || 1 } catch { /* preference only */ }
@@ -236,7 +244,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
 
   return {
     root: null, remembered: null, restored: false, busy: false,
-    lib: null, data: null, items: [], table: null, loaded: null, clipFiles: [], soundFiles: [],
+    lib: null, data: null, recorded: null, overrides: [], items: [], table: null, loaded: null, clipFiles: [], soundFiles: [],
     pending: { clips: {}, sounds: {} }, pcm: {}, sfx: {}, dirty: false, saveError: null, cur: 0, sel: null,
     notice: null, empty: null, log: [],
     note, addLog,
@@ -301,6 +309,12 @@ export const useSceneStore = create<SceneState>((set, get) => {
       if (lib) try { localStorage.setItem(clipKey(lib.project_name), String(cur)) } catch { /* preference only */ }
     },
     selectCue: (name, t) => set({ sel: { name, t } }),
+    setOverrides: overrides => {
+      const recorded = get().recorded
+      if (!recorded) { set({ overrides }); return }
+      const data = applyOverrides(recorded, overrides)
+      set({ overrides, data, items: buildItems(data) })
+    },
 
     edit: change => {
       const table = get().table

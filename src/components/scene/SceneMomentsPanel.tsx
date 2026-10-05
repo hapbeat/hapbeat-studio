@@ -10,6 +10,9 @@ import { VARIANT_NAME, type CueTable } from '@/utils/sceneCueTable'
 import { HapticIcon } from './HapticIcon'
 import { useMomentPlace } from './SceneCuePanels'
 import { useScene } from './sceneContext'
+import { removeOverride, setOverride as setSceneOverride, type OverriddenClip } from '@/utils/sceneOverrides'
+import { saveSceneOverrides } from '@/hooks/useSceneOverrides'
+import { localIsoString } from '@/utils/hapticKnowledge'
 
 /**
  * "Moments and events": the full replay, then one clip per cue moment, with which outputs its cues use. A click on
@@ -45,14 +48,28 @@ export function SceneMomentsPanel() {
           onClick={e => { if ((e.target as HTMLElement).closest('.scene-occ-form, button')) return; runtime.audio(); runtime.playMoment(k, useSceneSettings.getState().leadSec) }}>
           <span className="scene-num">{k === 0 ? '▶' : String(k).padStart(2, '0')}</span>
           <span className="scene-dot" style={{ background: familyColor(lib, it.name) }} />
-          <span className="scene-name">{it.kind === 'full' ? t('scene.full') : <>{it.names.join(' + ')}{(() => { const p = placeOf(table, it.names, it.hand); return <small title={`${p.title}\n${t('scene.placeHint')}`}>{p.text}</small> })()}</>}</span>
+          <span className="scene-name">{it.kind === 'full' ? t('scene.full') : <>{(it as OverriddenClip).from
+            ? <span className="scene-overridden" title={t('scene.override.hint')}>{(it as OverriddenClip).from} → {it.names.join(' + ')}</span>
+            : it.names.join(' + ')}{(() => { const p = placeOf(table, it.names, it.hand); return <small title={`${p.title}\n${t('scene.placeHint')}`}>{p.text}</small> })()}</>}</span>
           <span className="scene-kinds">{cues.length > 0 && <><span className="h">{cues.some(c => c.haptics.length) ? <HapticIcon /> : null}</span><span className="s">{cues.some(c => c.sfx) ? '♪' : ''}</span></>}</span>
           <span className="scene-num">{it.kind === 'full' ? '' : `${it.at.toFixed(1)}s`}</span>
-          {it.kind === 'clip' && <button type="button" className="scene-icon-btn scene-open-editor" aria-expanded={open === k} title={`${t('scene.occ.reassignHint')}${sent[k] ? `\n${t('scene.occ.sent')}` : ''}`}
-            onClick={e => { e.stopPropagation(); e.currentTarget.blur(); setOpen(open === k ? null : k) }}>{sent[k] ? `✓ ${t('scene.moment.change')}` : t('scene.moment.change')}</button>}
-          {open === k && it.kind === 'clip' && table && <ChangeEventForm from={it.name} at={it.at} table={table}
+          {it.kind === 'clip' && <span className="scene-item-actions">
+            {(it as OverriddenClip).from && <button type="button" className="scene-icon-btn" title={t('scene.override.undoHint')}
+              onClick={e => { e.stopPropagation(); e.currentTarget.blur(); const from = (it as OverriddenClip).from!
+                void saveSceneOverrides(removeOverride(useSceneStore.getState().overrides, from, it.at)).catch(error => useSceneStore.getState().note({ id: 'scene.occ.failed', params: { message: error instanceof Error ? error.message : String(error) }, error: true })) }}>{t('scene.override.undo')}</button>}
+            <button type="button" className="scene-icon-btn scene-open-editor" aria-expanded={open === k} title={`${t('scene.occ.reassignHint')}${sent[k] ? `\n${t('scene.occ.sent')}` : ''}`}
+            onClick={e => { e.stopPropagation(); e.currentTarget.blur(); setOpen(open === k ? null : k) }}>{sent[k] ? `✓ ${t('scene.moment.change')}` : t('scene.moment.change')}</button>
+          </span>}
+          {open === k && it.kind === 'clip' && table && <ChangeEventForm from={(it as OverriddenClip).from ?? it.name} at={it.at} table={table}
             onClose={() => setOpen(null)}
-            onSent={() => { setSent(s => ({ ...s, [k]: true })); setOpen(null); useSceneStore.getState().note({ id: 'scene.occ.sentStatus', params: { name: it.name, at: it.at.toFixed(2) } }) }}
+            onSent={to => {
+              setSent(s => ({ ...s, [k]: true })); setOpen(null)
+              useSceneStore.getState().note({ id: 'scene.occ.sentStatus', params: { name: it.name, at: it.at.toFixed(2) } })
+              // Studio treats the firing as the new event at once (until the scene is re-recorded).
+              const from = (it as OverriddenClip).from ?? it.name
+              void saveSceneOverrides(setSceneOverride(useSceneStore.getState().overrides, { from, atSec: it.at, to, requestedAt: localIsoString(new Date()) }))
+                .catch(error => useSceneStore.getState().note({ id: 'scene.occ.failed', params: { message: error instanceof Error ? error.message : String(error) }, error: true }))
+            }}
             onError={message => useSceneStore.getState().note({ id: 'scene.occ.failed', params: { message }, error: true })} />}
         </div>
       })}
@@ -63,7 +80,7 @@ export function SceneMomentsPanel() {
 const EVENT_NAME = /^[A-Za-z0-9_.-]{1,80}(:[a-z][a-z0-9_]{0,79})?$/
 
 /** "Change event…": over the rows (absolute; nothing moves). An existing event or a new `cue:variant`, a comment, "Request". */
-function ChangeEventForm({ from, at, table, onSent, onError, onClose }: { from: string; at: number; table: CueTable; onSent: () => void; onError: (message: string) => void; onClose: () => void }) {
+function ChangeEventForm({ from, at, table, onSent, onError, onClose }: { from: string; at: number; table: CueTable; onSent: (to: string) => void; onError: (message: string) => void; onClose: () => void }) {
   const { t } = useI18n()
   const listId = useId()
   const [to, setTo] = useState('')
@@ -95,7 +112,7 @@ function ChangeEventForm({ from, at, table, onSent, onError, onClose }: { from: 
       setNeedFolder(false)
       const text = t('scene.occ.message', { name: from, at: at.toFixed(2), to: target }) + (comment.trim() ? `\n${comment.trim()}` : '')
       await useAgentTrialStore.getState().sendAgentMessage({ text, project, reassign: { cue: from, atSec: at, to: target, comment } })
-      onSent()
+      onSent(target)
     } catch (error) { onError(t('scene.occ.sendFailed', { error: error instanceof Error ? error.message : String(error) })) }
     finally { setBusy(false) }
   }
