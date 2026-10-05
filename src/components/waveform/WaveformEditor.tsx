@@ -145,7 +145,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const groupOn = useEditorSettings(state => state.groupPlayback)
   const groupShown = !audition && sceneLib ? eventPreview ? { event: eventPreview.event, target: eventPreview.target, material: eventPreview.material }
     : adjusting && adjusting.project === sceneLib.project_name ? { event: adjusting.event, target: adjusting.target, material: adjusting.wav } : null : null
-  const groupKey = groupOn && groupShown && plan && sceneTable ? JSON.stringify(groupFirings(sceneTable, plan, groupShown, true).haptics) : '[]'
+  const groupKey = groupShown && sceneTable ? JSON.stringify(groupFirings(sceneTable, plan ?? { targets: [0], others: [] }, groupShown, groupOn).haptics) : '[]'
   const scenePcm = useSceneStore(state => state.pcm)
   // The playback runs to the end of the group's last haptic too (a bite after the last tear was cut off with the shown buffer).
   const groupEndSec = useMemo(() => groupHapticsEnd(JSON.parse(groupKey) as HapticPart[], scenePcm), [groupKey, scenePcm])

@@ -490,6 +490,37 @@ export function representativeSound<B>(table: CueTable, lib: SceneLib, names: re
   return null
 }
 
+/** On a paired cue (`variation.paired`): the sound with the same index as haptic `clip` (sound i goes with clip i of every route); else null. */
+export function pairedSoundOf(e: EffectiveEvent, clip: string): string | null {
+  if (e.variation?.paired !== true) return null
+  const sounds = sfxSounds(e.sfx)
+  for (const r of e.haptics) { const clips = routeClips(r), i = clips.indexOf(clip); if (i >= 0 && clips.length === sounds.length) return sounds[i] }
+  return null
+}
+
+/**
+ * The sound played with what the editor shows (null = the event's representative): an AI haptic candidate's
+ * `sound` / the user's pick, else — on a paired scene cue — the sound at the position its clip will take
+ * (after the clips already there, in candidate order; none when past the sounds); an event's haptic material or
+ * one being adjusted: its paired sound.
+ */
+export function companionSoundName(table: CueTable, o: {
+  audition: { trial: { id: string; candidates: readonly { id: string; sound?: string }[]; scene?: { cues: string[] } }; candidateId: string; picks: Record<string, string> } | null
+  material: { event: string; target: 'sound' | 'haptic'; wav: string } | null
+}): string | null {
+  if (o.audition) {
+    const { trial, candidateId, picks } = o.audition
+    const own = candidateSound(trial, candidateId, picks)
+    if (own) return own
+    const cue = trial.scene?.cues[0], r = cue ? resolveEventName(table, cue) : null, e = r && effectiveEvent(table, r.ref)
+    if (!e || e.variation?.paired !== true || !e.haptics[0]) return null
+    return sfxSounds(e.sfx)[routeClips(e.haptics[0]).length + trial.candidates.findIndex(c => c.id === candidateId)] ?? null
+  }
+  if (o.material?.target !== 'haptic') return null
+  const r = resolveEventName(table, o.material.event), e = r && effectiveEvent(table, r.ref)
+  return e ? pairedSoundOf(e, o.material.wav) : null
+}
+
 /** The sound played with AI candidate `cid`: the user's pick for it (`picks`, keyed `<trialId>/<cid>`), else its `sound`; null = the representative. */
 export function candidateSound(trial: { id: string; candidates: readonly { id: string; sound?: string }[] }, cid: string, picks: Record<string, string>): string | null {
   return picks[`${trial.id}/${cid}`] ?? trial.candidates.find(c => c.id === cid)?.sound ?? null

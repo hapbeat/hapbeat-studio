@@ -16,7 +16,7 @@ import { useToast } from '@/components/common/Toast'
 import { toFirstPlay } from '@/utils/sceneSegments'
 import { levelKey, useEventStore } from '@/stores/eventStore'
 import { LevelSlider } from './LevelSlider'
-import { assignEventsForTrial, candidateSound, effectiveEvent, parseEventKey, trialEvent, cueRoutePositions } from '@/utils/cueEvents'
+import { assignEventsForTrial, candidateSound, companionSoundName, effectiveEvent, parseEventKey, trialEvent, cueRoutePositions } from '@/utils/cueEvents'
 import { runDecision } from './eventDecide'
 import { isLoopCue, sfxSounds } from '@/utils/sceneCueTable'
 import { WaveformThumbnail } from './WaveformThumbnail'
@@ -442,7 +442,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
                 onSave={intensity => { useEventStore.getState().setLevels({ [levelKey.candidate(trial.id, requested.id)]: intensity }); editCandidate(requested.id, { intensity }) }} />
               {/* A haptic candidate's sound (the cue's pool; its `sound`, else the representative), picked per candidate. */}
               {soundPool.length > 1 && <select className="agent-card-sound" aria-label={t('editor.agent.withSound')} title={t('editor.agent.withSoundHint')}
-                value={soundPool.includes(candidateSound(trial, requested.id, soundPicks) ?? '') ? candidateSound(trial, requested.id, soundPicks)! : soundPool[0]}
+                value={((s: string | null) => s && soundPool.includes(s) ? s : soundPool[0])(sceneTable ? companionSoundName(sceneTable, { audition: { trial, candidateId: requested.id, picks: soundPicks }, material: null }) : null)}
                 onChange={e => { const value = e.target.value; e.target.blur(); useEditorSettings.getState().update({ candidateSounds: { ...useEditorSettings.getState().candidateSounds, [`${trial.id}/${requested.id}`]: value } }) }}>
                 {soundPool.map((s, i) => <option key={s} value={s}>{i === 0 ? `★ ${s}` : s}</option>)}
               </select>}

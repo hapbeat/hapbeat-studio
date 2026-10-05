@@ -8,7 +8,7 @@ import { RATE, resampleClip } from './sceneHaptics'
  * plays the member's representative sound AND haptic (the haptic goes to the devices), each at its material's
  * intensity (no scene multiplier); a cue outside the group plays its sound only (as before).
  * With a shown sound, the shown event's own firings get its haptic too (the clip paired with that sound on a
- * paired cue, else the representative). Pure: offsets are seconds from the start of the shown buffer.
+ * paired cue — also with the group off —, else the representative). Pure: offsets are seconds from the start of the shown buffer.
  */
 export interface GroupPlan { targets: readonly number[]; others: readonly { atSec: number; name: string }[] }
 export interface HapticPart { clip: string; atSec: number; gain: number }
@@ -27,8 +27,10 @@ export function groupFirings(table: CueTable, plan: GroupPlan, shown: { event: s
     const clip = e.haptics[0] ? routeClips(e.haptics[0])[0] : undefined
     if (group && r.ref.cue === cue && clip) haptics.push({ clip, atSec: o.atSec, gain: clipGain(clip) })
   }
-  if (group && shown.target === 'sound') {
-    const e = effectiveEvent(table, parseEventKey(shown.event))
+  const shownEvent = shown.target === 'sound' ? effectiveEvent(table, parseEventKey(shown.event)) : null
+  // A shown sound sends its event's haptic with the group, and always on a paired cue (the clip of the same index).
+  if (shown.target === 'sound' && (group || shownEvent?.variation?.paired === true)) {
+    const e = shownEvent
     const index = e ? sfxSounds(e.sfx).indexOf(shown.material) : -1
     const clip = e ? (index >= 0 ? pairedClips(e, index)[0]?.clip : undefined) ?? (e.haptics[0] ? routeClips(e.haptics[0])[0] : undefined) : undefined
     if (clip) for (const atSec of plan.targets) haptics.push({ clip, atSec, gain: clipGain(clip) })

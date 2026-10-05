@@ -4,7 +4,7 @@ import { useEditorSettings } from '@/stores/editorSettings'
 import { useEventStore, type EventPreview } from '@/stores/eventStore'
 import { useSceneStore } from '@/stores/sceneStore'
 import { trialTarget } from '@/utils/agentProtocol'
-import { candidateSound, effectiveEvent, parseEventKey, representativeSound, resolveEventName } from '@/utils/cueEvents'
+import { companionSoundName, effectiveEvent, parseEventKey, representativeSound, resolveEventName } from '@/utils/cueEvents'
 import { groupFirings } from '@/utils/groupPlayback'
 import { isLoopCue, routeClips, sfxSounds } from '@/utils/sceneCueTable'
 import { RATE, resampleClip } from '@/utils/sceneHaptics'
@@ -132,22 +132,24 @@ export function useDecidedSoundSync(player: EditorBufferPlayer) {
   })
   // The sound picked for the auditioned candidate (its `sound` / the user's pick); null = the representative.
   const picks = useEditorSettings(s => s.candidateSounds)
-  const preferred = useAgentTrialStore(s => {
-    const trial = s.audition ? s.trials.find(r => r.trial.id === s.audition!.trialId)?.trial : undefined
-    return trial ? candidateSound(trial, s.audition!.candidateId, picks) : null
-  })
+  const auditionTrial = useAgentTrialStore(s => s.audition ? s.trials.find(r => r.trial.id === s.audition!.trialId)?.trial ?? null : null)
   const preview = useEventStore(s => s.preview)
   const muted = useEditorSettings(s => s.muted)
   const table = useSceneStore(s => s.table)
   const lib = useSceneStore(s => s.lib)
   const buffers = useSceneStore(s => s.sfx)
   const adjusting = useAdjustingLink()
+  // The sound that goes with what is shown: a candidate's own / picked / planned paired sound, a haptic material's paired sound.
+  const preferred = useMemo(() => !table ? null : companionSoundName(table, {
+    audition: audition && auditionTrial ? { trial: auditionTrial, candidateId: audition.candidateId, picks } : null,
+    material: preview ? { event: preview.event, target: preview.target, wav: preview.material } : adjusting ? { event: adjusting.event, target: adjusting.target, wav: adjusting.wav } : null,
+  }), [table, audition, auditionTrial, picks, preview, adjusting])
   const picked = useMemo((): SoundSource | null => {
     if (!table || !lib) return null
     const [project, ...cues] = auditionCues ? auditionCues.split('\n') : ['']
     const names = decidedSoundEvents({ auditioning: !!audition, audition: auditionCues ? { project, cues } : null, preview: preview ? { event: preview.event, target: preview.target } : null,
       adjusting, openProject: lib.project_name })
-    return representativeSound(table, lib, names, buffers, audition ? preferred : null)
+    return representativeSound(table, lib, names, buffers, preferred)
   }, [audition, auditionCues, preview, adjusting, table, lib, buffers, preferred])
   // A scene (DEC-085): each firing is its own source on the AudioContext clock — the event's sound on the rated
   // cue's firings (with a haptic audition) and the decided sound of the scene's other cues on theirs (no jitter).
