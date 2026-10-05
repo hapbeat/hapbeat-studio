@@ -20,6 +20,8 @@ import { useSceneStore } from '@/stores/sceneStore'
 import { useEditorSettings } from '@/stores/editorSettings'
 import { wantedSceneProject } from '@/utils/trialScene'
 
+/** Trial tiles shown before "Show more" (newest first). */
+const TRIAL_TILE_LIMIT = 12
 /** Filter value for trials without a project (not a valid project name, so it cannot collide). */
 const UNASSIGNED_FILTER = ' '
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -78,6 +80,9 @@ export function AgentTrialsPanel() {
   const record = trials.find(r => r.trial.id === selectedId) ?? null
   const projects = useMemo(() => [...new Set(trials.map(r => r.trial.project).filter((p): p is string => !!p))].sort((a, b) => a.localeCompare(b)), [trials])
   const shown = projectFilter === '' ? trials : trials.filter(r => (r.trial.project ?? UNASSIGNED_FILTER) === projectFilter)
+  const [showAll, setShowAll] = useState(false)
+  const listed = showAll || shown.length <= TRIAL_TILE_LIMIT ? shown
+    : [...shown.slice(0, TRIAL_TILE_LIMIT), ...shown.slice(TRIAL_TILE_LIMIT).filter(r => r.trial.id === selectedId)]
   return <div className="agent-panel">
     <div className={`agent-status ${storeError ? 'error' : ''}`} role="status">{storeError ?? t(!folder ? 'editor.agent.noFolder' : polling ? 'editor.agent.watching' : 'editor.agent.paused')}</div>
     <div className={`agent-mcp-status ${isConnected && folder ? 'ready' : ''}`} title={t('editor.agent.mcpHint')}>{t(!isConnected ? 'editor.agent.mcpHelperOff' : folder ? 'editor.agent.mcpReady' : 'editor.agent.mcpNoFolder')}</div>
@@ -92,15 +97,22 @@ export function AgentTrialsPanel() {
         {projects.map(name => <option key={name} value={name}>{name}</option>)}
         <option value={UNASSIGNED_FILTER}>{t('editor.unassigned')}</option>
       </select></label>}
+    {/* Tiles in the panel's own (single) scroll; a long list is cut to the newest few, plus the selected one. */}
     <div className="agent-trial-list" aria-label={t('editor.agent.tab')}>
       {trials.length === 0 && rejected.length === 0 && <p className="agent-muted">{t('editor.agent.empty')}</p>}
-      {shown.map(r => <button key={r.trial.id} className={`agent-trial-item ${r.trial.id === selectedId ? 'selected' : ''}`} aria-pressed={r.trial.id === selectedId} onClick={() => pickTrial(r)}>
+      {listed.map(r => <button key={r.trial.id} className={`agent-trial-item ${r.trial.id === selectedId ? 'selected' : ''}`} aria-pressed={r.trial.id === selectedId} onClick={() => pickTrial(r)}
+        title={`${r.trial.id} · ${t('editor.agent.candidateCount', { count: r.trial.candidates.length })}`}>
         {/* A trial for a game event is titled by the event (scene.cues); its words come second. */}
         <strong>{r.trial.scene ? r.trial.scene.cues.join(' + ') : r.trial.terms.join(' · ')}</strong>
-        <span className={`agent-badge ${r.rating ? 'rated' : 'unrated'}`}>{t(r.rating ? 'editor.agent.rated' : 'editor.agent.unrated')}</span>
-        {trialTarget(r.trial) === 'sound' && <span className="agent-badge">{t('editor.agent.targetSound')}</span>}
-        <small>{r.trial.scene && `${r.trial.terms.join(' · ')} · `}{r.trial.id} · {t('editor.agent.candidateCount', { count: r.trial.candidates.length })}</small>
+        <small>{r.trial.scene ? r.trial.terms.join(' · ') : ''}</small>
+        <span className="agent-trial-badges">
+          <span className={`agent-badge ${r.rating ? 'rated' : 'unrated'}`}>{t(r.rating ? 'editor.agent.rated' : 'editor.agent.unrated')}</span>
+          {trialTarget(r.trial) === 'sound' && <span className="agent-badge">{t('editor.agent.targetSound')}</span>}
+        </span>
+        <small className="agent-trial-date">{new Date(r.trial.receivedAt).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</small>
       </button>)}
+      {shown.length > TRIAL_TILE_LIMIT && <button type="button" className="toolbar-btn agent-trial-more" onClick={() => setShowAll(!showAll)}>
+        {showAll ? t('editor.agent.showFewer') : t('editor.agent.showMore', { count: shown.length - listed.length })}</button>}
       {rejected.map(r => <div key={`${r.file}\n${r.error}`} className="agent-rejected">
         <strong>{t('editor.agent.rejected', { file: r.file })}</strong>
         <button className="toolbar-btn" onClick={() => setRejected(list => list.filter(o => o !== r))}>{t('editor.agent.dismiss')}</button>

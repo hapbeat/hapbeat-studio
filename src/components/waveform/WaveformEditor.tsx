@@ -30,6 +30,7 @@ import { playStart, useStartMarker } from '@/utils/editorStartMarker'
 import { scenePreRoll, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useEventStore } from '@/stores/eventStore'
+import { showDockPanel } from '@/utils/dockPanels'
 import { trialTarget } from '@/utils/agentProtocol'
 import { DecideDialog } from './DecideDialog'
 import { openEventDefault, useDecidedSoundSync } from './eventAudio'
@@ -172,7 +173,8 @@ export function WaveformEditor({ active }: { active: boolean }) {
     const shown = useAgentTrialStore.getState().audition
     if (shown && shown.trialId === trialId && shown.candidateId === candidateId && isPlaybackActive()) { stopPlayback(); return }
     // Audition (if needed) and play through the usual path (WaveformEditor's playRequested effect).
-    void useAgentTrialStore.getState().requestAudition(trialId, candidateId, true).catch(s.setError)
+    // No focus request: the AI trials panel is where the user is (and must keep its scroll position).
+    void useAgentTrialStore.getState().requestAudition(trialId, candidateId, true, false).catch(s.setError)
   }, [isPlaybackActive, stopPlayback, s.setError])
   useEffect(() => {
     const toggle = () => {
@@ -262,7 +264,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
       if (!panel) return
       if (panel.group.api.location.type === 'popout') { dockApi.getPopouts().find(p => p.group === panel.group)?.window.focus(); return }
       void dockApi.addPopoutGroup(panel, { popoutUrl: POPOUT_URL }).then(opened => {
-        if (!opened) { dockApi.getPanel('scene')?.api.setActive(); setNotice(t('editor.scene.popupBlocked')) }
+        if (!opened) { const panel = dockApi.getPanel('scene'); if (panel) showDockPanel(panel); setNotice(t('editor.scene.popupBlocked')) }
       })
     }
     const scene = useSceneStore.getState()

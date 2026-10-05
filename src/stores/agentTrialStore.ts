@@ -47,8 +47,8 @@ interface AgentTrialState {
   selectTrial: (trialId: string | null) => void
   startAudition: (target: AuditionTarget, buffer: AudioBuffer) => void
   clearAudition: () => void
-  /** Loads a rendered candidate, selects its trial and auditions it; the editor brings the AI trials tab to the front. */
-  requestAudition: (trialId: string, candidateId: string, play: boolean) => Promise<void>
+  /** Loads a rendered candidate, selects its trial and auditions it; with `focus` (default; MCP) the editor brings the AI trials tab to the front. */
+  requestAudition: (trialId: string, candidateId: string, play: boolean, focus?: boolean) => Promise<void>
   clearPlayRequest: () => void
   /** Accepts one hapbeat-trial@1 object immediately (MCP `submit_trial`) with the same processing as the inbox. */
   submitTrial: (trial: unknown) => Promise<AcceptResult>
@@ -211,7 +211,7 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
       set({ audition: { ...target, buffer }, playRequested: false })
     },
     clearAudition: () => { if (get().audition || get().playRequested) set({ audition: null, playRequested: false }) },
-    requestAudition: async (trialId, candidateId, play) => {
+    requestAudition: async (trialId, candidateId, play, focus = true) => {
       const record = get().trials.find(r => r.trial.id === trialId)
       const candidate = record?.candidates.find(c => c.id === candidateId)
       if (!record) throw new Error(`Trial "${trialId}" is not loaded`)
@@ -219,7 +219,7 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
       if (!candidate.audio || candidate.error) throw new Error(`Candidate "${candidateId}" has no rendered audio${candidate.error ? `: ${candidate.error}` : ''}`)
       const buffer = await get().loadCandidateAudio(trialId, candidateId)
       useWaveformStore.getState().setSelectedRegion(null)
-      set({ audition: { trialId, candidateId, buffer }, selectedTrialId: trialId, focusRequest: get().focusRequest + 1, playRequested: play })
+      set({ audition: { trialId, candidateId, buffer }, selectedTrialId: trialId, focusRequest: get().focusRequest + (focus ? 1 : 0), playRequested: play })
     },
     clearPlayRequest: () => set({ playRequested: false }),
     submitTrial: trial => exclusive(async () => {

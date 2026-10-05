@@ -1154,6 +1154,8 @@ export const messages = defineMessages({
   'editor.agent.draftRestored': { ja: '保存前の評価があります（下書きを復元しました）。', en: 'Unsaved rating restored from a draft.' },
   'editor.agent.moreRating': { ja: '詳しく（方向・使う範囲・コメント）', en: 'More (directions, kept range, comment)' },
   'editor.agent.moreSet': { ja: '{count} 件入力済み', en: '{count} set' },
+  'editor.agent.showMore': { ja: 'さらに表示（{count} 件）', en: 'Show {count} more' },
+  'editor.agent.showFewer': { ja: '新しいものだけ表示', en: 'Show only the newest' },
 })
 
 export type MessageId = keyof typeof messages

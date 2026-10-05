@@ -11,6 +11,7 @@ import { EffectsDockPanel } from './EffectsPanel'
 import { AgentTrialsPanel } from './AgentTrialsPanel'
 import { EditorScenePanel } from './EditorScenePanel'
 import { EventsPanel } from './EventsPanel'
+import { showDockPanel } from '@/utils/dockPanels'
 
 export const EDITOR_PANELS = ['clips', 'events', 'waveform', 'properties', 'effects', 'agent', 'scene'] as const
 export type EditorPanelId = typeof EDITOR_PANELS[number]
@@ -73,8 +74,8 @@ export function buildDefaultLayout(api: DockviewApi, t: Translate) {
 
 /** Shows the panel (re-adding it if it was closed) and brings its tab to the front. */
 export function focusPanel(api: DockviewApi, id: EditorPanelId, t: Translate) {
-  const panel = api.getPanel(id) ?? addPanel(api, id, t)
-  panel.api.setActive()
+  // A panel already shown keeps its scroll position (see showDockPanel).
+  showDockPanel(api.getPanel(id) ?? addPanel(api, id, t))
 }
 
 export function togglePanel(api: DockviewApi, id: EditorPanelId, t: Translate) {
