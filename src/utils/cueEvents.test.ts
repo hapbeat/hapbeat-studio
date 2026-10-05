@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   addEventMark, addPositionRoute, decidedSubjects, fireShot, resetAllReviews, setNone, setReview, setUndecided, addVariant, simultaneousGroups, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
   effectiveEvent, eventSceneCues, jitterGain, listEvents, MaterialPicker, matchesName, materialUsers, needsRouteForm, overwriteUsers,
-  parseEventKey, removeVariant, representativeSound, resolveEventName, setOverride, setRouteClips, setSfxSounds, setVariation, trialEvent, trialsForEvent,
+  parseEventKey, removeVariant, representativeSound, resolveEventName, cueRoutePositions, setOverride, setRouteClips, setSfxSounds, setVariation, trialEvent, trialsForEvent,
 } from './cueEvents'
 import { validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
 import { cueVoices, tableTargets } from './sceneHaptics'
@@ -358,5 +358,18 @@ describe('the sound played with a haptic audition', () => {
     const picks = ['candidate A', 'candidate B', 'candidate A'].map(() => representativeSound(t, sampleLib(), ['grab'], buffers))
     expect(picks.every(p => p?.buffer === buffers.GrowlA && p.volume === 0.7)).toBe(true)
     expect(representativeSound(t, sampleLib(), ['nope'], buffers)).toBeNull()
+  })
+})
+
+describe('audition routing of an event', () => {
+  it('footstep routed to pos_neck reaches only the neck device, not the wrists', async () => {
+    const { routePlaybackTargets } = await import('./playbackDevices')
+    const t = v2Table()
+    t.cues.footstep = { sfx: null, haptics: [{ clip: 'thump', at: 'pos_neck', gain: 1 }] }
+    const dev = (ip: string, address: string) => ({ name: ip, ipAddress: ip, address, firmwareVersion: '', online: true, serialConnected: false, volumeWiper: null, volumeLevel: null, volumeSteps: null })
+    const all = [dev('neck', 'player_1/pos_neck/group_1'), dev('lw', 'player_1/pos_l_wrist/group_1'), dev('rw', 'player_1/pos_r_wrist/group_1')]
+    const ats = cueRoutePositions(t, sampleLib(), 'footstep')
+    expect(ats).toEqual(['pos_neck'])
+    expect(routePlaybackTargets(all, ats).devices.map(d => d.ipAddress)).toEqual(['neck'])
   })
 })

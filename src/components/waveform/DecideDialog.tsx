@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useI18n } from '@/i18n/I18nProvider'
-import { useEventStore, type DecideRequest, type DecideResult } from '@/stores/eventStore'
+import { useEventStore, type DecideRequest } from '@/stores/eventStore'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useWaveformStore } from '@/stores/waveformStore'
@@ -9,7 +9,7 @@ import { useEditorSettings } from '@/stores/editorSettings'
 import { isLoopCue, positionsForCue, soundAllowed } from '@/utils/sceneCueTable'
 import { allEventKeys, defaultAt, effectiveEvent, matchesName, needsRouteForm, overwriteUsers, parseEventKey, sameBytes, trialEvent } from '@/utils/cueEvents'
 import { useAtLabel } from '@/components/scene/SceneCuePanels'
-import { autoWavName, decideSourceBuffer, encodeDecided, existingWav, runDecision, undoDecision } from './eventDecide'
+import { autoWavName, decideSourceBuffer, encodeDecided, existingWav, runDecision } from './eventDecide'
 import '@/components/common/ConfirmDialog.css'
 import './EventsPanel.css'
 
@@ -24,31 +24,6 @@ export function DecideDialog() {
 }
 
 /** The last decision: what was written, the import command (copy) and "Undo". */
-export function DecidedNotice({ result, onClose }: { result: DecideResult; onClose?: () => void }) {
-  const { t } = useI18n()
-  const [copied, setCopied] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const target = t(result.target === 'sound' ? 'events.target.sound' : 'events.target.haptic')
-  const undo = async () => {
-    setBusy(true)
-    try { const notice = await undoDecision(result); setError(notice ? t(notice.id, notice.params) : null) }
-    catch (e) { setError(message(e)) }
-    finally { setBusy(false) }
-  }
-  return <div className="events-decided" role="status">
-    {result.undone ? <p>{t('events.undone', { events: result.events.join(', '), target })}</p> : <>
-      <p>{t('events.decided', { event: result.events.join(', '), target, file: result.file })}{result.reused ? ` ${t('events.decide.reused')}` : ''}</p>
-      <p>{t('events.importNeeded')}</p>
-    </>}
-    <div className="events-command"><code>{result.importCommand}</code>
-      <button type="button" className="toolbar-btn" onClick={() => void navigator.clipboard?.writeText(result.importCommand).then(() => setCopied(true), () => setCopied(false))}>{t(copied ? 'common.copied' : 'common.copy')}</button>
-      {result.undo && !result.undone && <button type="button" className="toolbar-btn" disabled={busy} title={t('events.undoHint')} onClick={() => void undo()}>{t('events.undo')}</button>}
-      {onClose && <button type="button" className="toolbar-btn" onClick={onClose}>{t('common.close')}</button>}
-    </div>
-    {error && <p className="events-warn">{error}</p>}
-  </div>
-}
 
 function DecideForm({ request }: { request: DecideRequest }) {
   const { t } = useI18n()
@@ -81,7 +56,6 @@ function DecideForm({ request }: { request: DecideRequest }) {
   const [nameEdited, setNameEdited] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<DecideResult | null>(null)
   useEffect(() => {
     let cancelled = false
     void decideSourceBuffer(source).then(b => encodeDecided(b, target)).then(w => { if (!cancelled) setWav(w) }, e => { if (!cancelled) setError(message(e)) })
@@ -113,8 +87,7 @@ function DecideForm({ request }: { request: DecideRequest }) {
   const title = t(target === 'sound' ? 'events.decideSound' : 'events.decideHaptic')
   let body: JSX.Element
   let canSubmit = false
-  if (result) body = <DecidedNotice result={result} />
-  else if (!table || !lib) body = <p className="recipe-dialog-note">{t('events.decide.noProject')}</p>
+  if (!table || !lib) body = <p className="recipe-dialog-note">{t('events.decide.noProject')}</p>
   else if (!events.length) body = <p className="recipe-dialog-note">{t('events.decide.noEvents')}</p>
   else {
     const pattern = target === 'haptic' ? lib.clip_name : lib.sound_name
@@ -160,7 +133,8 @@ function DecideForm({ request }: { request: DecideRequest }) {
     setBusy(true); setError(null)
     try {
       const r = await runDecision({ target, source, events: [event], name, at, gain, wav })
-      if (r.ok) setResult(r.result)
+      // Success is logged (activity log), not shown: the dialog just closes.
+      if (r.ok) { close(); return }
       else setError(t(r.notice.id, r.notice.params))
     } catch (e) { setError(message(e)) }
     finally { setBusy(false) }
@@ -171,8 +145,8 @@ function DecideForm({ request }: { request: DecideRequest }) {
         <div className="confirm-dialog-title">{title}</div>
         <div className="confirm-dialog-body recipe-dialog-body">{body}</div>
         <div className="confirm-dialog-actions">
-          <button type="button" className="form-button-secondary" disabled={busy} onClick={close}>{t(result ? 'common.close' : 'common.cancel')}</button>
-          {!result && <button type="button" className="form-button" disabled={!canSubmit} onClick={() => void submit()}>{t(busy ? 'events.decide.writing' : onDisk === 'different' ? 'events.decide.overwriteSubmit' : 'events.decide.submit')}</button>}
+          <button type="button" className="form-button-secondary" disabled={busy} onClick={close}>{t('common.cancel')}</button>
+          {<button type="button" className="form-button" disabled={!canSubmit} onClick={() => void submit()}>{t(busy ? 'events.decide.writing' : onDisk === 'different' ? 'events.decide.overwriteSubmit' : 'events.decide.submit')}</button>}
         </div>
       </div>
     </div>,

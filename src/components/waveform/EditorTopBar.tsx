@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { DockviewApi } from 'dockview-react'
 import { useWaveformStore } from '@/stores/waveformStore'
-import { useToast } from '@/components/common/Toast'
 import { devicePosition } from '@/utils/playbackDevices'
 import { DevicePill } from '@/components/devices/DevicePill'
 import type { SampleRate } from '@/types/waveform'
@@ -17,7 +16,6 @@ export function EditorTopBar({ dockApi, notice, onNotice }: { dockApi: DockviewA
   const { t } = useI18n()
   const s = useWaveformStore()
   const { openRecipe } = useEditor()
-  const { toast } = useToast()
   const muted = useEditorSettings(state => state.muted)
   const hapticOnPc = useEditorSettings(state => state.hapticOnPc)
   const sendHaptics = useEditorSettings(state => state.sendHaptics)
@@ -35,8 +33,8 @@ export function EditorTopBar({ dockApi, notice, onNotice }: { dockApi: DockviewA
   const exportClip = () => {
     onNotice(t('editor.exporting', { folder: 'exports/' }))
     void s.exportWav().then(name => {
-      const message = t('editor.exported', { file: `exports/${name}` })
-      onNotice(message); toast(message, 'success')
+      // Success is not announced (logged); failures are.
+      console.info('[editor] exported', `exports/${name}`); onNotice('')
     }).catch(s.setError)
   }
   const exportSettings = () => {

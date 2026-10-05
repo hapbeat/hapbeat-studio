@@ -7,8 +7,12 @@ export const ACTIVITY_LOG = 'activity-log.jsonl'
 
 export interface ActivityEntry {
   at: string
-  kind: 'rated' | 'dismissed'
-  trialId: string
+  kind: 'rated' | 'dismissed' | 'decided' | 'material-updated'
+  trialId?: string
+  /** decided / material-updated: the events and the WAV. */
+  events?: string[]
+  file?: string
+  note?: string
   shortId?: string
   /** WAVs added to the event's material pool. */
   added?: string[]

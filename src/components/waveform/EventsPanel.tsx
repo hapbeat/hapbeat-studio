@@ -18,7 +18,6 @@ import {
 import { useConfirm } from '@/components/common/useConfirm'
 import { NumberField, useAtLabel } from '@/components/scene/SceneCuePanels'
 import { useEditor } from './editorContext'
-import { DecidedNotice } from './DecideDialog'
 import { EditorMenu, EditorMenuItem } from './EditorMenu'
 import { openEventDefault, openEventHaptic, openEventSound } from './eventAudio'
 import { MaterialList } from './MaterialList'
@@ -51,7 +50,6 @@ export function EventsPanel() {
   const data = useSceneStore(s => s.data)
   const saveError = useSceneStore(s => s.saveError)
   const busy = useSceneStore(s => s.busy)
-  const result = useEventStore(s => s.result)
   const selected = useEventStore(s => s.selected)
   const { ask, dialog } = useConfirm()
   const rows = useMemo(() => table && lib ? listEvents(table, lib) : [], [table, lib])
@@ -90,7 +88,6 @@ export function EventsPanel() {
     {dialog}
     {saveError && <div className="events-dirty" role="status">{t(saveError.id, saveError.params)}
       <button type="button" className="toolbar-btn" disabled={busy} onClick={() => void useSceneStore.getState().revert()}>{t('events.revert')}</button></div>}
-    {result && <DecidedNotice result={result} onClose={() => useEventStore.getState().setResult(null)} />}
     {!table || !lib ? <p className="agent-muted">{t('events.noProject')}</p> : <>
       <ResizableList label={t('editor.panel.events')}>{listItems}</ResizableList>
       <div className="events-detail-scroll">
@@ -217,8 +214,10 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
   const missing = (name: string) => useWaveformStore.getState().setError(t('events.preview.missing', { name }))
   const play = (s: string) => { if (!e.sfx || !openEventSound(key, s, e.sfx.volume, true)) missing(s) }
   const set = (list: string[]) => edit(tb => setSfxSounds(tb, e.ref, list))
+  // An approved sound is folded (its heading line stays); ▸ opens it.
+  const [open, setOpen] = useState(e.review.sfx !== 'approved')
   return <section className="events-sec">
-    <h4 className="events-sec-head">{t('events.sound')}{allowed && <><ReviewToggle e={e} field="sfx" edit={edit} /><DecisionBar e={e} field="sfx" edit={edit} /></>}
+    <h4 className="events-sec-head"><Fold open={open} set={setOpen} />{t('events.sound')}{allowed && <><ReviewToggle e={e} field="sfx" edit={edit} /><DecisionBar e={e} field="sfx" edit={edit} /></>}
       {allowed && e.sfx && <span className="events-field events-head-field">{t('scene.sound.volume')}
         <NumberField value={e.sfx.volume} min={0} max={2} step={0.05} label={t('scene.sound.volume')} onCommit={x => edit(tb => setOwnSfxVolume(tb, e.ref, x))} /></span>}
       {/* Ask for (more) sound candidates; after checking the sound (OK): on to the haptic — also for a cue without a sound. */}
@@ -226,7 +225,7 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
         onClick={() => { const k = `sound|${key}`; useReviseOpen.getState().set(useReviseOpen.getState().open === k ? null : k) }}>{t('events.soundRequest.button')}</button>
       <HapticRequestButton e={e} /></span></h4>
     <SoundRequestField cue={key} />
-    {!allowed ? <p className="agent-muted">{t('scene.sound.loopCue')}</p> : <>
+    {!open ? null : !allowed ? <p className="agent-muted">{t('scene.sound.loopCue')}</p> : <>
       {loop && <p className="agent-muted">{t('events.loopSoundHint')}</p>}
       {!sounds.length && <p className="agent-muted">{t(e.decided.sfx ? 'events.soundNone' : 'events.undecidedSound')}</p>}
       <MaterialList items={sounds} label={t('events.sound')} active={sounds.find(s => previewId === `${key}|sound|${s}`) ?? null} onPlay={play}
@@ -246,6 +245,8 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
 /** Haptic output: one block per route (body position × gain) with its clip candidates (★ = representative); "＋ add position" plays the event on another position at the same time. */
 function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: SceneLib; e: EffectiveEvent; loop: boolean; edit: Edit }) {
   const { t } = useI18n()
+  // An approved haptic is folded (its heading line stays); ▸ opens it.
+  const [hOpen, setHOpen] = useState(e.review.haptics !== 'approved')
   const atLabel = useAtLabel()
   const previewId = useEventStore(s => s.preview?.id)
   const key = eventKey(e.ref)
@@ -253,7 +254,8 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
   const missing = (name: string) => useWaveformStore.getState().setError(t('events.preview.missing', { name }))
   const free = positionsForCue(lib, e.ref.cue).some(a => !e.haptics.some(r => r.at === a))
   return <section className="events-sec">
-    <h4 className="events-sec-head">{t('events.haptic')}<ReviewToggle e={e} field="haptics" edit={edit} /><DecisionBar e={e} field="haptics" edit={edit} /></h4>
+    <h4 className="events-sec-head"><Fold open={hOpen} set={setHOpen} />{t('events.haptic')}<ReviewToggle e={e} field="haptics" edit={edit} /><DecisionBar e={e} field="haptics" edit={edit} /></h4>
+    {hOpen && <>
     {!loop && !e.decided.sfx && <p className="events-hint">{t('events.soundFirst')}</p>}
     {!e.haptics.length && <p className="agent-muted">{t(e.decided.haptics ? 'events.hapticNone' : 'events.undecidedHaptic')}</p>}
     {e.haptics.map((r, i) => {
@@ -279,6 +281,7 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
     <Reserves cue={e.ref.cue} target="haptic" />
     <button type="button" className="toolbar-btn events-add" disabled={!free} title={t('events.addPositionHint')}
       onClick={() => { if (!edit(tb => addPositionRoute(tb, lib, e.ref))) useWaveformStore.getState().setError(t(loop ? 'scene.route.noLoopClip' : 'scene.route.noClip')) }}>＋ {t('events.addPosition')}</button>
+    </>}
   </section>
 }
 
@@ -492,4 +495,10 @@ function SoundRequestField({ cue }: { cue: string }) {
       onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void send() } else if (e.key === 'Escape') { e.preventDefault(); close() } }} />
     {error && <small className="events-warn">{error}</small>}
   </div>
+}
+
+/** ▸ / ▾ in a section heading. */
+function Fold({ open, set }: { open: boolean; set: (open: boolean) => void }) {
+  const { t } = useI18n()
+  return <button type="button" className="events-fold" aria-expanded={open} title={t(open ? 'events.fold.close' : 'events.fold.open')} onClick={() => set(!open)}>{open ? '▾' : '▸'}</button>
 }

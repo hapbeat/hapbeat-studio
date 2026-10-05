@@ -35,6 +35,7 @@ import { showDockPanel } from '@/utils/dockPanels'
 import { trialTarget } from '@/utils/agentProtocol'
 import { waveformOnPc } from '@/utils/agentTrialUi'
 import { DecideDialog } from './DecideDialog'
+import { useMaterialWriteBack } from './eventEditing'
 import { openEventDefault, repeatBuffer, useDecidedSoundSync } from './eventAudio'
 import { useAuditionPlan } from './EditorScenePanel'
 
@@ -137,6 +138,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const player = useMemo(() => new EditorBufferPlayer(null, undefined, s.setError), [s.clip?.id, original, auditionKey])
   useEffect(() => {player.activate(); return () => player.dispose()}, [player])
   useDecidedSoundSync(player)
+  useMaterialWriteBack()
   player.setBuffer(audioBuffer ?? null)
   useEffect(() => {
     const selection = useWaveformStore.getState().selectedRegion

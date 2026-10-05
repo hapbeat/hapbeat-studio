@@ -42,6 +42,8 @@ export interface EditorUiSettings {
   eventMarks: Record<string, EventMark[]>
   /** Events panel: height (px) of the event list above the detail. */
   eventsListHeight: number
+  /** Editor clips opened from an event material ("Edit as clip"): edits are written back to that WAV. */
+  materialLinks: Record<string, MaterialLink>
   /** Haptic auditions (AI haptic candidates, event haptic materials) also play their waveform on the PC (off: devices only). */
   hapticOnPc: boolean
   /** AI trials: saving a rating adds its ★4+ candidates to the material pool of the trial's first scene cue. */
@@ -65,10 +67,12 @@ export interface EditorUiSettings {
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, hapticOnPc: false, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
+  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, materialLinks: {}, hapticOnPc: false, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
+/** The event material an editor clip edits: game project, event key, sound / haptic and the WAV name. */
+export interface MaterialLink { project: string; event: string; target: 'sound' | 'haptic'; wav: string }
 /** A "remake" request: the material of `cue`, sent at `at` (ISO). */
 export interface RevisePending { cue: string; target: 'sound' | 'haptic'; material: string; at: string }
 /** A reserved AI candidate: trial id + candidate id, and whether it is a sound or a haptic. */
@@ -132,6 +136,9 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
       && (r.target === 'sound' || r.target === 'haptic')).slice(-200).map(r => ({ cue: r.cue, target: r.target, material: r.material, at: r.at })) : [],
     eventsListHeight: clamp(v.eventsListHeight, 80, 1200, d.eventsListHeight),
     hapticOnPc: v.hapticOnPc === true,
+    materialLinks: isRecord(v.materialLinks) ? Object.fromEntries(Object.entries(v.materialLinks).filter((e): e is [string, MaterialLink] => isRecord(e[1]) && typeof e[1].project === 'string'
+      && typeof e[1].event === 'string' && typeof e[1].wav === 'string' && (e[1].target === 'sound' || e[1].target === 'haptic')).slice(0, 500)
+      .map(([id, l]) => [id, { project: l.project, event: l.event, target: l.target, wav: l.wav }])) : {},
     autoAssignOnRating: typeof v.autoAssignOnRating === 'boolean' ? v.autoAssignOnRating : d.autoAssignOnRating,
     trialProjectFilter: typeof v.trialProjectFilter === 'string' && v.trialProjectFilter.length <= 200 ? v.trialProjectFilter : d.trialProjectFilter,
     trialTargetFilter: v.trialTargetFilter === 'sound' || v.trialTargetFilter === 'haptic' ? v.trialTargetFilter : '',

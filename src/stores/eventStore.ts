@@ -1,7 +1,6 @@
 import { create } from 'zustand'
 import type { TrialSceneChoice } from '@/utils/editorUiSettings'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
-import type { PendingWavs } from '@/utils/sceneProject'
 
 /**
  * Event-centred authoring (DEC-083) state shared by the editor's Events panel,
@@ -12,8 +11,6 @@ import type { PendingWavs } from '@/utils/sceneProject'
 export type DecideTarget = 'sound' | 'haptic'
 export type DecideSource = { kind: 'clip'; clipId: string } | { kind: 'candidate'; trialId: string; candidateId: string }
 export interface DecideRequest { target: DecideTarget; source: DecideSource; /** Event key to preselect (null = the selected event / the trial's first cue). */ event: string | null }
-/** What a decision replaced: the cue table text and the overwritten WAV bytes (new WAVs are left in place). */
-export interface DecisionUndo { tableText: string; wavs: PendingWavs }
 export interface DecideResult {
   id: number
   events: string[]
@@ -23,8 +20,6 @@ export interface DecideResult {
   importCommand: string
   /** The WAV already held these bytes (nothing written). */
   reused: boolean
-  undo: DecisionUndo | null
-  undone: boolean
 }
 /**
  * An event's sound / haptic clip shown in the waveform panel instead of the editor clip (read only,
@@ -42,7 +37,6 @@ interface EventState {
   /** Bumped when the editor should bring the Events panel forward (Scene tab "open in editor"). */
   focusRequest: number
   decide: DecideRequest | null
-  result: DecideResult | null
   /** Scene video moment picked per event key (this session). */
   scenePicks: Record<string, TrialSceneChoice>
   preview: EventPreview | null
@@ -59,14 +53,13 @@ interface EventState {
   openInScene: (key: string | null) => void
   requestDecide: (request: DecideRequest) => void
   closeDecide: () => void
-  setResult: (result: DecideResult | null) => void
 }
 
 /** App listens for this and switches tabs (detail = tab id). */
 export const OPEN_TAB_EVENT = 'studio:open-tab'
 
 export const useEventStore = create<EventState>((set, get) => ({
-  selected: null, focusRequest: 0, decide: null, result: null, scenePicks: {}, preview: null, sceneOccurrences: null,
+  selected: null, focusRequest: 0, decide: null, scenePicks: {}, preview: null, sceneOccurrences: null,
   openInScene: key => {
     set({ sceneOccurrences: key })
     if (key) window.dispatchEvent(new CustomEvent(OPEN_TAB_EVENT, { detail: 'scene' }))
@@ -83,7 +76,6 @@ export const useEventStore = create<EventState>((set, get) => ({
     set({ selected: key, focusRequest: get().focusRequest + 1 })
     window.dispatchEvent(new CustomEvent(OPEN_TAB_EVENT, { detail: 'editor' }))
   },
-  requestDecide: decide => set({ decide, result: null }),
+  requestDecide: decide => set({ decide }),
   closeDecide: () => set({ decide: null }),
-  setResult: result => set({ result }),
 }))

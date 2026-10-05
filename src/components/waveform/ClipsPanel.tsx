@@ -45,6 +45,7 @@ export function ClipsPanel() {
   const update = useEditorSettings(state => state.update)
   const projectNames = useEditorSettings(state => state.projectNames)
   const eventMarks = useEditorSettings(state => state.eventMarks)
+  const materialLinks = useEditorSettings(state => state.materialLinks)
   const decide = (target: DecideTarget, clipId: string) => useEventStore.getState().requestDecide({ target, source: { kind: 'clip', clipId }, event: null })
   const projects = useProjectNames()
   const [query, setQuery] = useState('')
@@ -143,6 +144,7 @@ export function ClipsPanel() {
                 : <button className="editor-clip" disabled={busy} aria-pressed={selected} title={clip.name} onClick={e => clickClip(e, clip.id)}>
                   <strong>{clip.name || '—'}</strong><small>{clip.buffer.duration.toFixed(3)} s</small>
                   <EventMarkBadges marks={clipEventMarks(clip, eventMarks)} />
+                  {materialLinks[clip.id] && <small className="editor-clip-link" title={t('editor.materialLinkHint', { file: `${materialLinks[clip.id].wav}.wav`, event: materialLinks[clip.id].event })}>← {materialLinks[clip.id].event}</small>}
                   {thumbnails && <WaveformThumbnail buffer={clip.buffer} />}
                 </button>}
               <EditorMenu label="⋯" title={t('editor.clipMenu', { name: clip.name })} className="editor-clip-menu" disabled={busy}>

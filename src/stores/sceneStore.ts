@@ -72,8 +72,11 @@ interface SceneState {
    * tab has unsaved edits, so a decision never saves them along unseen.
    */
   commitDecision: (next: CueTable, wavs: PendingWavs) => Promise<{ ok: true } | { ok: false; notice: SceneNotice; problems?: string[] }>
-  /** Undo of a decision: writes back the previous WAV bytes and the previous cue table text, then reloads. Refused while the tab has unsaved edits. */
-  restoreDecision: (tableText: string, wavs: PendingWavs) => Promise<{ ok: true } | { ok: false; notice: SceneNotice }>
+  /**
+   * Writes new bytes to an existing material WAV (an edited "Edit as clip" result): the previous file goes to
+   * `_archive/<dir>/<name>_<time>.wav` first (never deleted), then the cache is decoded again.
+   */
+  replaceMaterial: (target: 'sound' | 'haptic', name: string, wav: ArrayBuffer) => Promise<{ archived: string }>
   revert: () => Promise<void>
   note: (notice: SceneNotice) => void
   addLog: (text: string) => void
@@ -162,7 +165,8 @@ export const useSceneStore = create<SceneState>((set, get) => {
           const edited = now !== table ? now : null
           await loadTable()
           if (edited) { set({ table: edited, dirty: true }); scheduleSave() }
-          note({ id: result.conflicts.length ? 'scene.autosave.conflicts' : 'scene.autosave.merged', params: { fields: result.conflicts.join(', ') }, error: result.conflicts.length > 0 })
+          if (result.conflicts.length) note({ id: 'scene.autosave.conflicts', params: { fields: result.conflicts.join(', ') }, error: true })
+          else addLog(`merged outside changes into ${lib.paths.cues}`)
         } else if (now === table) set({ dirty: false, pending: { clips: {}, sounds: {} }, saveError: null })
         else { set({ pending: { clips: {}, sounds: {} }, saveError: null }); scheduleSave() }
         addLog(`autosave → ${lib.paths.cues}`)
@@ -180,7 +184,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
     try {
       if (await sync.changedOnDisk() === null) return
       await loadTable()
-      note({ id: 'scene.autosave.reloaded', params: { file: lib.paths.cues } })
+      addLog(`${lib.paths.cues} changed outside Studio: reloaded`)
     } catch { /* checked again later */ }
   }
   if (typeof window !== 'undefined') {
@@ -353,24 +357,18 @@ export const useSceneStore = create<SceneState>((set, get) => {
       addLog(`decide → ${[...Object.keys(wavs.clips).map(n => `${lib.paths.clips}/${n}.wav`), ...Object.keys(wavs.sounds).map(n => `${lib.paths.sounds}/${n}.wav`), lib.paths.cues].join(', ')}`)
       return { ok: true }
     },
-    restoreDecision: async (tableText, wavs) => {
-      await get().save()
-      const { root, lib, dirty, busy } = get()
-      if (!root || !lib) return { ok: false, notice: { id: 'scene.save.noProject', error: true } }
-      if (dirty) return { ok: false, notice: { id: 'events.decide.dirty', error: true } }
-      if (busy) return { ok: false, notice: { id: 'events.decide.busy', error: true } }
-      let failed: SceneNotice | null = null
-      set({ busy: true })
-      try {
-        for (const [name, buf] of Object.entries(wavs.clips)) await writeProjectFile(root, `${lib.paths.clips}/${name}.wav`, buf)
-        for (const [name, buf] of Object.entries(wavs.sounds)) await writeProjectFile(root, `${lib.paths.sounds}/${name}.wav`, buf)
-        await writeProjectFile(root, lib.paths.cues, tableText)
-        await loadTable()
-      } catch (error) { failed = { id: 'scene.save.failed', params: { error: message(error) }, error: true }; addLog(message(error)) }
-      finally { set({ busy: false }) }
-      if (failed) return { ok: false, notice: failed }
-      addLog(`undo decision → ${lib.paths.cues}`)
-      return { ok: true }
+    replaceMaterial: async (target, name, wav) => {
+      const { root, lib } = get()
+      if (!root || !lib) throw new Error('No game project is open')
+      const dir = target === 'haptic' ? lib.paths.clips : lib.paths.sounds
+      const previous = await (await readProjectFile(root, `${dir}/${name}.wav`)).arrayBuffer()
+      const archived = `_archive/${dir}/${name}_${new Date().toISOString().replace(/[:.]/g, '-')}.wav`
+      await writeProjectFile(root, archived, previous)
+      await writeProjectFile(root, `${dir}/${name}.wav`, wav)
+      if (target === 'haptic') { const pcm = mono(await decode(wav.slice(0), RATE)); set(st => ({ pcm: { ...st.pcm, [name]: pcm } })) }
+      else { const b = await decode(wav.slice(0), 48000); set(st => ({ sfx: { ...st.sfx, [name]: b } })) }
+      addLog(`edited ${dir}/${name}.wav (previous → ${archived})`)
+      return { archived }
     },
     revert: async () => {
       if (!get().root) return

@@ -1037,3 +1037,6 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 /* Where auditions go (by the cue's positions): one line next to the output options. */
 .editor-routing { flex: 0 1 auto; min-width: 0; max-width: 40%; font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .editor-routing.empty { color: #e3c27a; }
+.editor-clip-link { color: #a9c3f0; font-size: 11px; white-space: nowrap; }
+/* Editor / Scene tabs fill the space above the log bar: no bottom padding (it showed as an empty band). */
+.tab-content.tab-content-editor { padding-bottom: 0; }

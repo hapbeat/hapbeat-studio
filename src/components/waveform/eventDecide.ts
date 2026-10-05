@@ -2,14 +2,16 @@ import { effectsPending, useWaveformStore } from '@/stores/waveformStore'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useSceneStore, type SceneNotice } from '@/stores/sceneStore'
 import { useEditorSettings } from '@/stores/editorSettings'
-import { useEventStore, type DecideResult, type DecideSource, type DecideTarget } from '@/stores/eventStore'
+import { type DecideResult, type DecideSource, type DecideTarget } from '@/stores/eventStore'
 import { resample } from '@/utils/audioDsp'
-import { encodePcm16Wav, isLoopCue, serializeCueTable } from '@/utils/sceneCueTable'
-import { readProjectFile } from '@/utils/sceneProject'
+import { encodePcm16Wav, isLoopCue } from '@/utils/sceneCueTable'
+import { readProjectFile, writeProjectFile } from '@/utils/sceneProject'
 import { RATE } from '@/utils/sceneHaptics'
 import { addEventMark, applyHapticDecision, applySoundDecision, defaultAt, effectiveEvent, nextWavName, parseEventKey, safeWavName, sameBytes, wavBaseName } from '@/utils/cueEvents'
 import { routeClips, sfxSounds } from '@/utils/sceneCueTable'
 import { sameSound } from '@/utils/wavCompare'
+import { appendActivity } from '@/utils/activityLog'
+import { localIsoString } from '@/utils/hapticKnowledge'
 
 /** Cue sounds are written at 48 kHz (the Scene tab's sound writer). */
 export const SOUND_RATE = 48000
@@ -141,7 +143,8 @@ export async function runDecision(input: DecisionInput): Promise<{ ok: true; res
       : applySoundDecision(next, ref, picked.name)
   }
   const kind = input.target === 'haptic' ? 'clips' : 'sounds'
-  const undo = { tableText: serializeCueTable(table), wavs: { clips: {}, sounds: {}, [kind]: previous && !same ? { [picked.name]: previous } : {} } }
+  // A WAV overwritten under the same name with other bytes is kept in _archive first (never lost).
+  if (previous && !same && before.root) await writeProjectFile(before.root, `_archive/${dirOf(input.target)}/${picked.name}_${new Date().toISOString().replace(/[:.]/g, '-')}.wav`, previous)
   const committed = await useSceneStore.getState().commitDecision(next, { clips: {}, sounds: {}, [kind]: same ? {} : { [picked.name]: wav } })
   if (!committed.ok) return committed
   const subject = input.source.kind === 'clip' ? input.source.clipId : `${input.source.trialId}/${input.source.candidateId}`
@@ -149,16 +152,8 @@ export async function runDecision(input: DecisionInput): Promise<{ ok: true; res
   for (const key of input.events) marks = addEventMark(marks, subject, { project: lib.project_name, event: key, target: input.target })
   useEditorSettings.getState().update({ eventMarks: marks })
   const result: DecideResult = { id: Date.now(), events: input.events, target: input.target, name: picked.name, file: `${dirOf(input.target)}/${picked.name}.wav`,
-    importCommand: lib.import_command, reused: same, undo, undone: false }
-  useEventStore.getState().setResult(result)
+    importCommand: lib.import_command, reused: same }
+  const root = useWaveformStore.getState().folder?.root
+  if (root) void appendActivity(root, { at: localIsoString(new Date()), kind: 'decided', events: input.events, file: result.file, note: `${input.target}${same ? ' (same bytes, reused)' : ''}; import: ${lib.import_command}` }).catch(() => {})
   return { ok: true, result }
-}
-
-/** "Undo" of the shown decision: the previous table and overwritten WAV bytes go back (a new WAV is left in place, unreferenced). */
-export async function undoDecision(result: DecideResult): Promise<SceneNotice | null> {
-  if (!result.undo || result.undone) return null
-  const restored = await useSceneStore.getState().restoreDecision(result.undo.tableText, result.undo.wavs)
-  if (!restored.ok) return restored.notice
-  useEventStore.getState().setResult({ ...result, undone: true })
-  return null
 }
