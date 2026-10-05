@@ -9,8 +9,11 @@
 .video-overlay-bar:hover .video-overlay-track { height: 5px; }
 .video-overlay-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent-light, #b9a8ff); }
 /* The cue mark (sound start = 0 s). */
-.video-overlay-mark { position: absolute; top: 1px; bottom: 1px; width: 2px; margin-left: -1px; background: #ff4d4f; pointer-events: none; }
+.video-overlay-mark { position: absolute; top: 1px; bottom: 1px; width: 3px; margin-left: -1.5px; background: var(--target-red, #ff4d4f); }
 /* Another cue of the scene (plays its decided sound). */
 .video-overlay-mark.other { background: #9aa0a6; }
 .video-overlay-time { flex: none; min-width: 7ch; text-align: right; font-variant-numeric: tabular-nums; }
 .video-overlay-info { flex: none; opacity: .8; cursor: help; }
+/* The cue being rated (same red as its marks), always shown top left. */
+.target-cue-badge { display: inline-block; padding: 0 6px; border-radius: 8px; background: var(--target-red, #ff4d4f); color: #fff; font-size: 11px; font-weight: 600; line-height: 18px; white-space: nowrap; flex: none; }
+.video-overlay-target { position: absolute; left: 6px; top: 6px; pointer-events: none; opacity: .9; }

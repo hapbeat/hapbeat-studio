@@ -11,6 +11,7 @@ import { isLoopCue } from '@/utils/sceneCueTable'
 import { parseEventKey } from '@/utils/cueEvents'
 import { isTypingTarget } from '@/utils/playbackShortcut'
 import { VideoOverlay } from '@/components/scene/VideoOverlay'
+import '@/components/scene/VideoOverlay.css'
 import { useEditor } from './editorContext'
 import { useEventStore } from '@/stores/eventStore'
 import { onUserStop } from '@/utils/playerStops'
@@ -285,6 +286,7 @@ export function EditorScenePanel() {
     {/* One wrapping row: title, play mode, moment, lead-in (the details are in the titles). */}
     <div className="editor-scene-head">
       <span className="editor-scene-title" title={title}>{title}</span>
+      {chosen?.segment && <span className="target-cue-badge" title={t('editor.scene.targetHint')}>{chosen.segment.names.join(' + ')}</span>}
       {synced && <span className={`editor-scene-mode ${focused ? 'video' : ''}`} title={focused ? t('editor.scene.modeVideoHint', { seconds: lead }) : t('editor.scene.modeWaveHint')}>
         {focused ? t('editor.scene.modeVideo', { seconds: lead }) : t('editor.scene.modeWave')}</span>}
       {!message && <SceneChoiceSelect choice={choice} label={t('editor.scene.clip')} />}
@@ -296,7 +298,7 @@ export function EditorScenePanel() {
       <div className="editor-scene-stage" title={hint} onClick={e => { e.currentTarget.closest<HTMLElement>('.editor-scene-panel')?.focus(); focusedRef.current = true; setFocused(true); if (synced) togglePause() }}>
         {chosen && src && !videoError ? <video ref={videoRef} src={src} muted playsInline preload="auto" onLoadedMetadata={cue} onPlay={() => setVideoRunning(true)} onPause={() => setVideoRunning(false)} onError={e => setVideoError(e.currentTarget.error?.message || `MediaError ${e.currentTarget.error?.code ?? ''}`)} />
           : <p className="agent-muted">{chosen && videoError ? t('editor.scene.unreadable', { file: chosen.file, error: videoError }) : chosen ? t('editor.scene.loading') : t('editor.scene.pickHint')}</p>}
-        {synced && chosen && src && !videoError && <VideoOverlay video={videoEl} mark={chosen.mark} marks={marks} range={chosen.segment && end != null ? [chosen.segment.start, end] : null} playing={videoRunning}
+        {synced && chosen && src && !videoError && <VideoOverlay video={videoEl} mark={chosen.mark} marks={marks} target={chosen.segment ? chosen.segment.names.join(' + ') : null} range={chosen.segment && end != null ? [chosen.segment.start, end] : null} playing={videoRunning}
           onToggle={() => { focusedRef.current = true; setFocused(true); togglePause() }} onSeek={seekVideo} info={hint} />}
       </div>
     </>}

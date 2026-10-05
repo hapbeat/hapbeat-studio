@@ -23,6 +23,12 @@ const T_REX_ALL: SceneEvent[] = [
 describe('representative scene (DEC-085)', () => {
   const marksOf = (seg: ReturnType<typeof sceneSegment>) => seg!.marks.map(m => `${m.target ? 'R' : 'G'} ${m.name} ${m.t}`)
 
+  it('bite:tear as the target: the same meal, 3 bite:tear marks (red) and every bite in it (grey)', () => {
+    const seg = sceneSegment(T_REX_ALL, ['bite:tear'], 0.8)!
+    expect(marksOf(seg)).toEqual(['G bite 21.367', 'R bite:tear 21.967', 'G bite 23.4', 'R bite:tear 24', 'G bite 25.4', 'R bite:tear 26'])
+    expect(seg.start).toBeCloseTo(21.367 - 1.5)
+  })
+
   it('bite: the meal from 1.5 s before the first bite, 3 bite marks (red) and 3 bite:tear marks (grey)', () => {
     const seg = sceneSegment(T_REX_ALL, ['bite'], 0.8)!
     expect(seg.repeating).toBe(true)

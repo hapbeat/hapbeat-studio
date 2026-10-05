@@ -133,13 +133,7 @@ export function trialKind(trial: Pick<TrialRequest, 'kind' | 'scene'>, durations
   const known = durations.filter((d): d is number => typeof d === 'number' && Number.isFinite(d))
   return known.length && known.every(d => d <= ONESHOT_MAX_SEC) ? 'oneshot' : null
 }
-/** Dimensions about repetition do not apply to a single event. */
-export const REPETITION_DIMENSIONS = ['regularity', 'continuity']
 /** Axes the rating form does not ask (pleasantness reads as the overall score). */
-export const HIDDEN_DIMENSIONS = ['pleasantness']
-/** Axes shown for a haptic trial: regularity / continuity only for a loop or a sequence; never pleasantness. */
-export const visibleDimensions = <T extends Pick<Dimension, 'id'>>(dimensions: T[], kind: TrialKind | null) =>
-  dimensions.filter(d => !HIDDEN_DIMENSIONS.includes(d.id) && (kind === 'loop' || kind === 'sequence' || !REPETITION_DIMENSIONS.includes(d.id)))
 
 /**
  * Axes of a sound trial (target "sound"): weight (bass), roughness, sharpness, strength (volume), length, regularity (always).
@@ -157,13 +151,6 @@ export const SOUND_DIMENSIONS: Dimension[] = [
 /** The verdict the form writes, from the overall score: 4–5 use, 3 maybe, 1–2 no. */
 export const verdictFromOverall = (overall: number | null): Verdict | null => overall == null ? null : overall >= 4 ? 'use' : overall === 3 ? 'maybe' : 'no'
 
-/** Pole words that do not read naturally as 「もっと〜に」. */
-const JA_POLE_PHRASES: Record<string, string> = { '快': '心地よく', '断続': '途切れがちに', '連続': '途切れなく' }
-/** Japanese pole → adverbial phrase for 「もっと…」: i-adjectives take く (重い → 重く), the rest に (滑らか → 滑らかに). */
-export function jaPolePhrase(pole: string): string {
-  if (JA_POLE_PHRASES[pole]) return JA_POLE_PHRASES[pole]
-  return /[^\x00-\x7f]い$/.test(pole) && !/(きれい|嫌い|綺麗)$/.test(pole) ? pole.slice(0, -1) + 'く' : pole + 'に'
-}
 
 /**
  * Rating conditions the helper reports for the playback devices: names, the

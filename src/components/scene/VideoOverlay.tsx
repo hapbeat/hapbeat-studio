@@ -9,13 +9,15 @@ import './VideoOverlay.css'
  * while hovered or while the video is paused / stopped; hidden during playback once
  * the pointer leaves. The overlay takes no layout space.
  */
-export function VideoOverlay({ video, mark, marks, range, playing, onToggle, onSeek, info }: {
+export function VideoOverlay({ video, mark, marks, range, playing, onToggle, onSeek, info, target }: {
   /** The video element (read every frame for the bar and the time). */
   video: HTMLVideoElement | null
   /** Video time of the cue mark (seconds); null = no mark (time shown as the video time). */
   mark: number | null
-  /** Ticks on the bar (video times; `target` false = grey); default: `mark`. */
-  marks?: readonly { t: number; target?: boolean }[]
+  /** Ticks on the bar (video times; `target` false = grey; `name` in the tooltip); default: `mark`. */
+  marks?: readonly { t: number; target?: boolean; name?: string }[]
+  /** The cue being rated: a small badge top left, always shown. */
+  target?: string | null
   /** The stretch the bar spans (video times); default: the whole video. */
   range?: readonly [number, number] | null
   /** Shows ⏸ (else ▶). The overlay stays visible while this is false. */
@@ -51,7 +53,8 @@ export function VideoOverlay({ video, mark, marks, range, playing, onToggle, onS
     if (to > from && r.width > 0) onSeek(from + Math.max(0, Math.min(1, (event.clientX - r.left) / r.width)) * (to - from))
   }
   const label = t(playing ? 'scene.overlay.pause' : 'scene.overlay.play')
-  return <div className={`video-overlay ${playing ? '' : 'shown'}`} onClick={e => e.stopPropagation()}>
+  return <>{target && <span className="target-cue-badge video-overlay-target" title={t('editor.scene.targetHint')}>{t('editor.scene.rating', { name: target })}</span>}
+  <div className={`video-overlay ${playing ? '' : 'shown'}`} onClick={e => e.stopPropagation()}>
     <button type="button" className="video-overlay-btn" aria-label={label} title={label} onClick={onToggle}>{playing ? '⏸' : '▶'}</button>
     <div className="video-overlay-bar" role="slider" aria-label={t('scene.overlay.seek')} aria-valuemin={0} aria-valuemax={duration} tabIndex={-1}
       onPointerDown={e => { dragging.current = true; e.currentTarget.setPointerCapture(e.pointerId); seekAt(e) }}
@@ -59,9 +62,9 @@ export function VideoOverlay({ video, mark, marks, range, playing, onToggle, onS
       onPointerUp={e => { dragging.current = false; if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId) }}
       onPointerCancel={() => { dragging.current = false }}>
       <div className="video-overlay-track"><div className="video-overlay-fill" ref={fill} /></div>
-      {to > from && ticks.filter(x => x.t >= from && x.t <= to).map(x => <div key={x.t} className={`video-overlay-mark ${x.target === false ? 'other' : ''}`} style={{ left: `${(x.t - from) / (to - from) * 100}%` }} />)}
+      {to > from && ticks.filter(x => x.t >= from && x.t <= to).map(x => <div key={x.t} className={`video-overlay-mark ${x.target === false ? 'other' : ''}`} title={`${x.name ?? ''} ${(mark === null ? x.t : x.t - mark).toFixed(2)} s`.trim()} style={{ left: `${(x.t - from) / (to - from) * 100}%` }} />)}
     </div>
     <span className="video-overlay-time" ref={time} />
     <span className="video-overlay-info" title={info} aria-label={info}>ⓘ</span>
-  </div>
+  </div></>
 }

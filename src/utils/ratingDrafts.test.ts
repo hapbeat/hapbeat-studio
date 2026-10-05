@@ -43,10 +43,6 @@ describe('rating drafts', () => {
     await clearRatingDraft(root as unknown as FileSystemDirectoryHandle, 't-1') // already gone: no error
   })
 
-  it('remembers the AI trials project filter and the Directions toggle (off by default)', () => {
-    expect(sanitizeUiSettings({}).ratingShowAxes).toBe(false)
-    expect(sanitizeUiSettings({ ratingShowAxes: true }).ratingShowAxes).toBe(true)
-  })
 
   it('remembers the AI trials project filter in the editor settings', () => {
     expect(sanitizeUiSettings({ trialProjectFilter: 'trex-encounter' }).trialProjectFilter).toBe('trex-encounter')

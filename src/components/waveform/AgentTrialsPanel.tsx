@@ -3,10 +3,10 @@ import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useAgentTrialStore, type AuditionTarget } from '@/stores/agentTrialStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useWaveformStore } from '@/stores/waveformStore'
-import { localIsoString, type Dimension, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
+import { localIsoString, type TrialRecord } from '@/utils/hapticKnowledge'
 import type { HapticFeatures } from '@/utils/hapticFeatures'
 import { clearRatingDraft, DraftKeeper, readFolderDraft, readLocalDraft, writeRatingDraft } from '@/utils/ratingDrafts'
-import { addUseRange, usableCandidates, autoRatingContext, EMPTY_CONTEXT, formToRating, jaPolePhrase, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, SOUND_DIMENSIONS, trialKind, verdictFromOverall, visibleDimensions, type CandidateRatingForm, type Direction, type RatingForm } from '@/utils/agentTrialUi'
+import { addUseRange, usableCandidates, autoRatingContext, EMPTY_CONTEXT, formToRating, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, trialKind, verdictFromOverall, type CandidateRatingForm, type RatingForm } from '@/utils/agentTrialUi'
 import { trialTarget, type TrialKind } from '@/utils/agentProtocol'
 import { useAuditionPlan } from './EditorScenePanel'
 import { toFirstPlay } from '@/utils/sceneSegments'
@@ -78,7 +78,6 @@ export function AgentTrialsPanel() {
   const folder = useAgentTrialStore(s => s.folder)
   const polling = useAgentTrialStore(s => s.polling)
   const lastResult = useAgentTrialStore(s => s.lastResult)
-  const dimensions = useAgentTrialStore(s => s.dimensions)
   const storeError = useAgentTrialStore(s => s.error)
   const selectedId = useAgentTrialStore(s => s.selectedTrialId)
   const setSelectedId = useAgentTrialStore(s => s.selectTrial)
@@ -114,8 +113,6 @@ export function AgentTrialsPanel() {
   }
   const prev = stepQueue(queue, record?.trial.id ?? null, -1), next = stepQueue(queue, record?.trial.id ?? null, 1)
   const autoSend = useEditorSettings(s => s.autoSendOnRating)
-  /** "Directions": the per-axis buttons (and kept ranges) beside the stars and comments; off by default. */
-  const showAxes = useEditorSettings(s => s.ratingShowAxes)
   const { openSceneVideo } = useEditor()
   const { ask, dialog } = useConfirm()
   const [panelNotice, setPanelNotice] = useState('')
@@ -168,6 +165,7 @@ export function AgentTrialsPanel() {
       <span className="agent-short-id large" title={record?.trial.id ?? ''}>{record?.shortId ?? '—'}</span>
       <button type="button" className="toolbar-btn" disabled={!next} aria-label={t('editor.agent.nextTrial')} title={t('editor.agent.nextTrial')} onClick={() => next && pickTrial(next)}>›</button>
       {record && <span className="agent-what" title={what}>{t(target === 'sound' ? 'editor.agent.rateSound' : 'editor.agent.rateHaptic', { what })}</span>}
+      {record?.trial.scene && <span className="target-cue-badge" title={t('editor.scene.targetHint')}>{record.trial.scene.cues.join(' + ')}</span>}
       {record && <span className={`agent-target-badge ${target}`}>{t(target === 'sound' ? 'editor.agent.targetSound' : 'editor.agent.targetHaptic')}</span>}
       <span className="agent-remaining">{record && !inQueue ? t(record.dismissed ? 'editor.agent.fromHistoryDismissed' : 'editor.agent.fromHistory') : t('editor.agent.remaining', { count: queue.length })}</span>
       <EditorMenu label={`${t('editor.agent.history')} ▾`} title={t('editor.agent.historyHint')} className="agent-history">
@@ -180,8 +178,6 @@ export function AgentTrialsPanel() {
       </EditorMenu>
       {record && <button className="toolbar-btn" title={t('editor.scene.openHint')}
         onClick={() => openSceneVideo({ kind: 'trial', trialId: record.trial.id }, wantedSceneProject({ scene: record.trial.scene, saved: useEditorSettings.getState().trialScenes[record.trial.id], fallback: record.trial.project }) ?? null)}>▶ {t('editor.agent.video')}</button>}
-      <label className="agent-axes-toggle" title={t('editor.agent.axesToggleHint')}>
-        <input type="checkbox" checked={showAxes} onChange={e => useEditorSettings.getState().update({ ratingShowAxes: e.target.checked })} />{t('editor.agent.axesToggle')}</label>
       {record && (record.dismissed ? <button className="toolbar-btn" onClick={() => void restore(record)}>{t('editor.agent.restore')}</button>
         : !record.rating && <button className="toolbar-btn" title={t('editor.agent.dismissHint')} onClick={() => void dismiss(record)}>{t('editor.agent.dismissTrial')}</button>)}
     </div>
@@ -199,7 +195,7 @@ export function AgentTrialsPanel() {
       {decided && decided.id === done.assignedId && <DecidedNotice result={decided} />}
       {done.kind === 'rated' && !autoSend && <AgentMessageBox record={done.record} saved />}
     </div>}
-    {record ? <TrialDetail key={record.trial.id} record={record} dimensions={dimensions} known={trials} audition={audition} onAudition={onAudition} deviceNames={deviceNames} onSelectTrial={setSelectedId}
+    {record ? <TrialDetail key={record.trial.id} record={record} known={trials} audition={audition} onAudition={onAudition} deviceNames={deviceNames} onSelectTrial={setSelectedId}
       autoAudition={autoTrialId === record.trial.id} onAutoAuditioned={() => setAutoTrialId(null)} onDone={onDone} />
       : <p className="agent-muted">{t(trials.length ? 'editor.agent.allDone' : 'editor.agent.selectTrial')}</p>}
   </div>
@@ -208,8 +204,8 @@ export function AgentTrialsPanel() {
 /** What the last save / dismissal did (shown by the panel above the next trial). */
 interface DoneInfo { recordId: string; notes: string[]; assignedId: number | null; kind: 'rated' | 'dismissed' }
 
-function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNames, onSelectTrial, autoAudition, onAutoAuditioned, onDone }: {
-  record: TrialRecord; dimensions: DimensionsDoc | null; known: TrialRecord[]; audition: AuditionTarget | null
+function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelectTrial, autoAudition, onAutoAuditioned, onDone }: {
+  record: TrialRecord; known: TrialRecord[]; audition: AuditionTarget | null
   onAudition: (target: AuditionTarget, buffer: AudioBuffer) => void; deviceNames: string[]; onSelectTrial: (id: string) => void
   /** After a save or a dismissal: the panel moves on. */
   onDone: (done: DoneInfo) => void
@@ -280,13 +276,10 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
     sceneLib && trial.scene?.project === sceneLib.project_name ? sceneLib.loop_cues : [])
   /** Sound trials rate overall / term match / comment only (no haptic dimensions or device conditions). */
   const target = trialTarget(trial)
-  /** Axes to rate: the sound set for a sound trial, else the haptic dimensions without pleasantness (repetition only for loop / sequence). */
-  const axes = useMemo(() => target === 'sound' ? SOUND_DIMENSIONS : dimensions ? visibleDimensions(dimensions.dimensions, kind) : [], [dimensions, kind, target])
   /** The event of the open Scene project this trial is for (its first scene cue), if any. */
   const event = sceneLib && sceneTable && trial.scene?.project === sceneLib.project_name ? trialEvent(sceneTable, trial.scene) : null
   const soundFirst = target === 'haptic' && !!event && !!sceneLib && !!sceneTable && !isLoopCue(sceneLib, parseEventKey(event).cue) && !effectiveEvent(sceneTable, parseEventKey(event))?.sfx
   const marks = useEditorSettings(s => s.eventMarks)
-  const showAxes = useEditorSettings(s => s.ratingShowAxes)
   /** The waveform selection while a candidate is auditioned: recorded as its "use only this part" range. */
   const region = useWaveformStore(s => s.selectedRegion)
   // On a stretch played at several firings the range is taken as seconds of one play.
@@ -403,8 +396,7 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
               <VerdictTag overall={form.candidates[requested.id].overall} />
               {(marks[`${trial.id}/${requested.id}`] ?? []).map(m => <span key={`${m.project}:${m.event}:${m.target}`} className="editor-event-badge" title={m.project}>{m.target === 'sound' ? '♪' : '≋'} {m.event}</span>)}
             </div>
-            {showAxes && <Directions value={form.candidates[requested.id]} axes={axes} onChange={patch => editCandidate(requested.id, patch)} />}
-            <CandidateNotes value={form.candidates[requested.id]} onChange={patch => editCandidate(requested.id, patch)} selection={active ? selection : null} showRanges={showAxes} />
+            <CandidateNotes value={form.candidates[requested.id]} onChange={patch => editCandidate(requested.id, patch)} selection={active ? selection : null} />
           </div>
         </article>
       })}
@@ -457,54 +449,21 @@ function VerdictTag({ overall }: { overall: number | null }) {
   return <small className={`agent-verdict-tag ${v ?? ''}`} title={t('editor.agent.verdictHint')}>{v ? t(`editor.agent.verdict.${v}` as MessageId) : ''}</small>
 }
 
-/** "How to change it": per axis `low [−][・][+] high`, buttons without text (title "more …"); a grid of 2–3 columns. */
-function Directions({ value, axes, onChange }: { value: CandidateRatingForm; axes: Dimension[]; onChange: (patch: Partial<CandidateRatingForm>) => void }) {
-  const { t, locale } = useI18n()
-  const setDirection = (dim: string, v: Direction) => {
-    const directions = { ...value.directions }
-    if (directions[dim] === v) delete directions[dim]; else directions[dim] = v
-    onChange({ directions })
-  }
-  if (!axes.length) return null
-  return <div className="agent-axes" aria-label={t('editor.agent.directions')}>
-    {axes.map(d => {
-      const [low, high] = d.poles[locale]
-      const hint = DIMENSION_HINTS[d.id] ? t(DIMENSION_HINTS[d.id]) : t('editor.agent.dimHint.generic', { low, high })
-      const more = (p: string) => locale === 'ja' ? t('editor.agent.more', { pole: jaPolePhrase(p) }) : t('editor.agent.more', { pole: p })
-      const titles: Record<Direction, string> = { [-1]: more(low), 0: t('editor.agent.fine'), 1: more(high) }
-      return <div className="agent-axis" key={d.id} title={`${locale === 'ja' ? d.ja : d.en}: ${hint}`}>
-        <span className="agent-axis-pole">{low}</span>
-        {([-1, 0, 1] as Direction[]).map(v => <button key={v} type="button" className={`agent-axis-btn ${value.directions[d.id] === v ? 'selected' : ''}`} aria-pressed={value.directions[d.id] === v}
-          title={titles[v]} aria-label={titles[v]} onClick={() => setDirection(d.id, v)}>{v === 0 ? '·' : v < 0 ? '−' : '+'}</button>)}
-        <span className="agent-axis-pole">{high}</span>
-      </div>
-    })}
-  </div>
-}
-
-/** Short "what this rates" tooltips for the seed dimensions; others get a generic low ↔ high line. */
-const DIMENSION_HINTS: Record<string, MessageId> = {
-  roughness: 'editor.agent.dimHint.roughness', weight: 'editor.agent.dimHint.weight', sharpness: 'editor.agent.dimHint.sharpness',
-  intensity: 'editor.agent.dimHint.intensity', regularity: 'editor.agent.dimHint.regularity', continuity: 'editor.agent.dimHint.continuity',
-}
-
 /** Comment (one line, grows) and kept ranges (small). */
-function CandidateNotes({ value, onChange, selection, showRanges }: {
+function CandidateNotes({ value, onChange, selection }: {
   value: CandidateRatingForm; onChange: (patch: Partial<CandidateRatingForm>) => void
   /** The waveform range selected on this candidate (only while it is the auditioned one). */
   selection: { start: number; end: number } | null
-  /** The kept-range control (with "Directions"); recorded ranges always show. */
-  showRanges: boolean
 }) {
   const { t } = useI18n()
   return <div className="agent-notes">
     <GrowingTextarea className="agent-comment" rows={1} placeholder={t('editor.agent.comment')} aria-label={t('editor.agent.comment')} value={value.comment} onChange={comment => onChange({ comment })} />
-    {(showRanges || value.useRange.length > 0) && <span className="agent-use-range">
+    <span className="agent-use-range">
       <button className="agent-icon-btn" disabled={!selection || selection.end <= selection.start} title={t('editor.agent.useRangeHint')}
         onClick={() => { if (selection) onChange({ useRange: addUseRange(value.useRange, selection.start, selection.end) }) }}>{t('editor.agent.useRangeShort')}</button>
       {value.useRange.map((r, i) => <span key={`${r[0]}-${r[1]}`} className="agent-chip">{r[0].toFixed(2)}–{r[1].toFixed(2)}
         <button className="agent-chip-remove" aria-label={t('editor.agent.useRangeRemove')} title={t('editor.agent.useRangeRemove')} onClick={() => onChange({ useRange: value.useRange.filter((_, k) => k !== i) })}>✕</button></span>)}
-    </span>}
+    </span>
   </div>
 }
 
@@ -535,23 +494,20 @@ const trialName = (record: TrialRecord) => record.shortId ?? record.trial.id
  */
 function AgentMessageBox({ record, saved }: { record: TrialRecord | null; saved?: boolean }) {
   const { t } = useI18n()
-  const [text, setText] = useState('')
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null)
   const [sending, setSending] = useState(false)
-  const fallback = !record ? t('editor.agent.msgGeneric') : saved || record.rating ? t('editor.agent.msgSaved', { id: trialName(record) }) : t('editor.agent.msgAbout', { id: trialName(record) })
+  // The message refers to the trial shown (the agent reads its rating.json).
+  const body = !record ? t('editor.agent.msgGeneric') : saved || record.rating ? t('editor.agent.msgSaved', { id: trialName(record) }) : t('editor.agent.msgAbout', { id: trialName(record) })
   const send = async () => {
     setSending(true)
     try {
-      const body = (text.trim() || fallback)
       await useAgentTrialStore.getState().sendAgentMessage(record ? messageFor(record, body) : { text: body })
-      setText(''); setStatus({ ok: true, text: t('editor.agent.msgSent') })
+      setStatus({ ok: true, text: t('editor.agent.msgSent') })
     } catch (error) { setStatus({ ok: false, text: t('editor.agent.msgFailed', { message: message(error) }) }) }
     finally { setSending(false) }
   }
-  return <div className="agent-message" title={t('editor.agent.msgHint')}>
-    <input value={text} placeholder={fallback} aria-label={t('editor.agent.msgSend')} maxLength={4000}
-      onChange={e => { setText(e.target.value); setStatus(null) }} onKeyDown={e => { if (e.key === 'Enter' && !sending) void send() }} />
-    <button type="button" className="toolbar-btn" disabled={sending} onClick={() => void send()}>{t('editor.agent.msgSend')}</button>
+  return <div className="agent-message">
+    <button type="button" className="toolbar-btn" disabled={sending} title={`${t('editor.agent.msgHint')}\n${body}`} onClick={() => void send()}>{t('editor.agent.msgSend')}</button>
     <span className={`agent-message-status ${status && !status.ok ? 'error' : ''}`} role="status">{status?.text ?? ''}</span>
   </div>
 }

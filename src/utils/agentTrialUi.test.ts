@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { EffectParams } from '@/types/waveform'
 import { ratingError, type RatingBody, type TrialRequest } from './agentProtocol'
-import { autoRatingContext, derivedEffectChain, parseWiper, formToRating, jaPolePhrase, ratingFormIssue, ratingToForm, trialKind, visibleDimensions } from './agentTrialUi'
+import { autoRatingContext, derivedEffectChain, parseWiper, formToRating, ratingFormIssue, ratingToForm, trialKind } from './agentTrialUi'
 import type { DeviceInfo } from '@/types/manager'
 
 const trial: TrialRequest = {
@@ -80,18 +80,6 @@ describe('trial kind and rating wording', () => {
     expect(trialKind({}, [null, undefined])).toBeNull()
   })
 
-  it('shows repetition axes only for loops / sequences and never pleasantness', () => {
-    const dims = [{ id: 'weight' }, { id: 'regularity' }, { id: 'continuity' }, { id: 'pleasantness' }]
-    expect(visibleDimensions(dims, 'oneshot').map(d => d.id)).toEqual(['weight'])
-    expect(visibleDimensions(dims, null).map(d => d.id)).toEqual(['weight'])
-    expect(visibleDimensions(dims, 'loop').map(d => d.id)).toEqual(['weight', 'regularity', 'continuity'])
-    expect(visibleDimensions(dims, 'sequence')).toHaveLength(3)
-  })
-
-  it('turns pole words into natural 「もっと…」 phrases', () => {
-    expect(['粗い', '重い', '滑らか', '不快', '快', '規則的', '断続', '連続'].map(jaPolePhrase))
-      .toEqual(['粗く', '重く', '滑らかに', '不快に', '心地よく', '規則的に', '途切れがちに', '途切れなく'])
-  })
 
   it('fills device names and the volume wiper from the helper, empty when unknown', () => {
     const dev = (ip: string, name: string, wiper: number | null, level: number | null, steps: number | null) => ({ ipAddress: ip, name, volumeWiper: wiper, volumeLevel: level, volumeSteps: steps }) as DeviceInfo

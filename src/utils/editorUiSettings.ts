@@ -51,14 +51,12 @@ export interface EditorUiSettings {
   autoSendOnRating: boolean
   /** AI trials panel target filter: '' = all, 'sound', 'haptic'. */
   trialTargetFilter: '' | 'sound' | 'haptic'
-  /** AI trials rating form: show the direction axes (and kept ranges); off = stars and comments only. */
-  ratingShowAxes: boolean
 }
 
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, autoAssignOnRating: true, trialProjectFilter: '', autoSendOnRating: false, trialTargetFilter: '', ratingShowAxes: false,
+  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, autoAssignOnRating: true, trialProjectFilter: '', autoSendOnRating: false, trialTargetFilter: '',
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -107,7 +105,6 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     trialProjectFilter: typeof v.trialProjectFilter === 'string' && v.trialProjectFilter.length <= 200 ? v.trialProjectFilter : d.trialProjectFilter,
     autoSendOnRating: typeof v.autoSendOnRating === 'boolean' ? v.autoSendOnRating : d.autoSendOnRating,
     trialTargetFilter: v.trialTargetFilter === 'sound' || v.trialTargetFilter === 'haptic' ? v.trialTargetFilter : '',
-    ratingShowAxes: typeof v.ratingShowAxes === 'boolean' ? v.ratingShowAxes : d.ratingShowAxes,
   }
 }
 
