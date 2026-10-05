@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   addEventMark, addPositionRoute, fireShot, resetAllReviews, setNone, setReview, setUndecided, addVariant, simultaneousGroups, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
   effectiveEvent, eventSceneCues, jitterGain, listEvents, MaterialPicker, matchesName, materialUsers, needsRouteForm, overwriteUsers,
-  parseEventKey, removeVariant, representativeSound, resolveEventName, cueRoutePositions, setOverride, setRouteClips, setSfxSounds, setVariation, trialEvent, trialsForEvent,
+  parseEventKey, removeVariant, representativeSound, resolveEventName, cueRoutePositions, materialRoutePositions, setOverride, setRouteClips, setSfxSounds, setVariation, trialEvent, trialsForEvent,
 } from './cueEvents'
 import { validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
 import { cueVoices, tableTargets } from './sceneHaptics'
@@ -363,5 +363,22 @@ describe('audition routing of an event', () => {
     const ats = cueRoutePositions(t, sampleLib(), 'footstep')
     expect(ats).toEqual(['pos_neck'])
     expect(routePlaybackTargets(all, ats).devices.map(d => d.ipAddress)).toEqual(['neck'])
+  })
+})
+
+describe('routing of an adjusted material', () => {
+  it('a footstep material adjusted in the editor goes to the neck only (every event using it counts)', async () => {
+    const { routePlaybackTargets } = await import('./playbackDevices')
+    const t = v2Table()
+    t.cues.footstep = { sfx: null, haptics: [{ clip: 'thump', at: 'pos_neck', gain: 1 }] }
+    delete t.cues.detent // thump is also used by detent at pos_chest in the fixture: keep the case to footstep
+    const dev = (ip: string, address: string) => ({ name: ip, ipAddress: ip, address, firmwareVersion: '', online: true, serialConnected: false, volumeWiper: null, volumeLevel: null, volumeSteps: null })
+    const all = [dev('neck', 'player_1/pos_neck/group_1'), dev('lw', 'player_1/pos_l_wrist/group_1'), dev('rw', 'player_1/pos_r_wrist/group_1')]
+    const ats = materialRoutePositions(t, sampleLib(), 'haptic', 'thump', 'footstep')
+    expect(ats).toEqual(['pos_neck'])
+    expect(routePlaybackTargets(all, ats).devices.map(d => d.ipAddress)).toEqual(['neck'])
+    // Used by another cue too: the union of their positions.
+    const shared = v2Table(); shared.cues.footstep = { sfx: null, haptics: [{ clip: 'thump', at: 'pos_neck', gain: 1 }] }
+    expect(materialRoutePositions(shared, sampleLib(), 'haptic', 'thump', 'footstep')).toEqual(expect.arrayContaining(['pos_neck', 'pos_chest']))
   })
 })

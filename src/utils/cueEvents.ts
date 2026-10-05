@@ -472,3 +472,10 @@ export function cueRoutePositions(table: CueTable, lib: SceneLib, name: string):
   if (!r || !e) return null
   return e.haptics.length ? [...new Set(e.haptics.map(route => route.at))] : [defaultAt(lib, r.ref.cue)]
 }
+
+/** Route positions of every event using a material (a clip of the routes / a sound of the sfx), plus `fallbackEvent`'s; null when none resolves. */
+export function materialRoutePositions(table: CueTable, lib: SceneLib, target: 'sound' | 'haptic', wav: string, fallbackEvent: string): string[] | null {
+  const users = materialUsers(table, target === 'haptic' ? 'clip' : 'sound', wav)
+  const all = [...new Set([...users, fallbackEvent])].flatMap(key => cueRoutePositions(table, lib, key) ?? [])
+  return all.length ? [...new Set(all)] : null
+}

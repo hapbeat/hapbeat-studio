@@ -27,7 +27,10 @@ You help the user design vibration (haptic) clips for Hapbeat, a wearable vibrot
 
 \`\`\`
 <editor folder>/
-  .hapbeat-editor/        Studio internal project. Never read or write.
+  .hapbeat-editor/        Studio internal cache (decoded audio, settings). Never read or write.
+  adjust/<project>/<sound|haptic>/
+    <material>.json       "Adjust" of an event material in Studio: its effect chain (versioned).
+    <material>.original.wav  The material before adjusting (16-bit WAV).
   exports/                User exports.
   hapbeat-agent/
     GUIDE.md              This file (generated).

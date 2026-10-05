@@ -21,7 +21,7 @@ import { isDemoMode } from '@/demo/isDemoMode'
 import { lookupMaterials, provenanceLine } from '@/utils/materials'
 import type { WaveformClip } from '@/types/waveform'
 import { onlinePlaybackDevices, resolvePlaybackTargets, routePlaybackTargets } from '@/utils/playbackDevices'
-import { cueRoutePositions } from '@/utils/cueEvents'
+import { cueRoutePositions, materialRoutePositions } from '@/utils/cueEvents'
 import { handlePlaybackShortcut, isTypingTarget } from '@/utils/playbackShortcut'
 import { useEditorSettingsFolderSync, type SettingsSyncNotice } from '@/hooks/useEditorSettingsFolderSync'
 import { EditorContext, type EditorShared } from './editorContext'
@@ -35,7 +35,7 @@ import { showDockPanel } from '@/utils/dockPanels'
 import { trialTarget } from '@/utils/agentProtocol'
 import { waveformOnPc } from '@/utils/agentTrialUi'
 import { DecideDialog } from './DecideDialog'
-import { useMaterialWriteBack } from './eventEditing'
+import { useAdjustPersistence, useMaterialWriteBack } from './eventEditing'
 import { openEventDefault, repeatBuffer, useDecidedSoundSync } from './eventAudio'
 import { useAuditionPlan } from './EditorScenePanel'
 
@@ -117,6 +117,8 @@ export function WaveformEditor({ active }: { active: boolean }) {
   })
   const sceneTable = useSceneStore(state => state.table)
   const sceneLib = useSceneStore(state => state.lib)
+  /** The event material being adjusted (its editor document is selected), if any. */
+  const adjusting = useEditorSettings(state => !audition && !eventPreview && s.clip ? state.materialLinks[s.clip.id] : undefined)
   const routeAts = useMemo(() => {
     if (!sceneTable || !sceneLib) return null
     if (audition) {
@@ -124,10 +126,14 @@ export function WaveformEditor({ active }: { active: boolean }) {
       const [project, cue] = routedCue.split('\n')
       return project === sceneLib.project_name ? cueRoutePositions(sceneTable, sceneLib, cue) : null
     }
-    return eventPreview ? cueRoutePositions(sceneTable, sceneLib, eventPreview.event) : null
-  }, [sceneTable, sceneLib, audition, routedCue, eventPreview])
+    if (eventPreview) return cueRoutePositions(sceneTable, sceneLib, eventPreview.event)
+    // An adjusted material goes where its events' routes go (every event using it).
+    return adjusting && adjusting.project === sceneLib.project_name ? materialRoutePositions(sceneTable, sceneLib, adjusting.target, adjusting.wav, adjusting.event) : null
+  }, [sceneTable, sceneLib, audition, routedCue, eventPreview, adjusting])
   const routing = useMemo(() => routePlaybackTargets(isConnected ? resolvePlaybackTargets(devices, kitSelectedIps) : [], routeAts), [isConnected, devices, kitSelectedIps, routeAts])
-  const targets = useMemo(() => isConnected && sendHaptics && !auditionIsSound && eventPreview?.target !== 'sound' ? routing.devices.map(device => device.ipAddress) : [], [isConnected, sendHaptics, auditionIsSound, eventPreview?.target, routing])
+  // A sound (AI sound candidate, event sound, adjusted sound material) plays on the PC only.
+  const soundShown = auditionIsSound || eventPreview?.target === 'sound' || adjusting?.target === 'sound'
+  const targets = useMemo(() => isConnected && sendHaptics && !soundShown ? routing.devices.map(device => device.ipAddress) : [], [isConnected, sendHaptics, soundShown, routing])
   const targetKey = targets.join(',')
   const shownBuffer = audition ? audition.buffer : eventPreview ? eventPreview.buffer : original ? s.clip?.originalBuffer : previewActive ? (preview.buffer ?? s.clip?.buffer) : s.clip?.buffer
   // Auditions (AI candidate / event material) play at the scene's timing: on every target firing, without jitter
@@ -138,6 +144,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const player = useMemo(() => new EditorBufferPlayer(null, undefined, s.setError), [s.clip?.id, original, auditionKey])
   useEffect(() => {player.activate(); return () => player.dispose()}, [player])
   useDecidedSoundSync(player)
+  useAdjustPersistence()
   // An adjusted event material: what its chain renders (live preview, or the clip without pending changes) goes back to the WAV.
   useMaterialWriteBack(previewActive ? (preview.status === 'ready' ? preview.buffer ?? null : null) : pendingChain ? null : s.clip?.buffer ?? null,
     previewActive && preview.status === 'error' ? preview.error : null)
@@ -238,7 +245,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   useEffect(() => { player.setMuted(muted) }, [player, muted])
   // A haptic audition goes to the devices only; the PC plays the event's representative sound with it (not the haptic waveform).
   const hapticOnPc = useEditorSettings(state => state.hapticOnPc)
-  const hapticAudition = (!!audition && !auditionIsSound) || (!audition && eventPreview?.target === 'haptic')
+  const hapticAudition = (!!audition && !auditionIsSound) || (!audition && eventPreview?.target === 'haptic') || adjusting?.target === 'haptic'
   useEffect(() => { player.setOutput(waveformOnPc({ hapticAudition, hapticOnPc })) }, [player, hapticAudition, hapticOnPc])
   useEffect(() => { setOriginal(false); useAgentTrialStore.getState().clearAudition(); useEventStore.getState().clearPreview() }, [s.clip?.id])
   // MCP `audition` with play: true — the usual playback path (selected haptic targets, PC audio per the mute toggle).
