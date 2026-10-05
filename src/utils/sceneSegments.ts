@@ -99,16 +99,19 @@ export function toFirstPlay(sel: { start: number; end: number } | null, offsets:
 }
 
 /**
- * Where firing `ev` is in its run (the same name firing again within CHAIN_GAP_SEC): 0 for the first, 1 for the
- * last, linear by count in between (a variant's `rampTo`; the game interpolates by how far the scene has gone).
- * A single firing is 0.
+ * Which firing of its run `ev` is (the same name firing again within CHAIN_GAP_SEC) and how many the run has —
+ * a variant's ramp / rampSteps (the game interpolates by how far the scene has gone). A lone firing: 0 of 1.
  */
-export function runProgress(events: readonly SceneEvent[], ev: { t: number; name: string }): number {
+export function runPosition(events: readonly SceneEvent[], ev: { t: number; name: string }): { index: number; count: number } {
   const times = events.filter(e => e.name === ev.name).map(e => e.t).sort((a, b) => a - b)
   const i = times.indexOf(ev.t)
-  if (i < 0) return 0
+  if (i < 0) return { index: 0, count: 1 }
   let first = i, last = i
   while (first > 0 && times[first] - times[first - 1] <= CHAIN_GAP_SEC) first--
   while (last < times.length - 1 && times[last + 1] - times[last] <= CHAIN_GAP_SEC) last++
-  return last === first ? 0 : (i - first) / (last - first)
+  return { index: i - first, count: last - first + 1 }
+}
+/** The longest run of `name` in the recording (how many rampSteps a variant needs); 0 when it never fires. */
+export function longestRun(events: readonly SceneEvent[], name: string): number {
+  return Math.max(0, ...events.filter(e => e.name === name).map(e => runPosition(events, e).count))
 }

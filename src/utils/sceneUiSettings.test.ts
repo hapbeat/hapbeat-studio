@@ -4,10 +4,11 @@ import { DEFAULT_SCENE_UI, parseSceneUiFile, parseStoredSceneUi, resolveSceneUi,
 const layout = { grid: { root: {} }, panels: { video: {} } }
 
 describe('scene UI settings', () => {
-  it('keeps valid fields, clamps the lead and never stores haptic send', () => {
-    const s = sanitizeSceneUi({ pcSound: false, hapticLeadMs: 900, loop: 'x', dockLayout: layout, sendHaptics: true })
-    expect(s).toEqual({ ...DEFAULT_SCENE_UI, pcSound: false, hapticLeadMs: 400, dockLayout: layout })
-    expect('sendHaptics' in s).toBe(false)
+  it('keeps valid fields, clamps the lead and keeps haptic send (on by default)', () => {
+    const s = sanitizeSceneUi({ pcSound: false, hapticLeadMs: 900, loop: 'x', dockLayout: layout, sendHaptics: false })
+    expect(s).toEqual({ ...DEFAULT_SCENE_UI, pcSound: false, hapticLeadMs: 400, dockLayout: layout, sendHaptics: false })
+    expect(DEFAULT_SCENE_UI.sendHaptics).toBe(true)
+    expect(sanitizeSceneUi({}).sendHaptics).toBe(true)
   })
 
   it('round-trips the file format and rejects untagged files', () => {

@@ -4,7 +4,7 @@ import { useSceneSettings } from '@/stores/sceneSettings'
 import { clipEnd, focusEvent, itemEvents, levelAt, offsetOf, type SceneItem, type VisibleEvent } from '@/utils/sceneData'
 import { isLoopCue, routeClips, sfxSounds, type CueRoute, type CueSfx, soundIntensity } from '@/utils/sceneCueTable'
 import { effectiveEvent, fireShot, MaterialPicker, resolveEventName } from '@/utils/cueEvents'
-import { runProgress } from '@/utils/sceneSegments'
+import { runPosition } from '@/utils/sceneSegments'
 import { buildLoopVoices, shotVoices, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, SceneHapticMixer, targetsOf, type HapticDevice, type HelperSend } from '@/utils/sceneHaptics'
 
 export const SPEEDS = [1, 0.5, 0.25]
@@ -166,8 +166,8 @@ export class SceneRuntime {
     const s = useSceneStore.getState(), resolved = s.table && resolveEventName(s.table, ev.name), e = resolved && s.table && effectiveEvent(s.table, resolved.ref)
     if (!e || !s.table || !s.lib) return
     const loop = isLoopCue(s.lib, e.ref.cue)
-    // A variant's ramp (rampTo) by which firing of its run this is in the recording.
-    const shot = fireShot(e, loop, this.picker, Math.random, 't' in ev && s.data ? runProgress(s.data.full.events, ev) : 0)
+    // A variant's ramp (rampTo / rampCurve / rampSteps) by which firing of its run this is in the recording.
+    const shot = fireShot(e, loop, this.picker, Math.random, 't' in ev && s.data ? runPosition(s.data.full.events, ev) : undefined)
     if (shot.sound && !loop) this.playSfx(shot.sound, shot.soundGain, delay, false, 2 ** (shot.pitchSt / 12))
     if (this.firedListeners.size) {
       const materials = [...(shot.sound && !loop ? [shot.sound] : []), ...shot.routes.map(r => r.clip)]

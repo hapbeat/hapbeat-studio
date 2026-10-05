@@ -4,14 +4,14 @@ import { useSceneStore } from '@/stores/sceneStore'
 import { useEventStore } from '@/stores/eventStore'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { allEventKeys, effectiveEvent, resolveEventName, scaleAt } from '@/utils/cueEvents'
-import { occurrences, runProgress } from '@/utils/sceneSegments'
+import { occurrences, runPosition } from '@/utils/sceneSegments'
 import { useScene } from './sceneContext'
 
 /**
  * Every firing of one event in the recording (DEC-085: moments are checked here, not in the
  * editor). ▶ plays the full replay from 1 s before it and selects the cue, so the Event panel edits that
  * event's values (multipliers, materials — per event, never per moment). Each row shows the firing's effective
- * multiplier (a variant's sfxVolume / hapticsGain ramped to rampTo by which firing of its run it is).
+ * multiplier (a variant's sfxVolume / hapticsGain ramped to rampTo along rampCurve, or its rampSteps, by which firing of its run it is).
  * "Reassign" sends the agent a request to make that firing another event / variant
  * (hapbeat-agent-message@1 `reassign`: a change of the game's routing).
  */
@@ -31,8 +31,8 @@ export function SceneOccurrences() {
   const resolved = table && name ? resolveEventName(table, name) : null
   const effective = resolved && table ? effectiveEvent(table, resolved.ref) : null
   const multiplier = (at: number) => {
-    if (!effective || !data || (effective.scale.sfx === 1 && effective.scale.haptics === 1 && effective.scale.rampTo === null)) return null
-    const m = scaleAt(effective, runProgress(data.full.events, { t: at, name: name! }))
+    if (!effective || !data || (effective.scale.sfx === 1 && effective.scale.haptics === 1 && effective.scale.rampTo === null && !effective.scale.steps)) return null
+    const m = scaleAt(effective, runPosition(data.full.events, { t: at, name: name! }))
     return m.sfx === m.haptics ? `×${m.sfx.toFixed(2)}` : `♪×${m.sfx.toFixed(2)} ≋×${m.haptics.toFixed(2)}`
   }
   const [open, setOpen] = useState<number | null>(null)
@@ -53,10 +53,10 @@ export function SceneOccurrences() {
         <div className="scene-occ-row">
           <span className="scene-num">{i + 1}</span>
           <button type="button" className="scene-icon-btn" title={t('scene.occ.playHint')} onClick={e => { e.currentTarget.blur(); play(at) }}>▶ {at.toFixed(2)} s</button>
+          <button type="button" className="scene-icon-btn" aria-expanded={open === i} title={t('scene.occ.reassignHint')} onClick={() => setOpen(open === i ? null : i)}>{t('scene.occ.reassign')}</button>
           <span className="scene-grow" />
           {multiplier(at) && <small className="scene-dim" title={t('scene.occ.multiplierHint')}>{multiplier(at)}</small>}
           {sent[`${name}@${at}`] && <span className="scene-on">{t('scene.occ.sent')}</span>}
-          <button type="button" className="scene-icon-btn" aria-expanded={open === i} title={t('scene.occ.reassignHint')} onClick={() => setOpen(open === i ? null : i)}>{t('scene.occ.reassign')}</button>
         </div>
         {open === i && table && <ReassignForm from={name} at={at} keys={allEventKeys(table).filter(k => k !== name)}
           onSent={() => { setSent(s => ({ ...s, [`${name}@${at}`]: true })); setOpen(null); setStatus(t('scene.occ.sentStatus', { name, at: at.toFixed(2) })) }}

@@ -1,9 +1,8 @@
 /**
- * Scene tab UI preferences (dock layout, PC sound, haptic lead, loop). Kept in
+ * Scene tab UI preferences (dock layout, PC sound, haptic lead, loop, send haptics). Kept in
  * three places like the editor's: localStorage, `Saved/HapticViewer/studio-scene-ui.json`
- * in the opened game project, and a user-exported JSON file. "Send haptics"
- * is deliberately not stored: it starts OFF on every load (viewer behaviour,
- * so opening the tab never streams to a device by surprise).
+ * in the opened game project, and a user-exported JSON file. "Send haptics" is on by
+ * default and keeps its last state across reloads.
  */
 export const SCENE_UI_FORMAT = 'hapbeat-scene-ui@1'
 export const SCENE_UI_STORAGE_KEY = 'hapbeat-scene-settings'
@@ -15,11 +14,13 @@ export interface SceneUiSettings {
   hapticLeadMs: number
   /** Loop the selected clip. */
   loop: boolean
+  /** Send haptics to the devices during Scene playback (on by default; kept across reloads). */
+  sendHaptics: boolean
   /** dockview `toJSON()` output; null = default layout. */
   dockLayout: Record<string, unknown> | null
 }
 
-export const DEFAULT_SCENE_UI: SceneUiSettings = { pcSound: true, hapticLeadMs: 0, loop: true, dockLayout: null }
+export const DEFAULT_SCENE_UI: SceneUiSettings = { pcSound: true, hapticLeadMs: 0, loop: true, sendHaptics: true, dockLayout: null }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const isDockLayout = (value: unknown): value is Record<string, unknown> => isRecord(value) && isRecord(value.grid) && isRecord(value.panels)
@@ -32,6 +33,7 @@ export function sanitizeSceneUi(value: unknown): SceneUiSettings {
     pcSound: typeof v.pcSound === 'boolean' ? v.pcSound : d.pcSound,
     hapticLeadMs: typeof v.hapticLeadMs === 'number' && Number.isFinite(v.hapticLeadMs) ? Math.max(-200, Math.min(400, v.hapticLeadMs)) : d.hapticLeadMs,
     loop: typeof v.loop === 'boolean' ? v.loop : d.loop,
+    sendHaptics: typeof v.sendHaptics === 'boolean' ? v.sendHaptics : d.sendHaptics,
     dockLayout: isDockLayout(v.dockLayout) ? v.dockLayout : d.dockLayout,
   }
 }

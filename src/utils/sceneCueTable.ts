@@ -35,8 +35,12 @@ export interface CueVariant {
   description?: string; sfx?: CueSfx | null; haptics?: CueRoute[]; variation?: CueVariation; review?: CueReview
   /** A variant that inherits the materials (no own sfx / haptics): scene multipliers on the inherited sfx volume / every route gain (0..2). */
   sfxVolume?: number; hapticsGain?: number
-  /** Over a run of firings the multipliers go linearly from sfxVolume / hapticsGain (default 1) to this (0..2). */
+  /** Over a run of firings the multipliers go from sfxVolume / hapticsGain (default 1) to this (0..2), shaped by `rampCurve`. */
   rampTo?: number
+  /** The shape of the ramp (default linear; needs rampTo). */
+  rampCurve?: RampCurve
+  /** One multiplier per firing of a run (1–64, 0..2; past the end the last one) — instead of rampTo / rampCurve. */
+  rampSteps?: number[]
   [key: string]: unknown
 }
 /**
@@ -49,6 +53,9 @@ export interface CueEntry {
   review?: CueReview
   [key: string]: unknown
 }
+export const RAMP_CURVES = ['linear', 'easeIn', 'easeOut', 'easeInOut', 'sigmoid'] as const
+export type RampCurve = typeof RAMP_CURVES[number]
+
 /** Variant names (`<cue>:<variant>` in the game and in viewer-data events). */
 export const VARIANT_NAME = /^[a-z][a-z0-9_]*$/
 /** Ranges of the numeric `variation` fields. */
@@ -93,6 +100,8 @@ export function parseCueTable(text: string): CueTable {
         if (variant.sfx !== undefined && variant.sfx !== null && !isRecord(variant.sfx)) throw new Error(`cue table: ${at}.sfx must be an object or null`)
         if (variant.variation !== undefined && !isRecord(variant.variation)) throw new Error(`cue table: ${at}.variation must be an object`)
         for (const k of ['sfxVolume', 'hapticsGain', 'rampTo'] as const) if (variant[k] !== undefined && typeof variant[k] !== 'number') throw new Error(`cue table: ${at}.${k} must be a number`)
+        if (variant.rampCurve !== undefined && typeof variant.rampCurve !== 'string') throw new Error(`cue table: ${at}.rampCurve must be a string`)
+        if (variant.rampSteps !== undefined && !(Array.isArray(variant.rampSteps) && variant.rampSteps.every(x => typeof x === 'number'))) throw new Error(`cue table: ${at}.rampSteps must be a list of numbers`)
       }
     }
   }
@@ -177,6 +186,15 @@ function validateVariantScale(err: string[], label: string, v: CueVariant): void
   if (v.sfxVolume !== undefined && v.sfx !== undefined) err.push(`${label}: sfxVolume is for an inherited sfx (this variant has its own sfx)`)
   if (v.hapticsGain !== undefined && v.haptics !== undefined) err.push(`${label}: hapticsGain is for inherited haptics (this variant has its own haptics)`)
   if (v.rampTo !== undefined && v.sfx !== undefined && v.haptics !== undefined) err.push(`${label}: rampTo needs an inherited sfx or haptics`)
+  if (v.rampCurve !== undefined) {
+    if (!(RAMP_CURVES as readonly string[]).includes(v.rampCurve)) err.push(`${label}: rampCurve must be one of ${RAMP_CURVES.join(', ')}`)
+    if (v.rampTo === undefined) err.push(`${label}: rampCurve needs rampTo`)
+  }
+  if (v.rampSteps !== undefined) {
+    if (v.rampSteps.length < 1 || v.rampSteps.length > 64 || v.rampSteps.some(x => !inRange(x, 0, 2))) err.push(`${label}: rampSteps must be 1-64 numbers 0..2`)
+    if (v.rampTo !== undefined || v.rampCurve !== undefined) err.push(`${label}: rampSteps replaces rampTo / rampCurve (not both)`)
+    if (v.sfx !== undefined && v.haptics !== undefined) err.push(`${label}: rampSteps needs an inherited sfx or haptics`)
+  }
 }
 
 /**

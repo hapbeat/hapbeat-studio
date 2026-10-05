@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
-import { isLoopCue, pairedProblem, PICK_MODES, routeClips, sfxSounds, soundAllowed, VARIANT_NAME, clipsForCue, type CueTable, type CueVariation, type VariationNumberKey } from '@/utils/sceneCueTable'
+import { isLoopCue, pairedProblem, PICK_MODES, routeClips, sfxSounds, soundAllowed, VARIANT_NAME, clipsForCue, type CueTable, type CueVariation, type VariationNumberKey, RAMP_CURVES, type RampCurve } from '@/utils/sceneCueTable'
 import {
   addVariant, effectiveEvent, eventKey, pairedClips, removeVariant, resolveEventName, setOverride, setOwnSfxVolume, setRouteClips, setSfxSounds, setVariation,
-  setVariantKind, setVariantScale, updateOwnRoute, variantKind,
+  setVariantKind, setVariantScale, updateOwnRoute, variantKind, curveAt, rampValue,
   type EffectiveEvent, type OverridableField,
 } from '@/utils/cueEvents'
-import { sceneSegment } from '@/utils/sceneSegments'
+import { longestRun, sceneSegment } from '@/utils/sceneSegments'
 import { MaterialList } from '@/components/waveform/MaterialList'
 import { CuePicker, NumberField, useAtLabel } from './SceneCuePanels'
 import { useScene } from './sceneContext'
@@ -99,12 +99,20 @@ function VariantScale({ e, edit }: { e: EffectiveEvent; edit: Edit }) {
   const { t } = useI18n()
   const table = useSceneStore(s => s.table)
   const kind = variantKind(e), v = table?.cues[e.ref.cue]?.variants?.[e.ref.variant!] ?? {}
-  const ramp = typeof v.rampTo === 'number'
+  const data = useSceneStore(s => s.data)
+  const ramp = typeof v.rampTo === 'number', steps = Array.isArray(v.rampSteps) ? v.rampSteps : null, gradual = ramp || !!steps
+  const curve: RampCurve = v.rampCurve ?? 'linear'
   const rampField = <NumberField value={ramp ? v.rampTo as number : ''} min={0} max={2} step={0.05} label={t('scene.variant.rampTo')} onCommit={x => edit(tb => setVariantScale(tb, e.ref, { rampTo: x }))} />
+  /** "One by one": as many fields as the longest run of this variant in the recording, filled from the current curve. */
+  const toSteps = () => {
+    const count = (data ? longestRun(data.full.events, eventKey(e.ref)) : 0) || 4
+    const start = !e.own.sfx ? e.scale.sfx : e.scale.haptics, to = e.scale.rampTo ?? 1
+    return Array.from({ length: Math.min(64, count) }, (_, index) => Math.round(rampValue(start, to, curve, { index, count }) * 100) / 100)
+  }
   // One line per inherited material: "Sound × 0.3 → 1.0" (the ramp target only while "gradually" is on).
   const row = (key: 'sfxVolume' | 'hapticsGain') => <div key={key} className="scene-row scene-variant-scale" title={`${t(`scene.variant.${key}.hint` as MessageId)}\n${key}${ramp ? ' → rampTo' : ''}`}>
     <span className="scene-grow">{t(`scene.variant.${key}` as MessageId)}</span>
-    <NumberField value={typeof v[key] === 'number' ? v[key] as number : 1} min={0} max={2} step={0.05} label={t(`scene.variant.${key}` as MessageId)}
+    <NumberField value={typeof v[key] === 'number' ? v[key] as number : 1} min={0} max={2} step={0.05} disabled={!!steps} label={t(`scene.variant.${key}` as MessageId)}
       onCommit={x => edit(tb => setVariantScale(tb, e.ref, { [key]: x === 1 ? undefined : x }))} />
     {ramp && <><span aria-hidden="true">→</span>{rampField}</>}
   </div>
@@ -119,11 +127,37 @@ function VariantScale({ e, edit }: { e: EffectiveEvent; edit: Edit }) {
       {!e.own.sfx && row('sfxVolume')}
       {!e.own.haptics && row('hapticsGain')}
       <label className="scene-row" title={`${t('scene.variant.rampTo.hint')}\nrampTo`}>
-        <input type="checkbox" checked={ramp} onChange={ev => edit(tb => setVariantScale(tb, e.ref, { rampTo: ev.target.checked ? 1 : undefined }))} />
+        <input type="checkbox" checked={gradual} onChange={ev => edit(tb => setVariantScale(tb, e.ref, ev.target.checked ? { rampTo: 1 } : { rampTo: undefined, rampCurve: undefined, rampSteps: undefined }))} />
         {t('scene.variant.ramp')}
       </label>
+      {gradual && <div className="scene-ramp">
+        {!steps && <label className="scene-row" title={`${t('scene.variant.curve.hint')}\nrampCurve`}>
+          <span className="scene-dim">{t('scene.variant.curve')}</span>
+          <select value={curve} onChange={ev => { const c = ev.target.value as RampCurve; ev.target.blur(); edit(tb => setVariantScale(tb, e.ref, { rampCurve: c })) }}>
+            {RAMP_CURVES.map(c => <option key={c} value={c}>{t(`scene.variant.curve.${c}` as MessageId)}</option>)}
+          </select>
+          <CurvePreview curve={curve} />
+        </label>}
+        <label className="scene-row" title={`${t('scene.variant.steps.hint')}\nrampSteps`}>
+          <input type="checkbox" checked={!!steps} onChange={ev => edit(tb => setVariantScale(tb, e.ref, ev.target.checked
+            ? { rampSteps: toSteps(), rampTo: undefined, rampCurve: undefined } : { rampSteps: undefined, rampTo: steps?.[steps.length - 1] ?? 1 }))} />
+          {t('scene.variant.steps')}
+        </label>
+        {steps && <div className="scene-ramp-steps">{steps.map((x, i) => <label key={i}><span className="scene-dim">{i + 1}</span>
+          <NumberField value={x} min={0} max={2} step={0.05} label={t('scene.variant.step', { n: i + 1 })}
+            onCommit={value => edit(tb => setVariantScale(tb, e.ref, { rampSteps: steps.map((y, k) => k === i ? value : y) }))} /></label>)}</div>}
+      </div>}
     </>}
   </>
+}
+
+/** The ramp shape (curveAt) as a small line, 0 → 1 left to right, bottom to top. */
+function CurvePreview({ curve }: { curve: RampCurve }) {
+  const points = Array.from({ length: 25 }, (_, i) => `${(i / 24 * 116 + 2).toFixed(1)},${(26 - curveAt(curve, i / 24) * 24).toFixed(1)}`).join(' ')
+  return <svg className="scene-curve" width={120} height={28} viewBox="0 0 120 28" aria-hidden="true">
+    <rect x={2} y={2} width={116} height={24} fill="none" stroke="currentColor" strokeOpacity={0.2} />
+    <polyline points={points} fill="none" stroke="currentColor" strokeWidth={1.5} />
+  </svg>
 }
 
 /** For a variant: "inherited from the cue" with an override button, or "own" with a button back to inheriting. */

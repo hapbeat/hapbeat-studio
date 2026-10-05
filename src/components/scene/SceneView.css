@@ -95,3 +95,9 @@
 .scene-event select { max-width: 100%; }
 .scene-event-paired { margin-top: 6px; display: flex; flex-direction: column; gap: 2px; }
 .scene-event-pairs { margin: 0; padding-left: 16px; font-size: 12px; color: var(--text-secondary); }
+/* "Change gradually": the curve (select + a small preview) and the one-by-one values. */
+.scene-ramp { display: flex; flex-direction: column; gap: 4px; padding-left: 20px; }
+.scene-curve { flex: none; color: var(--accent-light, #b9a8ff); }
+.scene-ramp-steps { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.scene-ramp-steps label { display: inline-flex; align-items: center; gap: 3px; }
+.scene-ramp-steps .scene-number { width: 52px; }

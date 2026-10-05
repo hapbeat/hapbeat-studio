@@ -2,7 +2,7 @@ import type { SceneLib } from './sceneData'
 import {
   type CueReview, type ReviewState,
   clampNumber, isLoopCue, soundAllowed, soundIntensity, positionsForCue, routeClips, sfxSounds, VARIANT_NAME,
-  type CueEntry, type CueRoute, type CueSfx, type CueTable, type CueVariant, type CueVariation, type PickMode,
+  type CueEntry, type CueRoute, type CueSfx, type CueTable, type CueVariant, type CueVariation, type PickMode, type RampCurve,
 } from './sceneCueTable'
 
 /**
@@ -47,9 +47,11 @@ export interface EffectiveEvent {
   /** Decided (key present: a material, or none = null / []) vs undecided (no key on the cue). */
   decided: { sfx: boolean; haptics: boolean }
   /** A variant's scene multipliers on what it inherits (1 = none; own fields are never scaled) and its ramp target (null = none). */
-  scale: { sfx: number; haptics: number; rampTo: number | null }
+  scale: VariantScale
 }
-const NO_SCALE = { sfx: 1, haptics: 1, rampTo: null }
+/** A variant's multipliers: start values, and a ramp (to rampTo along rampCurve) or one value per firing (steps). */
+export interface VariantScale { sfx: number; haptics: number; rampTo: number | null; curve: RampCurve; steps: number[] | null }
+const NO_SCALE: VariantScale = { sfx: 1, haptics: 1, rampTo: null, curve: 'linear', steps: null }
 
 const variantOf = (table: CueTable, ref: EventRef): CueVariant | null => ref.variant === null ? null : table.cues[ref.cue]?.variants?.[ref.variant] ?? null
 
@@ -67,7 +69,8 @@ export function effectiveEvent(table: CueTable, ref: EventRef): EffectiveEvent |
   return { ref, description: v.description ?? cue.description, sfx: own.sfx ? v.sfx ?? null : cue.sfx ?? null, haptics: own.haptics ? v.haptics! : cue.haptics ?? [], variation: own.variation ? v.variation : cue.variation, own,
     review: { sfx: state(own.sfx ? v : cue, 'sfx'), haptics: state(own.haptics ? v : cue, 'haptics') },
     decided: { sfx: own.sfx || cueDecided.sfx, haptics: own.haptics || cueDecided.haptics },
-    scale: { sfx: own.sfx ? 1 : v.sfxVolume ?? 1, haptics: own.haptics ? 1 : v.hapticsGain ?? 1, rampTo: own.sfx && own.haptics ? null : v.rampTo ?? null } }
+    scale: { sfx: own.sfx ? 1 : v.sfxVolume ?? 1, haptics: own.haptics ? 1 : v.hapticsGain ?? 1, rampTo: own.sfx && own.haptics ? null : v.rampTo ?? null,
+      curve: v.rampCurve ?? 'linear', steps: own.sfx && own.haptics ? null : v.rampSteps ?? null } }
 }
 
 /** Undecided (no key) / decided as none (null / []) / a material; each decided state is tentative or approved. */
@@ -209,7 +212,7 @@ function edited(table: CueTable, ref: EventRef, change: (entry: CueEntry | CueVa
     const v = entry as CueVariant
     if (v.sfx !== undefined) delete v.sfxVolume
     if (v.haptics !== undefined) delete v.hapticsGain
-    if (v.sfx !== undefined && v.haptics !== undefined) delete v.rampTo
+    if (v.sfx !== undefined && v.haptics !== undefined) { delete v.rampTo; delete v.rampCurve; delete v.rampSteps }
   }
   return next
 }
@@ -292,10 +295,18 @@ export function setOverride(table: CueTable, ref: EventRef, field: OverridableFi
   })
 }
 /** A variant's scene multipliers (DEC-086 3rd layer for inherited materials): undefined clears one. */
-export function setVariantScale(table: CueTable, ref: EventRef, patch: Partial<Pick<CueVariant, 'sfxVolume' | 'hapticsGain' | 'rampTo'>>): CueTable {
+export function setVariantScale(table: CueTable, ref: EventRef, patch: Partial<Pick<CueVariant, 'sfxVolume' | 'hapticsGain' | 'rampTo' | 'rampCurve' | 'rampSteps'>>): CueTable {
   if (ref.variant === null) return table
   return edited(table, ref, entry => {
-    for (const [k, value] of Object.entries(patch) as [keyof typeof patch, number | undefined][]) if (value === undefined) delete entry[k]; else entry[k] = clampNumber(value, 0, 2)
+    for (const [k, value] of Object.entries(patch)) {
+      if (value === undefined) delete entry[k]
+      else if (k === 'rampSteps') entry.rampSteps = (value as number[]).slice(0, 64).map(x => Math.round(clampNumber(x, 0, 2) * 1000) / 1000)
+      else if (k === 'rampCurve') entry.rampCurve = value as RampCurve
+      else entry[k] = clampNumber(value as number, 0, 2)
+    }
+    // linear is the default (not written); a curve or steps without their ramp make no sense.
+    if (entry.rampCurve === 'linear') delete entry.rampCurve
+    if (entry.rampTo === undefined) delete entry.rampCurve
   })
 }
 /** Variant kinds: "materials" (own sfx + haptics, a copy of the inherited ones) or "scale" (inherits both; multipliers only). */
@@ -488,17 +499,34 @@ const jitter = (amount: number | undefined, random: () => number) => amount ? (r
 /** One firing: materials picked per `variation.pick` (never the previous one at random), gain / pitch / rate jitter drawn. Loop cues: only the gain jitter. */
 /**
  * One firing as the game plays it: pick (variation.pick), paired index, gain / pitch / rate jitter, and a variant's
- * multipliers on what it inherits (sfxVolume / hapticsGain), ramped to `rampTo` over a run (`progress` 0..1: which
- * firing of the run this is; Studio interpolates by count, see runProgress).
+ * multipliers on what it inherits (sfxVolume / hapticsGain), ramped to `rampTo` along `rampCurve` over a run, or
+ * `rampSteps` per firing (`run`: which firing of how many; Studio counts firings, see runPosition).
  */
 /** A variant's multipliers at `progress` (0..1 through its run) on what it inherits: 1 for own materials and for a cue. */
-export function scaleAt(e: EffectiveEvent, progress: number): { sfx: number; haptics: number } {
-  const at = (start: number) => e.scale.rampTo === null ? start : start + (e.scale.rampTo - start) * Math.max(0, Math.min(1, progress))
-  return { sfx: e.own.sfx ? 1 : at(e.scale.sfx), haptics: e.own.haptics ? 1 : at(e.scale.haptics) }
+export interface RunPosition { index: number; count: number }
+const ONE: RunPosition = { index: 0, count: 1 }
+const SIGMOID_K = 6
+/** The ramp shapes on t ∈ [0, 1] → [0, 1]: easeIn t², easeOut 1−(1−t)², easeInOut smoothstep, sigmoid a steep tanh S. */
+export function curveAt(curve: RampCurve, t: number): number {
+  const x = Math.max(0, Math.min(1, t))
+  switch (curve) {
+    case 'easeIn': return x * x
+    case 'easeOut': return 1 - (1 - x) * (1 - x)
+    case 'easeInOut': return x * x * (3 - 2 * x)
+    case 'sigmoid': return 0.5 + 0.5 * Math.tanh(SIGMOID_K * (x - 0.5)) / Math.tanh(SIGMOID_K / 2)
+    default: return x
+  }
 }
-export function fireShot(e: EffectiveEvent, loop: boolean, picker: MaterialPicker, random: () => number = Math.random, progress = 0): Shot {
+/** A ramp's multiplier at firing `run.index` of `run.count` from `start` (t = index / (count − 1)). */
+export const rampValue = (start: number, to: number, curve: RampCurve, run: RunPosition) => start + (to - start) * curveAt(curve, run.count > 1 ? run.index / (run.count - 1) : 0)
+export function scaleAt(e: EffectiveEvent, run: RunPosition = ONE): { sfx: number; haptics: number } {
+  const s = e.scale
+  const at = (start: number) => s.steps?.length ? s.steps[Math.min(run.index, s.steps.length - 1)] : s.rampTo === null ? start : rampValue(start, s.rampTo, s.curve, run)
+  return { sfx: e.own.sfx ? 1 : at(s.sfx), haptics: e.own.haptics ? 1 : at(s.haptics) }
+}
+export function fireShot(e: EffectiveEvent, loop: boolean, picker: MaterialPicker, random: () => number = Math.random, run: RunPosition = ONE): Shot {
   const v = e.variation ?? {}, key = eventKey(e.ref)
-  const { sfx: sfxScale, haptics: hapticScale } = scaleAt(e, progress)
+  const { sfx: sfxScale, haptics: hapticScale } = scaleAt(e, run)
   const jitterDb = jitter(v.gainJitterDb, random), gain = 10 ** (jitterDb / 20)
   const pitchSt = loop ? 0 : jitter(v.pitchJitterSt, random)
   const rate = loop ? 1 : 1 + jitter(v.rateJitterPct, random) / 100
