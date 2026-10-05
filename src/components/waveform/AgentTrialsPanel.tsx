@@ -318,7 +318,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
     const added: string[] = [], excluded: { candidate: string; reason: string }[] = [], failures: string[] = []
     for (const id of ids) {
       try {
-        const r = await runDecision({ target, source: { kind: 'candidate', trialId: trial.id, candidateId: id }, events, name: null, at: null, gain: 1 })
+        const r = await runDecision({ target, source: { kind: 'candidate', trialId: trial.id, candidateId: id }, events, name: null, at: null })
         if (r.ok) added.push(r.result.name)
         // A refusal that is not an error (the same sound is already there) is an exclusion, not a failure.
         else if (r.notice.error) failures.push(t(r.notice.id, r.notice.params))

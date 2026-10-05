@@ -1245,6 +1245,9 @@ export const messages = defineMessages({
   'events.adjustHint': { ja: 'この素材をその場でエフェクト（音量・LPF など）で調整します。変更はすぐイベントの WAV に反映され（元の音声とチェーンは残ります。チェーンを空にすれば元に戻ります）、レビューは「仮」に戻ります', en: 'Adjust this material in place with effects (volume, LPF …). Changes go straight to the event’s WAV (the original and the chain are kept; an empty chain restores it); its review goes back to tentative.' },
   'editor.adjusting': { ja: 'イベント: {event} · {file}（調整中）', en: 'Event: {event} · {file} (adjusting)' },
   'events.request.send': { ja: '依頼する', en: 'Request' },
+  'editor.intensity': { ja: '強さ', en: 'Strength' },
+  'editor.intensityHint': { ja: 'この素材の基準の強さ（intensity、0〜1）。cue 表に保存され、ゲームでは WAV × 強さ × 場面の倍率で鳴ります。WAV は形だけを持ち、常にフルスケールで書かれます', en: 'This material’s base strength (intensity, 0–1), saved in the cue table; the game plays WAV × strength × scene multiplier. The WAV holds only the shape, always at full scale.' },
+  'editor.gainNotStrength': { ja: '強さは「調整」の強さスライダーで変えてください。ゲインは形の調整用（書き戻すときにフルスケールへ正規化されます）', en: 'Change strength with the Adjust strength slider; gain is for the shape (written back normalized to full scale).' },
 })
 
 export type MessageId = keyof typeof messages

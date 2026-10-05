@@ -1,7 +1,7 @@
 import type { SceneLib } from './sceneData'
 import {
   type CueReview, type ReviewState,
-  clampNumber, isLoopCue, soundAllowed, positionsForCue, routeClips, sfxSounds, VARIANT_NAME,
+  clampNumber, isLoopCue, soundAllowed, soundIntensity, positionsForCue, routeClips, sfxSounds, VARIANT_NAME,
   type CueEntry, type CueRoute, type CueSfx, type CueTable, type CueVariant, type CueVariation, type PickMode,
 } from './sceneCueTable'
 
@@ -197,7 +197,7 @@ function edited(table: CueTable, ref: EventRef, change: (entry: CueEntry | CueVa
   return next
 }
 
-export interface HapticDecision { ref: EventRef; clip: string; /** at / gain for a new route (used only when the event has none). */ at: string; gain: number }
+export interface HapticDecision { ref: EventRef; clip: string; /** at / gain for a new route (used only when the event has none). */ at: string; gain: number; /** A new clip entry's intensity (default 1). */ intensity?: number }
 /**
  * Clip entry (added with intensity 1.0 and the cue's loop kind; an existing
  * entry keeps its values) + the event's haptics: `clip` joins the first route's
@@ -218,7 +218,7 @@ export function applyHapticDecision(table: CueTable, lib: SceneLib, d: HapticDec
     // A decision is tentative until the user approves it.
     entry.review = { ...(entry.review ?? {}), haptics: 'tentative' }
   })
-  if (!next.clips[d.clip]) next.clips[d.clip] = { intensity: 1.0, loop: isLoopCue(lib, d.ref.cue), description: `Decided in Studio for ${eventKey(d.ref)}` }
+  if (!next.clips[d.clip]) next.clips[d.clip] = { intensity: clampNumber(d.intensity ?? 1, 0, 1), loop: isLoopCue(lib, d.ref.cue), description: `Decided in Studio for ${eventKey(d.ref)}` }
   return next
 }
 /**
@@ -297,9 +297,6 @@ export function setSfxSounds(table: CueTable, ref: EventRef, sounds: string[]): 
     const volume = entry.sfx ? entry.sfx.volume : 1.0
     entry.sfx = !sounds.length ? null : sounds.length === 1 ? { sound: sounds[0], volume } : { sounds: [...sounds], volume }
   })
-}
-export function setOwnSfxVolume(table: CueTable, ref: EventRef, volume: number): CueTable {
-  return edited(table, ref, entry => { if (entry.sfx) entry.sfx.volume = clampNumber(volume, 0, 2) })
 }
 
 // ── Playback of v2 events (Scene tab, editor previews) ──
@@ -461,7 +458,8 @@ export function representativeSound<B>(table: CueTable, lib: SceneLib, names: re
   for (const name of names) {
     const r = resolveEventName(table, name), e = r && effectiveEvent(table, r.ref)
     const first = sfxSounds(e?.sfx)[0]
-    if (e?.sfx && first && buffers[first]) return { buffer: buffers[first], volume: e.sfx.volume, loop: isLoopCue(lib, e.ref.cue) }
+    // The editor plays a material at its base level only (DEC-086: sfx.volume is the scene multiplier).
+    if (e?.sfx && first && buffers[first]) return { buffer: buffers[first], volume: soundIntensity(table, first), loop: isLoopCue(lib, e.ref.cue) }
   }
   return null
 }

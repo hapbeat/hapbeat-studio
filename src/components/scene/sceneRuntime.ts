@@ -2,7 +2,7 @@ import { useSceneStore, sceneVideoUrl } from '@/stores/sceneStore'
 import { perfTrack } from '@/utils/perfRegistry'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { clipEnd, focusEvent, itemEvents, levelAt, offsetOf, type SceneItem, type VisibleEvent } from '@/utils/sceneData'
-import { isLoopCue, routeClips, sfxSounds, type CueRoute, type CueSfx } from '@/utils/sceneCueTable'
+import { isLoopCue, routeClips, sfxSounds, type CueRoute, type CueSfx, soundIntensity } from '@/utils/sceneCueTable'
 import { effectiveEvent, fireShot, MaterialPicker, resolveEventName } from '@/utils/cueEvents'
 import { buildLoopVoices, shotVoices, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, SceneHapticMixer, targetsOf, type HapticDevice, type HelperSend } from '@/utils/sceneHaptics'
 
@@ -142,7 +142,9 @@ export class SceneRuntime {
     const b = useSceneStore.getState().sfx[sound]
     if (!b || (!force && !useSceneSettings.getState().pcSound)) return
     const c = this.audio(), src = c.createBufferSource(), g = c.createGain()
-    src.buffer = b; src.playbackRate.value = rate; g.gain.value = volume; src.connect(g).connect(c.destination)
+    // WAV × the sound's base level × the scene multiplier (sfx.volume, with this firing's jitter) — DEC-086.
+    const table = useSceneStore.getState().table
+    src.buffer = b; src.playbackRate.value = rate; g.gain.value = volume * (table ? soundIntensity(table, sound) : 1); src.connect(g).connect(c.destination)
     const at = c.currentTime + delay
     src.start(at)
     if (!force) this.scheduledSfx.push({ src, at }) // cue sounds are cancelled on seek; a ▶ test is not

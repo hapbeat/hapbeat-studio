@@ -139,7 +139,7 @@ export function EffectsPanel() {
         <EditorMenu label={`+ ${t('editor.addEffect')}`} className="editor-add-effect">
           {EFFECT_CATEGORIES.map(category => <EditorMenuSection key={category.label} label={t(category.label)}>
             {category.types.map(type => <EditorMenuItem key={type} onSelect={() => handleAdd(type)}>
-              <EffectIcon type={type} /><span>{EFFECT_LABELS[type]}</span>
+              <EffectIcon type={type} /><span title={type === 'gain' ? t('editor.gainNotStrength') : undefined}>{EFFECT_LABELS[type]}</span>
               {EXPERIMENTAL_EFFECTS.has(type) && <small className="effect-experimental-badge" title={t('editor.experimentalHint')}>{t('editor.experimental')}</small>}
             </EditorMenuItem>)}
           </EditorMenuSection>)}

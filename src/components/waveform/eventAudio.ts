@@ -5,7 +5,7 @@ import { useEventStore } from '@/stores/eventStore'
 import { useSceneStore } from '@/stores/sceneStore'
 import { trialTarget } from '@/utils/agentProtocol'
 import { effectiveEvent, parseEventKey, representativeSound, resolveEventName } from '@/utils/cueEvents'
-import { isLoopCue, routeClips, sfxSounds } from '@/utils/sceneCueTable'
+import { isLoopCue, routeClips, sfxSounds, soundIntensity } from '@/utils/sceneCueTable'
 import { RATE, resampleClip } from '@/utils/sceneHaptics'
 import type { EditorBufferPlayer } from '@/utils/editorBufferPlayer'
 import { onUserStop } from '@/utils/playerStops'
@@ -36,31 +36,33 @@ function scaled(channels: Float32Array[], rate: number, factor: number, loopToSe
 const factorText = (x: number) => Number.isInteger(x * 10) ? x.toFixed(1) : String(Math.round(x * 1000) / 1000)
 const loopCue = (key: string) => { const lib = useSceneStore.getState().lib; return !!lib && isLoopCue(lib, parseEventKey(key).cue) }
 
-/** Route clip `clip` of event `key` at the level the game plays it (clip intensity × route gain); null when not loaded. `loopSec`: a loop cue's clip repeats to that length. */
-function hapticBuffer(clip: string, gain: number, loopSec: number): { buffer: AudioBuffer; factor: number } | null {
+/** Clip `clip` at its base level (DEC-086: WAV × intensity; the route gain is a scene multiplier, not applied in the editor); null when not loaded. `loopSec`: a loop cue's clip repeats to that length. */
+function hapticBuffer(clip: string, loopSec: number): { buffer: AudioBuffer; factor: number } | null {
   const s = useSceneStore.getState(), pcm = s.pcm[clip], entry = s.table?.clips[clip]
   if (!pcm || !entry) return null
-  const factor = entry.intensity * gain
+  const factor = entry.intensity
   return { buffer: scaled([pcm], RATE, factor, loopSec), factor }
 }
-/** Sound `sound` at `volume`; null when not loaded. */
-function soundBuffer(sound: string, volume: number, loopSec: number): AudioBuffer | null {
-  const b = useSceneStore.getState().sfx[sound]
-  if (!b) return null
+/** Sound `sound` at its base level (WAV × intensity; sfx.volume is a scene multiplier); null when not loaded. */
+function soundBuffer(sound: string, loopSec: number): AudioBuffer | null {
+  const s = useSceneStore.getState(), b = s.sfx[sound]
+  if (!b || !s.table) return null
+  const volume = soundIntensity(s.table, sound)
   return scaled(Array.from({ length: b.numberOfChannels }, (_, c) => b.getChannelData(c)), b.sampleRate, volume, loopSec)
 }
-/** Opens route clip `clip` of event `key` in the waveform panel, at the level the game plays it (clip intensity × route gain). A loop cue's clip repeats. */
-export function openEventHaptic(key: string, clip: string, gain: number, at: string, autoplay = false): boolean {
-  const made = hapticBuffer(clip, gain, loopCue(key) ? LOOP_PREVIEW_SEC : 0)
+/** Opens clip `clip` of event `key` in the waveform panel at its base level (WAV × intensity). A loop cue's clip repeats. */
+export function openEventHaptic(key: string, clip: string, at: string, autoplay = false): boolean {
+  const made = hapticBuffer(clip, loopCue(key) ? LOOP_PREVIEW_SEC : 0)
   if (!made) return false
   useEventStore.getState().showPreview({ id: `${key}|haptic|${clip}|${at}`, event: key, target: 'haptic', label: `${key} · ${clip}.wav × ${factorText(made.factor)}`, buffer: made.buffer, autoplay })
   return true
 }
-/** Opens sound `sound` of event `key` in the waveform panel, at its volume (PC playback only). A loop cue's sound repeats. */
-export function openEventSound(key: string, sound: string, volume: number, autoplay = false): boolean {
-  const buffer = soundBuffer(sound, volume, loopCue(key) ? LOOP_PREVIEW_SEC : 0)
-  if (!buffer) return false
-  useEventStore.getState().showPreview({ id: `${key}|sound|${sound}`, event: key, target: 'sound', label: `${key} · ${sound}.wav × ${factorText(volume)}`, buffer, autoplay })
+/** Opens sound `sound` of event `key` in the waveform panel at its base level (PC playback only). A loop cue's sound repeats. */
+export function openEventSound(key: string, sound: string, autoplay = false): boolean {
+  const buffer = soundBuffer(sound, loopCue(key) ? LOOP_PREVIEW_SEC : 0)
+  const table = useSceneStore.getState().table
+  if (!buffer || !table) return false
+  useEventStore.getState().showPreview({ id: `${key}|sound|${sound}`, event: key, target: 'sound', label: `${key} · ${sound}.wav × ${factorText(soundIntensity(table, sound))}`, buffer, autoplay })
   return true
 }
 
@@ -145,7 +147,7 @@ export function useDecidedSoundSync(player: EditorBufferPlayer) {
     if (picked) for (const atSec of plan.targets) out.push({ buffer: picked.buffer, atSec, gain: picked.volume })
     for (const o of plan.others) {
       const r = resolveEventName(table, o.name), e = r && effectiveEvent(table, r.ref), first = sfxSounds(e?.sfx)[0], b = first ? buffers[first] : undefined
-      if (e?.sfx && b) out.push({ buffer: b, atSec: o.atSec, gain: e.sfx.volume })
+      if (e?.sfx && b) out.push({ buffer: b, atSec: o.atSec, gain: soundIntensity(table, first!) })
     }
     return out
   }, [plan, picked, table, buffers])
@@ -174,8 +176,8 @@ export function openEventDefault(key: string) {
   const table = useSceneStore.getState().table
   const e = table ? effectiveEvent(table, parseEventKey(key)) : null
   const route = e?.haptics[0], clip = route ? routeClips(route)[0] : undefined
-  if (route && clip && openEventHaptic(key, clip, route.gain, route.at)) return
+  if (route && clip && openEventHaptic(key, clip, route.at)) return
   const sound = sfxSounds(e?.sfx)[0]
-  if (e?.sfx && sound && openEventSound(key, sound, e.sfx.volume)) return
+  if (e?.sfx && sound && openEventSound(key, sound)) return
   useEventStore.getState().clearPreview()
 }

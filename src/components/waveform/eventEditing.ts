@@ -9,7 +9,9 @@ import { materialUsers, parseEventKey, sameBytes, setReview } from '@/utils/cueE
 import type { MaterialLink } from '@/utils/editorUiSettings'
 import { appendActivity } from '@/utils/activityLog'
 import { localIsoString } from '@/utils/hapticKnowledge'
-import { encodeDecided, existingWav } from './eventDecide'
+import { encodeDecided, encodeMaterial, existingWav } from './eventDecide'
+import { materialIntensity, setClipIntensity, setSoundIntensity } from '@/utils/sceneCueTable'
+import { renormalize } from '@/utils/materialLevel'
 import { ADJUST_FORMAT, hasMaterialAdjust, readMaterialAdjust, writeMaterialAdjust, writeMaterialOriginal, type MaterialAdjust } from '@/utils/materialAdjust'
 import { decodeAudioFile } from '@/utils/wavIO'
 import type { EffectEntry, SampleRate } from '@/types/waveform'
@@ -59,8 +61,8 @@ export async function openMaterialForAdjust(event: string, target: DecideTarget,
   settings.update({ materialLinks: { ...settings.materialLinks, [clipId]: link } })
 }
 
-const adjustData = (link: MaterialLink, effects: EffectEntry[], exportSampleRate: SampleRate): MaterialAdjust =>
-  ({ format: ADJUST_FORMAT, ...link, effects, exportSampleRate, updatedAt: localIsoString(new Date()) })
+const adjustData = (link: MaterialLink, effects: EffectEntry[], exportSampleRate: SampleRate, normGain?: number): MaterialAdjust =>
+  ({ format: ADJUST_FORMAT, ...link, effects, exportSampleRate, ...(normGain !== undefined ? { normGain } : {}), updatedAt: localIsoString(new Date()) })
 
 /**
  * The adjusted material's chain is kept in adjust/<project>/<target>/<material>.json (versioned) 0.5 s after
@@ -76,7 +78,10 @@ export function useAdjustPersistence() {
   useEffect(() => {
     if (!folder || !link || !clipId || rate === null) return
     if (first.current !== clipId) { first.current = clipId; return } // just opened: nothing changed yet
-    const timer = setTimeout(() => void writeMaterialAdjust(folder.root, adjustData(link, effects, rate)).catch(error => useWaveformStore.getState().setError(error)), 500)
+    const timer = setTimeout(() => void (async () => {
+      const saved = await readMaterialAdjust(folder.root, link.project, link.target, link.wav).catch(() => null)
+      await writeMaterialAdjust(folder.root, adjustData(link, effects, rate, saved?.data.normGain))
+    })().catch(error => useWaveformStore.getState().setError(error)), 500)
     return () => clearTimeout(timer)
   }, [folder, clipId, link, effects, rate])
   // Migration of adjustments made before adjust/ existed (they lived only in .hapbeat-editor).
@@ -124,13 +129,18 @@ async function writeBack(buffer: AudioBuffer, link: MaterialLink) {
   const scene = useSceneStore.getState(), editor = useWaveformStore.getState()
   try {
     if (!scene.root || !scene.lib || !scene.table || scene.lib.project_name !== link.project) throw new Error(`open the game project ${link.project} to update ${link.wav}.wav`)
-    const wav = await encodeDecided(buffer, link.target)
+    // The shape goes to the WAV at full scale; the intensity follows so it sounds as loud as before (DEC-086).
+    const encoded = await encodeMaterial(buffer, link.target)
     const current = await existingWav(link.target, link.wav)
-    if (current && sameBytes(current, wav)) return
-    const { archived } = await scene.replaceMaterial(link.target, link.wav, wav)
+    if (current && sameBytes(current, encoded.wav)) return
+    const saved = editor.folder ? await readMaterialAdjust(editor.folder.root, link.project, link.target, link.wav).catch(() => null) : null
+    const level = renormalize(encoded.peak, saved?.data.normGain ?? 1, materialIntensity(scene.table, link.target, link.wav))
+    const { archived } = await scene.replaceMaterial(link.target, link.wav, encoded.wav)
+    if (editor.folder && saved) await writeMaterialAdjust(editor.folder.root, { ...saved.data, normGain: level.gain, updatedAt: localIsoString(new Date()) })
     const field = link.target === 'haptic' ? 'haptics' : 'sfx'
     const users = materialUsers(useSceneStore.getState().table!, link.target === 'haptic' ? 'clip' : 'sound', link.wav)
-    useSceneStore.getState().edit(tb => users.reduce((t, key) => setReview(t, parseEventKey(key), field, 'tentative'), tb))
+    useSceneStore.getState().edit(tb => users.reduce((t, key) => setReview(t, parseEventKey(key), field, 'tentative'),
+      link.target === 'haptic' ? setClipIntensity(tb, link.wav, level.intensity) : setSoundIntensity(tb, link.wav, level.intensity)))
     if (editor.folder) void appendActivity(editor.folder.root, { at: localIsoString(new Date()), kind: 'material-updated', events: users, file: `${link.wav}.wav`, note: `previous → ${archived}` }).catch(() => {})
   } catch (error) {
     useWaveformStore.getState().setError(`${link.wav}.wav: ${error instanceof Error ? error.message : String(error)}`)

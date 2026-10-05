@@ -346,9 +346,10 @@ describe('the sound played with a haptic audition', () => {
   it('is always the representative (first of a pool of 4), whichever candidate is auditioned', () => {
     const t = v2Table()
     t.cues.grab.sfx = { sounds: ['GrowlA', 'GrowlB', 'GrowlC', 'GrowlD'], volume: 0.7 }
+    t.sounds = { GrowlA: { intensity: 0.6 } } // the editor plays the base level, not sfx.volume (DEC-086)
     const buffers = { GrowlA: { id: 'A' }, GrowlB: { id: 'B' }, GrowlC: { id: 'C' }, GrowlD: { id: 'D' } }
     const picks = ['candidate A', 'candidate B', 'candidate A'].map(() => representativeSound(t, sampleLib(), ['grab'], buffers))
-    expect(picks.every(p => p?.buffer === buffers.GrowlA && p.volume === 0.7)).toBe(true)
+    expect(picks.every(p => p?.buffer === buffers.GrowlA && p.volume === 0.6)).toBe(true)
     expect(representativeSound(t, sampleLib(), ['nope'], buffers)).toBeNull()
   })
 })

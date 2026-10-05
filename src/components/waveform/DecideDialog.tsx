@@ -9,7 +9,8 @@ import { useEditorSettings } from '@/stores/editorSettings'
 import { isLoopCue, positionsForCue, soundAllowed } from '@/utils/sceneCueTable'
 import { allEventKeys, defaultAt, effectiveEvent, matchesName, needsRouteForm, overwriteUsers, parseEventKey, sameBytes, trialEvent } from '@/utils/cueEvents'
 import { useAtLabel } from '@/components/scene/SceneCuePanels'
-import { autoWavName, decideSourceBuffer, encodeDecided, existingWav, runDecision } from './eventDecide'
+import { autoWavName, decideSourceBuffer, encodeMaterial, existingWav, runDecision } from './eventDecide'
+import { intensityForPeak } from '@/utils/materialLevel'
 import '@/components/common/ConfirmDialog.css'
 import './EventsPanel.css'
 
@@ -58,7 +59,7 @@ function DecideForm({ request }: { request: DecideRequest }) {
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
-    void decideSourceBuffer(source).then(b => encodeDecided(b, target)).then(w => { if (!cancelled) setWav(w) }, e => { if (!cancelled) setError(message(e)) })
+    void decideSourceBuffer(source).then(b => encodeMaterial(b, target)).then(m => { if (!cancelled) { setWav(m.wav); setIntensity(intensityForPeak(m.peak)) } }, e => { if (!cancelled) setError(message(e)) })
     return () => { cancelled = true }
   }, [])
   useEffect(() => {
@@ -77,7 +78,8 @@ function DecideForm({ request }: { request: DecideRequest }) {
   }, [wav, name, target])
   const [at, setAt] = useState(() => valid ? defaultAt(lib!, ref.cue) : 'hand')
   useEffect(() => { if (valid) setAt(defaultAt(lib!, ref.cue)) }, [event])
-  const [gain, setGain] = useState(1)
+  /** The new material's intensity (its size before normalizing; DEC-086). */
+  const [intensity, setIntensity] = useState(1)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !busy) close() }
     window.addEventListener('keydown', onKey)
@@ -118,9 +120,6 @@ function DecideForm({ request }: { request: DecideRequest }) {
         <label className="recipe-dialog-field">{t('scene.route.at')}
           <select value={at} onChange={e => setAt(e.target.value)}>{positionsForCue(lib, ref.cue).map(a => <option key={a} value={a}>{atLabel(a)}</option>)}</select>
         </label>
-        <label className="recipe-dialog-field">gain
-          <input type="number" min={0} max={2} step={0.05} value={gain} onChange={e => { const x = parseFloat(e.target.value); if (Number.isFinite(x)) setGain(Math.max(0, Math.min(2, x))) }} />
-        </label>
       </div>}
       {!routeForm && target === 'haptic' && <p className="recipe-dialog-note">{t('events.decide.keepsRoute')}</p>}
       <p className="recipe-dialog-note">{t(target === 'haptic' ? 'events.decide.writesHaptic' : 'events.decide.writesSound', { dir, table: lib.paths.cues })}</p>
@@ -132,7 +131,7 @@ function DecideForm({ request }: { request: DecideRequest }) {
     if (!canSubmit || !wav) return
     setBusy(true); setError(null)
     try {
-      const r = await runDecision({ target, source, events: [event], name, at, gain, wav })
+      const r = await runDecision({ target, source, events: [event], name, at, wav, intensity })
       // Success is logged (activity log), not shown: the dialog just closes.
       if (r.ok) { close(); return }
       else setError(t(r.notice.id, r.notice.params))

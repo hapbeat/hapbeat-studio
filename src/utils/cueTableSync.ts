@@ -50,7 +50,7 @@ export function mergeCueTables(base: CueTable, ours: CueTable, theirs: CueTable)
   const b = base as unknown as Rec, o = ours as unknown as Rec, t = theirs as unknown as Rec
   for (const key of new Set([...Object.keys(t), ...Object.keys(o), ...Object.keys(b)])) {
     const v = key === 'cues' ? mergeRecord(b.cues, o.cues, t.cues, 'cues', conflicts, entry)
-      : key === 'clips' ? mergeRecord(b.clips, o.clips, t.clips, 'clips', conflicts)
+      : key === 'clips' || key === 'sounds' ? mergeRecord(b[key] ?? {}, o[key] ?? {}, t[key] ?? {}, key, conflicts)
       : pick(b[key], o[key], t[key], key, conflicts)
     if (v !== undefined) table[key] = v
   }

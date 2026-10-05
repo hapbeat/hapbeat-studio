@@ -52,7 +52,16 @@ export const routeClips = (route: CueRoute): string[] => Array.isArray(route.cli
 /** The sounds a sfx may play (one for `sound`). */
 export const sfxSounds = (sfx: CueSfx | null | undefined): string[] => !sfx ? [] : Array.isArray(sfx.sounds) ? sfx.sounds : typeof sfx.sound === 'string' ? [sfx.sound] : []
 export interface ClipEntry { intensity: number; loop: boolean; description?: string; [key: string]: unknown }
-export interface CueTable { kit?: string; clips: Record<string, ClipEntry>; cues: Record<string, CueEntry>; [key: string]: unknown }
+/** A sound's base level (DEC-086): the WAV holds the shape at full scale, `intensity` how strong it is (0..1; absent = 1). */
+export interface SoundEntry { intensity: number; [key: string]: unknown }
+export interface CueTable { kit?: string; clips: Record<string, ClipEntry>; sounds?: Record<string, SoundEntry>; cues: Record<string, CueEntry>; [key: string]: unknown }
+
+/** WAV peak the materials are written at (−0.5 dBFS, DEC-086). */
+export const MATERIAL_PEAK = 10 ** (-0.5 / 20)
+/** The base level of a sound (its `sounds` entry; 1 when it has none). */
+export const soundIntensity = (table: CueTable, sound: string) => table.sounds?.[sound]?.intensity ?? 1
+/** The base level of a material: a clip's intensity, or a sound's. */
+export const materialIntensity = (table: CueTable, target: 'sound' | 'haptic', name: string) => target === 'haptic' ? table.clips[name]?.intensity ?? 1 : soundIntensity(table, name)
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 
@@ -127,6 +136,18 @@ export function validateCueTable(table: CueTable, ctx: CueTableContext): string[
     if (!inRange(c.intensity, 0, 1)) err.push(`clip ${name}: intensity must be 0..1`)
     if (typeof c.loop !== 'boolean') err.push(`clip ${name}: loop must be true/false`)
     if (!ctx.clipFiles.has(name)) err.push(`clip ${name}: ${lib.paths.clips}/${name}.wav missing`)
+  }
+  const sounds = table.sounds as unknown
+  if (sounds !== undefined) {
+    if (!isRecord(sounds)) err.push('sounds must be an object')
+    else {
+      const soundRe = new RegExp(lib.sound_name)
+      for (const [name, entry] of Object.entries(sounds)) {
+        if (!soundRe.test(name)) err.push(`sound name ${name} must match ${lib.sound_name}`)
+        if (!isRecord(entry) || !inRange(entry.intensity, 0, 1)) err.push(`sound ${name}: intensity must be 0..1`)
+        if (!ctx.soundFiles.has(name)) err.push(`sound ${name}: ${lib.paths.sounds}/${name}.wav missing`)
+      }
+    }
   }
   const names = Object.keys(table.cues)
   if (names.length !== ctx.cueNames.length || names.some(n => !ctx.cueNames.includes(n))) err.push(`cues must be exactly ${ctx.cueNames.join(', ')}`)
@@ -231,6 +252,12 @@ export function setSoundVolume(table: CueTable, cue: string, volume: number): Cu
   return next
 }
 
+/** Sets a sound's base level (adds its `sounds` entry). */
+export function setSoundIntensity(table: CueTable, sound: string, intensity: number): CueTable {
+  const next = clone(table)
+  next.sounds = { ...(next.sounds ?? {}), [sound]: { ...(next.sounds?.[sound] ?? {}), intensity: clampNumber(intensity, 0, 1) } }
+  return next
+}
 export function setClipIntensity(table: CueTable, clip: string, intensity: number): CueTable {
   const next = clone(table)
   next.clips[clip].intensity = clampNumber(intensity, 0, 1)

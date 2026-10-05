@@ -19,6 +19,8 @@ export interface MaterialAdjust {
   wav: string
   effects: EffectEntry[]
   exportSampleRate: SampleRate
+  /** The normalization gain of the last write-back (render × normGain = the WAV; DEC-086). Absent = 1. */
+  normGain?: number
   updatedAt: string
 }
 
@@ -35,7 +37,8 @@ export function parseMaterialAdjust(text: string): MaterialAdjust | null {
     const v = JSON.parse(text) as Partial<MaterialAdjust>
     if (v.format !== ADJUST_FORMAT || typeof v.project !== 'string' || typeof v.event !== 'string' || typeof v.wav !== 'string'
       || (v.target !== 'sound' && v.target !== 'haptic') || !validateEffects(v.effects) || ![16000, 24000, 44100, 48000].includes(v.exportSampleRate as number)) return null
-    return { format: ADJUST_FORMAT, project: v.project, event: v.event, target: v.target, wav: v.wav, effects: v.effects!, exportSampleRate: v.exportSampleRate as SampleRate, updatedAt: String(v.updatedAt ?? '') }
+    return { format: ADJUST_FORMAT, project: v.project, event: v.event, target: v.target, wav: v.wav, effects: v.effects!, exportSampleRate: v.exportSampleRate as SampleRate,
+      ...(typeof v.normGain === 'number' && Number.isFinite(v.normGain) && v.normGain > 0 ? { normGain: v.normGain } : {}), updatedAt: String(v.updatedAt ?? '') }
   } catch { return null }
 }
 

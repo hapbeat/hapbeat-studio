@@ -22,6 +22,7 @@ import { lookupMaterials, provenanceLine } from '@/utils/materials'
 import type { WaveformClip } from '@/types/waveform'
 import { onlinePlaybackDevices, resolvePlaybackTargets, routePlaybackTargets } from '@/utils/playbackDevices'
 import { cueRoutePositions, materialRoutePositions } from '@/utils/cueEvents'
+import { materialIntensity } from '@/utils/sceneCueTable'
 import { handlePlaybackShortcut, isTypingTarget } from '@/utils/playbackShortcut'
 import { useEditorSettingsFolderSync, type SettingsSyncNotice } from '@/hooks/useEditorSettingsFolderSync'
 import { EditorContext, type EditorShared } from './editorContext'
@@ -140,8 +141,10 @@ export function WaveformEditor({ active }: { active: boolean }) {
   // (DEC-085); one buffer, so Stop ends them all and seeks follow the video.
   const plan = useAuditionPlan()
   const stretched = !!shownBuffer && !!plan && (!!audition || !!eventPreview || !!adjusting) && !(plan.targets.length === 1 && plan.targets[0] === 0)
-  const audioBuffer = useMemo(() => stretched && shownBuffer && plan
-    ? repeatBuffer(shownBuffer, plan.targets.map(atSec => ({ atSec, gain: 1, rate: 1 }))) : shownBuffer, [stretched, shownBuffer, plan])
+  // An adjusted material is shown and played at its intensity (DEC-086: WAV × intensity); its file does not change.
+  const adjustIntensity = useSceneStore(state => adjusting && state.table ? materialIntensity(state.table, adjusting.target, adjusting.wav) : 1)
+  const audioBuffer = useMemo(() => shownBuffer && (stretched || adjustIntensity !== 1)
+    ? repeatBuffer(shownBuffer, (stretched && plan ? plan.targets : [0]).map(atSec => ({ atSec, gain: adjustIntensity, rate: 1 }))) : shownBuffer, [stretched, shownBuffer, plan, adjustIntensity])
   const player = useMemo(() => new EditorBufferPlayer(null, undefined, s.setError), [s.clip?.id, original, auditionKey])
   useEffect(() => {player.activate(); return () => player.dispose()}, [player])
   useDecidedSoundSync(player)

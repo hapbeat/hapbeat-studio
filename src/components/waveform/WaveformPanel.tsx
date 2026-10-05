@@ -1,6 +1,8 @@
 import { useWaveformStore } from '@/stores/waveformStore'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useEditorSettings } from '@/stores/editorSettings'
+import { useSceneStore } from '@/stores/sceneStore'
+import { materialIntensity, setClipIntensity, setSoundIntensity } from '@/utils/sceneCueTable'
 import { useEventStore } from '@/stores/eventStore'
 import { useI18n } from '@/i18n/I18nProvider'
 import { WaveformDisplay } from './WaveformDisplay'
@@ -39,6 +41,7 @@ export function WaveformPanel() {
     <div className="editor-comparison">
       <strong className={`editor-active-name ${audition ? 'editor-auditioning' : ''}`}>{eventPreview ? t('events.preview.name', { name: eventPreview.label }) : auditionKey ? t('editor.agent.auditioning', { name: auditionKey })
         : adjusting ? t('editor.adjusting', { event: adjusting.event, file: `${adjusting.wav}.wav` }) : s.clip?.name ?? t('editor.noClip')}</strong>
+      {adjusting && !eventPreview && !audition && <IntensitySlider target={adjusting.target} wav={adjusting.wav} project={adjusting.project} />}
       <div className="editor-segmented" role="group" aria-label={t('editor.showing')}>
         <button className={`toolbar-btn ${!original ? 'selected' : ''}`} disabled={!s.clip || locked} aria-pressed={!original} title={t('editor.committedHint')} onClick={() => { if (original) s.setSelectedRegion(null); setOriginal(false) }}>∿ {t('editor.edited')}</button>
         <button className={`toolbar-btn ${original ? 'selected' : ''}`} disabled={!s.clip || locked} aria-pressed={original} onClick={() => { s.setSelectedRegion(null); setOriginal(true) }}>↩ {t('editor.original')}</button>
@@ -69,4 +72,21 @@ export function WaveformPanel() {
         transport={<TransportBar player={player} available={!!audioBuffer} playback={playback} pending={pending} onToggle={togglePlay} onFromStart={() => playFromStart()} />} />
     </div>
   </div>
+}
+
+/**
+ * The strength of the adjusted material (DEC-086): its intensity (0..1, dB shown too), written to the cue
+ * table (saved automatically). The WAV keeps the shape at full scale; effects are for the shape.
+ */
+function IntensitySlider({ target, wav, project }: { target: 'sound' | 'haptic'; wav: string; project: string }) {
+  const { t } = useI18n()
+  const value = useSceneStore(state => state.table && state.lib?.project_name === project ? materialIntensity(state.table, target, wav) : null)
+  if (value === null) return null
+  const set = (v: number) => useSceneStore.getState().edit(tb => target === 'haptic' ? (tb.clips[wav] ? setClipIntensity(tb, wav, v) : null) : setSoundIntensity(tb, wav, v))
+  const db = value > 0 ? `${(20 * Math.log10(value)).toFixed(1)} dB` : '−∞ dB'
+  return <label className="editor-intensity" title={t('editor.intensityHint')}>
+    {t('editor.intensity')}
+    <input type="range" min={0} max={1} step={0.01} value={value} aria-label={t('editor.intensity')} onChange={e => set(parseFloat(e.target.value))} />
+    <span className="editor-intensity-value">{value.toFixed(2)} · {db}</span>
+  </label>
 }

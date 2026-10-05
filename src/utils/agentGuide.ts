@@ -147,6 +147,13 @@ The user rates in Studio and presses Save — that is the signal (there is no se
 3. Read each new outbox file, then move it to \`outbox/_read/\`.
 4. For a rating: read each candidate's \`overall\`, \`comment\`, \`useRange\` and the trial's \`comment\`. Every candidate rated ★4+ (\`verdict\` "use") joins the material pool of the trial's first scene cue as tentative, best first, without duplicates; an existing representative stays first (Studio does this on Save when its auto-assign is on). Never add free-plan output (label or source path containing "free plan" / "(free)": not for commercial use), nor what the comments explicitly reject. Then make the next candidates.
 
+## Strength of materials (DEC-086)
+
+- WAV = the shape, always written at full scale (peak −0.5 dBFS).
+- \`clips.<name>.intensity\` / \`sounds.<Name>.intensity\` (0..1, absent = 1) = the material's base strength; Studio's editor sets it (Adjust slider) and plays WAV × intensity.
+- Route \`gain\` / \`sfx.volume\` (default 1) = the scene multiplier, edited in the Scene tab only. Final output = WAV × intensity × scene multiplier × device volume.
+- Studio writes adopted candidates normalized, with their own size as the intensity. Do not bake loudness into WAVs.
+
 ## Messages from Studio \`hapbeat-agent-message@1\` (Studio writes, you read)
 
 From the user's clicks: "Reassign…" on a firing (Scene tab, \`reassign\`), "Remake…" on a material (\`revise\`), "Request a sound…" (\`sound\`) and "Go to haptics" (\`haptic\`) on an event, all in the Events panel. Files in \`hapbeat-agent/outbox/\`:

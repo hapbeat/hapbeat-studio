@@ -8,7 +8,8 @@ import { encodePcm16Wav, isLoopCue } from '@/utils/sceneCueTable'
 import { readProjectFile, writeProjectFile } from '@/utils/sceneProject'
 import { RATE } from '@/utils/sceneHaptics'
 import { addEventMark, applyHapticDecision, applySoundDecision, defaultAt, effectiveEvent, nextWavName, parseEventKey, safeWavName, sameBytes, wavBaseName } from '@/utils/cueEvents'
-import { routeClips, sfxSounds } from '@/utils/sceneCueTable'
+import { routeClips, setSoundIntensity, sfxSounds } from '@/utils/sceneCueTable'
+import { intensityForPeak, normalizeGain, peakOf } from '@/utils/materialLevel'
 import { sameSound } from '@/utils/wavCompare'
 import { appendActivity } from '@/utils/activityLog'
 import { localIsoString } from '@/utils/hapticKnowledge'
@@ -36,18 +37,23 @@ export async function decideSourceBuffer(source: DecideSource): Promise<AudioBuf
   return clip.buffer
 }
 
-/** Haptic: 16 kHz mono PCM16 (the Kit clip format); sound: 48 kHz PCM16 with the source's channels. */
+/** Haptic: 16 kHz mono PCM16 (the Kit clip format); sound: 48 kHz PCM16 with the source's channels. As is (no normalization). */
 export async function encodeDecided(buffer: AudioBuffer, target: DecideTarget): Promise<ArrayBuffer> {
+  return (await encodeMaterial(buffer, target, false)).wav
+}
+/**
+ * A material WAV (DEC-086): the shape at full scale (peak −0.5 dBFS) when `normalize`; `peak` is the peak before
+ * (at the material's rate / channels) and `gain` the factor applied (1 without normalizing).
+ */
+export async function encodeMaterial(buffer: AudioBuffer, target: DecideTarget, normalize = true): Promise<{ wav: ArrayBuffer; peak: number; gain: number }> {
   const rate = target === 'haptic' ? RATE : SOUND_RATE
   const b = await resample(buffer, rate), ch = b.numberOfChannels
-  if (target === 'haptic') {
-    const mono = new Float32Array(b.length)
-    for (let c = 0; c < ch; c++) { const d = b.getChannelData(c); for (let i = 0; i < b.length; i++) mono[i] += d[i] / ch }
-    return encodePcm16Wav(mono, rate, 1)
-  }
-  const inter = new Float32Array(b.length * ch)
-  for (let c = 0; c < ch; c++) { const d = b.getChannelData(c); for (let i = 0; i < b.length; i++) inter[i * ch + c] = d[i] }
-  return encodePcm16Wav(inter, rate, ch)
+  const channels = target === 'haptic' ? [(() => { const mono = new Float32Array(b.length); for (let c = 0; c < ch; c++) { const d = b.getChannelData(c); for (let i = 0; i < b.length; i++) mono[i] += d[i] / ch } return mono })()]
+    : Array.from({ length: ch }, (_, c) => b.getChannelData(c))
+  const peak = peakOf(channels), gain = normalize ? normalizeGain(peak) : 1
+  const n = channels[0].length, out = new Float32Array(n * channels.length)
+  for (let c = 0; c < channels.length; c++) { const d = channels[c]; for (let i = 0; i < n; i++) out[i * channels.length + c] = d[i] * gain }
+  return { wav: encodePcm16Wav(out, rate, channels.length), peak, gain }
 }
 
 /** Texts a decided WAV is named after: the editor clip's name and source file, or the candidate's label, source clip and file. */
@@ -109,11 +115,12 @@ export interface DecisionInput {
   events: string[]
   /** WAV name, or null = automatic (source name, numbered on a content clash, reused when identical). */
   name: string | null
-  /** For events without a haptic route; null = the project's default position / 1.0. */
+  /** For events without a haptic route; null = the project's default position (scene multiplier 1). */
   at: string | null
-  gain: number
   /** Pre-encoded WAV (the dialog encodes once to suggest a name). */
   wav?: ArrayBuffer
+  /** The intensity of a new material written from `wav` (its size before normalizing). */
+  intensity?: number
 }
 
 /**
@@ -124,7 +131,12 @@ export interface DecisionInput {
  * clip list, and publishes the result (Events panel / trial notices).
  */
 export async function runDecision(input: DecisionInput): Promise<{ ok: true; result: DecideResult } | { ok: false; notice: SceneNotice }> {
-  const wav = input.wav ?? await encodeDecided(await decideSourceBuffer(input.source), input.target)
+  // Written normalized; the candidate's / clip's own size becomes the new material's intensity (DEC-086).
+  const encoded = input.wav ? { wav: input.wav, intensity: input.intensity ?? 1 } : await (async () => {
+    const m = await encodeMaterial(await decideSourceBuffer(input.source), input.target)
+    return { wav: m.wav, intensity: intensityForPeak(m.peak) }
+  })()
+  const wav = encoded.wav
   const before = useSceneStore.getState()
   if (!before.table || !before.lib || !input.events.length) return { ok: false, notice: { id: 'scene.save.noProject', error: true } }
   const lib = before.lib
@@ -139,9 +151,11 @@ export async function runDecision(input: DecisionInput): Promise<{ ok: true; res
   for (const key of input.events) {
     const ref = parseEventKey(key)
     next = input.target === 'haptic'
-      ? applyHapticDecision(next, lib, { ref, clip: picked.name, at: input.at ?? defaultAt(lib, ref.cue), gain: input.gain })
+      ? applyHapticDecision(next, lib, { ref, clip: picked.name, at: input.at ?? defaultAt(lib, ref.cue), gain: 1, intensity: encoded.intensity })
       : applySoundDecision(next, ref, picked.name)
   }
+  // A new sound gets its base level; one already in the table keeps its own.
+  if (input.target === 'sound' && !next.sounds?.[picked.name]) next = setSoundIntensity(next, picked.name, encoded.intensity)
   const kind = input.target === 'haptic' ? 'clips' : 'sounds'
   // A WAV overwritten under the same name with other bytes is kept in _archive first (never lost).
   if (previous && !same && before.root) await writeProjectFile(before.root, `_archive/${dirOf(input.target)}/${picked.name}_${new Date().toISOString().replace(/[:.]/g, '-')}.wav`, previous)

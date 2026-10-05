@@ -63,4 +63,13 @@ describe('cue table autosave', () => {
     f.external(t => { t.cues.grab.sfx = { sound: 'Clack', volume: 1 } })
     expect(await sync.changedOnDisk()).toContain('"grab"')
   })
+
+  it('merges the sounds map per sound (DEC-086 levels)', () => {
+    const base = { ...sampleTable(), sounds: { Click: { intensity: 0.5 } } } as CueTable
+    const ours = clone(base); ours.sounds!.Click = { intensity: 0.3 }
+    const theirs = clone(base); theirs.sounds!.Clack = { intensity: 0.8 }
+    const { table, conflicts } = mergeCueTables(base, ours, theirs)
+    expect(table.sounds).toEqual({ Click: { intensity: 0.3 }, Clack: { intensity: 0.8 } })
+    expect(conflicts).toEqual([])
+  })
 })

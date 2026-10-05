@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addClipEntry, addRoute, positionsForCue, assignSound, clipNameFromFile, clipsForCue, encodePcm16Wav, parseCueTable, removeRoute, serializeCueTable, setClipIntensity, setSoundVolume, soundNameFromFile, updateRoute, validateCueTable, type CueTableContext } from './sceneCueTable'
+import { addClipEntry, addRoute, positionsForCue, assignSound, clipNameFromFile, clipsForCue, encodePcm16Wav, parseCueTable, removeRoute, serializeCueTable, setClipIntensity, setSoundIntensity, setSoundVolume, soundIntensity, materialIntensity, soundNameFromFile, updateRoute, validateCueTable, type CueTableContext } from './sceneCueTable'
 import { sampleLib, sampleTable } from './sceneTestFixtures'
 
 const ctx = (patch: Partial<CueTableContext> = {}): CueTableContext => ({
@@ -54,6 +54,19 @@ describe('scene cue table validation (the demos\' validate())', () => {
       'clip thump: Content/Kit/stream-clips/thump.wav missing',
       'grab: Content/Audio/Whoosh.wav missing',
     ])
+  })
+
+  it('reads and checks the sounds map (base levels, DEC-086)', () => {
+    let t = setSoundIntensity(sampleTable(), 'Click', 0.4)
+    expect(t.sounds).toEqual({ Click: { intensity: 0.4 } })
+    expect(validateCueTable(t, ctx())).toEqual([])
+    expect(soundIntensity(t, 'Click')).toBe(0.4)
+    expect(soundIntensity(sampleTable(), 'Click')).toBe(1) // absent = 1
+    expect(materialIntensity(t, 'haptic', 'thump')).toBe(0.5)
+    expect(setSoundIntensity(t, 'Click', 3).sounds!.Click.intensity).toBe(1)
+    t = { ...t, sounds: { Click: { intensity: 2 }, '9bad': { intensity: 0.5 }, Ghost: { intensity: 0.5 } } }
+    expect(validateCueTable(t, ctx())).toEqual(expect.arrayContaining(['sound Click: intensity must be 0..1', 'sound name 9bad must match ^[A-Za-z][A-Za-z0-9_]*$', 'sound Ghost: Content/Audio/Ghost.wav missing']))
+    expect(parseCueTable(serializeCueTable(setSoundIntensity(sampleTable(), 'Click', 0.4))).sounds).toEqual({ Click: { intensity: 0.4 } })
   })
 })
 

@@ -11,12 +11,12 @@ import { clipsForCue, isLoopCue, soundAllowed, positionsForCue, routeClips, sfxS
 import type { SceneLib } from '@/utils/sceneData'
 import {
   addPositionRoute, assignEventsForTrial, effectiveEvent, eventKey, listEvents, parseEventKey, removeOwnRoute,
-  setOwnSfxVolume, setRouteClips, setSfxSounds, simultaneousGroups, trialsForEvent, updateOwnRoute,
+  setRouteClips, setSfxSounds, simultaneousGroups, trialsForEvent, updateOwnRoute,
   resetAllReviews, setNone, setReview, setUndecided,
   type EffectiveEvent, type EventRow, type SoundStatus,
 } from '@/utils/cueEvents'
 import { useConfirm } from '@/components/common/useConfirm'
-import { NumberField, useAtLabel } from '@/components/scene/SceneCuePanels'
+import { useAtLabel } from '@/components/scene/SceneCuePanels'
 import { useEditor } from './editorContext'
 import { EditorMenu, EditorMenuItem } from './EditorMenu'
 import { openEventDefault, openEventHaptic, openEventSound } from './eventAudio'
@@ -213,14 +213,12 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
   const previewId = useEventStore(s => s.preview?.id)
   const key = eventKey(e.ref), sounds = sfxSounds(e.sfx)
   const missing = (name: string) => useWaveformStore.getState().setError(t('events.preview.missing', { name }))
-  const play = (s: string) => { if (!e.sfx || !openEventSound(key, s, e.sfx.volume, true)) missing(s) }
+  const play = (s: string) => { if (!openEventSound(key, s, true)) missing(s) }
   const set = (list: string[]) => edit(tb => setSfxSounds(tb, e.ref, list))
   // An approved sound is folded (its heading line stays); ▸ opens it.
   const [open, setOpen] = useState(e.review.sfx !== 'approved')
   return <section className="events-sec">
     <h4 className="events-sec-head"><Fold open={open} set={setOpen} />{t('events.sound')}{allowed && <><ReviewToggle e={e} field="sfx" edit={edit} /><DecisionBar e={e} field="sfx" edit={edit} /></>}
-      {allowed && e.sfx && <span className="events-field events-head-field">{t('scene.sound.volume')}
-        <NumberField value={e.sfx.volume} min={0} max={2} step={0.05} label={t('scene.sound.volume')} onCommit={x => edit(tb => setOwnSfxVolume(tb, e.ref, x))} /></span>}
       {/* Ask for (more) sound candidates; after checking the sound (OK): on to the haptic — also for a cue without a sound. */}
       <span className="events-haptic-request"><button type="button" className="agent-icon-btn" title={t('events.soundRequest.hint')}
         onClick={() => { const k = `sound|${key}`; useReviseOpen.getState().set(useReviseOpen.getState().open === k ? null : k) }}>{t('events.soundRequest.button')}</button>
@@ -266,7 +264,6 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
           <select value={r.at} aria-label={t('scene.route.at')} onChange={ev => { const v = ev.target.value; ev.target.blur(); edit(tb => updateOwnRoute(tb, e.ref, i, { at: v })) }}>
             {[...new Set([...positionsForCue(lib, e.ref.cue), r.at])].map(a => <option key={a} value={a}>{atLabel(a)}</option>)}
           </select>
-          <span className="events-field">gain <NumberField value={r.gain} min={0} max={2} step={0.05} label={t('scene.route.gain')} onCommit={x => edit(tb => updateOwnRoute(tb, e.ref, i, { gain: x }))} /></span>
           <select className="events-add-material" value="" aria-label={t('events.addClipMulti')} onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) set([...clips, x]) }}>
             <option value="">{t('events.addClipMulti')}</option>
             {fitting.filter(c => !clips.includes(c)).map(c => <option key={c} value={c}>{c}</option>)}
@@ -274,7 +271,7 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
           <button type="button" className="scene-icon-btn" aria-label={t('scene.route.remove')} title={t('scene.route.remove')} onClick={() => edit(tb => removeOwnRoute(tb, e.ref, i))}>✕</button>
         </div>
         <MaterialList items={clips} label={t('scene.route.clip')} active={clips.find(c => previewId === `${key}|haptic|${c}|${r.at}`) ?? null}
-          onPlay={c => { if (!openEventHaptic(key, c, r.gain, r.at, true)) missing(c) }} onReorder={set} onRemove={set} minItems={1}
+          onPlay={c => { if (!openEventHaptic(key, c, r.at, true)) missing(c) }} onReorder={set} onRemove={set} minItems={1}
           extra={c => <MaterialActions event={key} target="haptic" wav={c} />}
           below={c => <ReviseField cue={key} target="haptic" material={c} />} />
       </div>
@@ -363,7 +360,7 @@ function Reserves({ cue, target }: { cue: string; target: 'sound' | 'haptic' }) 
     if (!events.length) { useWaveformStore.getState().setError(t('events.auto.noEvents', { cues: row.key })); return }
     setBusy(true)
     try {
-      const r = await runDecision({ target, source: { kind: 'candidate', trialId: row.trialId, candidateId: row.candidateId }, events, name: null, at: null, gain: 1 })
+      const r = await runDecision({ target, source: { kind: 'candidate', trialId: row.trialId, candidateId: row.candidateId }, events, name: null, at: null })
       if (r.ok) drop(row.key, row); else useWaveformStore.getState().setError(t(r.notice.id, r.notice.params))
     } catch (error) { useWaveformStore.getState().setError(error) }
     finally { setBusy(false) }
