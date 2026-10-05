@@ -58,4 +58,11 @@ describe('editor UI settings', () => {
     expect(broken.source).toBe('local')
     expect(broken.folderMalformed).toMatch(/Invalid JSON/)
   })
+
+  it('keeps event reserves (valid references only) and the backfill flag', () => {
+    const v = sanitizeUiSettings({ eventReserves: { bite: [{ trialId: 't1', candidateId: 'A', target: 'sound' }, { trialId: 3 }], x: 'no' }, reservesBackfilled: true })
+    expect(v.eventReserves).toEqual({ bite: [{ trialId: 't1', candidateId: 'A', target: 'sound' }] })
+    expect(v.reservesBackfilled).toBe(true)
+    expect(sanitizeUiSettings({}).reservesBackfilled).toBe(false)
+  })
 })

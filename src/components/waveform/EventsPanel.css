@@ -92,3 +92,7 @@
 .events-route { display: flex; flex-direction: column; gap: 2px; }
 .events-route-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .events-head-field { margin-left: auto; font-weight: normal; font-size: 12px; }
+/* Reserves (★3, not in the game): the material row grid, faint. */
+.events-reserves { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; opacity: .6; }
+.events-reserves:hover { opacity: .9; }
+.events-reserve { border-style: dashed; }

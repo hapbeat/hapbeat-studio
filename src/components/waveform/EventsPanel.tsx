@@ -10,7 +10,7 @@ import { useSceneVideoTarget } from '@/utils/editorSceneSync'
 import { clipsForCue, isLoopCue, soundAllowed, positionsForCue, routeClips, sfxSounds, type CueTable } from '@/utils/sceneCueTable'
 import type { SceneLib } from '@/utils/sceneData'
 import {
-  addPositionRoute, effectiveEvent, eventKey, listEvents, parseEventKey, removeOwnRoute,
+  addPositionRoute, assignEventsForTrial, effectiveEvent, eventKey, listEvents, parseEventKey, removeOwnRoute,
   setOwnSfxVolume, setRouteClips, setSfxSounds, simultaneousGroups, trialsForEvent, updateOwnRoute,
   resetAllReviews, setNone, setReview, setUndecided,
   type EffectiveEvent, type EventRow, type SoundStatus,
@@ -22,6 +22,8 @@ import { DecidedNotice } from './DecideDialog'
 import { EditorMenu, EditorMenuItem } from './EditorMenu'
 import { openEventDefault, openEventHaptic, openEventSound } from './eventAudio'
 import { MaterialList } from './MaterialList'
+import { runDecision } from './eventDecide'
+import { removeReserve } from '@/utils/agentTrialUi'
 import { openEventMaterialForEditing } from './eventEditing'
 import './EventsPanel.css'
 import '@/components/scene/VideoOverlay.css'
@@ -221,6 +223,7 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
       <MaterialList items={sounds} label={t('events.sound')} active={sounds.find(s => previewId === `${key}|sound|${s}`) ?? null} onPlay={play}
         onReorder={set} onRemove={set}
         extra={s => <EditAsClipButton event={key} target="sound" wav={s} />} />
+      <Reserves cue={e.ref.cue} target="sound" />
       <select className="events-add-material" value="" aria-label={t('events.addSoundMulti')} title={t('events.soundDir', { dir: lib.paths.sounds })}
         onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) set([...sounds, x]) }}>
         <option value="">{t('events.addSoundMulti')}</option>
@@ -262,6 +265,7 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
           extra={c => <EditAsClipButton event={key} target="haptic" wav={c} />} />
       </div>
     })}
+    <Reserves cue={e.ref.cue} target="haptic" />
     <button type="button" className="toolbar-btn events-add" disabled={!free} title={t('events.addPositionHint')}
       onClick={() => { if (!edit(tb => addPositionRoute(tb, lib, e.ref))) useWaveformStore.getState().setError(t(loop ? 'scene.route.noLoopClip' : 'scene.route.noClip')) }}>＋ {t('events.addPosition')}</button>
   </section>
@@ -322,4 +326,45 @@ function DecisionBar({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'ha
     <button type="button" className="agent-icon-btn" style={{ visibility: isNone ? 'hidden' : 'visible' }} title={t(field === 'sfx' ? 'events.setNoneSoundHint' : 'events.setNoneHapticHint')} onClick={() => edit(tb => setNone(tb, e.ref, field))}>{t('events.setNone')}</button>
     <button type="button" className="agent-icon-btn" style={{ visibility: e.ref.variant === null && e.decided[field] ? 'visible' : 'hidden' }} title={t('events.setUndecidedHint')} onClick={() => edit(tb => setUndecided(tb, e.ref.cue, field))}>{t('events.setUndecided')}</button>
   </span>
+}
+
+/**
+ * The event's reserves (★3 AI candidates kept aside, editor settings): faint rows under the materials.
+ * ▶ auditions the candidate as rendered; "Adopt" does what "→ Event" does (writes the WAV, adds it to the
+ * end of the pool, tentative) and drops it from the reserves; "Remove" only drops it.
+ */
+function Reserves({ cue, target }: { cue: string; target: 'sound' | 'haptic' }) {
+  const { t } = useI18n()
+  const all = useEditorSettings(s => s.eventReserves)
+  const trials = useAgentTrialStore(s => s.trials)
+  const [busy, setBusy] = useState(false)
+  const rows = Object.entries(all).filter(([key]) => parseEventKey(key).cue === cue).flatMap(([key, refs]) => refs.filter(r => r.target === target).map(r => ({ key, ...r })))
+  if (!rows.length) return null
+  const drop = (key: string, r: { trialId: string; candidateId: string }) => useEditorSettings.getState().update({ eventReserves: removeReserve(useEditorSettings.getState().eventReserves, key, r) })
+  const adopt = async (row: typeof rows[number]) => {
+    const scene = useSceneStore.getState()
+    if (!scene.table || !scene.lib) { useWaveformStore.getState().setError(t('scene.save.noProject')); return }
+    const events = assignEventsForTrial(scene.table, scene.lib, [row.key], target)
+    if (!events.length) { useWaveformStore.getState().setError(t('events.auto.noEvents', { cues: row.key })); return }
+    setBusy(true)
+    try {
+      const r = await runDecision({ target, source: { kind: 'candidate', trialId: row.trialId, candidateId: row.candidateId }, events, name: null, at: null, gain: 1 })
+      if (r.ok) drop(row.key, row); else useWaveformStore.getState().setError(t(r.notice.id, r.notice.params))
+    } catch (error) { useWaveformStore.getState().setError(error) }
+    finally { setBusy(false) }
+  }
+  return <ul className="events-reserves" aria-label={t('events.reserves')} title={t('events.reservesHint')}>
+    {rows.map(row => {
+      const record = trials.find(r => r.trial.id === row.trialId)
+      const name = `${record?.shortId ? `${record.shortId}-` : ''}${row.candidateId} ${record?.trial.candidates.find(c => c.id === row.candidateId)?.label ?? row.trialId}`
+      return <li key={`${row.key}/${row.trialId}/${row.candidateId}`} className="events-mat events-reserve">
+        <button type="button" className="agent-icon-btn" disabled={!record} aria-label={t('events.mat.play', { name })} title={t('events.mat.play', { name })}
+          onClick={() => void useAgentTrialStore.getState().requestAudition(row.trialId, row.candidateId, true, false).catch(error => useWaveformStore.getState().setError(error))}>▶</button>
+        <span className="events-mat-name" title={`${name}${row.key !== cue ? ` (${row.key})` : ''}`}>{name}{row.key !== cue ? ` · ${row.key}` : ''}</span>
+        <span />
+        <button type="button" className="agent-icon-btn" disabled={busy || !record} title={t('events.reserveAdoptHint')} onClick={() => void adopt(row)}>{t('events.reserveAdopt')}</button>
+        <button type="button" className="agent-icon-btn" title={t('events.reserveRemoveHint')} onClick={() => drop(row.key, row)}>{t('events.mat.remove')}</button>
+      </li>
+    })}
+  </ul>
 }

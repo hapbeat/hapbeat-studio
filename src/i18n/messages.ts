@@ -1210,6 +1210,14 @@ export const messages = defineMessages({
   'editor.scene.targetHint': { ja: '評価・試聴の対象の cue（映像の赤い印。灰色の印は同じ場面の他の cue で、決定済みの音を鳴らします）', en: 'The cue being rated / auditioned (red marks; grey marks are other cues of the scene, playing their decided sound).' },
   'editor.agent.pooled': { ja: '{event} の素材候補に {count} 件追加（仮）: {names}', en: 'Added {count} to the material pool of {event} (tentative): {names}' },
   'editor.agent.freePlanSkipped': { ja: '{ids} は無料プランの生成物（商用不可）のため素材候補に入れていません', en: '{ids}: free-plan output (not for commercial use), not added to the pool.' },
+  'editor.agent.reserved': { ja: '{event} の控えに {ids} を入れました（★3。ゲームでは鳴らしません）', en: '{ids} kept as reserves of {event} (★3; not played in the game).' },
+  'editor.agent.poolNoScene': { ja: '{ids} は ★4 以上ですが、この試行に scene が無いため素材候補に入れていません', en: '{ids} are ★4+ but this trial has no scene: not added to a pool.' },
+  'editor.agent.poolOff': { ja: '{ids} は ★4 以上ですが、「イベントへ割当」がオフのため素材候補に入れていません', en: '{ids} are ★4+ but “Assign to event” is off: not added to the pool.' },
+  'events.reserves': { ja: '控え', en: 'Reserves' },
+  'events.reservesHint': { ja: '控え（★3 の AI 候補）。ゲームでは鳴らしません。「採用」で素材候補の末尾に追加します', en: 'Reserves (★3 AI candidates), not played in the game. “Adopt” adds one to the end of the pool.' },
+  'events.reserveAdopt': { ja: '採用', en: 'Adopt' },
+  'events.reserveAdoptHint': { ja: 'WAV を書き出して素材候補の末尾に追加し（仮）、控えから外します', en: 'Writes the WAV, adds it to the end of the pool (tentative) and drops it from the reserves.' },
+  'events.reserveRemoveHint': { ja: '控えから外します（試行と評価は残ります）', en: 'Drops it from the reserves (the trial and its rating stay).' },
 })
 
 export type MessageId = keyof typeof messages

@@ -195,3 +195,21 @@ export function poolCandidates(trial: Pick<TrialRequest, 'candidates'>, rating: 
     .sort((a, b) => (rating.candidates[b.id]!.overall! - rating.candidates[a.id]!.overall!) || a.id.localeCompare(b.id))
     .map(c => c.id)
 }
+
+/** ★3 (verdict "maybe") candidates kept aside as the event's reserves (free-plan output excluded, like the pool). */
+export function reserveCandidates(trial: Pick<TrialRequest, 'candidates'>, rating: Pick<RatingBody, 'candidates'>): string[] {
+  return trial.candidates.filter(c => rating.candidates[c.id]?.overall === 3 && !isFreePlanCandidate(c)).map(c => c.id)
+}
+/** Adds reserve references under `key` (no duplicates); returns the same object when nothing changed. */
+export function addReserves<R extends { trialId: string; candidateId: string }>(map: Record<string, R[]>, key: string, refs: readonly R[]): Record<string, R[]> {
+  const list = map[key] ?? []
+  const fresh = refs.filter(r => !list.some(x => x.trialId === r.trialId && x.candidateId === r.candidateId))
+  return fresh.length ? { ...map, [key]: [...list, ...fresh] } : map
+}
+/** Removes one reserve; an emptied key goes. */
+export function removeReserve<R extends { trialId: string; candidateId: string }>(map: Record<string, R[]>, key: string, ref: Pick<R, 'trialId' | 'candidateId'>): Record<string, R[]> {
+  const list = (map[key] ?? []).filter(x => !(x.trialId === ref.trialId && x.candidateId === ref.candidateId))
+  const next = { ...map }
+  if (list.length) next[key] = list; else delete next[key]
+  return next
+}

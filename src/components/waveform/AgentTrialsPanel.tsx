@@ -6,7 +6,7 @@ import { useWaveformStore } from '@/stores/waveformStore'
 import { localIsoString, type TrialRecord } from '@/utils/hapticKnowledge'
 import type { HapticFeatures } from '@/utils/hapticFeatures'
 import { clearRatingDraft, DraftKeeper, readFolderDraft, readLocalDraft, writeRatingDraft } from '@/utils/ratingDrafts'
-import { addUseRange, isFreePlanCandidate, poolCandidates, autoRatingContext, EMPTY_CONTEXT, formToRating, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, trialKind, verdictFromOverall, type CandidateRatingForm, type RatingForm } from '@/utils/agentTrialUi'
+import { addUseRange, isFreePlanCandidate, poolCandidates, reserveCandidates, addReserves, autoRatingContext, EMPTY_CONTEXT, formToRating, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, trialKind, verdictFromOverall, type CandidateRatingForm, type RatingForm } from '@/utils/agentTrialUi'
 import { trialTarget, type TrialKind } from '@/utils/agentProtocol'
 import { useAuditionPlan } from './EditorScenePanel'
 import { toFirstPlay } from '@/utils/sceneSegments'
@@ -75,6 +75,7 @@ export function AgentTrialsPanel() {
   const projectFilter = useEditorSettings(s => s.trialProjectFilter)
   const setProjectFilter = (value: string) => useEditorSettings.getState().update({ trialProjectFilter: value })
   const trials = useAgentTrialStore(s => s.trials)
+  useReserveBackfill(trials)
   const folder = useAgentTrialStore(s => s.folder)
   const polling = useAgentTrialStore(s => s.polling)
   const lastResult = useAgentTrialStore(s => s.lastResult)
@@ -200,6 +201,21 @@ export function AgentTrialsPanel() {
 
 /** What the last save / dismissal did (shown by the panel above the next trial). */
 interface DoneInfo { recordId: string; notes: string[]; assignedId: number | null; kind: 'rated' | 'dismissed' }
+
+/** Once per editor folder: ★3 candidates of ratings saved before reserves existed join their event's reserves. */
+function useReserveBackfill(trials: TrialRecord[]) {
+  const done = useEditorSettings(s => s.reservesBackfilled)
+  useEffect(() => {
+    if (done || !trials.length) return
+    let map = useEditorSettings.getState().eventReserves
+    for (const r of trials) {
+      if (!r.rating || !r.trial.scene || r.dismissed) continue
+      const ids = reserveCandidates(r.trial, r.rating)
+      if (ids.length) map = addReserves(map, r.trial.scene.cues[0], ids.map(candidateId => ({ trialId: r.trial.id, candidateId, target: trialTarget(r.trial) })))
+    }
+    useEditorSettings.getState().update({ eventReserves: map, reservesBackfilled: true })
+  }, [done, trials])
+}
 
 function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelectTrial, autoAudition, onAutoAuditioned, onDone }: {
   record: TrialRecord; known: TrialRecord[]; audition: AuditionTarget | null
@@ -327,8 +343,19 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
     // Every ★4+ candidate joins the event's material pool (the pool, not one best, is what the game picks from).
     const pooled = poolCandidates(trial, body)
     const skipped = trial.candidates.filter(c => (body.candidates[c.id]?.overall ?? 0) >= 4 && isFreePlanCandidate(c)).map(c => c.id)
-    if (trial.scene && autoAssign && pooled.length) { const r = await addToPool(pooled); notes.push(...r.notes); assignedId = r.assignedId }
-    if (trial.scene && autoAssign && skipped.length) notes.push(t('editor.agent.freePlanSkipped', { ids: skipped.map(id => record.shortId ? `${record.shortId}-${id}` : id).join(', ') }))
+    const ids = (list: string[]) => list.map(id => record.shortId ? `${record.shortId}-${id}` : id).join(', ')
+    // Nothing is skipped silently: no scene, auto-assign off and every refusal of the decision say why.
+    if (pooled.length && !trial.scene) notes.push(t('editor.agent.poolNoScene', { ids: ids(pooled) }))
+    else if (pooled.length && !autoAssign) notes.push(t('editor.agent.poolOff', { ids: ids(pooled) }))
+    else if (pooled.length) { const r = await addToPool(pooled); notes.push(...r.notes); assignedId = r.assignedId }
+    if (trial.scene && skipped.length) notes.push(t('editor.agent.freePlanSkipped', { ids: ids(skipped) }))
+    // ★3: the event's reserves (by reference, in the editor settings; not the cue table).
+    const reserved = reserveCandidates(trial, body)
+    if (trial.scene && reserved.length) {
+      const key = trial.scene.cues[0], settings = useEditorSettings.getState()
+      settings.update({ eventReserves: addReserves(settings.eventReserves, key, reserved.map(candidateId => ({ trialId: trial.id, candidateId, target }))) })
+      notes.push(t('editor.agent.reserved', { event: key, ids: ids(reserved) }))
+    }
     onDone({ recordId: trial.id, notes, assignedId, kind: 'rated' })
   }
   const adopt = async (cid: string, label: string) => {

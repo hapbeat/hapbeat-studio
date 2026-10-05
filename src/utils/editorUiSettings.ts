@@ -42,9 +42,12 @@ export interface EditorUiSettings {
   eventMarks: Record<string, EventMark[]>
   /** Events panel: height (px) of the event list above the detail. */
   eventsListHeight: number
-  /** Events panel: show the "Repetition" section for every event, not only those that fire repeatedly in the recording. */
-  /** AI trials: saving a rating with a best candidate assigns it to the trial's events. */
+  /** AI trials: saving a rating adds its ★4+ candidates to the material pool of the trial's first scene cue. */
   autoAssignOnRating: boolean
+  /** Reserves per event (a trial's first scene cue): ★3 candidates kept aside, by reference — not in the cue table, never played by the game. */
+  eventReserves: Record<string, ReserveRef[]>
+  /** The one-time backfill of ★3 ratings saved before reserves existed has run. */
+  reservesBackfilled: boolean
   /** AI trials panel project filter: '' = all, ' ' = trials without a project, else a project name. */
   trialProjectFilter: string
   /** AI trials panel target filter: '' = all, 'sound', 'haptic'. */
@@ -54,10 +57,23 @@ export interface EditorUiSettings {
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, autoAssignOnRating: true, trialProjectFilter: '', trialTargetFilter: '',
+  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, eventsListHeight: 220, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, trialProjectFilter: '', trialTargetFilter: '',
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
+/** A reserved AI candidate: trial id + candidate id, and whether it is a sound or a haptic. */
+export interface ReserveRef { trialId: string; candidateId: string; target: 'sound' | 'haptic' }
+function reserves(value: unknown): Record<string, ReserveRef[]> {
+  if (!isRecord(value)) return {}
+  const out: Record<string, ReserveRef[]> = {}
+  for (const [key, list] of Object.entries(value).slice(0, 500)) {
+    if (!Array.isArray(list) || key.length > 200) continue
+    const refs = list.filter((r): r is ReserveRef => isRecord(r) && typeof r.trialId === 'string' && typeof r.candidateId === 'string' && (r.target === 'sound' || r.target === 'haptic')
+      && r.trialId.length <= 200 && r.candidateId.length <= 50).slice(0, 200).map(r => ({ trialId: r.trialId, candidateId: r.candidateId, target: r.target }))
+    if (refs.length) out[key] = refs
+  }
+  return out
+}
 const clamp = (value: unknown, min: number, max: number, fallback: number) => typeof value === 'number' && Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback
 const strings = (value: unknown, max: number): value is string[] => Array.isArray(value) && value.length <= max && value.every(item => typeof item === 'string' && item.length <= 200)
 const isSceneChoice = (value: unknown): value is TrialSceneChoice => isRecord(value) && typeof value.project === 'string' && value.project.length <= 200
@@ -98,6 +114,8 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     trialScenes: sceneChoices(v.trialScenes),
     clipScenes: sceneChoices(v.clipScenes),
     eventMarks: eventMarks(v.eventMarks),
+    eventReserves: reserves(v.eventReserves),
+    reservesBackfilled: v.reservesBackfilled === true,
     eventsListHeight: clamp(v.eventsListHeight, 80, 1200, d.eventsListHeight),
     autoAssignOnRating: typeof v.autoAssignOnRating === 'boolean' ? v.autoAssignOnRating : d.autoAssignOnRating,
     trialProjectFilter: typeof v.trialProjectFilter === 'string' && v.trialProjectFilter.length <= 200 ? v.trialProjectFilter : d.trialProjectFilter,

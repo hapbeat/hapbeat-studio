@@ -178,3 +178,23 @@ describe('material pool on save', () => {
     expect(poolCandidates(t, { candidates: { E: { comment: 'x' } } })).toEqual([])
   })
 })
+
+describe('reserves (★3)', () => {
+  it('keeps ★3 candidates aside (free plan excluded), by reference, without duplicates', async () => {
+    const { reserveCandidates, addReserves, removeReserve } = await import('./agentTrialUi')
+    const src = (path: string) => ({ kind: 'file' as const, path })
+    const t = { candidates: [
+      { id: 'A', label: 'a', source: src('sources/a.wav'), effects: [] },
+      { id: 'B', label: 'b (free)', source: src('sources/b.wav'), effects: [] },
+      { id: 'C', label: 'c', source: src('sources/c.wav'), effects: [] },
+      { id: 'D', label: 'd', source: src('sources/d.wav'), effects: [] },
+    ] }
+    expect(reserveCandidates(t, { candidates: { A: { overall: 3 }, B: { overall: 3 }, C: { overall: 4 }, D: { overall: 2 } } })).toEqual(['A'])
+    const ref = { trialId: 't1', candidateId: 'A', target: 'sound' as const }
+    let map = addReserves({}, 'bite:tear', [ref])
+    expect(addReserves(map, 'bite:tear', [{ ...ref }])).toBe(map)
+    map = addReserves(map, 'bite:tear', [{ ...ref, candidateId: 'C' }])
+    expect(map['bite:tear'].map(r => r.candidateId)).toEqual(['A', 'C'])
+    expect(removeReserve(removeReserve(map, 'bite:tear', ref), 'bite:tear', { trialId: 't1', candidateId: 'C' })).toEqual({})
+  })
+})
