@@ -16,3 +16,8 @@
 .editor-scene-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; font-size: 13px; }
 .editor-scene-row select { flex: 1; min-width: 120px; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-light); border-radius: 4px; padding: 2px 4px; }
 .agent-scene-btn { align-self: flex-start; margin-top: 4px; }
+/* ⏸/▶ under the video; the time keeps its width so the hint does not move. */
+.editor-scene-controls { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+.editor-scene-pause { min-width: 32px; justify-content: center; }
+.editor-scene-time { min-width: 9ch; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.editor-scene-step { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

@@ -214,7 +214,7 @@ export const messages = defineMessages({
   "editor.scene.loading": { ja: "映像を読み込み中…", en: "Loading video…" },
   "editor.scene.lead": { ja: "印の", en: "Start" },
   "editor.scene.leadUnit": { ja: "秒前から", en: "s before the mark" },
-  "editor.scene.synced": { ja: "波形にフォーカスして再生すると即時に鳴り、映像は印から動きます。この映像をクリック（または映像にフォーカスして Space）すると、映像が印の手前から始まり、音と触覚は印で鳴ります。映像は無音です", en: "Playing with the waveform focused starts at once and the video runs from the mark. Click this video (or Space while it has focus) to start the video before the mark, with sound and haptics on the mark. The video is muted." },
+  'editor.scene.synced': { ja: '波形にフォーカスして再生すると即時に鳴り、映像は印から動きます。映像をクリック（または映像にフォーカスして Space）すると、止まっていれば印の手前から再生、動いていれば一時停止、一時停止中なら再開します。映像は無音です', en: 'Playing with the waveform focused starts at once and the video runs from the mark. Click the video (or Space while it has focus) to play from before the mark when stopped, pause while it runs, or resume when paused. The video is muted.' },
   "editor.scene.auditionHint": { ja: "この試行の候補を試聴すると、映像も一緒に再生されます", en: "Audition a candidate of this trial to play the video with it." },
   "editor.importMenu": { ja: "読み込み", en: "Import" },
   "editor.viewMenu": { ja: "表示", en: "View" },
@@ -1208,6 +1208,11 @@ export const messages = defineMessages({
   'editor.agent.axesToggle': { ja: '方向', en: 'Directions' },
   'editor.agent.axesToggleHint': { ja: '各候補に「どう変えると良いか」の軸ボタンと、使う範囲の記録を出します（既定はオフ：★とコメントだけ）', en: 'Show the per-axis "how to change it" buttons and kept ranges on each candidate (off by default: stars and comments only).' },
   'editor.agent.trialComment': { ja: '試行全体へのコメント（例: B が一番近い、もっと重く）', en: 'Comment on the whole trial (e.g. B is closest, make it heavier)' },
+  'editor.scene.pause': { ja: '一時停止（Space）', en: 'Pause (Space)' },
+  'editor.scene.resume': { ja: '再開（Space）', en: 'Resume (Space)' },
+  'editor.scene.playLead': { ja: '印の手前から再生（Space）', en: 'Play from before the mark (Space)' },
+  'editor.scene.pausedAt': { ja: '{time} s', en: '{time} s' },
+  'editor.scene.stepHint': { ja: '←/→ で 1/30 秒送り・波形クリックで移動（音の開始 = 0 s）', en: '←/→ step 1/30 s, click the waveform to seek (sound start = 0 s)' },
 })
 
 export type MessageId = keyof typeof messages

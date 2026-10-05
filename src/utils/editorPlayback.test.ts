@@ -35,6 +35,17 @@ describe('editor playback routing without physical output', () => {
     expect(cancel).toHaveBeenCalledTimes(1); expect(pc.play).toHaveBeenCalledTimes(1)
     playback.preRoll = () => ({seconds: 0, begin, cancel}); await playback.play(0, 4); expect(pc.play).toHaveBeenCalledTimes(2)
   })
+  it('uses a play\'s own pre-roll instead of the registered one (Scene video resume)', async () => {
+    vi.useFakeTimers(); const pc = player(), begin = vi.fn(), cancel = vi.fn(), own = vi.fn()
+    const playback = new EditorPlayback(pc, vi.fn(), [], vi.fn(), vi.fn())
+    playback.preRoll = () => ({seconds: 2, begin, cancel})
+    // Resume after the mark: no lead-in at all, from the paused time.
+    await playback.play(1.25, 4, true, null); expect(pc.play).toHaveBeenLastCalledWith(1.25, 4); expect(begin).not.toHaveBeenCalled()
+    // Resume in the lead-in: the rest of it (0.5 s), then the audio from 0.
+    const job = playback.play(0, 4, true, {seconds: 0.5, begin: own, cancel})
+    await vi.advanceTimersByTimeAsync(499); expect(own).toHaveBeenCalledWith(0); expect(pc.play).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1); await job; expect(pc.play).toHaveBeenLastCalledWith(0, 4); expect(begin).not.toHaveBeenCalled()
+  })
   it('cancels the silence wait when repeat is unchecked', async () => {
     vi.useFakeTimers(); const pc = player(); pc.getCurrentTime = () => 4
     const playback = new EditorPlayback(pc, vi.fn(), [], vi.fn(), vi.fn())

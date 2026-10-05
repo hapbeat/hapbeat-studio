@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveTrialScene, sceneVideoTime, trialSceneOptions } from './trialScene'
+import { resolveTrialScene, sceneEventTime, sceneVideoTime, stepSceneFrame, trialSceneOptions } from './trialScene'
 import { sampleData, sampleLib } from './sceneTestFixtures'
 
 describe('trial scene clips', () => {
@@ -35,6 +35,16 @@ describe('trial scene clips', () => {
     expect(sceneVideoTime(2, 0)).toBe(2)
     expect(sceneVideoTime(2, 0.5)).toBe(2.5)
     expect(sceneVideoTime(1, -2)).toBe(0)
+  })
+
+  it('pauses in event time (mark = 0) and steps one 1/30 s frame inside the video', () => {
+    expect(sceneEventTime(2, 2.5)).toBeCloseTo(0.5)
+    expect(sceneEventTime(2, 1.25)).toBeCloseTo(-0.75) // in the lead-in
+    expect(stepSceneFrame(0.5, 1, 2, 10)).toBeCloseTo(0.5 + 1 / 30)
+    expect(stepSceneFrame(0, -1, 2, 10)).toBeCloseTo(-1 / 30)
+    expect(stepSceneFrame(-2, -1, 2, 10)).toBe(-2) // video start
+    expect(stepSceneFrame(8, 1, 2, 10)).toBe(8) // video end
+    expect(stepSceneFrame(8, 1, 2, NaN)).toBeCloseTo(8 + 1 / 30) // duration not known yet
   })
 })
 

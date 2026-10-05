@@ -27,7 +27,7 @@ import { EditorContext, type EditorShared } from './editorContext'
 import { EditorDockLayout, focusPanel, POPOUT_URL } from './EditorDockLayout'
 import { EditorTopBar } from './EditorTopBar'
 import { playStart, useStartMarker } from '@/utils/editorStartMarker'
-import { scenePreRoll, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
+import { scenePause, scenePreRoll, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useEventStore } from '@/stores/eventStore'
 import { showDockPanel } from '@/utils/dockPanels'
@@ -189,8 +189,11 @@ export function WaveformEditor({ active }: { active: boolean }) {
       // Space with focus on an AI candidate card acts like the card's ▶ (typing in its rating fields never reaches here).
       const docs = [document, ...popoutWindows.map(w => w.document)]
       const card = docs.map(d => (d.activeElement as HTMLElement | null)?.closest?.<HTMLElement>('[data-candidate-id]')).find(Boolean)
-      if (card?.dataset.trialId && card.dataset.candidateId) toggleCandidate(card.dataset.trialId, card.dataset.candidateId)
-      else togglePlay()
+      if (card?.dataset.trialId && card.dataset.candidateId) { toggleCandidate(card.dataset.trialId, card.dataset.candidateId); return }
+      // Focus in the synced Scene video panel, or the video paused: pause / resume there (same as its ⏸/▶ button).
+      const scene = scenePause()
+      if (scene && (scene.paused() || docs.some(d => (d.activeElement as HTMLElement | null)?.closest?.('.editor-scene-panel')))) { scene.toggle(); return }
+      togglePlay()
     }
     window.addEventListener('studio:editor-playback', toggle)
     return () => window.removeEventListener('studio:editor-playback', toggle)

@@ -4,8 +4,9 @@ import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useEditorSettings } from '@/stores/editorSettings'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { sceneVideoUrl, useSceneStore } from '@/stores/sceneStore'
-import { resolveTrialScene, sceneVideoTime, wantedSceneProject, type TrialSceneState } from '@/utils/trialScene'
-import { setScenePreRoll, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
+import { resolveTrialScene, sceneEventTime, sceneVideoTime, stepSceneFrame, wantedSceneProject, type TrialSceneState } from '@/utils/trialScene'
+import { setScenePause, setScenePreRoll, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
+import { isTypingTarget } from '@/utils/playbackShortcut'
 import { useEditor } from './editorContext'
 import { useEventStore } from '@/stores/eventStore'
 import { onUserStop } from '@/utils/playerStops'
@@ -74,11 +75,13 @@ function useShownSubject(): SceneSubject {
  * any playback of that clip: it starts `sceneLeadSec` before the cue mark and
  * the editor holds the sound + haptics back by the same lead, so they play
  * exactly on the mark; seeking and stopping follow the editor player. A lead
- * of 0 starts both at once.
+ * of 0 starts both at once. ⏸ (or Space / a click on the video while it runs) pauses the video and the
+ * waveform playback at the same moment (the playhead stays there); while paused, ←/→ step the video by
+ * 1/30 s and a waveform click seeks, both kept together; ▶ continues video, waveform and sound from there.
  */
 export function EditorScenePanel() {
   const { t } = useI18n()
-  const { player, linkSceneProject, playFromStart } = useEditor()
+  const { player, playback, linkSceneProject, playFromStart, isPlaybackActive } = useEditor()
   /** Focus in this panel (its own window when popped out) = play "from the video": lead-in first, sound + haptics on the mark. */
   const rootRef = useRef<HTMLDivElement>(null)
   const [focused, setFocused] = useState(false)
@@ -127,7 +130,54 @@ export function EditorScenePanel() {
     return () => { cancelled = true }
   }, [root, chosen?.file])
   // Show the start frame (lead before the mark) whenever the clip or lead changes.
-  const cue = () => { const v = video.current; if (v && chosen) { v.pause(); v.currentTime = sceneVideoTime(chosen.mark, -lead) } }
+  const cue = () => { setPausedAt(null); const v = video.current; if (v && chosen) { v.pause(); v.currentTime = sceneVideoTime(chosen.mark, -lead) } }
+  /** Paused at this time: seconds from the event start (the mark = 0; negative in the lead-in). null = not paused. */
+  const [pausedAt, setPausedAt] = useState<number | null>(null)
+  const pausedRef = useRef<number | null>(null); pausedRef.current = pausedAt
+  /** The video is running (lead-in, with the playback, or ringing on after it); drives the ⏸/▶ icon. */
+  const [videoRunning, setVideoRunning] = useState(false)
+  /** Set while this panel moves the waveform playhead itself, so its 'seeking' does not move the video back to the mark. */
+  const ownSeek = useRef(false)
+  const seekWaveform = (time: number) => {
+    ownSeek.current = true
+    try { player.setTime(Math.max(0, Math.min(player.getDuration(), time))) } finally { ownSeek.current = false }
+  }
+  /** Stops video, waveform playback (haptics stream) and the decided sound where the video is; the playhead stays there. */
+  const pauseHere = () => {
+    const v = video.current
+    if (!v || !chosen) return
+    const time = sceneEventTime(chosen.mark, v.currentTime)
+    v.pause()
+    playback.stop()
+    seekWaveform(time)
+    setPausedAt(time)
+  }
+  /** Continues from the paused moment: in the lead-in the video runs first and the audio starts on the mark. */
+  const resume = () => {
+    const v = video.current, time = pausedRef.current
+    if (!v || time === null) return
+    setPausedAt(null)
+    const duration = player.getDuration()
+    // Past the audio (the video rings on to the moment's end): only the video continues.
+    if (time >= duration) { void v.play().catch(() => {}); return }
+    void playback.play(Math.max(0, time), duration, true, { seconds: Math.max(0, -time), begin: () => { void v.play().catch(() => {}) }, cancel: () => v.pause() })
+      .catch(useWaveformStore.getState().setError)
+  }
+  /** ⏸/▶, Space and a click on the video: resume when paused, pause while running, else play from the lead-in. */
+  const togglePause = () => {
+    if (pausedRef.current !== null) resume()
+    else if (isPlaybackActive() || (video.current && !video.current.paused)) pauseHere()
+    else playFromStart(true)
+  }
+  const togglePauseRef = useRef(togglePause); togglePauseRef.current = togglePause
+  const stepFrame = (direction: 1 | -1) => {
+    const v = video.current, time = pausedRef.current
+    if (!v || !chosen || time === null) return
+    const next = stepSceneFrame(time, direction, chosen.mark, v.duration)
+    v.currentTime = chosen.mark + next
+    seekWaveform(next)
+    setPausedAt(next)
+  }
   // A new subject, clip, lead or auditioned candidate re-cues the video (it waits; nothing plays by itself).
   const previewId = useEventStore(s => s.preview?.id)
   useEffect(cue, [src, chosen?.mark, lead, audition?.candidateId, audition?.trialId, previewId])
@@ -142,14 +192,16 @@ export function EditorScenePanel() {
       begin: start => { const v = video.current; if (!v) return; v.currentTime = at(start - lead); void v.play().catch(() => {}) },
       cancel: () => video.current?.pause(),
     })
+    setScenePause({ paused: () => pausedRef.current !== null, toggle: () => togglePauseRef.current() })
     const unsubs = [
-      // After the lead-in the video is already running; only correct a visible drift.
-      player.on('play', time => { const v = video.current; if (!v) return; if (v.paused || Math.abs(v.currentTime - at(time)) > 0.1) v.currentTime = at(time); void v.play().catch(() => {}) }),
-      player.on('seeking', time => { const v = video.current; if (v) v.currentTime = at(time) }),
+      // After the lead-in the video is already running; only correct a visible drift. Any play ends a pause.
+      player.on('play', time => { setPausedAt(null); const v = video.current; if (!v) return; if (v.paused || Math.abs(v.currentTime - at(time)) > 0.1) v.currentTime = at(time); void v.play().catch(() => {}) }),
+      // A waveform seek moves the video (and, while paused, the paused moment); the panel's own seeks are skipped.
+      player.on('seeking', time => { if (ownSeek.current) return; const v = video.current; if (v) v.currentTime = at(time); if (pausedRef.current !== null) setPausedAt(time) }),
       // The video runs on after the audio ends naturally (to the moment's end); a stop pauses it.
       onUserStop(player, () => video.current?.pause()),
     ]
-    return () => { setScenePreRoll(null); unsubs.forEach(unsub => unsub()); video.current?.pause() }
+    return () => { setScenePreRoll(null); setScenePause(null); setPausedAt(null); unsubs.forEach(unsub => unsub()); video.current?.pause() }
   }, [player, synced, chosen?.mark, lead])
 
   if (!choice.id) return <div className="editor-scene-panel"><p className="agent-muted">{t('editor.scene.noSubject')}</p></div>
@@ -163,7 +215,8 @@ export function EditorScenePanel() {
   }
   const message = state.kind === 'noClips' ? t('editor.scene.noClips', { cues: state.cues.join(', ') }) : null
   const title = subject.kind === 'trial' ? t('editor.scene.forTrial', { id: choice.id }) : subject.kind === 'event' ? t('editor.scene.forEvent', { name: choice.id ?? '' }) : t('editor.scene.forClip', { name: clipName })
-  return <div className="editor-scene-panel" ref={rootRef} tabIndex={-1}>
+  return <div className="editor-scene-panel" ref={rootRef} tabIndex={-1}
+    onKeyDown={e => { if (pausedRef.current === null || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') || isTypingTarget(e.target)) return; e.preventDefault(); stepFrame(e.key === 'ArrowRight' ? 1 : -1) }}>
     <div className="editor-scene-title" title={title}>{title}
       {synced && <span className={`editor-scene-mode ${focused ? 'video' : ''}`}>{focused ? t('editor.scene.modeVideo', { seconds: lead }) : t('editor.scene.modeWave')}</span>}</div>
     {message ? <p className="agent-muted">{message}</p> : <>
@@ -173,10 +226,16 @@ export function EditorScenePanel() {
           <input type="number" min={0} max={10} step={0.5} value={lead} onChange={e => { const x = parseFloat(e.target.value); if (Number.isFinite(x)) useEditorSettings.getState().update({ sceneLeadSec: Math.max(0, Math.min(10, x)) }) }} />
           {t('editor.scene.leadUnit')}</label>
       </div>
-      <div className="editor-scene-stage" onClick={e => { e.currentTarget.closest<HTMLElement>('.editor-scene-panel')?.focus(); focusedRef.current = true; setFocused(true); if (synced) playFromStart(true) }}>
-        {chosen && src && !videoError ? <video ref={video} src={src} muted playsInline preload="auto" onLoadedMetadata={cue} onError={e => setVideoError(e.currentTarget.error?.message || `MediaError ${e.currentTarget.error?.code ?? ''}`)} />
+      <div className="editor-scene-stage" onClick={e => { e.currentTarget.closest<HTMLElement>('.editor-scene-panel')?.focus(); focusedRef.current = true; setFocused(true); if (synced) togglePause() }}>
+        {chosen && src && !videoError ? <video ref={video} src={src} muted playsInline preload="auto" onLoadedMetadata={cue} onPlay={() => setVideoRunning(true)} onPause={() => setVideoRunning(false)} onError={e => setVideoError(e.currentTarget.error?.message || `MediaError ${e.currentTarget.error?.code ?? ''}`)} />
           : <p className="agent-muted">{chosen && videoError ? t('editor.scene.unreadable', { file: chosen.file, error: videoError }) : chosen ? t('editor.scene.loading') : t('editor.scene.pickHint')}</p>}
       </div>
+      {synced && chosen && src && !videoError && <div className="editor-scene-controls">
+        <button className="toolbar-btn editor-scene-pause" onClick={() => { focusedRef.current = true; setFocused(true); togglePause() }}
+          title={t(videoRunning ? 'editor.scene.pause' : pausedAt !== null ? 'editor.scene.resume' : 'editor.scene.playLead')} aria-label={t(videoRunning ? 'editor.scene.pause' : pausedAt !== null ? 'editor.scene.resume' : 'editor.scene.playLead')}>{videoRunning ? '⏸' : '▶'}</button>
+        <span className="editor-scene-time">{pausedAt !== null ? t('editor.scene.pausedAt', { time: pausedAt.toFixed(2) }) : ''}</span>
+        <span className="agent-muted editor-scene-step">{pausedAt !== null ? t('editor.scene.stepHint') : ''}</span>
+      </div>}
       <p className="agent-muted editor-scene-hint">{synced ? t('editor.scene.synced') : subject.kind === 'trial' && !trial ? '' : subject.kind === 'trial' ? t('editor.scene.auditionHint') : t('editor.scene.clipHint')}</p>
     </>}
   </div>

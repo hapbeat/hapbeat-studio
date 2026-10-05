@@ -13,6 +13,15 @@ export function setScenePreRoll(preRoll: ScenePreRoll | null) { current = preRol
 export function scenePreRoll(): PlaybackPreRoll | null { return current && current.active() ? current : null }
 
 /**
+ * Pause / resume of the synced Scene video panel. Space with the panel focused (or while it is
+ * paused) toggles it, and a plain waveform click while paused only seeks (video and waveform stay together).
+ */
+export interface ScenePause { paused: () => boolean; toggle: () => void }
+let pause: ScenePause | null = null
+export function setScenePause(control: ScenePause | null) { pause = control }
+export function scenePause(): ScenePause | null { return pause }
+
+/**
  * What the Scene video panel shows when no AI candidate is auditioned (an
  * audition always shows its trial): the trial whose "▶ Video" was pressed,
  * the selected clip (Properties "▶ Video") or the event selected in the Events panel.

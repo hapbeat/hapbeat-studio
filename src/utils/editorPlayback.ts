@@ -87,8 +87,8 @@ export class EditorPlayback {
     const time = this.player.getCurrentTime()
     return this.play(this.selection || time < range.start || time >= range.end ? range.start : time, range.end)
   }
-  /** `once`: no loop repeat for this play. */
-  play(start = 0, end?: number, once = false): Promise<void> {
+  /** `once`: no loop repeat for this play. `preRoll`: this play's lead-in instead of `this.preRoll` (null = none; Scene video resume). */
+  play(start = 0, end?: number, once = false, preRoll?: PlaybackPreRoll | null): Promise<void> {
     this.stop()
     this.once = once
     this.player.prepare?.()
@@ -98,16 +98,16 @@ export class EditorPlayback {
     this.range = {start: this.selection ? this.selectedRange().start : (end !== undefined && end < this.player.getDuration() ? start : 0), end: end ?? this.player.getDuration()}
     const controller = new AbortController()
     this.controller = controller; this.pending = true; this.changed(true)
-    const job = this.run(controller, EditorPlayback.settled, start, end, this.player.unlock?.())
+    const job = this.run(controller, EditorPlayback.settled, start, end, this.player.unlock?.(), preRoll)
     EditorPlayback.settled = job.catch(() => {})
     return job
   }
-  private async run(controller: AbortController, previous: Promise<void>, start: number, end?: number, unlocked?: Promise<void>): Promise<void> {
+  private async run(controller: AbortController, previous: Promise<void>, start: number, end?: number, unlocked?: Promise<void>, override?: PlaybackPreRoll | null): Promise<void> {
     try {
       await unlocked
       await previous
       if (controller.signal.aborted) return
-      const preRoll = this.preRoll?.()
+      const preRoll = override !== undefined ? override : this.preRoll?.()
       if (preRoll && preRoll.seconds > 0) {
         preRoll.begin(start)
         await new Promise<void>(resolve => {

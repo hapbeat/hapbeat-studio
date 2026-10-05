@@ -11,6 +11,7 @@ import { useI18n } from '@/i18n/I18nProvider'
 import { WaveformThumbnail } from './WaveformThumbnail'
 import { useEditorSettings } from '@/stores/editorSettings'
 import type { EditorBufferPlayer } from '@/utils/editorBufferPlayer'
+import { scenePause } from '@/utils/editorSceneSync'
 import { useEditor } from './editorContext'
 
 type OverviewMode = 'left' | 'right' | 'move' | 'seek'
@@ -211,7 +212,8 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
           const state = drag.current
           if (state) {
             // A plain click plays from there (the start marker moves there) or, while playing, stops; a drag made a range.
-            if (!state.moved) { if (state.wasPlaying) stopPlayback(); else playAt(state.time) }
+            // While the Scene video is paused a click only seeks (done on pointer down; the video follows).
+            if (!state.moved && !scenePause()?.paused()) { if (state.wasPlaying) stopPlayback(); else playAt(state.time) }
           }
           drag.current = null
           if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)

@@ -63,3 +63,16 @@ export function resolveTrialScene(o: { lib: SceneLib | null; data: SceneData | n
 export function sceneVideoTime(mark: number, playerTime: number): number {
   return Math.max(0, mark + playerTime)
 }
+
+/** Seconds from the event start (the cue mark = 0; negative in the lead-in) at video time `videoTime`. */
+export function sceneEventTime(mark: number, videoTime: number): number {
+  return videoTime - mark
+}
+
+/** One video frame (1/30 s) from event time `time`, kept inside the video (`videoDuration` unknown = no upper limit). */
+export const SCENE_FRAME_SEC = 1 / 30
+export function stepSceneFrame(time: number, direction: 1 | -1, mark: number, videoDuration: number): number {
+  const next = time + direction * SCENE_FRAME_SEC
+  const max = Number.isFinite(videoDuration) && videoDuration > 0 ? videoDuration - mark : Infinity
+  return Math.max(-mark, Math.min(max, next))
+}
