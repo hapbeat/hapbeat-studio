@@ -1231,7 +1231,7 @@ export const messages = defineMessages({
   'scene.event.runHint': { ja: '記録の通し映像を、このイベントの連続区間の先頭から再生します（実際の発生タイミングで、揺らぎを掛けて鳴ります）', en: 'Plays the full recording from the start of this event’s run (real firing times, with the variation).' },
   'editor.listenTimes': { ja: '試聴の回数', en: 'Plays per audition' },
   'editor.listenTimesHint': { ja: '繰り返し起きる cue の試聴（▶・カード・Space）を何回鳴らすか。記録の実際の間隔（記録が無ければ音の長さ＋0.4 秒）で、揺らぎなし。停止で残りも止まります。1 回しか起きない cue は常に 1 回です', en: 'How many times auditions of a repeating cue (▶, cards, Space) play: at the real gaps of the recording (else sound length + 0.4 s), without jitter; Stop ends the rest. Cues that fire once always play once.' },
-  'editor.dictation.start': { ja: '音声入力を開始（Ctrl+M）', en: 'Start dictation (Ctrl+M)' },
+  'editor.dictation.start': { ja: '音声入力（短押しで開始・終了、長押しは押している間だけ。Ctrl+M）', en: 'Dictation (click to start / stop, hold to talk; Ctrl+M)' },
   'editor.dictation.stop': { ja: '音声入力を終了（Ctrl+M / Esc）', en: 'Stop dictation (Ctrl+M / Esc)' },
   'editor.dictation.privacy': { ja: '音声はブラウザの認識サーバー（Chrome は Google、Edge は Microsoft）へ送られます', en: 'The audio is sent to the browser’s speech service (Chrome: Google, Edge: Microsoft).' },
   'editor.dictation.error': { ja: '音声入力エラー: {code}', en: 'Dictation error: {code}' },
@@ -1242,6 +1242,7 @@ export const messages = defineMessages({
   'events.repeatListen.no': { ja: 'しない', en: 'off' },
   'events.repeatListen.on': { ja: '繰り返し試聴：する', en: 'Repeated auditions: on' },
   'events.repeatListen.off': { ja: '繰り返し試聴：しない', en: 'Repeated auditions: off' },
+  'editor.dictation.listening': { ja: '● 聞き取り中…', en: '● Listening…' },
 })
 
 export type MessageId = keyof typeof messages

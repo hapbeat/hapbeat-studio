@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
-import { insertDictation, speechRecognitionCtor, startDictation, type Recognition } from './speechInput'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { DictationControl, insertDictation, speechRecognitionCtor, startDictation, stopDictation, type Recognition } from './speechInput'
 
 class MockRecognition implements Recognition {
   static instances: MockRecognition[] = []
@@ -17,6 +17,9 @@ class MockRecognition implements Recognition {
 }
 const last = () => MockRecognition.instances[MockRecognition.instances.length - 1]
 const handlers = () => ({ onInterim: vi.fn(), onFinal: vi.fn(), onEnd: vi.fn(), onError: vi.fn() })
+const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve() }
+afterEach(() => { stopDictation(); vi.restoreAllMocks() })
+vi.spyOn(console, 'debug').mockImplementation(() => {})
 
 describe('dictation', () => {
   it('finds the API (standard or webkit), or none', () => {
@@ -34,7 +37,7 @@ describe('dictation', () => {
     expect(insertDictation('abc', 3, 3, '  ')).toEqual({ value: 'abc', caret: 3 })
   })
 
-  it('runs ja-JP continuous with interim results; final pieces and interim text go to their handlers', () => {
+  it('runs ja-JP continuous with interim results; onend (silence) always ends it once', () => {
     const h = handlers()
     startDictation(MockRecognition, h)
     const r = last()
@@ -44,25 +47,68 @@ describe('dictation', () => {
     r.result(0, [['もっと重く', true], ['して', false]])
     expect(h.onFinal).toHaveBeenCalledWith('もっと重く')
     expect(h.onInterim).toHaveBeenLastCalledWith('して')
-    r.onend?.() // silence: the browser ends it
+    r.onend?.()
+    r.onend?.()
     expect(h.onEnd).toHaveBeenCalledTimes(1)
     expect(h.onInterim).toHaveBeenLastCalledWith('')
   })
 
-  it('one at a time: starting in another field stops the previous one; errors are reported (aborted / no-speech are not)', () => {
+  it('one at a time; fatal errors end it; aborted is silent', () => {
     const a = handlers(), b = handlers()
     startDictation(MockRecognition, a)
     const first = last()
-    const stopB = startDictation(MockRecognition, b)
+    startDictation(MockRecognition, b)
     expect(first.stopped).toBe(true)
     expect(a.onEnd).toHaveBeenCalledTimes(1)
     const second = last()
-    second.onerror?.({ error: 'no-speech' })
+    second.onerror?.({ error: 'aborted' })
+    expect(b.onError).not.toHaveBeenCalled()
     second.onerror?.({ error: 'not-allowed' })
-    expect(b.onError).toHaveBeenCalledTimes(1)
     expect(b.onError).toHaveBeenCalledWith('not-allowed')
-    stopB()
-    expect(second.stopped).toBe(true)
     expect(b.onEnd).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('dictation control (one field)', () => {
+  const make = (now = { t: 0 }, permission: () => Promise<void> = async () => {}) => {
+    const inserted: string[] = []
+    const control = new DictationControl(MockRecognition, text => inserted.push(text), permission, () => now.t)
+    return { control, inserted, now }
+  }
+
+  it('asks for the microphone first, then recognizes; a refusal is reported and leaves it stopped', async () => {
+    const { control } = make()
+    await control.start()
+    expect(control.listening).toBe(true)
+    expect(last().started).toBe(true)
+    const refused = make({ t: 0 }, async () => { throw Object.assign(new Error('denied'), { name: 'NotAllowedError' }) }).control
+    await refused.start()
+    expect(refused).toMatchObject({ listening: false, error: 'not-allowed' })
+  })
+
+  it('a blur to the field or its 🎤 does not stop it; a blur elsewhere does; onend resets the state', async () => {
+    const { control, inserted } = make()
+    await control.start()
+    control.blur(true)
+    expect(control.listening).toBe(true)
+    expect(last().stopped).toBe(false)
+    last().result(0, [['重く', true]])
+    expect(inserted).toEqual(['重く'])
+    last().onend?.() // silence: the browser ends it
+    expect(control).toMatchObject({ listening: false, interim: '' })
+    await control.start()
+    control.blur(false)
+    expect(control.listening).toBe(false)
+    expect(last().stopped).toBe(true)
+  })
+
+  it('a short press toggles; a long press (> 300 ms) records while held', async () => {
+    const { control, now } = make()
+    control.pressStart(); await flush(); now.t = 100; control.pressEnd()
+    expect(control.listening).toBe(true) // short: stays on
+    now.t = 1000; control.pressStart(); now.t = 1050; control.pressEnd()
+    expect(control.listening).toBe(false) // a press on a running one stops
+    now.t = 2000; control.pressStart(); await flush(); now.t = 2500; control.pressEnd()
+    expect(control.listening).toBe(false) // long: stops on release
   })
 })
