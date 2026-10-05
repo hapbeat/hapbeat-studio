@@ -108,7 +108,7 @@ function Sounds({ e, edit, allowed }: { e: EffectiveEvent; edit: Edit; allowed: 
     <h3>{t('events.repeat.sounds')}</h3>
     <OverrideBar e={e} field="sfx" edit={edit} />
     {!sounds.length ? <div className="scene-dim">{t('events.soundNone')}</div>
-      : <MaterialList items={sounds} label={t('events.repeat.sounds')} onFive={null} onReorder={own ? set : null} onRemove={own ? set : null}
+      : <MaterialList items={sounds} label={t('events.repeat.sounds')} onReorder={own ? set : null} onRemove={own ? set : null}
         onPlay={s => { runtime.audio(); runtime.testSound({ sound: s, volume: e.sfx?.volume ?? 1 }) }} />}
     {own && <select value="" aria-label={t('events.addSoundMulti')} onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) set([...sounds, x]) }}>
       <option value="">{t('events.addSoundMulti')}</option>
@@ -132,7 +132,7 @@ function Clips({ table, e, edit }: { table: CueTable; e: EffectiveEvent; edit: E
       const clips = routeClips(r), set = (list: string[]) => edit(tb => setRouteClips(tb, e.ref, i, list))
       return <div key={i}>
         <div className="scene-dim">{atLabel(r.at)} · gain {r.gain}</div>
-        <MaterialList items={clips} label={atLabel(r.at)} onFive={null} onReorder={own ? set : null} onRemove={own ? set : null} minItems={1}
+        <MaterialList items={clips} label={atLabel(r.at)} onReorder={own ? set : null} onRemove={own ? set : null} minItems={1}
           onPlay={c => runtime.testRoute({ clip: c, at: r.at, gain: r.gain })} />
         {own && <select value="" aria-label={t('events.addClipMulti')} onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) set([...clips, x]) }}>
           <option value="">{t('events.addClipMulti')}</option>

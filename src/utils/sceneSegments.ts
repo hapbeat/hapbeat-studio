@@ -57,14 +57,24 @@ export function representativeSegment(events: readonly SceneEvent[], name: strin
   return { name, start: Math.max(0, marks[0] - LEAD_SEC), end: marks[marks.length - 1] + tail, marks, run: !!run, total: times.length }
 }
 
-/** "×5": the offsets of five plays of one material (DEC-085 addendum) — the cue's representative run's real
- * timing (its first five firings; a shorter run continues at its mean gap), else a fixed 0.9 s apart. No jitter. */
-export const LISTEN_TIMES = 5
-export const LISTEN_GAP_SEC = 0.9
-export function listenOffsets(events: readonly SceneEvent[] | null, name: string): number[] {
+/**
+ * The offsets of `times` plays of one material in an editor audition (no jitter): the real timing of the
+ * cue's representative run (its first firings; a shorter run continues at its mean gap), else (a one-off
+ * cue, no recording) `soundSec` + 0.4 s apart.
+ */
+export const LISTEN_PAUSE_SEC = 0.4
+export function listenOffsets(events: readonly SceneEvent[] | null, name: string, times: number, soundSec: number): number[] {
   const run = events ? findRuns(occurrences(events, name))[0] : undefined
-  const out = run ? run.slice(0, LISTEN_TIMES).map(t => t - run[0]) : [0]
-  const gap = run && run.length > 1 ? (run[run.length - 1] - run[0]) / (run.length - 1) : LISTEN_GAP_SEC
-  while (out.length < LISTEN_TIMES) out.push(out[out.length - 1] + gap)
+  const out = run ? run.slice(0, times).map(t => t - run[0]) : [0]
+  const gap = run && run.length > 1 ? (run[run.length - 1] - run[0]) / (run.length - 1) : Math.max(0, soundSec) + LISTEN_PAUSE_SEC
+  while (out.length < times) out.push(out[out.length - 1] + gap)
   return out
+}
+
+/** A waveform selection on a repeated audition as seconds of one play (for `useRange`); null when it is empty. */
+export function toFirstPlay(sel: { start: number; end: number } | null, offsets: readonly number[] | null, duration: number): { start: number; end: number } | null {
+  if (!sel) return null
+  const o = offsets ? [...offsets].reverse().find(x => x <= sel.start + 1e-9) ?? 0 : 0
+  const start = Math.max(0, sel.start - o), end = Math.min(duration, sel.end - o)
+  return end > start ? { start, end } : null
 }

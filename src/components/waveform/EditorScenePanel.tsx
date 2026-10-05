@@ -6,7 +6,7 @@ import { useWaveformStore } from '@/stores/waveformStore'
 import { sceneVideoUrl, useSceneStore } from '@/stores/sceneStore'
 import { resolveTrialScene, sceneEventTime, sceneVideoTime, stepSceneFrame, wantedSceneProject, type TrialSceneState } from '@/utils/trialScene'
 import { setScenePause, setScenePreRoll, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
-import { eventSoundSec } from './eventAudio'
+import { eventSoundSec, useListenOffsets } from './eventAudio'
 import { isTypingTarget } from '@/utils/playbackShortcut'
 import { VideoOverlay } from '@/components/scene/VideoOverlay'
 import { useEditor } from './editorContext'
@@ -210,17 +210,12 @@ export function EditorScenePanel() {
   const previewId = useEventStore(s => s.preview?.id)
   useEffect(cue, [src, chosen?.mark, lead, audition?.candidateId, audition?.trialId, previewId])
   // A trial follows its auditions; a clip follows the editor playback while no candidate is auditioned.
-  // "×5" of this subject (an AI candidate of the trial, or a material of the event): its marks and a longer window.
-  const x5 = useEventStore(s => {
-    const p = s.preview
-    if (!p?.repeated || !p.listenOffsets) return null
-    const mine = subject.kind === 'trial' ? !!subject.trialId && p.id.startsWith(`trial:${subject.trialId}/`) : subject.kind === 'event' && !!subject.key && p.event === subject.key
-    return mine ? p.listenOffsets : null
-  })
-  const synced = !!chosen && (subject.kind === 'trial' ? audition?.trialId === subject.trialId || !!x5 : !audition)
-  /** Marks and end shown: one firing; "×5": its five plays (offsets from the mark). */
-  const marks = chosen ? (x5 ? x5.map(o => chosen.mark + o) : chosen.marks) : []
-  const end = chosen?.end == null ? null : chosen.end + (x5 ? x5[x5.length - 1] : 0)
+  const synced = !!chosen && (subject.kind === 'trial' ? audition?.trialId === subject.trialId : !audition)
+  // The audition's plays (×3 / ×5): a mark per play and a window long enough for them; ×1: the one firing.
+  const plays = useListenOffsets()
+  const repeated = synced && !!plays && !!chosen?.segment
+  const marks = chosen ? (repeated ? plays!.map(o => chosen.mark + o) : chosen.marks) : []
+  const end = chosen?.end == null ? null : chosen.end + (repeated ? plays![plays!.length - 1] : 0)
   useEffect(() => {
     if (!synced || !chosen) return
     const at = (time: number) => sceneVideoTime(chosen.mark, time)

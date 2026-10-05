@@ -1203,7 +1203,7 @@ export const messages = defineMessages({
   'scene.overlay.pause': { ja: '一時停止（Space）', en: 'Pause (Space)' },
   'scene.overlay.seek': { ja: 'シーク', en: 'Seek' },
   'editor.scene.segmentOne': { ja: '{name} · {at} s', en: '{name} · {at} s' },
-  'editor.scene.segmentHint': { ja: '記録の通し映像から、このイベントの代表の 1 回（連続するイベントは最初の 1 回）を切り出して出します。×5 では連続区間の実際の間隔で 5 回鳴らします。他の場面の確認や揺らぎ付きの連続再生はシーン確認タブで', en: 'One representative firing of this event (a repeated event: its first), cut from the full recording. ×5 plays five times at the run’s real gaps. Other moments and the run with its variation are in the Scene tab.' },
+  'editor.scene.segmentHint': { ja: '記録の通し映像から、このイベントの代表の 1 回（連続するイベントは最初の 1 回）を切り出して出します。試聴の回数（×3 / ×5）に合わせて印と窓が増えます。他の場面の確認や揺らぎ付きの連続再生はシーン確認タブで', en: 'One representative firing of this event (a repeated event: its first), cut from the full recording; the marks and window follow the plays per audition (×3 / ×5). Other moments and the run with its variation are in the Scene tab.' },
   'editor.scene.otherScenes': { ja: '他の場面（{count} 回）はシーン確認タブで…', en: 'Other moments ({count}) in the Scene tab…' },
   'scene.occ.label': { ja: '発生', en: 'Firings' },
   'scene.occ.hint': { ja: 'イベントごとに記録の全発生を並べます。▶ でその場面を再生し、音量・gain・素材はイベント単位で右のパネルで直します。場面ごとに別のイベントにすべきなら「振り分け」でエージェントに依頼します', en: 'Every firing of an event in the recording. ▶ plays that moment; fix volume, gain and materials per event in the panels. Use “Reassign” to ask the agent to make a firing another event.' },
@@ -1221,8 +1221,6 @@ export const messages = defineMessages({
   'events.mat.play': { ja: '{name} を再生', en: 'Play {name}' },
   'events.mat.representative': { ja: '代表（エディタの試聴・単発の場面で使う素材）', en: 'Representative (used for auditions and one-off moments)' },
   'events.mat.makeRepresentative': { ja: '代表にする（先頭へ移動）', en: 'Make representative (move first)' },
-  'events.mat.five': { ja: '×5', en: '×5' },
-  'events.mat.fiveHint': { ja: 'この素材 1 本を 5 回鳴らします（記録の連続区間の実際の間隔。記録が無ければ 0.9 秒間隔。揺らぎなし）', en: 'Plays this one material five times (the real gaps of the recorded run; 0.9 s apart without a recording; no jitter).' },
   'events.mat.remove': { ja: '外す', en: 'Remove' },
   'events.mat.removeHint': { ja: '候補リストから外します（WAV は消しません）', en: 'Remove from the candidates (the WAV is kept).' },
   'events.addHint': { ja: '選択中のクリップを素材候補に追加します（置き換えません。最初の 1 本が代表）', en: 'Adds the selected clip to the candidates (never replaces; the first one is the representative).' },
@@ -1231,6 +1229,8 @@ export const messages = defineMessages({
   'scene.panel.event': { ja: 'イベント', en: 'Event' },
   'scene.event.run': { ja: '連続区間を再生（{at} s〜 ×{count}）', en: 'Play the run ({at} s, ×{count})' },
   'scene.event.runHint': { ja: '記録の通し映像を、このイベントの連続区間の先頭から再生します（実際の発生タイミングで、揺らぎを掛けて鳴ります）', en: 'Plays the full recording from the start of this event’s run (real firing times, with the variation).' },
+  'editor.listenTimes': { ja: '試聴の回数', en: 'Plays per audition' },
+  'editor.listenTimesHint': { ja: 'エディタの試聴（▶・カード・Space）を何回繰り返すか。連続する cue は記録の実際の間隔、単発・記録なしは音の長さ＋0.4 秒の間隔で、揺らぎなしで鳴らします（停止で残りも止まります）', en: 'How many times every editor audition (▶, cards, Space) plays: at the real gaps of a repeated cue in the recording, else the sound length + 0.4 s apart, without jitter (Stop ends the rest).' },
 })
 
 export type MessageId = keyof typeof messages

@@ -20,7 +20,8 @@ import { NumberField, useAtLabel } from '@/components/scene/SceneCuePanels'
 import { useEditor } from './editorContext'
 import { DecidedNotice } from './DecideDialog'
 import { EditorMenu, EditorMenuItem } from './EditorMenu'
-import { listenFiveHaptic, listenFiveSound, openEventDefault, openEventHaptic, openEventSound } from './eventAudio'
+import { openEventDefault, openEventHaptic, openEventSound } from './eventAudio'
+import { ListenTimes } from './ListenTimes'
 import { MaterialList } from './MaterialList'
 import { openEventMaterialForEditing } from './eventEditing'
 import './EventsPanel.css'
@@ -77,6 +78,7 @@ export function EventsPanel() {
   return <div className="editor-panel events-panel">
     <div className="events-top">
       <ProjectPicker />
+      <ListenTimes />
       <EditorMenu label="⋯" title={t('events.menu')}>
         <EditorMenuItem disabled={!table} onSelect={() => void ask({ message: t('events.resetReviewsConfirm'), danger: true }).then(ok => { if (ok) useSceneStore.getState().edit(tb => resetAllReviews(tb)) })}>{t('events.resetReviews')}</EditorMenuItem>
       </EditorMenu>
@@ -219,7 +221,7 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
       {loop && <p className="agent-muted">{t('events.loopSoundHint')}</p>}
       {!sounds.length && <p className="agent-muted">{t(e.decided.sfx ? 'events.soundNone' : 'events.undecidedSound')}</p>}
       <MaterialList items={sounds} label={t('events.sound')} active={sounds.find(s => previewId === `${key}|sound|${s}`) ?? null} onPlay={play}
-        onReorder={set} onRemove={set} onFive={loop ? null : s => { if (!e.sfx || !listenFiveSound(key, s, e.sfx.volume)) missing(s) }}
+        onReorder={set} onRemove={set}
         extra={s => <EditAsClipButton event={key} target="sound" wav={s} />} />
       <select className="events-add-material" value="" aria-label={t('events.addSoundMulti')} title={t('events.soundDir', { dir: lib.paths.sounds })}
         onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) set([...sounds, x]) }}>
@@ -260,7 +262,6 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
         </div>
         <MaterialList items={clips} label={t('scene.route.clip')} active={clips.find(c => previewId === `${key}|haptic|${c}|${r.at}`) ?? null}
           onPlay={c => { if (!openEventHaptic(key, c, r.gain, r.at, true)) missing(c) }} onReorder={set} onRemove={set} minItems={1}
-          onFive={loop ? null : c => { if (!listenFiveHaptic(key, c, r.gain)) missing(c) }}
           extra={c => <EditAsClipButton event={key} target="haptic" wav={c} />} />
       </div>
     })}

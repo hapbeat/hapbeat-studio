@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findRuns, listenOffsets, occurrences, representativeSegment } from './sceneSegments'
+import { findRuns, listenOffsets, occurrences, representativeSegment, toFirstPlay } from './sceneSegments'
 import { representativeOption } from './trialScene'
 import { sampleData } from './sceneTestFixtures'
 import type { SceneEvent } from './sceneData'
@@ -42,11 +42,20 @@ describe('representative segment (DEC-085)', () => {
     expect(findRuns([0, 1])).toEqual([])
   })
 
-  it('×5: the real gaps of the cue run (first five firings), else 0.9 s apart, no jitter', () => {
-    expect(listenOffsets(T_REX, 'footstep:approach').map(x => +x.toFixed(3))).toEqual([0, 0.866, 1.7, 2.566, 3.433])
-    expect(listenOffsets(T_REX, 'footstep').map(x => +x.toFixed(3))).toEqual([0, 0.833, 1.7, 2.566, 3.433])
-    expect(listenOffsets(T_REX, 'roar').map(x => +x.toFixed(2))).toEqual([0, 0.9, 1.8, 2.7, 3.6]) // one-off
-    expect(listenOffsets(null, 'bite').map(x => +x.toFixed(2))).toEqual([0, 0.9, 1.8, 2.7, 3.6]) // no recording
-    expect(listenOffsets([0, 1, 2].map(t => ({ t, name: 'x', hand: 'both' })), 'x')).toEqual([0, 1, 2, 3, 4]) // a 3-firing run continues at its gap
+  it('audition plays: the real gaps of the cue run, else sound length + 0.4 s apart, no jitter', () => {
+    expect(listenOffsets(T_REX, 'footstep:approach', 5, 0.3).map(x => +x.toFixed(3))).toEqual([0, 0.866, 1.7, 2.566, 3.433])
+    expect(listenOffsets(T_REX, 'footstep', 3, 0.3).map(x => +x.toFixed(3))).toEqual([0, 0.833, 1.7])
+    expect(listenOffsets(T_REX, 'roar', 3, 2).map(x => +x.toFixed(2))).toEqual([0, 2.4, 4.8]) // one-off: sound + 0.4 s
+    expect(listenOffsets(null, 'bite', 3, 0.5).map(x => +x.toFixed(2))).toEqual([0, 0.9, 1.8]) // no recording
+    expect(listenOffsets(T_REX, 'footstep', 1, 0.3)).toEqual([0])
+    expect(listenOffsets([0, 1, 2].map(t => ({ t, name: 'x', hand: 'both' })), 'x', 5, 0)).toEqual([0, 1, 2, 3, 4]) // a 3-firing run continues at its gap
   })
+
+  it('a selection on a repeated audition maps to seconds of one play', () => {
+    expect(toFirstPlay({ start: 1.0, end: 1.2 }, [0, 0.9, 1.8], 0.5)).toEqual({ start: expect.closeTo(0.1), end: expect.closeTo(0.3) })
+    expect(toFirstPlay({ start: 0.1, end: 0.8 }, [0, 0.9], 0.5)).toEqual({ start: 0.1, end: 0.5 })
+    expect(toFirstPlay({ start: 0.6, end: 0.8 }, [0, 0.9], 0.5)).toBeNull() // the pause between plays
+    expect(toFirstPlay({ start: 0.1, end: 0.3 }, null, 0.5)).toEqual({ start: 0.1, end: 0.3 })
+  })
+
 })

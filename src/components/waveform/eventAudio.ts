@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useEditorSettings } from '@/stores/editorSettings'
-import { useEventStore, type DecideTarget } from '@/stores/eventStore'
+import { useEventStore } from '@/stores/eventStore'
 import { useSceneStore } from '@/stores/sceneStore'
 import { trialTarget } from '@/utils/agentProtocol'
 import { effectiveEvent, parseEventKey, resolveEventName } from '@/utils/cueEvents'
@@ -86,31 +86,27 @@ export function eventSoundSec(key: string): number {
   return (sound && s.sfx[sound]?.duration) || 1
 }
 /**
- * "×5" (DEC-085 addendum): one material five times, at the real timing of the cue's representative run in the
- * recording (else 0.9 s apart), without jitter — how it sounds repeated, as a material choice. `buffer` is
- * already at the game's level. With a haptic, the event's representative sound plays on the same marks.
+ * The plays of the current editor audition (an AI candidate, else an event material): `listenTimes` (×1 / ×3 / ×5)
+ * at the real gaps of its cue's run in the recording, else the sound's length + 0.4 s apart; null = once (×1, a
+ * loop cue, or nothing auditioned). Shared by the waveform buffer, the event's sound and the Scene video marks.
  */
-export function listenFive(o: { id: string; event: string; target: DecideTarget; label: string; buffer: AudioBuffer }) {
-  const s = useSceneStore.getState()
-  const offsets = listenOffsets(s.data?.full.events ?? null, o.event), plays = offsets.map(atSec => ({ atSec, gain: 1, rate: 1 }))
-  let companion: SoundSource | undefined
-  if (o.target === 'haptic' && s.table) {
-    const r = resolveEventName(s.table, o.event), e = r && effectiveEvent(s.table, r.ref), first = e?.sfx ? sfxSounds(e.sfx)[0] : undefined
-    const sound = first && e?.sfx ? soundBuffer(first, e.sfx.volume, 0) : null
-    if (sound) companion = { buffer: repeatBuffer(sound, plays), volume: 1 }
-  }
-  useEventStore.getState().showPreview({ id: `${o.id}|x5`, event: o.event, target: o.target, label: `${o.label} ×${plays.length}`, buffer: repeatBuffer(o.buffer, plays), companion, repeated: true, listenOffsets: offsets, autoplay: true })
-}
-/** "×5" of route clip `clip` / sound `sound` of event `key` (false when the WAV is not loaded). */
-export function listenFiveHaptic(key: string, clip: string, gain: number): boolean {
-  const made = hapticBuffer(clip, gain, 0)
-  if (made) listenFive({ id: `${key}|haptic|${clip}`, event: key, target: 'haptic', label: `${key} · ${clip}.wav`, buffer: made.buffer })
-  return !!made
-}
-export function listenFiveSound(key: string, sound: string, volume: number): boolean {
-  const buffer = soundBuffer(sound, volume, 0)
-  if (buffer) listenFive({ id: `${key}|sound|${sound}`, event: key, target: 'sound', label: `${key} · ${sound}.wav`, buffer })
-  return !!buffer
+export function useListenOffsets(): number[] | null {
+  const times = useEditorSettings(s => s.listenTimes)
+  const audition = useAgentTrialStore(s => s.audition)
+  const auditionEvent = useAgentTrialStore(s => {
+    const trial = s.audition ? s.trials.find(r => r.trial.id === s.audition!.trialId)?.trial : undefined
+    return trial?.scene?.cues[0] ?? ''
+  })
+  const preview = useEventStore(s => s.preview)
+  const data = useSceneStore(s => s.data)
+  const lib = useSceneStore(s => s.lib)
+  return useMemo(() => {
+    const shown = audition?.buffer ?? preview?.buffer
+    if (!shown || times <= 1) return null
+    const name = audition ? auditionEvent : preview!.event
+    if (lib && name && isLoopCue(lib, parseEventKey(name).cue)) return null
+    return listenOffsets(data?.full.events ?? null, name, times, shown.duration)
+  }, [times, audition, auditionEvent, preview, data, lib])
 }
 
 let ctx: AudioContext | null = null
@@ -151,7 +147,6 @@ export function useDecidedSoundSync(player: EditorBufferPlayer) {
   const lib = useSceneStore(s => s.lib)
   const buffers = useSceneStore(s => s.sfx)
   const picked = useMemo((): SoundSource | null => {
-    if (preview?.companion) return preview.companion
     if (!table || !lib) return null
     let names: string[] = []
     if (audition && auditionCues) {
@@ -165,9 +160,12 @@ export function useDecidedSoundSync(player: EditorBufferPlayer) {
     }
     return null
   }, [audition, auditionCues, preview, table, lib, buffers])
+  // The audition's plays (×3 / ×5): the event's sound on each, like the haptic.
+  const offsets = useListenOffsets()
+  const sound = useMemo(() => picked && offsets && !picked.loop ? { ...picked, buffer: repeatBuffer(picked.buffer, offsets.map(atSec => ({ atSec, gain: 1, rate: 1 }))) } : picked, [picked, offsets])
   const companion = useMemo(() => new CompanionSound(startOnPc), [])
   // By value: the same buffer / volume / loop keeps playing (see CompanionSound).
-  useEffect(() => { companion.setSource(muted ? null : picked) }, [companion, muted, picked?.buffer, picked?.volume, picked?.loop])
+  useEffect(() => { companion.setSource(muted ? null : sound) }, [companion, muted, sound?.buffer, sound?.volume, sound?.loop])
   useEffect(() => {
     const unsubs = [
       player.on('play', time => companion.play(time)),

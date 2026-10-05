@@ -2,7 +2,6 @@ import { create } from 'zustand'
 import type { TrialSceneChoice } from '@/utils/editorUiSettings'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import type { PendingWavs } from '@/utils/sceneProject'
-import type { SoundSource } from '@/utils/companionSound'
 
 /**
  * Event-centred authoring (DEC-083) state shared by the editor's Events panel,
@@ -34,12 +33,7 @@ export interface DecideResult {
  */
 export interface EventPreview {
   id: string; event: string; target: DecideTarget; label: string; buffer: AudioBuffer
-  /** A rendered sound to play with it ("×5") instead of the event's decided sound. */
-  companion?: SoundSource
-  /** "×5": already one play per firing; `listenOffsets` are their times from the first (the Scene video shows them as marks). */
-  repeated?: boolean
-  listenOffsets?: number[]
-  /** Play it once from the start as soon as it is shown ("×5"). */
+  /** Play it from the start as soon as it is shown (▶ on a material). */
   autoplay?: boolean
 }
 

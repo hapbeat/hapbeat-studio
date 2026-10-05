@@ -33,7 +33,7 @@ import { useEventStore } from '@/stores/eventStore'
 import { showDockPanel } from '@/utils/dockPanels'
 import { trialTarget } from '@/utils/agentProtocol'
 import { DecideDialog } from './DecideDialog'
-import { openEventDefault, useDecidedSoundSync } from './eventAudio'
+import { openEventDefault, repeatBuffer, useDecidedSoundSync, useListenOffsets } from './eventAudio'
 
 export function WaveformEditor({ active }: { active: boolean }) {
   const { t } = useI18n()
@@ -106,7 +106,11 @@ export function WaveformEditor({ active }: { active: boolean }) {
   // "Send haptics" off → no targets, so EditorPlayback never opens a stream (PC-only audition).
   const targets = useMemo(() => isConnected && sendHaptics && !auditionIsSound && eventPreview?.target !== 'sound' ? resolvePlaybackTargets(devices, kitSelectedIps).map(device => device.ipAddress) : [], [isConnected, sendHaptics, auditionIsSound, eventPreview?.target, devices, kitSelectedIps])
   const targetKey = targets.join(',')
-  const audioBuffer = audition ? audition.buffer : eventPreview ? eventPreview.buffer : original ? s.clip?.originalBuffer : previewActive ? (preview.buffer ?? s.clip?.buffer) : s.clip?.buffer
+  const shownBuffer = audition ? audition.buffer : eventPreview ? eventPreview.buffer : original ? s.clip?.originalBuffer : previewActive ? (preview.buffer ?? s.clip?.buffer) : s.clip?.buffer
+  // Auditions (AI candidate / event material) play ×1 / ×3 / ×5 at the cue's real gaps, without jitter; one buffer, so Stop ends every play.
+  const listenOffsets = useListenOffsets()
+  const audioBuffer = useMemo(() => shownBuffer && listenOffsets && (audition || eventPreview)
+    ? repeatBuffer(shownBuffer, listenOffsets.map(atSec => ({ atSec, gain: 1, rate: 1 }))) : shownBuffer, [shownBuffer, listenOffsets, audition, eventPreview])
   const player = useMemo(() => new EditorBufferPlayer(null, undefined, s.setError), [s.clip?.id, original, auditionKey])
   useEffect(() => {player.activate(); return () => player.dispose()}, [player])
   useDecidedSoundSync(player)

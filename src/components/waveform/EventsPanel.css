@@ -77,9 +77,9 @@
 
 .events-decision { display: flex; gap: 4px; }
 
-/* Material candidates (MaterialList): ▶ · name (shrinks) · ★ · ×5 · remove · extra — one grid row each. */
+/* Material candidates (MaterialList): ▶ · name (shrinks) · ★ · remove · extra — one grid row each. */
 .events-materials { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.events-mat { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto auto; align-items: center; gap: 4px; padding: 1px 4px; border: 1px solid var(--border); border-radius: 4px; }
+.events-mat { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; align-items: center; gap: 4px; padding: 1px 4px; border: 1px solid var(--border); border-radius: 4px; }
 .events-mat.active { border-color: #67e8f9; }
 .events-mat > * { white-space: nowrap; }
 .events-mat-name { overflow: hidden; text-overflow: ellipsis; }

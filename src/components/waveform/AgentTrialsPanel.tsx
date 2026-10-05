@@ -7,8 +7,10 @@ import { localIsoString, type Dimension, type DimensionsDoc, type TrialRecord } 
 import type { HapticFeatures } from '@/utils/hapticFeatures'
 import { clearRatingDraft, DraftKeeper, readFolderDraft, readLocalDraft, writeRatingDraft } from '@/utils/ratingDrafts'
 import { addUseRange, usableCandidates, autoRatingContext, EMPTY_CONTEXT, formToRating, jaPolePhrase, loadRememberedContext, POSITION_SUGGESTIONS, ratingFormIssue, ratingToForm, rememberContext, SOUND_DIMENSIONS, trialKind, verdictFromOverall, visibleDimensions, type CandidateRatingForm, type Direction, type RatingForm } from '@/utils/agentTrialUi'
-import { trialTarget, type TrialKind, type TrialRequest } from '@/utils/agentProtocol'
-import { listenFive } from './eventAudio'
+import { trialTarget, type TrialKind } from '@/utils/agentProtocol'
+import { useListenOffsets } from './eventAudio'
+import { ListenTimes } from './ListenTimes'
+import { toFirstPlay } from '@/utils/sceneSegments'
 import { useEventStore } from '@/stores/eventStore'
 import { assignEventsForTrial, effectiveEvent, parseEventKey, trialEvent } from '@/utils/cueEvents'
 import { runDecision } from './eventDecide'
@@ -179,6 +181,7 @@ export function AgentTrialsPanel() {
       </EditorMenu>
       {record && <button className="toolbar-btn" title={t('editor.scene.openHint')}
         onClick={() => openSceneVideo({ kind: 'trial', trialId: record.trial.id }, wantedSceneProject({ scene: record.trial.scene, saved: useEditorSettings.getState().trialScenes[record.trial.id], fallback: record.trial.project }) ?? null)}>▶ {t('editor.agent.video')}</button>}
+      <ListenTimes />
       <label className="agent-axes-toggle" title={t('editor.agent.axesToggleHint')}>
         <input type="checkbox" checked={showAxes} onChange={e => useEditorSettings.getState().update({ ratingShowAxes: e.target.checked })} />{t('editor.agent.axesToggle')}</label>
       {record && (record.dismissed ? <button className="toolbar-btn" onClick={() => void restore(record)}>{t('editor.agent.restore')}</button>
@@ -287,7 +290,11 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
   const marks = useEditorSettings(s => s.eventMarks)
   const showAxes = useEditorSettings(s => s.ratingShowAxes)
   /** The waveform selection while a candidate is auditioned: recorded as its "use only this part" range. */
-  const selection = useWaveformStore(s => s.selectedRegion)
+  const region = useWaveformStore(s => s.selectedRegion)
+  // On a repeated audition (×3 / ×5) the range is taken as seconds of one play.
+  const plays = useListenOffsets()
+  const auditionSec = useAgentTrialStore(s => s.audition?.buffer.duration ?? 0)
+  const selection = useMemo(() => toFirstPlay(region, plays, auditionSec), [region, plays, auditionSec])
   /** Every change goes to the draft keeper (memory now, the stores after 300 ms). */
   const edit = (update: (f: RatingForm) => RatingForm) => { const next = update(form); setForm(next); drafts.change(trial.id, next); setDirty(true); setSaveError(null) }
   const editCandidate = (cid: string, patch: Partial<CandidateRatingForm>) => edit(f => ({ ...f, candidates: { ...f.candidates, [cid]: { ...f.candidates[cid], ...patch } } }))
@@ -384,8 +391,6 @@ function TrialDetail({ record, dimensions, known, audition, onAudition, deviceNa
               <span className="agent-card-name" title={[requested.label, requested.hypothesis, requested.method && t(`editor.agent.method.${requested.method}` as MessageId)].filter(Boolean).join('\n')}>{requested.label}</span>
               {/* By hand only (saving the rating assigns automatically): copy into the clip list / assign to the event. */}
               <span className="agent-card-actions">
-                <button type="button" className="agent-icon-btn" disabled={!file?.audio || !!file?.error} title={t('events.mat.fiveHint')}
-                  onClick={() => void listenFiveCandidate(trial, requested.id, record.shortId ? `${record.shortId}-${requested.id}` : requested.id)}>{t('events.mat.five')}</button>
                 <button type="button" className="agent-icon-btn" disabled={!editorFolder || processing} title={t('editor.agent.toClipHint')} aria-label={t('editor.agent.toClipHint')}
                   onClick={() => void adopt(requested.id, requested.label)}>{t('editor.agent.toClip')}</button>
                 <button type="button" className="agent-icon-btn" disabled={!buffer} title={t(target === 'sound' ? 'editor.agent.toEventSoundHint' : 'editor.agent.toEventHapticHint')}
@@ -548,12 +553,4 @@ function AgentMessageBox({ record, saved }: { record: TrialRecord | null; saved?
     <button type="button" className="toolbar-btn" disabled={sending} onClick={() => void send()}>{t('editor.agent.msgSend')}</button>
     <span className={`agent-message-status ${status && !status.ok ? 'error' : ''}`} role="status">{status?.text ?? ''}</span>
   </div>
-}
-
-/** "×5" of an AI candidate: its rendered audio five times at the real timing of its event's run (DEC-085 addendum). */
-async function listenFiveCandidate(trial: TrialRequest, candidateId: string, label: string) {
-  try {
-    const buffer = await useAgentTrialStore.getState().loadCandidateAudio(trial.id, candidateId)
-    listenFive({ id: `trial:${trial.id}/${candidateId}`, event: trial.scene?.cues[0] ?? '', target: trialTarget(trial), label, buffer })
-  } catch (error) { useWaveformStore.getState().setError(error) }
 }
