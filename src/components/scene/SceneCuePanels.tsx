@@ -22,18 +22,25 @@ export function useHandLabel() {
   const { t } = useI18n()
   return (hand: string) => hand === 'both' ? t('scene.hand.both') : hand === 'right' ? t('scene.hand.right') : hand === 'left' ? t('scene.hand.left') : hand
 }
+/** The acting hand as a short mark: MV_ARM, with the hand of the recording when known (·R / ·L / ·LR). */
+export function movingArmMark(hand: string): string {
+  return `MV_ARM${hand === 'right' ? '·R' : hand === 'left' ? '·L' : hand === 'both' ? '·LR' : ''}`
+}
 /**
- * Where a moment's haptics go, from the cue table's current routes of its cues (`at`: neck, the acting hand, both
- * wrists …; several routes listed), plus the recorded hand only when a route goes to the acting hand ("hand (with
- * the right hand)"). Empty when its cues have no haptics.
+ * Where a moment's haptics go, from the cue table's current routes of its cues (`at`; several routes listed):
+ * `text` short (neck, both wrists …, the acting hand as MV_ARM·R etc.), `title` in words (the acting hand changes
+ * side with the player's action; the recorded hand added). Empty when its cues have no haptics.
  */
 export function useMomentPlace() {
+  const { t } = useI18n()
   const atLabel = useAtLabel(), handLabel = useHandLabel()
-  return (table: CueTable | null, names: readonly string[], hand: string) => {
-    if (!table) return ''
+  return (table: CueTable | null, names: readonly string[], hand: string): { text: string; title: string } => {
+    if (!table) return { text: '', title: '' }
     const ats = [...new Set(names.flatMap(n => { const r = resolveEventName(table, n), e = r && effectiveEvent(table, r.ref); return e ? e.haptics.map(route => route.at) : [] }))]
-    const where = ats.map(atLabel).join('・')
-    return ats.includes('hand') ? `${where}（${handLabel(hand)}）` : where
+    return {
+      text: ats.map(at => at === 'hand' ? movingArmMark(hand) : atLabel(at)).join('・'),
+      title: ats.map(at => at === 'hand' ? t('scene.movingArm', { hand: handLabel(hand) }) : atLabel(at)).join('・'),
+    }
   }
 }
 /** Gain / volume as shown next to its name ("gain 1.0", "gain 0.35"). */

@@ -367,6 +367,8 @@ function DecisionBar({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'ha
 function Reserves({ cue, target }: { cue: string; target: 'sound' | 'haptic' }) {
   const { t } = useI18n()
   const all = useEditorSettings(s => s.eventReserves)
+  const open = useEditorSettings(s => s.reservesOpen)
+  const shownAudition = useAgentTrialStore(s => s.audition ? `${s.audition.trialId}/${s.audition.candidateId}` : null)
   const trials = useAgentTrialStore(s => s.trials)
   const [busy, setBusy] = useState(false)
   const rows = Object.entries(all).filter(([key]) => parseEventKey(key).cue === cue).flatMap(([key, refs]) => refs.filter(r => r.target === target).map(r => ({ key, ...r })))
@@ -384,11 +386,17 @@ function Reserves({ cue, target }: { cue: string; target: 'sound' | 'haptic' }) 
     } catch (error) { useWaveformStore.getState().setError(error) }
     finally { setBusy(false) }
   }
-  return <ul className="events-reserves" aria-label={t('events.reserves')} title={t('events.reservesHint')}>
+  const show = (row: typeof rows[number]) => void useAgentTrialStore.getState().requestAudition(row.trialId, row.candidateId, false, false).catch(error => useWaveformStore.getState().setError(error))
+  return <>
+    <button type="button" className="events-reserves-toggle" aria-expanded={open} title={t('events.reservesHint')}
+      onClick={() => useEditorSettings.getState().update({ reservesOpen: !open })}>{open ? '▾' : '▸'} {t('events.reservesCount', { count: rows.length })}</button>
+    {open && <ul className="events-reserves" aria-label={t('events.reserves')} title={t('events.reservesHint')}>
     {rows.map(row => {
       const record = trials.find(r => r.trial.id === row.trialId)
       const name = `${record?.shortId ? `${record.shortId}-` : ''}${row.candidateId} ${record?.trial.candidates.find(c => c.id === row.candidateId)?.label ?? row.trialId}`
-      return <li key={`${row.key}/${row.trialId}/${row.candidateId}`} className="events-mat events-reserve">
+      // A click on the row (not its buttons) shows it in the waveform panel without playing; ▶ plays.
+      return <li key={`${row.key}/${row.trialId}/${row.candidateId}`} className={`events-mat events-reserve selectable ${shownAudition === `${row.trialId}/${row.candidateId}` ? 'active' : ''}`}
+        onClick={e => { if (record && !(e.target as HTMLElement).closest('button')) show(row) }}>
         <button type="button" className="agent-icon-btn" disabled={!record} aria-label={t('events.mat.play', { name })} title={t('events.mat.play', { name })}
           onClick={() => void useAgentTrialStore.getState().requestAudition(row.trialId, row.candidateId, true, false).catch(error => useWaveformStore.getState().setError(error))}>▶</button>
         <span className="events-mat-name" title={`${name}${row.key !== cue ? ` (${row.key})` : ''}`}>{name}{row.key !== cue ? ` · ${row.key}` : ''}</span>
@@ -397,7 +405,8 @@ function Reserves({ cue, target }: { cue: string; target: 'sound' | 'haptic' }) 
         <button type="button" className="agent-icon-btn" title={t('events.reserveRemoveHint')} onClick={() => drop(row.key, row)}>{t('events.mat.remove')}</button>
       </li>
     })}
-  </ul>
+  </ul>}
+  </>
 }
 
 /** Which material's remake comment field is open (one at a time). */

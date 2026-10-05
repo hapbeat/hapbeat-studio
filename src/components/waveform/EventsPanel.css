@@ -104,6 +104,8 @@
 .events-reserves { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; opacity: .6; }
 .events-reserves:hover { opacity: .9; }
 .events-reserve { border-style: dashed; }
+/* The fold of the materials not in use (stored; open by default). */
+.events-reserves-toggle { align-self: flex-start; margin-top: 2px; padding: 0 4px; border: none; background: none; color: var(--text-muted); font-size: 12px; cursor: pointer; }
 .events-mat-actions { display: inline-flex; align-items: center; gap: 2px; }
 /* The remake comment: one full-width line under its row. */
 .events-revise { grid-column: 1 / -1; display: flex; gap: 6px; align-items: center; min-width: 0; }

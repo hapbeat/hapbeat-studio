@@ -6,7 +6,7 @@ import { useSceneStore } from '@/stores/sceneStore'
 import { trialTarget } from '@/utils/agentProtocol'
 import { companionSoundName, effectiveEvent, parseEventKey, representativeSound, resolveEventName } from '@/utils/cueEvents'
 import { groupFirings } from '@/utils/groupPlayback'
-import { isLoopCue, routeClips, sfxSounds } from '@/utils/sceneCueTable'
+import { routeClips, sfxSounds } from '@/utils/sceneCueTable'
 import { RATE, resampleClip } from '@/utils/sceneHaptics'
 import type { EditorBufferPlayer } from '@/utils/editorBufferPlayer'
 import { onUserStop } from '@/utils/playerStops'
@@ -24,40 +24,38 @@ import { decidedSoundEvents } from '@/utils/decidedSound'
  * haptic audition of the same event.
  */
 
-/** Loop cue previews repeat their material to this length (the player has no endless loop). */
-export const LOOP_PREVIEW_SEC = 8
-
-/** The WAV as it is, a loop cue's repeated to `loopToSec` (the intensity is a playback gain, never baked in). */
-function looped(channels: Float32Array[], rate: number, loopToSec = 0): AudioBuffer {
-  const source = channels[0]?.length ?? 0
-  const length = loopToSec > 0 && source > 0 ? Math.max(source, Math.round(loopToSec * rate)) : source
+/**
+ * The WAV as it is (the intensity is a playback gain, never baked in). A loop cue's material is not repeated here:
+ * repeating is the transport's Loop toggle, so it can be switched off.
+ */
+function asBuffer(channels: Float32Array[], rate: number): AudioBuffer {
+  const length = channels[0]?.length ?? 0
   const buffer = new AudioBuffer({ numberOfChannels: Math.max(1, channels.length), length: Math.max(1, length), sampleRate: rate })
-  channels.forEach((data, c) => { const out = buffer.getChannelData(c); for (let i = 0; i < length; i++) out[i] = data[i % source] })
+  channels.forEach((data, c) => buffer.getChannelData(c).set(data))
   return buffer
 }
-const loopCue = (key: string) => { const lib = useSceneStore.getState().lib; return !!lib && isLoopCue(lib, parseEventKey(key).cue) }
 
-/** Clip `clip`'s WAV; null when not loaded. `loopSec`: a loop cue's clip repeats to that length. */
-function hapticBuffer(clip: string, loopSec: number): AudioBuffer | null {
+/** Clip `clip`'s WAV; null when not loaded. */
+function hapticBuffer(clip: string): AudioBuffer | null {
   const s = useSceneStore.getState(), pcm = s.pcm[clip]
-  return pcm && s.table?.clips[clip] ? looped([pcm], RATE, loopSec) : null
+  return pcm && s.table?.clips[clip] ? asBuffer([pcm], RATE) : null
 }
 /** Sound `sound`'s WAV; null when not loaded. */
-function soundBuffer(sound: string, loopSec: number): AudioBuffer | null {
+function soundBuffer(sound: string): AudioBuffer | null {
   const s = useSceneStore.getState(), b = s.sfx[sound]
-  return b && s.table ? looped(Array.from({ length: b.numberOfChannels }, (_, c) => b.getChannelData(c)), b.sampleRate, loopSec) : null
+  return b && s.table ? asBuffer(Array.from({ length: b.numberOfChannels }, (_, c) => b.getChannelData(c)), b.sampleRate) : null
 }
 /**
  * Opens clip `clip` of event `key` in the waveform panel, played and drawn at its base level (DEC-086: WAV × intensity
- * as a gain; the route gain is a scene multiplier, not applied in the editor). A loop cue's clip repeats.
+ * as a gain; the route gain is a scene multiplier, not applied in the editor).
  * When it is already shown, only `autoplay` acts (the shown buffer stays).
  */
 export function openEventHaptic(key: string, clip: string, at: string, autoplay = false): boolean {
-  return showMaterial({ id: `${key}|haptic|${clip}|${at}`, event: key, target: 'haptic', label: `${key} · ${clip}.wav`, material: clip }, () => hapticBuffer(clip, loopCue(key) ? LOOP_PREVIEW_SEC : 0), autoplay)
+  return showMaterial({ id: `${key}|haptic|${clip}|${at}`, event: key, target: 'haptic', label: `${key} · ${clip}.wav`, material: clip }, () => hapticBuffer(clip), autoplay)
 }
-/** Opens sound `sound` of event `key` in the waveform panel at its base level (PC playback only). A loop cue's sound repeats. */
+/** Opens sound `sound` of event `key` in the waveform panel at its base level (PC playback only). */
 export function openEventSound(key: string, sound: string, autoplay = false): boolean {
-  return showMaterial({ id: `${key}|sound|${sound}`, event: key, target: 'sound', label: `${key} · ${sound}.wav`, material: sound }, () => soundBuffer(sound, loopCue(key) ? LOOP_PREVIEW_SEC : 0), autoplay)
+  return showMaterial({ id: `${key}|sound|${sound}`, event: key, target: 'sound', label: `${key} · ${sound}.wav`, material: sound }, () => soundBuffer(sound), autoplay)
 }
 function showMaterial(preview: Omit<EventPreview, 'buffer' | 'autoplay'>, make: () => AudioBuffer | null, autoplay: boolean): boolean {
   const shown = useEventStore.getState().preview
