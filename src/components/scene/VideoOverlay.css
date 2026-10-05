@@ -15,3 +15,8 @@
 /* The cue being rated (same red as its marks), always shown top left. */
 .target-cue-badge { display: inline-block; padding: 0 6px; border-radius: 8px; background: var(--target-red, #ff4d4f); color: #fff; font-size: 11px; font-weight: 600; line-height: 18px; white-space: nowrap; flex: none; }
 .video-overlay-target { position: absolute; left: 6px; top: 6px; pointer-events: none; opacity: .9; }
+/* What each firing plays, while it sounds ("bite: bite_t51_a"): small, top right, red / grey like its mark. */
+.video-overlay-sounding { position: absolute; right: 6px; top: 6px; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; pointer-events: none; }
+.video-overlay-material { padding: 0 6px; border-radius: 8px; background: rgba(255, 77, 79, .85); color: #fff; font-size: 11px; line-height: 16px; white-space: nowrap; max-width: 60vw; overflow: hidden; text-overflow: ellipsis; }
+.video-overlay-material.other { background: rgba(110, 116, 122, .9); }
+.video-overlay-material[hidden] { display: none; }

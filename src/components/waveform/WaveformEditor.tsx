@@ -38,7 +38,7 @@ import { waveformOnPc } from '@/utils/agentTrialUi'
 import { DecideDialog } from './DecideDialog'
 import { useAdjustPersistence, useMaterialWriteBack } from './eventEditing'
 import { openEventDefault, repeatBuffer, useDecidedSoundSync } from './eventAudio'
-import { groupFirings, inSpans, mixGroupHaptics, shownSpans, type HapticPart } from '@/utils/groupPlayback'
+import { groupFirings, groupHapticsEnd, inSpans, mixGroupHaptics, shownSpans, type HapticPart } from '@/utils/groupPlayback'
 import { RATE as HAPTIC_RATE } from '@/utils/sceneHaptics'
 import { useAuditionPlan } from './EditorScenePanel'
 
@@ -57,7 +57,8 @@ export function WaveformEditor({ active }: { active: boolean }) {
   /** An event's sound / haptic opened from the Events panel: shown and played like an audition (read only). */
   const eventPreview = useEventStore(state => state.preview)
   const auditionKey = audition ? `${audition.trialId}/${audition.candidateId}` : eventPreview ? `event:${eventPreview.id}` : null
-  useEffect(() => { if (audition) useEventStore.getState().clearPreview() }, [audition])
+  // An AI candidate has no "original" (the toggle is off for it): it always shows as rendered.
+  useEffect(() => { if (audition) { useEventStore.getState().clearPreview(); setOriginal(false) } }, [audition])
   const focusRequest = useAgentTrialStore(state => state.focusRequest)
   useEffect(() => { if (focusRequest && dockApi) focusPanel(dockApi, 'agent', t) }, [focusRequest, dockApi])
   // Scene tab "open in editor": the Events panel with the event selected, and its moment in the Scene video panel.
@@ -139,8 +140,6 @@ export function WaveformEditor({ active }: { active: boolean }) {
   // (DEC-085); one buffer, so Stop ends them all and seeks follow the video.
   const plan = useAuditionPlan()
   const stretched = !!shownBuffer && !!plan && (!!audition || !!eventPreview || !!adjusting) && !(plan.targets.length === 1 && plan.targets[0] === 0)
-  const audioBuffer = useMemo(() => shownBuffer && stretched && plan
-    ? repeatBuffer(shownBuffer, plan.targets.map(atSec => ({ atSec, gain: 1, rate: 1 }))) : shownBuffer, [stretched, shownBuffer, plan])
   // The group of the shown event material (its cue and the cue's variants: bite and bite:tear) plays together at the stretch
   // (editor setting, default on): each member's firing with its representative sound and haptic at their intensities.
   const groupOn = useEditorSettings(state => state.groupPlayback)
@@ -148,6 +147,10 @@ export function WaveformEditor({ active }: { active: boolean }) {
     : adjusting && adjusting.project === sceneLib.project_name ? { event: adjusting.event, target: adjusting.target, material: adjusting.wav } : null : null
   const groupKey = groupOn && groupShown && plan && sceneTable ? JSON.stringify(groupFirings(sceneTable, plan, groupShown, true).haptics) : '[]'
   const scenePcm = useSceneStore(state => state.pcm)
+  // The playback runs to the end of the group's last haptic too (a bite after the last tear was cut off with the shown buffer).
+  const groupEndSec = useMemo(() => groupHapticsEnd(JSON.parse(groupKey) as HapticPart[], scenePcm), [groupKey, scenePcm])
+  const audioBuffer = useMemo(() => shownBuffer && ((stretched && plan) || groupEndSec > shownBuffer.duration)
+    ? repeatBuffer(shownBuffer, (stretched && plan ? plan.targets : [0]).map(atSec => ({ atSec, gain: 1, rate: 1 })), groupEndSec) : shownBuffer, [stretched, shownBuffer, plan, groupEndSec])
   // By value (groupKey): saving a strength rewrites the table but not these parts, so nothing is mixed again for it.
   const groupStream = useMemo(() => {
     const parts = JSON.parse(groupKey) as HapticPart[]

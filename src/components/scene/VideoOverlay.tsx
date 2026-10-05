@@ -14,8 +14,9 @@ export function VideoOverlay({ video, mark, marks, range, playing, onToggle, onS
   video: HTMLVideoElement | null
   /** Video time of the cue mark (seconds); null = no mark (time shown as the video time). */
   mark: number | null
-  /** Ticks on the bar (video times; `target` false = grey; `name` in the tooltip); default: `mark`. */
-  marks?: readonly { t: number; target?: boolean; name?: string }[]
+  /** Ticks on the bar (video times; `target` false = grey; `name` and `material` in the tooltip); default: `mark`.
+   *  With `material` and `durSec`, "name: material" shows over the video while that firing sounds. */
+  marks?: readonly { t: number; target?: boolean; name?: string; material?: string; durSec?: number }[]
   /** The cue being rated: a small badge top left, always shown. */
   target?: string | null
   /** The stretch the bar spans (video times); default: the whole video. */
@@ -31,6 +32,7 @@ export function VideoOverlay({ video, mark, marks, range, playing, onToggle, onS
   const { t } = useI18n()
   const fill = useRef<HTMLDivElement>(null)
   const time = useRef<HTMLSpanElement>(null)
+  const sounding = useRef<HTMLDivElement>(null)
   const [duration, setDuration] = useState(0)
   useEffect(() => {
     if (!video) return
@@ -41,6 +43,11 @@ export function VideoOverlay({ video, mark, marks, range, playing, onToggle, onS
       const [from, to] = range ?? [0, d]
       if (fill.current) fill.current.style.width = to > from ? `${Math.max(0, Math.min(100, (video.currentTime - from) / (to - from) * 100))}%` : '0%'
       if (time.current) time.current.textContent = `${(mark === null ? video.currentTime : video.currentTime - mark).toFixed(2)} s`
+      // The firings sounding now (only while the video runs).
+      for (const el of Array.from(sounding.current?.children ?? []) as HTMLElement[]) {
+        const from = Number(el.dataset.from), to = Number(el.dataset.to)
+        el.hidden = video.paused || video.currentTime < from || video.currentTime >= to
+      }
     }
     // Animated only while the video plays (and the page is visible); otherwise redrawn on the video's events.
     const loop = () => { draw(); frame = requestAnimationFrame(loop) }
@@ -68,6 +75,9 @@ export function VideoOverlay({ video, mark, marks, range, playing, onToggle, onS
   }
   const label = t(playing ? 'scene.overlay.pause' : 'scene.overlay.play')
   return <>{target && <span className="target-cue-badge video-overlay-target" title={t('editor.scene.targetHint')}>{t('editor.scene.rating', { name: target })}</span>}
+  <div className="video-overlay-sounding" ref={sounding} aria-hidden="true">
+    {(marks ?? []).filter(x => x.material && x.durSec).map(x => <span key={`${x.t}:${x.name}`} className={`video-overlay-material ${x.target === false ? 'other' : ''}`} data-from={x.t} data-to={x.t + x.durSec!} hidden>{x.name}: {x.material}</span>)}
+  </div>
   <div className="video-overlay" onClick={e => e.stopPropagation()}>
     <button type="button" className="video-overlay-btn" aria-label={label} title={label} onClick={onToggle}>{playing ? '⏸' : '▶'}</button>
     <div className="video-overlay-bar" role="slider" aria-label={t('scene.overlay.seek')} aria-valuemin={0} aria-valuemax={duration} tabIndex={-1}
@@ -76,7 +86,7 @@ export function VideoOverlay({ video, mark, marks, range, playing, onToggle, onS
       onPointerUp={e => { dragging.current = false; if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId) }}
       onPointerCancel={() => { dragging.current = false }}>
       <div className="video-overlay-track"><div className="video-overlay-fill" ref={fill} /></div>
-      {to > from && ticks.filter(x => x.t >= from && x.t <= to).map(x => <div key={x.t} className={`video-overlay-mark ${x.target === false ? 'other' : ''}`} title={`${x.name ?? ''} ${(mark === null ? x.t : x.t - mark).toFixed(2)} s`.trim()} style={{ left: `${(x.t - from) / (to - from) * 100}%` }} />)}
+      {to > from && ticks.filter(x => x.t >= from && x.t <= to).map(x => <div key={x.t} className={`video-overlay-mark ${x.target === false ? 'other' : ''}`} title={`${x.name ?? ''}${x.material ? `: ${x.material}` : ''} ${(mark === null ? x.t : x.t - mark).toFixed(2)} s`.trim()} style={{ left: `${(x.t - from) / (to - from) * 100}%` }} />)}
     </div>
     <span className="video-overlay-time" ref={time} />
     <span className="video-overlay-info" title={info} aria-label={info}>ⓘ</span>

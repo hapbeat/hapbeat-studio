@@ -49,6 +49,28 @@ export function mixGroupHaptics(base: { data: Float32Array; rate: number } | nul
   return out
 }
 
+/**
+ * What each firing of the stretch plays, for the video overlay ("bite: bite_t51_a" while it sounds) and the marks'
+ * titles: a red firing the shown material; a group member its representative of the shown kind (sound / haptic);
+ * any other cue its sound (all it plays). `lengthSec`: a material's length (0 when unknown). Null where nothing plays.
+ */
+export function markMaterials(table: CueTable, marks: readonly { name: string; target: boolean }[], shown: { event: string; target: 'sound' | 'haptic'; material: string } | null,
+  group: boolean, lengthSec: (kind: 'sound' | 'haptic', material: string) => number): ({ label: string; material: string; durSec: number } | null)[] {
+  const cue = shown ? parseEventKey(shown.event).cue : null
+  return marks.map(m => {
+    const r = resolveEventName(table, m.name), e = r && effectiveEvent(table, r.ref)
+    const label = r?.ref.variant ?? r?.ref.cue ?? m.name
+    const kind = shown && m.target ? shown.target : shown && group && r?.ref.cue === cue ? shown.target : 'sound'
+    const material = shown && m.target ? shown.material : !e ? undefined : kind === 'sound' ? sfxSounds(e.sfx)[0] : e.haptics[0] ? routeClips(e.haptics[0])[0] : undefined
+    return material ? { label, material, durSec: lengthSec(kind, material) } : null
+  })
+}
+
+/** When the last group haptic ends (seconds; 0 without parts): the playback lasts at least this long. */
+export function groupHapticsEnd(parts: readonly HapticPart[], pcm: Record<string, Float32Array>): number {
+  return Math.max(0, ...parts.map(p => p.atSec + (pcm[p.clip]?.length ?? 0) / RATE))
+}
+
 /** Where the shown haptic sounds (its firings, `lengthSec` each): the live strength applies there only, the group's parts keep their own. */
 export function shownSpans(targets: readonly number[] | null, lengthSec: number): [number, number][] {
   return (targets ?? [0]).map(at => [at, at + lengthSec])

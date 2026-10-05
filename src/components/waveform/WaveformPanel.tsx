@@ -23,6 +23,8 @@ export function WaveformPanel() {
   const region = s.selectedRegion
   const duration = audioBuffer?.duration ?? 0
   const locked = s.isProcessing || audition
+  /** Edited / Original also on a shown event material (Original: the file as it is, without its strength) and while adjusting; not on an AI candidate. */
+  const canCompare = !s.isProcessing && (eventPreview ? true : !!s.clip && !audition)
   /** Extract works on the rendered buffer, so a pending chain is applied first (the selection survives). */
   const extract = async () => {
     const selection = useWaveformStore.getState().selectedRegion
@@ -45,8 +47,8 @@ export function WaveformPanel() {
       {eventPreview ? <IntensitySlider key={eventPreview.material} target={eventPreview.target} wav={eventPreview.material} />
         : adjusting && !audition && <IntensitySlider key={adjusting.wav} target={adjusting.target} wav={adjusting.wav} project={adjusting.project} />}
       <div className="editor-segmented" role="group" aria-label={t('editor.showing')}>
-        <button className={`toolbar-btn ${!original ? 'selected' : ''}`} disabled={!s.clip || locked} aria-pressed={!original} title={t('editor.committedHint')} onClick={() => { if (original) s.setSelectedRegion(null); setOriginal(false) }}>∿ {t('editor.edited')}</button>
-        <button className={`toolbar-btn ${original ? 'selected' : ''}`} disabled={!s.clip || locked} aria-pressed={original} onClick={() => { s.setSelectedRegion(null); setOriginal(true) }}>↩ {t('editor.original')}</button>
+        <button className={`toolbar-btn ${!original ? 'selected' : ''}`} disabled={!canCompare} aria-pressed={!original} title={t('editor.committedHint')} onClick={() => { if (original) s.setSelectedRegion(null); setOriginal(false) }}>∿ {t('editor.edited')}</button>
+        <button className={`toolbar-btn ${original ? 'selected' : ''}`} disabled={!canCompare} aria-pressed={original} title={eventPreview ? t('editor.originalMaterialHint') : undefined} onClick={() => { s.setSelectedRegion(null); setOriginal(true) }}>↩ {t('editor.original')}</button>
       </div>
       {audition && <button className="toolbar-btn" onClick={() => { useAgentTrialStore.getState().clearAudition(); useEventStore.getState().clearPreview() }}>{t('editor.agent.backToClip')}</button>}
       <button className="toolbar-btn editor-extract" onClick={() => void extract()} disabled={!region || locked}>✂ {t('editor.extract')}</button>

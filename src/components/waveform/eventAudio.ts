@@ -73,8 +73,8 @@ function showMaterial(preview: Omit<EventPreview, 'buffer' | 'autoplay'>, make: 
 
 type Part = { start: number; data: Float32Array[]; gain: number }
 /** Sums `parts` (sample offsets) into one buffer, clipped to ±1. */
-function mixParts(parts: Part[], rate: number, nCh: number): AudioBuffer {
-  const length = Math.max(1, ...parts.map(p => p.start + p.data[0].length))
+function mixParts(parts: Part[], rate: number, nCh: number, minLength = 0): AudioBuffer {
+  const length = Math.max(1, minLength, ...parts.map(p => p.start + p.data[0].length))
   const buffer = new AudioBuffer({ numberOfChannels: nCh, length, sampleRate: rate })
   for (let c = 0; c < nCh; c++) {
     const out = buffer.getChannelData(c)
@@ -84,10 +84,10 @@ function mixParts(parts: Part[], rate: number, nCh: number): AudioBuffer {
   return buffer
 }
 
-/** `buffer` played once per firing (at `atSec`, × `gain`, at playback rate `rate`): one firing per mark of a repeated event (DEC-085). */
-export function repeatBuffer(buffer: AudioBuffer, plays: readonly { atSec: number; gain: number; rate: number }[]): AudioBuffer {
+/** `buffer` played once per firing (at `atSec`, × `gain`, at playback rate `rate`): one firing per mark of a repeated event (DEC-085). At least `minSec` long (silence after). */
+export function repeatBuffer(buffer: AudioBuffer, plays: readonly { atSec: number; gain: number; rate: number }[], minSec = 0): AudioBuffer {
   const channels = Array.from({ length: buffer.numberOfChannels }, (_, c) => buffer.getChannelData(c))
-  return mixParts(plays.map(p => ({ start: Math.round(p.atSec * buffer.sampleRate), data: channels.map(ch => p.rate === 1 ? ch : resampleClip(ch, p.rate)), gain: p.gain })), buffer.sampleRate, buffer.numberOfChannels)
+  return mixParts(plays.map(p => ({ start: Math.round(p.atSec * buffer.sampleRate), data: channels.map(ch => p.rate === 1 ? ch : resampleClip(ch, p.rate)), gain: p.gain })), buffer.sampleRate, buffer.numberOfChannels, Math.round(minSec * buffer.sampleRate))
 }
 
 /** The length of event `key`'s (first) sound in seconds; 1 s when it has none loaded. */

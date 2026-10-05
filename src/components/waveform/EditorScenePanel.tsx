@@ -5,7 +5,7 @@ import { useEditorSettings } from '@/stores/editorSettings'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { sceneVideoUrl, useSceneStore } from '@/stores/sceneStore'
 import { resolveTrialScene, sceneEventTime, sceneVideoTime, stepSceneFrame, wantedSceneProject, type TrialSceneState } from '@/utils/trialScene'
-import { setScenePause, setScenePreRoll, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
+import { FRAME_SEC, setScenePause, setScenePreRoll, useSceneVideoTarget, videoCorrection, type SceneVideoTarget } from '@/utils/editorSceneSync'
 import { eventSoundSec } from './eventAudio'
 import { useAdjustingLink } from './eventEditing'
 import { isLoopCue } from '@/utils/sceneCueTable'
@@ -17,6 +17,8 @@ import { useEditor } from './editorContext'
 import { useEventStore } from '@/stores/eventStore'
 import { onUserStop } from '@/utils/playerStops'
 import { eventSceneCues } from '@/utils/cueEvents'
+import { markMaterials } from '@/utils/groupPlayback'
+import { RATE as HAPTIC_RATE } from '@/utils/sceneHaptics'
 import './EditorScenePanel.css'
 
 export type SceneSubject = { kind: 'trial'; trialId: string | null } | { kind: 'clip'; clipId: string | null } | { kind: 'event'; key: string | null }
@@ -257,7 +259,22 @@ export function EditorScenePanel() {
   useEffect(cue, [src, chosen?.mark, lead, audition?.candidateId, audition?.trialId, previewId])
   // A trial follows its auditions; a clip follows the editor playback while no candidate is auditioned.
   const synced = !!chosen && (subject.kind === 'trial' ? audition?.trialId === subject.trialId : !audition)
-  const marks = chosen?.marks ?? []
+  // Each firing with what it plays (overlay while sounding, marks' titles): the shown event material and its group.
+  const preview = useEventStore(s => s.preview)
+  const adjusting = useAdjustingLink()
+  const table = useSceneStore(s => s.table)
+  const scenePcm = useSceneStore(s => s.pcm)
+  const sceneSfx = useSceneStore(s => s.sfx)
+  const groupOn = useEditorSettings(s => s.groupPlayback)
+  const shownMaterial = audition ? null : preview ? { event: preview.event, target: preview.target, material: preview.material }
+    : adjusting ? { event: adjusting.event, target: adjusting.target, material: adjusting.wav } : null
+  const marks = useMemo(() => {
+    const list = chosen?.marks ?? []
+    if (!table) return list
+    const length = (kind: 'sound' | 'haptic', name: string) => kind === 'sound' ? sceneSfx[name]?.duration ?? 0 : (scenePcm[name]?.length ?? 0) / HAPTIC_RATE
+    const materials = markMaterials(table, list, shownMaterial, groupOn, length)
+    return list.map((m, i) => materials[i] ? { ...m, name: materials[i]!.label, material: materials[i]!.material, durSec: materials[i]!.durSec } : m)
+  }, [chosen?.marks, table, scenePcm, sceneSfx, groupOn, shownMaterial?.event, shownMaterial?.target, shownMaterial?.material])
   const end = chosen?.end ?? null
   useEffect(() => {
     if (!synced || !chosen) return
@@ -271,13 +288,22 @@ export function EditorScenePanel() {
     setScenePause({ paused: () => pausedRef.current !== null, toggle: () => togglePauseRef.current() })
     const unsubs = [
       // After the lead-in the video is already running; only correct a visible drift. Any play ends a pause.
-      player.on('play', time => { setPausedAt(null); const v = video.current; if (!v) return; if (v.paused || Math.abs(v.currentTime - at(time)) > 0.1) v.currentTime = at(time); void v.play().catch(() => {}) }),
+      player.on('play', time => { setPausedAt(null); const v = video.current; if (!v) return; v.playbackRate = 1; if (v.paused || Math.abs(v.currentTime - at(time)) > FRAME_SEC) v.currentTime = at(time); void v.play().catch(() => {}) }),
+      // All along the playback: the video follows the playback clock within a frame (videoCorrection).
+      player.on('timeupdate', time => {
+        const v = video.current
+        if (!v || v.paused || v.seeking || !player.isPlaying()) return
+        const c = videoCorrection(v.currentTime, at(time))
+        if (c.seek !== null) v.currentTime = c.seek
+        if (v.playbackRate !== c.rate) v.playbackRate = c.rate
+      }),
+      player.on('finish', () => { if (video.current) video.current.playbackRate = 1 }),
       // A waveform seek moves the video (and, while paused, the paused moment); the panel's own seeks are skipped.
       player.on('seeking', time => { if (ownSeek.current) return; const v = video.current; if (v) v.currentTime = at(time); if (pausedRef.current !== null) setPausedAt(time) }),
       // The video runs on after the audio ends naturally (to the moment's end); a stop pauses it.
-      onUserStop(player, () => video.current?.pause()),
+      onUserStop(player, () => { const v = video.current; if (v) { v.pause(); v.playbackRate = 1 } }),
     ]
-    return () => { setScenePreRoll(null); setScenePause(null); setPausedAt(null); unsubs.forEach(unsub => unsub()); video.current?.pause() }
+    return () => { setScenePreRoll(null); setScenePause(null); setPausedAt(null); unsubs.forEach(unsub => unsub()); const v = video.current; if (v) { v.pause(); v.playbackRate = 1 } }
   }, [player, synced, chosen?.mark, lead])
   // A stretch of the full replay ends at its end (the replay itself runs on).
   useEffect(() => {

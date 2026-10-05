@@ -31,3 +31,21 @@ export const useSceneVideoTarget = create<{ target: SceneVideoTarget; setTarget:
   target: { kind: 'clip' },
   setTarget: target => set({ target }),
 }))
+
+/** One video frame (the recordings are 30 fps): the most the video may be off the playback. */
+export const FRAME_SEC = 1 / 30
+/** Beyond this the video is moved (seek); within it the speed is nudged so the picture does not jump. */
+const SEEK_OVER_SEC = 0.25
+/** How strongly the speed corrects (per second of error); kept within ±25 %. */
+const RATE_GAIN = 4
+/**
+ * Keeps the Scene video on the playback clock (the editor player = the sounds and the haptic stream): the video
+ * lags after a seek (decoding) and after the lead-in timer, so it is corrected all along, not only at play.
+ * `videoTime` / `expected`: where the video is / should be. Returns a seek (or null) and the playback rate to use.
+ */
+export function videoCorrection(videoTime: number, expected: number): { seek: number | null; rate: number } {
+  const diff = videoTime - expected
+  if (Math.abs(diff) > SEEK_OVER_SEC) return { seek: expected, rate: 1 }
+  if (Math.abs(diff) <= FRAME_SEC / 4) return { seek: null, rate: 1 }
+  return { seek: null, rate: Math.max(0.75, Math.min(1.25, 1 - diff * RATE_GAIN)) }
+}
