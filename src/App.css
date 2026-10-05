@@ -176,9 +176,10 @@ select.app-version-select option {
 
 /* Folded header: a slim bar keeps the expand button reachable on every tab. */
 /*
- * Header open / close: one 28 px toggle at the left end of the tab row, 12 px
- * from the top of the window in both states. Folded, the header keeps its grid
- * (items hidden, so every width stays the same) in a 46 px bar.
+ * Header open / close. Open: a near-square toggle beside the tabs, as tall as
+ * the tab row. Folded: the header is one 20 px line ("Hapbeat Studio · <tab>")
+ * and the toggle a slim horizontal bar at the same place (the left end of the
+ * tab row); the header keeps its grid (items hidden, so every width stays).
  */
 .header-tabs-box {
   grid-column: 2;
@@ -191,9 +192,10 @@ select.app-version-select option {
 }
 .header-collapse-toggle {
   flex: none;
-  align-self: flex-start;
-  width: 28px;
-  height: 28px;
+  align-self: stretch;
+  aspect-ratio: 1;
+  min-width: 28px;
+  min-height: 28px;
   padding: 0;
   border: 1px solid var(--border-light);
   border-radius: var(--radius);
@@ -204,9 +206,11 @@ select.app-version-select option {
   cursor: pointer;
 }
 .header-collapse-toggle:hover { color: var(--text-primary); border-color: var(--accent-light); }
-.app-header.app-header-folded { height: 46px; padding-top: 12px; padding-bottom: 6px; overflow: hidden; align-items: start; box-sizing: border-box; }
+.app-header.app-header-folded { height: 20px; grid-template-rows: 20px; padding-top: 0; padding-bottom: 0; overflow: hidden; align-items: start; box-sizing: border-box; }
 .app-header-folded .header-title, .app-header-folded .header-meta, .app-header-folded .header-toggle-tabs { visibility: hidden; }
-.header-collapsed-label { position: absolute; left: 36px; right: 0; top: 0; height: 28px; display: flex; align-items: center; color: var(--text-secondary); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-header-folded .header-tabs-box { align-self: start; align-items: center; height: 20px; }
+.app-header-folded .header-collapse-toggle { align-self: center; aspect-ratio: auto; width: 36px; height: 14px; min-width: 0; min-height: 0; font-size: 10px; border-radius: 7px; }
+.header-collapsed-label { position: absolute; left: 44px; right: 0; top: 0; height: 20px; display: flex; align-items: center; color: var(--text-secondary); font-size: 12px; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* 右側メタ情報グループ: docs リンク + Helper 接続状態 を縦中央揃えで並べる */
 .header-meta {
