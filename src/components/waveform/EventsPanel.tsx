@@ -24,7 +24,7 @@ import { MaterialList } from './MaterialList'
 import { runDecision } from './eventDecide'
 import { removeReserve, requestAnswered, reviseAnswered } from '@/utils/agentTrialUi'
 import { create } from 'zustand'
-import { openEventMaterialForEditing } from './eventEditing'
+import { openMaterialForAdjust } from './eventEditing'
 import './EventsPanel.css'
 import '@/components/scene/VideoOverlay.css'
 
@@ -303,18 +303,18 @@ function TrialsSection({ project, eventKey: key }: { project: string; eventKey: 
   </section>
 }
 
-/** Opens the material in the editor as a clip to process with effects (the clip it was decided from when known); "→ Event" on it assigns it back. */
-function EditAsClipButton({ event, target, wav }: { event: string; target: DecideTarget; wav: string }) {
+/** "Adjust": the material opens in the waveform panel with the effects panel; changes go straight back to the event's WAV. */
+function AdjustButton({ event, target, wav }: { event: string; target: DecideTarget; wav: string }) {
   const { t } = useI18n()
   const { focusEditorPanel } = useEditor()
   const [busy, setBusy] = useState(false)
   const open = async () => {
     setBusy(true)
-    try { await openEventMaterialForEditing(event, target, wav); focusEditorPanel('waveform') }
+    try { await openMaterialForAdjust(event, target, wav); focusEditorPanel('effects') }
     catch (error) { useWaveformStore.getState().setError(error) }
     finally { setBusy(false) }
   }
-  return <button type="button" className="agent-icon-btn events-edit-clip" disabled={busy} title={t('events.editAsClipHint')} onClick={() => void open()}>{t('events.editAsClip')}</button>
+  return <button type="button" className="agent-icon-btn events-edit-clip" disabled={busy} title={t('events.adjustHint')} onClick={() => void open()}>{t('events.adjust')}</button>
 }
 
 /** "Tentative" ↔ "OK" of an assigned sound / haptic (decisions start tentative; saved with the table). Kept in place (hidden) while undecided. */
@@ -387,11 +387,11 @@ function Reserves({ cue, target }: { cue: string; target: 'sound' | 'haptic' }) 
 const useReviseOpen = create<{ open: string | null; set: (open: string | null) => void }>(set => ({ open: null, set: open => set({ open }) }))
 const reviseKey = (cue: string, target: string, material: string) => `${cue}|${target}|${material}`
 
-/** "Edit as clip" and "Remake" (opens the one-line comment under the row) of one material row. */
+/** "Adjust" and "Remake" (opens the one-line comment under the row) of one material row. */
 function MaterialActions({ event, target, wav }: { event: string; target: DecideTarget; wav: string }) {
   const { t } = useI18n()
   return <span className="events-mat-actions">
-    <EditAsClipButton event={event} target={target} wav={wav} />
+    <AdjustButton event={event} target={target} wav={wav} />
     <button type="button" className="agent-icon-btn" title={t('events.revise.hint')} onClick={() => { const key = reviseKey(event, target, wav); useReviseOpen.getState().set(useReviseOpen.getState().open === key ? null : key) }}>{t('events.revise.open')}</button>
   </span>
 }

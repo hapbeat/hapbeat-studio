@@ -1101,8 +1101,6 @@ export const messages = defineMessages({
   'editor.agent.toEvent': { ja: '→イベント', en: '→ Event' },
   'editor.agent.toEventHapticHint': { ja: 'このイベントの触覚として割り当てます（ゲームの WAV とイベント表に書き込み）', en: 'Assigns it as the event haptic (writes the game WAV and cue table)' },
   'editor.agent.toEventSoundHint': { ja: 'このイベントの音として割り当てます（ゲームの WAV とイベント表に書き込み）', en: 'Assigns it as the event sound (writes the game WAV and cue table)' },
-  'events.editAsClip': { ja: '編集用にクリップへ', en: 'Edit as clip' },
-  'events.editAsClipHint': { ja: 'この WAV をエディタのクリップとして開き、エフェクトで加工できるようにします（決定したときのクリップが分かればそれを開きます）。加工後はクリップの「→イベント」で割り当て直します', en: 'Opens this WAV as an editor clip to process with effects (the clip it was decided from, when known). Assign it back with the clip menu.' },
   'editor.agent.allDone': { ja: '未評価の試行はありません。過去の試行は「履歴」から開けます', en: 'No unrated trials. Open past trials from History.' },
   'editor.agent.dismissTrial': { ja: '後回し', en: 'Later' },
   'editor.agent.dismissHint': { ja: '今は評価せずに後回しにして、次へ進みます（キューと知識の集計から外れ、入力中の下書きは残ります。「履歴」から戻せます）', en: 'Set this trial aside for now and go to the next one (out of the queue and the knowledge; any draft is kept; restore it from History).' },
@@ -1241,9 +1239,11 @@ export const messages = defineMessages({
   'editor.routing.unknown': { ja: '位置不明で除外: {count} 台（{names}）。アドレスに pos_… が無いデバイスです', en: 'Left out, position unknown: {count} ({names}) — their address has no pos_…' },
   'editor.routing.unknownShort': { ja: '位置不明 {count} 台を除外', en: '{count} without a position left out' },
   'editor.routing.hint': { ja: '試聴の触覚は、選択中の接続デバイスのうち、その cue の装着位置（route の at。hand / both は両手首）に合うものへ送ります。cue の無い試聴は選択どおり', en: 'Haptic auditions go to the selected connected devices at the cue’s positions (route at; hand / both = both wrists). Without a cue: as selected.' },
-  'editor.materialLinkHint': { ja: '{event} の素材 {file} を編集中です。編集はこの WAV に書き戻され（前の版は _archive へ）、レビューは「仮」に戻ります', en: 'Edits {file} of {event}: changes are written back to it (the previous version goes to _archive) and its review goes back to tentative.' },
   'events.fold.open': { ja: '開く', en: 'Open' },
   'events.fold.close': { ja: '畳む', en: 'Fold' },
+  'events.adjust': { ja: '調整', en: 'Adjust' },
+  'events.adjustHint': { ja: 'この素材をその場でエフェクト（音量・LPF など）で調整します。変更はすぐイベントの WAV に反映され（元の音声とチェーンは残ります。チェーンを空にすれば元に戻ります）、レビューは「仮」に戻ります', en: 'Adjust this material in place with effects (volume, LPF …). Changes go straight to the event’s WAV (the original and the chain are kept; an empty chain restores it); its review goes back to tentative.' },
+  'editor.adjusting': { ja: 'イベント: {event} · {file}（調整中）', en: 'Event: {event} · {file} (adjusting)' },
 })
 
 export type MessageId = keyof typeof messages

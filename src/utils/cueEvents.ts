@@ -383,11 +383,6 @@ export function addPositionRoute(table: CueTable, lib: SceneLib, ref: EventRef):
   return edited(table, ref, (entry, effective) => { entry.haptics = [...effective.haptics, { clip, at, gain: e.haptics[0]?.gain ?? 1.0 }] })
 }
 
-/** Clip ids / `trialId/candidateId` whose decision put a material on `event` ("edit as clip" opens that clip instead of the bare WAV). */
-export function decidedSubjects(marks: Record<string, readonly { project: string; event: string; target: string }[]>, project: string, event: string, target: string): string[] {
-  return Object.entries(marks).filter(([, list]) => list.some(m => m.project === project && m.event === event && m.target === target)).map(([subject]) => subject)
-}
-
 // ── Review (tentative / approved) ──
 
 /** Sets the review of the event's shown sfx / haptics on the entry that writes them (the cue when a variant inherits). Approved is written, tentative removes the mark (missing = tentative). */

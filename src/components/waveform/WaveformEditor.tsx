@@ -138,7 +138,9 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const player = useMemo(() => new EditorBufferPlayer(null, undefined, s.setError), [s.clip?.id, original, auditionKey])
   useEffect(() => {player.activate(); return () => player.dispose()}, [player])
   useDecidedSoundSync(player)
-  useMaterialWriteBack()
+  // An adjusted event material: what its chain renders (live preview, or the clip without pending changes) goes back to the WAV.
+  useMaterialWriteBack(previewActive ? (preview.status === 'ready' ? preview.buffer ?? null : null) : pendingChain ? null : s.clip?.buffer ?? null,
+    previewActive && preview.status === 'error' ? preview.error : null)
   player.setBuffer(audioBuffer ?? null)
   useEffect(() => {
     const selection = useWaveformStore.getState().selectedRegion

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  addEventMark, addPositionRoute, decidedSubjects, fireShot, resetAllReviews, setNone, setReview, setUndecided, addVariant, simultaneousGroups, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
+  addEventMark, addPositionRoute, fireShot, resetAllReviews, setNone, setReview, setUndecided, addVariant, simultaneousGroups, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
   effectiveEvent, eventSceneCues, jitterGain, listEvents, MaterialPicker, matchesName, materialUsers, needsRouteForm, overwriteUsers,
   parseEventKey, removeVariant, representativeSound, resolveEventName, cueRoutePositions, setOverride, setRouteClips, setSfxSounds, setVariation, trialEvent, trialsForEvent,
 } from './cueEvents'
@@ -261,19 +261,6 @@ describe('recording: simultaneous groups', () => {
     // detent is a tick: left out; grab joins button.
     expect(simultaneousGroups(t, moments, ['detent'])).toEqual([['button', 'grab']])
     expect(simultaneousGroups(t, moments, [])).toEqual([['button', 'grab', 'detent']])
-  })
-})
-
-describe('edit as clip', () => {
-  it('finds the clips / candidates an event material was decided from', () => {
-    const marks = {
-      c1: [{ project: 'trex', event: 'roar', target: 'haptic' }],
-      't1/B': [{ project: 'trex', event: 'roar', target: 'sound' }, { project: 'trex', event: 'roar', target: 'haptic' }],
-      c2: [{ project: 'mill', event: 'roar', target: 'haptic' }],
-    }
-    expect(decidedSubjects(marks, 'trex', 'roar', 'haptic')).toEqual(['c1', 't1/B'])
-    expect(decidedSubjects(marks, 'trex', 'roar', 'sound')).toEqual(['t1/B'])
-    expect(decidedSubjects(marks, 'trex', 'bite', 'haptic')).toEqual([])
   })
 })
 

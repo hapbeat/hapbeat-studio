@@ -58,6 +58,8 @@ export function ClipsPanel() {
   const groups = useMemo((): ClipGroup[] => {
     const map = new Map<string, EditorDocument[]>()
     for (const doc of s.documents) {
+      // Event materials being adjusted are not clips of the list (Events panel > Adjust opens them).
+      if (materialLinks[doc.clip.id]) continue
       const project = effectiveProject(doc.clip, projects).project
       if (!matches(doc, project, needle)) continue
       const key = groupBy === 'project' ? project ?? UNASSIGNED : doc.clip.sourceFileName ?? UNASSIGNED
@@ -66,7 +68,7 @@ export function ClipsPanel() {
     return [...map.entries()]
       .sort(([a], [b]) => a === UNASSIGNED ? 1 : b === UNASSIGNED ? -1 : a.localeCompare(b))
       .map(([key, docs]) => ({ key, docs, label: key || t(groupBy === 'project' ? 'editor.unassigned' : 'editor.noSourceFile') }))
-  }, [s.documents, projects, needle, groupBy, t])
+  }, [s.documents, projects, needle, groupBy, t, materialLinks])
   const groupId = (key: string) => `${groupBy}:${key}`
   const isCollapsed = (key: string) => !needle && collapsed.includes(groupId(key))
   const toggleGroup = (key: string) => update({ collapsedGroups: isCollapsed(key) ? collapsed.filter(item => item !== groupId(key)) : [...collapsed, groupId(key)] })
@@ -144,7 +146,6 @@ export function ClipsPanel() {
                 : <button className="editor-clip" disabled={busy} aria-pressed={selected} title={clip.name} onClick={e => clickClip(e, clip.id)}>
                   <strong>{clip.name || '—'}</strong><small>{clip.buffer.duration.toFixed(3)} s</small>
                   <EventMarkBadges marks={clipEventMarks(clip, eventMarks)} />
-                  {materialLinks[clip.id] && <small className="editor-clip-link" title={t('editor.materialLinkHint', { file: `${materialLinks[clip.id].wav}.wav`, event: materialLinks[clip.id].event })}>← {materialLinks[clip.id].event}</small>}
                   {thumbnails && <WaveformThumbnail buffer={clip.buffer} />}
                 </button>}
               <EditorMenu label="⋯" title={t('editor.clipMenu', { name: clip.name })} className="editor-clip-menu" disabled={busy}>

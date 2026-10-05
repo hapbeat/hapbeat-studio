@@ -1,5 +1,6 @@
 import { useWaveformStore } from '@/stores/waveformStore'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
+import { useEditorSettings } from '@/stores/editorSettings'
 import { useEventStore } from '@/stores/eventStore'
 import { useI18n } from '@/i18n/I18nProvider'
 import { WaveformDisplay } from './WaveformDisplay'
@@ -14,6 +15,8 @@ export function WaveformPanel() {
   const { original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, player, playback, pending, togglePlay, playFromStart } = useEditor()
   const audition = !!auditionKey
   const eventPreview = useEventStore(state => state.preview)
+  /** The event material being adjusted (its own editor document, linked to the WAV). */
+  const adjusting = useEditorSettings(state => s.clip ? state.materialLinks[s.clip.id] : undefined)
   const region = s.selectedRegion
   const duration = audioBuffer?.duration ?? 0
   const locked = s.isProcessing || audition
@@ -34,7 +37,8 @@ export function WaveformPanel() {
     : t('editor.selectionHint')
   return <div className="editor-panel editor-waveform-panel">
     <div className="editor-comparison">
-      <strong className={`editor-active-name ${audition ? 'editor-auditioning' : ''}`}>{eventPreview ? t('events.preview.name', { name: eventPreview.label }) : auditionKey ? t('editor.agent.auditioning', { name: auditionKey }) : s.clip?.name ?? t('editor.noClip')}</strong>
+      <strong className={`editor-active-name ${audition ? 'editor-auditioning' : ''}`}>{eventPreview ? t('events.preview.name', { name: eventPreview.label }) : auditionKey ? t('editor.agent.auditioning', { name: auditionKey })
+        : adjusting ? t('editor.adjusting', { event: adjusting.event, file: `${adjusting.wav}.wav` }) : s.clip?.name ?? t('editor.noClip')}</strong>
       <div className="editor-segmented" role="group" aria-label={t('editor.showing')}>
         <button className={`toolbar-btn ${!original ? 'selected' : ''}`} disabled={!s.clip || locked} aria-pressed={!original} title={t('editor.committedHint')} onClick={() => { if (original) s.setSelectedRegion(null); setOriginal(false) }}>∿ {t('editor.edited')}</button>
         <button className={`toolbar-btn ${original ? 'selected' : ''}`} disabled={!s.clip || locked} aria-pressed={original} onClick={() => { s.setSelectedRegion(null); setOriginal(true) }}>↩ {t('editor.original')}</button>
