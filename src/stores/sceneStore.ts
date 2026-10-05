@@ -3,16 +3,18 @@ import type { MessageId, MessageParams } from '@/i18n/messages'
 import { loadDirectoryHandle, saveDirectoryHandle } from '@/utils/localDirectory'
 import { buildItems, VIEWER_DIR, type SceneData, type SceneItem, type SceneLib } from '@/utils/sceneData'
 import { addClipEntry, clipNameFromFile, encodePcm16Wav, soundNameFromFile, validateCueTable, type CueTable } from '@/utils/sceneCueTable'
-import { openSceneProject, readProjectFile, readSceneTable, writeProjectFile, writeSceneSave, type PendingWavs } from '@/utils/sceneProject'
+import { listWavs, openSceneProject, readProjectFile, readSceneTable, writeProjectFile, writeSceneSave, type PendingWavs } from '@/utils/sceneProject'
+import { CueTableSync } from '@/utils/cueTableSync'
 import { RATE } from '@/utils/sceneHaptics'
 import { lookupSceneProject, registerSceneProject } from '@/utils/sceneRegistry'
 
 /**
  * Scene tab (haptic authoring) state: the opened game project folder, its
  * recording, the cue table being edited (one cue at a time) and the decoded
- * clip / sound audio. Disk is the truth: the table and WAVs are read from the
- * project and written back by `save()`; only the folder handle is kept in
- * IndexedDB (key `scenedir`) so the next visit can reopen it.
+ * clip / sound audio. Disk is the truth: every table edit is saved 300 ms later
+ * (onto the file's newer version when it changed outside Studio, see
+ * CueTableSync), and the file is read again when it changes while nothing is
+ * unsaved. Only the folder handle is kept in IndexedDB (key `scenedir`).
  */
 
 export interface SceneNotice { id: MessageId; params?: MessageParams; error?: boolean }
@@ -60,7 +62,10 @@ interface SceneState {
   edit: (change: (table: CueTable) => CueTable | null) => boolean
   addClip: (file: File, loop: boolean) => Promise<string | null>
   addSound: (file: File) => Promise<string | null>
+  /** Saves pending edits now (they are saved 300 ms after the last edit anyway). */
   save: () => Promise<void>
+  /** The last automatic save failed (an invalid table or a write error); shown until a save works. */
+  saveError: SceneNotice | null
   /**
    * Editor "decide": validates `next` (with the new WAVs), writes the WAVs then
    * the table, and reloads (the Scene tab shows it at once). Refused while the
@@ -108,6 +113,8 @@ export const useSceneStore = create<SceneState>((set, get) => {
   const loadTable = async () => {
     const { root, lib } = get()
     if (!root || !lib) return
+    const file = await readProjectFile(root, lib.paths.cues)
+    sync.reset(await file.text(), file.lastModified)
     const files = await readSceneTable(root, lib)
     const pcm: Record<string, Float32Array> = {}, sfx: Record<string, AudioBuffer> = {}
     await Promise.all([
@@ -115,7 +122,72 @@ export const useSceneStore = create<SceneState>((set, get) => {
       ...files.soundFiles.map(async n => { sfx[n] = await decode(await (await readProjectFile(root, `${lib.paths.sounds}/${n}.wav`)).arrayBuffer(), 48000) }),
     ])
     set({ table: files.table, loaded: { kit: files.table.kit, cueNames: Object.keys(files.table.cues) }, clipFiles: files.clipFiles, soundFiles: files.soundFiles,
-      pcm, sfx, pending: { clips: {}, sounds: {} }, dirty: false })
+      pcm, sfx, pending: { clips: {}, sounds: {} }, dirty: false, saveError: null })
+  }
+
+  // ── Autosave and outside changes ──
+  const sync = new CueTableSync<PendingWavs>({
+    read: async () => { const { root, lib } = get(); const f = await readProjectFile(root!, lib!.paths.cues); return { text: await f.text(), mtime: f.lastModified } },
+    write: async (table, pending) => {
+      const { root, lib } = get()
+      await writeSceneSave(root!, lib!, table, pending)
+      return (await readProjectFile(root!, lib!.paths.cues)).lastModified
+    },
+  })
+  let saveTimer: ReturnType<typeof setTimeout> | null = null
+  let saving: Promise<void> | null = null
+  const scheduleSave = () => { if (saveTimer) clearTimeout(saveTimer); saveTimer = setTimeout(() => { saveTimer = null; void saveNow() }, 300) }
+  /** Writes Studio's table (merged onto an outside change); a later edit made during the write is saved next. */
+  const saveNow = async (): Promise<void> => {
+    if (saving) { await saving; if (get().dirty) return saveNow(); return }
+    const { root, lib, table, loaded, pending } = get()
+    if (!root || !lib || !table || !loaded || !get().dirty) return
+    saving = (async () => {
+      try {
+        const result = await sync.save(table, pending, async (next, external) => {
+          // Outside changes may name WAVs written meanwhile and cues added there: check against the folder now.
+          const [clipFiles, soundFiles] = external ? await Promise.all([listWavs(root, lib.paths.clips), listWavs(root, lib.paths.sounds)]) : [get().clipFiles, get().soundFiles]
+          return validateCueTable(next, { lib, kit: loaded.kit, cueNames: external ? Object.keys(next.cues) : loaded.cueNames,
+            clipFiles: new Set([...clipFiles, ...Object.keys(pending.clips)]), soundFiles: new Set([...soundFiles, ...Object.keys(pending.sounds)]) })
+        })
+        if (!result.ok) {
+          for (const p of result.problems) addLog(p)
+          const notice = { id: 'scene.save.invalid' as const, params: { problems: result.problems.join(' / ') }, error: true }
+          set({ saveError: notice, notice })
+          return
+        }
+        const now = get().table
+        if (result.external) {
+          // Reload the merged file (new WAVs decoded); an edit made during the write is kept and saved next.
+          const edited = now !== table ? now : null
+          await loadTable()
+          if (edited) { set({ table: edited, dirty: true }); scheduleSave() }
+          note({ id: result.conflicts.length ? 'scene.autosave.conflicts' : 'scene.autosave.merged', params: { fields: result.conflicts.join(', ') }, error: result.conflicts.length > 0 })
+        } else if (now === table) set({ dirty: false, pending: { clips: {}, sounds: {} }, saveError: null })
+        else { set({ pending: { clips: {}, sounds: {} }, saveError: null }); scheduleSave() }
+        addLog(`autosave → ${lib.paths.cues}`)
+      } catch (error) {
+        const notice = { id: 'scene.save.failed' as const, params: { error: message(error) }, error: true }
+        set({ saveError: notice, notice }); addLog(message(error))
+      }
+    })()
+    try { await saving } finally { saving = null }
+  }
+  /** Reads the file again when it changed outside Studio and nothing is unsaved (every 2 s and on focus). */
+  const checkOutside = async () => {
+    const { root, lib, dirty, busy } = get()
+    if (!root || !lib || dirty || busy || saving || !sync.known) return
+    try {
+      if (await sync.changedOnDisk() === null) return
+      await loadTable()
+      note({ id: 'scene.autosave.reloaded', params: { file: lib.paths.cues } })
+    } catch { /* checked again later */ }
+  }
+  if (typeof window !== 'undefined') {
+    setInterval(() => void checkOutside(), 2000)
+    window.addEventListener('focus', () => void checkOutside())
+    // Leaving the page writes what is pending.
+    window.addEventListener('pagehide', () => { if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; void saveNow() } })
   }
 
   /** Opens a project folder; a folder with a lib is remembered even when the recording is missing (one click after recording). */
@@ -155,7 +227,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
   return {
     root: null, remembered: null, restored: false, busy: false,
     lib: null, data: null, items: [], table: null, loaded: null, clipFiles: [], soundFiles: [],
-    pending: { clips: {}, sounds: {} }, pcm: {}, sfx: {}, dirty: false, cur: 0, sel: null,
+    pending: { clips: {}, sounds: {} }, pcm: {}, sfx: {}, dirty: false, saveError: null, cur: 0, sel: null,
     notice: null, empty: null, log: [],
     note, addLog,
 
@@ -226,6 +298,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
       const next = change(table)
       if (!next) return false
       set({ table: next, dirty: true })
+      scheduleSave()
       return true
     },
 
@@ -238,6 +311,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
       try { data = mono(await decode(await file.arrayBuffer(), RATE)) } catch { note({ id: 'scene.wav.unreadable', params: { file: file.name }, error: true }); return null }
       set(s => ({ pcm: { ...s.pcm, [name]: data }, pending: { ...s.pending, clips: { ...s.pending.clips, [name]: encodePcm16Wav(data, RATE, 1) } },
         table: s.table && addClipEntry(s.table, name, loop, file.name), dirty: true }))
+      scheduleSave()
       note({ id: 'scene.wav.clipAdded', params: { name, seconds: (data.length / RATE).toFixed(2) } })
       return name
     },
@@ -252,42 +326,35 @@ export const useSceneStore = create<SceneState>((set, get) => {
       for (let c = 0; c < ch; c++) { const d = b.getChannelData(c); for (let i = 0; i < b.length; i++) inter[i * ch + c] = d[i] }
       set(s => ({ sfx: { ...s.sfx, [name]: b }, pending: { ...s.pending, sounds: { ...s.pending.sounds, [name]: encodePcm16Wav(inter, 48000, ch) } },
         soundFiles: [...s.soundFiles, name].sort(), dirty: true }))
+      scheduleSave()
       note({ id: 'scene.wav.soundAdded', params: { name, dir: lib.paths.sounds } })
       return name
     },
 
     save: async () => {
-      const { root, lib, table, loaded, pending, clipFiles, soundFiles } = get()
-      if (!root || !lib || !table || !loaded) { note({ id: 'scene.save.noProject', error: true }); return }
-      const problems = validateCueTable(table, { lib, kit: loaded.kit, cueNames: loaded.cueNames,
-        clipFiles: new Set([...clipFiles, ...Object.keys(pending.clips)]), soundFiles: new Set([...soundFiles, ...Object.keys(pending.sounds)]) })
-      if (problems.length) { note({ id: 'scene.save.invalid', params: { problems: problems.join(' / ') }, error: true }); for (const p of problems) addLog(p); return }
-      const added = Object.keys(pending.clips).length + Object.keys(pending.sounds).length
-      await guarded(async () => {
-        try { await writeSceneSave(root, lib, table, pending) }
-        catch (error) { note({ id: 'scene.save.failed', params: { error: message(error) }, error: true }); addLog(message(error)); return }
-        await loadTable()
-        note({ id: added ? 'scene.save.doneWavs' : 'scene.save.done', params: { file: lib.paths.cues, count: added } })
-      })
+      if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
+      await saveNow()
     },
     commitDecision: async (next, wavs) => {
-      const { root, lib, loaded, clipFiles, soundFiles, dirty, busy } = get()
+      const { root, lib, loaded, clipFiles, soundFiles, busy } = get()
       if (!root || !lib || !loaded) return { ok: false, notice: { id: 'scene.save.noProject', error: true } }
-      if (dirty) return { ok: false, notice: { id: 'events.decide.dirty', error: true } }
       if (busy) return { ok: false, notice: { id: 'events.decide.busy', error: true } }
+      // Pending edits first (autosave); a table that cannot be saved stops the decision.
+      await get().save()
+      if (get().dirty) return { ok: false, notice: get().saveError ?? { id: 'events.decide.dirty', error: true } }
       const problems = validateCueTable(next, { lib, kit: loaded.kit, cueNames: loaded.cueNames,
         clipFiles: new Set([...clipFiles, ...Object.keys(wavs.clips)]), soundFiles: new Set([...soundFiles, ...Object.keys(wavs.sounds)]) })
       if (problems.length) { for (const p of problems) addLog(p); return { ok: false, notice: { id: 'scene.save.invalid', params: { problems: problems.join(' / ') }, error: true }, problems } }
-      let failed: SceneNotice | null = null
-      set({ busy: true })
-      try { await writeSceneSave(root, lib, next, wavs); await loadTable() }
-      catch (error) { failed = { id: 'scene.save.failed', params: { error: message(error) }, error: true }; addLog(message(error)) }
-      finally { set({ busy: false }) }
-      if (failed) return { ok: false, notice: failed }
+      // Saved like an edit: onto the file's newer version when the agent changed it meanwhile.
+      set({ table: next, pending: wavs, dirty: true, busy: true })
+      try { await saveNow() } finally { set({ busy: false }) }
+      if (get().dirty) return { ok: false, notice: get().saveError ?? { id: 'scene.save.failed', params: { error: '' }, error: true } }
+      await loadTable()
       addLog(`decide → ${[...Object.keys(wavs.clips).map(n => `${lib.paths.clips}/${n}.wav`), ...Object.keys(wavs.sounds).map(n => `${lib.paths.sounds}/${n}.wav`), lib.paths.cues].join(', ')}`)
       return { ok: true }
     },
     restoreDecision: async (tableText, wavs) => {
+      await get().save()
       const { root, lib, dirty, busy } = get()
       if (!root || !lib) return { ok: false, notice: { id: 'scene.save.noProject', error: true } }
       if (dirty) return { ok: false, notice: { id: 'events.decide.dirty', error: true } }

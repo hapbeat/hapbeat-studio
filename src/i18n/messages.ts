@@ -333,9 +333,6 @@ export const messages = defineMessages({
   'scene.reopenNamed': { ja: '前回のプロジェクトを開く（{name}）', en: 'Reopen last project ({name})' },
   'scene.projectTitle': { ja: '{title}（フォルダー: {folder}）', en: '{title} (folder: {folder})' },
   'scene.noProject': { ja: 'プロジェクト未選択', en: 'No project open' },
-  'scene.save': { ja: '保存', en: 'Save' },
-  'scene.saveTitle': { ja: '割り当て表全体と新しい WAV をプロジェクトへ書き込む', en: 'Write the whole cue table and new WAVs into the project' },
-  'scene.dirty': { ja: '未保存', en: 'Unsaved' },
   'scene.revert': { ja: '未保存の変更を破棄', en: 'Discard unsaved changes' },
   'scene.confirmDiscard': { ja: '未保存の割り当て変更を捨てて、プロジェクトの内容を読み込み直しますか？', en: 'Discard the unsaved cue changes and reload the project?' },
   'scene.sendHaptics': { ja: '触覚を送信する（シーン確認の再生のみ・既定 OFF）', en: 'Send haptics (Scene playback only, off by default)' },
@@ -361,8 +358,6 @@ export const messages = defineMessages({
   'scene.save.noProject': { ja: 'プロジェクトを開いていません', en: 'No project is open' },
   'scene.save.invalid': { ja: '保存できません: {problems}', en: 'Cannot save: {problems}' },
   'scene.save.failed': { ja: '保存失敗: {error}', en: 'Save failed: {error}' },
-  'scene.save.done': { ja: '保存しました（{file}）。ゲームへの反映は最後にまとめて（出力・反映パネル）', en: 'Saved ({file}). Apply it to the game at the end (Output / apply panel).' },
-  'scene.save.doneWavs': { ja: '保存しました（{file}、新しい WAV {count} 個）。ゲームへの反映は最後にまとめて（出力・反映パネル）', en: 'Saved ({file}, {count} new WAVs). Apply it to the game at the end (Output / apply panel).' },
   'scene.reverted': { ja: '変更を破棄しました', en: 'Changes discarded' },
   'scene.full': { ja: '全編（マーカー付き）', en: 'Full replay (with markers)' },
   'scene.cueCount': { ja: '{count} cues', en: '{count} cues' },
@@ -999,8 +994,6 @@ export const messages = defineMessages({
   'events.addProject': { ja: '＋ フォルダーを選ぶ…', en: '+ Choose a folder…' },
   'events.noProject': { ja: 'ゲームのプロジェクトを選ぶと、そのイベント（cue）の一覧が出ます', en: 'Pick a game project to list its events (cues).' },
   'events.selectHint': { ja: 'イベントを選ぶと、音・触覚・AI 試行が表示されます', en: 'Select an event to see its sound, haptic and AI trials.' },
-  'events.unsaved': { ja: 'イベント表に未保存の変更があります', en: 'The cue table has unsaved changes.' },
-  'events.save': { ja: '保存', en: 'Save' },
   'events.revert': { ja: '元に戻す', en: 'Revert' },
   'events.notYet': { ja: '未', en: '—' },
   'events.loop': { ja: 'ループ', en: 'loop' },
@@ -1226,6 +1219,10 @@ export const messages = defineMessages({
   'events.revise.failed': { ja: '送信できません: {error}', en: 'Could not send: {error}' },
   'events.revise.pending': { ja: '作り直し依頼中', en: 'remake requested' },
   'events.revise.pendingHint': { ja: 'エージェントがこの cue の新しい試行を出すと消えます', en: 'Clears when the agent submits a new trial for this cue.' },
+  'scene.saving': { ja: '保存中…', en: 'Saving…' },
+  'scene.autosave.merged': { ja: 'cue 表が外部で変更されていたので、取り込んで保存しました', en: 'The cue table had changed outside Studio: merged and saved.' },
+  'scene.autosave.conflicts': { ja: 'cue 表の外部の変更と重なった項目は Studio 側を優先しました: {fields}', en: 'Changed outside Studio too, kept Studio’s value: {fields}' },
+  'scene.autosave.reloaded': { ja: '{file} が外部で更新されたので読み直しました', en: '{file} changed outside Studio: reloaded.' },
 })
 
 export type MessageId = keyof typeof messages

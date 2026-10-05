@@ -52,8 +52,7 @@ export function SceneTopBar({ dockApi, notice }: { dockApi: DockviewApi | null; 
     <div className="editor-folder-name" title={root ? t('scene.projectTitle', { title: lib?.title ?? '', folder: root.name }) : undefined}>
       <strong>{root ? `${lib?.title ?? root.name} · ${root.name}/` : t('scene.noProject')}</strong>
     </div>
-    <button type="button" className="toolbar-btn primary scene-save" disabled={!root || busy} title={t('scene.saveTitle')} onClick={e => { e.currentTarget.blur(); void useSceneStore.getState().save() }}>{t('scene.save')}</button>
-    <span className="scene-stack scene-dirty" role="status"><span aria-hidden="true" className="scene-sizer">{t('scene.dirty')}</span><span>{dirty ? t('scene.dirty') : ''}</span></span>
+    <span className="scene-stack scene-dirty" role="status"><span aria-hidden="true" className="scene-sizer">{t('scene.saving')}</span><span>{dirty ? t('scene.saving') : ''}</span></span>
     <span className={`editor-bar-notice ${notice?.error ? 'error' : ''}`} role="status" title={notice?.text}>{notice?.text ?? ''}</span>
     <DevicePill selectionScope="kit" showWhenDisconnected modalExtra={<div className="editor-output-options">
       <label><input type="checkbox" checked={sendHaptics} onChange={e => useSceneSettings.getState().update({ sendHaptics: e.target.checked })} />{t('scene.sendHaptics')}</label>

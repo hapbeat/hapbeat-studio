@@ -37,7 +37,7 @@ export function SceneProjectPanel() {
       <h3>{t('scene.data.heading')}</h3>
       <div>{t('scene.data.table', { folder: root.name, file: lib.paths.cues })}</div>
       <div className="scene-dim">{t('scene.data.counts', { cues: Object.keys(table.cues).length, clips: Object.keys(table.clips).length, sounds: soundFiles.length })}
-        <span className="scene-dirty-note">{dirty ? t('scene.dirty') : ''}</span></div>
+        <span className="scene-dirty-note">{dirty ? t('scene.saving') : ''}</span></div>
     </div>
     <div className="scene-sec">
       <h3>{t('scene.output.heading')}</h3>

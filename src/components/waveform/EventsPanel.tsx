@@ -49,7 +49,7 @@ export function EventsPanel() {
   const table = useSceneStore(s => s.table)
   const lib = useSceneStore(s => s.lib)
   const data = useSceneStore(s => s.data)
-  const dirty = useSceneStore(s => s.dirty)
+  const saveError = useSceneStore(s => s.saveError)
   const busy = useSceneStore(s => s.busy)
   const result = useEventStore(s => s.result)
   const selected = useEventStore(s => s.selected)
@@ -86,8 +86,7 @@ export function EventsPanel() {
       </EditorMenu>
     </div>
     {dialog}
-    {dirty && <div className="events-dirty" role="status">{t('events.unsaved')}
-      <button type="button" className="toolbar-btn" disabled={busy} onClick={() => void useSceneStore.getState().save()}>{t('events.save')}</button>
+    {saveError && <div className="events-dirty" role="status">{t(saveError.id, saveError.params)}
       <button type="button" className="toolbar-btn" disabled={busy} onClick={() => void useSceneStore.getState().revert()}>{t('events.revert')}</button></div>}
     {result && <DecidedNotice result={result} onClose={() => useEventStore.getState().setResult(null)} />}
     {!table || !lib ? <p className="agent-muted">{t('events.noProject')}</p> : <>
