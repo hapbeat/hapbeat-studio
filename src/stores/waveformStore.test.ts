@@ -3,7 +3,8 @@ import { useWaveformStore as store } from './waveformStore'
 import { EditorFolder } from '@/utils/editorFolder'
 import type { WaveformClip } from '@/types/waveform'
 vi.mock('@/utils/audioDsp', () => ({ cropBuffer: vi.fn(), deleteRegion: vi.fn(), applyEffect: vi.fn() }))
-import { loadDirectoryHandle } from '@/utils/localDirectory'
+import { loadDirectoryHandle, saveDirectoryHandle } from '@/utils/localDirectory'
+import { MemoryDirectory } from '@/utils/memoryDirectory.testutil'
 vi.mock('@/utils/localDirectory', () => ({loadDirectoryHandle: vi.fn(), saveDirectoryHandle: vi.fn()}))
 import { applyEffect, cropBuffer } from '@/utils/audioDsp'
 const makeBuffer = (length: number) => ({length, sampleRate: 16000, duration: length / 16000, numberOfChannels: 1}) as AudioBuffer
@@ -123,7 +124,7 @@ describe('editor session state', () => {
     expect(state.selectedRegion).toBeNull()
   })
   it('automatically restores the remembered folder only with granted permission', async () => {
-    const root = {name: 'SFX', queryPermission: vi.fn().mockResolvedValue('granted')} as unknown as FileSystemDirectoryHandle
+    const root = {name: 'SFX', queryPermission: vi.fn().mockResolvedValue('granted'), getDirectoryHandle: vi.fn().mockResolvedValue({})} as unknown as FileSystemDirectoryHandle
     vi.mocked(loadDirectoryHandle).mockResolvedValue(root)
     const clip = makeClip('restored')
     const folder = {root} as EditorFolder
@@ -243,5 +244,71 @@ describe('material provenance', () => {
     store.getState().setProvenance(new Map([[sha, {...provenance}]]))
     expect(store.getState().documents).toBe(documents)
     expect(store.getState().saveStatus).toBe('saved')
+  })
+})
+
+describe('editor folder confirmation', () => {
+  const granted = (dir: MemoryDirectory) => Object.assign(dir, { queryPermission: vi.fn().mockResolvedValue('granted') }) as unknown as FileSystemDirectoryHandle
+  const settle = async () => { for (let i = 0; i < 20; i++) await Promise.resolve() }
+  const pick = (root: FileSystemDirectoryHandle) => { (window as unknown as {showDirectoryPicker: unknown}).showDirectoryPicker = vi.fn().mockResolvedValue(root) }
+  afterEach(() => { delete (window as unknown as {showDirectoryPicker?: unknown}).showDirectoryPicker; vi.mocked(saveDirectoryHandle).mockClear() })
+
+  it('writes nothing in a restored folder without haptic-knowledge/ until the user answers', async () => {
+    const dir = new MemoryDirectory('hapbeat-demos')
+    vi.mocked(loadDirectoryHandle).mockResolvedValue(granted(dir))
+    const restoring = store.getState().restoreFolder()
+    await settle()
+    expect(store.getState().folderPrompt?.name).toBe('hapbeat-demos')
+    expect(dir.dirs.size + dir.files.size).toBe(0)
+    expect(store.getState().folder).toBeNull()
+    store.getState().folderPrompt!.answer(false)
+    await restoring
+    expect(dir.dirs.size + dir.files.size).toBe(0)
+    expect(store.getState().folder).toBeNull()
+    expect(store.getState().folderPrompt).toBeNull()
+    expect(saveDirectoryHandle).not.toHaveBeenCalled()
+  })
+
+  it('No keeps the previous folder and the remembered handle; nothing is written in the picked folder', async () => {
+    const previous = new MemoryDirectory('studio-editor')
+    await previous.getDirectoryHandle('haptic-knowledge', { create: true })
+    pick(granted(previous))
+    await store.getState().openFolder()
+    const kept = store.getState().folder
+    expect(kept?.root).toBe(previous)
+    vi.mocked(saveDirectoryHandle).mockClear()
+    const wrong = new MemoryDirectory('UnrealProject')
+    pick(granted(wrong))
+    const opening = store.getState().openFolder()
+    await settle()
+    expect(store.getState().folderPrompt?.name).toBe('UnrealProject')
+    store.getState().folderPrompt!.answer(false)
+    await opening
+    expect(wrong.dirs.size + wrong.files.size).toBe(0)
+    expect(store.getState().folder).toBe(kept)
+    expect(store.getState().rememberedFolder).toBe(previous)
+    expect(saveDirectoryHandle).not.toHaveBeenCalled()
+  })
+
+  it('Yes opens the folder and creates the editor files', async () => {
+    const dir = new MemoryDirectory('new-editor')
+    pick(granted(dir))
+    const opening = store.getState().openFolder()
+    await settle()
+    expect(dir.dirs.size).toBe(0)
+    store.getState().folderPrompt!.answer(true)
+    await opening
+    expect(store.getState().folder?.root).toBe(dir)
+    expect(dir.dirs.has('.hapbeat-editor')).toBe(true)
+    expect(saveDirectoryHandle).toHaveBeenCalledWith(dir, 'editordir')
+  })
+
+  it('opens a folder that already has haptic-knowledge/ without asking', async () => {
+    const dir = new MemoryDirectory('studio-editor')
+    await dir.getDirectoryHandle('haptic-knowledge', { create: true })
+    vi.mocked(loadDirectoryHandle).mockResolvedValue(granted(dir))
+    await store.getState().restoreFolder()
+    expect(store.getState().folderPrompt).toBeNull()
+    expect(store.getState().folder?.root).toBe(dir)
   })
 })

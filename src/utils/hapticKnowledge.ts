@@ -254,6 +254,10 @@ async function subdir(dir: FileSystemDirectoryHandle, name: string): Promise<Fil
   try { return await dir.getDirectoryHandle(name) }
   catch (error) { if (isNotFound(error)) return null; throw error }
 }
+/** True when `root` already has `haptic-knowledge/` (an editor folder). Read-only: creates nothing. */
+export async function hasKnowledgeFolder(root: FileSystemDirectoryHandle): Promise<boolean> {
+  return await subdir(root, KNOWLEDGE_DIR) !== null
+}
 async function dirPath(dir: FileSystemDirectoryHandle, parts: string[], create: boolean): Promise<FileSystemDirectoryHandle> {
   for (const part of parts) dir = await dir.getDirectoryHandle(part, { create })
   return dir

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { WaveformEditor } from '@/components/waveform/WaveformEditor'
+import { EditorFolderConfirm } from '@/components/waveform/EditorFolderConfirm'
 import { DisplayEditor } from '@/components/display/DisplayEditor'
 import { SceneView } from '@/components/scene/SceneView'
 import { OPEN_TAB_EVENT } from '@/stores/eventStore'
@@ -310,6 +311,7 @@ export function App() {
       </main>
       <LogDrawer />
       <HelperFailureToastListener />
+      <EditorFolderConfirm />
     </div>
   )
 }

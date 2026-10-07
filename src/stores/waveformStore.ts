@@ -9,7 +9,7 @@ import { EditorFolder, type EditorDocument } from '@/utils/editorFolder'
 import { assignProject } from '@/utils/clipProjects'
 import { loadRecipeSamples, renderRecipe, type Recipe } from '@/utils/recipe'
 import { readAgentBytes } from '@/utils/agentInbox'
-import type { KnowledgeFolder } from '@/utils/hapticKnowledge'
+import { hasKnowledgeFolder, type KnowledgeFolder } from '@/utils/hapticKnowledge'
 import { derivedEffectChain } from '@/utils/agentTrialUi'
 import { sha256Hex } from '@/utils/sha256'
 import { getActiveHelperChannel } from '@/utils/helperRequest'
@@ -30,7 +30,14 @@ interface EditorState {
    */
   ensureFolder: () => Promise<boolean>
   reconnectFolder: () => Promise<void>
+  /**
+   * The confirmed editor folder. Every writer into the editor folder (project, UI settings sync, activity log,
+   * rating drafts, material adjust, agent guide / knowledge / outbox, scene overrides) goes through this, so it is
+   * the single "editor folder ready" guard: it is set only after the folder is confirmed as an editor folder.
+   */
   folder: EditorFolder | null
+  /** Pending "make this folder an editor folder?" question (a folder without haptic-knowledge/); answer() settles it. */
+  folderPrompt: { name: string; answer: (yes: boolean) => void } | null
   documents: EditorDocument[]
   clip: WaveformClip | null
   effects: EffectEntry[]
@@ -99,12 +106,20 @@ export const useWaveformStore = create<EditorState>((set, get) => {
     clearTimeout(timer)
     timer = setTimeout(() => { void get().save().catch(() => {}) }, 700)
   }
-  const adoptFolder = async (root: FileSystemDirectoryHandle) => {
+  /** Asks before a folder that is not yet an editor folder (no haptic-knowledge/) gets any editor files. */
+  const confirmEditorFolder = async (root: FileSystemDirectoryHandle): Promise<boolean> => {
+    if (await hasKnowledgeFolder(root)) return true
+    return new Promise<boolean>(resolve => set({ folderPrompt: { name: root.name, answer: yes => { set({ folderPrompt: null }); resolve(yes) } } }))
+  }
+  /** Opens `root` as the editor folder; false (nothing written, current folder kept) when the user declines. */
+  const adoptFolder = async (root: FileSystemDirectoryHandle): Promise<boolean> => {
+    if (!await confirmEditorFolder(root)) return false
     const { folder, documents } = await EditorFolder.open(root)
     histories.clear()
     const first = documents[0]
     set({ folder, rememberedFolder: root, documents, clip: first?.clip ?? null, effects: first?.effects ?? [], exportAsMono: first?.exportAsMono ?? false,
       undoStack: [], redoStack: [], selectedRegion: null, saveStatus: 'saved', error: folder.recovered ? 'Recovered previous saved project. The latest index was damaged.' : null })
+    return true
   }
   return {
     rememberedFolder: null, restored: false,
@@ -137,7 +152,7 @@ export const useWaveformStore = create<EditorState>((set, get) => {
       } catch (error) { get().setError(error) }
       finally { set({ isProcessing: false }) }
     },
-    folder: null, documents: [], clip: null, effects: [], exportAsMono: false,
+    folder: null, folderPrompt: null, documents: [], clip: null, effects: [], exportAsMono: false,
     selectionOriginal: false, selectedRegion: null, isProcessing: false, zoom: 200,
     undoStack: [], redoStack: [], saveStatus: 'empty', error: null,
     setError: error => set({ error: error instanceof Error ? error.message : String(error) }),
@@ -152,7 +167,7 @@ export const useWaveformStore = create<EditorState>((set, get) => {
       try {
         if (get().folder && get().saveStatus !== 'saved') await get().save()
         await saveChain
-        await adoptFolder(root)
+        if (!await adoptFolder(root)) return
         set({restored: true})
         await saveDirectoryHandle(root, 'editordir')
       } catch (error) { get().setError(error) }
