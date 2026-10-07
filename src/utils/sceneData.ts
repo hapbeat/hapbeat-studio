@@ -18,7 +18,7 @@ export const VIEWER_DIR = 'Saved/HapticViewer'
 export const MOMENT_S = 0.2
 
 export interface SceneLayer {
-  /** The loop cue whose haptics follow this layer's recorded level. */
+  /** The loop cue whose haptics (and loop sound, lib.loop_cue_sounds) follow this layer's recorded level. */
   cue: string
   /** Level columns of the left / right hand gain. */
   gain: number[]
@@ -36,7 +36,7 @@ export interface SceneLib {
   loop_sounds: string[]
   /** Positions a loop-cue route may use (optional; absent = any of `at`). T-Rex: ['hand']. */
   loop_at?: string[]
-  /** Loop cues may carry a (looping) cue sound (optional, default false). T-Rex: true; Safety Mill: no. */
+  /** Loop cues may carry a (looping) cue sound, played at the layer's level (optional, default false). T-Rex and Safety Mill: true. */
   loop_cue_sounds?: boolean
   clip_name: string
   sound_name: string

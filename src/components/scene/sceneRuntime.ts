@@ -5,6 +5,7 @@ import { clipEnd, focusEvent, itemEvents, levelAt, offsetOf, type SceneItem, typ
 import { isLoopCue, routeClips, sfxSounds, type CueRoute, type CueSfx, soundIntensity } from '@/utils/sceneCueTable'
 import { effectiveEvent, fireShot, MaterialPicker, resolveEventName } from '@/utils/cueEvents'
 import { runPosition } from '@/utils/sceneSegments'
+import { buildLoopSounds, LoopSoundPlayer, loopSoundLevel, type LoopSound } from '@/utils/sceneLoopSounds'
 import { buildLoopVoices, shotVoices, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, SceneHapticMixer, targetsOf, type HapticDevice, type HelperSend } from '@/utils/sceneHaptics'
 
 export const SPEEDS = [1, 0.5, 0.25]
@@ -12,7 +13,8 @@ export const SPEEDS = [1, 0.5, 0.25]
 /**
  * The Scene tab's playback engine (one per tab, outlives dock panels): the
  * video element (moved into whichever panel shows it), cue sounds via Web Audio
- * scheduled against the video clock, and the per-device haptic streams through
+ * scheduled against the video clock, loop-cue sounds following the recorded
+ * layer levels (like the haptic loop layers), and the per-device haptic streams through
  * hapbeat-helper. A 10 ms tick fires the cues the video is about to reach.
  * Ported from the standalone viewer's tick() / fire() / pumpHaptics().
  */
@@ -28,6 +30,9 @@ export class SceneRuntime {
   private actx: AudioContext | null = null
   private scheduledSfx: { src: AudioBufferSourceNode; at: number }[] = []
   private mixer: SceneHapticMixer
+  /** Loop cues' sounds (lib.loop_cue_sounds), looped at the recorded layer level. */
+  private loopSounds: LoopSound[] = []
+  private loopPlayer = new LoopSoundPlayer()
   private helper: { send: HelperSend; connected: boolean; devices: HapticDevice[] } = { send: () => {}, connected: false, devices: [] }
   private cursor: number | null = null
   private lastVt = 0
@@ -174,7 +179,7 @@ export class SceneRuntime {
    * One cue occurrence (`cue` or `cue:variant`): one firing (fireShot, shared with
    * the editor's preview sequence) — picks per `variation.pick`, one gain jitter
    * for sound and haptics, the sound's pitch jitter as its playback rate and the
-   * haptic rate jitter. Loop cues are layer driven (no cue sound here).
+   * haptic rate jitter. Loop cues are layer driven (their sound plays in tick(), at the recorded level).
    */
   private fire(ev: VisibleEvent | { name: string; hand: string; gain?: number }, delay: number) {
     const s = useSceneStore.getState(), resolved = s.table && resolveEventName(s.table, ev.name), e = resolved && s.table && effectiveEvent(s.table, resolved.ref)
@@ -195,11 +200,13 @@ export class SceneRuntime {
   private flush() {
     if (this.actx) for (const x of this.scheduledSfx) if (x.at > this.actx.currentTime) try { x.src.stop() } catch { /* already ended */ }
     this.scheduledSfx.length = 0
+    if (this.actx) this.loopPlayer.stopAll(this.actx)
     this.mixer.flush(performance.now())
   }
   private rebuildLoops() {
     const s = useSceneStore.getState()
     this.mixer.loopVoices = s.table && s.lib ? buildLoopVoices(s.table, s.lib) : []
+    this.loopSounds = s.table && s.lib ? buildLoopSounds(s.table, s.lib) : []
   }
 
   /** Fires the cues the video is about to reach (both outputs) and keeps the device streams fed. */
@@ -220,6 +227,11 @@ export class SceneRuntime {
     }
     if (this.actx) while (this.scheduledSfx.length && this.scheduledSfx[0].at < this.actx.currentTime - 5) this.scheduledSfx.shift()
     const settings = useSceneSettings.getState(), data = s.data, lib = s.lib
+    // Loop-cue sounds at the level recorded for the replay time now (both hands' louder gain, its rate), with the PC sound on.
+    if (playing && it && data && lib && settings.pcSound && this.loopSounds.length) {
+      const t = v.currentTime + offsetOf(it)
+      this.loopPlayer.update(() => this.audio(), this.loopSounds, s.sfx, layer => loopSoundLevel(data.full.levels, data.fps, lib.layers[layer], t))
+    } else if (this.actx) this.loopPlayer.stopAll(this.actx)
     this.mixer.pump(now, {
       enabled: settings.sendHaptics && this.helper.connected, playing, devices: this.helper.devices, leadMs: settings.hapticLeadMs, pcm: s.pcm,
       level: (t, layer, side) => data && lib ? levelAt(data.full.levels, data.fps, lib.layers[layer], t, side) : [0, 1],

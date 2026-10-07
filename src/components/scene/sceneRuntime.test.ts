@@ -73,3 +73,64 @@ describe('Scene playback starts only on a user action, the full replay included'
     runtime.stop()
   })
 })
+
+/** A silent Web Audio stand-in: records the looping sources the runtime starts and stops. */
+class FakeParam { value = 0; target: number | null = null; setValueAtTime(v: number) { this.value = v } setTargetAtTime(v: number) { this.target = v } }
+class FakeSource {
+  buffer: unknown = null; loop = false; playbackRate = new FakeParam(); onended: (() => void) | null = null; started = false; stopped = false
+  connect<T>(node: T) { return node }
+  disconnect() {}
+  start() { this.started = true }
+  stop() { this.stopped = true }
+}
+class FakeAudioContext {
+  static last: FakeAudioContext | null = null
+  state = 'running'; currentTime = 0; destination = {}; sources: FakeSource[] = []; gains: { gain: FakeParam }[] = []
+  constructor() { FakeAudioContext.last = this }
+  createBufferSource() { const s = new FakeSource(); this.sources.push(s); return s }
+  createGain() { const g = { gain: new FakeParam(), connect: <T>(node: T) => node, disconnect() {} }; this.gains.push(g); return g }
+  resume() { return Promise.resolve() }
+  close() { return Promise.resolve() }
+}
+
+describe('Scene loop-cue sounds follow the recorded layer level', () => {
+  it('plays while the replay plays at level × sfx.volume × intensity; stops at level 0, on pause, seek and with PC sound off', async () => {
+    vi.stubGlobal('AudioContext', FakeAudioContext)
+    const { useSceneStore } = await import('@/stores/sceneStore')
+    const { useSceneSettings } = await import('@/stores/sceneSettings')
+    const { SceneRuntime } = await import('./sceneRuntime')
+    const { buildItems } = await import('@/utils/sceneData')
+    // Spindle (gain col 0, rate col 1) off for 1 s, then on at 0.9 rate; a haptic-only layer (cols 2, 3) whose cue has no sound.
+    const levels = Array.from({ length: 90 }, (_, i) => i < 30 ? [0, 0, 1, 1] : [1, 0.9, 1, 1])
+    const lib = {
+      layers: [{ cue: 'spindle_loop', gain: [0, 0], rate: [1, 1], colors: [] }, { cue: 'feed_loop', gain: [2, 3], rate: null, colors: [] }],
+      loop_cues: ['spindle_loop', 'feed_loop'], loop_cue_sounds: true, ticks: [],
+    }
+    const table = { clips: {}, sounds: { Motor: { intensity: 0.5 } }, cues: { spindle_loop: { sfx: { sound: 'Motor', volume: 0.8 }, haptics: [] }, feed_loop: { sfx: null, haptics: [] } } }
+    const data = { fps: 30, full: { file: 'full.mp4', levels, events: [] }, clips: [] }
+    const motor = {} as AudioBuffer
+    useSceneSettings.setState({ pcSound: true, sendHaptics: false })
+    useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: lib as never, table: table as never, data, recorded: data, items: buildItems(data), cur: 0, sfx: { Motor: motor } })
+    const runtime = new SceneRuntime(), tick = () => (runtime as unknown as { tick(): void }).tick()
+    runtime.start(); await flush()
+    const playAt = (t: number) => { video.readyState = 2; video.paused = false; video.seeking = false; video.currentTime = t; tick() }
+    playAt(0.5)
+    expect(FakeAudioContext.last?.sources ?? []).toHaveLength(0) // level 0: silent (feed_loop has no sound at any level)
+    playAt(1.5)
+    const ctx = FakeAudioContext.last!, [src] = ctx.sources
+    expect(ctx.sources).toHaveLength(1); expect(src.buffer).toBe(motor); expect(src.loop).toBe(true); expect(src.started).toBe(true)
+    expect(src.playbackRate.value).toBeCloseTo(0.9); expect(ctx.gains[0].gain.target).toBeCloseTo(1 * 0.8 * 0.5)
+    // Pause: faded out and stopped; playing again starts a new source.
+    video.pause(); tick(); expect(src.stopped).toBe(true)
+    playAt(1.6); expect(ctx.sources).toHaveLength(2)
+    // Seek: stopped while the video seeks.
+    video.seeking = true; tick(); expect(ctx.sources[1].stopped).toBe(true)
+    // PC sound off: no loop sound even while playing.
+    playAt(1.7); expect(ctx.sources).toHaveLength(3)
+    useSceneSettings.setState({ pcSound: false }); tick(); expect(ctx.sources[2].stopped).toBe(true)
+    playAt(1.8); expect(ctx.sources).toHaveLength(3)
+    // Past the recording (the end): silent.
+    useSceneSettings.setState({ pcSound: true }); playAt(10); expect(ctx.sources).toHaveLength(3)
+    runtime.stop()
+  })
+})
