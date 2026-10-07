@@ -5,7 +5,7 @@ import { useEventStore, type DecideTarget } from '@/stores/eventStore'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { useEditorSettings } from '@/stores/editorSettings'
-import { sceneProjectNames } from '@/utils/sceneRegistry'
+import { lastSceneProject, sceneProjectNames } from '@/utils/sceneRegistry'
 import { useSceneVideoTarget } from '@/utils/editorSceneSync'
 import { clipsForCue, isLoopCue, soundAllowed, positionsForCue, routeClips, sfxSounds, type CueTable } from '@/utils/sceneCueTable'
 import type { SceneLib } from '@/utils/sceneData'
@@ -30,11 +30,8 @@ import { openMaterialForAdjust } from './eventEditing'
 import './EventsPanel.css'
 import '@/components/scene/VideoOverlay.css'
 
-const LAST_PROJECT_KEY = 'hapbeat-events-project'
 const NEW_FOLDER = ' new'
 const LIST_MIN = 80, LIST_MAX = 1200
-const readLast = () => { try { return localStorage.getItem(LAST_PROJECT_KEY) } catch { return null } }
-const writeLast = (name: string) => { try { localStorage.setItem(LAST_PROJECT_KEY, name) } catch { /* preference only */ } }
 
 /**
  * "Events": the cues of the game project open in the Scene tab (same store, picked
@@ -131,7 +128,10 @@ function ResizableList({ label, children }: { label: string; children: ReactNode
   </>
 }
 
-/** Project picker over the registry (game projects linked once in the Scene tab / editor); remembers the last one. */
+/**
+ * Project picker over the registry (game projects linked once in the Scene tab / editor). The last opened project is
+ * reopened on a page load (sceneStore restore); when its folder needs a click for permission, "allow" is offered here.
+ */
 function ProjectPicker() {
   const { t } = useI18n()
   const { linkSceneProject } = useEditor()
@@ -139,15 +139,18 @@ function ProjectPicker() {
   const [names, setNames] = useState<string[]>([])
   const [need, setNeed] = useState<'needsClick' | 'dirty' | null>(null)
   const current = lib?.project_name ?? ''
-  useEffect(() => { void useSceneStore.getState().restore() }, [])
   useEffect(() => { void sceneProjectNames().then(setNames, () => setNames([])) }, [current])
   useEffect(() => {
     setNeed(null)
-    if (current) { writeLast(current); return }
-    const last = readLast()
-    if (!last) return
+    if (current) return
     let cancelled = false
-    void useSceneStore.getState().linkProject(last, false).then(r => { if (!cancelled && !r.ok && (r.reason === 'needsClick' || r.reason === 'dirty')) setNeed(r.reason) })
+    // After the page-load restore (it opens the last project when permitted): why it is not open yet, for "allow".
+    void useSceneStore.getState().restore().then(async () => {
+      const last = lastSceneProject()
+      if (cancelled || !last || useSceneStore.getState().lib) return
+      const r = await useSceneStore.getState().linkProject(last, false)
+      if (!cancelled && !r.ok && (r.reason === 'needsClick' || r.reason === 'dirty')) setNeed(r.reason)
+    })
     return () => { cancelled = true }
   }, [current])
   const options = [...new Set([...names, ...(current ? [current] : [])])].sort()
@@ -163,7 +166,7 @@ function ProjectPicker() {
         {options.map(n => <option key={n} value={n}>{n}</option>)}
         <option value={NEW_FOLDER}>{t('events.addProject')}</option>
       </select></label>
-    {need === 'needsClick' && <button type="button" className="toolbar-btn" onClick={() => void linkSceneProject(readLast())}>{t('editor.scene.allowButton')}</button>}
+    {need === 'needsClick' && <button type="button" className="toolbar-btn" onClick={() => void linkSceneProject(lastSceneProject())}>{t('editor.scene.allowButton')}</button>}
     {need === 'dirty' && <span className="events-warn">{t('scene.link.dirty')}</span>}
   </div>
 }

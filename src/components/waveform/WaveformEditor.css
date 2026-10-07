@@ -697,13 +697,13 @@
 .editor-seek-row { display: flex; align-items: center; gap: 16px; padding: 8px 12px; font-size: 12px; color: var(--text-secondary); }
 .editor-seek-row label { display: flex; align-items: center; gap: 12px; flex: 1; }
 .editor-seek-row input { flex: 1; }
-:is(.waveform-editor, .dv-popout-window) input:not([type=range]):not([type=checkbox]):not([type=file]), :is(.waveform-editor, .dv-popout-window) select {
+:is(.waveform-editor, .dv-popout-window, .editor-menu-list) input:not([type=range]):not([type=checkbox]):not([type=file]), :is(.waveform-editor, .dv-popout-window, .editor-menu-list) select {
   background-color: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-light); border-radius: 5px; padding: 6px 8px; font: inherit; font-size: 13px; min-height: 32px; color-scheme: dark;
 }
-:is(.waveform-editor, .dv-popout-window) select { cursor: pointer; }
-:is(.waveform-editor, .dv-popout-window) input[type=range], :is(.waveform-editor, .dv-popout-window) input[type=checkbox] { accent-color: var(--accent-light); }
-:is(.waveform-editor, .dv-popout-window) input:focus-visible, :is(.waveform-editor, .dv-popout-window) select:focus-visible, :is(.waveform-editor, .dv-popout-window) button:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
-:is(.waveform-editor, .dv-popout-window) select option { color: var(--text-primary); background: var(--bg-primary); }
+:is(.waveform-editor, .dv-popout-window, .editor-menu-list) select { cursor: pointer; }
+:is(.waveform-editor, .dv-popout-window, .editor-menu-list) input[type=range], :is(.waveform-editor, .dv-popout-window, .editor-menu-list) input[type=checkbox] { accent-color: var(--accent-light); }
+:is(.waveform-editor, .dv-popout-window, .editor-menu-list) input:focus-visible, :is(.waveform-editor, .dv-popout-window, .editor-menu-list) select:focus-visible, :is(.waveform-editor, .dv-popout-window, .editor-menu-list) button:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
+:is(.waveform-editor, .dv-popout-window, .editor-menu-list) select option { color: var(--text-primary); background: var(--bg-primary); }
 :is(.waveform-editor, .dv-popout-window) .effects-panel { max-height: none; min-height: 420px; border-top: 0; }
 :is(.waveform-editor, .dv-popout-window) .effects-chain { width: 55%; min-width: 240px; }
 :is(.waveform-editor, .dv-popout-window) .effects-chain-list { max-height: 210px; flex: none; }
@@ -856,7 +856,8 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 
 /* ---- Menus ---- */
 .editor-menu { display: inline-flex; position: relative; }
-.editor-menu-list { position: fixed; z-index: 1000; min-width: 200px; max-width: 340px; max-height: 70vh; overflow: auto; padding: 4px; background: var(--bg-secondary); border: 1px solid var(--border-light); border-radius: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, .45); }
+/* Rendered in a portal on the body (MenuPopup): colour and size do not come from the panel. */
+.editor-menu-list { position: fixed; z-index: 1000; color: var(--text-primary); font-size: 13px; min-width: 200px; max-width: 340px; max-height: 70vh; overflow: auto; padding: 4px; background: var(--bg-secondary); border: 1px solid var(--border-light); border-radius: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, .45); }
 .editor-menu-item { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--text-primary); font: inherit; font-size: 13px; text-align: left; cursor: pointer; white-space: nowrap; }
 .editor-menu-item:hover:not(:disabled), .editor-menu-item:focus-visible { background: var(--accent-dim); }
 .editor-menu-item:disabled { color: var(--text-muted); cursor: default; }

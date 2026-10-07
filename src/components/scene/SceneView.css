@@ -51,13 +51,13 @@
 /* A firing shown as another event until the scene is re-recorded. */
 /* The mark before the name: one fixed-width cell, so names stay aligned. */
 .scene-overridden i { display: inline-block; width: 1.1em; text-align: center; font-style: normal; color: var(--text-muted); }
-/* A row's right-click menu, over the rows below (nothing moves). */
-.scene-row-menu { grid-template-columns: auto; justify-content: start; }
 /* The moment of the firing selected on the timeline / here. */
 .scene-item.picked { outline: 1px solid var(--accent-light); outline-offset: -1px; }
 .scene-item.sel { background: rgba(124,92,191,.22); box-shadow: inset 3px 0 0 var(--accent-light); }
 /* "Change" on a moment: a one-line request over the following rows (nothing moves). */
 .scene-occ-form { position: absolute; left: 12px; right: 12px; top: 100%; z-index: 5; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 4px; padding: 4px; background: var(--bg-secondary); border: 1px solid var(--border-light); border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,.4); }
+/* A row's right-click menu at the pointer: a MenuPopup (portal on the body, fixed, kept in the window). */
+.scene-occ-form.scene-row-menu { position: fixed; right: auto; z-index: 1000; grid-template-columns: auto; justify-content: start; overflow: auto; color: var(--text-primary); font-size: 12px; }
 .scene-occ-form input { min-width: 0; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-light); border-radius: 4px; padding: 1px 4px; font-size: 12px; }
 .scene-num { color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .scene-dot { width: 9px; height: 9px; border-radius: 50%; }

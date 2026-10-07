@@ -8,7 +8,7 @@ import { CueTableSync } from '@/utils/cueTableSync'
 import { applyOverrides, type SceneOverride } from '@/utils/sceneOverrides'
 import { pageVisible, perfTrack } from '@/utils/perfRegistry'
 import { RATE } from '@/utils/sceneHaptics'
-import { lookupSceneProject, registerSceneProject } from '@/utils/sceneRegistry'
+import { lastSceneProject, lookupSceneProject, registerSceneProject, rememberSceneProject, restoreSceneHandle } from '@/utils/sceneRegistry'
 
 /**
  * Scene tab (haptic authoring) state: the opened game project folder, its
@@ -20,8 +20,11 @@ import { lookupSceneProject, registerSceneProject } from '@/utils/sceneRegistry'
  */
 
 export interface SceneNotice { id: MessageId; params?: MessageParams; error?: boolean }
-/** `needsClick`: registered but the folder permission must be granted from a click; `unregistered`: no folder known for the name yet. */
-export type LinkResult = { ok: true } | { ok: false; reason: 'needsClick' | 'unregistered' | 'cancelled' | 'failed' | 'dirty'; notice?: SceneNotice }
+/**
+ * `needsClick`: registered but the folder permission must be granted from a click; `unregistered`: no folder known for the name yet;
+ * `otherOpen`: another project is open, and only a click replaces it (an automatic link never does, so the user's choice stays).
+ */
+export type LinkResult = { ok: true } | { ok: false; reason: 'needsClick' | 'unregistered' | 'cancelled' | 'failed' | 'dirty' | 'otherOpen'; notice?: SceneNotice }
 export interface SceneSelection { name: string; /** Time in the current item's video; null when picked from the list. */ t: number | null }
 
 interface SceneState {
@@ -56,6 +59,7 @@ interface SceneState {
   /** Shown in the video panel while no recording is loaded. */
   empty: SceneNotice | null
   log: string[]
+  /** Opens the last opened project (else the Scene tab's remembered folder) once per page; later calls wait for the same run. */
   restore: () => Promise<void>
   /** Opens the folder picker (call from the click handler). */
   pick: () => Promise<void>
@@ -227,6 +231,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
       return false
     }
     clearVideoUrls()
+    rememberSceneProject(opened.lib.project_name)
     set({ root: handle, lib: opened.lib, recorded: opened.data, overrides: [], data: opened.data, items: buildItems(opened.data), sel: null, cur: 0, empty: null, table: null })
     await loadTable()
     let start = 1
@@ -235,6 +240,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
     return true
   }
 
+  let restoring: Promise<void> | null = null
   const guarded = async (work: () => Promise<void>) => {
     if (get().busy) return
     set({ busy: true })
@@ -249,14 +255,19 @@ export const useSceneStore = create<SceneState>((set, get) => {
     notice: null, empty: null, log: [],
     note, addLog,
 
-    restore: async () => {
-      if (get().restored) return
+    restore: () => {
+      if (restoring) return restoring
       set({ restored: true })
-      await guarded(async () => {
-        const handle = await loadDirectoryHandle('scenedir')
-        set({ remembered: handle })
-        if (handle && await handle.queryPermission({ mode: 'readwrite' }) === 'granted') await openFolder(handle)
+      restoring = guarded(async () => {
+        const candidate = async (handle: FileSystemDirectoryHandle | null) => handle && { handle, permission: await handle.queryPermission({ mode: 'readwrite' }) }
+        const name = lastSceneProject()
+        const last = await candidate(name ? await lookupSceneProject(name).catch(() => null) : null)
+        const sceneDir = await candidate(await loadDirectoryHandle('scenedir'))
+        set({ remembered: last?.handle ?? sceneDir?.handle ?? null })
+        const handle = restoreSceneHandle(last, sceneDir)
+        if (handle) await openFolder(handle)
       })
+      return restoring
     },
     pick: async () => {
       if (!('showDirectoryPicker' in window)) { note({ id: 'scene.open.unsupported', error: true }); return }
@@ -275,6 +286,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
     linkProject: async (name, interactive) => {
       const s = get()
       if (s.root && s.lib && (!name || s.lib.project_name === name)) return { ok: true }
+      if (!interactive && s.lib) return { ok: false, reason: 'otherOpen' }
       if (s.busy) return { ok: false, reason: 'failed' }
       if (s.dirty) return { ok: false, reason: 'dirty', notice: { id: 'scene.link.dirty', error: true } }
       let handle = name ? await lookupSceneProject(name).catch(() => null) : null

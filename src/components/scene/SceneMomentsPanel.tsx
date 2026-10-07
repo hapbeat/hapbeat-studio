@@ -13,6 +13,7 @@ import { useScene } from './sceneContext'
 import { removeOverride, setOverride as setSceneOverride, type OverriddenClip } from '@/utils/sceneOverrides'
 import { saveSceneOverrides } from '@/hooks/useSceneOverrides'
 import { localIsoString } from '@/utils/hapticKnowledge'
+import { MenuPopup } from '@/components/waveform/EditorMenu'
 
 /**
  * "Moments and events": the full replay, then one clip per cue moment, with which outputs its cues use. A click on
@@ -32,8 +33,8 @@ export function SceneMomentsPanel() {
   const list = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState<number | null>(null)
   const [sent, setSent] = useState<Record<number, true>>({})
-  /** The row whose right-click menu ("Undo" of a changed firing) is open. */
-  const [menu, setMenu] = useState<number | null>(null)
+  /** The row whose right-click menu ("Undo" of a changed firing) is open, and where (the pointer). */
+  const [menu, setMenu] = useState<{ k: number; x: number; y: number } | null>(null)
   // The firing selected here or on the timeline (Event panel follows it too): its moment's row is marked and scrolled to.
   const sel = useSceneStore(s => s.sel)
   const picked = useMemo(() => {
@@ -55,7 +56,7 @@ export function SceneMomentsPanel() {
         // `cue:variant` names resolve like the game (an unknown variant plays its cue).
         const cues = it.kind === 'clip' && table ? it.names.map(n => { const r = resolveEventName(table, n); return r && effectiveEvent(table, r.ref) }).filter(e => !!e) : []
         return <div key={k} className={`scene-item ${k === cur ? 'sel' : ''} ${k === picked ? 'picked' : ''}`} title={t('scene.moment.playHint')}
-          onContextMenu={e => { if (!(it as OverriddenClip).from) return; e.preventDefault(); setMenu(menu === k ? null : k) }}
+          onContextMenu={e => { if (!(it as OverriddenClip).from) return; e.preventDefault(); const at = { k, x: e.clientX, y: e.clientY }; setMenu(m => m?.k === k ? null : at) }}
           onClick={e => {
             if ((e.target as HTMLElement).closest('.scene-occ-form, button')) return
             runtime.audio(); runtime.playMoment(k, useSceneSettings.getState().leadSec)
@@ -73,11 +74,11 @@ export function SceneMomentsPanel() {
             <button type="button" className="scene-icon-btn scene-open-editor" aria-expanded={open === k} title={`${t('scene.occ.reassignHint')}${sent[k] ? `\n${t('scene.occ.sent')}` : ''}`}
             onClick={e => { e.stopPropagation(); e.currentTarget.blur(); setOpen(open === k ? null : k) }}>{sent[k] ? `✓ ${t('scene.moment.change')}` : t('scene.moment.change')}</button>
           </span>}
-          {menu === k && (it as OverriddenClip).from && <div className="scene-occ-form scene-row-menu" role="menu" onKeyDown={e => { if (e.key === 'Escape') setMenu(null) }}>
+          {menu?.k === k && (it as OverriddenClip).from && <MenuPopup anchor={list} at={menu} onClose={() => setMenu(null)} className="scene-occ-form scene-row-menu">
             <button type="button" role="menuitem" className="scene-icon-btn" autoFocus title={t('scene.override.undoHint')}
               onClick={e => { e.stopPropagation(); setMenu(null); const from = (it as OverriddenClip).from!
                 void saveSceneOverrides(removeOverride(useSceneStore.getState().overrides, from, it.at)).catch(error => changeFailed(error instanceof Error ? error.message : String(error))) }}>{t('scene.override.undoTo', { from: (it as OverriddenClip).from! })}</button>
-          </div>}
+          </MenuPopup>}
           {open === k && it.kind === 'clip' && table && <ChangeEventForm from={(it as OverriddenClip).from ?? it.name} at={it.at} table={table}
             onClose={() => setOpen(null)}
             onSent={to => { setSent(s => ({ ...s, [k]: true })); setOpen(null); changedFiring((it as OverriddenClip).from ?? it.name, it.at, to) }}
