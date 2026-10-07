@@ -1302,7 +1302,6 @@ export const messages = defineMessages({
   'scene.event.pairedHint': { ja: 'オン: 選ばれた音の番号と同じ番号の clip を、各 route から鳴らします（音ごとに長さの違う breath など）。足音のように使い回すものはオフ', en: 'On: the clip with the picked sound’s index plays on every route (e.g. breath, whose sounds differ in length). Off for reused materials such as footsteps.' },
   'scene.event.pairedProblem': { ja: '組にできません: {problem}', en: 'Cannot pair: {problem}' },
   'editor.agent.betaHint': { ja: 'AI 試行は開発中のベータ機能です。操作や保存形式は今後更新されます。', en: 'AI trials are a beta feature. Their controls and file formats may change.' },
-  'events.betaHint': { ja: 'イベントパネルは開発中のベータ機能です。操作や cue 表の扱いは今後更新されます。', en: 'The Events panel is a beta feature. Its controls and cue table handling may change.' },
 })
 
 export type MessageId = keyof typeof messages

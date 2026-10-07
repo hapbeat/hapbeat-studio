@@ -91,7 +91,6 @@ export function EventsPanel() {
   }
   return <div className="editor-panel events-panel">
     <div className="events-top">
-      <span className="editor-beta-label" title={t('events.betaHint')}>BETA</span>
       <ProjectPicker />
       <GroupPlaybackToggle />
       <EditorMenu label="⋯" title={t('events.menu')}>
@@ -153,8 +152,8 @@ function ProjectPicker() {
   }, [current])
   const options = [...new Set([...names, ...(current ? [current] : [])])].sort()
   return <div className="events-project">
-    <label>{t('events.project')}
-      <select value={current} onChange={e => {
+    <label title={t('events.project')}><span className="events-project-icon" aria-hidden="true">📁</span>
+      <select value={current} aria-label={t('events.project')} onChange={e => {
         const value = e.target.value
         e.target.blur()
         if (value === NEW_FOLDER) void linkSceneProject(null)

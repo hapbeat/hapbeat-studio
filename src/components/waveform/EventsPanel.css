@@ -3,7 +3,8 @@
 .events-panel > * { flex-shrink: 0; }
 .events-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .events-project { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.events-project label { display: flex; align-items: center; gap: 6px; }
+.events-project label { display: flex; align-items: center; gap: 4px; }
+.events-project-icon { flex: none; width: 1.4em; text-align: center; }
 .events-project select { min-width: 160px; }
 .events-dirty { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid #c9a34a; border-radius: 4px; color: #e3c27a; }
 .events-decided { padding: 6px 8px; border: 1px solid #4f9e7a; border-radius: 4px; color: var(--text-primary); }
