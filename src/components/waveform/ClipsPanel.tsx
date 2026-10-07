@@ -95,7 +95,7 @@ export function ClipsPanel() {
   return <div className="editor-panel editor-clips-panel">
     <div className="editor-clips-toolbar">
       <input type="search" className="editor-clip-search" value={query} placeholder={t('editor.searchClips')} aria-label={t('editor.searchClips')} onChange={e => setQuery(e.target.value)} />
-      <EditorMenu label={`${t('editor.moveToProject')} ▾`} title={t('editor.moveToProjectHint')} disabled={busy || !targets.length}>
+      <EditorMenu label={`${t('editor.moveToProjectShort')} ▾`} title={`${t('editor.moveToProject')}: ${t('editor.moveToProjectHint')}`} disabled={busy || !targets.length}>
         <EditorMenuSection label={t('editor.selectedClips', { count: targets.length })}>
           {projects.map(name => <EditorMenuItem key={name} checked={targetDocs.every(doc => doc.clip.project === name)} onSelect={() => moveSelection(name)}>{name}</EditorMenuItem>)}
           <MenuNameInput placeholder={t('editor.newProjectName')} onCommit={value => { const name = normalizeProjectName(value); if (name) moveSelection(name) }} />

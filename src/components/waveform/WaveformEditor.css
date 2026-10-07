@@ -884,7 +884,7 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 /* ---- Clips panel ---- */
 .editor-clips-panel { display: flex; flex-direction: column; }
 .editor-clips-toolbar { display: flex; gap: 6px; padding: 8px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg-primary); z-index: 1; }
-.editor-clip-search { flex: 1; min-width: 0; }
+.editor-clip-search { flex: 1; min-width: 6em; }
 .editor-clip-groups { flex: 1; padding: 4px 0; }
 .editor-clip-group-head { display: flex; align-items: center; background: var(--bg-secondary); }
 .editor-clip-group-head .editor-clip-menu .editor-menu-trigger { opacity: .35; }

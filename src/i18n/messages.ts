@@ -178,6 +178,7 @@ export const messages = defineMessages({
   "editor.projectAutoHint": { ja: "名前の先頭「{name}-」から自動で分類されています。入力すると個別に上書きします", en: "Grouped automatically by the name prefix \"{name}-\". Type a project to override it for this clip." },
   "editor.projectAutoPlaceholder": { ja: "{name}（名前から自動）", en: "{name} (auto from name)" },
   "editor.moveToProject": { ja: "プロジェクトに移動", en: "Move to project" },
+  "editor.moveToProjectShort": { ja: "移動", en: "Move" },
   "editor.moveToProjectHint": { ja: "選択中のクリップをまとめて移動します（Ctrl/Cmd+クリックで追加、Shift+クリックで範囲選択）", en: "Moves the selected clips (Ctrl/Cmd-click to add, Shift-click for a range)." },
   "editor.selectedClips": { ja: "選択中 {count} 件", en: "{count} selected" },
   "editor.newProjectName": { ja: "新しいプロジェクト名（Enter）", en: "New project name (Enter)" },
