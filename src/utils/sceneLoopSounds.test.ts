@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildLoopSounds, LOOP_SOUND_FADE, LOOP_SOUND_TAU, LoopSoundPlayer, loopSoundLevel, type LoopAudio } from './sceneLoopSounds'
+import { buildLoopSounds, LOOP_SOUND_FADE, LOOP_SOUND_FADE_IN, LOOP_SOUND_STOP, LOOP_SOUND_TAU, LoopSoundPlayer, loopSoundLevel, type LoopAudio } from './sceneLoopSounds'
 import type { CueTable } from './sceneCueTable'
 import type { SceneLayer, SceneLib } from './sceneData'
 
@@ -91,22 +91,24 @@ describe('loop-cue sounds (lib.loop_cue_sounds)', () => {
     expect(src.buffer).toBe(buffers.Motor); expect(src.loop).toBe(true); expect(src.started).toBe(10)
     expect(src.playbackRate.value).toBe(0.9)
     expect(g.gain.value).toBe(0); expect(g.gain.target).toBeCloseTo(0.8 * 0.5) // fades in from 0 to level × gain
+    expect(g.gain.targets[0].tau).toBeCloseTo(LOOP_SOUND_FADE_IN / 3); expect(LOOP_SOUND_FADE_IN).toBeCloseTo(0.08)
     expect(player.active).toEqual([3])
-    // The level moves: the same source glides (3τ within 20–50 ms), no restart.
+    // The level moves: the same source glides (τ ≈ 30 ms), no restart.
     ctx.currentTime = 10.01; level = { gain: 1, rate: 1 }
     player.update(audioOf(ctx), sounds, buffers, () => level)
     expect(ctx.sources).toHaveLength(1)
     expect(g.gain.targets[g.gain.targets.length - 1]).toEqual({ v: 0.5, at: 10.01, tau: LOOP_SOUND_TAU })
     expect(src.playbackRate.target).toBe(1)
-    expect(3 * LOOP_SOUND_TAU).toBeGreaterThanOrEqual(0.02); expect(3 * LOOP_SOUND_TAU).toBeLessThanOrEqual(0.05)
+    expect(LOOP_SOUND_TAU).toBeCloseTo(0.03)
     // An unchanged level schedules nothing new.
     const scheduled = g.gain.targets.length
     player.update(audioOf(ctx), sounds, buffers, () => level)
     expect(g.gain.targets.length).toBe(scheduled)
-    // Back to 0: fade out, then stop.
+    // Back to 0: fades out over ~200 ms, then stops.
     ctx.currentTime = 11; level = { gain: 0, rate: 0 }
     player.update(audioOf(ctx), sounds, buffers, () => level)
-    expect(g.gain.target).toBe(0); expect(src.stopped).toBeCloseTo(11 + LOOP_SOUND_FADE)
+    expect(g.gain.target).toBe(0); expect(g.gain.targets[g.gain.targets.length - 1].tau).toBeCloseTo(LOOP_SOUND_FADE / 6)
+    expect(LOOP_SOUND_FADE).toBeCloseTo(0.2); expect(src.stopped).toBeCloseTo(11 + LOOP_SOUND_FADE)
     expect(player.active).toEqual([])
     // Up again: a new source.
     level = { gain: 1, rate: 1 }
@@ -120,7 +122,7 @@ describe('loop-cue sounds (lib.loop_cue_sounds)', () => {
     player.update(audioOf(ctx), [{ layer: 1, sound: 'BrushLoop', gain: 1 }, { layer: 2, sound: 'Cutting', gain: 1 }, { layer: 3, sound: 'Motor', gain: 1 }], buffers, on)
     expect(player.active).toEqual([1, 2]) // Motor is not decoded (yet): silent
     player.stopAll(ctx as unknown as LoopAudio)
-    expect(player.active).toEqual([]); expect(ctx.sources.every(s => s.stopped === 10 + LOOP_SOUND_FADE)).toBe(true)
+    expect(player.active).toEqual([]); expect(ctx.sources.every(s => s.stopped === 10 + LOOP_SOUND_STOP)).toBe(true) // at once, not the 200 ms fade
     // A table edit changes layer 1's sound: the old one stops, the new one starts; a layer that left the list stops.
     player.update(audioOf(ctx), [{ layer: 1, sound: 'BrushLoop', gain: 1 }, { layer: 2, sound: 'Cutting', gain: 1 }], buffers, on)
     const [brush, cut] = ctx.sources.slice(2)

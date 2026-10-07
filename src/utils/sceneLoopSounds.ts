@@ -38,10 +38,14 @@ export function loopSoundLevel(levels: number[][], fps: number, layer: SceneLaye
 /** The Web Audio members the player uses. */
 export type LoopAudio = Pick<BaseAudioContext, 'currentTime' | 'destination' | 'createBufferSource' | 'createGain'>
 
-/** Glide time constant (s) of gain and rate changes: ~95 % of a change after 3τ = 45 ms, no zipper noise. */
-export const LOOP_SOUND_TAU = 0.015
-/** Fade before a loop sound stops (s); the gain falls with τ = a sixth of it. */
-export const LOOP_SOUND_FADE = 0.06
+/** Glide time constant (s) of gain and rate changes from one tick to the next (no zipper noise). */
+export const LOOP_SOUND_TAU = 0.03
+/** Fade-in (s) when the level rises above 0; the gain rises with τ = a third of it (as the T-Rex game's RubSound). */
+export const LOOP_SOUND_FADE_IN = 0.08
+/** Fade-out (s) when the level returns to 0 (the layer ends); the gain falls with τ = a sixth of it, then the source stops (as RubSound). */
+export const LOOP_SOUND_FADE = 0.2
+/** Stop (s) on pause, seek, another moment, playback end, PC sound off or closing: just long enough not to click. */
+export const LOOP_SOUND_STOP = 0.02
 /** Smaller changes than this are not rescheduled (a tick every 10 ms). */
 const EPS = 1e-4
 
@@ -65,14 +69,14 @@ export class LoopSoundPlayer {
       const buffer = buffers[x.sound], at = level(x.layer), gain = at.gain * x.gain
       let v = this.voices.get(x.layer)
       // Another sound (a table edit) or a re-decoded buffer: start over with it.
-      if (v && (v.sound !== x.sound || v.buffer !== buffer)) { this.release(audio(), x.layer); v = undefined }
-      if (!buffer || !(gain > 0)) { if (v) this.release(audio(), x.layer); continue }
+      if (v && (v.sound !== x.sound || v.buffer !== buffer)) { this.release(audio(), x.layer, LOOP_SOUND_STOP); v = undefined }
+      if (!buffer || !(gain > 0)) { if (v) this.release(audio(), x.layer, LOOP_SOUND_FADE); continue }
       live.add(x.layer)
       const ctx = audio(), now = ctx.currentTime
       if (!v) {
         const src = ctx.createBufferSource(), g = ctx.createGain()
         src.buffer = buffer; src.loop = true; src.playbackRate.value = at.rate
-        g.gain.setValueAtTime(0, now); g.gain.setTargetAtTime(gain, now, LOOP_SOUND_TAU)
+        g.gain.setValueAtTime(0, now); g.gain.setTargetAtTime(gain, now, LOOP_SOUND_FADE_IN / 3)
         src.connect(g).connect(ctx.destination)
         src.onended = () => { src.disconnect(); g.disconnect() }
         src.start(now)
@@ -83,18 +87,18 @@ export class LoopSoundPlayer {
       if (Math.abs(at.rate - v.rate) > EPS) { v.src.playbackRate.setTargetAtTime(at.rate, now, LOOP_SOUND_TAU); v.rate = at.rate }
     }
     // A layer no longer in the list (the table or project changed).
-    for (const layer of this.active) if (!live.has(layer)) this.release(audio(), layer)
+    for (const layer of this.active) if (!live.has(layer)) this.release(audio(), layer, LOOP_SOUND_STOP)
   }
 
-  /** Fades every sound out (pause, seek, another moment, playback end, PC sound off). */
-  stopAll(ctx: LoopAudio) { for (const layer of this.active) this.release(ctx, layer) }
+  /** Stops every sound at once (pause, seek, another moment, playback end, PC sound off, closing): no stray audio. */
+  stopAll(ctx: LoopAudio) { for (const layer of this.active) this.release(ctx, layer, LOOP_SOUND_STOP) }
 
-  private release(ctx: LoopAudio, layer: number) {
+  private release(ctx: LoopAudio, layer: number, fade: number) {
     const v = this.voices.get(layer)
     if (!v) return
     this.voices.delete(layer)
     const now = ctx.currentTime
-    v.g.gain.setTargetAtTime(0, now, LOOP_SOUND_FADE / 6)
-    try { v.src.stop(now + LOOP_SOUND_FADE) } catch { /* already stopped */ }
+    v.g.gain.setTargetAtTime(0, now, fade / 6)
+    try { v.src.stop(now + fade) } catch { /* already stopped */ }
   }
 }

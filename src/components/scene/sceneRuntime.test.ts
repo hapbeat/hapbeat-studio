@@ -131,6 +131,15 @@ describe('Scene loop-cue sounds follow the recorded layer level', () => {
     playAt(1.8); expect(ctx.sources).toHaveLength(3)
     // Past the recording (the end): silent.
     useSceneSettings.setState({ pcSound: true }); playAt(10); expect(ctx.sources).toHaveLength(3)
-    runtime.stop()
+    // Closing the tab while it sounds: stopped.
+    playAt(1.9); expect(ctx.sources).toHaveLength(4)
+    runtime.dispose(); expect(ctx.sources[3].stopped).toBe(true)
+    // Without lib.loop_cue_sounds: no loop sound at any level.
+    useSceneStore.setState({ lib: { ...lib, loop_cue_sounds: false } as never })
+    const quiet = new SceneRuntime(), quietTick = () => (quiet as unknown as { tick(): void }).tick()
+    quiet.start(); await flush()
+    video.readyState = 2; video.paused = false; video.seeking = false; video.currentTime = 1.5; quietTick()
+    expect(FakeAudioContext.last).toBe(ctx); expect(ctx.sources).toHaveLength(4)
+    quiet.stop()
   })
 })
