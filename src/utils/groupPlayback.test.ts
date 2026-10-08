@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { groupFirings, inSpans, mixGroupHaptics, shownSpans } from './groupPlayback'
+import { groupFirings, mixGroupHaptics } from './groupPlayback'
 import { EditorPlayback } from './editorPlayback'
 import { RATE } from './sceneHaptics'
 import type { CueTable } from './sceneCueTable'
@@ -31,18 +31,16 @@ describe('group playback (cue + its variants)', () => {
     expect(groupFirings(table(), plan, tear, false).haptics).toEqual([])
   })
 
-  it('the haptic stream carries the bite firing and is sent; the live strength applies to the shown firings only', async () => {
+  it('the haptic stream carries the bite firing and is sent; the strength scales the shown haptic only', async () => {
     const pcm = { bite_hit: new Float32Array(160).fill(0.5) }
-    const shown = { data: new Float32Array(RATE * 0.2).fill(0.25), rate: RATE }
+    const shown = { data: new Float32Array(RATE * 0.2).fill(0.25), rate: RATE, gain: 0.3 }
     const parts = groupFirings(table(), plan, { event: 'bite:tear', target: 'haptic', material: 'bite_hit' }, true).haptics
     expect(parts).toEqual([{ clip: 'bite_hit', atSec: 0.8, gain: 0.8 }])
     const mixed = mixGroupHaptics(shown, parts, pcm, 1.5)
     expect(mixed.length).toBe(RATE * 1.5)
-    expect(mixed[Math.round(0.05 * RATE)]).toBeCloseTo(0.25) // the shown haptic (as played)
+    expect(mixed[Math.round(0.05 * RATE)]).toBeCloseTo(0.075) // the shown haptic × its strength
     expect(mixed[Math.round(0.8 * RATE) + 10]).toBeCloseTo(0.4) // bite: 0.5 × 0.8
     expect(mixed[Math.round(1.2 * RATE) + 10]).toBe(0) // footstep: no haptic
-    const spans = shownSpans(plan.targets, 0.2)
-    expect(inSpans(spans, 0.1)).toBe(true); expect(inSpans(spans, 0.85)).toBe(false)
 
     // Played with a device target: the stream starts (haptic send) and reads the strength per chunk position.
     const player = { play: vi.fn().mockResolvedValue(undefined), pause: vi.fn(), isPlaying: () => false, getCurrentTime: () => 0, getDuration: () => 1.5 }
@@ -50,11 +48,10 @@ describe('group playback (cue + its variants)', () => {
     let options: StreamOptions | undefined
     const stream = vi.fn(async (_blob: Blob, out: (m: ManagerMessage) => void, o: StreamOptions) => { options = o; out({ type: 'stream_begin', payload: {} } as ManagerMessage) })
     const playback = new EditorPlayback(player, vi.fn().mockResolvedValue(new Blob()), ['10.0.0.9'], send, stream)
-    playback.level = time => inSpans(spans, time) ? 0.3 : 1
+    playback.level = () => 1 // the mix carries the strength (WaveformEditor)
     await playback.play()
     expect(stream).toHaveBeenCalledOnce()
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'stream_begin', payload: expect.objectContaining({ targets: ['10.0.0.9'] }) }))
-    expect(options!.control!.getIntensity!(0.1)).toBe(0.3) // the shown (red) firing: the slider
-    expect(options!.control!.getIntensity!(0.85)).toBe(1) // the bite (grey) firing: its own intensity, already mixed in
+    expect(options!.control!.getIntensity!(0.1)).toBe(1) // no chunk gain over the mix
   })
 })

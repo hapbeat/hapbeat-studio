@@ -39,14 +39,15 @@ export function groupFirings(table: CueTable, plan: GroupPlan, shown: { event: s
 }
 
 /**
- * The haptic stream of a group play (mono, RATE): `base` (the shown haptic as played, at its own rate; null for a
- * shown sound) plus each part's clip × its gain, `durationSec` long (the player's length, so seeks map 1:1).
- * `layers`: an already rendered stream added as it is (an audition's context loops, renderContextLoops).
+ * The haptic stream of a group play (mono, RATE): `base` (the shown haptic as played, at its own rate, × `gain`: its
+ * strength, absent = 1; null for a shown sound) plus each part's clip × its gain, `durationSec` long (the player's length,
+ * so seeks map 1:1). `layers`: an already rendered stream added as it is (an audition's context loops, renderContextLoops).
+ * A plain sample-wise sum, clipped to ±1 only at the end: nothing ducks another part.
  */
-export function mixGroupHaptics(base: { data: Float32Array; rate: number } | null, parts: readonly HapticPart[], pcm: Record<string, Float32Array>, durationSec: number, layers: Float32Array | null = null): Float32Array {
+export function mixGroupHaptics(base: { data: Float32Array; rate: number; gain?: number } | null, parts: readonly HapticPart[], pcm: Record<string, Float32Array>, durationSec: number, layers: Float32Array | null = null): Float32Array {
   const out = new Float32Array(Math.max(1, Math.round(durationSec * RATE)))
   const add = (data: Float32Array, start: number, gain: number) => { for (let i = 0; i < data.length && start + i < out.length; i++) if (start + i >= 0) out[start + i] += data[i] * gain }
-  if (base) add(base.rate === RATE ? base.data : resampleClip(base.data, base.rate / RATE), 0, 1)
+  if (base) add(base.rate === RATE ? base.data : resampleClip(base.data, base.rate / RATE), 0, base.gain ?? 1)
   if (layers) add(layers, 0, 1)
   for (const p of parts) { const data = pcm[p.clip]; if (data) add(data, Math.round(p.atSec * RATE), p.gain) }
   for (let i = 0; i < out.length; i++) out[i] = Math.max(-1, Math.min(1, out[i]))
@@ -74,9 +75,3 @@ export function markMaterials(table: CueTable, marks: readonly { name: string; t
 export function groupHapticsEnd(parts: readonly HapticPart[], pcm: Record<string, Float32Array>): number {
   return Math.max(0, ...parts.map(p => p.atSec + (pcm[p.clip]?.length ?? 0) / RATE))
 }
-
-/** Where the shown haptic sounds (its firings, `lengthSec` each): the live strength applies there only, the group's parts keep their own. */
-export function shownSpans(targets: readonly number[] | null, lengthSec: number): [number, number][] {
-  return (targets ?? [0]).map(at => [at, at + lengthSec])
-}
-export const inSpans = (spans: readonly [number, number][], t: number) => spans.some(([a, b]) => t >= a && t < b)

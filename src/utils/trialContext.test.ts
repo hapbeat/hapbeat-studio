@@ -86,4 +86,16 @@ describe('audition context (scene.context, simultaneous groups)', () => {
     const out = mixGroupHaptics(null, [], {}, 1, loops)
     expect(out[100]).toBeCloseTo(0.25)
   })
+
+  it('a candidate over a context loop: the stream is their sum while the candidate plays (no ducking, no gap)', () => {
+    // feed_loop rendered over 2 s (a ramp like the recorded layer level), the candidate (strength 0.4) at 0.5–1.0 s.
+    const loops = Float32Array.from({ length: 2 * RATE }, (_, i) => 0.1 + 0.3 * i / (2 * RATE))
+    const candidate = new Float32Array(2 * RATE)
+    for (let i = Math.round(0.5 * RATE); i < RATE; i++) candidate[i] = i % 2 ? 0.6 : -0.6
+    const out = mixGroupHaptics({ data: candidate, rate: RATE, gain: 0.4 }, [], {}, 2, loops)
+    for (let i = 0; i < out.length; i += 37) expect(out[i]).toBeCloseTo(loops[i] + candidate[i] * 0.4, 6)
+    // Clipped to ±1 only at the end of the sum.
+    const loud = mixGroupHaptics({ data: new Float32Array(RATE).fill(0.9), rate: RATE }, [], {}, 1, new Float32Array(RATE).fill(0.5))
+    expect(loud[10]).toBe(1)
+  })
 })
