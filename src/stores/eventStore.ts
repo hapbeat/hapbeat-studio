@@ -75,6 +75,16 @@ interface EventState {
   closeDecide: () => void
 }
 
+/**
+ * Selects event `key` in the Events / Event detail panels and brings both forward (`focus` = the editor's
+ * focusEditorPanel: re-adds a closed panel, fronts its tab). The list scrolls its row into view.
+ */
+export function revealEvent(key: string, focus: (id: 'events' | 'eventDetail') => void) {
+  useEventStore.getState().select(key)
+  focus('events')
+  focus('eventDetail')
+}
+
 /** App listens for this and switches tabs (detail = tab id). */
 export const OPEN_TAB_EVENT = 'studio:open-tab'
 

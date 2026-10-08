@@ -77,6 +77,15 @@ export function effectiveEvent(table: CueTable, ref: EventRef): EffectiveEvent |
     falloff: v.distanceFalloff !== undefined ? v.distanceFalloff : cue.distanceFalloff ?? null }
 }
 
+/**
+ * The note shown before a haptic is decided for an event without a sound (none for a loop cue or one with a sound):
+ * a warning while its sound is undecided (no `sfx` key), a neutral note when it is decided as none (`sfx: null`).
+ */
+export function soundFirstNote(e: EffectiveEvent | null, loop: boolean): 'events.soundFirst' | 'events.soundNoneDecided' | null {
+  if (!e || loop || e.sfx) return null
+  return e.decided.sfx ? 'events.soundNoneDecided' : 'events.soundFirst'
+}
+
 /** Undecided (no key) / decided as none (null / []) / a material; each decided state is tentative or approved. */
 export type MaterialState = 'undecided' | 'none' | 'set'
 export interface MaterialStatus { state: MaterialState; review: ReviewState }

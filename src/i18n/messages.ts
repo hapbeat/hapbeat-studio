@@ -1040,6 +1040,8 @@ export const messages = defineMessages({
   'events.haptic': { ja: '触覚', en: 'Haptic' },
   'events.hapticNone': { ja: '触覚は未決定です', en: 'No haptic decided yet.' },
   'events.soundFirst': { ja: '先に音を決めましょう（音に合わせて触覚を決めると揃えやすくなります）', en: 'Decide the sound first: a haptic is easier to match to a decided sound.' },
+  'events.soundNoneDecided': { ja: '音なし（このイベントは音を付けない設定）', en: 'No sound (this event is set to have no sound).' },
+  'events.openInEvents': { ja: 'イベントパネルで開く', en: 'Open in the Events panel' },
   'events.addClipMulti': { ja: '＋ クリップの候補を追加', en: '+ Add a clip candidate' },
   'events.remove': { ja: '外す', en: 'Remove' },
   'events.variation': { ja: '繰り返しの揺らぎ', en: 'Repetition variation' },

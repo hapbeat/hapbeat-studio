@@ -64,6 +64,8 @@
 .events-panel .scene-icon-btn:hover:not(:disabled) { border-color: var(--border-light); color: var(--text-primary); }
 .events-trials { margin: 0; padding-left: 16px; }
 .events-hint { margin: 0; color: #e3c27a; font-size: 12px; }
+/* Sound decided as none: same slot as the "sound first" warning, neutral (not a warning). */
+.events-hint.decided { color: var(--text-muted); }
 .events-warn { margin: 0; color: #f08a7a; font-size: 12px; }
 .events-decide-dialog { max-width: 520px; }
 .events-decide-dialog input, .events-decide-dialog select { background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 13px; box-sizing: border-box; }

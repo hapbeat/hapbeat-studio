@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   addEventMark, addPositionRoute, fireShot, resetAllReviews, setNone, setReview, setUndecided, addVariant, simultaneousGroups, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
   effectiveEvent, eventSceneCues, jitterGain, listEvents, MaterialPicker, matchesName, materialUsers, needsRouteForm, overwriteUsers,
-  parseEventKey, removeVariant, representativeSound, candidateSound, hasOwnMaterials, shownEventKey, resolveEventName, cueRoutePositions, materialRoutePositions, pairedClips, setOverride, setRouteClips, setSfxSounds, setVariation, trialEvent, trialsForEvent,
+  parseEventKey, removeVariant, representativeSound, candidateSound, hasOwnMaterials, shownEventKey, resolveEventName, cueRoutePositions, materialRoutePositions, pairedClips, setOverride, setRouteClips, setSfxSounds, setVariation, soundFirstNote, trialEvent, trialsForEvent,
 } from './cueEvents'
 import { validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
 import { cueVoices, tableTargets } from './sceneHaptics'
@@ -57,6 +57,19 @@ describe('cue table v2 validation', () => {
     const t = sampleTable()
     t.cues.feed_loop.variation = { gainJitterDb: 3, pitchJitterSt: 2 }
     expect(validateCueTable(t, ctx())).toEqual([])
+  })
+})
+
+describe('sound-first note before a haptic', () => {
+  it('warns only while the sound is undecided; a sound decided as none gets the neutral note', () => {
+    const t = sampleTable()
+    delete (t.cues.grab as { sfx?: unknown }).sfx
+    expect(soundFirstNote(effectiveEvent(t, { cue: 'grab', variant: null }), false)).toBe('events.soundFirst')
+    expect(soundFirstNote(effectiveEvent(t, { cue: 'detent', variant: null }), false)).toBe('events.soundNoneDecided')
+    expect(soundFirstNote(effectiveEvent(t, { cue: 'button', variant: null }), false)).toBeNull()
+    // A loop cue / no event: nothing.
+    expect(soundFirstNote(effectiveEvent(t, { cue: 'grab', variant: null }), true)).toBeNull()
+    expect(soundFirstNote(null, false)).toBeNull()
   })
 })
 

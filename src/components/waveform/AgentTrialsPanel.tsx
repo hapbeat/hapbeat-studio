@@ -14,10 +14,11 @@ import { useDeviceStore } from '@/stores/deviceStore'
 import { appendActivity } from '@/utils/activityLog'
 import { useToast } from '@/components/common/Toast'
 import { toFirstPlay } from '@/utils/sceneSegments'
-import { levelKey, useEventStore } from '@/stores/eventStore'
+import { levelKey, revealEvent, useEventStore } from '@/stores/eventStore'
 import { LevelSlider } from './LevelSlider'
-import { assignEventsForTrial, candidateSound, companionSoundName, effectiveEvent, parseEventKey, trialEvent, cueRoutePositions } from '@/utils/cueEvents'
+import { assignEventsForTrial, candidateSound, companionSoundName, effectiveEvent, parseEventKey, trialEvent, cueRoutePositions, soundFirstNote } from '@/utils/cueEvents'
 import { runDecision } from './eventDecide'
+import { SoundFirstNote } from './EventsPanel'
 import { isLoopCue, sfxSounds } from '@/utils/sceneCueTable'
 import { WaveformThumbnail } from './WaveformThumbnail'
 import { EditorMenu, EditorMenuItem } from './EditorMenu'
@@ -106,7 +107,7 @@ export function AgentTrialsPanel() {
     if (next) pickTrial(next); else setSelectedId(null)
   }
   const prev = stepQueue(queue, record?.trial.id ?? null, -1), next = stepQueue(queue, record?.trial.id ?? null, 1)
-  const { openSceneVideo } = useEditor()
+  const { openSceneVideo, focusEditorPanel } = useEditor()
   const { ask, dialog } = useConfirm()
   const [panelNotice, setPanelNotice] = useState('')
   const dismiss = async (r: TrialRecord) => {
@@ -130,6 +131,11 @@ export function AgentTrialsPanel() {
   }
   const target = record ? trialTarget(record.trial) : null
   const what = record ? (record.trial.scene ? record.trial.scene.cues.join(' + ') : record.trial.terms.join(' · ')) : ''
+  const sceneLib = useSceneStore(s => s.lib)
+  const sceneTable = useSceneStore(s => s.table)
+  /** The event the pill opens: the trial's first cue in the open project's table (else its first cue as named). */
+  const pillEvent = record?.trial.scene ? (sceneLib && sceneTable && record.trial.scene.project === sceneLib.project_name
+    ? trialEvent(sceneTable, record.trial.scene) : null) ?? record.trial.scene.cues[0] ?? null : null
   return <div className="agent-panel">
     {dialog}
     {/* One line: watcher / MCP state, project and target filters. */}
@@ -156,8 +162,10 @@ export function AgentTrialsPanel() {
       <button type="button" className="toolbar-btn" disabled={!prev} aria-label={t('editor.agent.prevTrial')} title={t('editor.agent.prevTrial')} onClick={() => prev && pickTrial(prev)}>‹</button>
       <span className="agent-short-id large" title={record?.trial.id ?? ''}>{record?.shortId ?? '—'}</span>
       <button type="button" className="toolbar-btn" disabled={!next} aria-label={t('editor.agent.nextTrial')} title={t('editor.agent.nextTrial')} onClick={() => next && pickTrial(next)}>›</button>
-      {record && <span className="target-cue-badge agent-what" title={record.trial.scene ? `${what}
-${t('editor.scene.targetHint')}` : what}>{what}</span>}
+      {record && (pillEvent ? <button type="button" className="target-cue-badge agent-what agent-what-btn" title={`${what}
+${t('events.openInEvents')}
+${t('editor.scene.targetHint')}`} onClick={() => revealEvent(pillEvent, focusEditorPanel)}>{what}</button>
+        : <span className="target-cue-badge agent-what" title={what}>{what}</span>)}
       {record && <span className={`agent-target-badge ${target}`}>{t(target === 'sound' ? 'editor.agent.targetSound' : 'editor.agent.targetHaptic')}</span>}
       <span className="agent-remaining">{record && !inQueue ? t(record.dismissed ? 'editor.agent.fromHistoryDismissed' : 'editor.agent.fromHistory') : t('editor.agent.remaining', { count: queue.length })}</span>
       <EditorMenu label={`${t('editor.agent.history')} ▾`} title={t('editor.agent.historyHint')} className="agent-history">
@@ -287,7 +295,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
   /** A haptic trial's cue sounds (the pool, representative first): the sound played with each candidate is picked from them. */
   const soundPool = useMemo(() => target === 'haptic' && event && sceneTable ? sfxSounds(effectiveEvent(sceneTable, parseEventKey(event))?.sfx) : [], [target, event, sceneTable])
   const soundPicks = useEditorSettings(s => s.candidateSounds)
-  const soundFirst = target === 'haptic' && !!event && !!sceneLib && !!sceneTable && !isLoopCue(sceneLib, parseEventKey(event).cue) && !effectiveEvent(sceneTable, parseEventKey(event))?.sfx
+  const soundNote = target === 'haptic' && event && sceneLib && sceneTable ? soundFirstNote(effectiveEvent(sceneTable, parseEventKey(event)), isLoopCue(sceneLib, parseEventKey(event).cue)) : null
   const marks = useEditorSettings(s => s.eventMarks)
   /** The waveform selection while a candidate is auditioned: recorded as its "use only this part" range. */
   const region = useWaveformStore(s => s.selectedRegion)
@@ -385,7 +393,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
       {trial.parentTrial && known.some(r => r.trial.id === trial.parentTrial) && <button className="agent-link" onClick={() => onSelectTrial(trial.parentTrial!)}>↖ {known.find(r => r.trial.id === trial.parentTrial)?.shortId ?? trial.parentTrial}</button>}
     </p>
     {kind === 'sequence' && <p className="agent-muted">{t('editor.agent.sequenceNote')}</p>}
-    {soundFirst && <p className="events-hint">{t('events.soundFirst')}</p>}
+    <SoundFirstNote note={soundNote} />
     <div className="agent-notice" role="status">{notice}</div>
     <div className="agent-candidates">
       {trial.candidates.map(requested => {

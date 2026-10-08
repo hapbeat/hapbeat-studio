@@ -7,10 +7,11 @@ import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { useEditorSettings } from '@/stores/editorSettings'
 import { isLoopCue, positionsForCue, soundAllowed } from '@/utils/sceneCueTable'
-import { allEventKeys, defaultAt, effectiveEvent, matchesName, needsRouteForm, overwriteUsers, parseEventKey, sameBytes, trialEvent } from '@/utils/cueEvents'
+import { allEventKeys, defaultAt, effectiveEvent, matchesName, needsRouteForm, overwriteUsers, parseEventKey, sameBytes, soundFirstNote, trialEvent } from '@/utils/cueEvents'
 import { useAtLabel } from '@/components/scene/SceneCuePanels'
 import { autoWavName, decideSourceBuffer, encodeMaterial, existingWav, ratedIntensity, runDecision } from './eventDecide'
 import { intensityForPeak } from '@/utils/materialLevel'
+import { SoundFirstNote } from './EventsPanel'
 import '@/components/common/ConfirmDialog.css'
 import './EventsPanel.css'
 
@@ -97,7 +98,7 @@ function DecideForm({ request }: { request: DecideRequest }) {
     const nameOk = matchesName(name, pattern) && !(target === 'sound' && lib.loop_sounds.includes(name))
     const users = valid ? overwriteUsers(table, target === 'haptic' ? 'clip' : 'sound', name, [event]) : []
     const routeForm = target === 'haptic' && valid && needsRouteForm(table, ref)
-    const soundFirst = target === 'haptic' && valid && !isLoopCue(lib, ref.cue) && !effectiveEvent(table, ref)?.sfx
+    const soundNote = target === 'haptic' && valid ? soundFirstNote(effectiveEvent(table, ref), isLoopCue(lib, ref.cue)) : null
     const loopMismatch = target === 'haptic' && !!table.clips[name] && table.clips[name].loop !== isLoopCue(lib, ref.cue)
     canSubmit = valid && !!wav && nameOk && !loopMismatch && !dirty && !busy
     body = <>
@@ -107,7 +108,7 @@ function DecideForm({ request }: { request: DecideRequest }) {
           {events.map(k => <option key={k} value={k}>{k}</option>)}
         </select>
       </label>
-      {soundFirst && <p className="events-hint">{t('events.soundFirst')}</p>}
+      <SoundFirstNote note={soundNote} />
       <label className="recipe-dialog-field">{t(target === 'haptic' ? 'events.decide.clipName' : 'events.decide.soundName')}
         <input value={name} spellCheck={false} placeholder={wav ? '' : t('events.decide.preparing')} onChange={e => { setName(e.target.value); setNameEdited(true); setError(null) }} />
       </label>

@@ -999,6 +999,9 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 .agent-queue-nav > .toolbar-btn, .agent-queue-nav .editor-menu-trigger, .agent-queue-nav > .target-cue-badge, .agent-queue-nav > .agent-target-badge {
   box-sizing: border-box; height: 30px; display: inline-flex; align-items: center; }
 .agent-queue-nav > .target-cue-badge { padding: 0 12px; border-radius: 15px; font-size: 15px; font-weight: 700; line-height: 1; }
+.agent-what-btn { border: none; font-family: inherit; cursor: pointer; }
+.agent-what-btn:hover { filter: brightness(1.15); }
+.agent-what-btn:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 1px; }
 .agent-target-badge { flex: none; padding: 0 12px; border-radius: 15px; font-size: 14px; font-weight: 700; border: 2px solid; }
 .agent-target-badge.sound { border-color: #36c5c0; color: #7fe3df; }
 .agent-target-badge.haptic { border-color: #a78bfa; color: #c4b5fd; }

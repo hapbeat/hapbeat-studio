@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useEventStore, type DecideTarget } from '@/stores/eventStore'
@@ -12,7 +12,7 @@ import type { SceneLib } from '@/utils/sceneData'
 import {
   addPositionRoute, assignEventsForTrial, effectiveEvent, eventKey, listEvents, parseEventKey, removeOwnRoute, shownEventKey,
   setRouteClips, setSfxSounds, simultaneousGroups, trialsForEvent, updateOwnRoute,
-  resetAllReviews, setNone, setOverride, setReview, setUndecided, hasOwnMaterials, undecidedReserves, restoreReserve,
+  resetAllReviews, setNone, setOverride, setReview, setUndecided, hasOwnMaterials, undecidedReserves, restoreReserve, soundFirstNote,
   type EffectiveEvent, type EventRow, type SoundStatus,
 } from '@/utils/cueEvents'
 import { useConfirm } from '@/components/common/useConfirm'
@@ -65,6 +65,9 @@ export function EventsPanel() {
     openEventDefault(key)
   }
   const shown = shownEventKey(table, selected)
+  // A selection made elsewhere (the AI panel's event pill) scrolls its row into view.
+  const list = useRef<HTMLDivElement>(null)
+  useEffect(() => { list.current?.querySelector('.events-row.selected')?.scrollIntoView({ block: 'nearest' }) }, [shown])
   const requested = useOpenRequests()
   const one = (r: EventRow) => <EventRowButton key={r.key} row={r} selected={shown === r.key} onSelect={select}
     requested={{ sound: requested.has(`${r.key}|sound`), haptic: requested.has(`${r.key}|haptic`) }} />
@@ -96,7 +99,7 @@ export function EventsPanel() {
     {saveError && <div className="events-dirty" role="status">{t(saveError.id, saveError.params)}
       <button type="button" className="toolbar-btn" disabled={busy} onClick={() => void useSceneStore.getState().revert()}>{t('events.revert')}</button></div>}
     {!table || !lib ? <p className="agent-muted">{t('events.noProject')}</p>
-      : <div className="events-list" role="listbox" aria-label={t('editor.panel.events')}>{listItems}</div>}
+      : <div ref={list} className="events-list" role="listbox" aria-label={t('editor.panel.events')}>{listItems}</div>}
   </div>
 }
 
@@ -264,7 +267,7 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
     <h4 className="events-sec-head"><Fold open={hOpen} set={setHOpen} />{t('events.haptic')}{e.own.haptics && <><ReviewToggle e={e} field="haptics" edit={edit} /><DecisionBar e={e} field="haptics" edit={edit} /></>}</h4>
     {hOpen && !e.own.haptics && <Inherited e={e} field="haptics" edit={edit} />}
     {hOpen && e.own.haptics && <>
-    {!loop && !e.decided.sfx && <p className="events-hint">{t('events.soundFirst')}</p>}
+    <SoundFirstNote note={soundFirstNote(e, loop)} />
     {!e.haptics.length && <p className="agent-muted">{t(e.decided.haptics ? 'events.hapticNone' : 'events.undecidedHaptic')}</p>}
     {e.haptics.map((r, i) => {
       const clips = routeClips(r), set = (list: string[]) => edit(tb => setRouteClips(tb, e.ref, i, list))
@@ -295,6 +298,12 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
       onClick={() => { if (!edit(tb => addPositionRoute(tb, lib, e.ref))) useWaveformStore.getState().setError(t(loop ? 'scene.route.noLoopClip' : 'scene.route.noClip')) }}>＋ {t('events.addPosition')}</button>
     </>}
   </section>
+}
+
+/** Before deciding a haptic: a warning while the event's sound is undecided, a neutral note when it is decided as none (see soundFirstNote). */
+export function SoundFirstNote({ note }: { note: ReturnType<typeof soundFirstNote> }) {
+  const { t } = useI18n()
+  return note && <p className={`events-hint ${note === 'events.soundNoneDecided' ? 'decided' : ''}`}>{t(note)}</p>
 }
 
 /** AI trials made for this event (their `scene` names it), sound and haptic apart. */
