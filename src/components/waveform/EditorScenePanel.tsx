@@ -21,7 +21,9 @@ import { eventSceneCues } from '@/utils/cueEvents'
 import { markMaterials } from '@/utils/groupPlayback'
 import { RATE as HAPTIC_RATE } from '@/utils/sceneHaptics'
 import { auditionContext, type ContextPlan } from '@/utils/trialContext'
-import { loopStretch, type LoopStretch } from '@/utils/loopStretch'
+import { loopMaterialLevelMap, loopStretch, type LoopStretch } from '@/utils/loopStretch'
+import type { LevelMap } from '@/utils/levelMap'
+import { trialTarget } from '@/utils/agentProtocol'
 import { useEventGroups } from './useEventGroups'
 import './EditorScenePanel.css'
 
@@ -106,18 +108,30 @@ export function useAuditionPlan(): AuditionPlan | null {
 
 /**
  * A loop cue's audition (an event material / AI candidate of a loop cue at its representative stretch from the full
- * replay): its layer's active runs over the stretch (loopStretch); null otherwise (one-shot cues use the plan) or when
- * the layer is not active there.
+ * replay): its layer's active runs over the stretch (loopStretch), with the levelMap the material plays with (its sfx's /
+ * route's, DEC-090); null otherwise (one-shot cues use the plan) or when the layer is not active there.
  */
 export function useLoopAudition(): LoopStretch | null {
-  const { lib, chosen, auditioning } = useAuditionChoice()
+  const { lib, chosen, auditioning, audition, trial } = useAuditionChoice()
   const data = useSceneStore(s => s.data)
+  const previewTarget = useEventStore(s => s.preview?.target ?? null)
+  const previewMaterial = useEventStore(s => s.preview?.material ?? null)
+  const adjusting = useAdjustingLink()
+  const target = audition ? trial ? trialTarget(trial) : 'haptic' : previewTarget ?? adjusting?.target ?? 'haptic'
+  const material = audition ? null : previewTarget ? previewMaterial : adjusting?.wav ?? null
+  // By value: only this material's levelMap (a strength or other cue edit re-renders nothing).
+  const levelMapKey = useSceneStore(s => {
+    const cue = chosen?.cue ? parseEventKey(chosen.cue).cue : null
+    return s.table && cue ? JSON.stringify(loopMaterialLevelMap(s.table, cue, target, material) ?? null) : 'null'
+  })
   return useMemo(() => {
     if (!auditioning || !lib || !data || !chosen?.segment || !chosen.cue) return null
     const cue = parseEventKey(chosen.cue).cue
     const layer = isLoopCue(lib, cue) ? lib.layers.find(l => l.cue === cue) : undefined
-    return layer ? loopStretch(data.full.levels, data.fps, layer, chosen.mark, chosen.segment.end - chosen.mark) : null
-  }, [auditioning, lib, data, chosen])
+    const stretch = layer ? loopStretch(data.full.levels, data.fps, layer, chosen.mark, chosen.segment.end - chosen.mark) : null
+    const levelMap = JSON.parse(levelMapKey) as LevelMap | null
+    return stretch && levelMap ? { ...stretch, levelMap } : stretch
+  }, [auditioning, lib, data, chosen, levelMapKey])
 }
 
 const OTHER_SCENES = '\u0000scene-tab'

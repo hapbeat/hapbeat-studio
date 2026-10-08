@@ -1,4 +1,5 @@
 import type { SceneLib } from './sceneData'
+import { isLevelMap, LEVEL_MAP_RULE, type LevelMap } from './levelMap'
 
 /**
  * The project's cue table (`lib.paths.cues`, e.g. Safety Mill
@@ -19,12 +20,16 @@ import type { SceneLib } from './sceneData'
  * DEC-088 adds `emit` on a pulse cue (fired by the game while a loop cue runs).
  * DEC-089: only starred materials play — `sound` / `sounds` and a route's `clip` / `clips` (first = representative);
  * `alternates` on a sfx / route holds unstarred candidates (names) that are never played. Omitted when empty.
+ * DEC-090 adds `levelMap` on a loop cue's sfx / route: the recorded layer level mapped to a multiplier (see levelMap).
  */
 
-/** A route plays `clip`, or one of `clips` per firing (picked by `variation.pick`); `alternates`: unstarred clips (never played, DEC-089). */
-export interface CueRoute { clip?: string; clips?: string[]; alternates?: string[]; at: string; gain: number; [key: string]: unknown }
-/** A cue sound: `sound`, or one of `sounds` per firing; `alternates`: unstarred sounds (never played, DEC-089). */
-export interface CueSfx { sound?: string; sounds?: string[]; alternates?: string[]; volume: number; [key: string]: unknown }
+/**
+ * A route plays `clip`, or one of `clips` per firing (picked by `variation.pick`); `alternates`: unstarred clips (never played, DEC-089);
+ * `levelMap`: a loop cue's recorded level → multiplier (DEC-090; absent = the level).
+ */
+export interface CueRoute { clip?: string; clips?: string[]; alternates?: string[]; at: string; gain: number; levelMap?: LevelMap; [key: string]: unknown }
+/** A cue sound: `sound`, or one of `sounds` per firing; `alternates`: unstarred sounds (never played, DEC-089); `levelMap` as a route's. */
+export interface CueSfx { sound?: string; sounds?: string[]; alternates?: string[]; volume: number; levelMap?: LevelMap; [key: string]: unknown }
 export const PICK_MODES = ['random', 'roundRobin'] as const
 export type PickMode = typeof PICK_MODES[number]
 /** `paired`: the clip with the picked sound's index is played on every route (sounds and each route's clips line up). */
@@ -255,6 +260,7 @@ function validateCueFields(err: string[], table: CueTable, ctx: CueTableContext,
       }
     }
     if (!inRange(sfx.volume, 0, 2)) err.push(`${label}: sfx volume must be 0..2`)
+    levelMapProblems(err, lib, cue, label, 'sfx', sfx.levelMap)
   }
   for (const r of entry.haptics ?? []) {
     const hasOne = r.clip !== undefined, hasMany = r.clips !== undefined
@@ -272,6 +278,7 @@ function validateCueFields(err: string[], table: CueTable, ctx: CueTableContext,
     if (!lib.at.includes(r.at)) err.push(`${label}: at must be one of ${lib.at.join(', ')}`)
     else if (!positionsForCue(lib, cue).includes(r.at)) err.push(`${label}: continuous layers allow at = ${positionsForCue(lib, cue).join(', ')}`)
     if (!inRange(r.gain, 0, 2)) err.push(`${label}: gain must be 0..2`)
+    levelMapProblems(err, lib, cue, label, 'route', r.levelMap)
   }
   const df = entry.distanceFalloff
   if (df) {
@@ -301,6 +308,13 @@ function validateCueFields(err: string[], table: CueTable, ctx: CueTableContext,
     const problem = pairedProblem(effective.sfx ?? null, effective.haptics ?? [])
     if (problem) err.push(`${label}: variation.paired: ${problem}`)
   }
+}
+
+/** levelMap (DEC-090): only on a loop cue's sfx / route, in shape (see levelMap). */
+function levelMapProblems(err: string[], lib: SceneLib, cue: string, label: string, kind: 'sfx' | 'route', map: unknown): void {
+  if (map === undefined) return
+  if (!isLoopCue(lib, cue)) err.push(`${label}: ${kind} levelMap is for loop cues`)
+  else if (!isLevelMap(map)) err.push(`${label}: ${kind} levelMap must be ${LEVEL_MAP_RULE}`)
 }
 
 /** Studio's own checks on alternates (the demos accept them): no name twice, none that is also starred. */

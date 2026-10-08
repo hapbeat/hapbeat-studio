@@ -1,14 +1,15 @@
 import { levelAt, type SceneLayer, type SceneLib } from './sceneData'
 import { sfxSounds, soundIntensity, type CueTable } from './sceneCueTable'
+import { mapLevel, type LevelMap } from './levelMap'
 
 /**
  * The Scene tab's loop-cue sounds (lib.loop_cue_sounds, docs/haptic-authoring-cue-table.md
  * "ループ cue の音"): while the replay plays, each loop cue with an `sfx` loops its
  * first sound (a loop does not re-pick or vary) at the recorded level of its layer,
- * like the haptic loop layers. Gain = recorded level × sfx.volume × the sound's
- * intensity (DEC-086); a layer with a rate column sets the playback rate.
+ * like the haptic loop layers. Gain = levelMap(recorded level) × sfx.volume × the sound's
+ * intensity (DEC-086 / DEC-090; no levelMap = the level); a layer with a rate column sets the playback rate.
  */
-export interface LoopSound { layer: number; sound: string; gain: number }
+export interface LoopSound { layer: number; sound: string; gain: number; levelMap?: LevelMap }
 
 /** One entry per lib.layers loop cue that has a sound; none unless the project plays loop-cue sounds. */
 export function buildLoopSounds(table: CueTable, lib: SceneLib): LoopSound[] {
@@ -16,7 +17,7 @@ export function buildLoopSounds(table: CueTable, lib: SceneLib): LoopSound[] {
   const out: LoopSound[] = []
   lib.layers.forEach(({ cue }, layer) => {
     const sfx = table.cues[cue]?.sfx, sound = sfxSounds(sfx)[0]
-    if (sfx && sound !== undefined) out.push({ layer, sound, gain: sfx.volume * soundIntensity(table, sound) })
+    if (sfx && sound !== undefined) out.push({ layer, sound, gain: sfx.volume * soundIntensity(table, sound), levelMap: sfx.levelMap })
   })
   return out
 }
@@ -66,7 +67,7 @@ export class LoopSoundPlayer {
   update(audio: () => LoopAudio, sounds: LoopSound[], buffers: Record<string, AudioBuffer>, level: (layer: number) => { gain: number; rate: number }) {
     const live = new Set<number>()
     for (const x of sounds) {
-      const buffer = buffers[x.sound], at = level(x.layer), gain = at.gain * x.gain
+      const buffer = buffers[x.sound], at = level(x.layer), gain = mapLevel(x.levelMap, at.gain) * x.gain
       let v = this.voices.get(x.layer)
       // Another sound (a table edit) or a re-decoded buffer: start over with it.
       if (v && (v.sound !== x.sound || v.buffer !== buffer)) { this.release(audio(), x.layer, LOOP_SOUND_STOP); v = undefined }

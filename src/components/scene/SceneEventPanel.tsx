@@ -15,6 +15,7 @@ import { MaterialList } from '@/components/waveform/MaterialList'
 import { PairedList } from '@/components/waveform/PairedList'
 import { CuePicker, NumberField, useAtLabel } from './SceneCuePanels'
 import { useScene } from './sceneContext'
+import { LevelMaps } from './SceneLevelMap'
 
 type Edit = (change: (tb: CueTable) => CueTable | null) => boolean
 
@@ -29,8 +30,8 @@ const VARIATION_FIELDS: { key: VariationNumberKey; max: number; step: number; lo
  * are used by situation is decided here): its variants and their kind (own materials, or multipliers only:
  * sfxVolume / hapticsGain / rampTo), the scene multipliers (sfx.volume, route gain; DEC-086 3rd layer), the
  * variation (pick, gain / pitch / rate jitter, paired), which materials play (★, DEC-089; the rest are alternates)
- * and removal, and playing the event's run of the recording through (its real firings, as the game computes
- * them). Edits go to the same table and are saved with it.
+ * and removal, a loop cue's level → multiplier (levelMap, DEC-090), and playing the event's run of the recording
+ * through (its real firings, as the game computes them). Edits go to the same table and are saved with it.
  */
 export function SceneEventPanel() {
   const { t } = useI18n()
@@ -43,7 +44,7 @@ export function SceneEventPanel() {
   const resolved = sel ? resolveEventName(table, sel.name) : null
   const e = resolved ? effectiveEvent(table, resolved.ref) : null
   if (!resolved || !e) return <div className="scene-cue-panel scene-event"><CuePicker /><div className="scene-panel-empty">{t('scene.selectCue')}</div></div>
-  const key = eventKey(e.ref), loop = isLoopCue(lib, e.ref.cue)
+  const key = eventKey(e.ref), loop = isLoopCue(lib, e.ref.cue), layer = loop ? lib.layers.find(l => l.cue === e.ref.cue) : undefined
   const edit: Edit = change => useSceneStore.getState().edit(change)
   const select = (name: string) => useSceneStore.getState().selectCue(name, sel?.t ?? null)
   const sound = e.sfx ? sfxSounds(e.sfx)[0] : undefined
@@ -60,6 +61,7 @@ export function SceneEventPanel() {
     </div>
     {!loop || lib.loop_cue_sounds ? <Sounds e={e} edit={edit} allowed={soundAllowed(lib, e.ref.cue)} /> : null}
     <Clips table={table} e={e} edit={edit} />
+    {loop && e.ref.variant === null && layer && <LevelMaps table={table} layer={layer} cue={e.ref.cue} edit={edit} />}
     <div className="scene-sec">
       <h3>{t('events.variation')}</h3>
       {e.ref.variant !== null && e.own.variation && <OverrideBar e={e} field="variation" edit={edit} />}
@@ -209,7 +211,7 @@ function Falloff({ table, e, edit }: { table: CueTable; e: EffectiveEvent; edit:
     <h3 title={`${t('scene.falloff.hint')}\ndistanceFalloff`}>{t('scene.falloff.heading')}</h3>
     <div className="scene-row">
       {e.ref.variant === null
-        ? <label><input type="checkbox" checked={!!own} onChange={ev => set(ev.target.checked ? DEFAULT_FALLOFF : null)} />{t('scene.falloff.on')}</label>
+        ? <label className="scene-check"><input type="checkbox" checked={!!own} onChange={ev => set(ev.target.checked ? DEFAULT_FALLOFF : null)} />{t('scene.falloff.on')}</label>
         : <select value={mode} aria-label={t('scene.falloff.heading')} onChange={ev => { const m = ev.target.value; ev.target.blur(); set(m === 'inherit' ? undefined : m === 'none' ? null : f ?? DEFAULT_FALLOFF) }}>
           <option value="inherit">{t('scene.falloff.inherit', { cue: e.ref.cue })}</option>
           <option value="own">{t('scene.falloff.own')}</option>

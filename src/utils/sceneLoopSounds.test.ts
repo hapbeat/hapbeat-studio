@@ -130,4 +130,17 @@ describe('loop-cue sounds (lib.loop_cue_sounds)', () => {
     expect(brush.stopped).not.toBeNull(); expect(cut.stopped).not.toBeNull()
     expect(ctx.sources[ctx.sources.length - 1].buffer).toBe(buffers.Other); expect(player.active).toEqual([1])
   })
+
+  it('maps the level through the sfx levelMap (DEC-090): buildLoopSounds carries it, the player applies it', () => {
+    const map = { points: [[0.5, 2], [1, 1]] as [number, number][] }
+    const table = { ...TABLE, cues: { ...TABLE.cues, brush_loop: { sfx: { sound: 'BrushLoop', volume: 1, levelMap: map } } } } as unknown as CueTable
+    const sounds = buildLoopSounds(table, MILL)
+    expect(sounds[0]).toEqual({ layer: 1, sound: 'BrushLoop', gain: 0.5, levelMap: map })
+    const ctx = new FakeCtx(), player = new LoopSoundPlayer(), buffers = { BrushLoop: buf('BrushLoop') }
+    player.update(audioOf(ctx), [sounds[0]], buffers, () => ({ gain: 0.25, rate: 1 }))
+    expect(ctx.gains[0].gain.target).toBeCloseTo(2 * 0.5) // below the first point: its value, not the level 0.25
+    ctx.currentTime = 10.01
+    player.update(audioOf(ctx), [sounds[0]], buffers, () => ({ gain: 0.75, rate: 1 }))
+    expect(ctx.gains[0].gain.target).toBeCloseTo(1.5 * 0.5) // halfway between the points
+  })
 })

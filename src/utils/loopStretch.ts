@@ -1,6 +1,8 @@
-import type { SceneLayer } from './sceneData'
+import type { SceneLayer, SceneLib } from './sceneData'
 import { layerRuns } from './sceneEmit'
 import { loopSoundLevel } from './sceneLoopSounds'
+import { routeAlternates, routeClips, type CueTable } from './sceneCueTable'
+import { mapLevel, type LevelMap } from './levelMap'
 
 /**
  * A loop cue's material over its representative stretch, as the game plays it: one continuous loop while the cue's
@@ -18,6 +20,8 @@ export interface LoopStretch {
   durationSec: number
   /** The recorded level at playback time `sec` (loopSoundLevel: the louder hand's gain and its rate). */
   level: (sec: number) => { gain: number; rate: number }
+  /** The played material's level → multiplier (DEC-090; absent = the level), applied by renderLoopStretch. */
+  levelMap?: LevelMap
 }
 
 /**
@@ -38,10 +42,10 @@ export function loopStretch(levels: number[][], fps: number, layer: SceneLayer, 
 
 /**
  * `channels` (one material at `rate` Hz) looped over `stretch`, `durationSec` long: within each segment the material
- * starts from its beginning and tiles phase-continuously, each sample × the recorded gain, the phase advancing by the
- * recorded rate (as the Scene tab's loop voices, renderChunk); silence outside the segments.
+ * starts from its beginning and tiles phase-continuously, each sample × the recorded gain through the stretch's levelMap,
+ * the phase advancing by the recorded rate (as the Scene tab's loop voices, renderChunk); silence outside the segments.
  */
-export function renderLoopStretch(channels: readonly Float32Array[], rate: number, stretch: Pick<LoopStretch, 'segments' | 'level'>, durationSec: number): Float32Array[] {
+export function renderLoopStretch(channels: readonly Float32Array[], rate: number, stretch: Pick<LoopStretch, 'segments' | 'level' | 'levelMap'>, durationSec: number): Float32Array[] {
   const length = Math.max(1, Math.round(durationSec * rate))
   const out = channels.map(() => new Float32Array(length))
   const n = channels[0]?.length ?? 0
@@ -49,7 +53,7 @@ export function renderLoopStretch(channels: readonly Float32Array[], rate: numbe
   for (const segment of stretch.segments) {
     let ph = 0
     for (let i = Math.round(segment.start * rate), end = Math.min(length, Math.round(segment.end * rate)); i < end; i++) {
-      const { gain, rate: r } = stretch.level(i / rate)
+      const { gain: level, rate: r } = stretch.level(i / rate), gain = mapLevel(stretch.levelMap, level)
       if (gain > 0) { const j = Math.floor(ph) % n; channels.forEach((data, c) => { out[c][i] = data[j] * gain }) }
       ph = (ph + r) % n
     }
@@ -67,4 +71,21 @@ export function loopPhaseAt(stretch: Pick<LoopStretch, 'segments' | 'level'>, ma
   let ph = 0
   for (let t = segment.start; t < sec; t += step) ph += stretch.level(t).rate * Math.min(step, sec - t)
   return ph % materialSec
+}
+
+/**
+ * The levelMap a loop cue's material plays with (DEC-090): the sfx's for a sound; for a haptic the route that stars or
+ * keeps `material` (the first route when none, e.g. an AI candidate). Undefined = the level itself.
+ */
+export function loopMaterialLevelMap(table: CueTable, cue: string, target: 'sound' | 'haptic', material: string | null): LevelMap | undefined {
+  const entry = table.cues[cue]
+  if (target === 'sound') return entry?.sfx?.levelMap
+  const routes = entry?.haptics ?? []
+  return (routes.find(r => material !== null && (routeClips(r).includes(material) || routeAlternates(r).includes(material))) ?? routes[0])?.levelMap
+}
+
+/** The active runs [start, end) of loop cue `name`'s layer (cue or cue:variant) over `levels` (the layer's max gain > 0); [] for other cues. */
+export function loopCueRuns(levels: number[][], fps: number, lib: Pick<SceneLib, 'layers' | 'loop_cues'>, name: string): [number, number][] {
+  const cue = name.split(':')[0], layer = lib.loop_cues.includes(cue) ? lib.layers.find(l => l.cue === cue) : undefined
+  return layer ? layerRuns(levels, fps, layer) : []
 }

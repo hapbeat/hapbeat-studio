@@ -1,6 +1,7 @@
 import { routeClips, type CueTable } from './sceneCueTable'
 import { effectiveEvent, eventKey, MaterialPicker, resolveEventName, type Shot } from './cueEvents'
 import type { SceneLib } from './sceneData'
+import { mapLevel, type LevelMap } from './levelMap'
 
 /**
  * Scene tab haptics: one stream per Hapbeat through hapbeat-helper, every
@@ -8,7 +9,7 @@ import type { SceneLib } from './sceneData'
  * PCM16, gain applied before the mix, the device's full address as the
  * STREAM_BEGIN `target`, exact unicast via `targets`). Gains follow the Unreal
  * SDK: WAV × clip intensity × route gain × cue gain (one-shots) or × the
- * recorded layer level (loops). Ported from the standalone haptic clip viewer.
+ * recorded layer level through the route's levelMap (loops, DEC-090). Ported from the standalone haptic clip viewer.
  */
 
 export const RATE = 16000
@@ -47,7 +48,8 @@ export function tableTargets(table: CueTable): string[] {
 }
 
 export interface OneShotVoice { pcm: Float32Array; targets: string[]; gain: number; start: number; cue?: boolean }
-export interface LoopVoice { clip: string; targets: string[]; gain: number; layer: number; side: number; phase: Record<string, number> }
+/** `levelMap`: the route's level → multiplier (DEC-090; absent = the level). */
+export interface LoopVoice { clip: string; targets: string[]; gain: number; levelMap?: LevelMap; layer: number; side: number; phase: Record<string, number> }
 /** Replay time `t` was at wall time `wall` (ms), advancing at `rate`. */
 export interface PlayClock { t: number; rate: number; wall: number }
 export type LevelFn = (t: number, layer: number, side: number) => [number, number]
@@ -60,7 +62,7 @@ export function buildLoopVoices(table: CueTable, lib: SceneLib): LoopVoice[] {
       // A loop does not re-pick while it plays: a multi-clip route loops its first clip.
       const clipName = routeClips(r)[0], clip = clipName === undefined ? undefined : table.clips[clipName]
       if (!clip || clipName === undefined) continue
-      const add = (targets: string[], side: number) => out.push({ clip: clipName, targets, gain: clip.intensity * r.gain, layer, side, phase: {} })
+      const add = (targets: string[], side: number) => out.push({ clip: clipName, targets, gain: clip.intensity * r.gain, levelMap: r.levelMap, layer, side, phase: {} })
       if (r.at === 'hand') { add([WRIST.left], 0); add([WRIST.right], 1) } else add(targetsOf(r.at), -1)
     }
   })
@@ -106,7 +108,7 @@ export function shotVoices(table: CueTable, pcm: Record<string, Float32Array>, s
 /**
  * One CHUNK of a device's mix at wall time `wall` (ms): every voice whose
  * targets match the device address, plus the loop voices scaled by the
- * recorded layer level while the video plays. Returns interleaved stereo PCM16
+ * recorded layer level (through each voice's levelMap) while the video plays. Returns interleaved stereo PCM16
  * (L = R). Loop phases advance per device ip.
  */
 export function renderChunk(opts: { ip: string; address: string; wall: number; voices: OneShotVoice[]; loopVoices: LoopVoice[]; clock: PlayClock | null; pcm: Record<string, Float32Array>; level: LevelFn }): Int16Array {
@@ -121,7 +123,7 @@ export function renderChunk(opts: { ip: string; address: string; wall: number; v
     for (const x of loopVoices) {
       const p = pcm[x.clip]
       if (!p || !p.length || !x.targets.some(tg => matchesAddress(tg, address))) continue
-      const [g0, r0] = level(t0, x.layer, x.side), [g1] = level(t1, x.layer, x.side)
+      const [l0, r0] = level(t0, x.layer, x.side), [l1] = level(t1, x.layer, x.side), g0 = mapLevel(x.levelMap, l0), g1 = mapLevel(x.levelMap, l1)
       let ph = x.phase[ip] || 0
       if (g0 > 0 || g1 > 0) for (let k = 0; k < CHUNK; k++) { out[k] += p[Math.floor(ph) % p.length] * (g0 + (g1 - g0) * k / CHUNK) * x.gain; ph += r0 }
       x.phase[ip] = ph % p.length

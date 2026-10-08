@@ -5,6 +5,7 @@ import {
   clampNumber, isLoopCue, soundAllowed, soundIntensity, positionsForCue, routeAlternates, routeClips, sfxAlternates, sfxSounds, VARIANT_NAME,
   type CueEntry, type CueRoute, type CueSfx, type CueTable, type CueVariant, type CueVariation, type PickMode, type RampCurve, type DistanceFalloff, type CueEmit,
 } from './sceneCueTable'
+import type { LevelMap } from './levelMap'
 
 /**
  * Events = the cues of a project's cue table (and their v2 variants), as the
@@ -408,6 +409,16 @@ export function removeOwnRoute(table: CueTable, ref: EventRef, index: number): C
 /** The scene multiplier of the sound `ref` writes (sfx.volume, 0..2; DEC-086 3rd layer). */
 export function setOwnSfxVolume(table: CueTable, ref: EventRef, volume: number): CueTable {
   return edited(table, ref, entry => { if (entry.sfx) entry.sfx = { ...entry.sfx, volume: clampNumber(volume, 0, 2) } })
+}
+/** A loop cue's level → multiplier (DEC-090) on its sfx (`'sfx'`) or route `where`; undefined removes it (the multiplier is the level). */
+export function setLevelMap(table: CueTable, cue: string, where: 'sfx' | number, map: LevelMap | undefined): CueTable {
+  return edited(table, { cue, variant: null }, entry => {
+    const target = where === 'sfx' ? entry.sfx : entry.haptics?.[where]
+    if (!target) return
+    const next = { ...target }
+    if (map) next.levelMap = map; else delete next.levelMap
+    if (where === 'sfx') entry.sfx = next as CueSfx; else entry.haptics![where] = next as CueRoute
+  })
 }
 /**
  * The sfx `ref` writes plays `sounds` (one = `sound`, several = `sounds`; empty = no sound, its alternates go too);

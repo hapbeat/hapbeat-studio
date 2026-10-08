@@ -12,6 +12,7 @@ import { effectiveEvent, resolveEventName } from '@/utils/cueEvents'
 import { useScene } from './sceneContext'
 import { SPEEDS } from './sceneRuntime'
 import { SceneOutputToggles } from './SceneOutputToggles'
+import { loopCueRuns } from '@/utils/loopStretch'
 import { useMomentPlace } from './SceneCuePanels'
 
 const SOUND_COLOR = '#36c5c0'
@@ -22,7 +23,8 @@ const MAX_ZOOM = 2000
 
 /**
  * Timeline: continuous-layer levels behind two lanes, sound (upper) and
- * haptics (lower), as in the editor; a cue shows in each lane it uses. Click a marker to edit
+ * haptics (lower), as in the editor; a cue shows in each lane it uses (a selected loop cue: its whole active
+ * span, as long as its layer's recorded level is above 0, as bands in those lanes). Click a marker to edit
  * that cue (the moments list marks it too), elsewhere to seek; right-click a marker to change its event.
  * Ctrl + wheel zooms around the pointer, wheel / Shift + wheel pans (like the editor's waveform), also while playing.
  * Read-outs and output toggles above it.
@@ -41,6 +43,8 @@ export function SceneTimelinePanel() {
   const placeRef = useRef(placeOf); placeRef.current = placeOf
   const view = useRef<View>({ key: '', start: 0, zoom: 1, fit: true })
   const [change, setChange] = useState<{ from: string; at: number } | null>(null)
+  /** The selected loop cue's active runs over the shown moment's levels (computed again only when either changes). */
+  const runs = useRef<{ levels: number[][] | null; name: string; runs: [number, number][] }>({ levels: null, name: '', runs: [] })
 
   // Drawn only while the Scene tab is shown and the page visible.
   const { active } = useScene()
@@ -107,6 +111,20 @@ export function SceneTimelinePanel() {
         [top, mid, name => !!effective(name)?.sfx, () => SOUND_COLOR],
         [mid + 1, base, name => { const e = effective(name); return !!e && (e.haptics.length > 0 || lib.loop_cues.includes(e.ref.cue)) }, name => familyColor(lib, name)],
       ]
+      // A selected loop cue: bands over its layer's active runs (the recorded firings are only the layer's starts).
+      const rc = runs.current
+      if (rc.levels !== L || rc.name !== (sel?.name ?? '')) { rc.levels = L; rc.name = sel?.name ?? ''; rc.runs = sel ? loopCueRuns(L, fps, lib, sel.name) : [] }
+      if (rc.runs.length && sel) for (const [y0, y1, has, color] of lanes) {
+        if (!has(sel.name)) continue
+        ctx.fillStyle = color(sel.name)
+        for (const [a, b] of rc.runs) {
+          const x0 = Math.max(-1, X(a)), x1 = Math.min(w + 1, X(b))
+          if (x1 <= x0) continue
+          ctx.globalAlpha = 0.22; ctx.fillRect(x0, y0 + 2, x1 - x0, y1 - y0 - 2)
+          ctx.globalAlpha = 0.9; ctx.fillRect(x0, y0 + 2, x1 - x0, 2)
+        }
+      }
+      ctx.globalAlpha = 1
       const found: Hit[] = []
       for (const [y0, y1, has, color] of lanes) {
         let labelX = -1e9

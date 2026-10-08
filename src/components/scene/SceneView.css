@@ -83,6 +83,10 @@
 .scene-coverage { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 4px 0; }
 .scene-log { margin: 0; height: 160px; overflow: auto; white-space: pre-wrap; color: var(--text-muted); background: #111316;
   border: 1px solid var(--border); border-radius: 3px; padding: 6px; font: 11px/1.35 var(--font-mono); }
+.scene-view input[type=checkbox] { accent-color: var(--accent-light); cursor: pointer; }
+/* A checkbox with its text (as the editor's): box and text on one line, centred, a fixed gap. */
+.scene-check { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; cursor: pointer; }
+.scene-check input[type=checkbox] { margin: 0; flex: none; }
 .scene-view select, .scene-view input[type=number] { background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-light); border-radius: 4px; padding: 2px 4px; font: inherit; }
 .scene-view .dv-content-container { overflow: auto; }
 
@@ -106,6 +110,16 @@
 .scene-ramp-steps { display: flex; flex-wrap: wrap; gap: 4px 8px; }
 .scene-ramp-steps label { display: inline-flex; align-items: center; gap: 3px; }
 .scene-ramp-steps .scene-number { width: 52px; }
+/* Loop cue level → multiplier (levelMap): fixed widths for the live numbers, a fixed-size graph beside the curve and points. */
+.scene-levelmap-num { display: inline-block; min-width: 5ch; font-variant-numeric: tabular-nums; text-align: right; }
+.scene-levelmap-levels { gap: 16px; }
+.scene-levelmap-item { margin-top: 6px; }
+.scene-levelmap-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scene-levelmap-body { display: flex; gap: 10px; align-items: flex-start; }
+.scene-levelmap-side { min-width: 0; flex: 1 1 auto; }
+.scene-levelmap-side .scene-row { margin-top: 0; }
+.scene-levelmap-points { margin: 0; padding: 0; list-style: none; font-size: 12px; }
+.scene-levelmap-points li { display: flex; align-items: center; gap: 6px; }
 /* Timeline: "Change" opened from a marker, over the canvas (nothing moves). */
 .scene-timeline { position: relative; }
 .scene-timeline-change { position: absolute; left: 8px; right: 8px; top: 34px; z-index: 6; }
