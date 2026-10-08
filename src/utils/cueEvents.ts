@@ -107,6 +107,16 @@ export function hasOwnMaterials(table: CueTable, ref: EventRef): boolean {
   return !!v && (v.sfx !== undefined || v.haptics !== undefined)
 }
 
+/**
+ * The event the editor's Events list highlights and the event detail panel shows for the selected key: a variant with
+ * its own sfx / haptics as itself; any other variant (opened from the Scene tab, an AI trial) as its cue.
+ */
+export function shownEventKey(table: CueTable | null, selected: string | null): string | null {
+  if (!selected) return null
+  const ref = parseEventKey(selected)
+  return eventKey(table && (ref.variant === null || !hasOwnMaterials(table, ref)) ? { cue: ref.cue, variant: null } : ref)
+}
+
 /** Every cue in table order, each with its variants nested. */
 export function listEvents(table: CueTable, lib: SceneLib): EventRow[] {
   return Object.keys(table.cues).map(cue => row(table, lib, { cue, variant: null },

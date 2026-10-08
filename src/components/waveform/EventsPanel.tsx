@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useEventStore, type DecideTarget } from '@/stores/eventStore'
@@ -10,7 +10,7 @@ import { useSceneVideoTarget } from '@/utils/editorSceneSync'
 import { clipsForCue, isLoopCue, soundAllowed, positionsForCue, routeClips, sfxSounds, type CueTable } from '@/utils/sceneCueTable'
 import type { SceneLib } from '@/utils/sceneData'
 import {
-  addPositionRoute, assignEventsForTrial, effectiveEvent, eventKey, listEvents, parseEventKey, removeOwnRoute,
+  addPositionRoute, assignEventsForTrial, effectiveEvent, eventKey, listEvents, parseEventKey, removeOwnRoute, shownEventKey,
   setRouteClips, setSfxSounds, simultaneousGroups, trialsForEvent, updateOwnRoute,
   resetAllReviews, setNone, setOverride, setReview, setUndecided, hasOwnMaterials, undecidedReserves, restoreReserve,
   type EffectiveEvent, type EventRow, type SoundStatus,
@@ -33,7 +33,6 @@ import './EventsPanel.css'
 import '@/components/scene/VideoOverlay.css'
 
 const NEW_FOLDER = ' new'
-const LIST_MIN = 80, LIST_MAX = 1200
 
 /**
  * "Events": the cues of the game project open in the Scene tab (same store, picked
@@ -45,6 +44,7 @@ const LIST_MIN = 80, LIST_MAX = 1200
  * Cues the recording plays at the same moment are grouped
  * (display only). Edits mark the table unsaved (Save / Revert at the top, same
  * as the Scene tab); "decide" writes at once.
+ * The selected event's detail is its own dock panel (EventDetailPanel); both follow the selection in useEventStore.
  */
 export function EventsPanel() {
   const { t } = useI18n()
@@ -64,11 +64,7 @@ export function EventsPanel() {
     // The waveform panel follows: the event's haptic, else its sound.
     openEventDefault(key)
   }
-  // A variant with its own sfx / haptics is shown as itself; any other variant opened from elsewhere (Scene tab, an AI trial) shows its cue.
-  const ref = selected ? parseEventKey(selected) : null
-  const shownRef = ref && table && (ref.variant === null || !hasOwnMaterials(table, ref)) ? { cue: ref.cue, variant: null } : ref
-  const shown = shownRef ? eventKey(shownRef) : null
-  const effective = table && shownRef ? effectiveEvent(table, shownRef) : null
+  const shown = shownEventKey(table, selected)
   const requested = useOpenRequests()
   const one = (r: EventRow) => <EventRowButton key={r.key} row={r} selected={shown === r.key} onSelect={select}
     requested={{ sound: requested.has(`${r.key}|sound`), haptic: requested.has(`${r.key}|haptic`) }} />
@@ -99,35 +95,25 @@ export function EventsPanel() {
     {dialog}
     {saveError && <div className="events-dirty" role="status">{t(saveError.id, saveError.params)}
       <button type="button" className="toolbar-btn" disabled={busy} onClick={() => void useSceneStore.getState().revert()}>{t('events.revert')}</button></div>}
-    {!table || !lib ? <p className="agent-muted">{t('events.noProject')}</p> : <>
-      <ResizableList label={t('editor.panel.events')}>{listItems}</ResizableList>
-      <div className="events-detail-scroll">
-        {effective ? <EventDetail key={shown!} table={table} lib={lib} e={effective} />
-          : <p className="agent-muted">{t('events.selectHint')}</p>}
-      </div>
-    </>}
+    {!table || !lib ? <p className="agent-muted">{t('events.noProject')}</p>
+      : <div className="events-list" role="listbox" aria-label={t('editor.panel.events')}>{listItems}</div>}
   </div>
 }
 
-/** The event list with a drag handle below it; the height is an editor UI setting (localStorage, folder copy, export). */
-function ResizableList({ label, children }: { label: string; children: ReactNode }) {
+/** "Event detail" (its own dock panel, beside the list by default): the event selected in the Events list. */
+export function EventDetailPanel() {
   const { t } = useI18n()
-  const saved = useEditorSettings(s => s.eventsListHeight)
-  const [dragging, setDragging] = useState<number | null>(null)
-  const start = useRef<{ y: number; h: number } | null>(null)
-  const height = dragging ?? saved
-  const clamp = (h: number) => Math.max(LIST_MIN, Math.min(LIST_MAX, Math.round(h)))
-  const commit = (h: number) => { useEditorSettings.getState().update({ eventsListHeight: clamp(h) }); setDragging(null) }
-  return <>
-    <div className="events-list" role="listbox" aria-label={label} style={{ height }}>{children}</div>
-    <div className="events-split" role="separator" aria-orientation="horizontal" aria-label={t('events.resize')} title={t('events.resize')} tabIndex={0}
-      aria-valuemin={LIST_MIN} aria-valuemax={LIST_MAX} aria-valuenow={height}
-      onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); start.current = { y: e.clientY, h: height } }}
-      onPointerMove={e => { if (start.current) setDragging(clamp(start.current.h + e.clientY - start.current.y)) }}
-      onPointerUp={e => { if (!start.current) return; const h = start.current.h + e.clientY - start.current.y; start.current = null; commit(h) }}
-      onPointerCancel={() => { start.current = null; setDragging(null) }}
-      onKeyDown={e => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); commit(height + (e.key === 'ArrowDown' ? 20 : -20)) } }} />
-  </>
+  const table = useSceneStore(s => s.table)
+  const lib = useSceneStore(s => s.lib)
+  const selected = useEventStore(s => s.selected)
+  const shown = shownEventKey(table, selected)
+  const effective = table && shown ? effectiveEvent(table, parseEventKey(shown)) : null
+  return <div className="editor-panel events-panel">
+    {!table || !lib ? <p className="agent-muted">{t('events.noProject')}</p> : <div className="events-detail-scroll">
+      {effective ? <EventDetail key={shown!} table={table} lib={lib} e={effective} />
+        : <p className="agent-muted">{t('events.selectHint')}</p>}
+    </div>}
+  </div>
 }
 
 /**

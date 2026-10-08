@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   addEventMark, addPositionRoute, fireShot, resetAllReviews, setNone, setReview, setUndecided, addVariant, simultaneousGroups, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
   effectiveEvent, eventSceneCues, jitterGain, listEvents, MaterialPicker, matchesName, materialUsers, needsRouteForm, overwriteUsers,
-  parseEventKey, removeVariant, representativeSound, candidateSound, hasOwnMaterials, resolveEventName, cueRoutePositions, materialRoutePositions, pairedClips, setOverride, setRouteClips, setSfxSounds, setVariation, trialEvent, trialsForEvent,
+  parseEventKey, removeVariant, representativeSound, candidateSound, hasOwnMaterials, shownEventKey, resolveEventName, cueRoutePositions, materialRoutePositions, pairedClips, setOverride, setRouteClips, setSfxSounds, setVariation, trialEvent, trialsForEvent,
 } from './cueEvents'
 import { validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
 import { cueVoices, tableTargets } from './sceneHaptics'
@@ -350,6 +350,11 @@ describe('child rows of the editor (DEC-085 addendum)', () => {
     expect(hasOwnMaterials(t, { cue: 'button', variant: 'plain' })).toBe(false)
     expect(hasOwnMaterials(t, { cue: 'button', variant: 'loud' })).toBe(false)
     expect(hasOwnMaterials(t, { cue: 'button', variant: null })).toBe(false)
+    // The list and the event detail panel show the same event for the shared selection.
+    expect(shownEventKey(t, 'button:soft')).toBe('button:soft')
+    expect(shownEventKey(t, 'button:plain')).toBe('button')
+    expect(shownEventKey(t, 'button')).toBe('button')
+    expect(shownEventKey(t, null)).toBeNull()
     // "Separate for this situation" makes an inheriting variant a child row; "back to button" hides it again.
     const own = setOverride(t, { cue: 'button', variant: 'plain' }, 'sfx', true)
     expect(hasOwnMaterials(own, { cue: 'button', variant: 'plain' })).toBe(true)

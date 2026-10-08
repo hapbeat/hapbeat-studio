@@ -46,8 +46,6 @@ export interface EditorUiSettings {
   groupPlayback: boolean
   /** AI trials: the sound played with a haptic candidate, picked per `<trialId>/<candidateId>` (overrides the candidate's `sound`). */
   candidateSounds: Record<string, string>
-  /** Events panel: height (px) of the event list above the detail. */
-  eventsListHeight: number
   /** Editor clips opened from an event material ("Edit as clip"): edits are written back to that WAV. */
   materialLinks: Record<string, MaterialLink>
   /** Haptic auditions (AI haptic candidates, event haptic materials) also play their waveform on the PC (off: devices only). */
@@ -73,7 +71,7 @@ export interface EditorUiSettings {
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, reservesOpen: true, groupPlayback: true, candidateSounds: {}, eventsListHeight: 220, materialLinks: {}, hapticOnPc: false, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
+  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, reservesOpen: true, groupPlayback: true, candidateSounds: {}, materialLinks: {}, hapticOnPc: false, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -152,7 +150,6 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     soundPending: Array.isArray(v.soundPending) ? v.soundPending.filter((r): r is { cue: string; at: string } => isRecord(r) && typeof r.cue === 'string' && typeof r.at === 'string').slice(-200).map(r => ({ cue: r.cue, at: r.at })) : [],
     revisePending: Array.isArray(v.revisePending) ? v.revisePending.filter((r): r is RevisePending => isRecord(r) && typeof r.cue === 'string' && typeof r.material === 'string' && typeof r.at === 'string'
       && (r.target === 'sound' || r.target === 'haptic')).slice(-200).map(r => ({ cue: r.cue, target: r.target, material: r.material, at: r.at })) : [],
-    eventsListHeight: clamp(v.eventsListHeight, 80, 1200, d.eventsListHeight),
     hapticOnPc: v.hapticOnPc === true,
     materialLinks: isRecord(v.materialLinks) ? Object.fromEntries(Object.entries(v.materialLinks).filter((e): e is [string, MaterialLink] => isRecord(e[1]) && typeof e[1].project === 'string'
       && typeof e[1].event === 'string' && typeof e[1].wav === 'string' && (e[1].target === 'sound' || e[1].target === 'haptic')).slice(0, 500)

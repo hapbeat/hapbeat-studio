@@ -43,3 +43,13 @@ export function withoutDockPanels(layout: Json, ids: readonly string[]): Json {
   const root = grid ? prune(grid.root) : null
   return { ...layout, panels: Object.fromEntries(Object.entries(panels).filter(([id]) => !ids.includes(id))), ...(grid ? { grid: { ...grid, root: root ?? { type: 'branch', data: [], size: 0 } } } : {}) }
 }
+
+/**
+ * Panels a later Studio added since `layout` was saved: those of `panels` not in its `knownPanels` (written with
+ * every save), or not in `before` (the panels of the Studio that saved it) when the layout has no `knownPanels` yet.
+ * They join the restored layout once; a panel the user closed afterwards stays closed (it is known by then).
+ */
+export function newDockPanels<T extends string>(layout: Json, panels: readonly T[], before: readonly string[]): T[] {
+  const known = Array.isArray(layout.knownPanels) ? layout.knownPanels as string[] : before
+  return panels.filter(id => !known.includes(id))
+}

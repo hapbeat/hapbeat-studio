@@ -11,13 +11,9 @@
 .events-decided p { margin: 0 0 4px 0; }
 .events-command { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .events-command code { padding: 2px 6px; background: var(--bg-primary); border-radius: 3px; word-break: break-all; }
-.events-list { display: flex; flex-direction: column; gap: 2px; overflow: auto; border: 1px solid var(--border); border-radius: 4px; padding: 2px; box-sizing: border-box; }
-/* Drag handle between the list and the detail (height saved in the editor UI settings). */
-.events-split { height: 6px; margin: -2px 0; cursor: row-resize; border-radius: 3px; background: transparent; touch-action: none; }
-.events-split::after { content: ''; display: block; width: 40px; height: 2px; margin: 2px auto; border-radius: 1px; background: var(--border-light); }
-.events-split:hover::after, .events-split:focus-visible::after { background: var(--accent-light); }
-.events-split:focus-visible { outline: none; }
-.events-detail-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
+/* The list fills the Events panel; the selected event's detail is its own dock panel (fills it too). */
+.events-panel > .events-list { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; gap: 2px; overflow: auto; border: 1px solid var(--border); border-radius: 4px; padding: 2px; box-sizing: border-box; }
+.events-panel > .events-detail-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
 /* Simultaneous group (recording, display only): a framed block with a heading. Variants: indented, dashed rule, "variant" tag. */
 .events-group { border: 1px solid var(--border-light); border-left: 3px solid #7aa2e3; border-radius: 4px; padding: 2px; margin: 2px 0; }
 .events-group-head { display: flex; align-items: center; gap: 6px; padding: 1px 6px; font-size: 12px; color: var(--text-secondary); }

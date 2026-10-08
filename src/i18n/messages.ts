@@ -1013,6 +1013,7 @@ export const messages = defineMessages({
   'devices.dismissAria': { ja: '未接続デバイス {name} をリストから消す', en: 'Remove offline device {name} from list' },
   // Event-centred authoring (DEC-083): Events panel, decide, sound trials, cue table v2.
   'editor.panel.events': { ja: 'イベント', en: 'Events' },
+  'editor.panel.eventDetail': { ja: 'イベント詳細', en: 'Event detail' },
   'editor.scene.forEvent': { ja: 'イベント {name}', en: 'Event {name}' },
   'editor.agent.targetSound': { ja: '音', en: 'Sound' },
   'events.project': { ja: 'プロジェクト', en: 'Project' },
@@ -1088,7 +1089,6 @@ export const messages = defineMessages({
   'events.assignSound': { ja: '音に割り当て', en: 'Assign as sound' },
   'events.assignHaptic': { ja: '触覚に割り当て', en: 'Assign as haptic' },
   'events.menu': { ja: 'イベントパネルの設定', en: 'Events panel options' },
-  'events.resize': { ja: 'ドラッグで一覧の高さを変更（↑↓ キーでも可）', en: 'Drag to resize the list (or ↑ / ↓)' },
   'events.simultaneous': { ja: '同時', en: 'together' },
   'events.simultaneousHint': { ja: '録画で同じ瞬間（0.2 秒以内）に鳴るイベントをまとめて表示しています（表示だけで、表は変わりません）', en: 'Events the recording fires at the same moment (within 0.2 s), shown together (display only; the table is unchanged).' },
   'events.openHint': { ja: 'クリックで波形パネルに開き、通常の再生で確認します', en: 'Click to open it in the waveform panel and check it with the normal playback.' },

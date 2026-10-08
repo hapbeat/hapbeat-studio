@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { showDockPanel, withoutDockPanels } from './dockPanels'
+import { newDockPanels, showDockPanel, withoutDockPanels } from './dockPanels'
 
 /**
  * Regression: Space / ▶ in the AI trials panel scrolled it to the top, because
@@ -35,5 +35,16 @@ describe('withoutDockPanels (panels a later Studio removed)', () => {
     expect(inner).toHaveLength(1)
     expect(inner[0].data).toMatchObject({ views: ['event', 'project'], activeView: 'event' })
     expect(withoutDockPanels(out, ['haptics', 'sound'])).toBe(out) // nothing left to drop
+  })
+})
+
+describe('newDockPanels (panels added by a later Studio join a saved layout once)', () => {
+  const panels = ['clips', 'events', 'eventDetail', 'waveform'] as const
+  const before = ['clips', 'events', 'waveform']
+  it('adds the event detail panel to a layout saved before it existed', () => {
+    expect(newDockPanels({ grid: {}, panels: {} }, panels, before)).toEqual(['eventDetail'])
+  })
+  it('adds nothing once the layout was saved with it known (closed by the user stays closed)', () => {
+    expect(newDockPanels({ grid: {}, panels: {}, knownPanels: [...panels] }, panels, before)).toEqual([])
   })
 })

@@ -11,16 +11,18 @@ import { PropertiesPanel } from './PropertiesPanel'
 import { EffectsDockPanel } from './EffectsPanel'
 import { AgentTrialsPanel } from './AgentTrialsPanel'
 import { EditorScenePanel } from './EditorScenePanel'
-import { EventsPanel } from './EventsPanel'
-import { showDockPanel } from '@/utils/dockPanels'
+import { EventDetailPanel, EventsPanel } from './EventsPanel'
+import { newDockPanels, showDockPanel } from '@/utils/dockPanels'
 
-export const EDITOR_PANELS = ['clips', 'events', 'waveform', 'properties', 'effects', 'agent', 'scene'] as const
+export const EDITOR_PANELS = ['clips', 'events', 'eventDetail', 'waveform', 'properties', 'effects', 'agent', 'scene'] as const
 export type EditorPanelId = typeof EDITOR_PANELS[number]
 export const PANEL_TITLES: Record<EditorPanelId, MessageId> = {
-  clips: 'editor.panel.clips', events: 'editor.panel.events', waveform: 'editor.panel.waveform', properties: 'editor.panel.properties',
+  clips: 'editor.panel.clips', events: 'editor.panel.events', eventDetail: 'editor.panel.eventDetail', waveform: 'editor.panel.waveform', properties: 'editor.panel.properties',
   effects: 'editor.panel.effects', agent: 'editor.agent.tab', scene: 'editor.panel.scene',
 }
 type Translate = (id: MessageId, params?: Record<string, string | number>) => string
+/** The panels of the Studios before the event detail panel (a saved layout without `knownPanels`). */
+const PANELS_BEFORE_KNOWN: readonly EditorPanelId[] = EDITOR_PANELS.filter(id => id !== 'eventDetail')
 
 /** Same-origin blank page dockview moves popped-out groups into (public/popout.html). */
 export const POPOUT_URL = `${import.meta.env.BASE_URL}popout.html`
@@ -37,6 +39,7 @@ function PanelFrame({ children }: { children: ReactNode }) {
 const COMPONENTS: Record<EditorPanelId, FunctionComponent<IDockviewPanelProps>> = {
   clips: () => <PanelFrame><ClipsPanel /></PanelFrame>,
   events: () => <PanelFrame><EventsPanel /></PanelFrame>,
+  eventDetail: () => <PanelFrame><EventDetailPanel /></PanelFrame>,
   waveform: () => <PanelFrame><WaveformPanel /></PanelFrame>,
   properties: () => <PanelFrame><PropertiesPanel /></PanelFrame>,
   effects: () => <PanelFrame><EffectsDockPanel /></PanelFrame>,
@@ -54,6 +57,8 @@ function addPanel(api: DockviewApi, id: EditorPanelId, t: Translate, inactive = 
     case 'clips': return api.addPanel({ ...base, ...(api.getPanel('waveform') ? near('waveform', 'left') : { position: { direction: 'left' } }), initialWidth: 270 })
     // A tab next to Clips (the game project's events and their decided sound / haptic).
     case 'events': return api.addPanel({ ...base, ...(api.getPanel('clips') ? near('clips', 'within') : api.getPanel('waveform') ? near('waveform', 'left') : { position: { direction: 'left' } }), initialWidth: 270 })
+    // The selected event's detail, in its own group right of the events list (list and detail side by side).
+    case 'eventDetail': return api.addPanel({ ...base, ...(api.getPanel('events') ? near('events', 'right') : api.getPanel('waveform') ? near('waveform', 'left') : { position: { direction: 'left' } }), initialWidth: 340 })
     case 'effects': return api.addPanel({ ...base, ...(api.getPanel('agent') ? near('agent', 'within') : api.getPanel('waveform') ? near('waveform', 'right') : { position: { direction: 'right' } }), initialWidth: 380 })
     case 'agent': return api.addPanel({ ...base, ...(api.getPanel('effects') ? near('effects', 'within') : { position: { direction: 'right' } }), initialWidth: 380 })
     // Not in the default layout: shown from the View menu, next to the AI trials it belongs to.
@@ -67,6 +72,7 @@ export function buildDefaultLayout(api: DockviewApi, t: Translate) {
   addPanel(api, 'waveform', t)
   addPanel(api, 'clips', t)
   addPanel(api, 'events', t, true)
+  addPanel(api, 'eventDetail', t)
   addPanel(api, 'effects', t)
   addPanel(api, 'agent', t, true)
   addPanel(api, 'properties', t)
@@ -84,11 +90,16 @@ export function togglePanel(api: DockviewApi, id: EditorPanelId, t: Translate) {
   if (panel) panel.api.close(); else addPanel(api, id, t)
 }
 
+/** The layout as saved, with the panels this Studio knows (later Studios add their new panels once). */
+const savedLayout = (api: DockviewApi): Record<string, unknown> => ({ ...(api.toJSON() as unknown as Record<string, unknown>), knownPanels: [...EDITOR_PANELS] })
+
 function applySavedLayout(api: DockviewApi, layout: Record<string, unknown> | null, t: Translate): boolean {
   if (!layout) { buildDefaultLayout(api, t); return true }
   try {
     api.fromJSON(layout as unknown as Parameters<DockviewApi['fromJSON']>[0])
     if (!api.panels.length) buildDefaultLayout(api, t)
+    // Panels added in a later Studio (not known when the layout was saved) join it once; a panel the user closed stays closed.
+    for (const id of newDockPanels(layout, EDITOR_PANELS, PANELS_BEFORE_KNOWN)) if (!api.getPanel(id)) addPanel(api, id, t, true)
     return true
   } catch (error) {
     console.warn('[editor] saved dock layout could not be restored', error)
@@ -138,7 +149,7 @@ export function EditorDockLayout({ onApi, onPopoutWindows, onNotice }: { onApi: 
     try {
       if (!applySavedLayout(api, useEditorSettings.getState().dockLayout, tRef.current)) callbacks.current.onNotice(tRef.current('editor.settings.layoutReset'))
     } finally { applying.current = false }
-    useEditorSettings.getState().update({ dockLayout: api.toJSON() as unknown as Record<string, unknown> })
+    useEditorSettings.getState().update({ dockLayout: savedLayout(api) })
     setBuilt(n => n + 1)
   }
 
@@ -150,7 +161,7 @@ export function EditorDockLayout({ onApi, onPopoutWindows, onNotice }: { onApi: 
     api.onDidLayoutChange(() => {
       if (applying.current) return
       clearTimeout(timer)
-      timer = setTimeout(() => { if (apiRef.current === api) useEditorSettings.getState().update({ dockLayout: api.toJSON() as unknown as Record<string, unknown> }) }, 300)
+      timer = setTimeout(() => { if (apiRef.current === api) useEditorSettings.getState().update({ dockLayout: savedLayout(api) }) }, 300)
     })
     const syncWindows = () => callbacks.current.onPopoutWindows(api.getPopouts().map(popout => popout.window))
     api.onDidAddPopoutGroup(syncWindows)
