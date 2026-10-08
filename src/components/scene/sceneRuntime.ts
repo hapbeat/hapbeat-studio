@@ -42,6 +42,17 @@ export class SceneRuntime {
   private lastItem = -1
   /** Full replay time to start from once its video has loaded (playFull while another moment was shown). */
   private pendingStart: number | null = null
+  /** Whether the pending start also plays (a moment / span / ▶ does; 「全編に戻って続ける」 keeps a paused video paused). */
+  private pendingPlay = true
+  /** The moment whose video the element holds (set once its URL is assigned); the old one plays on until then. */
+  private loadedCur = -1
+  /** Whether the video has played inside the moment / span shown now (else 「全編に戻って続ける」 starts at its mark − lead). */
+  private playedHere = false
+  /**
+   * The last full-replay playhead outside a loop cue span (replay seconds): where the 全編 row and 「全編に戻って続ける」
+   * resume after tuning a moment or a span. 0 for a newly opened recording.
+   */
+  fullTime = 0
   private timer: ReturnType<typeof setInterval> | null = null
   private unsubscribe: (() => void) | null = null
   /** Multi-material picks (v2 `clips` / `sounds`), per event. */
@@ -65,6 +76,7 @@ export class SceneRuntime {
     this.unsubscribe = useSceneStore.subscribe(state => {
       // A new moment, another file, or a newly opened recording (a re-opened project revokes the old video URLs, even for
       // the same file names); not a mere rename of the items (firing overrides), which keeps the video playing.
+      if (state.root !== prev.root || state.recorded !== prev.recorded) this.fullTime = 0
       if (state.cur !== prev.cur || state.root !== prev.root || state.recorded !== prev.recorded || state.items[state.cur]?.file !== prev.items[prev.cur]?.file
         || (state.items !== prev.items && !state.items.length)) this.loadItem()
       if (state.table !== prev.table || state.lib !== prev.lib) this.rebuildLoops()
@@ -116,10 +128,10 @@ export class SceneRuntime {
       const start = this.pendingStart
       this.pendingStart = null
       // Only a user's ▶ (playFull) starts it; loading a moment (reload, opening a project, selecting) leaves it paused.
-      if (start !== null) { this.seek(start); void this.video.play().catch(() => {}) }
+      if (start !== null) { this.seek(start); if (this.pendingPlay) void this.video.play().catch(() => {}) }
       else if (this.part) this.setPart(true, false)
     }
-    sceneVideoUrl(root, it.file).then(url => { if (useSceneStore.getState().cur === cur && this.video.src !== url) this.video.src = url },
+    sceneVideoUrl(root, it.file).then(url => { if (useSceneStore.getState().cur !== cur) return; if (this.video.src !== url) this.video.src = url; this.loadedCur = cur },
       error => useSceneStore.getState().note({ id: 'scene.video.unreadable', params: { file: it.file, error: error instanceof Error ? error.message : String(error) }, error: true }))
   }
   private loopOn() { return useSceneSettings.getState().loop && !this.part }
@@ -145,29 +157,53 @@ export class SceneRuntime {
     }
     this.applyLoop()
   }
-  /** Plays moment `index` from `leadSec` before its mark (the full replay from its start), loading it first when another is shown. */
+  /**
+   * Plays moment `index` from `leadSec` before its mark, loading it first when another is shown. The full replay resumes
+   * at `fullTime` (where it was left for a moment or a span; shown without a span: plays on from where it is).
+   */
   playMoment(index: number, leadSec: number) {
     const s = useSceneStore.getState(), it = s.items[index]
     if (!it) return
+    const wasSpan = this.span
     if (this.span) { this.endSpan(); this.part = false; this.partAB = null; this.applyLoop() }
-    const t = it.kind === 'clip' ? Math.max(0, it.event - leadSec) : 0
-    if (s.cur === index && this.video.readyState >= 1) { this.seek(t); void this.video.play().catch(() => {}); return }
+    const t = it.kind === 'clip' ? Math.max(0, it.event - leadSec) : this.fullTime
+    if (s.cur === index && this.video.readyState >= 1) { if (it.kind === 'clip' || wasSpan) this.seek(t); void this.video.play().catch(() => {}); return }
     this.pendingStart = t
+    this.pendingPlay = true
     s.select(index)
   }
   /** Plays the full replay (moment 0) from replay time `t`, switching to it first when another moment is shown. */
-  playFull(t: number) {
+  playFull(t: number) { this.showFull(t, true) }
+  /** The full replay at replay time `t`, playing or paused (`play`), switching to it first when another moment is shown. */
+  private showFull(t: number, play: boolean) {
     const s = useSceneStore.getState()
-    if (s.items[s.cur]?.kind === 'full' && this.video.readyState >= 1) { this.seek(t); void this.video.play().catch(() => {}); return }
+    if (s.items[s.cur]?.kind === 'full' && this.video.readyState >= 1) { this.seek(t); if (play) void this.video.play().catch(() => {}); return }
     this.pendingStart = t
+    this.pendingPlay = play
     const index = s.items.findIndex(it => it.kind === 'full')
     if (index >= 0) s.select(index)
+  }
+  /**
+   * 「全編に戻って続ける」 (F): the full replay without the moment's / span's play range (no span, no W loop), at the
+   * position shown now in replay time — a clip's time + its offset (offsetOf: at − event), a span's time as is; before
+   * anything played there, the moment's mark (a span: its start) − the lead-in. Playing stays playing, paused stays paused.
+   */
+  returnToFull() {
+    const s = useSceneStore.getState(), it = s.items[s.cur], v = this.video
+    if (!it) return
+    const lead = useSceneSettings.getState().leadSec, play = !v.paused
+    const t = it.kind === 'clip' ? (this.playedHere ? v.currentTime + offsetOf(it) : Math.max(0, it.at - lead))
+      : this.span && this.partAB && !this.playedHere ? this.partAB[0] : v.currentTime
+    this.endSpan(); this.part = false; this.partAB = null; this.applyLoop()
+    this.fullTime = t
+    this.showFull(t, play)
   }
   /**
    * Plays a loop cue's active span `run` (replay seconds) in the full replay, from `leadSec` before its start to
    * `postSec` after its end, repeated like W's part until a moment, W or another span is chosen.
    */
   playSpan(run: [number, number], leadSec: number, postSec: number) {
+    this.playedHere = false
     this.span = true
     this.part = true
     this.partAB = [Math.max(0, run[0] - leadSec), run[1] + postSec]
@@ -244,6 +280,10 @@ export class SceneRuntime {
     const s = useSceneStore.getState(), it = s.items[s.cur], now = performance.now(), v = this.video
     if (this.part && this.partAB && (v.currentTime >= this.partAB[1] || v.ended)) { const ended = v.ended; this.seek(this.partAB[0]); if (ended) void v.play().catch(() => {}) }
     const playing = !!s.table && !!it && !v.paused && !v.seeking && v.readyState >= 2
+    if (s.cur !== this.lastItem) this.playedHere = false
+    // The full replay's playhead (its own video, loaded, outside a span): where it resumes after a moment or a span.
+    if (it?.kind === 'full' && !this.span && this.loadedCur === s.cur && this.pendingStart === null && v.readyState >= 1) this.fullTime = v.currentTime
+    if (!v.paused && v.readyState >= 1 && this.loadedCur === s.cur) this.playedHere = true
     if (!playing || s.cur !== this.lastItem) { this.flush(); this.cursor = null; this.mixer.clock = null; this.lastItem = s.cur }
     if (playing && it && s.data) {
       const vt = v.currentTime, rate = v.playbackRate, t = vt + offsetOf(it)

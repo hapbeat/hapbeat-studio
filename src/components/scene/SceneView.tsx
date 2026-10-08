@@ -92,7 +92,7 @@ export function SceneView({ active }: { active: boolean }) {
   }, [])
 
   // Keys (viewer's): ↑↓ item, Space play (App forwards it as studio:scene-playback), ←→ frame / Shift 1 s,
-  // E before the cue, W ±0.5 s loop, R restart, S speed, L loop, , . previous / next cue, M sound, H haptics.
+  // E before the cue, W ±0.5 s loop, R restart, F back to the full replay (where the moment / span is now), S speed, L loop, , . previous / next cue, M sound, H haptics.
   useEffect(() => {
     if (!active) return
     const playback = () => { if (useSceneStore.getState().items.length) { runtime.audio(); runtime.togglePlay() } }
@@ -110,6 +110,7 @@ export function SceneView({ active }: { active: boolean }) {
       else if (key === 'e') { const ev = focusEvent(it, runtime.events(), v.currentTime, ticks); if (ev) { runtime.seek(ev.t - 0.5); void v.play().catch(() => {}); s.selectCue(ev.name, ev.t) } }
       else if (key === 'w') runtime.setPart(!runtime.part)
       else if (key === 'r') runtime.restart()
+      else if (key === 'f') runtime.returnToFull()
       else if (key === 's') runtime.cycleSpeed()
       else if (key === 'l') { useSceneSettings.getState().update({ loop: !useSceneSettings.getState().loop }); runtime.applyLoop() }
       else if (key === 'm') useSceneSettings.getState().update({ pcSound: !useSceneSettings.getState().pcSound })

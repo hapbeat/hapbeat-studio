@@ -14,7 +14,7 @@ import { useSceneProjectActions } from './useSceneProjectActions'
 /** Scene header: project ▾ · save, the shared device pill, View and "…" menus. Everything else lives in panels. */
 export function SceneTopBar({ dockApi, notice }: { dockApi: DockviewApi | null; notice: { text: string; error: boolean } | null }) {
   const { t } = useI18n()
-  const { confirmDiscard } = useScene()
+  const { confirmDiscard, runtime } = useScene()
   const { open, reopen, rememberedName, busy } = useSceneProjectActions()
   const root = useSceneStore(s => s.root)
   const lib = useSceneStore(s => s.lib)
@@ -22,6 +22,8 @@ export function SceneTopBar({ dockApi, notice }: { dockApi: DockviewApi | null; 
   const sendHaptics = useSceneSettings(s => s.sendHaptics)
   const pcSound = useSceneSettings(s => s.pcSound)
   const leadSec = useSceneSettings(s => s.leadSec)
+  /** Already on the full replay without a span's play range: 「全編に戻って続ける」 has nothing to do. */
+  const onFull = useSceneStore(s => s.items[s.cur]?.kind !== 'clip' && !s.span)
   const settingsInput = useRef<HTMLInputElement>(null)
   const [openPanels, setOpenPanels] = useState<string[]>([])
   useEffect(() => {
@@ -59,6 +61,9 @@ export function SceneTopBar({ dockApi, notice }: { dockApi: DockviewApi | null; 
       <label><input type="checkbox" checked={sendHaptics} onChange={e => useSceneSettings.getState().update({ sendHaptics: e.target.checked })} />{t('scene.sendHaptics')}</label>
       <label><input type="checkbox" checked={pcSound} onChange={e => useSceneSettings.getState().update({ pcSound: e.target.checked })} />{t('scene.pcSound')}</label>
     </div>} />
+    {/* Leaves the moment / span being tuned for the full replay at the same point (SceneRuntime.returnToFull; F). */}
+    <button type="button" className="scene-icon-btn" disabled={onFull} title={t('scene.backToFullHint')}
+      onClick={e => { e.currentTarget.blur(); runtime.audio(); runtime.returnToFull() }}>{t('scene.backToFull')}</button>
     {/* Where playing a firing starts (timeline, occurrences ▶, an event's run), as in the editor. */}
     <label className="editor-scene-lead" title={t('scene.leadHint')}>{t('editor.scene.lead')}
       <input type="number" min={0} max={10} step={0.5} value={leadSec} aria-label={t('scene.leadHint')}

@@ -43,8 +43,9 @@ describe('Scene playback starts only on a user action, the full replay included'
     // ▶ / Space (togglePlay): pause, then play again.
     runtime.togglePlay(); expect(video.paused).toBe(true)
     runtime.togglePlay(); expect(video.paused).toBe(false)
-    // The row again while it is shown: from the start.
-    video.currentTime = 30; runtime.playMoment(0, 1); expect(video.currentTime).toBe(0); expect(video.paused).toBe(false)
+    // The row again while it is shown: plays on from where it is (R restarts).
+    video.currentTime = 30; runtime.playMoment(0, 1); expect(video.currentTime).toBe(30); expect(video.paused).toBe(false)
+    runtime.restart(); expect(video.currentTime).toBe(0)
     // A clip moment: from the lead-in before its mark.
     runtime.playMoment(1, 1); await flush()
     expect(useSceneStore.getState().cur).toBe(1); expect(video.currentTime).toBe(0); expect(video.paused).toBe(false)
@@ -71,6 +72,79 @@ describe('Scene playback starts only on a user action, the full replay included'
     expect(load).toHaveBeenCalled() // the moment is loaded again (a new video URL), not left on the revoked one
     runtime.playMoment(0, 1); await flush()
     expect(video.paused).toBe(false); expect(video.currentTime).toBe(0)
+    runtime.stop()
+  })
+})
+
+describe('Back to the full replay after tuning a moment or a span (「全編に戻って続ける」, F)', () => {
+  const setup = async () => {
+    const { useSceneStore } = await import('@/stores/sceneStore')
+    const { useSceneSettings } = await import('@/stores/sceneSettings')
+    const { SceneRuntime } = await import('./sceneRuntime')
+    const { buildItems } = await import('@/utils/sceneData')
+    // Clip 1: its mark is 1 s into the clip and 7.9 s into the full replay (offset 6.9 s).
+    const data = { fps: 30, full: { file: 'full.mp4', levels: [], events: [] }, clips: [{ file: '01.mp4', name: 'roar', names: ['roar'], hand: 'both', at: 7.9, note: '', event: 1, levels: [] }] }
+    useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: null, data, recorded: data, items: buildItems(data), cur: 0, table: null, span: null })
+    useSceneSettings.getState().update({ leadSec: 1 })
+    const runtime = new SceneRuntime()
+    runtime.start(); await flush()
+    const tick = () => (runtime as unknown as { tick: () => void }).tick()
+    return { runtime, useSceneStore, tick }
+  }
+
+  it('a clip: the full replay at clip time + (at − event), still playing; the 全編 row resumes there, R still goes to 0', async () => {
+    const { runtime, useSceneStore, tick } = await setup()
+    runtime.playMoment(0, 1); await flush()
+    video.currentTime = 20; tick() // watching the full replay at 20 s
+    runtime.playMoment(1, 1); await flush() // tune the clip
+    expect(useSceneStore.getState().cur).toBe(1); expect(runtime.fullTime).toBe(20)
+    video.currentTime = 2.5; tick() // played inside the clip, 1.5 s after its mark
+    runtime.returnToFull(); await flush()
+    expect(useSceneStore.getState().cur).toBe(0); expect(video.currentTime).toBeCloseTo(9.4); expect(video.paused).toBe(false)
+    expect(runtime.part).toBe(false); expect(runtime.partAB).toBeNull()
+    // Back to the clip and the 全編 row again: resumes at the remembered 9.4 s, not 0.
+    tick(); runtime.playMoment(1, 1); await flush()
+    runtime.playMoment(0, 1); await flush()
+    expect(useSceneStore.getState().cur).toBe(0); expect(video.currentTime).toBeCloseTo(9.4); expect(video.paused).toBe(false)
+    runtime.restart(); expect(video.currentTime).toBe(0)
+    runtime.stop()
+  })
+
+  it('a clip not played yet: its mark − the lead-in, and paused stays paused', async () => {
+    const { runtime, useSceneStore, tick } = await setup()
+    useSceneStore.getState().select(1); await flush() // shown (↓), not played
+    tick()
+    expect(video.paused).toBe(true)
+    runtime.returnToFull(); await flush()
+    expect(useSceneStore.getState().cur).toBe(0); expect(video.currentTime).toBeCloseTo(6.9); expect(video.paused).toBe(true)
+    expect(runtime.fullTime).toBeCloseTo(6.9)
+    runtime.stop()
+  })
+
+  it('a span: its play range is cleared and the full replay goes on from the same time; unplayed: the span start − lead', async () => {
+    const { runtime, useSceneStore, tick } = await setup()
+    runtime.playMoment(0, 1); await flush()
+    video.currentTime = 12; tick()
+    runtime.playSpan([30, 34], 1, 1)
+    expect(useSceneStore.getState().span).toEqual([30, 34]); expect(video.currentTime).toBe(29); expect(runtime.fullTime).toBe(12)
+    video.currentTime = 31.5; tick()
+    runtime.returnToFull()
+    expect(useSceneStore.getState().span).toBeNull(); expect(runtime.part).toBe(false); expect(runtime.partAB).toBeNull()
+    expect(video.currentTime).toBe(31.5); expect(video.paused).toBe(false); expect(runtime.fullTime).toBe(31.5)
+    // A span left before it played (paused at once): its start − the lead-in, paused.
+    runtime.playSpan([40, 44], 1, 1); video.pause(); video.currentTime = 41
+    runtime.returnToFull()
+    expect(video.currentTime).toBe(39); expect(video.paused).toBe(true); expect(useSceneStore.getState().span).toBeNull()
+    runtime.stop()
+  })
+
+  it('the 全編 row after a span resumes where the full replay was left for it', async () => {
+    const { runtime, useSceneStore, tick } = await setup()
+    runtime.playMoment(0, 1); await flush()
+    video.currentTime = 12; tick()
+    runtime.playSpan([30, 34], 1, 1); video.currentTime = 31; tick()
+    runtime.playMoment(0, 1)
+    expect(useSceneStore.getState().span).toBeNull(); expect(video.currentTime).toBe(12); expect(video.paused).toBe(false)
     runtime.stop()
   })
 })
