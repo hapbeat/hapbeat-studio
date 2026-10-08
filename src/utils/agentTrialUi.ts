@@ -78,7 +78,9 @@ export function formToRating(form: RatingForm, trial: TrialRequest, ratedAt: str
       // Derived from the overall score (no separate input).
       ...(f.overall !== null ? { verdict: verdictFromOverall(f.overall)! } : {}),
       ...(f.useFor.trim() ? { useFor: f.useFor.trim().slice(0, 200) } : {}),
-      ...(f.intensity !== 1 ? { intensity: Math.round(Math.max(0, Math.min(1, f.intensity)) * 100) / 100 } : {}),
+      // Written when it is not 1 or when it differs from the proposed start (1 after a start of 0.2 must be stated: a candidate
+      // with nothing else would otherwise be {} and fail ratingError).
+      ...(f.intensity !== 1 || f.intensity !== initialIntensity(c) ? { intensity: Math.round(Math.max(0, Math.min(1, f.intensity)) * 100) / 100 } : {}),
     }
   }
   const context: RatingContext = {}

@@ -81,10 +81,12 @@ describe('rating form', () => {
     expect(formToRating(form, proposed, '2026-10-08T10:00:00+09:00').candidates).toEqual({})
     form.candidates.A.overall = 4
     expect(formToRating(form, proposed, '2026-10-08T10:00:00+09:00').candidates.A).toMatchObject({ overall: 4, intensity: 0.2 })
-    // Moved back to 1 from the proposed start: an input, saved without intensity (absent = 1).
+    // Moved to 1 from the proposed start: an input, saved with intensity 1 stated, and the rating is valid.
     const moved = ratingToForm(proposed, null); moved.candidates.A.intensity = 1
     expect(ratingFormIssue(moved, proposed)).toBeNull()
-    expect(formToRating(moved, proposed, '2026-10-08T10:00:00+09:00').candidates).toEqual({ A: {} })
+    const movedRating = formToRating(moved, proposed, '2026-10-08T10:00:00+09:00')
+    expect(movedRating.candidates).toEqual({ A: { intensity: 1 } })
+    expect(ratingError(movedRating, proposed, [])).toBeNull()
     // A saved rating's value (or its absence = 1) wins over the proposed start.
     const saved: RatingBody = { format: 'hapbeat-rating@1', trialId: 't1', ratedAt: '2026-10-08T10:00:00+09:00', candidates: { A: { overall: 3 } } }
     expect(ratingToForm(proposed, saved).candidates.A.intensity).toBe(1)
