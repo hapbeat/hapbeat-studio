@@ -44,6 +44,7 @@ import { RATE as HAPTIC_RATE } from '@/utils/sceneHaptics'
 import { useAuditionPlan } from './EditorScenePanel'
 import type { ShownLayout } from '@/utils/shownLayout'
 import { sceneStopSec } from '@/utils/sceneStop'
+import { contextHapticParts, renderContextLoops } from '@/utils/trialContext'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { LANE_RATE, mixLane, soundLaneParts, type SoundLane } from '@/utils/soundLane'
 
@@ -82,7 +83,8 @@ export function WaveformEditor({ active }: { active: boolean }) {
   })
   useEffect(() => {
     if (!active || !s.folder) return
-    useAgentTrialStore.getState().startPolling()
+    // A trial's scene.context is checked against the cue table of the Scene project open in the Events panel.
+    useAgentTrialStore.getState().startPolling(project => { const scene = useSceneStore.getState(); return scene.lib?.project_name === project ? scene.table : null })
     return () => useAgentTrialStore.getState().stopPolling()
   }, [active, s.folder])
   useAgentEndpoint(active && !!s.folder, s.folder?.root.name ?? null)
@@ -150,7 +152,9 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const groupOn = useEditorSettings(state => state.groupPlayback)
   const groupShown = !audition && sceneLib ? eventPreview ? { event: eventPreview.event, target: eventPreview.target, material: eventPreview.material }
     : adjusting && adjusting.project === sceneLib.project_name ? { event: adjusting.event, target: adjusting.target, material: adjusting.wav } : null : null
-  const groupKey = groupShown && sceneTable ? JSON.stringify(groupFirings(sceneTable, plan ?? { targets: [0], others: [] }, groupShown, groupOn).haptics) : '[]'
+  // With them, the context's one-shot cues (an audition's scene.context / 「同時」 group: their decided haptics at their firings).
+  const groupKey = sceneTable && (groupShown || plan?.context) ? JSON.stringify([...groupShown ? groupFirings(sceneTable, plan ?? { targets: [0], others: [], contextCues: [], context: null }, groupShown, groupOn).haptics : [],
+    ...plan?.context ? contextHapticParts(sceneTable, plan.context) : []]) : '[]'
   const scenePcm = useSceneStore(state => state.pcm)
   // The playback runs to the end of the group's last haptic too (a bite after the last tear was cut off with the shown buffer).
   const groupEndSec = useMemo(() => groupHapticsEnd(JSON.parse(groupKey) as HapticPart[], scenePcm), [groupKey, scenePcm])
@@ -159,8 +163,9 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const sceneSounds = useSceneSounds()
   const postRollSec = useEditorSettings(state => state.scenePostRollSec)
   const stopSec = useMemo(() => !shownBuffer || !plan || (!audition && !eventPreview && !adjusting) ? 0 : sceneStopSec({
-    firings: [...plan.targets, ...plan.others.map(o => o.atSec)],
+    firings: [...plan.targets, ...plan.others.map(o => o.atSec), ...(plan.context?.firings ?? []).map(f => f.atSec)],
     postRollSec,
+    untilSec: plan.context?.endSec,
     sounds: (sceneSounds.firings ?? []).map(f => ({ atSec: f.atSec, durSec: f.buffer.duration })),
     haptics: [...(stretched ? plan.targets : [0]).map(atSec => ({ atSec, durSec: shownBuffer.duration })), { atSec: 0, durSec: groupEndSec }],
   }), [shownBuffer, plan, audition, eventPreview, adjusting, postRollSec, sceneSounds.firings, stretched, groupEndSec])
@@ -170,21 +175,27 @@ export function WaveformEditor({ active }: { active: boolean }) {
   /** What the waveform panel shows: the file once, or the material placed at its event's firings (header line + per-firing marks). */
   const shownLayout = useMemo((): ShownLayout | null => shownBuffer ? { materialSec: shownBuffer.duration, starts: stretched && plan ? plan.targets : null } : null, [shownBuffer, stretched, plan])
   // By value (groupKey): saving a strength rewrites the table but not these parts, so nothing is mixed again for it.
+  // The context's loop cues: their haptics at the recorded layer levels over the playback (mono, to the same devices).
+  const sceneData = useSceneStore(state => state.data)
+  const contextLoops = useMemo(() => plan?.context?.layers.length && sceneTable && sceneLib && sceneData && audioBuffer
+    ? renderContextLoops(sceneTable, sceneLib, sceneData, plan.context, scenePcm, audioBuffer.duration) : null, [plan, sceneTable, sceneLib, sceneData, scenePcm, audioBuffer?.duration])
+  /** Sound or haptic shown (an AI candidate's target, else the event material's); null = a plain clip. */
+  const shownTarget = audition ? (auditionIsSound ? 'sound' : 'haptic') : groupShown?.target ?? null
   const groupStream = useMemo(() => {
     const parts = JSON.parse(groupKey) as HapticPart[]
-    if (!parts.length || !audioBuffer || !groupShown) return null
-    const base = groupShown.target === 'haptic' ? { data: audioBuffer.getChannelData(0), rate: audioBuffer.sampleRate } : null
-    const mixed = mixGroupHaptics(base, parts, scenePcm, audioBuffer.duration)
+    if ((!parts.length && !contextLoops) || !audioBuffer || !shownTarget) return null
+    const base = shownTarget === 'haptic' ? { data: audioBuffer.getChannelData(0), rate: audioBuffer.sampleRate } : null
+    const mixed = mixGroupHaptics(base, parts, scenePcm, audioBuffer.duration, contextLoops)
     const buffer = new AudioBuffer({ numberOfChannels: 1, length: mixed.length, sampleRate: HAPTIC_RATE })
     buffer.getChannelData(0).set(mixed)
     return buffer
-  }, [groupKey, audioBuffer, scenePcm, groupShown?.target])
+  }, [groupKey, audioBuffer, scenePcm, shownTarget, contextLoops])
   const streamRef = useRef<AudioBuffer | null>(null); streamRef.current = groupStream
   // A sound (AI sound candidate, event sound, adjusted sound material) plays on the PC only — except its group's haptics.
   const soundShown = auditionIsSound || eventPreview?.target === 'sound' || adjusting?.target === 'sound'
   const targets = useMemo(() => isConnected && sendHaptics && (!soundShown || !!groupStream) ? routing.devices.map(device => device.ipAddress) : [], [isConnected, sendHaptics, soundShown, !!groupStream, routing])
   /** Where the live strength applies in the stream: the shown haptic's firings (the group's parts keep their own); nowhere for a shown sound. */
-  const levelSpans = groupStream ? groupShown?.target === 'haptic' && shownBuffer ? shownSpans(stretched && plan ? plan.targets : null, shownBuffer.duration) : [] : null
+  const levelSpans = groupStream ? shownTarget === 'haptic' && shownBuffer ? shownSpans(stretched && plan ? plan.targets : null, shownBuffer.duration) : [] : null
   const spansRef = useRef(levelSpans); spansRef.current = levelSpans
   const targetKey = targets.join(',')
   // The shown material's strength (DEC-086: WAV × intensity): a gain on the PC output and the device stream and a scale

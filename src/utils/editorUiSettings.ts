@@ -1,4 +1,5 @@
 import { isProjectName } from './editorFolder'
+import type { GroupEdits } from './eventGroups'
 
 /**
  * Waveform editor UI preferences (dock layout, panel set, clip list view,
@@ -36,6 +37,10 @@ export interface EditorUiSettings {
   sceneLeadSec: number
   /** Scene video panel: a scene audition runs at least this many seconds past its last firing (longer when a sound / haptic is longer). */
   scenePostRollSec: number
+  /** 「周りのイベントも鳴らす」: an audition over the representative stretch also plays its context (a trial's `scene.context`, the other cues of the event's 「同時」 group); false = the candidate / material alone. */
+  sceneContext: boolean
+  /** Events panel 「同時」 groups edited by hand, per Scene project (eventGroups.applyGroupEdits; cue names). */
+  eventGroupEdits: Record<string, GroupEdits>
   /** Scene video panel: scene clip picked per AI trial id. */
   trialScenes: Record<string, TrialSceneChoice>
   /** Scene video panel: scene clip picked per editor clip id. */
@@ -73,7 +78,7 @@ export interface EditorUiSettings {
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, scenePostRollSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, reservesOpen: true, groupPlayback: true, candidateSounds: {}, materialLinks: {}, hapticOnPc: false, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
+  sceneLeadSec: 1, scenePostRollSec: 1, sceneContext: true, eventGroupEdits: {}, trialScenes: {}, clipScenes: {}, eventMarks: {}, reservesOpen: true, groupPlayback: true, candidateSounds: {}, materialLinks: {}, hapticOnPc: false, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -121,6 +126,19 @@ function eventMarks(value: unknown): Record<string, EventMark[]> {
     .filter((entry): entry is [string, unknown[]] => /^[A-Za-z0-9_-]{1,80}(\/[A-Za-z0-9_-]{1,16})?$/.test(entry[0]) && Array.isArray(entry[1]))
     .map(([id, marks]) => [id, marks.filter(isEventMark).slice(-20)] as const).filter(([, marks]) => marks.length).slice(0, 2000))
 }
+const cueNames = (value: unknown): value is string[] => Array.isArray(value) && value.length <= 500 && value.every(c => typeof c === 'string' && c.length > 0 && c.length <= 200)
+/** Group edits keyed by project (at most 200); invalid entries are dropped. */
+function groupEdits(value: unknown): Record<string, GroupEdits> {
+  if (!isRecord(value)) return {}
+  const out: Record<string, GroupEdits> = {}
+  for (const [project, e] of Object.entries(value).slice(0, 200)) {
+    if (!isRecord(e) || project.length > 200) continue
+    const detached = cueNames(e.detached) ? [...new Set(e.detached)] : []
+    const joined = Array.isArray(e.joined) ? e.joined.filter((p): p is [string, string] => cueNames(p) && p.length === 2 && p[0] !== p[1]).slice(0, 500).map(([a, b]) => [a, b] as [string, string]) : []
+    if (detached.length || joined.length) out[project] = { detached, joined }
+  }
+  return out
+}
 /** Shallow shape check; dockview itself rejects a layout it cannot restore. */
 const isDockLayout = (value: unknown): value is Record<string, unknown> => isRecord(value) && isRecord(value.grid) && isRecord(value.panels)
 
@@ -141,6 +159,8 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     dockLayout: isDockLayout(v.dockLayout) ? v.dockLayout : d.dockLayout,
     sceneLeadSec: clamp(v.sceneLeadSec, 0, 10, d.sceneLeadSec),
     scenePostRollSec: clamp(v.scenePostRollSec, 0, 5, d.scenePostRollSec),
+    sceneContext: typeof v.sceneContext === 'boolean' ? v.sceneContext : d.sceneContext,
+    eventGroupEdits: groupEdits(v.eventGroupEdits),
     trialScenes: sceneChoices(v.trialScenes),
     clipScenes: sceneChoices(v.clipScenes),
     eventMarks: eventMarks(v.eventMarks),

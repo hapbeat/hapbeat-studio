@@ -111,4 +111,16 @@ describe('trial target and variant cues (cue table v2)', () => {
     const bad = parseTrialRequest(request({ scene: { project: 'trex-encounter', cues: ['footstep:Approach'] } }), 't-01')
     expect(bad.ok ? null : bad.error).toMatch(/scene/)
   })
+
+  it('accepts scene.context (cues sounding around the target) and rejects malformed ones', () => {
+    const scene = { project: 'safety-mill', cues: ['engage'], context: ['cut_loop', 'feed_loop', 'chip:big'] }
+    const ok = parseTrialRequest(request({ scene }), 't-01')
+    expect(ok.ok && ok.trial.scene?.context).toEqual(['cut_loop', 'feed_loop', 'chip:big'])
+    expect(parseTrialRequest(request({ scene: { ...scene, context: [] } }), 't-01').ok).toBe(true)
+    for (const [context, error] of [['cut_loop', /scene\.context must be 0-20/], [['Cut loop'], /scene\.context must be 0-20/], [['engage'], /must not repeat a target cue \("engage"/],
+      [['cut_loop', 'cut_loop'], /twice/], [Array.from({ length: 21 }, (_, i) => `c${i}`), /0-20/]] as const) {
+      const r = parseTrialRequest(request({ scene: { ...scene, context } }), 't-01')
+      expect(r.ok ? null : r.error).toMatch(error)
+    }
+  })
 })

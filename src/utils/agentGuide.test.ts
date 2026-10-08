@@ -26,6 +26,10 @@ describe('agent guide and catalog', () => {
     expect(guideMarkdown('1.2.3')).toContain('POST https://api.elevenlabs.io/v1/sound-generation')
   })
 
+  it('describes scene.context (the cues sounding around the target)', () => {
+    expect(guideMarkdown('1.2.3')).toContain('`"context": ["cut_loop", "feed_loop"]`')
+  })
+
   it('agent store does not start polling on import', async () => {
     const { useAgentTrialStore } = await import('@/stores/agentTrialStore')
     expect(useAgentTrialStore.getState().polling).toBe(false)

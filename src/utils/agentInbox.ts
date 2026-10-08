@@ -8,6 +8,8 @@ import { parseTrialRequest, trialRequestError, CANDIDATE_FORMAT, type CandidateF
 import { computeFeatures, mixToMono } from '@/utils/hapticFeatures'
 import { localIsoString, monthOf, type KnowledgeFolder } from '@/utils/hapticKnowledge'
 import { loadRecipeSamples, type Recipe, type RecipeSamples } from '@/utils/recipe'
+import type { CueTable } from '@/utils/sceneCueTable'
+import { unknownContextCues } from '@/utils/trialContext'
 
 export const OUTPUT_RATE = 48000
 /** A request file must be unchanged this long before it is read (agents may still be writing). */
@@ -25,6 +27,8 @@ export interface InboxDeps {
   applyEffect: (buffer: AudioBuffer, params: EffectParams) => Promise<AudioBuffer>
   resample: (buffer: AudioBuffer, sampleRate: number) => Promise<AudioBuffer>
   encodeWav: (data: Float32Array, sampleRate: number) => Blob
+  /** The cue table of Scene project `project` when it is the one open (null = not known here): `scene.context` is checked against it. */
+  sceneCueTable?: (project: string) => CueTable | null
 }
 export interface InboxResult { accepted: string[]; rejected: { file: string; error: string }[] }
 
@@ -101,6 +105,9 @@ export type AcceptResult = { ok: true; trialId: string; month: string; candidate
  * so both produce the same trial folder; `storeRequest` writes request.json last.
  */
 export async function acceptTrial(folder: KnowledgeFolder, request: TrialRequest, deps: InboxDeps, storeRequest: (month: string) => Promise<void>): Promise<AcceptResult> {
+  const table = request.scene?.context?.length ? deps.sceneCueTable?.(request.scene.project) ?? null : null
+  const unknown = table && request.scene?.context ? unknownContextCues(table, request.scene.context) : []
+  if (unknown.length) return { ok: false, error: `scene.context names cues the "${request.scene!.project}" cue table does not have: ${unknown.join(', ')}` }
   const state = await folder.trialState(request.id)
   if (state.state === 'complete') return { ok: false, error: `Trial id "${request.id}" already exists; submit under a new id` }
   const now = deps.now()

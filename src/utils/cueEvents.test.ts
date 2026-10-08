@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   addEventMark, addPositionRoute, fireShot, resetAllReviews, setNone, setReview, setUndecided, addVariant, simultaneousGroups, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
   effectiveEvent, eventSceneCues, jitterGain, listEvents, MaterialPicker, matchesName, materialUsers, needsRouteForm, overwriteUsers,
-  parseEventKey, removeVariant, representativeSound, candidateSound, hasOwnMaterials, shownEventKey, resolveEventName, cueRoutePositions, materialRoutePositions, pairedClips, setOverride, setRouteClips, setSfxSounds, setVariation, soundFirstNote, trialEvent, trialsForEvent,
+  parseEventKey, removeVariant, representativeSound, candidateSound, hasOwnMaterials, shownEventKey, resolveEventName, cueRoutePositions, materialRoutePositions, pairedClips, setOverride, setRouteClips, setSfxSounds, setVariation, soundFirstNote, noSoundNote, trialEvent, trialsForEvent,
 } from './cueEvents'
 import { validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
 import { cueVoices, tableTargets } from './sceneHaptics'
@@ -70,6 +70,13 @@ describe('sound-first note before a haptic', () => {
     // A loop cue / no event: nothing.
     expect(soundFirstNote(effectiveEvent(t, { cue: 'grab', variant: null }), true)).toBeNull()
     expect(soundFirstNote(null, false)).toBeNull()
+  })
+
+  it('the sound section says "no sound" for a sound decided as none and "undecided" only without the sfx key', () => {
+    const t = sampleTable()
+    delete (t.cues.grab as { sfx?: unknown }).sfx
+    expect(noSoundNote(effectiveEvent(t, { cue: 'grab', variant: null })!)).toBe('events.undecidedSound')
+    expect(noSoundNote(effectiveEvent(t, { cue: 'detent', variant: null })!)).toBe('events.soundNoneDecided')
   })
 })
 

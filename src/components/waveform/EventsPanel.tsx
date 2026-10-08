@@ -11,8 +11,8 @@ import { clipsForCue, isLoopCue, soundAllowed, positionsForCue, routeClips, sfxS
 import type { SceneLib } from '@/utils/sceneData'
 import {
   addPositionRoute, assignEventsForTrial, effectiveEvent, eventKey, listEvents, parseEventKey, removeOwnRoute, shownEventKey,
-  setRouteClips, setSfxSounds, simultaneousGroups, trialsForEvent, updateOwnRoute,
-  resetAllReviews, setNone, setOverride, setReview, setUndecided, hasOwnMaterials, undecidedReserves, restoreReserve, soundFirstNote,
+  setRouteClips, setSfxSounds, trialsForEvent, updateOwnRoute,
+  resetAllReviews, setNone, setOverride, setReview, setUndecided, hasOwnMaterials, undecidedReserves, restoreReserve, soundFirstNote, noSoundNote,
   type EffectiveEvent, type EventRow, type SoundStatus,
 } from '@/utils/cueEvents'
 import { useConfirm } from '@/components/common/useConfirm'
@@ -29,6 +29,8 @@ import type { MaterialReserve, TrialReserve } from '@/utils/editorUiSettings'
 import { create } from 'zustand'
 import { openMaterialForAdjust } from './eventEditing'
 import { materialTrialByIds, materialTrialSummary, materialTrialTooltip, resolveMaterialTrial, type MaterialTrial } from '@/utils/materialTrial'
+import { useEventGroups } from './useEventGroups'
+import { detachCue, joinCues, type GroupEdits } from '@/utils/eventGroups'
 import './EventsPanel.css'
 import '@/components/scene/VideoOverlay.css'
 
@@ -50,13 +52,20 @@ export function EventsPanel() {
   const { t } = useI18n()
   const table = useSceneStore(s => s.table)
   const lib = useSceneStore(s => s.lib)
-  const data = useSceneStore(s => s.data)
   const saveError = useSceneStore(s => s.saveError)
   const busy = useSceneStore(s => s.busy)
   const selected = useEventStore(s => s.selected)
   const { ask, dialog } = useConfirm()
   const rows = useMemo(() => table && lib ? listEvents(table, lib) : [], [table, lib])
-  const groups = useMemo(() => table && lib && data ? simultaneousGroups(table, data.clips, lib.ticks) : [], [table, lib, data])
+  // 「同時」 groups with the user's edits (per project); an audition of a member plays the others as its context.
+  const groups = useEventGroups()
+  const groupEdits = useEditorSettings(s => lib ? s.eventGroupEdits[lib.project_name] : undefined)
+  const setGroupEdits = (next: GroupEdits | null) => {
+    if (!lib) return
+    const all = { ...useEditorSettings.getState().eventGroupEdits }
+    if (next && (next.detached.length || next.joined.length)) all[lib.project_name] = next; else delete all[lib.project_name]
+    useEditorSettings.getState().update({ eventGroupEdits: all })
+  }
   const select = (key: string) => {
     useEventStore.getState().select(key)
     // The Scene video panel (window or docked, never opened here) shows this event's moment.
@@ -77,9 +86,12 @@ export function EventsPanel() {
     return children.length ? <div key={r.key} className="events-family">{one(r)}{children.map(one)}</div> : one(r)
   }
   const listItems: ReactNode[] = [], done = new Set<string>()
+  /** The cues of each list item (a group, or one cue), in list order: 「前のイベント」 is the item before. */
+  const itemCues: string[][] = []
   for (const r of rows) {
     if (done.has(r.key)) continue
     const group = groups.find(g => g.includes(r.key))
+    itemCues.push(group ?? [r.key])
     if (!group) { listItems.push(block(r)); continue }
     group.forEach(k => done.add(k))
     listItems.push(<div key={`group:${group.join('+')}`} className="events-group" title={t('events.simultaneousHint')}>
@@ -87,12 +99,22 @@ export function EventsPanel() {
       {group.map(k => rows.find(x => x.key === k)).filter((x): x is EventRow => !!x).map(block)}
     </div>)
   }
+  // Group edits act on the selected event's cue.
+  const selectedCue = shown ? parseEventKey(shown).cue : null
+  const selectedItem = selectedCue ? itemCues.findIndex(c => c.includes(selectedCue)) : -1
+  const previousCue = selectedItem > 0 ? itemCues[selectedItem - 1][0] : null
+  const inGroup = selectedItem >= 0 && itemCues[selectedItem].length > 1
   return <div className="editor-panel events-panel">
     <div className="events-top">
       <ProjectPicker />
       <GroupPlaybackToggle />
       <EditorMenu label="⋯" title={t('events.menu')}>
         <EditorMenuItem disabled={!table} onSelect={() => void ask({ message: t('events.resetReviewsConfirm'), danger: true }).then(ok => { if (ok) useSceneStore.getState().edit(tb => resetAllReviews(tb)) })}>{t('events.resetReviews')}</EditorMenuItem>
+        <EditorMenuItem disabled={!selectedCue || !previousCue} onSelect={() => { if (selectedCue && previousCue) setGroupEdits(joinCues(groupEdits, previousCue, selectedCue)) }}>
+          {t('events.group.joinPrevious', { name: selectedCue ?? '', previous: previousCue ?? '' })}</EditorMenuItem>
+        <EditorMenuItem disabled={!selectedCue || !inGroup} onSelect={() => { if (selectedCue) setGroupEdits(detachCue(groupEdits, selectedCue)) }}>
+          {t('events.group.detach', { name: selectedCue ?? '' })}</EditorMenuItem>
+        <EditorMenuItem disabled={!groupEdits} onSelect={() => setGroupEdits(null)}>{t('events.group.reset')}</EditorMenuItem>
       </EditorMenu>
     </div>
     {dialog}
@@ -235,7 +257,7 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
     <SoundRequestField cue={key} />
     {!open ? null : !allowed ? <p className="agent-muted">{t('scene.sound.loopCue')}</p> : !e.own.sfx ? <Inherited e={e} field="sfx" edit={edit} /> : <>
       {loop && <p className="agent-muted">{t('events.loopSoundHint')}</p>}
-      {!sounds.length && <p className="agent-muted">{t(e.decided.sfx ? 'events.soundNone' : 'events.undecidedSound')}</p>}
+      {!sounds.length && <p className="agent-muted">{t(noSoundNote(e))}</p>}
       {/* A paired cue's sounds are listed as pairs in the haptic section. */}
       {e.variation?.paired === true ? sounds.length > 0 && <p className="agent-muted">{t('events.pair.inHaptics')}</p> : <MaterialList items={sounds} label={t('events.sound')} active={sounds.find(s => previewId === `${key}|sound|${s}`) ?? null} onPlay={play} onSelect={show}
         onReorder={set} onRemove={set}

@@ -36,6 +36,14 @@ describe('editor UI settings', () => {
     expect(sanitizeUiSettings({ scenePostRollSec: 'x' }).scenePostRollSec).toBe(1)
   })
 
+  it('keeps the context toggle (default on) and the hand-edited event groups per project', () => {
+    expect(sanitizeUiSettings({}).sceneContext).toBe(true)
+    expect(sanitizeUiSettings({ sceneContext: false }).sceneContext).toBe(false)
+    expect(sanitizeUiSettings({ sceneContext: 'no' }).sceneContext).toBe(true)
+    expect(sanitizeUiSettings({ eventGroupEdits: { mill: { detached: ['cut_loop', 'cut_loop'], joined: [['engage', 'feed_loop'], ['x', 'x'], ['a'], 3] }, bad: 3, empty: { detached: [], joined: [] } } }).eventGroupEdits)
+      .toEqual({ mill: { detached: ['cut_loop'], joined: [['engage', 'feed_loop']] } })
+  })
+
   it('roundtrips through the file format and rejects untagged or broken files', () => {
     const settings = { ...DEFAULT_UI_SETTINGS, clipThumbnails: true, dockLayout: layout }
     const parsed = parseUiSettingsFile(serializeUiSettings(settings))

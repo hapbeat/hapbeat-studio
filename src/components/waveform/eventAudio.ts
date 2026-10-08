@@ -17,6 +17,8 @@ import { useAuditionPlan } from './EditorScenePanel'
 import { useAdjustingLink } from './eventEditing'
 import { decidedSoundEvents } from '@/utils/decidedSound'
 import { leadFirings } from '@/utils/soundLane'
+import { contextLoopSounds, contextReplayTime, contextSoundFirings, type ContextPlan } from '@/utils/trialContext'
+import { LoopSoundPlayer, loopSoundLevel } from '@/utils/sceneLoopSounds'
 
 /**
  * Event materials in the editor: an event's sound / haptic clip opened in the
@@ -116,6 +118,8 @@ export interface SceneSounds {
   picked: SoundSource | null
   /** A scene's sounds at their firing times (FiringScheduler); null = no scene plan (or a loop sound). */
   firings: Firing[] | null
+  /** The audition's context loop cues: their sounds follow the recorded layer levels while it plays (LoopSoundPlayer); null = none. */
+  loops: Pick<ContextPlan, 'layers' | 'mark'> | null
 }
 /** What useDecidedSoundSync plays (also read for where a scene audition stops, sceneStopSec). */
 export function useSceneSounds(): SceneSounds {
@@ -154,9 +158,12 @@ export function useSceneSounds(): SceneSounds {
     if (picked) for (const atSec of plan.targets) out.push({ buffer: picked.buffer, atSec, gain: picked.volume })
     // The other firings' sounds (group members and other cues alike; their haptics go with the device stream, groupPlayback).
     for (const f of groupFirings(table, plan, { event: '', target: 'haptic', material: '' }, false).sounds) { const b = buffers[f.sound]; if (b) out.push({ buffer: b, atSec: f.atSec, gain: f.gain }) }
+    // The context's one-shot cues (scene.context, the 「同時」 group): their decided sounds at their firings.
+    if (plan.context) for (const f of contextSoundFirings(table, plan.context)) { const b = buffers[f.sound]; if (b) out.push({ buffer: b, atSec: f.atSec, gain: f.gain }) }
     return out
   }, [plan, picked, table, buffers])
-  return { picked, firings }
+  const loops = useMemo(() => plan?.context?.layers.length ? { layers: plan.context.layers, mark: plan.context.mark } : null, [plan])
+  return { picked, firings, loops }
 }
 
 /**
@@ -173,7 +180,7 @@ export function useSceneSounds(): SceneSounds {
  * `leadSec`: the haptic lead (scene hapticLeadMs) while the haptic goes to devices — every sound plays that much
  * later on the playback (< 0: earlier, the start cut), the same shift the sound lane draws (soundLaneParts).
  */
-export function useDecidedSoundSync(player: EditorBufferPlayer, { picked, firings }: SceneSounds, leadSec = 0) {
+export function useDecidedSoundSync(player: EditorBufferPlayer, { picked, firings, loops }: SceneSounds, leadSec = 0) {
   const muted = useEditorSettings(s => s.muted)
   const companion = useMemo(() => new CompanionSound(startOnPc), [])
   const scheduler = useMemo(() => new FiringScheduler(() => audio()), [])
@@ -195,6 +202,33 @@ export function useDecidedSoundSync(player: EditorBufferPlayer, { picked, firing
     ]
     return () => { unsubs.forEach(unsub => unsub()); companion.stop(); scheduler.stop() }
   }, [player, companion, scheduler])
+  useContextLoopSounds(player, muted ? null : loops, leadRef)
+}
+
+/**
+ * The context loop cues' sounds while the editor plays (the Scene tab's loop sounds, LoopSoundPlayer): a 10 ms tick reads
+ * the recorded layer levels at the replay time of the playback (its 0 s = the first target firing, the PC sounds `lead`
+ * later) and follows them; they stop with the playback (end, stop, pause), and on the next tick with PC sound off or the context switched off.
+ */
+function useContextLoopSounds(player: EditorBufferPlayer, loops: SceneSounds['loops'], lead: { current: number }) {
+  const voices = useMemo(() => new LoopSoundPlayer(), [])
+  const loopsRef = useRef(loops); loopsRef.current = loops
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null
+    const halt = () => {
+      if (timer) { clearInterval(timer); perfTrack('intervals', -1); timer = null }
+      if (ctx) voices.stopAll(ctx)
+    }
+    const tick = () => {
+      const l = loopsRef.current, s = useSceneStore.getState(), table = s.table, lib = s.lib, data = s.data
+      if (!l || !player.isPlaying() || !table || !lib || !data) { halt(); return }
+      const t = contextReplayTime(l, player.getCurrentTime(), lead.current)
+      voices.update(audio, contextLoopSounds(table, lib, l), s.sfx, layer => loopSoundLevel(data.full.levels, data.fps, lib.layers[layer], t))
+    }
+    const start = () => { if (!loopsRef.current || timer) return; timer = setInterval(tick, 10); perfTrack('intervals', 1); tick() }
+    const unsubs = [player.on('play', start), player.on('pause', halt), player.on('finish', halt), onUserStop(player, halt)]
+    return () => { unsubs.forEach(unsub => unsub()); halt() }
+  }, [player, voices, lead])
 }
 
 /** On selecting an event: the waveform panel shows its haptic (first route's clip), else its sound, else the editor clip again. */

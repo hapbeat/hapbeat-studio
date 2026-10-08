@@ -19,6 +19,10 @@ describe('sceneStopSec', () => {
     expect(sceneStopSec({ firings: [0, 0.8, 1.6], postRollSec: 1, sounds: [{ atSec: 1.6, durSec: 0.3 }], haptics: [{ atSec: 1.6, durSec: 0.2 }] })).toBeCloseTo(2.6)
     expect(sceneStopSec({ firings: [0, 0.8, 1.6], postRollSec: 1, sounds: [{ atSec: 0.8, durSec: 3 }], haptics: [] })).toBeCloseTo(3.8)
   })
+  it('with context, runs to the end of the representative stretch', () => {
+    expect(sceneStopSec({ firings: [0], postRollSec: 0.5, sounds: [{ atSec: 0, durSec: 0.3 }], haptics: [], untilSec: 2.4 })).toBe(2.4)
+    expect(sceneStopSec({ firings: [0], postRollSec: 0.5, sounds: [{ atSec: 0, durSec: 3 }], haptics: [], untilSec: 2.4 })).toBe(3)
+  })
   it('a post-roll of 0 stops with the longest material', () => {
     expect(sceneStopSec({ firings: [0], postRollSec: 0, sounds: [{ atSec: 0, durSec: 0.3 }], haptics: [{ atSec: 0, durSec: 0.16 }] })).toBe(0.3)
   })

@@ -4,6 +4,7 @@ import { encodePcm16Wav, normalizeOverPeak, processInbox, SETTLE_MS, submitTrial
 import { KnowledgeFolder } from './hapticKnowledge'
 import { MemoryDirectory } from './memoryDirectory.testutil'
 import { renderRecipe, type Recipe } from './recipe'
+import type { CueTable } from './sceneCueTable'
 
 /** Minimal AudioBuffer stand-in; the inbox only touches these members through injected deps. */
 function fakeBuffer(channels: Float32Array[], sampleRate: number): AudioBuffer {
@@ -165,6 +166,21 @@ describe('submitTrialRequest', () => {
     const valid = { ...JSON.parse(request('t-02')), candidates: [JSON.parse(request('t-02')).candidates[4]] }
     expect((await submitTrialRequest(folder, valid, deps())).ok).toBe(true)
     expect(await submitTrialRequest(folder, valid, deps())).toEqual({ ok: false, error: 'Trial id "t-02" already exists; submit under a new id' })
+  })
+
+  it('rejects scene.context cues the open project does not know (unchecked when it is not open)', async () => {
+    const root = new MemoryDirectory('root')
+    const folder = await KnowledgeFolder.open(root.asHandle())
+    const base = JSON.parse(request('t-03'))
+    const trial = { ...base, candidates: [base.candidates[4]], scene: { project: 'safety-mill', cues: ['engage'], context: ['cut_loop', 'cutloop'] } }
+    const table = { clips: {}, cues: { engage: {}, cut_loop: {} } } as unknown as CueTable
+    const withTable = { ...deps(), sceneCueTable: (project: string) => project === 'safety-mill' ? table : null }
+    expect(await submitTrialRequest(folder, trial, withTable)).toEqual({ ok: false, error: 'scene.context names cues the "safety-mill" cue table does not have: cutloop' })
+    expect(root.has('haptic-knowledge/trials/2026-09')).toBe(false)
+    root.put('hapbeat-agent/inbox/t-04.json', JSON.stringify({ ...trial, id: 't-04' }))
+    const inbox = await processInbox(folder, { ...withTable, now: () => new Date(NOW.getTime() + SETTLE_MS * 10) })
+    expect(inbox.rejected.map(r => r.error)).toEqual(['scene.context names cues the "safety-mill" cue table does not have: cutloop'])
+    expect((await submitTrialRequest(folder, trial, { ...deps(), sceneCueTable: () => null })).ok).toBe(true)
   })
 })
 

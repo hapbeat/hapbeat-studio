@@ -12,6 +12,7 @@ import { processInbox, readAgentBytes, submitTrialRequest, encodePcm16Wav, type 
 import { buildCatalog } from '@/utils/agentGuide'
 import { pageVisible, perfTrack } from '@/utils/perfRegistry'
 import { buildAgentMessage, outboxFileName, writeOutboxMessage, type HapticRequest, type Reassign, type Revise, type SoundRequest } from '@/utils/agentOutbox'
+import type { CueTable } from '@/utils/sceneCueTable'
 import { KnowledgeFolder, localIsoString, trialSlugs, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
 
 const POLL_MS = 2000
@@ -38,8 +39,11 @@ interface AgentTrialState {
   playRequested: boolean
   /** Binds to the open editor folder, imports inbox requests and reloads trials. */
   refresh: () => Promise<void>
-  /** Polls every 2 s (skipped while the page is hidden) and keeps catalog.json in sync with editor documents. */
-  startPolling: () => void
+  /**
+   * Polls every 2 s (skipped while the page is hidden) and keeps catalog.json in sync with editor documents.
+   * `sceneCueTable`: the open Scene project's cue table by project name (null = not open), to check a trial's `scene.context`.
+   */
+  startPolling: (sceneCueTable?: (project: string) => CueTable | null) => void
   stopPolling: () => void
   /** Writes hapbeat-agent/catalog.json from the current editor documents now. */
   writeCatalog: () => Promise<void>
@@ -69,6 +73,8 @@ let pollTimer: ReturnType<typeof setInterval> | undefined
 let catalogTimer: ReturnType<typeof setTimeout> | undefined
 let unsubscribeDocuments: (() => void) | undefined
 let running: Promise<void> | null = null
+/** Set by startPolling: what scene.context is checked against (InboxDeps.sceneCueTable). */
+let cueTableOf: ((project: string) => CueTable | null) | undefined
 /** Serializes inbox imports and direct submissions (both write trials/ and the derived files). */
 let queue: Promise<unknown> = Promise.resolve()
 function exclusive<T>(job: () => Promise<T>): Promise<T> {
@@ -95,6 +101,7 @@ const inboxDeps = (): InboxDeps => ({
   applyEffect,
   resample,
   encodeWav: encodePcm16Wav,
+  sceneCueTable: cueTableOf,
 })
 const newestFirst = (records: TrialRecord[]) => [...records].sort((a, b) => Date.parse(b.trial.receivedAt) - Date.parse(a.trial.receivedAt) || a.trial.id.localeCompare(b.trial.id))
 
@@ -143,7 +150,8 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
       })
       return running
     },
-    startPolling: () => {
+    startPolling: sceneCueTable => {
+      cueTableOf = sceneCueTable
       if (pollTimer !== undefined) return
       set({ polling: true })
       // A hot reload keeps the previous module's timer alive: stop it (one poll per page).

@@ -20,6 +20,8 @@ import { onUserStop } from '@/utils/playerStops'
 import { eventSceneCues } from '@/utils/cueEvents'
 import { markMaterials } from '@/utils/groupPlayback'
 import { RATE as HAPTIC_RATE } from '@/utils/sceneHaptics'
+import { auditionContext, type ContextPlan } from '@/utils/trialContext'
+import { useEventGroups } from './useEventGroups'
 import './EditorScenePanel.css'
 
 export type SceneSubject = { kind: 'trial'; trialId: string | null } | { kind: 'clip'; clipId: string | null } | { kind: 'event'; key: string | null }
@@ -58,8 +60,12 @@ export function useSceneChoice(subject: SceneSubject) {
   return { id, trial, scene, wanted, state, chosen: state.kind === 'ready' ? state.chosen : null, choose }
 }
 
-/** What the current editor audition plays at the scene's timing (offsets from its first firing): the auditioned material at the targets' firings, the decided sound of the other cues at theirs. */
-export interface AuditionPlan { targets: number[]; others: { atSec: number; name: string }[] }
+/**
+ * What the current editor audition plays at the scene's timing (offsets from its first firing): the auditioned material at the
+ * targets' firings, the decided sound of the other cues at theirs, and the context (`contextCues`: a trial's `scene.context` and the
+ * other cues of the target's 「同時」 group; `context`: what they play, null while 「周りのイベントも鳴らす」 is off or there are none).
+ */
+export interface AuditionPlan { targets: number[]; others: { atSec: number; name: string }[]; contextCues: string[]; context: ContextPlan | null }
 /** The plan of the current audition (an AI candidate, else an event material); null = once (a recorded clip, a loop cue, nothing shown). */
 export function useAuditionPlan(): AuditionPlan | null {
   const audition = useAgentTrialStore(s => s.audition)
@@ -70,15 +76,20 @@ export function useAuditionPlan(): AuditionPlan | null {
   const adjustEvent = adjusting && adjusting.project === lib?.project_name ? adjusting.event : null
   const subject: SceneSubject = audition ? { kind: 'trial', trialId: audition.trialId } : previewEvent ? { kind: 'event', key: previewEvent }
     : adjustEvent ? { kind: 'event', key: adjustEvent } : { kind: 'clip', clipId: null }
-  const { chosen } = useSceneChoice(subject)
+  const { chosen, trial } = useSceneChoice(subject)
+  const data = useSceneStore(s => s.data)
+  const groups = useEventGroups()
+  const contextOn = useEditorSettings(s => s.sceneContext)
   const plan = useMemo((): AuditionPlan | null => {
     if (!chosen?.segment || (!audition && !previewEvent && !adjustEvent)) return null
     if (lib && chosen.cue && isLoopCue(lib, parseEventKey(chosen.cue).cue)) return null
+    const own = trial?.scene?.project === lib?.project_name ? trial?.scene?.context ?? [] : []
     return {
       targets: chosen.marks.filter(m => m.target).map(m => m.t - chosen.mark),
       others: chosen.marks.filter(m => !m.target).map(m => ({ atSec: m.t - chosen.mark, name: m.name })),
+      ...auditionContext({ own, groups, targets: chosen.segment.names, on: contextOn, data, lib, mark: chosen.mark, end: chosen.segment.end }),
     }
-  }, [chosen, audition, previewEvent, adjustEvent, lib])
+  }, [chosen, audition, previewEvent, adjustEvent, lib, trial, data, groups, contextOn])
   // By value: the AI trials poll replaces the trial objects every 2 s, which recomputes the same plan;
   // keeping the same object keeps the repeated buffer and the scheduled sounds playing.
   const stable = useRef<{ key: string; plan: AuditionPlan | null }>({ key: 'null', plan: null })
@@ -285,6 +296,7 @@ export function EditorScenePanel() {
   // A synced scene audition ends where the editor playback does (its buffer runs to the scene's stop, sceneStopSec);
   // otherwise the stretch's own end (a recorded clip: the video's end).
   const plan = useAuditionPlan()
+  const contextOn = useEditorSettings(s => s.sceneContext)
   const end = synced && plan && chosen && audioBuffer ? sceneVideoTime(chosen.mark, audioBuffer.duration) : chosen?.end ?? null
   useEffect(() => {
     if (!synced || !chosen) return
@@ -355,6 +367,8 @@ export function EditorScenePanel() {
       {!message && <label className="editor-scene-lead" title={t('editor.scene.postRollHint')}>{t('editor.scene.postRoll')}
         <input type="number" min={0} max={5} step={0.1} value={postRollSetting} disabled={!chosen?.segment} onChange={e => { const x = parseFloat(e.target.value); if (Number.isFinite(x)) useEditorSettings.getState().update({ scenePostRollSec: Math.max(0, Math.min(5, x)) }) }} />
         {t('editor.scene.postRollUnit')}</label>}
+      {!message && synced && plan && plan.contextCues.length > 0 && <label className="editor-scene-context" title={t('editor.scene.contextHint', { cues: plan.contextCues.join(', ') })}>
+        <input type="checkbox" checked={contextOn} onChange={e => useEditorSettings.getState().update({ sceneContext: e.target.checked })} />{t('editor.scene.context')}</label>}
     </div>
     {message ? <p className="agent-muted">{message}</p> : <>
       <div className="editor-scene-stage" title={hint} onClick={e => { e.currentTarget.closest<HTMLElement>('.editor-scene-panel')?.focus(); focusedRef.current = true; setFocused(true); if (synced) togglePause() }}>

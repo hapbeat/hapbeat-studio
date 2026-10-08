@@ -41,11 +41,13 @@ export function groupFirings(table: CueTable, plan: GroupPlan, shown: { event: s
 /**
  * The haptic stream of a group play (mono, RATE): `base` (the shown haptic as played, at its own rate; null for a
  * shown sound) plus each part's clip × its gain, `durationSec` long (the player's length, so seeks map 1:1).
+ * `layers`: an already rendered stream added as it is (an audition's context loops, renderContextLoops).
  */
-export function mixGroupHaptics(base: { data: Float32Array; rate: number } | null, parts: readonly HapticPart[], pcm: Record<string, Float32Array>, durationSec: number): Float32Array {
+export function mixGroupHaptics(base: { data: Float32Array; rate: number } | null, parts: readonly HapticPart[], pcm: Record<string, Float32Array>, durationSec: number, layers: Float32Array | null = null): Float32Array {
   const out = new Float32Array(Math.max(1, Math.round(durationSec * RATE)))
   const add = (data: Float32Array, start: number, gain: number) => { for (let i = 0; i < data.length && start + i < out.length; i++) if (start + i >= 0) out[start + i] += data[i] * gain }
   if (base) add(base.rate === RATE ? base.data : resampleClip(base.data, base.rate / RATE), 0, 1)
+  if (layers) add(layers, 0, 1)
   for (const p of parts) { const data = pcm[p.clip]; if (data) add(data, Math.round(p.atSec * RATE), p.gain) }
   for (let i = 0; i < out.length; i++) out[i] = Math.max(-1, Math.min(1, out[i]))
   return out

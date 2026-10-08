@@ -86,6 +86,11 @@ export function soundFirstNote(e: EffectiveEvent | null, loop: boolean): 'events
   return e.decided.sfx ? 'events.soundNoneDecided' : 'events.soundFirst'
 }
 
+/** The sound section's note for an event without sounds: decided as none (`sfx: null`), or still undecided (no `sfx` key). */
+export function noSoundNote(e: Pick<EffectiveEvent, 'decided'>): 'events.soundNoneDecided' | 'events.undecidedSound' {
+  return e.decided.sfx ? 'events.soundNoneDecided' : 'events.undecidedSound'
+}
+
 /** Undecided (no key) / decided as none (null / []) / a material; each decided state is tentative or approved. */
 export type MaterialState = 'undecided' | 'none' | 'set'
 export interface MaterialStatus { state: MaterialState; review: ReviewState }

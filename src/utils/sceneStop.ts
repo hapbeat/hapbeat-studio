@@ -14,7 +14,8 @@ export interface StopPart {
 
 const partEnd = (p: StopPart) => p.atSec + p.durSec / (p.rate && p.rate > 0 ? p.rate : 1)
 
-export function sceneStopSec(o: { firings: readonly number[]; postRollSec: number; sounds: readonly StopPart[]; haptics: readonly StopPart[] }): number {
+/** `untilSec`: never before this either (an audition with context runs to the end of the representative stretch). */
+export function sceneStopSec(o: { firings: readonly number[]; postRollSec: number; sounds: readonly StopPart[]; haptics: readonly StopPart[]; untilSec?: number }): number {
   const last = Math.max(0, ...o.firings)
-  return Math.max(last + Math.max(0, o.postRollSec), ...o.sounds.map(partEnd), ...o.haptics.map(partEnd))
+  return Math.max(last + Math.max(0, o.postRollSec), ...o.sounds.map(partEnd), ...o.haptics.map(partEnd), o.untilSec ?? 0)
 }
