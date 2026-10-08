@@ -1,90 +1,91 @@
-import { useEffect, useState, useCallback } from 'react'
-import type { DeviceInfo, ManagerMessage, SpaceResult } from '@/types/manager'
+import type { DeviceInfo } from '@/types/manager'
+import type { CapacityProblem, TargetSpaceSummary } from '@/utils/deviceSpace'
+import type { KitStorageEstimate } from '@/utils/kitSizeEstimate'
 import { formatFileSize } from '@/utils/wavIO'
 import { useI18n } from '@/i18n/I18nProvider'
-
-const DEFAULT_CAPACITY = 4 * 1024 * 1024 // 4MB
+import { summarizeCapacityProblems } from './capacityText'
 
 interface CapacityGaugeProps {
-  kitSize: number
+  /** Bytes the kit's clips will take on the device (stored-size estimate). */
+  estimate: KitStorageEstimate
   managerConnected: boolean
-  devices: DeviceInfo[]
-  send: (msg: ManagerMessage) => void
+  /** Devices the kit would be deployed to. */
+  targets: DeviceInfo[]
+  summary: TargetSpaceSummary
+  problems: CapacityProblem[]
+  onRefresh: () => void
 }
 
-export function CapacityGauge({ kitSize, managerConnected, devices, send }: CapacityGaugeProps) {
+/**
+ * Device clip storage of the deploy targets vs. the kit's stored size.
+ * Shows the device's own reading; with several targets, the one with the
+ * least free space. Without a reading the bar is grey and Used / Free say
+ * "unknown" — never an assumed capacity.
+ */
+export function CapacityGauge({ estimate, managerConnected, targets, summary, problems, onRefresh }: CapacityGaugeProps) {
   const { t } = useI18n()
-  const [space, setSpace] = useState<SpaceResult | null>(null)
-  const [queried, setQueried] = useState(false)
+  const kitBytes = estimate.clipBytes
+  const space = summary.limiting?.space ?? null
+  const problemText = summarizeCapacityProblems(problems, t)
 
-  const querySpace = useCallback(() => {
-    if (!managerConnected || devices.length === 0) return
-    // No target — Manager answers for its selected device(s)
-    send({ type: 'query_space', payload: {} })
-    setQueried(true)
-  }, [managerConnected, devices, send])
+  const usedPct = space ? (space.usedBytes / space.totalBytes) * 100 : 0
+  const kitPct = space ? (kitBytes / space.totalBytes) * 100 : 0
 
-  // Query space on mount / device change
-  useEffect(() => {
-    if (managerConnected && devices.length > 0 && !queried) {
-      querySpace()
+  let note: string
+  if (problemText) note = problemText
+  else if (!managerConnected) note = t('kit.capacity.helperOffline')
+  else if (targets.length === 0) note = t('kit.capacity.noDevice')
+  else if (space && summary.targetCount > 1) {
+    note = t('kit.capacity.lowest', { device: summary.limiting!.name || summary.limiting!.ip, count: summary.targetCount })
+    if (summary.knownCount < summary.targetCount) {
+      note += t('kit.capacity.partial', { known: summary.knownCount, count: summary.targetCount })
     }
-  }, [managerConnected, devices.length, queried, querySpace])
+  } else if (space) note = ''
+  else if (summary.pendingCount > 0) note = t('kit.capacity.querying')
+  else if (summary.boardEstimate) {
+    note = t('kit.capacity.boardEstimate', { board: summary.boardEstimate.board, size: formatFileSize(summary.boardEstimate.bytes) })
+  } else note = t('kit.capacity.unknown')
 
-  // Listen for space_result via custom event (set up in useHelperConnection)
-  useEffect(() => {
-    const handler = (e: CustomEvent<SpaceResult>) => {
-      setSpace(e.detail)
-    }
-    window.addEventListener('hapbeat-space-result', handler as EventListener)
-    return () => window.removeEventListener('hapbeat-space-result', handler as EventListener)
-  }, [])
-
-  const totalBytes = space?.total_bytes ?? DEFAULT_CAPACITY
-  const usedBytes = space?.used_bytes ?? 0
-  const freeBytes = space?.free_bytes ?? (totalBytes - usedBytes)
-  const usedPct = (usedBytes / totalBytes) * 100
-  const kitPct = (kitSize / totalBytes) * 100
-  const wouldExceed = kitSize > freeBytes
-
-  if (kitSize === 0 && !space) return null
+  const volumeDevice = targets[0]
 
   return (
     <div className="capacity-gauge">
-      <div className="capacity-bar">
-        <div
-          className="capacity-used"
-          style={{ width: `${Math.min(usedPct, 100)}%` }}
-        />
-        <div
-          className={`capacity-kit ${wouldExceed ? 'exceed' : ''}`}
-          style={{ width: `${Math.min(kitPct, 100 - usedPct)}%`, left: `${usedPct}%` }}
-        />
+      <div className={`capacity-bar${space ? '' : ' unknown'}`}>
+        {space && (
+          <>
+            <div className="capacity-used" style={{ width: `${Math.min(usedPct, 100)}%` }} />
+            <div
+              className={`capacity-kit ${problems.length > 0 ? 'exceed' : ''}`}
+              style={{ width: `${Math.max(0, Math.min(kitPct, 100 - usedPct))}%`, left: `${Math.min(usedPct, 100)}%` }}
+            />
+          </>
+        )}
       </div>
       <div className="capacity-labels">
-        <span title="Device storage in use">
-          Used: {formatFileSize(usedBytes)} / {formatFileSize(totalBytes)}
+        <span title={t('kit.capacity.usedTitle')}>
+          {space
+            ? t('kit.capacity.used', { used: formatFileSize(space.usedBytes), total: formatFileSize(space.totalBytes) })
+            : t('kit.capacity.usedUnknown')}
         </span>
-        {kitSize > 0 && (
-          <span className={wouldExceed ? 'capacity-warning' : ''} title="Size of the current kit">
-            Kit: {formatFileSize(kitSize)}
-            {wouldExceed && ' (exceeds free space!)'}
-          </span>
-        )}
-        <span title="Remaining device storage">Free: {formatFileSize(freeBytes)}</span>
-        {devices.length > 0 && devices[0].volumeWiper != null && (
+        <span className={problems.length > 0 ? 'capacity-warning' : ''} title={t('kit.capacity.kitTitle', { count: estimate.clipCount })}>
+          {t('kit.capacity.kit', { size: formatFileSize(kitBytes) })}
+        </span>
+        <span title={t('kit.capacity.freeTitle')}>
+          {space ? t('kit.capacity.free', { free: formatFileSize(space.freeBytes) }) : t('kit.capacity.freeUnknown')}
+        </span>
+        {volumeDevice?.volumeWiper != null && (
           <span className="capacity-vol" title={t('kit.volumeWiperTitle')}>
-            Vol {devices[0].volumeWiper}/128 ({Math.round((devices[0].volumeWiper / 127) * 100)}%)
+            Vol {volumeDevice.volumeWiper}/128 ({Math.round((volumeDevice.volumeWiper / 127) * 100)}%)
           </span>
         )}
       </div>
-      {!space && (
-        <div className="capacity-note">
-          {managerConnected && devices.length > 0
-            ? 'Querying device...'
-            : 'Estimated (no device connected)'}
-        </div>
-      )}
+      {/* Always one line tall so the status text never moves the events list. */}
+      <div className={`capacity-note${problemText ? ' capacity-warning' : ''}`} title={note}>
+        <span className="capacity-note-text">{note}</span>
+        {managerConnected && targets.length > 0 && (
+          <button type="button" className="capacity-refresh" onClick={onRefresh} title={t('kit.capacity.refresh')} aria-label={t('kit.capacity.refresh')}>↻</button>
+        )}
+      </div>
     </div>
   )
 }

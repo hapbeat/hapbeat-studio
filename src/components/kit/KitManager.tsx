@@ -10,6 +10,10 @@ import type { LibraryClip, LibraryViewMode, KitDefinition } from '@/types/librar
 import type { DeviceInfo } from '@/types/manager'
 import { resolvePlaybackTargets } from '@/utils/playbackDevices'
 import { CapacityGauge } from './CapacityGauge'
+import { summarizeCapacityProblems } from './capacityText'
+import { useDeviceSpace } from '@/hooks/useDeviceSpace'
+import { estimateKitStorageFromEvents, estimateKitStorageFromFiles } from '@/utils/kitSizeEstimate'
+import { findCapacityProblems, summarizeTargetSpace, type CapacityProblem, type SpaceEntry } from '@/utils/deviceSpace'
 import { KitEventRow } from './editor/KitEventRow'
 import { KitEventEditModal } from './editor/KitEventEditModal'
 import { ClipModeInfoModal } from './editor/ClipModeInfoModal'
@@ -1549,24 +1553,23 @@ function KitEditor() {
     }
   }, [activeKitId, activeKit, clips, dragOverIdx, editLocked, addEventToKit, updateKit, toast])
 
-  // Kit のデバイス flash 使用量は FIRE (command) モードのイベントだけ数える。
-  // CLIP はデバイスに WAV を載せず SDK 側ストリームで送るため flash を消費しない。
-  // multi-mode (FIRE+CLIP) は command 側だけが install-clips/ に焼かれる
-  // ので、ev.modes に 'command' が含まれていれば 1 回だけ計上する。
-  const kitSize = activeKit
-    ? activeKit.events.reduce((s, ev) => {
-        const hasCommand = ev.modes?.length
-          ? ev.modes.includes('command')
-          : true  // legacy event without modes[] — assume command
-        if (!hasCommand) return s
-        // Independence: each event carries its own clipFileSize snapshot
-        // (no library lookup). The estimate is roughly the source byte
-        // count — the actual on-disk install-clips/ WAV is 16 kHz PCM16
-        // which may be smaller, but this is the right ballpark for the
-        // user's "is this kit going to fit on flash?" sanity check.
-        return s + (ev.clipFileSize ?? 0)
-      }, 0) + 1024
-    : 0
+  // Kit size as stored on the device (16 kHz, IMA ADPCM, unique clips, FIRE
+  // mode only — see kitSizeEstimate.ts), checked against the storage each
+  // deploy target reports. Deploy re-checks with the exact built files.
+  const kitSelectedIps = useDeviceStore((s) => s.kitSelectedIps)
+  const infoCache = useDeviceStore((s) => s.infoCache)
+  const deployTargets = useMemo(() => resolvePlaybackTargets(devices, kitSelectedIps), [devices, kitSelectedIps])
+  const { entries: spaceEntries, refresh: refreshSpace } = useDeviceSpace(deployTargets.map((d) => d.ipAddress))
+  const boardOf = useCallback((ip: string) => infoCache[ip]?.board, [infoCache])
+  const kitEstimate = useMemo(() => estimateKitStorageFromEvents(activeKit?.events ?? []), [activeKit?.events])
+  const spaceSummary = useMemo(
+    () => summarizeTargetSpace(deployTargets, spaceEntries, boardOf),
+    [deployTargets, spaceEntries, boardOf],
+  )
+  const capacityProblems = useMemo(
+    () => findCapacityProblems(kitEstimate, deployTargets, spaceEntries, boardOf),
+    [kitEstimate, deployTargets, spaceEntries, boardOf],
+  )
 
   return (
     <div className="kit-editor" ref={kitPanelRef} tabIndex={-1}>
@@ -1780,11 +1783,12 @@ function KitEditor() {
                     >{t('kit.loadDevice')}</button>
                   </details>
 
-                  <CapacityGauge kitSize={kitSize} managerConnected={managerConnected} devices={devices} send={send} />
+                  <CapacityGauge estimate={kitEstimate} managerConnected={managerConnected} targets={deployTargets}
+                    summary={spaceSummary} problems={capacityProblems} onRefresh={refreshSpace} />
 
                   <div className="kit-events-header">
                     <span>Events ({activeKit.events.length})</span>
-                    <span className="kit-size-label" title={t('kit.fireCapacityTitle')}>{formatFileSize(kitSize)}</span>
+                    <span className="kit-size-label" title={t('kit.fireCapacityTitle')}>{formatFileSize(kitEstimate.clipBytes)}</span>
                     <select
                       className="library-sort"
                       value={`${kitSort.by}:${kitSort.order}`}
@@ -1937,7 +1941,8 @@ function KitEditor() {
                   </fieldset>
 
                   <KitExportSection kit={activeKit} isExporting={isExporting} setIsExporting={setIsExporting}
-                    managerConnected={managerConnected} devices={devices} send={send} />
+                    managerConnected={managerConnected} devices={devices} send={send}
+                    capacityProblems={capacityProblems} spaceEntries={spaceEntries} boardOf={boardOf} />
                 </div>
               )}
             </div>
@@ -2038,12 +2043,16 @@ interface DeployProgressState {
   stuck?: boolean
 }
 
-function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, devices, send }: {
+function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, devices, send, capacityProblems, spaceEntries, boardOf }: {
   kit: import('@/types/library').KitDefinition
   isExporting: boolean; setIsExporting: (v: boolean) => void
   managerConnected: boolean
   devices: import('@/types/manager').DeviceInfo[]
   send: (msg: import('@/types/manager').ManagerMessage) => void
+  /** Reasons the kit (metadata estimate) won't fit a deploy target. */
+  capacityProblems: CapacityProblem[]
+  spaceEntries: Record<string, SpaceEntry>
+  boardOf: (ip: string) => string | undefined
 }) {
   const { t } = useI18n()
   const { toast } = useToast()
@@ -2285,6 +2294,15 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
         if (built) toast(t('kit.folderSaveWarning'), 'warning')
       }
       if (!built) { toast('Build failed', 'error'); return }
+      // Final capacity gate on the exact files being shipped (the button's
+      // check uses the events' metadata estimate).
+      const exact = await estimateKitStorageFromFiles(built.files)
+      const blocking = summarizeCapacityProblems(findCapacityProblems(exact, deployTargets, spaceEntries, boardOf), t)
+      if (blocking) {
+        toast(t('kit.capacity.deployBlocked', { reason: blocking }), 'error')
+        setProgressByIp({})
+        return
+      }
       const { buildKitZip } = await import('@/utils/kitExporter')
       const { blob } = await buildKitZip(built.files, built.kitId)
       const ab = await blob.arrayBuffer(); const bytes = new Uint8Array(ab)
@@ -2296,7 +2314,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
       toast(`Sending "${built.kitId}" to ${targetIps.length} device(s)…`, 'info')
     } catch (err) { toast(`Deploy failed: ${err instanceof Error ? err.message : err}`, 'error') }
     finally { setIsExporting(false) }
-  }, [kit, deployTargets, selectedIps, send, preflightKit, setIsExporting, toast, t])
+  }, [kit, deployTargets, selectedIps, send, preflightKit, setIsExporting, toast, t, spaceEntries, boardOf])
 
   // Status copy shown beside the Deploy button. Save Folder / Deploy
   // both push their `saving → saved` transition through the store's
@@ -2333,7 +2351,20 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
   // name is valid — device / Helper presence is irrelevant. Deploy
   // additionally requires Helper online + at least one device.
   const saveBlocked = kit.events.length === 0 || isExporting || !outRoot || !!validateKitName(kit.name)
-  const deployBlocked = saveBlocked || !managerConnected || devices.length === 0
+  const capacityBlockReason = summarizeCapacityProblems(capacityProblems, t)
+  const deployBlocked = saveBlocked || !managerConnected || devices.length === 0 || !!capacityBlockReason
+
+  // Save status (saving / saved / error) takes precedence over the passive
+  // deploy-readiness hints — explicit Save Folder works without devices, so
+  // a "デバイスが見つかりません" message would lie about what's actually happening.
+  const idleInfo = !outRoot
+    ? t('kit.selectFolder')
+    : saveStatusLabel
+      ? saveStatusLabel
+      : !managerConnected ? 'Helper offline'
+      : devices.length === 0 ? 'デバイスが見つかりません'
+      : capacityBlockReason ? t('kit.capacity.deployBlocked', { reason: capacityBlockReason })
+      : `${devices.length} device(s) ready`
 
   return (
     <div className="kit-export-section-wrap">
@@ -2342,7 +2373,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
           className="library-btn primary"
           disabled={deployBlocked}
           onClick={handleDeploy}
-          title={t('kit.deployTitle')}
+          title={capacityBlockReason ? t('kit.capacity.deployBlocked', { reason: capacityBlockReason }) : t('kit.deployTitle')}
         >Deploy</button>
         <button
           className="library-btn"
@@ -2360,20 +2391,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
             Multiple devices stack vertically inside this column. */}
         <div className="kit-deploy-progress-inline">
           {Object.keys(progressByIp).length === 0 ? (
-            <span className="kit-export-info muted">
-              {/* Save status (saving / saved / error) takes precedence
-                  over the passive deploy-readiness hints — explicit
-                  Save Folder works without devices, so a
-                  "デバイスが見つかりません" message would lie about what's
-                  actually happening. */}
-              {!outRoot
-                ? t('kit.selectFolder')
-                : saveStatusLabel
-                  ? saveStatusLabel
-                  : !managerConnected ? 'Helper offline'
-                  : devices.length === 0 ? 'デバイスが見つかりません'
-                  : `${devices.length} device(s) ready`}
-            </span>
+            <span className="kit-export-info muted" title={idleInfo}>{idleInfo}</span>
           ) : (
             // 1-line compact rows: [ip] [bar] [pct] [msg]
             // Keeps section height stable regardless of how many
