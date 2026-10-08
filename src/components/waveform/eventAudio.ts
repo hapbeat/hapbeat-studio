@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useEditorSettings } from '@/stores/editorSettings'
 import { useEventStore, type EventPreview } from '@/stores/eventStore'
@@ -16,6 +16,7 @@ import { perfTrack } from '@/utils/perfRegistry'
 import { useAuditionPlan } from './EditorScenePanel'
 import { useAdjustingLink } from './eventEditing'
 import { decidedSoundEvents } from '@/utils/decidedSound'
+import { leadFirings } from '@/utils/soundLane'
 
 /**
  * Event materials in the editor: an event's sound / haptic clip opened in the
@@ -102,11 +103,11 @@ const audio = () => {
   if (ctx.state === 'suspended') void ctx.resume()
   return ctx
 }
-const startOnPc = (source: SoundSource, offset: number) => {
+const startOnPc = (source: SoundSource, offset: number, delay: number) => {
   const c = audio(), src = c.createBufferSource(), g = c.createGain()
   src.buffer = source.buffer; src.loop = !!source.loop; g.gain.value = source.volume
   src.connect(g).connect(c.destination)
-  src.start(0, offset)
+  src.start(delay > 0 ? c.currentTime + delay : 0, offset)
   return { stop: () => src.stop() }
 }
 
@@ -168,18 +169,23 @@ export function useSceneSounds(): SceneSounds {
  *
  * The sound is chosen by value (buffer + volume): store refreshes (the AI trials
  * poll every 2 s) never restart or stop what is playing (CompanionSound).
+ *
+ * `leadSec`: the haptic lead (scene hapticLeadMs) while the haptic goes to devices — every sound plays that much
+ * later on the playback (< 0: earlier, the start cut), the same shift the sound lane draws (soundLaneParts).
  */
-export function useDecidedSoundSync(player: EditorBufferPlayer, { picked, firings }: SceneSounds) {
+export function useDecidedSoundSync(player: EditorBufferPlayer, { picked, firings }: SceneSounds, leadSec = 0) {
   const muted = useEditorSettings(s => s.muted)
   const companion = useMemo(() => new CompanionSound(startOnPc), [])
   const scheduler = useMemo(() => new FiringScheduler(() => audio()), [])
+  const leadRef = useRef(leadSec); leadRef.current = leadSec
+  const shifted = useMemo(() => firings && leadSec ? leadFirings(firings, leadSec) : firings, [firings, leadSec])
   // By value (see CompanionSound / FiringScheduler): recomputing the same sounds keeps them playing.
   useEffect(() => {
-    scheduler.setFirings(muted || !firings ? [] : firings)
+    scheduler.setFirings(muted || !shifted ? [] : shifted)
     companion.setSource(muted || firings ? null : picked)
-  }, [companion, scheduler, muted, firings, picked?.buffer, picked?.volume, picked?.loop])
+  }, [companion, scheduler, muted, shifted, firings, picked?.buffer, picked?.volume, picked?.loop])
   useEffect(() => {
-    const play = (time: number) => { companion.play(time); scheduler.play(time) }
+    const play = (time: number) => { companion.play(time, leadRef.current); scheduler.play(time) }
     const unsubs = [
       player.on('play', play),
       player.on('seeking', time => { if (player.isPlaying()) play(time) }),

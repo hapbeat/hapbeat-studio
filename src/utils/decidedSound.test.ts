@@ -18,7 +18,7 @@ describe('decided sound with what the editor shows', () => {
     companion.setSource(picked)
     companion.play(0)
     expect(start).toHaveBeenCalledTimes(1)
-    expect(start).toHaveBeenCalledWith(picked, 0)
+    expect(start).toHaveBeenCalledWith(picked, 0, 0)
   })
 
   it('no extra sound with an adjusted sound material, another project, or a sound preview; auditions as before', () => {

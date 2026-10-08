@@ -13,6 +13,9 @@ import { useEditorSettings } from '@/stores/editorSettings'
 import type { EditorBufferPlayer } from '@/utils/editorBufferPlayer'
 import { scenePause } from '@/utils/editorSceneSync'
 import { useEditor } from './editorContext'
+import { laneColumns, lanePxPerSec, laneX, type SoundLane } from '@/utils/soundLane'
+import { useSceneSettings } from '@/stores/sceneSettings'
+import { NumberField } from '@/components/scene/SceneCuePanels'
 
 type OverviewMode = 'left' | 'right' | 'move' | 'seek'
 
@@ -22,8 +25,10 @@ type OverviewMode = 'left' | 'right' | 'move' | 'seek'
  * range, a double click plays from the start. `transport` sits right under the waveform.
  * `scale` multiplies the drawing only (a material's intensity): a change redraws, nothing is decoded or rendered.
  * `placements`: the copies of a material placed at its event's firings; each gets a start line and an alternating tint.
+ * `soundLane`: the PC sounds of a haptic audition, drawn in a fixed-height lane above the haptic on the same time axis
+ * (same zoom, scroll and playhead); null = the haptic alone.
  */
-export function WaveformDisplay({ original, bufferOverride, player, viewKey, transport, scale = 1, placements = [] }: { original: boolean; bufferOverride?: AudioBuffer; player: EditorBufferPlayer; viewKey?: string; transport?: ReactNode; scale?: number; placements?: readonly { start: number; end: number }[] }) {
+export function WaveformDisplay({ original, bufferOverride, player, viewKey, transport, scale = 1, placements = [], soundLane = null }: { original: boolean; bufferOverride?: AudioBuffer; player: EditorBufferPlayer; viewKey?: string; transport?: ReactNode; scale?: number; placements?: readonly { start: number; end: number }[]; soundLane?: SoundLane | null }) {
   const { t } = useI18n()
   const { playAt, stopPlayback, isPlaybackActive, playFromStart } = useEditor()
   const height = useEditorSettings(s => s.height)
@@ -184,7 +189,9 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
           event.preventDefault(); event.stopPropagation(); selectAll()
         }
       }}>
+      {soundLane && ready && duration > 0 && <SoundLaneView lane={soundLane} viewStart={viewport.start} zoom={zoom} duration={duration} time={time} />}
       <div ref={container} className="waveform-container" />
+      {soundLane && ready && <span className="editor-lane-label haptic" aria-hidden="true" style={{ top: SOUND_LANE_HEIGHT }}>{t('editor.lane.haptic')}</span>}
       {placements.length > 0 && ready && duration > 0 && (() => {
         // One firing each: a line where it starts and a tint over its length, alternating so copies never read as one long file.
         const width = surface.current?.clientWidth ?? 0, px = Math.max(zoom, width / duration)
@@ -274,6 +281,58 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
     <div className="editor-seek-row">
       <label>{t('editor.seek')}<input type="range" min={0} max={duration || 1} step={.001} value={time} disabled={!ready} onChange={event => player.setTime(Number(event.target.value))} /></label>
       <span>{t('editor.visibleRange')} {viewport.start.toFixed(3)}–{viewport.end.toFixed(3)} s</span>
+    </div>
+  </div>
+}
+
+/** Height (px) of the sound lane: fixed, so the haptic below never moves with what the lane shows. */
+const SOUND_LANE_HEIGHT = 84
+
+/**
+ * The PC sound above the haptic: min / max per pixel of the lane's samples at the haptic lane's scroll and zoom, the
+ * playhead across it, a mark where the haptic lead puts the sound's 0, and the lead (scene hapticLeadMs) to edit.
+ */
+function SoundLaneView({ lane, viewStart, zoom, duration, time }: { lane: SoundLane; viewStart: number; zoom: number; duration: number; time: number }) {
+  const { t } = useI18n()
+  const box = useRef<HTMLDivElement>(null)
+  const canvas = useRef<HTMLCanvasElement>(null)
+  const [width, setWidth] = useState(0)
+  const setting = useSceneSettings(s => s.hapticLeadMs)
+  useEffect(() => {
+    const element = box.current
+    if (!element) return
+    const observer = new ResizeObserver(() => setWidth(element.clientWidth))
+    observer.observe(element); setWidth(element.clientWidth)
+    return () => observer.disconnect()
+  }, [])
+  const px = lanePxPerSec(zoom, width, duration)
+  useEffect(() => {
+    const c = canvas.current, ctx = c?.getContext('2d')
+    if (!c || !ctx || !width) return
+    const ratio = window.devicePixelRatio || 1, height = c.clientHeight
+    c.width = Math.round(width * ratio); c.height = Math.round(height * ratio)
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0); ctx.clearRect(0, 0, width, height)
+    const mid = height / 2
+    ctx.fillStyle = '#60a5fa'
+    laneColumns(lane.data, lane.rate, viewStart, px, Math.ceil(width)).forEach(([lo, hi], x) => {
+      const top = mid - Math.min(1, hi) * mid, bottom = mid - Math.max(-1, lo) * mid
+      ctx.fillRect(x, top, 1, Math.max(1, bottom - top))
+    })
+  }, [lane, viewStart, px, width])
+  const head = laneX(time, viewStart, px), mark = laneX(lane.leadMs / 1000, viewStart, px)
+  const signed = (ms: number) => `${ms > 0 ? '+' : ms < 0 ? '−' : '±'}${Math.abs(Math.round(ms))}`
+  return <div className="editor-sound-lane" style={{ height: SOUND_LANE_HEIGHT }}>
+    <div className="editor-lane-header">
+      <span className="editor-lane-label">{t('editor.lane.sound')}</span>
+      <label className="editor-lane-lead" title={t('editor.lane.leadHint')}>{t('editor.lane.lead')}
+        <NumberField value={setting} step={5} min={-200} max={400} label={t('editor.lane.lead')} onCommit={x => useSceneSettings.getState().update({ hapticLeadMs: Math.max(-200, Math.min(400, x)) })} /> ms</label>
+      {/* Fixed width: switching applied / not applied never moves the header. */}
+      <span className="editor-lane-status" role="status">{lane.leadMs || setting === 0 ? t('editor.lane.applied', { ms: signed(lane.leadMs) }) : t('editor.lane.notApplied')}</span>
+    </div>
+    <div ref={box} className="editor-lane-wave">
+      <canvas ref={canvas} />
+      {lane.leadMs !== 0 && mark >= 0 && mark <= width && <div className="editor-lane-lead-mark" style={{ left: mark }} title={t('editor.lane.applied', { ms: signed(lane.leadMs) })} />}
+      {head >= 0 && head <= width && <div className="editor-lane-playhead" style={{ left: head }} />}
     </div>
   </div>
 }

@@ -17,7 +17,7 @@ import { layoutPlacements, layoutStatus } from '@/utils/shownLayout'
 export function WaveformPanel() {
   const { t } = useI18n()
   const s = useWaveformStore()
-  const { original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, shownLayout, level, player, playback, pending, togglePlay, playFromStart } = useEditor()
+  const { original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, shownLayout, soundLane, level, player, playback, pending, togglePlay, playFromStart } = useEditor()
   const audition = !!auditionKey
   const eventPreview = useEventStore(state => state.preview)
   /** The event material being adjusted (its own editor document, linked to the WAV). */
@@ -80,7 +80,7 @@ export function WaveformPanel() {
     <div className="editor-preview-status" role="status">{status}</div>
     <div className="waveform-main">
       {!s.clip && !audition && <div className="waveform-empty"><div className="empty-icon">∿</div><div className="empty-message">{t('wave.drop')}</div><div className="empty-hint">{t('editor.emptyHint')}</div></div>}
-      <WaveformDisplay original={original} scale={level} bufferOverride={audioBuffer} player={player} viewKey={auditionKey ?? undefined} placements={placements}
+      <WaveformDisplay original={original} scale={level} bufferOverride={audioBuffer} player={player} viewKey={auditionKey ?? undefined} placements={placements} soundLane={soundLane}
         transport={<TransportBar player={player} available={!!audioBuffer} playback={playback} pending={pending} onToggle={togglePlay} onFromStart={() => playFromStart()} />} />
     </div>
   </div>

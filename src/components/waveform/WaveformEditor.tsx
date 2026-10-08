@@ -44,6 +44,8 @@ import { RATE as HAPTIC_RATE } from '@/utils/sceneHaptics'
 import { useAuditionPlan } from './EditorScenePanel'
 import type { ShownLayout } from '@/utils/shownLayout'
 import { sceneStopSec } from '@/utils/sceneStop'
+import { useSceneSettings } from '@/stores/sceneSettings'
+import { LANE_RATE, mixLane, soundLaneParts, type SoundLane } from '@/utils/soundLane'
 
 export function WaveformEditor({ active }: { active: boolean }) {
   const { t } = useI18n()
@@ -201,7 +203,17 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const player = useMemo(() => new EditorBufferPlayer(null, undefined, s.setError), [s.clip?.id, original, auditionKey])
   useEffect(() => {player.activate(); return () => player.dispose()}, [player])
   useEffect(() => { player.setLevel(level) }, [player, level])
-  useDecidedSoundSync(player, sceneSounds)
+  // A haptic audition going to devices: the PC sounds play the scene's haptic lead later (hapticLeadMs, > 0 = the haptic
+  // is sent earlier than the sound; the Scene tab's calibration), and the waveform panel draws them that much later.
+  const hapticAudition = (!!audition && !auditionIsSound) || (!audition && eventPreview?.target === 'haptic') || adjusting?.target === 'haptic'
+  const hapticLeadMs = useSceneSettings(state => state.hapticLeadMs)
+  const leadSec = hapticAudition && targets.length ? hapticLeadMs / 1000 : 0
+  useDecidedSoundSync(player, sceneSounds, leadSec)
+  const soundLane = useMemo((): SoundLane | null => {
+    if (!hapticAudition || !audioBuffer) return null
+    const parts = soundLaneParts(sceneSounds, leadSec)
+    return parts.length ? { data: mixLane(parts, audioBuffer.duration), rate: LANE_RATE, leadMs: leadSec * 1000 } : null
+  }, [hapticAudition, audioBuffer, sceneSounds, leadSec])
   useAdjustPersistence()
   // An adjusted event material: what its chain renders (live preview, or the clip without pending changes) goes back to the WAV.
   useMaterialWriteBack(previewActive ? (preview.status === 'ready' ? preview.buffer ?? null : null) : pendingChain ? null : s.clip?.buffer ?? null,
@@ -307,7 +319,6 @@ export function WaveformEditor({ active }: { active: boolean }) {
   useEffect(() => { player.setMuted(muted) }, [player, muted])
   // A haptic audition goes to the devices only; the PC plays the event's representative sound with it (not the haptic waveform).
   const hapticOnPc = useEditorSettings(state => state.hapticOnPc)
-  const hapticAudition = (!!audition && !auditionIsSound) || (!audition && eventPreview?.target === 'haptic') || adjusting?.target === 'haptic'
   useEffect(() => { player.setOutput(waveformOnPc({ hapticAudition, hapticOnPc })) }, [player, hapticAudition, hapticOnPc])
   useEffect(() => { setOriginal(false); useAgentTrialStore.getState().clearAudition(); useEventStore.getState().clearPreview() }, [s.clip?.id])
   // ▶ on an AI candidate (requestAudition with play): the usual playback path. Consumed at once, so a request made while the tab is hidden never plays later.
@@ -385,7 +396,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   }, [dockApi, t, s.setError, linkSceneProject])
   const focusEditorPanel = useCallback((id: Parameters<EditorShared['focusEditorPanel']>[0]) => { if (dockApi) focusPanel(dockApi, id, t) }, [dockApi, t])
   const shared: EditorShared = {
-    active, original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, shownLayout, level, player, playback, pending, togglePlay, playAt, stopPlayback, isPlaybackActive, playFromStart, toggleCandidate,
+    active, original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, shownLayout, soundLane, level, player, playback, pending, togglePlay, playAt, stopPlayback, isPlaybackActive, playFromStart, toggleCandidate,
     openRecipe, provenanceText, isConnected, playbackDevices, targets, routing, setVisibleClipIds, openSceneVideo, linkSceneProject, focusEditorPanel,
   }
   return <EditorContext.Provider value={shared}>

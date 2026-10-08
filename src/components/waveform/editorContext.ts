@@ -6,6 +6,7 @@ import type { DeviceInfo } from '@/types/manager'
 import type { WaveformClip } from '@/types/waveform'
 import type { SceneVideoTarget } from '@/utils/editorSceneSync'
 import type { ShownLayout } from '@/utils/shownLayout'
+import type { SoundLane } from '@/utils/soundLane'
 
 /** State the editor owns and every dock panel reads (panels render in dockview portals / popout windows). */
 export interface EditorShared {
@@ -20,6 +21,8 @@ export interface EditorShared {
   audioBuffer: AudioBuffer | undefined
   /** How `audioBuffer` holds the shown material: the file once, or one copy per firing of its event (null = nothing shown). */
   shownLayout: ShownLayout | null
+  /** The PC sounds played with a haptic audition, on the same time axis (drawn above the haptic); null = none. */
+  soundLane: SoundLane | null
   /** The shown material's / AI candidate's strength (intensity, live while its slider moves): playback gain and "edited" drawing scale. */
   level: number
   player: EditorBufferPlayer

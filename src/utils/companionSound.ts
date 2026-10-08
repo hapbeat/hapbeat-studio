@@ -8,7 +8,8 @@
  */
 export interface SoundSource { buffer: AudioBuffer; volume: number; loop?: boolean }
 export interface PlayingSound { stop: () => void }
-export type StartSound = (source: SoundSource, offsetSec: number) => PlayingSound
+/** Starts `source` from `offsetSec` into it, `delaySec` from now (0 = at once). */
+export type StartSound = (source: SoundSource, offsetSec: number, delaySec: number) => PlayingSound
 
 export class CompanionSound {
   private source: SoundSource | null = null
@@ -23,12 +24,15 @@ export class CompanionSound {
     this.source = source
   }
   get loops() { return !!this.source?.loop }
-  /** (Re)starts from `timeSec` of the playback (nothing past the end of a non-looping sound). */
-  play(timeSec: number) {
+  /**
+   * (Re)starts from `timeSec` of the playback (nothing past the end of a non-looping sound). `leadSec`: the haptic lead
+   * (scene hapticLeadMs) — the sound sits that much later on the playback (> 0: it waits; < 0: it starts part way).
+   */
+  play(timeSec: number, leadSec = 0) {
     this.stop()
-    const s = this.source
-    if (!s || (!s.loop && timeSec >= s.buffer.duration)) return
-    this.playing = this.start(s, s.loop ? timeSec % s.buffer.duration : Math.max(0, timeSec))
+    const s = this.source, at = timeSec - leadSec
+    if (!s || (!s.loop && at >= s.buffer.duration)) return
+    this.playing = at < 0 ? this.start(s, 0, -at) : this.start(s, s.loop ? at % s.buffer.duration : at, 0)
   }
   stop() { try { this.playing?.stop() } catch { /* already ended */ } this.playing = null }
   get isPlaying() { return this.playing !== null }
