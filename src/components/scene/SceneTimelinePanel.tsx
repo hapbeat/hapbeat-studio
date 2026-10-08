@@ -16,9 +16,11 @@ import type { CueTable } from '@/utils/sceneCueTable'
 import { mapLevel } from '@/utils/levelMap'
 import { laneY, layerLanes, layerScaleMax, outputCurves, outputScaleMax, sideLevel, type Lane, type OutputCurve } from '@/utils/sceneTimelineLevels'
 import { spanWindow, stepView, timelineClick, type TimelineView } from '@/utils/sceneTimelineView'
+import { firingBar, firingKey, recordingFiringGains, type FiringGains } from '@/utils/sceneFiringGain'
 
 const SOUND_COLOR = '#36c5c0'
-type Hit = { x: number; y0: number; y1: number; name: string; t: number }
+/** A drawn marker; `gain`: what that firing plays at in its lane (null: a loop cue / tick, drawn as before). */
+type Hit = { x: number; y0: number; y1: number; name: string; t: number; lane: Lane; gain: number | null }
 /** A drawn band of the selected loop cue: its lane's height and x range (CSS px). */
 type Band = { x0: number; x1: number; y0: number; y1: number }
 const MAX_ZOOM = 2000
@@ -28,7 +30,8 @@ const INPUT_DASH = [5, 3]
 /**
  * Timeline: two lanes, sound (upper) and haptics (lower), as in the editor, each with its continuous-layer levels
  * scaled inside it (a selected loop cue: also its output, levelMap applied); a cue shows in each lane it uses (a selected loop cue: its whole active
- * span, as long as its layer's recorded level is above 0, as bands in those lanes). A click seeks (timelineClick);
+ * span, as long as its layer's recorded level is above 0, as bands in those lanes); a one-shot firing's marker is as tall
+ * as the gain it plays at in that lane (sceneFiringGain; lane top = 1, the value in its tooltip). A click seeks (timelineClick);
  * Ctrl (Cmd) + click a marker to edit that cue (the moments list marks it too), a band to play that span in the full
  * replay (SceneRuntime.playSpan; within the span already playing: seek). A firing is reassigned from the moments list.
  * While a loop cue's span plays, the timeline shows only that span with its lead-in / post-roll (sceneTimelineView).
@@ -55,6 +58,8 @@ export function SceneTimelinePanel() {
   const scales = useRef<{ levels: number[][] | null; max: number[] }>({ levels: null, max: [] })
   /** The selected loop cue's output curves (levelMap applied) and their scale top (again only when the recording, table or cue changes). */
   const outputs = useRef<{ levels: number[][] | null; table: CueTable | null; cue: string; curves: OutputCurve[]; max: number }>({ levels: null, table: null, cue: '', curves: [], max: 1 })
+  /** Each firing's gains (sceneFiringGain; again when the table or the recording changes, so an edit shows at once). */
+  const gains = useRef<{ table: CueTable | null; events: unknown; map: Map<string, FiringGains> }>({ table: null, events: null, map: new Map() })
 
   // Drawn only while the Scene tab is shown and the page visible.
   const { active } = useScene()
@@ -113,10 +118,13 @@ export function SceneTimelinePanel() {
       // `cue:variant` names resolve like the game (variant fields, else the cue's).
       const effective = (name: string) => { const r = table ? resolveEventName(table, name) : null; return r && table ? effectiveEvent(table, r.ref) : null }
       // Sound above, haptics below (as in the editor).
-      const lanes: [number, number, (name: string) => boolean, (name: string) => string][] = [
-        [top, mid, name => !!effective(name)?.sfx, () => SOUND_COLOR],
-        [mid + 1, base, name => { const e = effective(name); return !!e && (e.haptics.length > 0 || lib.loop_cues.includes(e.ref.cue)) }, name => familyColor(lib, name)],
+      const lanes: [number, number, (name: string) => boolean, (name: string) => string, Lane][] = [
+        [top, mid, name => !!effective(name)?.sfx, () => SOUND_COLOR, 'sound'],
+        [mid + 1, base, name => { const e = effective(name); return !!e && (e.haptics.length > 0 || lib.loop_cues.includes(e.ref.cue)) }, name => familyColor(lib, name), 'haptics'],
       ]
+      const gc = gains.current
+      if (gc.table !== table || gc.events !== data.full.events) { gc.table = table; gc.events = data.full.events; gc.map = table ? recordingFiringGains(table, lib, data.full.events) : new Map() }
+      const offset = offsetOf(it)
       // A selected loop cue: bands over its layer's active runs (the recorded firings are only the layer's starts).
       const rc = runs.current
       if (rc.levels !== L || rc.name !== (sel?.name ?? '')) { rc.levels = L; rc.name = sel?.name ?? ''; rc.runs = sel ? loopCueRuns(L, fps, lib, sel.name) : [] }
@@ -135,17 +143,26 @@ export function SceneTimelinePanel() {
       bands.current = drawnBands
       ctx.globalAlpha = 1
       const found: Hit[] = []
-      for (const [y0, y1, has, color] of lanes) {
+      for (const [y0, y1, has, color, lane] of lanes) {
         let labelX = -1e9
         for (const ev of events) {
           if (!has(ev.name)) continue
           const x = X(ev.t), picked = !!sel && sel.name === ev.name && sel.t != null && Math.abs(ev.t - sel.t) < 0.02
           if (x < -10 || x > w + 10) continue
-          found.push({ x, y0, y1, name: ev.name, t: ev.t })
+          const tick = ticks.includes(ev.name) && !picked, gain = tick ? null : gc.map.get(firingKey(ev.name, ev.t + offset))?.[lane] ?? null
+          found.push({ x, y0, y1, name: ev.name, t: ev.t, lane, gain })
           ctx.fillStyle = color(ev.name)
           ctx.globalAlpha = picked ? 1 : sel && sel.t != null ? 0.35 : it.kind === 'clip' && !ev.own ? 0.5 : 1
-          if (ticks.includes(ev.name) && !picked) { ctx.fillRect(x, y1 - 6, 1, 6); continue }
-          ctx.fillRect(x - 1, y0 + 2, picked ? 3 : 2, y1 - y0 - 2)
+          if (tick) { ctx.fillRect(x, y1 - 6, 1, 6); continue }
+          // A one-shot firing's bar: its gain × the lane height (1 at the lane top; above: clamped, with a cap; 0: dotted).
+          const bw = picked ? 3 : 2
+          if (gain === null) ctx.fillRect(x - 1, y0 + 2, bw, y1 - y0 - 2)
+          else {
+            const bar = firingBar(gain, y0 + 2, y1)
+            if (bar.stub) for (let k = 1; k <= 7; k += 3) ctx.fillRect(x - 1, y1 - k, bw, 1)
+            else ctx.fillRect(x - 1, bar.top, bw, y1 - bar.top)
+            if (bar.over) ctx.fillRect(x - 3, bar.top, bw + 4, 2)
+          }
           if (picked) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.strokeRect(x - 3.5, y0 + 0.5, 7, y1 - y0) }
           if (x - labelX > 40 || picked) { ctx.fillText(ev.name, x + 5, y0 + 12); labelX = x }
         }
@@ -213,6 +230,12 @@ export function SceneTimelinePanel() {
     const r = event.currentTarget.getBoundingClientRect(), x = event.clientX - r.left, y = event.clientY - r.top
     return { x, hit: hits.current.filter(m => y >= m.y0 && y <= m.y1 && Math.abs(m.x - x) <= 5).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0] }
   }
+  /** Over a one-shot marker the tooltip is its gain (「触覚 0.50」), elsewhere the hint. */
+  const onMouseMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
+    const { hit } = hitAt(event)
+    const text = hit && hit.gain !== null ? `${t(hit.lane === 'sound' ? 'scene.lane.sound' : 'scene.lane.haptics')} ${hit.gain.toFixed(2)}` : t('scene.timeline.hint')
+    if (event.currentTarget.title !== text) event.currentTarget.title = text
+  }
   const onMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
     if (!useSceneStore.getState().items.length || event.button !== 0) return
     const { x, hit } = hitAt(event), time = view.current.start + x / view.current.zoom
@@ -260,7 +283,7 @@ export function SceneTimelinePanel() {
       <span className="scene-info-state" ref={state} />
       <SceneOutputToggles />
     </div>
-    <canvas className="scene-timeline-canvas" ref={canvas} tabIndex={0} title={t('scene.timeline.hint')} onMouseDown={onMouseDown} />
+    <canvas className="scene-timeline-canvas" ref={canvas} tabIndex={0} title={t('scene.timeline.hint')} onMouseDown={onMouseDown} onMouseMove={onMouseMove} />
     <div className="scene-help">{t('scene.keys')}</div>
   </div>
 }
