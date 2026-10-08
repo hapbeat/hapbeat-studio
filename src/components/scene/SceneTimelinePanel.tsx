@@ -14,6 +14,9 @@ import { SPEEDS } from './sceneRuntime'
 import { SceneOutputToggles } from './SceneOutputToggles'
 import { loopCueRuns } from '@/utils/loopStretch'
 import { useMomentPlace } from './SceneCuePanels'
+import type { CueTable } from '@/utils/sceneCueTable'
+import { mapLevel } from '@/utils/levelMap'
+import { laneY, layerLanes, layerScaleMax, outputCurves, outputScaleMax, sideLevel, type Lane, type OutputCurve } from '@/utils/sceneTimelineLevels'
 
 const SOUND_COLOR = '#36c5c0'
 type Hit = { x: number; y0: number; y1: number; name: string; t: number; from?: string }
@@ -24,8 +27,8 @@ type View = { key: string; start: number; zoom: number; fit: boolean }
 const MAX_ZOOM = 2000
 
 /**
- * Timeline: continuous-layer levels behind two lanes, sound (upper) and
- * haptics (lower), as in the editor; a cue shows in each lane it uses (a selected loop cue: its whole active
+ * Timeline: two lanes, sound (upper) and haptics (lower), as in the editor, each with its continuous-layer levels
+ * scaled inside it (a selected loop cue: also its output, levelMap applied); a cue shows in each lane it uses (a selected loop cue: its whole active
  * span, as long as its layer's recorded level is above 0, as bands in those lanes). Click a marker to edit
  * that cue (the moments list marks it too), a band to play that span in the full replay (SceneRuntime.playSpan; within
  * the span already playing: seek), elsewhere to seek; right-click a marker to change its event.
@@ -49,6 +52,10 @@ export function SceneTimelinePanel() {
   const [change, setChange] = useState<{ from: string; at: number } | null>(null)
   /** The selected loop cue's active runs over the shown moment's levels (computed again only when either changes). */
   const runs = useRef<{ levels: number[][] | null; name: string; runs: [number, number][] }>({ levels: null, name: '', runs: [] })
+  /** Each layer's scale top over the recording (computed again only for another recording). */
+  const scales = useRef<{ levels: number[][] | null; max: number[] }>({ levels: null, max: [] })
+  /** The selected loop cue's output curves (levelMap applied) and their scale top (again only when the recording, table or cue changes). */
+  const outputs = useRef<{ levels: number[][] | null; table: CueTable | null; cue: string; curves: OutputCurve[]; max: number }>({ levels: null, table: null, cue: '', curves: [], max: 1 })
 
   // Drawn only while the Scene tab is shown and the page visible.
   const { active } = useScene()
@@ -69,7 +76,6 @@ export function SceneTimelinePanel() {
       ctx.clearRect(0, 0, w, h)
       if (!it || !lib || !data) { hits.current = []; bands.current = []; return }
       const fps = data.fps, layers = lib.layers, ticks = lib.ticks, sel = s.sel, table = s.table
-      const series = layers.flatMap(l => l.gain.map((i, k) => ({ i, color: l.colors[k] })))
       const dur = v.duration || it.levels.length / fps || 1
       // The visible stretch: the whole moment until zoomed; while playing, the playhead is kept in view.
       const vw = view.current, key = `${s.cur}:${it.file}`, fit = w / dur
@@ -85,26 +91,55 @@ export function SceneTimelinePanel() {
       ctx.fillStyle = '#5c636c'
       const step = span > 60 ? 10 : span > 20 ? 5 : span > 4 ? 1 : 0.5
       for (let sec = Math.ceil(vw.start / step) * step; sec <= vw.start + span; sec += step) { ctx.fillRect(X(sec), base, 1, 4); ctx.fillText(it.kind === 'clip' ? (sec - it.event).toFixed(step < 1 ? 1 : 0) + 's' : sec.toFixed(step < 1 ? 1 : 0) + 's', X(sec) + 2, h - 3) }
-      // Continuous layer levels.
-      const L = it.levels
-      let peak = 1
-      for (const r of L) for (const x of series) peak = Math.max(peak, r[x.i])
-      const selLayer = sel ? layers.find(l => l.cue === sel.name) : undefined
-      for (const x of series) {
-        if (!L.some(r => r[x.i] > 0)) continue
-        const mine = !!selLayer && selLayer.gain.includes(x.i)
-        ctx.globalAlpha = selLayer ? (mine ? 1 : 0.3) : 0.7
-        ctx.strokeStyle = x.color; ctx.lineWidth = mine ? 2.5 : 1.5; ctx.beginPath()
-        L.forEach((r, n) => { const px = X(n / fps), py = base - r[x.i] / peak * (base - top); if (n) ctx.lineTo(px, py); else ctx.moveTo(px, py) })
+      // Continuous layer levels, each in its own lane (0 at the lane bottom, the layer's scale top at the lane top):
+      // haptics for a loop cue with haptics routes, sound for one with a sound. The selected loop cue: its output
+      // (levelMap applied, bold) over its recorded level (thin, dimmed), on one scale.
+      const L = it.levels, full = data.full.levels
+      const sc = scales.current
+      if (sc.levels !== full) { sc.levels = full; sc.max = layers.map(l => layerScaleMax(full, l)) }
+      const selCue = sel ? sel.name.split(':')[0] : '', selLayer = selCue ? layers.find(l => l.cue === selCue) : undefined
+      const oc = outputs.current
+      if (oc.levels !== full || oc.table !== table || oc.cue !== (selLayer?.cue ?? '')) {
+        oc.levels = full; oc.table = table; oc.cue = selLayer?.cue ?? ''
+        oc.curves = selLayer ? outputCurves(table, selLayer.cue) : []
+        oc.max = selLayer ? outputScaleMax(full, selLayer, oc.curves) : 1
+      }
+      const laneBox = (lane: Lane): [number, number] => lane === 'sound' ? [top + 3, mid - 1] : [mid + 4, base - 1]
+      const path = (value: (n: number) => number, max: number, y0: number, y1: number) => {
+        ctx.beginPath()
+        for (let n = 0; n < L.length; n++) { const px = X(n / fps), py = laneY(value(n), max, y0, y1); if (n) ctx.lineTo(px, py); else ctx.moveTo(px, py) }
         ctx.stroke()
       }
+      layers.forEach((l, li) => {
+        const mine = l === selLayer, max = mine ? oc.max : sc.max[li]
+        for (const lane of layerLanes(table, l.cue)) {
+          const [y0, y1] = laneBox(lane)
+          l.gain.forEach((col, k) => {
+            if (!L.some(r => r[col] > 0)) return
+            ctx.globalAlpha = selLayer ? (mine ? 0.45 : 0.3) : 0.7
+            ctx.strokeStyle = l.colors[k]; ctx.lineWidth = mine ? 1 : 1.5
+            path(n => L[n][col], max, y0, y1)
+          })
+          if (!mine) continue
+          ctx.globalAlpha = 1; ctx.lineWidth = 2.5
+          for (const c of oc.curves) if (c.lane === lane) { ctx.strokeStyle = l.colors[Math.max(0, c.side)]; path(n => mapLevel(c.map, sideLevel(L[n], l, c.side)), max, y0, y1) }
+        }
+      })
       ctx.globalAlpha = 1
-      let lx = w - 8 // legend of the level lines, right-aligned
-      for (const l of [...layers].reverse()) for (let k = l.gain.length - 1; k >= 0; k--) {
-        if (!L.some(r => r[l.gain[k]] > 0)) continue
-        const text = tr('scene.timeline.level', { cue: l.cue, side: k ? 'R' : 'L' }), tw = ctx.measureText(text).width
-        lx -= tw; ctx.fillStyle = '#8b929b'; ctx.fillText(text, lx, top + 10)
-        lx -= 16; ctx.fillStyle = l.colors[k]; ctx.fillRect(lx, top + 6, 12, 2); lx -= 12
+      let lx = w - 8 // legend of the level lines (with each layer's scale top), right-aligned
+      for (const l of [...layers].reverse()) {
+        const mine = l === selLayer, max = mine ? oc.max : sc.max[layers.indexOf(l)]
+        if (mine && oc.curves.length) {
+          const text = tr('scene.timeline.output', { cue: l.cue }), tw = ctx.measureText(text).width
+          lx -= tw; ctx.fillStyle = '#8b929b'; ctx.fillText(text, lx, top + 10)
+          lx -= 16; ctx.fillStyle = l.colors[0]; ctx.fillRect(lx, top + 5, 12, 3); lx -= 12
+        }
+        for (let k = l.gain.length - 1; k >= 0; k--) {
+          if (!L.some(r => r[l.gain[k]] > 0)) continue
+          const text = tr('scene.timeline.level', { cue: l.cue, side: k ? 'R' : 'L', max: max.toFixed(2) }), tw = ctx.measureText(text).width
+          lx -= tw; ctx.fillStyle = '#8b929b'; ctx.fillText(text, lx, top + 10)
+          lx -= 16; ctx.fillStyle = l.colors[k]; ctx.fillRect(lx, top + 6, 12, mine ? 1 : 2); lx -= 12
+        }
       }
       // Cue markers per lane: the selected cue bright and framed, the clip's moment normal, the rest dimmed.
       const events = runtime.events()

@@ -54,9 +54,8 @@
 /* The moment of the firing selected on the timeline / here. */
 .scene-item.picked { outline: 1px solid var(--accent-light); outline-offset: -1px; }
 .scene-item.sel { background: rgba(124,92,191,.22); box-shadow: inset 3px 0 0 var(--accent-light); }
-/* A cue of a moment of several cues, and a loop cue's active span: indented rows of one fixed height under their row. */
+/* A cue of a moment of several cues: indented rows of one fixed height under their row. */
 .scene-subitem { grid-template-columns: 10px minmax(0, 1fr) auto; height: 24px; padding-top: 0; padding-bottom: 0; padding-left: 34px; font-size: 12px; color: var(--text-secondary); }
-.scene-subitem.scene-span { padding-left: 44px; }
 .scene-subitem.sel { color: var(--text-primary); }
 /* "Change" on a moment: a one-line request over the following rows (nothing moves). */
 .scene-occ-form { position: absolute; left: 12px; right: 12px; top: 100%; z-index: 5; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 4px; padding: 4px; background: var(--bg-secondary); border: 1px solid var(--border-light); border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,.4); }
@@ -114,16 +113,20 @@
 .scene-ramp-steps { display: flex; flex-wrap: wrap; gap: 4px 8px; }
 .scene-ramp-steps label { display: inline-flex; align-items: center; gap: 3px; }
 .scene-ramp-steps .scene-number { width: 52px; }
-/* Loop cue level → multiplier (levelMap): fixed widths for the live numbers, a fixed-size graph beside the curve and points. */
+/* Loop cue level → output (levelMap): fixed widths for the live numbers; the graph first, the points compact below. */
 .scene-levelmap-num { display: inline-block; min-width: 5ch; font-variant-numeric: tabular-nums; text-align: right; }
 .scene-levelmap-levels { gap: 16px; }
-.scene-levelmap-item { margin-top: 6px; }
-.scene-levelmap-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.scene-levelmap-body { display: flex; gap: 10px; align-items: flex-start; }
-.scene-levelmap-side { min-width: 0; flex: 1 1 auto; }
-.scene-levelmap-side .scene-row { margin-top: 0; }
-.scene-levelmap-points { margin: 0; padding: 0; list-style: none; font-size: 12px; }
-.scene-levelmap-points li { display: flex; align-items: center; gap: 6px; }
+.scene-levelmap-note { font-size: 11px; min-height: 1.4em; }
+.scene-levelmap-item { margin-top: 8px; }
+.scene-levelmap-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.scene-levelmap-dot { cursor: pointer; }
+.scene-levelmap-picked { font-size: 11px; font-variant-numeric: tabular-nums; }
+.scene-levelmap-set { flex-wrap: wrap; gap: 6px; font-variant-numeric: tabular-nums; }
+.scene-levelmap-set .scene-number { width: 64px; }
+.scene-levelmap-more { flex-wrap: wrap; align-items: flex-start; gap: 4px 12px; font-size: 12px; }
+.scene-levelmap-more .scene-row { margin-top: 0; }
+.scene-levelmap-points { display: flex; flex-wrap: wrap; gap: 2px 10px; margin: 0; padding: 0; list-style: none; font-size: 12px; }
+.scene-levelmap-points li { display: flex; align-items: center; gap: 4px; }
 /* Timeline: "Change" opened from a marker, over the canvas (nothing moves). */
 .scene-timeline { position: relative; }
 .scene-timeline-change { position: absolute; left: 8px; right: 8px; top: 34px; z-index: 6; }

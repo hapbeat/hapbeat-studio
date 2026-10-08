@@ -89,3 +89,21 @@ export function loopCueRuns(levels: number[][], fps: number, lib: Pick<SceneLib,
   const cue = name.split(':')[0], layer = lib.loop_cues.includes(cue) ? lib.layers.find(l => l.cue === cue) : undefined
   return layer ? layerRuns(levels, fps, layer) : []
 }
+
+/** The replay time of the recorded firing of `name` nearest `at` (`at` itself when it never fired). */
+export function nearestFiring(events: { t: number; name: string }[], name: string, at: number): number {
+  return events.filter(e => e.name === name).reduce<number | null>((best, e) => best === null || Math.abs(e.t - at) < Math.abs(best - at) ? e.t : best, null) ?? at
+}
+
+/** How far after a loop cue's recorded firing its layer's run may start and still be that firing's run (s). */
+export const RUN_START_TOLERANCE_S = 0.5
+
+/**
+ * The active run (of `runs`, loop cue `name`'s: loopCueRuns) that its firing near replay time `at` plays: the recorded
+ * firing of `name` nearest `at` (nearestFiring), then the run containing it, else the first run starting within
+ * RUN_START_TOLERANCE_S after it. Null when no run fits.
+ */
+export function loopCueRunAt(runs: [number, number][], events: { t: number; name: string }[], name: string, at: number): [number, number] | null {
+  const fired = nearestFiring(events, name, at)
+  return runs.find(([a, b]) => fired >= a && fired < b) ?? runs.find(([a]) => a >= fired && a - fired <= RUN_START_TOLERANCE_S) ?? null
+}

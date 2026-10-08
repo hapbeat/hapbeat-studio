@@ -73,3 +73,13 @@ export function withLevelCurve(map: LevelMap, curve: LevelMapCurve): LevelMap {
   const { curve: _curve, ...rest } = map
   return curve === 'linear' ? rest as LevelMap : { ...rest, points: map.points, curve }
 }
+
+/**
+ * "At this level, the output is `output`": `map` with that point placed (or replaced) at recorded `level` (the playhead's
+ * level), so mapLevel(result, level) = output. Null when there is no level (≤ 0) or the map is full without a point there.
+ */
+export function withOutputAt(map: LevelMap | null | undefined, level: number, output: number): LevelMap | null {
+  if (!(level > 0)) return null
+  if (map && map.points.length >= LEVEL_MAP_MAX_POINTS && !map.points.some(p => p[0] === round3(level))) return null
+  return withLevelPoint(map, level, output)
+}

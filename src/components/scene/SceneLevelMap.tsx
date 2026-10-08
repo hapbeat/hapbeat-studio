@@ -5,7 +5,7 @@ import { offsetOf, type SceneLayer } from '@/utils/sceneData'
 import type { CueTable } from '@/utils/sceneCueTable'
 import { setLevelMap } from '@/utils/cueEvents'
 import { loopSoundLevel } from '@/utils/sceneLoopSounds'
-import { LEVEL_MAP_CURVES, LEVEL_MAP_GAIN_RANGE, LEVEL_MAP_MAX_POINTS, mapLevel, withLevelCurve, withLevelPoint, withoutLevelPoint, type LevelMap, type LevelMapCurve } from '@/utils/levelMap'
+import { LEVEL_MAP_CURVES, LEVEL_MAP_GAIN_RANGE, LEVEL_MAP_MAX_POINTS, mapLevel, withLevelCurve, withOutputAt, withoutLevelPoint, type LevelMap, type LevelMapCurve } from '@/utils/levelMap'
 import { NumberField, useAtLabel } from './SceneCuePanels'
 import { useScene } from './sceneContext'
 
@@ -32,9 +32,10 @@ function usePlayheadLevel(layer: SceneLayer): number {
 }
 
 /**
- * Level → multiplier of a loop cue (levelMap, DEC-090): the recorded level at the playhead and the recording's max, and
- * per sound / route the points (set one at the current level with 「このレベルで倍率を決める」), the interpolation and a
- * small graph. Without points the multiplier is the level itself.
+ * Level → output of a loop cue (levelMap, DEC-090): a mapping, not tied to time — playing / seeking only picks the
+ * level the user feels now. Shows the current level and the recording's max, and per sound / route the mapping as the
+ * main graph (the current level moving along it), 「今の強さ … のときの出力 [ ]」 (Enter / 「点を置く」 puts the point at
+ * the current level), then the interpolation and the points, compact. Without points the output is the level.
  */
 export function LevelMaps({ table, layer, cue, edit }: { table: CueTable; layer: SceneLayer; cue: string; edit: Edit }) {
   const { t } = useI18n()
@@ -50,6 +51,7 @@ export function LevelMaps({ table, layer, cue, edit }: { table: CueTable; layer:
       <span>{t('scene.levelMap.now')} <b className="scene-levelmap-num">{level.toFixed(3)}</b></span>
       <span className="scene-dim">{t('scene.levelMap.max')} <b className="scene-levelmap-num">{max.toFixed(3)}</b></span>
     </div>
+    <div className="scene-dim scene-levelmap-note">{t('scene.levelMap.same')}</div>
     {entry?.sfx && <LevelMapEditor label={t('scene.levelMap.sound')} map={entry.sfx.levelMap} level={level} max={max}
       onChange={m => edit(tb => setLevelMap(tb, cue, 'sfx', m))} />}
     {(entry?.haptics ?? []).map((r, i) => <LevelMapEditor key={i} label={atLabel(r.at)} map={r.levelMap} level={level} max={max}
@@ -57,54 +59,73 @@ export function LevelMaps({ table, layer, cue, edit }: { table: CueTable; layer:
   </div>
 }
 
-/** One sound's / route's levelMap: the multiplier now, a gain field + 「このレベルで倍率を決める」, the graph, interpolation and points. */
+/** One sound's / route's levelMap: the graph, the output at the current level (edit + Enter or 「点を置く」 sets the point), interpolation and points. */
 function LevelMapEditor({ label, map, level, max, onChange }: { label: string; map: LevelMap | undefined; level: number; max: number; onChange: (map: LevelMap | undefined) => void }) {
   const { t } = useI18n()
-  const [draft, setDraft] = useState<number | null>(null)
-  const now = mapLevel(map, level)
+  const now = Math.round(mapLevel(map, level) * 100) / 100
+  /** The output in the field (follows the current level until edited). */
+  const [shown, setShown] = useState(now)
+  useEffect(() => setShown(now), [now])
   const full = !!map && map.points.length >= LEVEL_MAP_MAX_POINTS && !map.points.some(p => p[0] === level)
-  const set = () => { onChange(withLevelPoint(map, level, draft ?? now)); setDraft(null) }
+  const off = !(level > 0) || full
+  const place = (output: number) => { const next = withOutputAt(map, level, output); if (next) onChange(next) }
   return <div className="scene-levelmap-item">
-    <div className="scene-row">
-      <span className="scene-levelmap-label" title={label}>{label}</span>
-      <span className="scene-dim scene-levelmap-num" title={t('scene.levelMap.nowGain.hint')}>×{now.toFixed(2)}</span>
-      <NumberField value={draft ?? Math.round(now * 100) / 100} min={LEVEL_MAP_GAIN_RANGE[0]} max={LEVEL_MAP_GAIN_RANGE[1]} step={0.05} label={t('scene.levelMap.gain')}
-        onCommit={x => setDraft(Math.max(LEVEL_MAP_GAIN_RANGE[0], Math.min(LEVEL_MAP_GAIN_RANGE[1], x)))} />
-      <button type="button" className="scene-icon-btn" disabled={!(level > 0) || full} title={t(full ? 'scene.levelMap.full' : 'scene.levelMap.set.hint', { max: LEVEL_MAP_MAX_POINTS })}
-        onClick={ev => { ev.currentTarget.blur(); set() }}>{t('scene.levelMap.set')}</button>
+    <div className="scene-levelmap-label" title={label}>{label}</div>
+    <LevelMapGraph map={map} level={level} max={max} />
+    <div className="scene-row scene-levelmap-set" title={t('scene.levelMap.output.hint')}>
+      <span>{t('scene.levelMap.here', { level: level.toFixed(3) })}</span>
+      <NumberField value={now} min={LEVEL_MAP_GAIN_RANGE[0]} max={LEVEL_MAP_GAIN_RANGE[1]} step={0.05} disabled={off} label={t('scene.levelMap.output')}
+        onCommit={x => { const v = Math.max(LEVEL_MAP_GAIN_RANGE[0], Math.min(LEVEL_MAP_GAIN_RANGE[1], x)); setShown(v); place(v) }} />
+      <button type="button" className="scene-icon-btn" disabled={off} title={t('scene.levelMap.place.hint')}
+        onClick={ev => { ev.currentTarget.blur(); place(shown) }}>{t('scene.levelMap.place')}</button>
     </div>
-    <div className="scene-levelmap-body">
-      <LevelMapGraph map={map} level={level} max={max} />
-      <div className="scene-levelmap-side">
-        <label className="scene-row" title={`${t('scene.levelMap.curve.hint')}\ncurve`}><span className="scene-dim">{t('scene.levelMap.curve')}</span>
-          <select value={map?.curve ?? 'linear'} disabled={!map} onChange={ev => { const c = ev.target.value as LevelMapCurve; ev.target.blur(); if (map) onChange(withLevelCurve(map, c)) }}>
-            {LEVEL_MAP_CURVES.map(c => <option key={c} value={c}>{t(`scene.levelMap.curve.${c}` as MessageId)}</option>)}
-          </select></label>
-        {!map ? <div className="scene-dim">{t('scene.levelMap.none')}</div>
-          : <ul className="scene-levelmap-points">{map.points.map(([l, g], i) => <li key={l}>
-            <span className="scene-levelmap-num">{l.toFixed(3)} → ×{g.toFixed(2)}</span>
-            <button type="button" className="scene-icon-btn" title={t('scene.levelMap.remove', { level: l })} aria-label={t('scene.levelMap.remove', { level: l })}
-              onClick={() => onChange(withoutLevelPoint(map, i))}>✕</button>
-          </li>)}</ul>}
-      </div>
+    <div className="scene-dim scene-levelmap-note">{full ? t('scene.levelMap.full', { max: LEVEL_MAP_MAX_POINTS }) : !(level > 0) ? t('scene.levelMap.noLevel') : ' '}</div>
+    <div className="scene-row scene-levelmap-more">
+      <label className="scene-row" title={`${t('scene.levelMap.curve.hint')}\ncurve`}><span className="scene-dim">{t('scene.levelMap.curve')}</span>
+        <select value={map?.curve ?? 'linear'} disabled={!map} onChange={ev => { const c = ev.target.value as LevelMapCurve; ev.target.blur(); if (map) onChange(withLevelCurve(map, c)) }}>
+          {LEVEL_MAP_CURVES.map(c => <option key={c} value={c}>{t(`scene.levelMap.curve.${c}` as MessageId)}</option>)}
+        </select></label>
+      {!map ? <span className="scene-dim">{t('scene.levelMap.none')}</span>
+        : <ul className="scene-levelmap-points">{map.points.map(([l, g], i) => <li key={l}>
+          <span className="scene-levelmap-num">{l.toFixed(3)} → {g.toFixed(2)}</span>
+          <button type="button" className="scene-icon-btn" title={t('scene.levelMap.remove', { level: l })} aria-label={t('scene.levelMap.remove', { level: l })}
+            onClick={() => onChange(withoutLevelPoint(map, i))}>✕</button>
+        </li>)}</ul>}
     </div>
   </div>
 }
 
-const GW = 160, GH = 64, PAD = 4
+const GW = 260, GH = 120, PL = 30, PR = 6, PT = 6, PB = 18
 /**
- * The map as a small graph (fixed size): level 0 .. the recording's max (or the last point, if beyond) left to right,
- * multiplier bottom to top (0 .. the largest of 1 and the points); the points as dots, the playhead level as a line.
+ * The mapping as the main graph (fixed size): level 0 .. the recording's max (or the last point, if beyond) left to
+ * right, output bottom to top (0 .. the largest of 1 and the points); the curve, the points (hover or click: their
+ * level and output) and the current level as a line with a dot on the curve, following the playhead.
  */
 function LevelMapGraph({ map, level, max }: { map: LevelMap | undefined; level: number; max: number }) {
+  const { t } = useI18n()
+  const [picked, setPicked] = useState<number | null>(null)
   const xMax = Math.max(max, map?.points[map.points.length - 1]?.[0] ?? 0, level) * 1.05 || 1
   const yMax = Math.max(1, ...(map ? map.points.map(p => p[1]) : [xMax]))
-  const X = (l: number) => (PAD + l / xMax * (GW - 2 * PAD)).toFixed(1), Y = (g: number) => (GH - PAD - g / yMax * (GH - 2 * PAD)).toFixed(1)
-  const line = Array.from({ length: 49 }, (_, i) => { const l = i / 48 * xMax; return `${X(l)},${Y(mapLevel(map, l))}` }).join(' ')
-  return <svg className="scene-curve scene-levelmap-graph" width={GW} height={GH} viewBox={`0 0 ${GW} ${GH}`} aria-hidden="true">
-    <rect x={PAD} y={PAD} width={GW - 2 * PAD} height={GH - 2 * PAD} fill="none" stroke="currentColor" strokeOpacity={0.2} />
-    <polyline points={line} fill="none" stroke="currentColor" strokeWidth={1.5} />
-    {map?.points.map(([l, g]) => <circle key={l} cx={X(l)} cy={Y(g)} r={2.5} fill="currentColor" />)}
-    {level > 0 && <line x1={X(level)} x2={X(level)} y1={PAD} y2={GH - PAD} stroke="#fff" strokeOpacity={0.7} />}
-  </svg>
+  const X = (l: number) => PL + l / xMax * (GW - PL - PR), Y = (g: number) => GH - PB - g / yMax * (GH - PT - PB)
+  const line = Array.from({ length: 97 }, (_, i) => { const l = i / 96 * xMax; return `${X(l).toFixed(1)},${Y(mapLevel(map, l)).toFixed(1)}` }).join(' ')
+  const pointText = (l: number, g: number) => t('scene.levelMap.point', { level: l.toFixed(3), output: g.toFixed(2) })
+  const p = picked !== null ? map?.points[picked] : undefined
+  return <div className="scene-levelmap-graphbox">
+    <svg className="scene-curve scene-levelmap-graph" width={GW} height={GH} viewBox={`0 0 ${GW} ${GH}`}>
+      <rect x={PL} y={PT} width={GW - PL - PR} height={GH - PT - PB} fill="none" stroke="currentColor" strokeOpacity={0.2} />
+      <text x={PL - 3} y={PT + 8} textAnchor="end" fontSize={9} fill="currentColor" fillOpacity={0.6}>{yMax.toFixed(1)}</text>
+      <text x={PL - 3} y={GH - PB} textAnchor="end" fontSize={9} fill="currentColor" fillOpacity={0.6}>0</text>
+      <text x={PL - 3} y={(PT + GH - PB) / 2 + 3} textAnchor="end" fontSize={9} fill="currentColor" fillOpacity={0.6}>{t('scene.levelMap.output')}</text>
+      <text x={GW - PR} y={GH - 5} textAnchor="end" fontSize={9} fill="currentColor" fillOpacity={0.6}>{xMax.toFixed(2)}</text>
+      <text x={(PL + GW - PR) / 2} y={GH - 5} textAnchor="middle" fontSize={9} fill="currentColor" fillOpacity={0.6}>{t('scene.levelMap.level')}</text>
+      <polyline points={line} fill="none" stroke="currentColor" strokeWidth={1.5} />
+      {level > 0 && <>
+        <line x1={X(level)} x2={X(level)} y1={PT} y2={GH - PB} stroke="#fff" strokeOpacity={0.5} />
+        <circle cx={X(level)} cy={Y(mapLevel(map, level))} r={4} fill="#fff" />
+      </>}
+      {map?.points.map(([l, g], i) => <circle key={l} cx={X(l)} cy={Y(g)} r={picked === i ? 5 : 3.5} fill="currentColor" className="scene-levelmap-dot"
+        onClick={() => setPicked(picked === i ? null : i)}><title>{pointText(l, g)}</title></circle>)}
+    </svg>
+    <div className="scene-dim scene-levelmap-picked">{p ? pointText(p[0], p[1]) : ' '}</div>
+  </div>
 }
