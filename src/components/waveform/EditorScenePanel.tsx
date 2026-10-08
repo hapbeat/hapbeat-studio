@@ -88,8 +88,10 @@ export function useAuditionPlan(): AuditionPlan | null {
   const data = useSceneStore(s => s.data)
   const groups = useEventGroups()
   const contextOn = useEditorSettings(s => s.sceneContext)
+  // A material opened from the Scene tab plays as the plain file (EventPreview.plain): no scene timing.
+  const plain = useEventStore(s => !!s.preview?.plain)
   const plan = useMemo((): AuditionPlan | null => {
-    if (!chosen?.segment || (!audition && !previewEvent && !adjustEvent)) return null
+    if (!chosen?.segment || (!audition && !previewEvent && !adjustEvent) || (!audition && plain)) return null
     if (lib && chosen.cue && isLoopCue(lib, parseEventKey(chosen.cue).cue)) return null
     const own = trial?.scene?.project === lib?.project_name ? trial?.scene?.context ?? [] : []
     return {
@@ -97,7 +99,7 @@ export function useAuditionPlan(): AuditionPlan | null {
       others: chosen.marks.filter(m => !m.target).map(m => ({ atSec: m.t - chosen.mark, name: m.name })),
       ...auditionContext({ own, groups, targets: chosen.segment.names, on: contextOn, data, lib, mark: chosen.mark, end: chosen.segment.end }),
     }
-  }, [chosen, audition, previewEvent, adjustEvent, lib, trial, data, groups, contextOn])
+  }, [chosen, audition, previewEvent, adjustEvent, lib, trial, data, groups, contextOn, plain])
   // By value: the AI trials poll replaces the trial objects every 2 s, which recomputes the same plan;
   // keeping the same object keeps the repeated buffer and the scheduled sounds playing.
   const stable = useRef<{ key: string; plan: AuditionPlan | null }>({ key: 'null', plan: null })
@@ -119,19 +121,20 @@ export function useLoopAudition(): LoopStretch | null {
   const adjusting = useAdjustingLink()
   const target = audition ? trial ? trialTarget(trial) : 'haptic' : previewTarget ?? adjusting?.target ?? 'haptic'
   const material = audition ? null : previewTarget ? previewMaterial : adjusting?.wav ?? null
+  const plain = useEventStore(s => !!s.preview?.plain)
   // By value: only this material's levelMap (a strength or other cue edit re-renders nothing).
   const levelMapKey = useSceneStore(s => {
     const cue = chosen?.cue ? parseEventKey(chosen.cue).cue : null
     return s.table && cue ? JSON.stringify(loopMaterialLevelMap(s.table, cue, target, material) ?? null) : 'null'
   })
   return useMemo(() => {
-    if (!auditioning || !lib || !data || !chosen?.segment || !chosen.cue) return null
+    if (!auditioning || !lib || !data || !chosen?.segment || !chosen.cue || (!audition && plain)) return null
     const cue = parseEventKey(chosen.cue).cue
     const layer = isLoopCue(lib, cue) ? lib.layers.find(l => l.cue === cue) : undefined
     const stretch = layer ? loopStretch(data.full.levels, data.fps, layer, chosen.mark, chosen.segment.end - chosen.mark) : null
     const levelMap = JSON.parse(levelMapKey) as LevelMap | null
     return stretch && levelMap ? { ...stretch, levelMap } : stretch
-  }, [auditioning, lib, data, chosen, levelMapKey])
+  }, [auditioning, lib, data, chosen, levelMapKey, audition, plain])
 }
 
 const OTHER_SCENES = '\u0000scene-tab'

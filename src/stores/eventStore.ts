@@ -38,6 +38,12 @@ export interface EventPreview {
   autoplay?: boolean
   /** Bumped by ▶ on the material already shown: plays it again without reopening it. */
   playRequest?: number
+  /**
+   * Opened from the Scene tab (「エディタで開く」 / O): shown and played as the plain file — its own length, no scene stretch,
+   * no firings sequence, no scene sounds, no post-roll — until another material / event is shown, the same material is
+   * picked again in the Events panel, or the Scene video is asked for (▶ Video).
+   */
+  plain?: boolean
 }
 
 /** A strength slider while it moves, before its value is saved (`key`: see `levelKey`). */

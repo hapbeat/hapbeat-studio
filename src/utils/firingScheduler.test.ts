@@ -6,9 +6,10 @@ import { sceneSegment } from './sceneSegments'
 function mockContext() {
   const starts: { when: number; offset: number; buffer: unknown; gain: number }[] = []
   let stops = 0
+  const gains: { gain: { value: number } }[] = []
   const ctx: AudioContextLike = {
     currentTime: 10, destination: {},
-    createGain: () => ({ gain: { value: 1 }, connect: () => {} }),
+    createGain: () => { const g = { gain: { value: 1 }, connect: () => {} }; gains.push(g); return g },
     createBufferSource: () => {
       const node = { buffer: null as unknown, gainNode: null as null | { gain: { value: number } },
         connect(target: unknown) { this.gainNode = target as { gain: { value: number } } },
@@ -17,7 +18,7 @@ function mockContext() {
       return node
     },
   }
-  return { ctx, starts, stops: () => stops }
+  return { ctx, starts, gains, stops: () => stops }
 }
 
 /** The T37 scene: bite:tear rated (red), bite (grey) — the meal of the T-Rex recording. */
@@ -60,5 +61,19 @@ describe('scene firings (each its own source)', () => {
     expect(stops()).toBe(2)
     scheduler.play(0); scheduler.stop()
     expect(stops()).toBe(3)
+  })
+
+  it('only the gains changed while it plays: nothing stops, a firing not started yet gets its new gain, one sounding keeps its own', () => {
+    const { ctx, gains, stops } = mockContext()
+    const scheduler = new FiringScheduler<{ duration: number }>(() => ctx)
+    scheduler.setFirings([{ atSec: 0, buffer: biteSound, gain: 1 }, { atSec: 2, buffer: biteSound, gain: 1 }])
+    scheduler.play(0)
+    ctx.currentTime = 10.5 // the first firing sounds, the second starts at 12
+    scheduler.setFirings([{ atSec: 0, buffer: biteSound, gain: 0.5 }, { atSec: 2, buffer: biteSound, gain: 0.5 }])
+    expect(stops()).toBe(0)
+    expect(gains.map(g => g.gain.value)).toEqual([1, 0.5])
+    // The next play (a loop repeat) starts every firing at the new gain.
+    scheduler.play(0)
+    expect(gains.slice(2).map(g => g.gain.value)).toEqual([0.5, 0.5])
   })
 })

@@ -155,3 +155,23 @@ describe('streamClip pause (stream-session-v2 inactivity timeout)', () => {
     expect(sent.map(m => m.type)).toEqual(['stream_begin', 'stream_end'])
   })
 })
+
+describe('streamClip live samples', () => {
+  const sentSamples = (messages: ManagerMessage[]) => messages.filter(m => m.type === 'stream_data')
+    .flatMap(m => [...new Int16Array(Uint8Array.from(atob(m.payload.data as string), c => c.charCodeAt(0)).buffer)])
+  it('a chunk from liveChunk (a source mixed again while it streams) is sent in place of the prepared PCM, L = R', async () => {
+    const messages: ManagerMessage[] = [], asked: [number, number][] = []
+    const blob = new Blob([new Uint8Array([1])], { type: 'audio/wav' })
+    await streamClip(blob, m => messages.push(m), { control: { liveChunk: (atSec, frames) => { asked.push([atSec, frames]); return new Float32Array(frames).fill(0.5) } } })
+    expect(asked).toEqual([[0, 4]])
+    expect(sentSamples(messages)).toEqual(Array(8).fill(Math.round(0.5 * 32767)))
+  })
+  it('null (or a chunk of another length) keeps the prepared PCM', async () => {
+    const plain: ManagerMessage[] = [], wrong: ManagerMessage[] = [], none: ManagerMessage[] = []
+    const blob = new Blob([new Uint8Array([1])], { type: 'audio/wav' })
+    await streamClip(blob, m => plain.push(m))
+    await streamClip(blob, m => none.push(m), { control: { liveChunk: () => null } })
+    await streamClip(blob, m => wrong.push(m), { control: { liveChunk: () => new Float32Array(1) } })
+    expect(sentSamples(none)).toEqual(sentSamples(plain)); expect(sentSamples(wrong)).toEqual(sentSamples(plain))
+  })
+})

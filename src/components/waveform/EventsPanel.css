@@ -2,6 +2,9 @@
 .events-panel { display: flex; flex-direction: column; gap: 6px; height: 100%; min-height: 0; overflow: hidden; padding: 8px; box-sizing: border-box; font-size: 13px; }
 .events-panel > * { flex-shrink: 0; }
 .events-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+/* The ⋯ menu trigger and the group toggle beside it: one fixed height (the toolbar button was taller). */
+.events-top :is(.events-group-toggle, .editor-menu-trigger) { height: 24px; box-sizing: border-box; padding-top: 0; padding-bottom: 0; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center; }
 .events-project { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .events-project label { display: flex; align-items: center; gap: 4px; }
 .events-project-icon { flex: none; width: 1.4em; text-align: center; }
@@ -16,6 +19,10 @@
 .events-panel > .events-detail-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
 /* Simultaneous group (recording, display only): a framed block with a heading. Variants: indented, dashed rule, "variant" tag. */
 .events-group { border: 1px solid var(--border-light); border-left: 3px solid #7aa2e3; border-radius: 4px; padding: 2px; margin: 2px 0; }
+/* A row outside a group ends where a group's rows end (the group's 1 px right border + 2 px padding), so the 音 / 触覚 pills
+   of every row sit in one column. Keep in step with .events-group's right border and padding. */
+.events-list > .events-row { width: calc(100% - 3px); }
+.events-list > .events-family { margin-right: 3px; }
 .events-group-head { display: flex; align-items: center; gap: 6px; padding: 1px 6px; font-size: 12px; color: var(--text-secondary); }
 .events-tag { padding: 0 5px; border-radius: 8px; font-size: 10px; font-weight: normal; border: 1px solid var(--border-light); }
 .events-tag.simultaneous { border-color: #7aa2e3; color: #a9c3f0; }
@@ -36,9 +43,10 @@
 .events-badge.undecided { border-color: #c9a34a; color: #e3c27a; }
 .events-badge.approved { border-color: #4f9e7a; color: #8dd5b1; background: rgba(79,158,122,.15); }
 .events-badge.tentative { border-color: #6b8fd6; color: #a9c3f0; }
-/* No material: outline only, the icon slashed in the pill's colour; grey while tentative, green with ✓ once approved. */
-.events-badge.none-tentative { border-color: #6b7280; color: #9ca3af; background: transparent; }
-.events-badge.none-approved { border-color: #4f9e7a; color: #8dd5b1; background: transparent; }
+/* No material: a 2 px outline (1 px border + 1 px inset shadow, so the pill keeps the others' size) and a faint fill, the
+   icon slashed in the pill's colour; grey while tentative, saturated green with ✓ once approved (the solid OK stays softer). */
+.events-badge.none-tentative { border-color: #8b93a1; color: #b4bac4; background: rgba(139,147,161,.08); box-shadow: inset 0 0 0 1px #8b93a1; }
+.events-badge.none-approved { border-color: #22c06e; color: #5be39b; background: rgba(34,192,110,.12); box-shadow: inset 0 0 0 1px #22c06e; }
 .events-badge.none-tentative > .kind-icon, .events-badge.none-approved > .kind-icon { color: inherit; }
 .events-badge-check { color: #4fd18f; font-weight: 700; }
 .events-badge.unset { border-color: #c9a34a; color: #e3c27a; }

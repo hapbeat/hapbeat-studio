@@ -340,3 +340,34 @@ describe('A variant ramp counts firings in replay time while a clip moment plays
     runtime.stop()
   })
 })
+
+describe('A one-shot firing takes its gains from the table when it fires', () => {
+  it('a gain edited between two firings (route gain, clip / sound intensity, sfx.volume) is used by the next one, haptic and sound', async () => {
+    vi.stubGlobal('AudioContext', FakeAudioContext)
+    const { useSceneStore } = await import('@/stores/sceneStore')
+    const { useSceneSettings } = await import('@/stores/sceneSettings')
+    const { SceneRuntime } = await import('./sceneRuntime')
+    const { buildItems } = await import('@/utils/sceneData')
+    const events = [{ t: 1, name: 'bite', hand: 'right' }, { t: 2, name: 'bite', hand: 'right' }]
+    const data = { fps: 30, full: { file: 'full.mp4', levels: [], events }, clips: [] }
+    const table = { clips: { b: { intensity: 0.5, loop: false } }, sounds: { Bite: { intensity: 0.5 } },
+      cues: { bite: { sfx: { sound: 'Bite', volume: 1 }, haptics: [{ clip: 'b', at: 'both', gain: 1 }] } } }
+    useSceneSettings.setState({ pcSound: true, sendHaptics: true, hapticLeadMs: 0 })
+    useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: { project_name: 'mill', paths: { cues: 'cues.json', clips: 'clips', sounds: 'sounds' }, layers: [], loop_cues: [], ticks: [] } as never, table: table as never, loaded: null,
+      data: data as never, recorded: data as never, items: buildItems(data as never), cur: 0, pcm: { b: new Float32Array(1600).fill(1) }, sfx: { Bite: { duration: 0.1 } as AudioBuffer } })
+    const runtime = new SceneRuntime(), tick = () => (runtime as unknown as { tick(): void }).tick()
+    runtime.setHelper({ send: () => {}, connected: true, devices: [{ ipAddress: '10.0.0.2', address: 'p1/pos_r_wrist' }] })
+    runtime.start(); await flush()
+    const voices = () => (runtime as unknown as { mixer: { voices: { gain: number }[] } }).mixer.voices
+    const playAt = (vt: number) => { video.readyState = 2; video.paused = false; video.seeking = false; video.currentTime = vt; tick() }
+    playAt(0.95)
+    const ctx = FakeAudioContext.last!
+    expect(voices().map(v => v.gain)).toEqual([0.5]); expect(ctx.gains[ctx.gains.length - 1].gain.value).toBeCloseTo(0.5)
+    // Edited while it plays (unsaved): the next firing uses the new values.
+    useSceneStore.getState().edit(tb => ({ ...tb, clips: { b: { intensity: 0.25, loop: false } }, sounds: { Bite: { intensity: 0.8 } },
+      cues: { bite: { sfx: { sound: 'Bite', volume: 0.5 }, haptics: [{ clip: 'b', at: 'both', gain: 1.5 }] } } }))
+    playAt(1.5); playAt(1.95)
+    expect(voices()[voices().length - 1].gain).toBeCloseTo(0.25 * 1.5); expect(ctx.gains[ctx.gains.length - 1].gain.value).toBeCloseTo(0.8 * 0.5)
+    runtime.stop()
+  })
+})

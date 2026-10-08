@@ -5,7 +5,8 @@
  * is mixed into one buffer, so one firing never cuts another.
  *
  * `setFirings` compares by value (times, gains, buffers): recomputing the same list (store refreshes,
- * effects re-run) keeps what is playing; only a different list stops it.
+ * effects re-run) keeps what is playing; a list that differs only in gains (a strength / volume edited while it
+ * plays) keeps it too and gives the firings not started yet their new gain; any other change stops it.
  */
 export interface Firing<B = AudioBuffer> { atSec: number; buffer: B; gain: number }
 
@@ -13,17 +14,24 @@ interface SourceLike { buffer: unknown; connect(node: unknown): unknown; start(w
 interface GainLike { gain: { value: number }; connect(node: unknown): unknown }
 export interface AudioContextLike { currentTime: number; destination: unknown; createBufferSource(): SourceLike; createGain(): GainLike }
 
-const sameFirings = <B>(a: readonly Firing<B>[], b: readonly Firing<B>[]) =>
-  a.length === b.length && a.every((f, i) => f.atSec === b[i].atSec && f.gain === b[i].gain && f.buffer === b[i].buffer)
+const sameTimes = <B>(a: readonly Firing<B>[], b: readonly Firing<B>[]) =>
+  a.length === b.length && a.every((f, i) => f.atSec === b[i].atSec && f.buffer === b[i].buffer)
 
 export class FiringScheduler<B extends { duration: number } = AudioBuffer> {
   private firings: Firing<B>[] = []
-  private playing: SourceLike[] = []
+  /** What play() started: each source with its gain node, the firing it plays and when it starts (context time). */
+  private playing: { source: SourceLike; gain: GainLike; index: number; when: number }[] = []
   constructor(private readonly context: () => AudioContextLike) {}
 
   get size() { return this.firings.length }
   setFirings(firings: readonly Firing<B>[]) {
-    if (sameFirings(this.firings, firings)) return
+    if (sameTimes(this.firings, firings)) {
+      this.firings = [...firings]
+      // Only the gains changed: a firing not started yet plays at its new gain (one already sounding keeps its own).
+      const now = this.playing.length ? this.context().currentTime : 0
+      for (const p of this.playing) if (p.when > now) p.gain.gain.value = this.firings[p.index].gain
+      return
+    }
     this.stop()
     this.firings = [...firings]
   }
@@ -32,18 +40,18 @@ export class FiringScheduler<B extends { duration: number } = AudioBuffer> {
     this.stop()
     if (!this.firings.length) return
     const ctx = this.context(), now = ctx.currentTime
-    for (const f of this.firings) {
-      if (f.atSec + f.buffer.duration <= fromSec) continue
-      const source = ctx.createBufferSource(), gain = ctx.createGain()
+    this.firings.forEach((f, index) => {
+      if (f.atSec + f.buffer.duration <= fromSec) return
+      const source = ctx.createBufferSource(), gain = ctx.createGain(), when = now + Math.max(0, f.atSec - fromSec)
       source.buffer = f.buffer
       gain.gain.value = f.gain
       source.connect(gain); gain.connect(ctx.destination)
-      source.start(now + Math.max(0, f.atSec - fromSec), Math.max(0, fromSec - f.atSec))
-      this.playing.push(source)
-    }
+      source.start(when, Math.max(0, fromSec - f.atSec))
+      this.playing.push({ source, gain, index, when })
+    })
   }
   stop() {
-    for (const source of this.playing) { try { source.stop() } catch { /* not started / ended */ } }
+    for (const { source } of this.playing) { try { source.stop() } catch { /* not started / ended */ } }
     this.playing = []
   }
 }

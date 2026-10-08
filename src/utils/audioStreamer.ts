@@ -62,6 +62,10 @@ export interface StreamControl {
    *  cut the haptic level mid-stream. When absent, falls back to the
    *  static `intensity` option (frozen at start). `atSec`: the chunk's position in the stream (seconds). */
   getIntensity?: (atSec: number) => number
+  /** Live samples: the chunk at `atSec` (its position in the stream, seconds) as mono samples at the target rate,
+   *  `frames` long, sent in place of the prepared PCM (L = R), so a source mixed again while it streams (a gain
+   *  edited during a scene audition) reaches the device from the next chunk. Null (or another length) = the prepared PCM. */
+  liveChunk?: (atSec: number, frames: number) => Float32Array | null
   /** Called after every chunk send with the current read position. */
   onProgress?: (currentFrames: number, totalFrames: number, sampleRate: number) => void
 }
@@ -206,7 +210,8 @@ export async function streamClip(
       }
 
       const endFrame = Math.min(frameOffset + chunkFrames, totalFrames)
-      const chunk = pcm16.slice(frameOffset * channels, endFrame * channels)
+      const live = control?.liveChunk?.(frameOffset / targetRate, endFrame - frameOffset)
+      const chunk = live && live.length === endFrame - frameOffset ? monoToPcm16(live, channels) : pcm16.slice(frameOffset * channels, endFrame * channels)
 
       // Apply current intensity per-chunk. `slice` already returned a
       // new buffer so this mutation doesn't affect the source pcm16.
@@ -255,6 +260,18 @@ export async function streamClip(
 }
 
 // ---- Helpers ----
+
+/** Mono float samples as interleaved PCM16 with every channel the same (as the prepared PCM is converted). */
+function monoToPcm16(data: Float32Array, channels: number): Int16Array {
+  const out = new Int16Array(data.length * channels)
+  for (let i = 0; i < data.length; i++) {
+    let val = Math.round(data[i] * 32767)
+    if (val > 32767) val = 32767
+    if (val < -32768) val = -32768
+    for (let c = 0; c < channels; c++) out[i * channels + c] = val
+  }
+  return out
+}
 
 function createStreamId(): string {
   streamIdCounter = (streamIdCounter + 1) >>> 0

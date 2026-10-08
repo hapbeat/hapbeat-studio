@@ -20,6 +20,12 @@ export const MIN_LOOP_PERIOD_MS = 50
 export class EditorPlayback {
   /** The device stream's gain (DEC-086 intensity) at `time` (seconds of the player), read for every chunk sent: a change applies mid-stream without restarting. */
   level: ((time: number) => number) | null = null
+  /**
+   * The device stream's samples from `time` (seconds of the player), `frames` long at the stream rate, read for every
+   * chunk sent: a source mixed again while it plays (a gain edited during a scene audition) reaches the devices from the
+   * next chunk. Null (or a null result) = the clip encoded at play.
+   */
+  samples: ((time: number, frames: number) => Float32Array | null) | null = null
   /** Read at every play; null or 0 s = start at once. */
   preRoll: (() => PlaybackPreRoll | null) | null = null
   // Finish the previous stream_end before starting another clip or target set.
@@ -145,7 +151,8 @@ export class EditorPlayback {
             if (this.controller === controller) { this.stop(); this.failed(error) }
           })
         }
-      }, {signal: controller.signal, control: {consumeSeek: () => {const seek = this.seekRequest; this.seekRequest = null; return seek}, getIntensity: at => this.level?.(range.start + at) ?? 1}})
+      }, {signal: controller.signal, control: {consumeSeek: () => {const seek = this.seekRequest; this.seekRequest = null; return seek}, getIntensity: at => this.level?.(range.start + at) ?? 1,
+        liveChunk: (at, frames) => this.samples?.(range.start + at, frames) ?? null}})
     } catch (error) {
       // The helper took the devices from this stream (audioStreamer StreamLostError): the sound plays on, the notice says why the haptics stopped.
       if (!controller.signal.aborted && error instanceof Error && error.name === 'StreamLostError') { this.failed(error); return }

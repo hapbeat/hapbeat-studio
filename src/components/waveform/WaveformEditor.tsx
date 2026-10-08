@@ -78,7 +78,10 @@ export function WaveformEditor({ active }: { active: boolean }) {
     const key = useEventStore.getState().selected
     if (!key) { focusPanel(dockApi, 'events', t); return }
     revealEvent(key, id => focusPanel(dockApi, id, t))
-    useSceneVideoTarget.getState().setTarget({ kind: 'event', key }); openEventDefault(key)
+    // Its material as the plain file (EventPreview.plain): its own length, the whole waveform selected.
+    useSceneVideoTarget.getState().setTarget({ kind: 'event', key }); openEventDefault(key, true)
+    const shown = useEventStore.getState().preview
+    if (shown?.plain && shown.event === key) useWaveformStore.getState().setSelectedRegion({ start: 0, end: shown.buffer.duration }, false, shown.buffer.duration)
   }, [eventFocusRequest, dockApi])
   /** A sound AI trial (target "sound") is auditioned on the PC only: no haptic targets while one is shown. */
   const auditionIsSound = useAgentTrialStore(state => {
@@ -158,7 +161,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   // The group of the shown event material (its cue and the cue's variants: bite and bite:tear) plays together at the stretch
   // (editor setting, default on): each member's firing with its representative sound and haptic at their intensities.
   const groupOn = useEditorSettings(state => state.groupPlayback)
-  const groupShown = !audition && sceneLib ? eventPreview ? { event: eventPreview.event, target: eventPreview.target, material: eventPreview.material }
+  const groupShown = !audition && sceneLib && !eventPreview?.plain ? eventPreview ? { event: eventPreview.event, target: eventPreview.target, material: eventPreview.material }
     : adjusting && adjusting.project === sceneLib.project_name ? { event: adjusting.event, target: adjusting.target, material: adjusting.wav } : null : null
   // With them, the context's one-shot cues (an audition's scene.context / 「同時」 group: their decided haptics at their firings).
   const groupKey = sceneTable && (groupShown || plan?.context) ? JSON.stringify([...groupShown ? groupFirings(sceneTable, plan ?? { targets: [0], others: [], contextCues: [], context: null }, groupShown, groupOn).haptics : [],
@@ -198,7 +201,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
     ? renderContextLoops(sceneTable, sceneLib, sceneData, plan.context, scenePcm, audioBuffer.duration) : null, [plan, sceneTable, sceneLib, sceneData, scenePcm, audioBuffer?.duration])
   // The shown material's strength (DEC-086: WAV × intensity): a gain on the PC output and the device stream and a scale
   // of the "edited" drawing, changed live by the strength slider; the buffer is never rendered again for it. A group /
-  // context mix (groupStream) is mixed again with it instead (the shown haptic only): a move reaches the devices on the next play.
+  // context mix (groupStream) is mixed again with it instead (the shown haptic only) and streamed live (playback.samples).
   // An AI candidate's comes from its rating form (published by the AI trials panel).
   const levelKeyShown = audition ? levelKey.candidate(audition.trialId, audition.candidateId)
     : eventPreview ? levelKey.material(eventPreview.target, eventPreview.material) : adjusting ? levelKey.material(adjusting.target, adjusting.wav) : null
@@ -224,6 +227,8 @@ export function WaveformEditor({ active }: { active: boolean }) {
     return buffer
   }, [groupKey, audioBuffer, scenePcm, shownTarget, contextLoops, level])
   const streamRef = useRef<AudioBuffer | null>(null); streamRef.current = groupStream
+  /** The buffer the group / context mix was mixed over (the player's buffer at that render). */
+  const streamFromRef = useRef<AudioBuffer | null>(null); streamFromRef.current = groupStream ? audioBuffer ?? null : null
   // A sound (AI sound candidate, event sound, adjusted sound material) plays on the PC only — except its group's haptics.
   const soundShown = auditionIsSound || eventPreview?.target === 'sound' || adjusting?.target === 'sound'
   const targets = useMemo(() => isConnected && sendHaptics && (!soundShown || !!groupStream) ? routing.devices.map(device => device.ipAddress) : [], [isConnected, sendHaptics, soundShown, !!groupStream, routing])
@@ -273,6 +278,14 @@ export function WaveformEditor({ active }: { active: boolean }) {
   // The Scene video panel's lead-in (audio / haptics start on the cue mark).
   playback.preRoll = scenePreRoll
   playback.level = () => mixedRef.current ? 1 : levelRef.current
+  // The group / context mix as it is now, chunk by chunk: a strength, gain or volume edited while it plays (the mix is made
+  // again from the table) reaches the devices from the next chunk, not the next play. Only a mix of what the player plays.
+  playback.samples = (time, frames) => {
+    const stream = streamRef.current
+    if (!stream || streamFromRef.current !== player.getBuffer()) return null
+    const start = Math.round(time * stream.sampleRate)
+    return start >= 0 && start + frames <= stream.length ? stream.getChannelData(0).subarray(start, start + frames) : null
+  }
   // ▶ on a material plays it once from the start (again on the material already shown).
   const autoplayed = useRef<{ buffer: AudioBuffer; request: number } | null>(null)
   useEffect(() => {
@@ -414,6 +427,9 @@ export function WaveformEditor({ active }: { active: boolean }) {
    */
   const openSceneVideo = useCallback((target: SceneVideoTarget) => {
     useSceneVideoTarget.getState().setTarget(target)
+    // Asking for the Scene video ends the plain view of a material opened from the Scene tab (scene timing again).
+    const shown = useEventStore.getState().preview
+    if (shown?.plain) useEventStore.getState().showPreview({ ...shown, plain: undefined, autoplay: false })
     if (!dockApi) return
     const show = () => {
       focusPanel(dockApi, 'scene', t)

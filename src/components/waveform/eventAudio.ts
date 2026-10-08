@@ -52,24 +52,26 @@ function soundBuffer(sound: string): AudioBuffer | null {
 /**
  * Opens clip `clip` of event `key` in the waveform panel, played and drawn at its base level (DEC-086: WAV × intensity
  * as a gain; the route gain is a scene multiplier, not applied in the editor).
- * When it is already shown, only `autoplay` acts (the shown buffer stays).
+ * When it is already shown, only `autoplay` and `plain` act (the shown buffer stays).
+ * `plain`: as the plain file (opened from the Scene tab, EventPreview.plain); false ends that mode for this material.
  */
-export function openEventHaptic(key: string, clip: string, at: string, autoplay = false): boolean {
-  return showMaterial({ id: `${key}|haptic|${clip}|${at}`, event: key, target: 'haptic', label: `${key} · ${clip}.wav`, material: clip }, () => hapticBuffer(clip), autoplay)
+export function openEventHaptic(key: string, clip: string, at: string, autoplay = false, plain = false): boolean {
+  return showMaterial({ id: `${key}|haptic|${clip}|${at}`, event: key, target: 'haptic', label: `${key} · ${clip}.wav`, material: clip }, () => hapticBuffer(clip), autoplay, plain)
 }
 /** Opens sound `sound` of event `key` in the waveform panel at its base level (PC playback only). */
-export function openEventSound(key: string, sound: string, autoplay = false): boolean {
-  return showMaterial({ id: `${key}|sound|${sound}`, event: key, target: 'sound', label: `${key} · ${sound}.wav`, material: sound }, () => soundBuffer(sound), autoplay)
+export function openEventSound(key: string, sound: string, autoplay = false, plain = false): boolean {
+  return showMaterial({ id: `${key}|sound|${sound}`, event: key, target: 'sound', label: `${key} · ${sound}.wav`, material: sound }, () => soundBuffer(sound), autoplay, plain)
 }
-function showMaterial(preview: Omit<EventPreview, 'buffer' | 'autoplay'>, make: () => AudioBuffer | null, autoplay: boolean): boolean {
+function showMaterial(preview: Omit<EventPreview, 'buffer' | 'autoplay'>, make: () => AudioBuffer | null, autoplay: boolean, plain: boolean): boolean {
   const shown = useEventStore.getState().preview
   if (shown?.id === preview.id) {
-    if (autoplay) useEventStore.getState().showPreview({ ...shown, autoplay: true, playRequest: (shown.playRequest ?? 0) + 1 })
+    const replay = autoplay ? { autoplay: true, playRequest: (shown.playRequest ?? 0) + 1 } : {}
+    if (autoplay || !!shown.plain !== plain) useEventStore.getState().showPreview({ ...shown, ...replay, plain: plain || undefined })
     return true
   }
   const buffer = make()
   if (!buffer) return false
-  useEventStore.getState().showPreview({ ...preview, buffer, autoplay })
+  useEventStore.getState().showPreview({ ...preview, buffer, autoplay, plain: plain || undefined })
   return true
 }
 
@@ -170,8 +172,11 @@ export function useSceneSounds(): SceneSounds {
     return out
   }, [plan, picked, table, buffers])
   const loops = useMemo(() => plan?.context?.layers.length ? { layers: plan.context.layers, mark: plan.context.mark } : null, [plan])
+  // A material opened from the Scene tab plays as the plain file: no sound with it (EventPreview.plain).
+  if (!audition && preview?.plain) return NO_SCENE_SOUNDS
   return { picked, firings, loops }
 }
+const NO_SCENE_SOUNDS: SceneSounds = { picked: null, firings: null, loops: null }
 
 /**
  * While a haptic of an event is played in the editor — an AI candidate of a
@@ -238,13 +243,16 @@ function useContextLoopSounds(player: EditorBufferPlayer, loops: SceneSounds['lo
   }, [player, voices, lead])
 }
 
-/** On selecting an event: the waveform panel shows its haptic (first route's clip), else its sound, else the editor clip again. */
-export function openEventDefault(key: string) {
+/**
+ * On selecting an event: the waveform panel shows its haptic (first route's clip), else its sound, else the editor clip again.
+ * `plain`: as the plain file (the Scene tab's 「エディタで開く」, EventPreview.plain).
+ */
+export function openEventDefault(key: string, plain = false) {
   const table = useSceneStore.getState().table
   const e = table ? effectiveEvent(table, parseEventKey(key)) : null
   const route = e?.haptics[0], clip = route ? routeClips(route)[0] : undefined
-  if (route && clip && openEventHaptic(key, clip, route.at)) return
+  if (route && clip && openEventHaptic(key, clip, route.at, false, plain)) return
   const sound = sfxSounds(e?.sfx)[0]
-  if (e?.sfx && sound && openEventSound(key, sound)) return
+  if (e?.sfx && sound && openEventSound(key, sound, false, plain)) return
   useEventStore.getState().clearPreview()
 }
