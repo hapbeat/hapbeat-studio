@@ -47,6 +47,7 @@ import { sceneStopSec } from '@/utils/sceneStop'
 import { contextHapticParts, renderContextLoops } from '@/utils/trialContext'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { LANE_RATE, mixLane, soundLaneParts, type SoundLane } from '@/utils/soundLane'
+import { usePageVisible } from '@/hooks/usePageVisible'
 
 export function WaveformEditor({ active }: { active: boolean }) {
   const { t } = useI18n()
@@ -278,7 +279,9 @@ export function WaveformEditor({ active }: { active: boolean }) {
     if (active && !useWaveformStore.getState().isProcessing) { useStartMarker.getState().set(null); void playback.play(0, player.getDuration(), true).catch(s.setError) }
   }, [eventPreview, playback, player, active, s.setError])
   useEffect(() => () => playback?.stop(), [playback])
-  useEffect(() => { if (!active) playback?.stop() }, [active, playback])
+  // The editor tab left or the browser tab hidden: stop (a loop never repeats on unseen).
+  const pageVisible = usePageVisible()
+  useEffect(() => { if (!active || !pageVisible) playback?.stop() }, [active, pageVisible, playback])
   useEffect(() => {
     if (!playback) return
     const unsubs = [player.on('pause', () => playback.paused()), player.on('finish', () => playback.paused()), player.on('timeupdate', time => playback.timeUpdated(time)), player.on('seeking', time => playback.seek(time))]

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { EditorPlayback } from './editorPlayback'
+import { EditorPlayback, MIN_LOOP_PERIOD_MS } from './editorPlayback'
 import type { StreamOptions } from './audioStreamer'
 import type { ManagerMessage } from '@/types/manager'
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(r => {resolve = r}); return {promise, resolve} }
@@ -67,7 +67,7 @@ describe('editor playback routing without physical output', () => {
   })
 
   it('uses the selection for ordinary playback, stops at its boundary and loops only that range', async () => {
-    const pc = player(); let time = 0; pc.getCurrentTime = () => time
+    vi.useFakeTimers(); const pc = player(); let time = 0; pc.getCurrentTime = () => time
     const playback = new EditorPlayback(pc, vi.fn(), [], vi.fn(), vi.fn())
     playback.configure({start: 3, end: 4}, false)
     await playback.toggle()
@@ -75,10 +75,39 @@ describe('editor playback routing without physical output', () => {
     time = 4; playback.paused(); await tick()
     expect(pc.play).toHaveBeenCalledTimes(1)
     playback.configure({start: 3, end: 4}, true)
-    await playback.toggle(); playback.paused(); playback.paused(); await tick()
+    await playback.toggle(); playback.paused(); playback.paused(); await vi.advanceTimersByTimeAsync(MIN_LOOP_PERIOD_MS)
     expect(pc.play).toHaveBeenCalledTimes(3)
     expect(pc.play).toHaveBeenLastCalledWith(3, 4)
     playback.stop()
+  })
+  it('repeats indefinitely with loop on, at least MIN_LOOP_PERIOD_MS apart, until Stop', async () => {
+    vi.useFakeTimers(); const pc = player(); let time = 0; pc.getCurrentTime = () => time
+    const playback = new EditorPlayback(pc, vi.fn(), [], vi.fn(), vi.fn())
+    playback.configure(null, true); await playback.play(0, 10)
+    for (let i = 1; i <= 20; i++) {
+      time = 10; playback.paused()
+      await vi.advanceTimersByTimeAsync(MIN_LOOP_PERIOD_MS - 1); expect(pc.play).toHaveBeenCalledTimes(i)
+      await vi.advanceTimersByTimeAsync(1); expect(pc.play).toHaveBeenCalledTimes(i + 1); expect(pc.play).toHaveBeenLastCalledWith(0, 10)
+      time = 0
+    }
+    // A pass longer than the minimum period repeats at once.
+    await vi.advanceTimersByTimeAsync(5000); time = 10; playback.paused(); await tick(); expect(pc.play).toHaveBeenCalledTimes(22)
+    time = 10; playback.paused(); playback.stop(); await vi.advanceTimersByTimeAsync(5000)
+    expect(pc.play).toHaveBeenCalledTimes(22); expect(playback.pending).toBe(false)
+  })
+  it.each([0, Number.NaN, Number.POSITIVE_INFINITY])('never plays or repeats with a buffer length of %s', async duration => {
+    vi.useFakeTimers(); const pc = player(); pc.getDuration = () => duration; pc.getCurrentTime = () => duration
+    const playback = new EditorPlayback(pc, vi.fn(), [], vi.fn(), vi.fn())
+    playback.configure(null, true); await playback.toggle(); await playback.play(0, 5)
+    playback.paused(); await vi.advanceTimersByTimeAsync(5000)
+    expect(pc.play).not.toHaveBeenCalled(); expect(playback.pending).toBe(false)
+  })
+  it('a repeat whose buffer became empty while waiting stops instead of restarting', async () => {
+    vi.useFakeTimers(); const pc = player(); let duration = 10; pc.getDuration = () => duration; pc.getCurrentTime = () => 10
+    const playback = new EditorPlayback(pc, vi.fn(), [], vi.fn(), vi.fn())
+    playback.configure(null, true, 1); await playback.play(0, 10)
+    playback.paused(); duration = Number.NaN; await vi.advanceTimersByTimeAsync(5000)
+    expect(pc.play).toHaveBeenCalledTimes(1); expect(playback.pending).toBe(false)
   })
   it('does not restart a queued loop after explicit Stop or clip cleanup', async () => {
     const pc = player(); let time = 3; pc.getCurrentTime = () => time

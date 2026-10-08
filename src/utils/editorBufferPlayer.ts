@@ -77,15 +77,21 @@ export class EditorBufferPlayer {
     if (this.end <= this.offset) {this.emit('pause'); return}
     const source = this.context!.createBufferSource(); source.buffer = this.buffer; source.connect(this.gain!)
     this.source = source; this.began = this.context!.currentTime
-    source.onended = () => {
-      if (this.source !== source) return
-      this.source = null; this.offset = this.end; source.disconnect()
-      if (this.timer) clearInterval(this.timer); this.timer = null
-      this.emit('timeupdate'); this.emit('pause'); this.emit('finish')
-    }
+    source.onended = () => this.ended(source, true)
     source.start(0, this.offset, this.end - this.offset)
-    this.timer = setInterval(() => this.emit('timeupdate'), 16)
+    // The 16 ms tick usually reaches the end before the node's 'ended' (the node starts a render quantum or more after
+    // `began`). Either way it is the natural end ('pause' + 'finish'): a bare 'pause' is a user stop (onUserStop), which
+    // stopped the sounds and the Scene video a loop repeat had just started again.
+    this.timer = setInterval(() => { if (this.getCurrentTime() >= this.end) this.ended(source, false); else this.emit('timeupdate') }, 16)
     this.emit('timeupdate'); this.emit('play')
+  }
+  /** The natural end of `source`'s pass. `done`: its 'ended' fired; else it may still sound its last ms and disconnects itself then. */
+  private ended(source: AudioBufferSourceNode, done: boolean) {
+    if (this.source !== source) return
+    this.source = null; this.offset = this.end
+    if (done) source.disconnect(); else source.onended = () => source.disconnect()
+    if (this.timer) clearInterval(this.timer); this.timer = null
+    this.emit('timeupdate'); this.emit('pause'); this.emit('finish')
   }
   activate() { this.disposed = false }
   dispose() { this.disposed = true; this.pause(); this.listeners.clear(); const context = this.context; this.context = null; this.gain = null; if (context) { perfTrack('audioContexts', -1); void context.close() } }

@@ -15,6 +15,8 @@ interface Player {
  * `begin` is called when the lead-in starts, `cancel` when Stop interrupts it.
  */
 export interface PlaybackPreRoll { seconds: number; begin: (start: number) => void; cancel: () => void }
+/** Loop repeats start at least this long apart (a near-zero range or an instant end never spins). */
+export const MIN_LOOP_PERIOD_MS = 50
 export class EditorPlayback {
   /** The device stream's gain (DEC-086 intensity) at `time` (seconds of the player), read for every chunk sent: a change applies mid-stream without restarting. */
   level: ((time: number) => number) | null = null
@@ -33,6 +35,8 @@ export class EditorPlayback {
   pending = false
   /** The current play runs once even with loop on (Scene video click). Reset by every play. */
   private once = false
+  /** When the current play was asked for (Date.now()): the next loop repeat waits at least MIN_LOOP_PERIOD_MS from it. */
+  private startedAt = -Infinity
   constructor(private player: Player, private encode: (start: number, end: number) => Promise<Blob>, private targets: string[],
     private send: (message: ManagerMessage) => void,
     private stream: (blob: Blob, send: (message: ManagerMessage) => void, options: StreamOptions) => Promise<void>,
@@ -51,7 +55,7 @@ export class EditorPlayback {
   paused() {
     const range = this.range
     if (!range || this.pending || this.player.isPlaying()) return
-    const repeat = range && this.loop && !this.once && this.player.getCurrentTime() >= range.end - .002
+    const repeat = this.loop && !this.once && range.end - range.start > 0 && this.player.getCurrentTime() >= range.end - .002
     this.range = null
     this.cancel()
     const revision = this.revision
@@ -61,10 +65,12 @@ export class EditorPlayback {
         this.loopTimer = null
         if (this.revision !== revision || !this.loop) return
         const next = this.selectedRange()
-        if (next.end <= next.start) {this.stop(); return}
+        // Not `end <= start`: a NaN duration must not restart either.
+        if (!(next.end > next.start)) {this.stop(); return}
         void this.play(next.start, next.end).catch(this.failed)
       }
-      if (this.loopDelay > 0) this.loopTimer = setTimeout(restart, this.loopDelay)
+      const wait = Math.max(this.loopDelay, MIN_LOOP_PERIOD_MS - (Date.now() - this.startedAt))
+      if (wait > 0) this.loopTimer = setTimeout(restart, wait)
       else queueMicrotask(restart)
     }
   }
@@ -93,10 +99,12 @@ export class EditorPlayback {
   play(start = 0, end?: number, once = false, preRoll?: PlaybackPreRoll | null): Promise<void> {
     this.stop()
     this.once = once
+    this.startedAt = Date.now()
     this.player.prepare?.()
     const duration = this.player.getDuration()
     start = Math.max(0, Math.min(duration, start)); end = Math.max(start, Math.min(duration, end ?? duration))
-    if (end <= start) return Promise.resolve()
+    // Also a NaN / infinite duration: nothing plays (and nothing repeats).
+    if (!Number.isFinite(duration) || !(end > start)) return Promise.resolve()
     this.range = {start: this.selection ? this.selectedRange().start : (end !== undefined && end < this.player.getDuration() ? start : 0), end: end ?? this.player.getDuration()}
     const controller = new AbortController()
     this.controller = controller; this.pending = true; this.changed(true)
