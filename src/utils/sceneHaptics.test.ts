@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildLoopVoices, CHUNK, cueVoices, LEAD_MS, matchesAddress, QUIET_END_MS, renderChunk, SceneHapticMixer, tableTargets, targetsOf, WRIST } from './sceneHaptics'
+import { ACK_TIMEOUT_MS, buildLoopVoices, CHUNK, RETRY_MS, cueVoices, LEAD_MS, matchesAddress, QUIET_END_MS, renderChunk, SceneHapticMixer, tableTargets, targetsOf, WRIST } from './sceneHaptics'
 import { sampleLib, sampleTable } from './sceneTestFixtures'
 
 const ones = (n: number) => new Float32Array(n).fill(0.5)
@@ -95,5 +95,63 @@ describe('scene haptic streams', () => {
     pump(1000)
     pump(1010, { devices: [] })
     expect(sent[sent.length - 1]).toEqual({ type: 'stream_end', payload: expect.objectContaining({ targets: ['10.0.0.2'] }) })
+  })
+
+  /** The helper's stream_ack checks: a rejected / lost / partial BEGIN re-opens the stream (new stream_id) after the back-off. */
+  const begins = (sent: { type: string; payload: Record<string, unknown> }[]) => sent.filter(m => m.type === 'stream_begin').map(m => m.payload.stream_id as string)
+
+  it('an ok ack keeps the stream: no retry, DATA keeps flowing on the same stream_id', () => {
+    const { sent, mixer, pump } = run()
+    pump(1000)
+    const [id] = begins(sent)
+    mixer.onAck({ stream_id: id, status: 'ok', targets: ['10.0.0.2'] }, 1005)
+    pump(1000 + ACK_TIMEOUT_MS + RETRY_MS + 10)
+    expect(begins(sent)).toEqual([id])
+    expect(sent[sent.length - 1]).toEqual({ type: 'stream_data', payload: expect.objectContaining({ stream_id: id }) })
+  })
+
+  it('a no_target ack drops the session and BEGINs again with a new stream_id after the back-off', () => {
+    const { sent, mixer, pump } = run()
+    pump(1000)
+    const [id] = begins(sent)
+    mixer.onAck({ stream_id: id, status: 'no_target' }, 1005)
+    expect(mixer.streaming).toBe(false)
+    const before = sent.length
+    pump(1010); pump(1005 + RETRY_MS - 1)
+    expect(sent.length).toBe(before) // nothing sent during the back-off (no DATA for a dead session)
+    pump(1005 + RETRY_MS)
+    const again = begins(sent)
+    expect(again).toHaveLength(2); expect(again[1]).not.toBe(id)
+  })
+
+  it('an ok ack that defers the device, or leaves it out of targets, is retried too', () => {
+    for (const ack of [{ status: 'ok', targets: [], deferred: ['10.0.0.2'] }, { status: 'ok', targets: ['10.0.0.9'] }]) {
+      const { sent, mixer, pump } = run()
+      pump(1000)
+      mixer.onAck({ stream_id: begins(sent)[0], ...ack }, 1000)
+      expect(mixer.streaming).toBe(false)
+      pump(1000 + RETRY_MS)
+      expect(begins(sent)).toHaveLength(2)
+    }
+  })
+
+  it('a BEGIN without an ack within ACK_TIMEOUT_MS is ended and retried', () => {
+    const { sent, pump } = run()
+    pump(1000)
+    const [id] = begins(sent)
+    pump(1000 + ACK_TIMEOUT_MS)
+    expect(begins(sent)).toHaveLength(1)
+    pump(1000 + ACK_TIMEOUT_MS + 1)
+    expect(sent.some(m => m.type === 'stream_end' && m.payload.stream_id === id)).toBe(true)
+    pump(1000 + ACK_TIMEOUT_MS + 1 + RETRY_MS)
+    expect(begins(sent)).toHaveLength(2)
+  })
+
+  it('acks of other streams (the editor, another tab) are ignored', () => {
+    const { sent, mixer, pump } = run()
+    pump(1000)
+    mixer.onAck({ stream_id: 'editor-1', status: 'no_target' }, 1005)
+    expect(mixer.streaming).toBe(true)
+    expect(mixer.owns(begins(sent)[0])).toBe(true); expect(mixer.owns('editor-1')).toBe(false)
   })
 })

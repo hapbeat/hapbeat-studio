@@ -6,7 +6,7 @@ import { isLoopCue, routeClips, sfxSounds, type CueRoute, type CueSfx, soundInte
 import { effectiveEvent, fireShot, MaterialPicker, resolveEventName } from '@/utils/cueEvents'
 import { runPosition } from '@/utils/sceneSegments'
 import { buildLoopSounds, LoopSoundPlayer, loopSoundLevel, type LoopSound } from '@/utils/sceneLoopSounds'
-import { buildLoopVoices, shotVoices, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, SceneHapticMixer, targetsOf, type HapticDevice, type HelperSend } from '@/utils/sceneHaptics'
+import { buildLoopVoices, shotVoices, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, SceneHapticMixer, targetsOf, type HapticDevice, type HelperSend, type StreamAck } from '@/utils/sceneHaptics'
 
 export const SPEEDS = [1, 0.5, 0.25]
 
@@ -84,6 +84,12 @@ export class SceneRuntime {
 
   setHelper(helper: { send: HelperSend; connected: boolean; devices: HapticDevice[] }) { this.helper = helper }
   get streaming() { return this.mixer.streaming }
+  /** Whether a helper `stream_ack` is for one of this tab's device streams. */
+  ownsStream(streamId: string | undefined) { return this.mixer.owns(streamId) }
+  /** A helper `stream_ack`: a rejected / partial BEGIN re-opens that device's stream after a back-off. */
+  streamAck(ack: StreamAck) { this.mixer.onAck(ack, performance.now()) }
+  /** Sends stream_end for every open device stream (page unload: React cleanups do not run). */
+  endStreams() { this.mixer.endSessions() }
 
   item(): SceneItem | undefined { const s = useSceneStore.getState(); return s.items[s.cur] }
   events(): VisibleEvent[] {

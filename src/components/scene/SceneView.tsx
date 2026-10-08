@@ -12,7 +12,7 @@ import { useWaveformStore } from '@/stores/waveformStore'
 import { useSceneOverrides } from '@/hooks/useSceneOverrides'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { resolvePlaybackTargets } from '@/utils/playbackDevices'
-import { matchesAddress, tableTargets, type HapticDevice } from '@/utils/sceneHaptics'
+import { matchesAddress, tableTargets, type HapticDevice, type StreamAck } from '@/utils/sceneHaptics'
 import { focusEvent } from '@/utils/sceneData'
 import { isTypingTarget } from '@/utils/playbackShortcut'
 import { SceneRuntime } from './sceneRuntime'
@@ -63,13 +63,21 @@ export function SceneView({ active }: { active: boolean }) {
   useEffect(() => {
     runtime.setHelper({ send: (type, payload) => send({ type, payload } as Parameters<typeof send>[0]), connected: isConnected, devices: targetDevices })
   }, [runtime, send, isConnected, targetDevices])
-  // Stream acknowledgements / helper errors go to the Project panel log while this tab streams.
+  // This tab's stream acknowledgements go to the mixer (a rejected BEGIN re-opens the stream) and, like helper errors
+  // while this tab streams, to the Project panel log.
   useEffect(() => subscribe(message => {
-    if (!runtime.streaming) return
-    const p = (message.payload ?? {}) as { status?: string; targets?: string[]; deferred?: string[]; message?: string }
-    if (message.type === 'stream_ack') useSceneStore.getState().addLog(`stream_ack ${p.status ?? ''}${p.targets ? ' → ' + p.targets.join(', ') : ''}${p.deferred ? ` (${t('scene.log.deferred')}: ${p.deferred.join(', ')})` : ''}${p.message ? ' ' + p.message : ''}`)
-    else if (message.type === 'error') useSceneStore.getState().addLog(`helper error: ${p.message ?? ''}`)
+    const p = (message.payload ?? {}) as StreamAck
+    if (message.type === 'stream_ack' && runtime.ownsStream(p.stream_id)) {
+      useSceneStore.getState().addLog(`stream_ack ${p.stream_id} ${p.status ?? ''}${p.targets ? ' → ' + p.targets.join(', ') : ''}${p.deferred ? ` (${t('scene.log.deferred')}: ${p.deferred.join(', ')})` : ''}${p.message ? ' ' + p.message : ''}`)
+      runtime.streamAck(p)
+    } else if (message.type === 'error' && runtime.streaming) useSceneStore.getState().addLog(`helper error: ${p.message ?? ''}`)
   }), [subscribe, runtime, t])
+  // Leaving the page (reload / close): end the device streams now, the helper otherwise ends them only on the socket close.
+  useEffect(() => {
+    const end = () => runtime.endStreams()
+    window.addEventListener('pagehide', end); window.addEventListener('beforeunload', end)
+    return () => { window.removeEventListener('pagehide', end); window.removeEventListener('beforeunload', end) }
+  }, [runtime])
 
   const { ask, dialog } = useConfirm()
   const confirmDiscard = useCallback(() => ask({ message: t('scene.confirmDiscard'), danger: true }), [ask, t])

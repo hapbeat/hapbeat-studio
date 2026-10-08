@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+vi.mock('@/utils/sceneSegments', async orig => { const m = await orig<typeof import('@/utils/sceneSegments')>(); return { ...m, runPosition: vi.fn(m.runPosition) } })
 vi.mock('@/utils/sceneProject', async orig => ({ ...(await orig<typeof import('@/utils/sceneProject')>()), readProjectFile: async (_root: unknown, path: string) => new File(['x'], path) }))
 
 /** A silent stand-in for the <video> element: a new src loads (metadata) on the next tick; play() only flips `paused`. */
@@ -214,5 +215,54 @@ describe('A levelMap edit reaches the haptic stream at once (DEC-090)', () => {
     expect(lastGain()).toBeCloseTo(0.4202 * mapLevel({ points: [[0.08, 0.08], [1.225, 0.3]] }, 1.225), 3)
     expect(lastGain()).toBeCloseTo(0.4202 * 0.3, 3)
     runtime.stop(); clock.mockRestore()
+  })
+})
+
+describe('Scene haptic streams end when the page goes away', () => {
+  it('endStreams (pagehide / beforeunload) sends stream_end for the open device stream', async () => {
+    const { useSceneStore } = await import('@/stores/sceneStore')
+    const { useSceneSettings } = await import('@/stores/sceneSettings')
+    const { SceneRuntime } = await import('./sceneRuntime')
+    const { buildItems } = await import('@/utils/sceneData')
+    const data = { fps: 30, full: { file: 'full.mp4', levels: [], events: [] }, clips: [] }
+    useSceneSettings.setState({ pcSound: false, sendHaptics: true, hapticLeadMs: 0 })
+    useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: null, table: { clips: {}, sounds: {}, cues: {} } as never, data, recorded: data, items: buildItems(data), cur: 0, pcm: {}, sfx: {} })
+    const sent: { type: string; payload: Record<string, unknown> }[] = []
+    const runtime = new SceneRuntime(), tick = () => (runtime as unknown as { tick(): void }).tick()
+    runtime.setHelper({ send: (type, payload) => sent.push({ type, payload }), connected: true, devices: [{ ipAddress: '10.0.0.2', address: 'p1/pos_r_wrist' }] })
+    runtime.start(); await flush()
+    video.readyState = 2; video.paused = false; video.seeking = false; video.currentTime = 1
+    tick()
+    const begin = sent.find(m => m.type === 'stream_begin')!
+    expect(runtime.ownsStream(begin.payload.stream_id as string)).toBe(true)
+    runtime.endStreams()
+    expect(sent[sent.length - 1]).toEqual({ type: 'stream_end', payload: { stream_id: begin.payload.stream_id, targets: ['10.0.0.2'] } })
+    expect(runtime.streaming).toBe(false)
+    runtime.stop()
+  })
+})
+
+describe('A variant ramp counts firings in replay time while a clip moment plays', () => {
+  it('fire() looks up the run position with the full-replay time, not the clip-relative one', async () => {
+    const { useSceneStore } = await import('@/stores/sceneStore')
+    const { useSceneSettings } = await import('@/stores/sceneSettings')
+    const { SceneRuntime } = await import('./sceneRuntime')
+    const { buildItems } = await import('@/utils/sceneData')
+    const segments = await import('@/utils/sceneSegments')
+    const runPosition = vi.mocked(segments.runPosition)
+    // Two hits 0.1 s apart (one run) in the replay; the clip moment starts 9.9 s into the replay.
+    const events = [{ t: 10.9, name: 'hit', hand: 'right' }, { t: 11.0, name: 'hit', hand: 'right' }]
+    const data = { fps: 30, full: { file: 'full.mp4', levels: [], events }, clips: [{ file: '01.mp4', name: 'hit', names: ['hit'], hand: 'right', at: 10.9, note: '', event: 1, levels: Array.from({ length: 90 }, () => [0]) }] }
+    useSceneSettings.setState({ pcSound: false, sendHaptics: false })
+    useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: { layers: [], loop_cues: [], ticks: [] } as never, table: { clips: {}, sounds: {}, cues: { hit: { sfx: null, haptics: [] } } } as never,
+      data: data as never, recorded: data as never, items: buildItems(data as never), cur: 1, pcm: {}, sfx: {} })
+    const runtime = new SceneRuntime(), tick = () => (runtime as unknown as { tick(): void }).tick()
+    runtime.start(); await flush()
+    runPosition.mockClear()
+    const playAt = (vt: number) => { video.readyState = 2; video.paused = false; video.seeking = false; video.currentTime = vt; tick() }
+    playAt(0.95); playAt(1.05)
+    expect(runPosition.mock.calls.map(c => c[1].t)).toEqual([10.9, 11.0])
+    expect(runPosition.mock.results.map(r => r.value)).toEqual([{ index: 0, count: 2 }, { index: 1, count: 2 }])
+    runtime.stop()
   })
 })

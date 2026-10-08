@@ -143,14 +143,28 @@ export function bytesToBase64(buffer: ArrayBuffer): string {
 
 export interface HapticDevice { ipAddress: string; address: string; name?: string }
 export type HelperSend = (type: string, payload: Record<string, unknown>) => void
+/** The helper's reply to stream_begin (hapbeat-helper `stream_ack`). */
+export interface StreamAck { stream_id?: string; status?: string; targets?: string[]; deferred?: string[]; message?: string }
+
+/** A BEGIN without a `stream_ack` within this long counts as lost. */
+export const ACK_TIMEOUT_MS = 1000
+/** Wait before a device's next BEGIN after a rejected / lost one (at most one retry per second per device). */
+export const RETRY_MS = 1000
 
 /**
  * Keeps one helper stream per matching device open while there is something
  * to play, and feeds it CHUNK by CHUNK slightly ahead of the wall clock.
- * The caller drives it with `pump()` every ~10 ms.
+ * The caller drives it with `pump()` every ~10 ms and passes the helper's
+ * `stream_ack`s to `onAck()`: a BEGIN the helper rejects (`no_target`, the ip
+ * deferred or not among `targets`) or does not acknowledge within
+ * ACK_TIMEOUT_MS drops that device's session, and the next `pump()` after
+ * RETRY_MS opens a new one with a new stream_id (instead of sending DATA the
+ * helper drops).
  */
 export class SceneHapticMixer {
-  private sessions = new Map<string, { id: string; address: string; wall: number; bytes: number }>()
+  private sessions = new Map<string, { id: string; address: string; wall: number; bytes: number; begun: number; acked: boolean }>()
+  /** Per device ip: no BEGIN before this time (ms, the pump clock). */
+  private retryAt = new Map<string, number>()
   private sid = 0
   private quietSince = 0
   voices: OneShotVoice[] = []
@@ -160,13 +174,33 @@ export class SceneHapticMixer {
   constructor(private send: HelperSend, private log: (text: string) => void = () => {}) {}
 
   get streaming() { return this.sessions.size > 0 }
+  /** Whether `streamId` is one of this mixer's open sessions (its acks belong here). */
+  owns(streamId: string | undefined) { return !!streamId && [...this.sessions.values()].some(s => s.id === streamId) }
 
   /** Drops cue voices that were scheduled but not yet due (they belong to the old position after a seek / stop). */
   flush(now: number) { this.voices = this.voices.filter(x => !x.cue || x.start <= now) }
 
   endSessions() {
-    for (const [ip, s] of this.sessions) { this.send('stream_end', { stream_id: s.id, targets: [ip] }); this.log(`stream_end → ${ip}`) }
+    for (const [ip, s] of this.sessions) { this.send('stream_end', { stream_id: s.id, targets: [ip] }); this.log(`stream_end ${s.id} → ${ip}`) }
     this.sessions.clear()
+    this.retryAt.clear()
+  }
+
+  /** A `stream_ack` from the helper (acks of other streams are ignored). */
+  onAck(ack: StreamAck, now: number) {
+    for (const [ip, s] of this.sessions) {
+      if (s.id !== ack.stream_id) continue
+      if (ack.status === 'ok' && ack.targets?.includes(ip) && !ack.deferred?.includes(ip)) { s.acked = true; continue }
+      this.drop(ip, now, `${ack.status ?? '?'}${ack.deferred?.includes(ip) ? ', deferred' : ''}${ack.status === 'ok' && !ack.targets?.includes(ip) ? ', not in targets' : ''}`)
+    }
+  }
+
+  private drop(ip: string, now: number, why: string) {
+    const s = this.sessions.get(ip)
+    if (!s) return
+    this.sessions.delete(ip)
+    this.retryAt.set(ip, now + RETRY_MS)
+    this.log(`stream drop ${s.id} → ${ip} (${why}); retry in ${RETRY_MS} ms`)
   }
 
   /**
@@ -178,15 +212,20 @@ export class SceneHapticMixer {
     if (!o.enabled) { this.endSessions(); this.voices = []; return }
     if (o.playing || this.voices.length) this.quietSince = now
     if (now - this.quietSince > QUIET_END_MS) { this.endSessions(); return }
+    // A BEGIN the helper never acknowledged: end it (harmless if it never started) and retry.
+    for (const [ip, s] of this.sessions) if (!s.acked && now - s.begun > ACK_TIMEOUT_MS) {
+      this.send('stream_end', { stream_id: s.id, targets: [ip] })
+      this.drop(ip, now, 'no ack')
+    }
     for (const d of o.devices) {
-      if (!d.ipAddress || this.sessions.has(d.ipAddress)) continue
+      if (!d.ipAddress || this.sessions.has(d.ipAddress) || (this.retryAt.get(d.ipAddress) ?? -Infinity) > now) continue
       const id = `scene-${Date.now().toString(36)}-${++this.sid}`
       this.send('stream_begin', { stream_id: id, targets: [d.ipAddress], target: d.address, sample_rate: RATE, channels: 2, format: 'pcm16', total_samples: 0, gain: 1.0 })
-      this.sessions.set(d.ipAddress, { id, address: d.address, wall: now, bytes: 0 })
-      this.log(`stream_begin → ${d.name ?? ''} ${d.ipAddress} (${d.address})`)
+      this.sessions.set(d.ipAddress, { id, address: d.address, wall: now, bytes: 0, begun: now, acked: false })
+      this.log(`stream_begin ${id} → ${d.name ?? ''} ${d.ipAddress} (${d.address})`)
     }
     for (const [ip, s] of this.sessions) {
-      if (!o.devices.some(d => d.ipAddress === ip)) { this.send('stream_end', { stream_id: s.id, targets: [ip] }); this.sessions.delete(ip); continue }
+      if (!o.devices.some(d => d.ipAddress === ip)) { this.send('stream_end', { stream_id: s.id, targets: [ip] }); this.sessions.delete(ip); this.log(`stream_end ${s.id} → ${ip}`); continue }
       if (s.wall < now - 200) s.wall = now // throttled tab: skip ahead instead of bursting
       while (s.wall < now + LEAD_MS) {
         const chunk = renderChunk({ ip, address: s.address, wall: s.wall + o.leadMs, voices: this.voices, loopVoices: this.loopVoices, clock: this.clock, pcm: o.pcm, level: o.level })
