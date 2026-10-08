@@ -49,6 +49,8 @@ export interface EditorUiSettings {
   eventMarks: Record<string, EventMark[]>
   /** Events panel: the materials not in use (★3 reserves) shown under each section; false = folded. */
   reservesOpen: boolean
+  /** The event detail's sound / haptic material lists are open (one fold for both; default open). */
+  materialsOpen: boolean
   /** Events panel auditions play the whole group (cue + its variants) at the stretch; false = only the shown row (others: sound only). */
   groupPlayback: boolean
   /** Waveform panel 「発生に合わせて並べる」: draw an audition at the scene timing (the material placed at its firings / a loop cue's segments); false = the material file once at its own length (auditions play the scene timing either way). */
@@ -80,7 +82,7 @@ export interface EditorUiSettings {
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, scenePostRollSec: 1, sceneContext: true, eventGroupEdits: {}, trialScenes: {}, clipScenes: {}, eventMarks: {}, reservesOpen: true, groupPlayback: true, placeAtFirings: false, candidateSounds: {}, materialLinks: {}, hapticOnPc: false, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
+  sceneLeadSec: 1, scenePostRollSec: 1, sceneContext: true, eventGroupEdits: {}, trialScenes: {}, clipScenes: {}, eventMarks: {}, reservesOpen: true, materialsOpen: true, groupPlayback: true, placeAtFirings: false, candidateSounds: {}, materialLinks: {}, hapticOnPc: false, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -169,6 +171,7 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     groupPlayback: typeof v.groupPlayback === 'boolean' ? v.groupPlayback : d.groupPlayback,
     placeAtFirings: typeof v.placeAtFirings === 'boolean' ? v.placeAtFirings : d.placeAtFirings,
     reservesOpen: typeof v.reservesOpen === 'boolean' ? v.reservesOpen : d.reservesOpen,
+    materialsOpen: typeof v.materialsOpen === 'boolean' ? v.materialsOpen : d.materialsOpen,
     candidateSounds: isRecord(v.candidateSounds) ? Object.fromEntries(Object.entries(v.candidateSounds).filter((e): e is [string, string] => typeof e[1] === 'string' && e[1].length <= 80).slice(-2000)) : {},
     eventReserves: reserves(v.eventReserves),
     reservesBackfilled: v.reservesBackfilled === true,

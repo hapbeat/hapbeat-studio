@@ -1,3 +1,8 @@
+import { firstFirings } from './cueEvents'
+import type { CueTable } from './sceneCueTable'
+import { MOMENT_S, type SceneData, type SceneLib } from './sceneData'
+import { layerRuns } from './sceneEmit'
+
 /**
  * The Events panel's 「同時」 groups by hand: the user's edits (per Scene project, keyed by cue names) applied on top
  * of the automatic grouping (simultaneousGroups: cues the recording fires within MOMENT_S). Display only for the cue
@@ -45,4 +50,44 @@ export function joinGroupOf(edits: GroupEdits | undefined, cue: string, target: 
 /** The other cues of `cue`'s group ([] when it is in none): they play as context of its auditions. */
 export function groupContext(groups: readonly (readonly string[])[], cue: string): string[] {
   return groups.find(g => g.includes(cue))?.filter(c => c !== cue) ?? []
+}
+
+/**
+ * When each cue first plays in the recording (s): its first recorded firing, or — for a loop cue — its layer's first
+ * active run when that is earlier. Cues that never play are absent.
+ */
+export function firstTimes(table: CueTable, lib: SceneLib, data: SceneData): Record<string, number> {
+  const out = firstFirings(table, data.full.events)
+  for (const layer of lib.layers) {
+    const run = table.cues[layer.cue] ? layerRuns(data.full.levels, data.fps, layer)[0] : undefined
+    if (run && (out[layer.cue] === undefined || run[0] < out[layer.cue])) out[layer.cue] = run[0]
+  }
+  return out
+}
+
+/**
+ * A group's cues in the order they play: by first time (`firsts`); a loop cue starting within MOMENT_S of a one-shot
+ * comes after it (the one-shot starts it); cues never played last; otherwise as given.
+ */
+export function orderByFirst(group: readonly string[], firsts: Record<string, number>, isLoop: (cue: string) => boolean): string[] {
+  const key = (cue: string) => (firsts[cue] ?? Infinity) + (isLoop(cue) ? MOMENT_S : 0)
+  return group.map((cue, i) => ({ cue, i, k: key(cue) })).sort((a, b) => (a.k - b.k) || (a.i - b.i)).map(x => x.cue)
+}
+/** A group's header: its cues in play order joined with 「 → 」. */
+export const groupLabel = (ordered: readonly string[]) => ordered.join(' → ')
+
+/**
+ * The Events list: one item per group (at its first cue's place in the table) or per ungrouped cue. A group never
+ * merges its events: `cues` lists every one (each its own selectable row), in play order (orderByFirst).
+ */
+export function eventListItems(order: readonly string[], groups: readonly (readonly string[])[], firsts: Record<string, number>, isLoop: (cue: string) => boolean): { cues: string[]; group: boolean }[] {
+  const out: { cues: string[]; group: boolean }[] = [], done = new Set<string>()
+  for (const cue of order) {
+    if (done.has(cue)) continue
+    const group = groups.find(g => g.includes(cue))
+    if (!group) { out.push({ cues: [cue], group: false }); continue }
+    group.forEach(c => done.add(c))
+    out.push({ cues: orderByFirst(group.filter(c => order.includes(c)), firsts, isLoop), group: true })
+  }
+  return out
 }

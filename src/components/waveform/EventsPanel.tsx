@@ -11,7 +11,7 @@ import { clipsForCue, isLoopCue, soundAllowed, positionsForCue, routeAlternates,
 import type { SceneLib } from '@/utils/sceneData'
 import {
   addPositionRoute, assignEventsForTrial, effectiveEvent, eventKey, listEvents, parseEventKey, removeOwnRoute, shownEventKey,
-  addMaterial, removeMaterial, setStarred, trialsForEvent, updateOwnRoute, firstFirings,
+  addMaterial, removeMaterial, setStarred, trialsForEvent, updateOwnRoute,
   resetAllReviews, setNone, setOverride, setReview, setUndecided, hasOwnMaterials, undecidedReserves, restoreReserve, soundFirstNote, noSoundNote,
   type EffectiveEvent, type EventRow, type SoundStatus,
 } from '@/utils/cueEvents'
@@ -30,7 +30,7 @@ import { create } from 'zustand'
 import { openMaterialForAdjust } from './eventEditing'
 import { materialTrialByIds, materialTrialSummary, materialTrialTooltip, resolveMaterialTrial, type MaterialTrial } from '@/utils/materialTrial'
 import { useEventGroups } from './useEventGroups'
-import { detachCue, joinGroupOf, type GroupEdits } from '@/utils/eventGroups'
+import { detachCue, eventListItems, firstTimes, groupLabel, joinGroupOf, type GroupEdits } from '@/utils/eventGroups'
 import './EventsPanel.css'
 import '@/components/scene/VideoOverlay.css'
 
@@ -86,28 +86,25 @@ export function EventsPanel() {
     const children = table ? r.variants.filter(v => hasOwnMaterials(table, v.ref)) : []
     return children.length ? <div key={r.key} className="events-family">{one(r)}{children.map(one)}</div> : one(r)
   }
-  const listItems: ReactNode[] = [], done = new Set<string>()
+  // When each cue first plays (a loop: its layer's first run): the order inside a group and 「grab（3.2 秒）」 in the menu.
+  const firsts = useMemo(() => table && lib && data ? firstTimes(table, lib, data) : {}, [table, lib, data])
+  // A group is a header plus every event as its own row, in play order (never merged into one row).
+  const items = useMemo(() => lib ? eventListItems(rows.map(r => r.key), groups, firsts, cue => isLoopCue(lib, cue)) : [], [rows, groups, firsts, lib])
   /** The cues of each list item (a group, or one cue), in list order: the targets of 「グループに入れる」. */
-  const itemCues: string[][] = []
-  for (const r of rows) {
-    if (done.has(r.key)) continue
-    const group = groups.find(g => g.includes(r.key))
-    itemCues.push(group ?? [r.key])
-    if (!group) { listItems.push(block(r)); continue }
-    group.forEach(k => done.add(k))
-    listItems.push(<div key={`group:${group.join('+')}`} className="events-group" title={t('events.simultaneousHint')}>
-      <div className="events-group-head">{group.join(' ＋ ')}<span className="events-tag simultaneous">{t('events.simultaneous')}</span></div>
-      {group.map(k => rows.find(x => x.key === k)).filter((x): x is EventRow => !!x).map(block)}
-    </div>)
-  }
+  const itemCues = items.map(item => item.cues)
+  const listItems: ReactNode[] = items.map(item => {
+    const members = item.cues.map(k => rows.find(x => x.key === k)).filter((x): x is EventRow => !!x)
+    return !item.group ? members.map(block) : <div key={`group:${item.cues.join('+')}`} className="events-group" title={t('events.simultaneousHint')}>
+      <div className="events-group-head">{groupLabel(item.cues)}<span className="events-tag simultaneous">{t('events.simultaneous')}</span></div>
+      {members.map(block)}
+    </div>
+  })
   // Group edits act on the selected event's cue.
   const selectedCue = shown ? parseEventKey(shown).cue : null
   const selectedItem = selectedCue ? itemCues.findIndex(c => c.includes(selectedCue)) : -1
-  // Each other item named with its first firing in the recording, e.g. 「grab（3.2 秒）」.
-  const firsts = useMemo(() => table && data ? firstFirings(table, data.full.events) : {}, [table, data])
   const itemLabel = (cues: string[]) => {
     const times = cues.map(c => firsts[c]).filter((x): x is number => x !== undefined)
-    const name = cues.join(' ＋ ')
+    const name = groupLabel(cues)
     return times.length ? t('events.group.at', { name, sec: Math.min(...times).toFixed(1) }) : name
   }
   const inGroup = selectedItem >= 0 && itemCues[selectedItem].length > 1
@@ -118,8 +115,9 @@ export function EventsPanel() {
       <EditorMenu label="⋯" title={t('events.menu')}>
         <EditorMenuItem disabled={!table} onSelect={() => void ask({ message: t('events.resetReviewsConfirm'), danger: true }).then(ok => { if (ok) useSceneStore.getState().edit(tb => resetAllReviews(tb)) })}>{t('events.resetReviews')}</EditorMenuItem>
         {selectedCue ? <EditorMenuSection label={t('events.group.join', { name: selectedCue })}>
-          {itemCues.filter((_, i) => i !== selectedItem).map(cues => <EditorMenuItem key={cues.join('+')} onSelect={() => setGroupEdits(joinGroupOf(groupEdits, selectedCue, cues[0]))}>
-            {t('events.group.joinWith', { target: itemLabel(cues) })}</EditorMenuItem>)}
+          {/* One entry per event (a group's events each on their own, in play order). */}
+          {itemCues.filter((_, i) => i !== selectedItem).flat().map(cue => <EditorMenuItem key={cue} onSelect={() => setGroupEdits(joinGroupOf(groupEdits, selectedCue, cue))}>
+            {t('events.group.joinWith', { target: itemLabel([cue]) })}</EditorMenuItem>)}
         </EditorMenuSection> : <EditorMenuItem disabled onSelect={() => {}}>{t('events.group.joinPick')}</EditorMenuItem>}
         <EditorMenuItem disabled={!selectedCue || !inGroup} onSelect={() => { if (selectedCue) setGroupEdits(detachCue(groupEdits, selectedCue)) }}>
           {t('events.group.detach', { name: selectedCue ?? '' })}</EditorMenuItem>
@@ -254,8 +252,8 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
   const play = (s: string) => { if (!openEventSound(key, s, true)) missing(s) }
   const show = (s: string) => { if (!openEventSound(key, s)) missing(s) }
   const describe = useDescribeMaterial()
-  // An approved sound is folded (its heading line stays); ▸ opens it.
-  const [open, setOpen] = useState(e.review.sfx !== 'approved')
+  // The material lists fold together (editor setting, open by default; the heading line stays).
+  const [open, setOpen] = useMaterialsOpen()
   return <section className="events-sec">
     <h4 className="events-sec-head"><Fold open={open} set={setOpen} />{t('events.sound')}{allowed && e.own.sfx && <><ReviewToggle e={e} field="sfx" edit={edit} /><DecisionBar e={e} field="sfx" edit={edit} /></>}
       {/* Ask for (more) sound candidates; after checking the sound (OK): on to the haptic — also for a cue without a sound. */}
@@ -285,8 +283,7 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
 /** Haptic output: one block per route (body position × gain) with its clips (★ = `clips`, played; the rest = `alternates`); "＋ add position" plays the event on another position at the same time. */
 function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: SceneLib; e: EffectiveEvent; loop: boolean; edit: Edit }) {
   const { t } = useI18n()
-  // An approved haptic is folded (its heading line stays); ▸ opens it.
-  const [hOpen, setHOpen] = useState(e.review.haptics !== 'approved')
+  const [hOpen, setHOpen] = useMaterialsOpen()
   const atLabel = useAtLabel()
   const previewId = useEventStore(s => s.preview?.id)
   const key = eventKey(e.ref)
@@ -654,6 +651,12 @@ function GroupPlaybackToggle() {
     onClick={() => useEditorSettings.getState().update({ groupPlayback: !on })}>
     <span className="transport-label-stack" aria-hidden="true"><span style={{ visibility: on ? 'visible' : 'hidden' }}>{t('events.groupPlayback.group')}</span><span style={{ visibility: on ? 'hidden' : 'visible' }}>{t('events.groupPlayback.row')}</span></span>
   </button>
+}
+
+/** The event detail's material fold (editor setting `materialsOpen`, shared by the sound and haptic sections). */
+function useMaterialsOpen(): [boolean, (open: boolean) => void] {
+  const open = useEditorSettings(s => s.materialsOpen)
+  return [open, next => useEditorSettings.getState().update({ materialsOpen: next })]
 }
 
 /** ▸ / ▾ in a section heading. */
