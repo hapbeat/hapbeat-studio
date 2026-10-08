@@ -141,7 +141,7 @@ function useShownSubject(): SceneSubject {
  */
 export function EditorScenePanel() {
   const { t } = useI18n()
-  const { player, playback, linkSceneProject, playFromStart, isPlaybackActive } = useEditor()
+  const { player, playback, linkSceneProject, playFromStart, isPlaybackActive, audioBuffer } = useEditor()
   /** Focus in this panel (its own window when popped out) = play "from the video": lead-in first, sound + haptics on the mark. */
   const rootRef = useRef<HTMLDivElement>(null)
   const [focused, setFocused] = useState(false)
@@ -187,6 +187,7 @@ export function EditorScenePanel() {
   }, [needsLink, linkName, openProject])
   const clipName = useWaveformStore(s => s.clip?.name ?? '')
   const leadSetting = useEditorSettings(s => s.sceneLeadSec)
+  const postRollSetting = useEditorSettings(s => s.scenePostRollSec)
   const [src, setSrc] = useState<string | null>(null)
   /** A clip video that cannot be read (missing file, or a name the folder cannot hold such as `:`) is reported instead of "loading" forever. */
   const [videoError, setVideoError] = useState<string | null>(null)
@@ -281,7 +282,10 @@ export function EditorScenePanel() {
     const materials = markMaterials(table, list, shownMaterial, groupOn, length)
     return list.map((m, i) => materials[i] ? { ...m, name: materials[i]!.label, material: materials[i]!.material, durSec: materials[i]!.durSec } : m)
   }, [chosen?.marks, table, scenePcm, sceneSfx, groupOn, shownMaterial?.event, shownMaterial?.target, shownMaterial?.material])
-  const end = chosen?.end ?? null
+  // A synced scene audition ends where the editor playback does (its buffer runs to the scene's stop, sceneStopSec);
+  // otherwise the stretch's own end (a recorded clip: the video's end).
+  const plan = useAuditionPlan()
+  const end = synced && plan && chosen && audioBuffer ? sceneVideoTime(chosen.mark, audioBuffer.duration) : chosen?.end ?? null
   useEffect(() => {
     if (!synced || !chosen) return
     const at = (time: number) => sceneVideoTime(chosen.mark, time)
@@ -348,6 +352,9 @@ export function EditorScenePanel() {
       {!message && <label className="editor-scene-lead">{t('editor.scene.lead')}
         <input type="number" min={0} max={10} step={0.5} value={leadSetting} disabled={!!chosen?.segment} onChange={e => { const x = parseFloat(e.target.value); if (Number.isFinite(x)) useEditorSettings.getState().update({ sceneLeadSec: Math.max(0, Math.min(10, x)) }) }} />
         {t('editor.scene.leadUnit')}</label>}
+      {!message && <label className="editor-scene-lead" title={t('editor.scene.postRollHint')}>{t('editor.scene.postRoll')}
+        <input type="number" min={0} max={5} step={0.1} value={postRollSetting} disabled={!chosen?.segment} onChange={e => { const x = parseFloat(e.target.value); if (Number.isFinite(x)) useEditorSettings.getState().update({ scenePostRollSec: Math.max(0, Math.min(5, x)) }) }} />
+        {t('editor.scene.postRollUnit')}</label>}
     </div>
     {message ? <p className="agent-muted">{message}</p> : <>
       <div className="editor-scene-stage" title={hint} onClick={e => { e.currentTarget.closest<HTMLElement>('.editor-scene-panel')?.focus(); focusedRef.current = true; setFocused(true); if (synced) togglePause() }}>

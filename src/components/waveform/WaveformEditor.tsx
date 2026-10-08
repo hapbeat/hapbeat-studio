@@ -38,11 +38,12 @@ import { trialTarget } from '@/utils/agentProtocol'
 import { waveformOnPc } from '@/utils/agentTrialUi'
 import { DecideDialog } from './DecideDialog'
 import { useAdjustPersistence, useMaterialWriteBack } from './eventEditing'
-import { openEventDefault, repeatBuffer, useDecidedSoundSync } from './eventAudio'
+import { openEventDefault, repeatBuffer, useDecidedSoundSync, useSceneSounds } from './eventAudio'
 import { groupFirings, groupHapticsEnd, inSpans, mixGroupHaptics, shownSpans, type HapticPart } from '@/utils/groupPlayback'
 import { RATE as HAPTIC_RATE } from '@/utils/sceneHaptics'
 import { useAuditionPlan } from './EditorScenePanel'
 import type { ShownLayout } from '@/utils/shownLayout'
+import { sceneStopSec } from '@/utils/sceneStop'
 
 export function WaveformEditor({ active }: { active: boolean }) {
   const { t } = useI18n()
@@ -151,8 +152,19 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const scenePcm = useSceneStore(state => state.pcm)
   // The playback runs to the end of the group's last haptic too (a bite after the last tear was cut off with the shown buffer).
   const groupEndSec = useMemo(() => groupHapticsEnd(JSON.parse(groupKey) as HapticPart[], scenePcm), [groupKey, scenePcm])
-  const audioBuffer = useMemo(() => shownBuffer && ((stretched && plan) || groupEndSec > shownBuffer.duration)
-    ? repeatBuffer(shownBuffer, (stretched && plan ? plan.targets : [0]).map(atSec => ({ atSec, gain: 1, rate: 1 })), groupEndSec) : shownBuffer, [stretched, shownBuffer, plan, groupEndSec])
+  // A scene audition runs (haptic stream and Scene video, which pauses at its end) to the last firing + the post-roll, or
+  // to the end of the longest sound / haptic played if later (sceneStopSec); the sounds ring out on their own after it.
+  const sceneSounds = useSceneSounds()
+  const postRollSec = useEditorSettings(state => state.scenePostRollSec)
+  const stopSec = useMemo(() => !shownBuffer || !plan || (!audition && !eventPreview && !adjusting) ? 0 : sceneStopSec({
+    firings: [...plan.targets, ...plan.others.map(o => o.atSec)],
+    postRollSec,
+    sounds: (sceneSounds.firings ?? []).map(f => ({ atSec: f.atSec, durSec: f.buffer.duration })),
+    haptics: [...(stretched ? plan.targets : [0]).map(atSec => ({ atSec, durSec: shownBuffer.duration })), { atSec: 0, durSec: groupEndSec }],
+  }), [shownBuffer, plan, audition, eventPreview, adjusting, postRollSec, sceneSounds.firings, stretched, groupEndSec])
+  const minSec = Math.max(groupEndSec, stopSec)
+  const audioBuffer = useMemo(() => shownBuffer && ((stretched && plan) || minSec > shownBuffer.duration)
+    ? repeatBuffer(shownBuffer, (stretched && plan ? plan.targets : [0]).map(atSec => ({ atSec, gain: 1, rate: 1 })), minSec) : shownBuffer, [stretched, shownBuffer, plan, minSec])
   /** What the waveform panel shows: the file once, or the material placed at its event's firings (header line + per-firing marks). */
   const shownLayout = useMemo((): ShownLayout | null => shownBuffer ? { materialSec: shownBuffer.duration, starts: stretched && plan ? plan.targets : null } : null, [shownBuffer, stretched, plan])
   // By value (groupKey): saving a strength rewrites the table but not these parts, so nothing is mixed again for it.
@@ -189,7 +201,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const player = useMemo(() => new EditorBufferPlayer(null, undefined, s.setError), [s.clip?.id, original, auditionKey])
   useEffect(() => {player.activate(); return () => player.dispose()}, [player])
   useEffect(() => { player.setLevel(level) }, [player, level])
-  useDecidedSoundSync(player)
+  useDecidedSoundSync(player, sceneSounds)
   useAdjustPersistence()
   // An adjusted event material: what its chain renders (live preview, or the clip without pending changes) goes back to the WAV.
   useMaterialWriteBack(previewActive ? (preview.status === 'ready' ? preview.buffer ?? null : null) : pendingChain ? null : s.clip?.buffer ?? null,

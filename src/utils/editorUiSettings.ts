@@ -34,6 +34,8 @@ export interface EditorUiSettings {
   dockLayout: Record<string, unknown> | null
   /** Scene video panel: the video starts this many seconds before the cue mark when an audition plays. */
   sceneLeadSec: number
+  /** Scene video panel: a scene audition runs at least this many seconds past its last firing (longer when a sound / haptic is longer). */
+  scenePostRollSec: number
   /** Scene video panel: scene clip picked per AI trial id. */
   trialScenes: Record<string, TrialSceneChoice>
   /** Scene video panel: scene clip picked per editor clip id. */
@@ -71,7 +73,7 @@ export interface EditorUiSettings {
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, reservesOpen: true, groupPlayback: true, candidateSounds: {}, materialLinks: {}, hapticOnPc: false, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
+  sceneLeadSec: 1, scenePostRollSec: 1, trialScenes: {}, clipScenes: {}, eventMarks: {}, reservesOpen: true, groupPlayback: true, candidateSounds: {}, materialLinks: {}, hapticOnPc: false, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -138,6 +140,7 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     projectNames: strings(v.projectNames, 500) ? [...new Set(v.projectNames.filter(isProjectName))] : d.projectNames,
     dockLayout: isDockLayout(v.dockLayout) ? v.dockLayout : d.dockLayout,
     sceneLeadSec: clamp(v.sceneLeadSec, 0, 10, d.sceneLeadSec),
+    scenePostRollSec: clamp(v.scenePostRollSec, 0, 5, d.scenePostRollSec),
     trialScenes: sceneChoices(v.trialScenes),
     clipScenes: sceneChoices(v.clipScenes),
     eventMarks: eventMarks(v.eventMarks),

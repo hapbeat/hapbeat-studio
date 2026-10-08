@@ -28,6 +28,14 @@ describe('editor UI settings', () => {
     expect(sanitizeUiSettings({ clipScenes: { 'c1': { project: 'trex', file: '01.mp4' }, 'x': 3 } }).clipScenes).toEqual({ c1: { project: 'trex', file: '01.mp4' } })
   })
 
+  it('clamps the scene post-roll to 0–5 s (default 1 s)', () => {
+    expect(sanitizeUiSettings({}).scenePostRollSec).toBe(1)
+    expect(sanitizeUiSettings({ scenePostRollSec: 2.5 }).scenePostRollSec).toBe(2.5)
+    expect(sanitizeUiSettings({ scenePostRollSec: 9 }).scenePostRollSec).toBe(5)
+    expect(sanitizeUiSettings({ scenePostRollSec: -1 }).scenePostRollSec).toBe(0)
+    expect(sanitizeUiSettings({ scenePostRollSec: 'x' }).scenePostRollSec).toBe(1)
+  })
+
   it('roundtrips through the file format and rejects untagged or broken files', () => {
     const settings = { ...DEFAULT_UI_SETTINGS, clipThumbnails: true, dockLayout: layout }
     const parsed = parseUiSettingsFile(serializeUiSettings(settings))

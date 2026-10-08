@@ -110,18 +110,14 @@ const startOnPc = (source: SoundSource, offset: number) => {
   return { stop: () => src.stop() }
 }
 
-/**
- * While a haptic of an event is played in the editor — an AI candidate of a
- * haptic trial (its first scene cue in the open Scene project), the event's own
- * haptic clip, or a preview sequence (its rendered sound) — the event's sound
- * plays on the PC from the same position. It rings out after the haptic ends
- * (a loop cue's sound stops with it) and stops on a stop. Follows the editor's
- * PC audio toggle (muted = silent).
- *
- * The sound is chosen by value (buffer + volume): store refreshes (the AI trials
- * poll every 2 s) never restart or stop what is playing (CompanionSound).
- */
-export function useDecidedSoundSync(player: EditorBufferPlayer) {
+export interface SceneSounds {
+  /** The sound that goes with what is shown (played whole by CompanionSound when there is no scene plan); null = none. */
+  picked: SoundSource | null
+  /** A scene's sounds at their firing times (FiringScheduler); null = no scene plan (or a loop sound). */
+  firings: Firing[] | null
+}
+/** What useDecidedSoundSync plays (also read for where a scene audition stops, sceneStopSec). */
+export function useSceneSounds(): SceneSounds {
   const audition = useAgentTrialStore(s => s.audition)
   // Only what picks the sound: the auditioned trial's scene cues (not the whole, often replaced, trial list).
   const auditionCues = useAgentTrialStore(s => {
@@ -132,7 +128,6 @@ export function useDecidedSoundSync(player: EditorBufferPlayer) {
   const picks = useEditorSettings(s => s.candidateSounds)
   const auditionTrial = useAgentTrialStore(s => s.audition ? s.trials.find(r => r.trial.id === s.audition!.trialId)?.trial ?? null : null)
   const preview = useEventStore(s => s.preview)
-  const muted = useEditorSettings(s => s.muted)
   const table = useSceneStore(s => s.table)
   const lib = useSceneStore(s => s.lib)
   const buffers = useSceneStore(s => s.sfx)
@@ -160,6 +155,22 @@ export function useDecidedSoundSync(player: EditorBufferPlayer) {
     for (const f of groupFirings(table, plan, { event: '', target: 'haptic', material: '' }, false).sounds) { const b = buffers[f.sound]; if (b) out.push({ buffer: b, atSec: f.atSec, gain: f.gain }) }
     return out
   }, [plan, picked, table, buffers])
+  return { picked, firings }
+}
+
+/**
+ * While a haptic of an event is played in the editor — an AI candidate of a
+ * haptic trial (its first scene cue in the open Scene project), the event's own
+ * haptic clip, or a preview sequence (its rendered sound) — the event's sound
+ * plays on the PC from the same position. It rings out after the haptic ends
+ * (a loop cue's sound stops with it) and stops on a stop. Follows the editor's
+ * PC audio toggle (muted = silent).
+ *
+ * The sound is chosen by value (buffer + volume): store refreshes (the AI trials
+ * poll every 2 s) never restart or stop what is playing (CompanionSound).
+ */
+export function useDecidedSoundSync(player: EditorBufferPlayer, { picked, firings }: SceneSounds) {
+  const muted = useEditorSettings(s => s.muted)
   const companion = useMemo(() => new CompanionSound(startOnPc), [])
   const scheduler = useMemo(() => new FiringScheduler(() => audio()), [])
   // By value (see CompanionSound / FiringScheduler): recomputing the same sounds keeps them playing.
