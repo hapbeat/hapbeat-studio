@@ -208,15 +208,19 @@ export function poolCandidates(trial: Pick<TrialRequest, 'candidates'>, rating: 
 export function reserveCandidates(trial: Pick<TrialRequest, 'candidates'>, rating: Pick<RatingBody, 'candidates'>): string[] {
   return trial.candidates.filter(c => rating.candidates[c.id]?.overall === 3 && !isFreePlanCandidate(c)).map(c => c.id)
 }
-/** Adds reserve references under `key` (no duplicates); returns the same object when nothing changed. */
-export function addReserves<R extends { trialId: string; candidateId: string }>(map: Record<string, R[]>, key: string, refs: readonly R[]): Record<string, R[]> {
-  const list = map[key] ?? []
-  const fresh = refs.filter(r => !list.some(x => x.trialId === r.trialId && x.candidateId === r.candidateId))
+/** What identifies a reserve: an AI candidate (trial + candidate), or an event material (target, name, a haptic's position). */
+type ReserveKey = { trialId: string; candidateId: string } | { material: string; target: string; at?: string }
+const reserveId = (r: ReserveKey) => 'material' in r ? `material|${r.target}|${r.material}|${r.at ?? ''}` : `trial|${r.trialId}|${r.candidateId}`
+/** Adds reserve references under `key` (no duplicates, also within `refs`); returns the same object when nothing changed. */
+export function addReserves<R extends ReserveKey>(map: Record<string, R[]>, key: string, refs: readonly R[]): Record<string, R[]> {
+  const list = map[key] ?? [], seen = new Set(list.map(reserveId))
+  const fresh = refs.filter(r => { const id = reserveId(r); if (seen.has(id)) return false; seen.add(id); return true })
   return fresh.length ? { ...map, [key]: [...list, ...fresh] } : map
 }
 /** Removes one reserve; an emptied key goes. */
-export function removeReserve<R extends { trialId: string; candidateId: string }>(map: Record<string, R[]>, key: string, ref: Pick<R, 'trialId' | 'candidateId'>): Record<string, R[]> {
-  const list = (map[key] ?? []).filter(x => !(x.trialId === ref.trialId && x.candidateId === ref.candidateId))
+export function removeReserve<R extends ReserveKey>(map: Record<string, R[]>, key: string, ref: ReserveKey): Record<string, R[]> {
+  const id = reserveId(ref)
+  const list = (map[key] ?? []).filter(x => reserveId(x) !== id)
   const next = { ...map }
   if (list.length) next[key] = list; else delete next[key]
   return next

@@ -82,14 +82,23 @@ export interface MaterialLink { project: string; event: string; target: 'sound' 
 /** A "remake" request: the material of `cue`, sent at `at` (ISO). */
 export interface RevisePending { cue: string; target: 'sound' | 'haptic'; material: string; at: string }
 /** A reserved AI candidate: trial id + candidate id, and whether it is a sound or a haptic. */
-export interface ReserveRef { trialId: string; candidateId: string; target: 'sound' | 'haptic' }
+export interface TrialReserve { trialId: string; candidateId: string; target: 'sound' | 'haptic' }
+/** A material taken off an event when it was set back to undecided (its WAV stays): name, and a haptic's route position and gain. */
+export interface MaterialReserve { material: string; target: 'sound' | 'haptic'; at?: string; gain?: number }
+export type ReserveRef = TrialReserve | MaterialReserve
 function reserves(value: unknown): Record<string, ReserveRef[]> {
   if (!isRecord(value)) return {}
   const out: Record<string, ReserveRef[]> = {}
   for (const [key, list] of Object.entries(value).slice(0, 500)) {
     if (!Array.isArray(list) || key.length > 200) continue
-    const refs = list.filter((r): r is ReserveRef => isRecord(r) && typeof r.trialId === 'string' && typeof r.candidateId === 'string' && (r.target === 'sound' || r.target === 'haptic')
-      && r.trialId.length <= 200 && r.candidateId.length <= 50).slice(0, 200).map(r => ({ trialId: r.trialId, candidateId: r.candidateId, target: r.target }))
+    const refs = list.flatMap((r): ReserveRef[] => {
+      if (!isRecord(r) || (r.target !== 'sound' && r.target !== 'haptic')) return []
+      if (typeof r.trialId === 'string' && typeof r.candidateId === 'string' && r.trialId.length <= 200 && r.candidateId.length <= 50)
+        return [{ trialId: r.trialId, candidateId: r.candidateId, target: r.target }]
+      if (typeof r.material !== 'string' || !r.material || r.material.length > 200) return []
+      return [{ material: r.material, target: r.target, ...(typeof r.at === 'string' && r.at.length <= 50 ? { at: r.at } : {}),
+        ...(typeof r.gain === 'number' && Number.isFinite(r.gain) ? { gain: Math.max(0, Math.min(2, r.gain)) } : {}) }]
+    }).slice(0, 200)
     if (refs.length) out[key] = refs
   }
   return out

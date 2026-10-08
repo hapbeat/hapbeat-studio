@@ -12,7 +12,7 @@ import type { SceneLib } from '@/utils/sceneData'
 import {
   addPositionRoute, assignEventsForTrial, effectiveEvent, eventKey, listEvents, parseEventKey, removeOwnRoute,
   setRouteClips, setSfxSounds, simultaneousGroups, trialsForEvent, updateOwnRoute,
-  resetAllReviews, setNone, setOverride, setReview, setUndecided, hasOwnMaterials,
+  resetAllReviews, setNone, setOverride, setReview, setUndecided, hasOwnMaterials, undecidedReserves, restoreReserve,
   type EffectiveEvent, type EventRow, type SoundStatus,
 } from '@/utils/cueEvents'
 import { useConfirm } from '@/components/common/useConfirm'
@@ -24,7 +24,8 @@ import { MaterialList } from './MaterialList'
 import { PairedList } from './PairedList'
 import { useToast } from '@/components/common/Toast'
 import { runDecision } from './eventDecide'
-import { removeReserve, requestAnswered, reviseAnswered } from '@/utils/agentTrialUi'
+import { addReserves, removeReserve, requestAnswered, reviseAnswered } from '@/utils/agentTrialUi'
+import type { MaterialReserve, TrialReserve } from '@/utils/editorUiSettings'
 import { create } from 'zustand'
 import { openMaterialForAdjust } from './eventEditing'
 import './EventsPanel.css'
@@ -350,37 +351,57 @@ function ReviewToggle({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'h
 }
 
 /**
- * Decided vs undecided: "None" (sfx: null / haptics: []) and, on a cue, "Back to undecided" (the key removed).
+ * Decided vs undecided: "None" (sfx: null / haptics: []) and, on a cue, "Back to undecided" (the key removed; its
+ * materials move to the event's reserves, representative first, so nothing is lost).
  * A variant goes back to inheriting with the override bar instead.
  */
 function DecisionBar({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'haptics'; edit: Edit }) {
   const { t } = useI18n()
   const isNone = e.decided[field] && (field === 'sfx' ? !e.sfx : e.haptics.length === 0)
+  const toUndecided = () => {
+    const table = useSceneStore.getState().table
+    const moved = table ? undecidedReserves(table, e.ref.cue, field) : []
+    if (!edit(tb => setUndecided(tb, e.ref.cue, field)) || !moved.length) return
+    const settings = useEditorSettings.getState()
+    settings.update({ eventReserves: addReserves(settings.eventReserves, e.ref.cue, moved) })
+  }
   // Fixed slots on the section's head line: a button that does not apply is hidden, not removed (nothing moves).
   return <span className="events-decision">
     <button type="button" className="agent-icon-btn" style={{ visibility: isNone ? 'hidden' : 'visible' }} title={t(field === 'sfx' ? 'events.setNoneSoundHint' : 'events.setNoneHapticHint')} onClick={() => edit(tb => setNone(tb, e.ref, field))}>{t('events.setNone')}</button>
     {/* A cue: back to undecided; a variant (child row): back to its cue's (the override removed). */}
     {e.ref.variant === null
-      ? <button type="button" className="agent-icon-btn" style={{ visibility: e.decided[field] ? 'visible' : 'hidden' }} title={t('events.setUndecidedHint')} onClick={() => edit(tb => setUndecided(tb, e.ref.cue, field))}>{t('events.setUndecided')}</button>
+      ? <button type="button" className="agent-icon-btn" style={{ visibility: e.decided[field] ? 'visible' : 'hidden' }} title={t('events.setUndecidedHint')} onClick={toUndecided}>{t('events.setUndecided')}</button>
       : <button type="button" className="agent-icon-btn" title={t('events.backToParentHint', { parent: e.ref.cue })} onClick={() => edit(tb => setOverride(tb, e.ref, field, false))}>{t('events.backToParent', { parent: e.ref.cue })}</button>}
   </span>
 }
 
 /**
- * The event's reserves (★3 AI candidates kept aside, editor settings): faint rows under the materials.
- * ▶ auditions the candidate as rendered; "Adopt" does what "→ Event" does (writes the WAV, adds it to the
- * end of the pool, tentative) and drops it from the reserves; "Remove" only drops it.
+ * The event's reserves (editor settings): faint rows under the materials. ★3 AI candidates kept aside: ▶ auditions
+ * the candidate as rendered; "Adopt" does what "→ Event" does (writes the WAV, adds it to the end of the pool,
+ * tentative) and drops it from the reserves. Materials taken off by "back to undecided": ▶ plays the event's WAV;
+ * "Put back" adds it to the end of the pool (tentative; the first back is the representative) and drops it from the
+ * reserves. "Remove" only drops a reserve.
  */
 function Reserves({ cue, target }: { cue: string; target: 'sound' | 'haptic' }) {
   const { t } = useI18n()
   const all = useEditorSettings(s => s.eventReserves)
-  const open = useEditorSettings(s => s.reservesOpen)
+  const shownOpen = useEditorSettings(s => s.reservesOpen)
   const shownAudition = useAgentTrialStore(s => s.audition ? `${s.audition.trialId}/${s.audition.candidateId}` : null)
   const trials = useAgentTrialStore(s => s.trials)
   const [busy, setBusy] = useState(false)
-  const rows = Object.entries(all).filter(([key]) => parseEventKey(key).cue === cue).flatMap(([key, refs]) => refs.filter(r => r.target === target).map(r => ({ key, ...r })))
-  if (!rows.length) return null
-  const drop = (key: string, r: { trialId: string; candidateId: string }) => useEditorSettings.getState().update({ eventReserves: removeReserve(useEditorSettings.getState().eventReserves, key, r) })
+  const atLabel = useAtLabel()
+  const previewId = useEventStore(s => s.preview?.id)
+  const entries = Object.entries(all).filter(([key]) => parseEventKey(key).cue === cue).flatMap(([key, refs]) => refs.filter(r => r.target === target).map(r => ({ key, r })))
+  const rows = entries.flatMap(({ key, r }) => 'material' in r ? [] : [{ key, ...r }])
+  const materials = entries.flatMap(({ key, r }) => 'material' in r ? [{ key, r }] : [])
+  if (!entries.length) return null
+  const drop = (key: string, r: TrialReserve | MaterialReserve) => useEditorSettings.getState().update({ eventReserves: removeReserve(useEditorSettings.getState().eventReserves, key, r) })
+  const missing = (name: string) => useWaveformStore.getState().setError(t('events.preview.missing', { name }))
+  const open = (key: string, r: MaterialReserve, autoplay: boolean) => {
+    const ok = r.target === 'sound' ? openEventSound(key, r.material, autoplay) : openEventHaptic(key, r.material, r.at ?? '', autoplay)
+    if (!ok) missing(r.material)
+  }
+  const putBack = (key: string, r: MaterialReserve) => { if (useSceneStore.getState().edit(tb => restoreReserve(tb, parseEventKey(key).cue, r))) drop(key, r) }
   const adopt = async (row: typeof rows[number]) => {
     const scene = useSceneStore.getState()
     if (!scene.table || !scene.lib) { useWaveformStore.getState().setError(t('scene.save.noProject')); return }
@@ -395,9 +416,21 @@ function Reserves({ cue, target }: { cue: string; target: 'sound' | 'haptic' }) 
   }
   const show = (row: typeof rows[number]) => void useAgentTrialStore.getState().requestAudition(row.trialId, row.candidateId, false, false).catch(error => useWaveformStore.getState().setError(error))
   return <>
-    <button type="button" className="events-reserves-toggle" aria-expanded={open} title={t('events.reservesHint')}
-      onClick={() => useEditorSettings.getState().update({ reservesOpen: !open })}>{open ? '▾' : '▸'} {t('events.reservesCount', { count: rows.length })}</button>
-    {open && <ul className="events-reserves" aria-label={t('events.reserves')} title={t('events.reservesHint')}>
+    <button type="button" className="events-reserves-toggle" aria-expanded={shownOpen} title={t('events.reservesHint')}
+      onClick={() => useEditorSettings.getState().update({ reservesOpen: !shownOpen })}>{shownOpen ? '▾' : '▸'} {t('events.reservesCount', { count: entries.length })}</button>
+    {shownOpen && <ul className="events-reserves" aria-label={t('events.reserves')} title={t('events.reservesHint')}>
+    {materials.map(({ key, r }) => {
+      const name = r.target === 'haptic' && r.at ? `${r.material} · ${atLabel(r.at)}` : r.material
+      const id = r.target === 'sound' ? `${key}|sound|${r.material}` : `${key}|haptic|${r.material}|${r.at ?? ''}`
+      return <li key={`${key}/material/${r.target}/${r.material}/${r.at ?? ''}`} className={`events-mat events-reserve selectable ${previewId === id ? 'active' : ''}`}
+        onClick={e => { if (!(e.target as HTMLElement).closest('button')) open(key, r, false) }}>
+        <button type="button" className="agent-icon-btn" aria-label={t('events.mat.play', { name })} title={t('events.mat.play', { name })} onClick={() => open(key, r, true)}>▶</button>
+        <span className="events-mat-name" title={name}>{name}</span>
+        <span />
+        <button type="button" className="agent-icon-btn" title={t('events.reservePutBackHint')} onClick={() => putBack(key, r)}>{t('events.reservePutBack')}</button>
+        <button type="button" className="agent-icon-btn" title={t('events.reserveRemoveMaterialHint')} onClick={() => drop(key, r)}>{t('events.mat.remove')}</button>
+      </li>
+    })}
     {rows.map(row => {
       const record = trials.find(r => r.trial.id === row.trialId)
       const name = `${record?.shortId ? `${record.shortId}-` : ''}${row.candidateId} ${record?.trial.candidates.find(c => c.id === row.candidateId)?.label ?? row.trialId}`

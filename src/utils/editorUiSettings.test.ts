@@ -64,5 +64,8 @@ describe('editor UI settings', () => {
     expect(v.eventReserves).toEqual({ bite: [{ trialId: 't1', candidateId: 'A', target: 'sound' }] })
     expect(v.reservesBackfilled).toBe(true)
     expect(sanitizeUiSettings({}).reservesBackfilled).toBe(false)
+    // Materials taken off by "back to undecided": name, a haptic's position and gain (clamped).
+    expect(sanitizeUiSettings({ eventReserves: { button: [{ material: 'thump', target: 'haptic', at: 'hand', gain: 3 }, { material: 'Clack', target: 'sound' }, { material: '', target: 'sound' }] } }).eventReserves)
+      .toEqual({ button: [{ material: 'thump', target: 'haptic', at: 'hand', gain: 2 }, { material: 'Clack', target: 'sound' }] })
   })
 })

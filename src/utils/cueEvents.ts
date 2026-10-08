@@ -1,4 +1,5 @@
 import type { SceneLib } from './sceneData'
+import type { MaterialReserve } from './editorUiSettings'
 import {
   type CueReview, type ReviewState,
   clampNumber, isLoopCue, soundAllowed, soundIntensity, positionsForCue, routeClips, sfxSounds, VARIANT_NAME,
@@ -501,6 +502,42 @@ export function setUndecided(table: CueTable, cue: string, field: 'sfx' | 'hapti
     delete entry[field]
     if (entry.review) { delete entry.review[field]; if (!Object.keys(entry.review).length) delete entry.review }
   })
+}
+/**
+ * The materials "back to undecided" takes off a cue's sound / haptic, to keep as the event's reserves: the sounds
+ * (representative first), or each route's clips in route order with the route's position and gain.
+ */
+export function undecidedReserves(table: CueTable, cue: string, field: 'sfx' | 'haptics'): MaterialReserve[] {
+  const entry = table.cues[cue]
+  if (!entry) return []
+  if (field === 'sfx') return sfxSounds(entry.sfx).map(material => ({ material, target: 'sound' as const }))
+  return (entry.haptics ?? []).flatMap(r => routeClips(r).map(material => ({ material, target: 'haptic' as const, at: r.at, gain: r.gain })))
+}
+/**
+ * "Put back" of a reserved material: added to the end of the cue's pool (the first one back is the representative),
+ * a haptic onto the route at its position (a new route when there is none); never twice. The review goes to tentative.
+ */
+export function restoreReserve(table: CueTable, cue: string, r: MaterialReserve): CueTable {
+  const ref: EventRef = { cue, variant: null }
+  const next = edited(table, ref, entry => {
+    if (r.target === 'sound') {
+      const sounds = sfxSounds(entry.sfx)
+      if (sounds.includes(r.material)) return
+      const volume = entry.sfx ? entry.sfx.volume : 1.0, list = [...sounds, r.material]
+      entry.sfx = list.length === 1 ? { sound: list[0], volume } : { sounds: list, volume }
+      return
+    }
+    const routes = entry.haptics ?? [], at = r.at ?? routes[0]?.at
+    if (!at) return
+    const route = routes.find(x => x.at === at)
+    if (!route) { entry.haptics = [...routes, { clip: r.material, at, gain: r.gain ?? 1.0 }]; return }
+    const clips = routeClips(route)
+    if (clips.includes(r.material)) return
+    delete route.clip; delete route.clips
+    route.clips = [...clips, r.material]
+    entry.haptics = routes
+  })
+  return setReview(next, ref, r.target === 'sound' ? 'sfx' : 'haptics', 'tentative')
 }
 // ── One firing (shared by the Scene tab and the editor) ──
 

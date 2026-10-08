@@ -440,3 +440,38 @@ describe('paired sounds and haptics (variation.paired)', () => {
     expect(validateCueTable(t, okCtx)).toEqual(expect.arrayContaining(['grab: variation.paired must be true/false']))
   })
 })
+
+describe('back to undecided keeps the materials as reserves', () => {
+  it('lists the pool representative first, puts back representative-first (tentative), never twice', async () => {
+    const { undecidedReserves, restoreReserve } = await import('./cueEvents')
+    const { addReserves, removeReserve } = await import('./agentTrialUi')
+    let t = sampleTable()
+    t.cues.button.sfx = { sounds: ['Clack', 'Click'], volume: 0.8 }
+    t.cues.button.haptics = [{ clips: ['thump', 'click'], at: 'hand', gain: 0.5 }, { clip: 'hum', at: 'pos_neck', gain: 1 }]
+    t = setReview(setReview(t, { cue: 'button', variant: null }, 'sfx', 'approved'), { cue: 'button', variant: null }, 'haptics', 'approved')
+    const sounds = undecidedReserves(t, 'button', 'sfx'), clips = undecidedReserves(t, 'button', 'haptics')
+    expect(sounds).toEqual([{ material: 'Clack', target: 'sound' }, { material: 'Click', target: 'sound' }])
+    expect(clips).toEqual([{ material: 'thump', target: 'haptic', at: 'hand', gain: 0.5 }, { material: 'click', target: 'haptic', at: 'hand', gain: 0.5 }, { material: 'hum', target: 'haptic', at: 'pos_neck', gain: 1 }])
+    // Moved into the reserves in order, no duplicates (also when moved twice).
+    let map = addReserves(addReserves({}, 'button', [...sounds, ...clips]), 'button', sounds)
+    expect(map.button.map(r => 'material' in r ? r.material : '')).toEqual(['Clack', 'Click', 'thump', 'click', 'hum'])
+    t = setUndecided(setUndecided(t, 'button', 'sfx'), 'button', 'haptics')
+    expect('sfx' in t.cues.button || 'haptics' in t.cues.button).toBe(false)
+    // Put back: the first one back is the representative; tentative; a second put-back of the same does not duplicate.
+    t = restoreReserve(t, 'button', sounds[0]); map = removeReserve(map, 'button', sounds[0])
+    t = restoreReserve(t, 'button', sounds[1]); map = removeReserve(map, 'button', sounds[1])
+    t = restoreReserve(t, 'button', sounds[1])
+    expect(t.cues.button.sfx).toEqual({ sounds: ['Clack', 'Click'], volume: 1 })
+    t = restoreReserve(t, 'button', clips[0])
+    t = restoreReserve(t, 'button', clips[2])
+    t = restoreReserve(t, 'button', clips[1])
+    t = restoreReserve(t, 'button', clips[1])
+    expect(t.cues.button.haptics).toEqual([{ clips: ['thump', 'click'], at: 'hand', gain: 0.5 }, { clip: 'hum', at: 'pos_neck', gain: 1 }])
+    expect(effectiveEvent(t, { cue: 'button', variant: null })!.review).toEqual({ sfx: 'tentative', haptics: 'tentative' })
+    expect(map.button.map(r => 'material' in r ? r.material : '')).toEqual(['thump', 'click', 'hum'])
+    // Approved before a put-back goes back to tentative.
+    t = setReview(t, { cue: 'button', variant: null }, 'sfx', 'approved')
+    t = setSfxSounds(t, { cue: 'button', variant: null }, ['Clack'])
+    expect(restoreReserve(t, 'button', sounds[1]).cues.button.review?.sfx).toBeUndefined()
+  })
+})
