@@ -11,14 +11,14 @@ import { clipsForCue, isLoopCue, soundAllowed, positionsForCue, routeClips, sfxS
 import type { SceneLib } from '@/utils/sceneData'
 import {
   addPositionRoute, assignEventsForTrial, effectiveEvent, eventKey, listEvents, parseEventKey, removeOwnRoute, shownEventKey,
-  setRouteClips, setSfxSounds, trialsForEvent, updateOwnRoute,
+  setRouteClips, setSfxSounds, trialsForEvent, updateOwnRoute, firstFirings,
   resetAllReviews, setNone, setOverride, setReview, setUndecided, hasOwnMaterials, undecidedReserves, restoreReserve, soundFirstNote, noSoundNote,
   type EffectiveEvent, type EventRow, type SoundStatus,
 } from '@/utils/cueEvents'
 import { useConfirm } from '@/components/common/useConfirm'
 import { useAtLabel } from '@/components/scene/SceneCuePanels'
 import { useEditor } from './editorContext'
-import { EditorMenu, EditorMenuItem } from './EditorMenu'
+import { EditorMenu, EditorMenuItem, EditorMenuSection } from './EditorMenu'
 import { openEventDefault, openEventHaptic, openEventSound } from './eventAudio'
 import { MaterialList } from './MaterialList'
 import { PairedList } from './PairedList'
@@ -30,7 +30,7 @@ import { create } from 'zustand'
 import { openMaterialForAdjust } from './eventEditing'
 import { materialTrialByIds, materialTrialSummary, materialTrialTooltip, resolveMaterialTrial, type MaterialTrial } from '@/utils/materialTrial'
 import { useEventGroups } from './useEventGroups'
-import { detachCue, joinCues, type GroupEdits } from '@/utils/eventGroups'
+import { detachCue, joinGroupOf, type GroupEdits } from '@/utils/eventGroups'
 import './EventsPanel.css'
 import '@/components/scene/VideoOverlay.css'
 
@@ -52,6 +52,7 @@ export function EventsPanel() {
   const { t } = useI18n()
   const table = useSceneStore(s => s.table)
   const lib = useSceneStore(s => s.lib)
+  const data = useSceneStore(s => s.data)
   const saveError = useSceneStore(s => s.saveError)
   const busy = useSceneStore(s => s.busy)
   const selected = useEventStore(s => s.selected)
@@ -86,7 +87,7 @@ export function EventsPanel() {
     return children.length ? <div key={r.key} className="events-family">{one(r)}{children.map(one)}</div> : one(r)
   }
   const listItems: ReactNode[] = [], done = new Set<string>()
-  /** The cues of each list item (a group, or one cue), in list order: 「前のイベント」 is the item before. */
+  /** The cues of each list item (a group, or one cue), in list order: the targets of 「グループに入れる」. */
   const itemCues: string[][] = []
   for (const r of rows) {
     if (done.has(r.key)) continue
@@ -102,7 +103,13 @@ export function EventsPanel() {
   // Group edits act on the selected event's cue.
   const selectedCue = shown ? parseEventKey(shown).cue : null
   const selectedItem = selectedCue ? itemCues.findIndex(c => c.includes(selectedCue)) : -1
-  const previousCue = selectedItem > 0 ? itemCues[selectedItem - 1][0] : null
+  // Each other item named with its first firing in the recording, e.g. 「grab（3.2 秒）」.
+  const firsts = useMemo(() => table && data ? firstFirings(table, data.full.events) : {}, [table, data])
+  const itemLabel = (cues: string[]) => {
+    const times = cues.map(c => firsts[c]).filter((x): x is number => x !== undefined)
+    const name = cues.join(' ＋ ')
+    return times.length ? t('events.group.at', { name, sec: Math.min(...times).toFixed(1) }) : name
+  }
   const inGroup = selectedItem >= 0 && itemCues[selectedItem].length > 1
   return <div className="editor-panel events-panel">
     <div className="events-top">
@@ -110,8 +117,10 @@ export function EventsPanel() {
       <GroupPlaybackToggle />
       <EditorMenu label="⋯" title={t('events.menu')}>
         <EditorMenuItem disabled={!table} onSelect={() => void ask({ message: t('events.resetReviewsConfirm'), danger: true }).then(ok => { if (ok) useSceneStore.getState().edit(tb => resetAllReviews(tb)) })}>{t('events.resetReviews')}</EditorMenuItem>
-        <EditorMenuItem disabled={!selectedCue || !previousCue} onSelect={() => { if (selectedCue && previousCue) setGroupEdits(joinCues(groupEdits, previousCue, selectedCue)) }}>
-          {t('events.group.joinPrevious', { name: selectedCue ?? '', previous: previousCue ?? '' })}</EditorMenuItem>
+        {selectedCue ? <EditorMenuSection label={t('events.group.join', { name: selectedCue })}>
+          {itemCues.filter((_, i) => i !== selectedItem).map(cues => <EditorMenuItem key={cues.join('+')} onSelect={() => setGroupEdits(joinGroupOf(groupEdits, selectedCue, cues[0]))}>
+            {t('events.group.joinWith', { target: itemLabel(cues) })}</EditorMenuItem>)}
+        </EditorMenuSection> : <EditorMenuItem disabled onSelect={() => {}}>{t('events.group.joinPick')}</EditorMenuItem>}
         <EditorMenuItem disabled={!selectedCue || !inGroup} onSelect={() => { if (selectedCue) setGroupEdits(detachCue(groupEdits, selectedCue)) }}>
           {t('events.group.detach', { name: selectedCue ?? '' })}</EditorMenuItem>
         <EditorMenuItem disabled={!groupEdits} onSelect={() => setGroupEdits(null)}>{t('events.group.reset')}</EditorMenuItem>

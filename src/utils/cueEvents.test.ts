@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  addEventMark, addPositionRoute, fireShot, resetAllReviews, setNone, setReview, setUndecided, addVariant, simultaneousGroups, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
+  addEventMark, addPositionRoute, fireShot, resetAllReviews, setNone, setReview, setUndecided, addVariant, simultaneousGroups, firstFirings, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
   effectiveEvent, eventSceneCues, jitterGain, listEvents, MaterialPicker, matchesName, materialUsers, needsRouteForm, overwriteUsers,
   parseEventKey, removeVariant, representativeSound, candidateSound, hasOwnMaterials, shownEventKey, resolveEventName, cueRoutePositions, materialRoutePositions, pairedClips, setOverride, setRouteClips, setSfxSounds, setVariation, soundFirstNote, noSoundNote, trialEvent, trialsForEvent,
 } from './cueEvents'
@@ -281,6 +281,11 @@ describe('recording: simultaneous groups', () => {
     // detent is a tick: left out; grab joins button.
     expect(simultaneousGroups(t, moments, ['detent'])).toEqual([['button', 'grab']])
     expect(simultaneousGroups(t, moments, [])).toEqual([['button', 'grab', 'detent']])
+  })
+
+  it('first firing of each cue (variants count as their cue)', () => {
+    const events = [{ t: 4.3, name: 'grab' }, { t: 3.2, name: 'button:soft' }, { t: 1.5, name: 'grab' }, { t: 2, name: 'nope' }]
+    expect(firstFirings(v2Table(), events)).toEqual({ grab: 1.5, button: 3.2 })
   })
 })
 

@@ -477,6 +477,16 @@ export function simultaneousGroups(table: CueTable, moments: readonly { names: r
   return [...groups.values()].filter(g => g.length > 1)
 }
 
+/** The recording's first firing (seconds) of each cue (variants counted as their cue); cues it never fires are absent. */
+export function firstFirings(table: CueTable, events: readonly { t: number; name: string }[]): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const e of events) {
+    const cue = resolveEventName(table, e.name)?.ref.cue
+    if (cue && (out[cue] === undefined || e.t < out[cue])) out[cue] = e.t
+  }
+  return out
+}
+
 /** "＋ add position": a new route of what `ref` writes with the first route's clip at the next unused position (null when every position is used or no clip fits). */
 export function addPositionRoute(table: CueTable, lib: SceneLib, ref: EventRef): CueTable | null {
   const e = effectiveEvent(table, ref)

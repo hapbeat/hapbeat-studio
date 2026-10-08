@@ -6,7 +6,7 @@
 export interface GroupEdits {
   /** Cues taken out of their automatic group (「このグループから外す」). */
   detached: string[]
-  /** Cue pairs joined by hand (「前のイベントとまとめる」), joined transitively with the rest of their groups. */
+  /** Cue pairs joined by hand (「… と同じグループにする」), joined transitively with the rest of their groups. */
   joined: [string, string][]
 }
 export const NO_GROUP_EDITS: GroupEdits = { detached: [], joined: [] }
@@ -32,11 +32,14 @@ export function detachCue(edits: GroupEdits | undefined, cue: string): GroupEdit
   return { detached: [...new Set([...e.detached, cue])], joined: e.joined.filter(p => !p.includes(cue)) }
 }
 
-/** 「前のイベントとまとめる」: `cue` joins the group of `previous` (both come back from a detach). */
-export function joinCues(edits: GroupEdits | undefined, previous: string, cue: string): GroupEdits {
-  const e = edits ?? NO_GROUP_EDITS
-  const joined = e.joined.some(p => p.includes(previous) && p.includes(cue)) ? e.joined : [...e.joined, [previous, cue] as [string, string]]
-  return { detached: e.detached.filter(c => c !== previous && c !== cue), joined }
+/**
+ * 「{target} と同じグループにする」: `cue` leaves its own group (as detachCue) and joins the group of `target`, which
+ * stays as it is. A cue not in the table any more is ignored by applyGroupEdits.
+ */
+export function joinGroupOf(edits: GroupEdits | undefined, cue: string, target: string): GroupEdits {
+  if (cue === target) return edits ?? NO_GROUP_EDITS
+  const e = detachCue(edits, cue)
+  return { detached: e.detached, joined: [...e.joined, [target, cue]] }
 }
 
 /** The other cues of `cue`'s group ([] when it is in none): they play as context of its auditions. */
