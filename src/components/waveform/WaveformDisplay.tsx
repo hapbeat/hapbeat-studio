@@ -16,6 +16,7 @@ import { useEditor } from './editorContext'
 import { laneColumns, lanePxPerSec, laneX, type SoundLane } from '@/utils/soundLane'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { NumberField } from '@/components/scene/SceneCuePanels'
+import type { LoopStretch } from '@/utils/loopStretch'
 
 type OverviewMode = 'left' | 'right' | 'move' | 'seek'
 
@@ -25,10 +26,12 @@ type OverviewMode = 'left' | 'right' | 'move' | 'seek'
  * range, a double click plays from the start. `transport` sits right under the waveform.
  * `scale` multiplies the drawing only (a material's intensity): a change redraws, nothing is decoded or rendered.
  * `placements`: the copies of a material placed at its event's firings; each gets a start line and an alternating tint.
+ * `loop`: a loop cue's material looped over its layer's active segments: each segment gets a start and an end line, and
+ * the recorded level is drawn as a line over the haptic (bottom = 0, top = 1).
  * `soundLane`: the PC sounds of a haptic audition, drawn in a fixed-height lane above the haptic on the same time axis
  * (same zoom, scroll and playhead); null = the haptic alone.
  */
-export function WaveformDisplay({ original, bufferOverride, player, viewKey, transport, scale = 1, placements = [], soundLane = null }: { original: boolean; bufferOverride?: AudioBuffer; player: EditorBufferPlayer; viewKey?: string; transport?: ReactNode; scale?: number; placements?: readonly { start: number; end: number }[]; soundLane?: SoundLane | null }) {
+export function WaveformDisplay({ original, bufferOverride, player, viewKey, transport, scale = 1, placements = [], loop = null, soundLane = null }: { original: boolean; bufferOverride?: AudioBuffer; player: EditorBufferPlayer; viewKey?: string; transport?: ReactNode; scale?: number; placements?: readonly { start: number; end: number }[]; loop?: Pick<LoopStretch, 'segments' | 'envelope'> | null; soundLane?: SoundLane | null }) {
   const { t } = useI18n()
   const { playAt, stopPlayback, isPlaybackActive, playFromStart } = useEditor()
   const height = useEditorSettings(s => s.height)
@@ -199,6 +202,20 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
           const left = (p.start - viewport.start) * px, right = (Math.min(duration, p.end) - viewport.start) * px
           return right < 0 || left > width ? null : <div key={i} className={`editor-placement ${i % 2 ? 'odd' : ''}`} style={{ left, width: Math.max(1, right - left) }} />
         })}</div>
+      })()}
+      {loop && ready && duration > 0 && (() => {
+        // A loop cue: where each active segment starts and stops (not per firing), and the recorded level as a line.
+        const width = surface.current?.clientWidth ?? 0, px = Math.max(zoom, width / duration), top = soundLane ? SOUND_LANE_HEIGHT : 0
+        const x = (t: number) => (t - viewport.start) * px
+        return <div className="editor-loop" aria-hidden="true">
+          {loop.segments.map((p, i) => {
+            const left = x(p.start), right = x(Math.min(duration, p.end))
+            return right < 0 || left > width ? null : <div key={i} className="editor-loop-segment" style={{ left, width: Math.max(1, right - left) }} />
+          })}
+          <svg className="editor-loop-envelope" style={{ top, height }} width={width} height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+            <polyline points={loop.envelope.map(p => `${x(p.t).toFixed(1)},${(height * (1 - Math.max(0, Math.min(1, p.gain)))).toFixed(1)}`).join(' ')} />
+          </svg>
+        </div>
       })()}
       {marker !== null && !selection && ready && duration > 0 && (() => {
         const width = surface.current?.clientWidth ?? 0

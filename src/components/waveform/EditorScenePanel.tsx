@@ -21,6 +21,7 @@ import { eventSceneCues } from '@/utils/cueEvents'
 import { markMaterials } from '@/utils/groupPlayback'
 import { RATE as HAPTIC_RATE } from '@/utils/sceneHaptics'
 import { auditionContext, type ContextPlan } from '@/utils/trialContext'
+import { loopStretch, type LoopStretch } from '@/utils/loopStretch'
 import { useEventGroups } from './useEventGroups'
 import './EditorScenePanel.css'
 
@@ -67,7 +68,8 @@ export function useSceneChoice(subject: SceneSubject) {
  */
 export interface AuditionPlan { targets: number[]; others: { atSec: number; name: string }[]; contextCues: string[]; context: ContextPlan | null }
 /** The plan of the current audition (an AI candidate, else an event material); null = once (a recorded clip, a loop cue, nothing shown). */
-export function useAuditionPlan(): AuditionPlan | null {
+/** What the editor auditions (an AI candidate, else an event material shown or adjusted) and its scene choice. */
+function useAuditionChoice() {
   const audition = useAgentTrialStore(s => s.audition)
   const previewEvent = useEventStore(s => s.preview?.event ?? null)
   const lib = useSceneStore(s => s.lib)
@@ -77,6 +79,10 @@ export function useAuditionPlan(): AuditionPlan | null {
   const subject: SceneSubject = audition ? { kind: 'trial', trialId: audition.trialId } : previewEvent ? { kind: 'event', key: previewEvent }
     : adjustEvent ? { kind: 'event', key: adjustEvent } : { kind: 'clip', clipId: null }
   const { chosen, trial } = useSceneChoice(subject)
+  return { audition, previewEvent, adjustEvent, lib, chosen, trial, auditioning: !!audition || !!previewEvent || !!adjustEvent }
+}
+export function useAuditionPlan(): AuditionPlan | null {
+  const { audition, previewEvent, adjustEvent, lib, chosen, trial } = useAuditionChoice()
   const data = useSceneStore(s => s.data)
   const groups = useEventGroups()
   const contextOn = useEditorSettings(s => s.sceneContext)
@@ -96,6 +102,22 @@ export function useAuditionPlan(): AuditionPlan | null {
   const key = JSON.stringify(plan)
   if (stable.current.key !== key) stable.current = { key, plan }
   return stable.current.plan
+}
+
+/**
+ * A loop cue's audition (an event material / AI candidate of a loop cue at its representative stretch from the full
+ * replay): its layer's active runs over the stretch (loopStretch); null otherwise (one-shot cues use the plan) or when
+ * the layer is not active there.
+ */
+export function useLoopAudition(): LoopStretch | null {
+  const { lib, chosen, auditioning } = useAuditionChoice()
+  const data = useSceneStore(s => s.data)
+  return useMemo(() => {
+    if (!auditioning || !lib || !data || !chosen?.segment || !chosen.cue) return null
+    const cue = parseEventKey(chosen.cue).cue
+    const layer = isLoopCue(lib, cue) ? lib.layers.find(l => l.cue === cue) : undefined
+    return layer ? loopStretch(data.full.levels, data.fps, layer, chosen.mark, chosen.segment.end - chosen.mark) : null
+  }, [auditioning, lib, data, chosen])
 }
 
 const OTHER_SCENES = '\u0000scene-tab'

@@ -38,10 +38,10 @@ import { trialTarget } from '@/utils/agentProtocol'
 import { waveformOnPc } from '@/utils/agentTrialUi'
 import { DecideDialog } from './DecideDialog'
 import { useAdjustPersistence, useMaterialWriteBack } from './eventEditing'
-import { openEventDefault, repeatBuffer, useDecidedSoundSync, useSceneSounds } from './eventAudio'
+import { loopBuffer, openEventDefault, repeatBuffer, useDecidedSoundSync, useSceneSounds } from './eventAudio'
 import { groupFirings, groupHapticsEnd, mixGroupHaptics, type HapticPart } from '@/utils/groupPlayback'
 import { RATE as HAPTIC_RATE } from '@/utils/sceneHaptics'
-import { useAuditionPlan } from './EditorScenePanel'
+import { useAuditionPlan, useLoopAudition } from './EditorScenePanel'
 import type { ShownLayout } from '@/utils/shownLayout'
 import { sceneStopSec } from '@/utils/sceneStop'
 import { contextHapticParts, renderContextLoops } from '@/utils/trialContext'
@@ -146,6 +146,9 @@ export function WaveformEditor({ active }: { active: boolean }) {
   // Auditions (AI candidate / event material) play at the scene's timing: on every target firing, without jitter
   // (DEC-085); one buffer, so Stop ends them all and seeks follow the video.
   const plan = useAuditionPlan()
+  // A loop cue's material plays as the game plays it: looped while its layer is active, at the recorded level (no plan then).
+  const loopRun = useLoopAudition()
+  const looped = !!shownBuffer && !!loopRun && (!!audition || !!eventPreview || !!adjusting)
   const stretched = !!shownBuffer && !!plan && (!!audition || !!eventPreview || !!adjusting) && !(plan.targets.length === 1 && plan.targets[0] === 0)
   // The group of the shown event material (its cue and the cue's variants: bite and bite:tear) plays together at the stretch
   // (editor setting, default on): each member's firing with its representative sound and haptic at their intensities.
@@ -170,10 +173,12 @@ export function WaveformEditor({ active }: { active: boolean }) {
     haptics: [...(stretched ? plan.targets : [0]).map(atSec => ({ atSec, durSec: shownBuffer.duration })), { atSec: 0, durSec: groupEndSec }],
   }), [shownBuffer, plan, audition, eventPreview, adjusting, postRollSec, sceneSounds.firings, stretched, groupEndSec])
   const minSec = Math.max(groupEndSec, stopSec)
-  const audioBuffer = useMemo(() => shownBuffer && ((stretched && plan) || minSec > shownBuffer.duration)
-    ? repeatBuffer(shownBuffer, (stretched && plan ? plan.targets : [0]).map(atSec => ({ atSec, gain: 1, rate: 1 })), minSec) : shownBuffer, [stretched, shownBuffer, plan, minSec])
-  /** What the waveform panel shows: the file once, or the material placed at its event's firings (header line + per-firing marks). */
-  const shownLayout = useMemo((): ShownLayout | null => shownBuffer ? { materialSec: shownBuffer.duration, starts: stretched && plan ? plan.targets : null } : null, [shownBuffer, stretched, plan])
+  const audioBuffer = useMemo(() => shownBuffer && looped && loopRun ? loopBuffer(shownBuffer, loopRun, minSec)
+    : shownBuffer && ((stretched && plan) || minSec > shownBuffer.duration)
+    ? repeatBuffer(shownBuffer, (stretched && plan ? plan.targets : [0]).map(atSec => ({ atSec, gain: 1, rate: 1 })), minSec) : shownBuffer, [looped, loopRun, stretched, shownBuffer, plan, minSec])
+  /** What the waveform panel shows: the file once, the material placed at its event's firings (header line + per-firing marks), or looped over a loop cue's active segments. */
+  const shownLayout = useMemo((): ShownLayout | null => shownBuffer ? { materialSec: shownBuffer.duration, starts: stretched && plan ? plan.targets : null,
+    loop: looped && loopRun ? { segments: loopRun.segments, envelope: loopRun.envelope } : null } : null, [shownBuffer, stretched, plan, looped, loopRun])
   // By value (groupKey): saving a strength rewrites the table but not these parts, so nothing is mixed again for it.
   // The context's loop cues: their haptics at the recorded layer levels over the playback (mono, to the same devices).
   const sceneData = useSceneStore(state => state.data)
@@ -361,7 +366,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
       if (original || audition || eventPreview) return
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? state.redo() : state.undo() }
       // An adjusted material shown at its event's firings: a region on that stretch is not a region of the material.
-      if (event.key === 'Delete' && state.selectedRegion && !stretched) { event.preventDefault(); state.deleteRegion() }
+      if (event.key === 'Delete' && state.selectedRegion && !stretched && !looped) { event.preventDefault(); state.deleteRegion() }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         const ids = visibleClipIds.current
         const index = ids.indexOf(state.clip?.id ?? '')
@@ -377,7 +382,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
       window.removeEventListener('keydown', keydown)
       for (const popup of popoutWindows) { popup.removeEventListener('keydown', space, true); popup.removeEventListener('keydown', keydown) }
     }
-  }, [active, original, audition, eventPreview, popoutWindows, stretched])
+  }, [active, original, audition, eventPreview, popoutWindows, stretched, looped])
   const linkSceneProject = useCallback(async (name: string | null) => {
     const result = await useSceneStore.getState().linkProject(name, true)
     if (result.ok) return true

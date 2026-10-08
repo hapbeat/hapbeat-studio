@@ -878,8 +878,9 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 .editor-comparison { display: flex; align-items: center; gap: 8px; padding: 8px 12px; flex-wrap: wrap; }
 .editor-comparison > .editor-active-name { flex: 1 1 160px; min-width: 0; margin: 0; max-width: none; height: 24px; line-height: 24px; }
 /* Fixed width (the longest line fits), so single / sequence and the counts never shift the header. */
-.editor-shown-layout { flex: 0 0 22em; width: 22em; height: 24px; line-height: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.editor-shown-layout { flex: 0 0 27em; width: 27em; height: 24px; line-height: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .editor-shown-layout.sequence { color: #34d399; }
+.editor-shown-layout.loop { color: #fbbf24; }
 .editor-segmented { display: inline-flex; }
 .editor-segmented .toolbar-btn { border-radius: 0; margin-left: -1px; white-space: nowrap; }
 .editor-segmented .toolbar-btn:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
@@ -950,6 +951,11 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 .editor-placements { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 1; }
 .editor-placement { position: absolute; top: 0; bottom: 0; box-sizing: border-box; border-left: 2px solid #34d399; background: rgba(52, 211, 153, .10); }
 .editor-placement.odd { border-left-color: #f472b6; background: rgba(244, 114, 182, .10); }
+/* Loop cue: the active segments (start / end lines, one tint) and the recorded level line over the haptic. */
+.editor-loop { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 1; }
+.editor-loop-segment { position: absolute; top: 0; bottom: 0; box-sizing: border-box; border-left: 2px solid #fbbf24; border-right: 2px solid #fbbf24; background: rgba(251, 191, 36, .08); }
+.editor-loop-envelope { position: absolute; left: 0; overflow: visible; }
+.editor-loop-envelope polyline { fill: none; stroke: #fbbf24; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 /* Sound lane (PC sound of a haptic audition) above the haptic: fixed height, same time axis; the header stays clickable over the pointer layer. */
 .editor-sound-lane { position: relative; display: flex; flex-direction: column; box-sizing: border-box; border-bottom: 1px solid var(--border-color, #3f3f46); }
 .editor-lane-header { position: relative; z-index: 5; display: flex; align-items: center; gap: 10px; height: 22px; padding: 0 6px; font-size: 11px; white-space: nowrap; }

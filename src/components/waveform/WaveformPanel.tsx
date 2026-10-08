@@ -50,7 +50,7 @@ export function WaveformPanel() {
       <strong className={`editor-active-name ${audition ? 'editor-auditioning' : ''}`}>{eventPreview ? t('events.preview.name', { name: eventPreview.label }) : auditionKey ? t('editor.agent.auditioning', { name: auditionKey })
         : adjusting ? t('editor.adjusting', { event: adjusting.event, file: `${adjusting.wav}.wav` }) : s.clip?.name ?? t('editor.noClip')}</strong>
       {/* Fixed width, always present (empty without a buffer): switching single / sequence never moves the controls. */}
-      <span className={`editor-shown-layout ${shownLayout?.starts ? 'sequence' : ''}`} role="status" title={shownLayout?.starts ? t('editor.shown.sequenceHint') : undefined}>
+      <span className={`editor-shown-layout ${shownLayout?.loop ? 'loop' : shownLayout?.starts ? 'sequence' : ''}`} role="status" title={shownLayout?.starts ? t('editor.shown.sequenceHint') : undefined}>
         {layoutLine ? t(layoutLine.id, layoutLine.params) : ''}</span>
       {eventPreview ? <IntensitySlider key={eventPreview.material} target={eventPreview.target} wav={eventPreview.material} />
         : adjusting && !audition && <IntensitySlider key={adjusting.wav} target={adjusting.target} wav={adjusting.wav} project={adjusting.project} />}
@@ -80,7 +80,7 @@ export function WaveformPanel() {
     <div className="editor-preview-status" role="status">{status}</div>
     <div className="waveform-main">
       {!s.clip && !audition && <div className="waveform-empty"><div className="empty-icon">∿</div><div className="empty-message">{t('wave.drop')}</div><div className="empty-hint">{t('editor.emptyHint')}</div></div>}
-      <WaveformDisplay original={original} scale={level} bufferOverride={audioBuffer} player={player} viewKey={auditionKey ?? undefined} placements={placements} soundLane={soundLane}
+      <WaveformDisplay original={original} scale={level} bufferOverride={audioBuffer} player={player} viewKey={auditionKey ?? undefined} placements={placements} loop={shownLayout?.loop ?? null} soundLane={soundLane}
         transport={<TransportBar player={player} available={!!audioBuffer} playback={playback} pending={pending} onToggle={togglePlay} onFromStart={() => playFromStart()} />} />
     </div>
   </div>

@@ -19,6 +19,7 @@ import { decidedSoundEvents } from '@/utils/decidedSound'
 import { leadFirings } from '@/utils/soundLane'
 import { contextLoopSounds, contextReplayTime, contextSoundFirings, type ContextPlan } from '@/utils/trialContext'
 import { LoopSoundPlayer, loopSoundLevel } from '@/utils/sceneLoopSounds'
+import { renderLoopStretch, type LoopStretch } from '@/utils/loopStretch'
 
 /**
  * Event materials in the editor: an event's sound / haptic clip opened in the
@@ -89,6 +90,12 @@ function mixParts(parts: Part[], rate: number, nCh: number, minLength = 0): Audi
 export function repeatBuffer(buffer: AudioBuffer, plays: readonly { atSec: number; gain: number; rate: number }[], minSec = 0): AudioBuffer {
   const channels = Array.from({ length: buffer.numberOfChannels }, (_, c) => buffer.getChannelData(c))
   return mixParts(plays.map(p => ({ start: Math.round(p.atSec * buffer.sampleRate), data: channels.map(ch => p.rate === 1 ? ch : resampleClip(ch, p.rate)), gain: p.gain })), buffer.sampleRate, buffer.numberOfChannels, Math.round(minSec * buffer.sampleRate))
+}
+
+/** `buffer` looped over a loop cue's stretch (renderLoopStretch: tiled while the layer is active, × its recorded level), at least `minSec` long. */
+export function loopBuffer(buffer: AudioBuffer, stretch: LoopStretch, minSec = 0): AudioBuffer {
+  const channels = Array.from({ length: buffer.numberOfChannels }, (_, c) => buffer.getChannelData(c))
+  return asBuffer(renderLoopStretch(channels, buffer.sampleRate, stretch, Math.max(stretch.durationSec, minSec)), buffer.sampleRate)
 }
 
 /** The length of event `key`'s (first) sound in seconds; 1 s when it has none loaded. */
