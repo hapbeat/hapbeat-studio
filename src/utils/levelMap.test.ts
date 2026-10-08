@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { isLevelMap, mapLevel, withLevelCurve, withLevelPoint, withoutLevelPoint, type LevelMap } from './levelMap'
+import { isLevelMap, LEVEL_MAP_CURVES, mapLevel, withLevelCurve, withLevelIntercept, withLevelPoint, withoutLevelPoint, type LevelMap, type LevelMapCurve } from './levelMap'
+import { curveAt } from './rampCurve'
 import { validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
 import { addMaterial, setLevelMap, setStarred, updateOwnRoute } from './cueEvents'
 import { buildLoopVoices, CHUNK, renderChunk } from './sceneHaptics'
@@ -11,62 +12,103 @@ import type { SceneData } from './sceneData'
 const MAP: LevelMap = { points: [[0.2, 0.5], [0.6, 1.5], [1, 1]] }
 const FEED = { cue: 'feed_loop', variant: null }
 
-describe('levelMap (DEC-090): recorded level → multiplier', () => {
-  it('is the level itself without a map, and 0 at level 0 (or below)', () => {
+describe('levelMap (DEC-090 revised): input → output through (0, intercept) and the points', () => {
+  it('is the input itself without a map, and 0 at input 0 (or below)', () => {
     expect(mapLevel(undefined, 0.7)).toBe(0.7)
     expect(mapLevel(undefined, 0)).toBe(0)
     expect(mapLevel(MAP, 0)).toBe(0)
     expect(mapLevel(MAP, -1)).toBe(0)
+    expect(mapLevel({ points: [[1, 2]], intercept: 1 }, 0)).toBe(0) // the loop is off: 0 even with an intercept
   })
 
-  it('takes the end values beyond the points', () => {
-    expect(mapLevel(MAP, 0.05)).toBe(0.5) // below the first point (but above 0): its value
-    expect(mapLevel(MAP, 0.2)).toBe(0.5)
-    expect(mapLevel(MAP, 1)).toBe(1)
-    expect(mapLevel(MAP, 3)).toBe(1)
+  it('one point: a line through the origin (proportional), extended past the point', () => {
+    const one: LevelMap = { points: [[1.225, 0.5]] }
+    expect(mapLevel(one, 0.08)).toBeCloseTo(0.5 * 0.08 / 1.225) // ≈ 0.0327
+    expect(mapLevel(one, 0.08)).toBeCloseTo(0.0327, 4)
+    expect(mapLevel(one, 1.225)).toBe(0.5)
+    expect(mapLevel(one, 2.45)).toBeCloseTo(1)
   })
 
-  it('interpolates linearly between points', () => {
-    expect(mapLevel(MAP, 0.4)).toBeCloseTo(1)
-    expect(mapLevel(MAP, 0.3)).toBeCloseTo(0.75)
-    expect(mapLevel(MAP, 0.8)).toBeCloseTo(1.25)
+  it('two points: piecewise linear from the origin through both', () => {
+    const two: LevelMap = { points: [[0.08, 0.08], [1.225, 0.5]] }
+    expect(mapLevel(two, 0.04)).toBeCloseTo(0.04) // (0, 0) → (0.08, 0.08)
+    expect(mapLevel(two, 0.08)).toBeCloseTo(0.08)
+    expect(mapLevel(two, (0.08 + 1.225) / 2)).toBeCloseTo((0.08 + 0.5) / 2)
+    expect(mapLevel(two, 1.225)).toBeCloseTo(0.5)
+    // Past the last point: the last segment slope.
+    expect(mapLevel(two, 2)).toBeCloseTo(0.5 + (0.5 - 0.08) / (1.225 - 0.08) * (2 - 1.225))
   })
 
-  it('smooth: smoothstep between two points (same at the points and the midpoint, eased near them)', () => {
-    const smooth = { ...MAP, curve: 'smooth' as const }
-    expect(mapLevel(smooth, 0.4)).toBeCloseTo(1) // f = 0.5 → 0.5
-    expect(mapLevel(smooth, 0.6)).toBeCloseTo(1.5)
-    // f = 0.25 → 0.25² × (3 − 0.5) = 0.15625
-    expect(mapLevel(smooth, 0.3)).toBeCloseTo(0.5 + 1 * 0.15625)
-    expect(mapLevel(smooth, 0.3)).toBeLessThan(mapLevel(MAP, 0.3))
+  it('intercept: the first segment starts at (0, intercept)', () => {
+    const m: LevelMap = { points: [[1, 2]], intercept: 1 }
+    expect(mapLevel(m, 1e-6)).toBeCloseTo(1)
+    expect(mapLevel(m, 0.5)).toBeCloseTo(1.5)
+    expect(mapLevel(m, 2)).toBeCloseTo(3) // one point: the secant from (0, intercept)
+    expect(mapLevel({ points: [[1, 0]], intercept: 2 }, 0.5)).toBeCloseTo(1) // falling is fine
   })
 
-  it('accepts 1–16 points with increasing levels ≥ 0, gains 0..4, curve linear / smooth', () => {
+  it('each curve shapes every segment (mid-segment values)', () => {
+    const at = (curve: LevelMapCurve, x: number) => mapLevel({ ...MAP, curve }, x)
+    // Segment (0.2, 0.5) → (0.6, 1.5): t = 0.5 at 0.4, t = 0.25 at 0.3.
+    expect(at('linear', 0.3)).toBeCloseTo(0.5 + 1 * 0.25)
+    expect(at('easeIn', 0.4)).toBeCloseTo(0.5 + 1 * 0.25)
+    expect(at('easeOut', 0.4)).toBeCloseTo(0.5 + 1 * 0.75)
+    expect(at('easeInOut', 0.4)).toBeCloseTo(1)
+    expect(at('easeInOut', 0.3)).toBeCloseTo(0.5 + 0.15625)
+    expect(at('sigmoid', 0.4)).toBeCloseTo(1)
+    expect(at('sigmoid', 0.3)).toBeCloseTo(0.5 + curveAt('sigmoid', 0.25))
+    expect(at('sigmoid', 0.3)).toBeLessThan(at('easeInOut', 0.3))
+    // The first segment from the origin too: (0, 0) → (0.2, 0.5) at t = 0.5.
+    expect(at('easeIn', 0.1)).toBeCloseTo(0.5 * 0.25)
+    // The points themselves for every shape.
+    for (const c of LEVEL_MAP_CURVES) { expect(at(c, 0.6)).toBeCloseTo(1.5); expect(at(c, 1)).toBeCloseTo(1) }
+  })
+
+  it('extends past the last point with the last secant, the output kept in 0..4', () => {
+    // Last segment (0.6, 1.5) → (1, 1): slope −1.25.
+    expect(mapLevel(MAP, 1.4)).toBeCloseTo(0.5)
+    expect(mapLevel(MAP, 3)).toBe(0) // −1 clamped to 0
+    expect(mapLevel({ points: [[0.5, 3]] }, 1.225)).toBe(4) // 7.35 clamped to 4
+    // The secant, not the shaped curve's end slope.
+    expect(mapLevel({ ...MAP, curve: 'easeIn' }, 1.4)).toBeCloseTo(0.5)
+  })
+
+  it('accepts 1–16 points with increasing inputs > 0, outputs 0..4, intercept 0..4, the 5 curves; nothing else', () => {
     expect(isLevelMap(MAP)).toBe(true)
-    expect(isLevelMap({ points: [[0, 0]], curve: 'smooth' })).toBe(true)
+    expect(isLevelMap({ points: [[0.1, 0]], intercept: 4, curve: 'sigmoid' })).toBe(true)
+    for (const c of LEVEL_MAP_CURVES) expect(isLevelMap({ points: [[1, 1]], curve: c })).toBe(true)
     expect(isLevelMap({ points: [] })).toBe(false)
-    expect(isLevelMap({ points: Array.from({ length: 17 }, (_, i) => [i, 1]) })).toBe(false)
+    expect(isLevelMap({ points: Array.from({ length: 17 }, (_, i) => [i + 1, 1]) })).toBe(false)
     expect(isLevelMap({ points: [[0.5, 1], [0.2, 1]] })).toBe(false) // not sorted
-    expect(isLevelMap({ points: [[0.5, 1], [0.5, 2]] })).toBe(false) // a level twice
+    expect(isLevelMap({ points: [[0.5, 1], [0.5, 2]] })).toBe(false) // an input twice
+    expect(isLevelMap({ points: [[0, 0]] })).toBe(false) // input 0 is not a point (the intercept is)
     expect(isLevelMap({ points: [[-0.1, 1]] })).toBe(false)
     expect(isLevelMap({ points: [[0.1, 4.5]] })).toBe(false)
+    expect(isLevelMap({ points: [[0.1, -0.1]] })).toBe(false)
+    expect(isLevelMap({ points: [[0.1, 1]], intercept: 4.5 })).toBe(false)
+    expect(isLevelMap({ points: [[0.1, 1]], intercept: -1 })).toBe(false)
+    expect(isLevelMap({ points: [[0.1, 1]], curve: 'smooth' })).toBe(false) // removed
     expect(isLevelMap({ points: [[0.1, 1]], curve: 'cubic' })).toBe(false)
     expect(isLevelMap({ points: [[0.1, 1]], extra: 1 })).toBe(false)
   })
 
-  it('edits: a point added in order or replaced at the same level, removed (none left = no map), the curve', () => {
+  it('edits: a point added in order or replaced at the same input, removed (none left = no map), the curve, the intercept', () => {
     const one = withLevelPoint(undefined, 0.5, 1.2)
     expect(one).toEqual({ points: [[0.5, 1.2]] })
     const two = withLevelPoint(one, 0.25, 9)
-    expect(two.points).toEqual([[0.25, 4], [0.5, 1.2]]) // gain clamped to 4
+    expect(two.points).toEqual([[0.25, 4], [0.5, 1.2]]) // output clamped to 4
     expect(withLevelPoint(two, 0.5, 0.3).points).toEqual([[0.25, 4], [0.5, 0.3]])
+    expect(() => withLevelPoint(two, 0.0004, 1)).toThrow() // rounds to input 0
     expect(withoutLevelPoint(two, 0)).toEqual({ points: [[0.5, 1.2]] })
     expect(withoutLevelPoint(one, 0)).toBeUndefined()
-    expect(withLevelCurve(two, 'smooth').curve).toBe('smooth')
-    expect('curve' in withLevelCurve({ ...two, curve: 'smooth' }, 'linear')).toBe(false)
-    const full: LevelMap = { points: Array.from({ length: 16 }, (_, i) => [i, 1]) }
+    expect(withLevelCurve(two, 'easeInOut').curve).toBe('easeInOut')
+    expect('curve' in withLevelCurve({ ...two, curve: 'sigmoid' }, 'linear')).toBe(false)
+    expect(withLevelIntercept(two, 0.25).intercept).toBe(0.25)
+    expect(withLevelIntercept(two, 9).intercept).toBe(4)
+    expect('intercept' in withLevelIntercept({ ...two, intercept: 1 }, 0)).toBe(false)
+    const full: LevelMap = { points: Array.from({ length: 16 }, (_, i) => [i + 1, 1]) }
     expect(() => withLevelPoint(full, 20, 1)).toThrow()
-    expect(withLevelPoint(full, 3, 2).points[3]).toEqual([3, 2])
+    expect(withLevelPoint(full, 3, 2).points[2]).toEqual([3, 2])
   })
 })
 
@@ -81,6 +123,12 @@ describe('levelMap in the cue table', () => {
     expect(validateCueTable(ok, ctx())).toEqual([])
     const bad = setLevelMap(sampleTable(), 'feed_loop', 0, { points: [[0.5, 1], [0.2, 1]] })
     expect(validateCueTable(bad, ctx())).toEqual([expect.stringMatching(/^feed_loop: route levelMap must be \{points:/)])
+    const zero = setLevelMap(sampleTable(), 'feed_loop', 0, { points: [[0, 1]] })
+    expect(validateCueTable(zero, ctx())).toEqual([expect.stringMatching(/^feed_loop: route levelMap must be \{points: \[\[input > 0/)])
+    const smooth = setLevelMap(sampleTable(), 'feed_loop', 0, { points: [[1, 1]], curve: 'smooth' } as unknown as LevelMap)
+    expect(validateCueTable(smooth, ctx())).toEqual(['feed_loop: route levelMap curve "smooth" was removed (DEC-090 revision): use easeInOut'])
+    const withIntercept = setLevelMap(sampleTable(), 'feed_loop', 0, { points: [[1, 1]], intercept: 0.2, curve: 'easeOut' })
+    expect(validateCueTable(withIntercept, ctx())).toEqual([])
     const pulse = structuredClone(sampleTable())
     pulse.cues.detent.haptics![0].levelMap = MAP
     expect(validateCueTable(pulse, ctx())).toEqual(['detent: route levelMap is for loop cues'])
@@ -113,7 +161,7 @@ describe('levelMap in loop playback', () => {
     const table = setLevelMap(sampleTable(), 'feed_loop', 0, { points: [[0.5, 2]] })
     const loopVoices = buildLoopVoices(table, sampleLib())
     const out = renderChunk({ ip: 'a', address: 'p1/pos_r_wrist', wall: 0, voices: [], loopVoices, clock: { t: 0, rate: 1, wall: 0 }, pcm, level: () => [0.25, 1] })
-    expect(out[0]).toBe(Math.round(0.5 * 2 * 0.8 * 32767)) // level 0.25 → ×2 (the end value), route gain 0.8
+    expect(out[0]).toBe(Math.round(0.5 * 1 * 0.8 * 32767)) // input 0.25 → ×1 (half of (0.5, 2) from the origin), route gain 0.8
     const silent = renderChunk({ ip: 'b', address: 'p1/pos_r_wrist', wall: 0, voices: [], loopVoices, clock: { t: 0, rate: 1, wall: 0 }, pcm, level: () => [0, 1] })
     expect(silent.every(s => s === 0)).toBe(true) // level 0 → 0
   })
@@ -129,7 +177,7 @@ describe('levelMap in loop playback', () => {
   it('editor loop view: renderLoopStretch applies the stretch levelMap', () => {
     const stretch = { segments: [{ start: 0, end: 1 }], level: () => ({ gain: 0.5, rate: 1 }) }
     expect(renderLoopStretch([new Float32Array(4).fill(0.5)], 10, stretch, 1)[0][3]).toBeCloseTo(0.25)
-    expect(renderLoopStretch([new Float32Array(4).fill(0.5)], 10, { ...stretch, levelMap: { points: [[1, 3]] } }, 1)[0][3]).toBeCloseTo(1.5)
+    expect(renderLoopStretch([new Float32Array(4).fill(0.5)], 10, { ...stretch, levelMap: { points: [[1, 3]] } }, 1)[0][3]).toBeCloseTo(0.75) // input 0.5 → 1.5
   })
 })
 

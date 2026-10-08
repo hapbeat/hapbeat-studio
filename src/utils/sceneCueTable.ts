@@ -1,5 +1,6 @@
 import type { SceneLib } from './sceneData'
 import { isLevelMap, LEVEL_MAP_RULE, type LevelMap } from './levelMap'
+import { RAMP_CURVES, type RampCurve } from './rampCurve'
 
 /**
  * The project's cue table (`lib.paths.cues`, e.g. Safety Mill
@@ -20,12 +21,12 @@ import { isLevelMap, LEVEL_MAP_RULE, type LevelMap } from './levelMap'
  * DEC-088 adds `emit` on a pulse cue (fired by the game while a loop cue runs).
  * DEC-089: only starred materials play — `sound` / `sounds` and a route's `clip` / `clips` (first = representative);
  * `alternates` on a sfx / route holds unstarred candidates (names) that are never played. Omitted when empty.
- * DEC-090 adds `levelMap` on a loop cue's sfx / route: the recorded layer level mapped to a multiplier (see levelMap).
+ * DEC-090 adds `levelMap` on a loop cue's sfx / route: the input the game gives the loop (the recorded layer level) mapped to an output multiplier (see levelMap).
  */
 
 /**
  * A route plays `clip`, or one of `clips` per firing (picked by `variation.pick`); `alternates`: unstarred clips (never played, DEC-089);
- * `levelMap`: a loop cue's recorded level → multiplier (DEC-090; absent = the level).
+ * `levelMap`: a loop cue's input → output (DEC-090; absent = the input).
  */
 export interface CueRoute { clip?: string; clips?: string[]; alternates?: string[]; at: string; gain: number; levelMap?: LevelMap; [key: string]: unknown }
 /** A cue sound: `sound`, or one of `sounds` per firing; `alternates`: unstarred sounds (never played, DEC-089); `levelMap` as a route's. */
@@ -77,8 +78,6 @@ export interface CueEntry {
   review?: CueReview
   [key: string]: unknown
 }
-export const RAMP_CURVES = ['linear', 'easeIn', 'easeOut', 'easeInOut', 'sigmoid'] as const
-export type RampCurve = typeof RAMP_CURVES[number]
 
 /** Variant names (`<cue>:<variant>` in the game and in viewer-data events). */
 export const VARIANT_NAME = /^[a-z][a-z0-9_]*$/
@@ -314,6 +313,7 @@ function validateCueFields(err: string[], table: CueTable, ctx: CueTableContext,
 function levelMapProblems(err: string[], lib: SceneLib, cue: string, label: string, kind: 'sfx' | 'route', map: unknown): void {
   if (map === undefined) return
   if (!isLoopCue(lib, cue)) err.push(`${label}: ${kind} levelMap is for loop cues`)
+  else if (isRecord(map) && map.curve === 'smooth') err.push(`${label}: ${kind} levelMap curve "smooth" was removed (DEC-090 revision): use easeInOut`)
   else if (!isLevelMap(map)) err.push(`${label}: ${kind} levelMap must be ${LEVEL_MAP_RULE}`)
 }
 

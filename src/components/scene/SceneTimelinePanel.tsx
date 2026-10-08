@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { usePageVisible } from '@/hooks/usePageVisible'
 import { perfTrack } from '@/utils/perfRegistry'
 import { useI18n } from '@/i18n/I18nProvider'
@@ -6,8 +6,6 @@ import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { familyColor, frameAt, offsetOf } from '@/utils/sceneData'
 import { WHEEL_ZOOM_RATE, wheelPixels, zoomAtTime } from '@/utils/waveformView'
-import { ChangeEventForm, changedFiring, changeFailed } from './SceneMomentsPanel'
-import type { OverriddenEvent } from '@/utils/sceneOverrides'
 import { effectiveEvent, resolveEventName } from '@/utils/cueEvents'
 import { useScene } from './sceneContext'
 import { SPEEDS } from './sceneRuntime'
@@ -20,7 +18,7 @@ import { laneY, layerLanes, layerScaleMax, outputCurves, outputScaleMax, sideLev
 import { spanWindow, stepView, timelineClick, type TimelineView } from '@/utils/sceneTimelineView'
 
 const SOUND_COLOR = '#36c5c0'
-type Hit = { x: number; y0: number; y1: number; name: string; t: number; from?: string }
+type Hit = { x: number; y0: number; y1: number; name: string; t: number }
 /** A drawn band of the selected loop cue: its lane's height and x range (CSS px). */
 type Band = { x0: number; x1: number; y0: number; y1: number }
 const MAX_ZOOM = 2000
@@ -30,7 +28,7 @@ const MAX_ZOOM = 2000
  * scaled inside it (a selected loop cue: also its output, levelMap applied); a cue shows in each lane it uses (a selected loop cue: its whole active
  * span, as long as its layer's recorded level is above 0, as bands in those lanes). A click seeks (timelineClick);
  * Ctrl (Cmd) + click a marker to edit that cue (the moments list marks it too), a band to play that span in the full
- * replay (SceneRuntime.playSpan; within the span already playing: seek); right-click a marker to change its event.
+ * replay (SceneRuntime.playSpan; within the span already playing: seek). A firing is reassigned from the moments list.
  * While a loop cue's span plays, the timeline shows only that span with its lead-in / post-roll (sceneTimelineView).
  * Ctrl + wheel zooms around the pointer, wheel / Shift + wheel pans (like the editor's waveform), also while playing.
  * Read-outs and output toggles above it.
@@ -49,7 +47,6 @@ export function SceneTimelinePanel() {
   const placeOf = useMomentPlace()
   const placeRef = useRef(placeOf); placeRef.current = placeOf
   const view = useRef<TimelineView>({ key: '', start: 0, zoom: 1, fit: true, span: false })
-  const [change, setChange] = useState<{ from: string; at: number } | null>(null)
   /** The selected loop cue's active runs over the shown moment's levels (computed again only when either changes). */
   const runs = useRef<{ levels: number[][] | null; name: string; runs: [number, number][] }>({ levels: null, name: '', runs: [] })
   /** Each layer's scale top over the recording (computed again only for another recording). */
@@ -173,7 +170,7 @@ export function SceneTimelinePanel() {
           if (!has(ev.name)) continue
           const x = X(ev.t), picked = !!sel && sel.name === ev.name && sel.t != null && Math.abs(ev.t - sel.t) < 0.02
           if (x < -10 || x > w + 10) continue
-          found.push({ x, y0, y1, name: ev.name, t: ev.t, from: (ev as OverriddenEvent).from })
+          found.push({ x, y0, y1, name: ev.name, t: ev.t })
           ctx.fillStyle = color(ev.name)
           ctx.globalAlpha = picked ? 1 : sel && sel.t != null ? 0.35 : it.kind === 'clip' && !ev.own ? 0.5 : 1
           if (ticks.includes(ev.name) && !picked) { ctx.fillRect(x, y1 - 6, 1, 6); continue }
@@ -225,14 +222,6 @@ export function SceneTimelinePanel() {
     const run = loopCueRuns(s.data.full.levels, s.data.fps, s.lib, s.sel.name).find(([a, b]) => replay >= a && replay <= b)
     return run && !(s.span && s.span[0] === run[0] && s.span[1] === run[1]) ? run : null
   }
-  /** Right-click a marker: "Change" (the moments list's), over the timeline. */
-  const onContextMenu = (event: React.MouseEvent<HTMLCanvasElement>) => {
-    const s = useSceneStore.getState(), it = s.items[s.cur], { hit } = hitAt(event)
-    if (!hit || !it) return
-    event.preventDefault()
-    s.selectCue(hit.name, hit.t)
-    setChange({ from: hit.from ?? hit.name, at: Math.round((hit.t + offsetOf(it)) * 1000) / 1000 })
-  }
   // Ctrl + wheel zooms around the pointer; wheel / Shift + wheel pans (the editor waveform's handling).
   useEffect(() => {
     const cv = canvas.current
@@ -259,18 +248,8 @@ export function SceneTimelinePanel() {
       <span className="scene-info-state" ref={state} />
       <SceneOutputToggles />
     </div>
-    <canvas className="scene-timeline-canvas" ref={canvas} tabIndex={0} title={t('scene.timeline.hint')} onMouseDown={onMouseDown} onContextMenu={onContextMenu} />
-    {change && <TimelineChange from={change.from} at={change.at} onClose={() => setChange(null)} />}
+    <canvas className="scene-timeline-canvas" ref={canvas} tabIndex={0} title={t('scene.timeline.hint')} onMouseDown={onMouseDown} />
     <div className="scene-help">{t('scene.keys')}</div>
   </div>
 }
 
-/** "Change" opened from a timeline marker (over the timeline; the moments list's form). */
-function TimelineChange({ from, at, onClose }: { from: string; at: number; onClose: () => void }) {
-  const table = useSceneStore(s => s.table)
-  if (!table) return null
-  return <div className="scene-timeline-change">
-    <ChangeEventForm from={from} at={at} table={table} onClose={onClose} onError={changeFailed}
-      onSent={to => { onClose(); changedFiring(from, at, to) }} />
-  </div>
-}

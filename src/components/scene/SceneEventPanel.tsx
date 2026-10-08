@@ -2,12 +2,13 @@ import { useState } from 'react'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
-import { isLoopCue, pairedProblem, PICK_MODES, routeAlternates, routeClips, sfxAlternates, sfxSounds, soundAllowed, VARIANT_NAME, clipsForCue, type CueTable, type CueVariation, type VariationNumberKey, RAMP_CURVES, type RampCurve, type DistanceFalloff } from '@/utils/sceneCueTable'
+import { isLoopCue, pairedProblem, PICK_MODES, routeAlternates, routeClips, sfxAlternates, sfxSounds, soundAllowed, VARIANT_NAME, clipsForCue, type CueTable, type CueVariation, type VariationNumberKey, type DistanceFalloff } from '@/utils/sceneCueTable'
+import { curveAt, RAMP_CURVES, type RampCurve } from '@/utils/rampCurve'
 import { EMIT_INTERVAL_RANGE, EMIT_JITTER_RANGE } from '@/utils/sceneEmit'
 import type { SceneLib } from '@/utils/sceneData'
 import {
   addMaterial, addVariant, effectiveEvent, eventKey, pairedClips, removeMaterial, removeVariant, resolveEventName, setOverride, setOwnSfxVolume, setStarred, setVariation,
-  setVariantKind, setVariantScale, updateOwnRoute, variantKind, curveAt, rampValue, setDistanceFalloff, setEmit,
+  setVariantKind, setVariantScale, updateOwnRoute, variantKind, rampValue, setDistanceFalloff, setEmit,
   type EffectiveEvent, type OverridableField,
 } from '@/utils/cueEvents'
 import { longestRun, sceneSegment } from '@/utils/sceneSegments'

@@ -3,9 +3,10 @@ import type { MaterialReserve } from './editorUiSettings'
 import {
   type CueReview, type ReviewState,
   clampNumber, isLoopCue, soundAllowed, soundIntensity, positionsForCue, routeAlternates, routeClips, sfxAlternates, sfxSounds, VARIANT_NAME,
-  type CueEntry, type CueRoute, type CueSfx, type CueTable, type CueVariant, type CueVariation, type PickMode, type RampCurve, type DistanceFalloff, type CueEmit,
+  type CueEntry, type CueRoute, type CueSfx, type CueTable, type CueVariant, type CueVariation, type PickMode, type DistanceFalloff, type CueEmit,
 } from './sceneCueTable'
 import type { LevelMap } from './levelMap'
+import { curveAt, type RampCurve } from './rampCurve'
 
 /**
  * Events = the cues of a project's cue table (and their v2 variants), as the
@@ -679,18 +680,6 @@ const jitter = (amount: number | undefined, random: () => number) => amount ? (r
 /** A variant's multipliers at `progress` (0..1 through its run) on what it inherits: 1 for own materials and for a cue. */
 export interface RunPosition { index: number; count: number }
 const ONE: RunPosition = { index: 0, count: 1 }
-const SIGMOID_K = 6
-/** The ramp shapes on t ∈ [0, 1] → [0, 1]: easeIn t², easeOut 1−(1−t)², easeInOut smoothstep, sigmoid a steep tanh S. */
-export function curveAt(curve: RampCurve, t: number): number {
-  const x = Math.max(0, Math.min(1, t))
-  switch (curve) {
-    case 'easeIn': return x * x
-    case 'easeOut': return 1 - (1 - x) * (1 - x)
-    case 'easeInOut': return x * x * (3 - 2 * x)
-    case 'sigmoid': return 0.5 + 0.5 * Math.tanh(SIGMOID_K * (x - 0.5)) / Math.tanh(SIGMOID_K / 2)
-    default: return x
-  }
-}
 /** A ramp's multiplier at firing `run.index` of `run.count` from `start` (t = index / (count − 1)). */
 export const rampValue = (start: number, to: number, curve: RampCurve, run: RunPosition) => start + (to - start) * curveAt(curve, run.count > 1 ? run.index / (run.count - 1) : 0)
 export function scaleAt(e: EffectiveEvent, run: RunPosition = ONE): { sfx: number; haptics: number } {

@@ -37,7 +37,7 @@ describe('A loop cue row plays its own span (the run its firing starts)', () => 
   })
 })
 
-describe('Output at the current level (levelMap, DEC-090)', () => {
+describe('Output at the current input (levelMap, DEC-090)', () => {
   it('sets the point at the current level, so the output there is the value entered', () => {
     const m = withOutputAt(undefined, 1.225, 0.5)!
     expect(m.points).toEqual([[1.225, 0.5]])
@@ -48,6 +48,7 @@ describe('Output at the current level (levelMap, DEC-090)', () => {
   })
   it('none at level 0, nor when the map is full without a point there', () => {
     expect(withOutputAt(undefined, 0, 0.5)).toBeNull()
+    expect(withOutputAt(undefined, 0.0004, 0.5)).toBeNull() // rounds to 0
     const full: LevelMap = { points: Array.from({ length: LEVEL_MAP_MAX_POINTS }, (_, i) => [i * 0.1 + 0.1, 1] as [number, number]) }
     expect(withOutputAt(full, 5, 1)).toBeNull()
     expect(withOutputAt(full, 0.1, 0.3)!.points[0]).toEqual([0.1, 0.3])
@@ -78,7 +79,7 @@ describe('Timeline level curves stay in their own lanes', () => {
     expect(outputScaleMax(levels, layer, curves)).toBeCloseTo(1.225)
     // A larger output widens the scale; a sound's curve follows the louder hand in the sound lane.
     const loud = millTable({ points: [[0.5, 3]] })
-    expect(outputScaleMax(levels, layer, outputCurves(loud, 'feed_loop'))).toBe(3)
+    expect(outputScaleMax(levels, layer, outputCurves(loud, 'feed_loop'))).toBe(4) // 1.225 → 7.35 past the point, kept at 4
     const sound = outputCurves(millTable(), 'cut_loop')
     expect(sound).toEqual([{ lane: 'sound', side: -1, map: undefined }])
     expect(outputValues(levels, layer, sound[0])[50]).toBeCloseTo(1.225)

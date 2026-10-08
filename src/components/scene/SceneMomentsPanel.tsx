@@ -123,16 +123,16 @@ export function SceneMomentsPanel() {
 }
 
 /** After a "Change" request: noted, and the firing is the new event at once (scene-overrides, until re-recorded). */
-export function changedFiring(from: string, atSec: number, to: string) {
+function changedFiring(from: string, atSec: number, to: string) {
   useSceneStore.getState().note({ id: 'scene.occ.sentStatus', params: { name: from, at: atSec.toFixed(2) } })
   void saveSceneOverrides(setSceneOverride(useSceneStore.getState().overrides, { from, atSec, to, requestedAt: localIsoString(new Date()) })).catch(error => changeFailed(error instanceof Error ? error.message : String(error)))
 }
-export const changeFailed = (message: string) => useSceneStore.getState().note({ id: 'scene.occ.failed', params: { message }, error: true })
+const changeFailed = (message: string) => useSceneStore.getState().note({ id: 'scene.occ.failed', params: { message }, error: true })
 
 const EVENT_NAME = /^[A-Za-z0-9_.-]{1,80}(:[a-z][a-z0-9_]{0,79})?$/
 
 /** "Change event…": over the rows (absolute; nothing moves). An existing event or a new `cue:variant`, a comment, "Request". */
-export function ChangeEventForm({ from, at, table, onSent, onError, onClose }: { from: string; at: number; table: CueTable; onSent: (to: string) => void; onError: (message: string) => void; onClose: () => void }) {
+function ChangeEventForm({ from, at, table, onSent, onError, onClose }: { from: string; at: number; table: CueTable; onSent: (to: string) => void; onError: (message: string) => void; onClose: () => void }) {
   const { t } = useI18n()
   const listId = useId()
   const [to, setTo] = useState('')

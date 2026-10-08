@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { curveAt, effectiveEvent, fireShot, hasOwnMaterials, scaleAt, MaterialPicker, setRouteClips, setVariantKind, setVariantScale } from './cueEvents'
+import { effectiveEvent, fireShot, hasOwnMaterials, scaleAt, MaterialPicker, setRouteClips, setVariantKind, setVariantScale } from './cueEvents'
+import { curveAt } from './rampCurve'
 import { parseCueTable, serializeCueTable, validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
 import { mergeCueTables } from './cueTableSync'
 import { longestRun, runPosition } from './sceneSegments'

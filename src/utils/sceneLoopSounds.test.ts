@@ -138,7 +138,7 @@ describe('loop-cue sounds (lib.loop_cue_sounds)', () => {
     expect(sounds[0]).toEqual({ layer: 1, sound: 'BrushLoop', gain: 0.5, levelMap: map })
     const ctx = new FakeCtx(), player = new LoopSoundPlayer(), buffers = { BrushLoop: buf('BrushLoop') }
     player.update(audioOf(ctx), [sounds[0]], buffers, () => ({ gain: 0.25, rate: 1 }))
-    expect(ctx.gains[0].gain.target).toBeCloseTo(2 * 0.5) // below the first point: its value, not the level 0.25
+    expect(ctx.gains[0].gain.target).toBeCloseTo(1 * 0.5) // below the first point: from the origin to it (0.25 → 1), not the input 0.25
     ctx.currentTime = 10.01
     player.update(audioOf(ctx), [sounds[0]], buffers, () => ({ gain: 0.75, rate: 1 }))
     expect(ctx.gains[0].gain.target).toBeCloseTo(1.5 * 0.5) // halfway between the points
