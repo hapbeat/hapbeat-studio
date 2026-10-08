@@ -3,9 +3,11 @@ import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { isLoopCue, pairedProblem, PICK_MODES, routeClips, sfxSounds, soundAllowed, VARIANT_NAME, clipsForCue, type CueTable, type CueVariation, type VariationNumberKey, RAMP_CURVES, type RampCurve, type DistanceFalloff } from '@/utils/sceneCueTable'
+import { EMIT_INTERVAL_RANGE, EMIT_JITTER_RANGE } from '@/utils/sceneEmit'
+import type { SceneLib } from '@/utils/sceneData'
 import {
   addVariant, effectiveEvent, eventKey, pairedClips, removeVariant, resolveEventName, setOverride, setOwnSfxVolume, setRouteClips, setSfxSounds, setVariation,
-  setVariantKind, setVariantScale, updateOwnRoute, variantKind, curveAt, rampValue, setDistanceFalloff,
+  setVariantKind, setVariantScale, updateOwnRoute, variantKind, curveAt, rampValue, setDistanceFalloff, setEmit,
   type EffectiveEvent, type OverridableField,
 } from '@/utils/cueEvents'
 import { longestRun, sceneSegment } from '@/utils/sceneSegments'
@@ -52,6 +54,7 @@ export function SceneEventPanel() {
       <Variants table={table} e={e} select={select} edit={edit} />
       {e.ref.variant !== null && <VariantScale e={e} edit={edit} />}
       <Falloff table={table} e={e} edit={edit} />
+      {e.ref.variant === null && <Emit table={table} lib={lib} cue={e.ref.cue} edit={edit} />}
       {run?.repeating && <button type="button" className="scene-icon-btn scene-event-run" title={t('scene.event.runHint')}
         onClick={ev => { ev.currentTarget.blur(); runtime.audio(); runtime.playFull(Math.max(0, run.marks[0].t - useSceneSettings.getState().leadSec)) }}>{t('scene.event.run', { at: run.marks[0].t.toFixed(1), count: run.marks.filter(m => m.target).length })}</button>}
     </div>
@@ -152,6 +155,43 @@ function VariantScale({ e, edit }: { e: EffectiveEvent; edit: Edit }) {
       </div>}
     </>}
   </>
+}
+
+/**
+ * Emitted cue (emit, DEC-088): the game fires this cue by itself while its loop cue (`during`) runs, every interval
+ * ± jitter. The Scene tab plays firings made from the recorded layer by the same rule (not the recorded ones);
+ * "draw again" makes another set (the same set otherwise, also after a seek).
+ */
+function Emit({ table, lib, cue, edit }: { table: CueTable; lib: SceneLib; cue: string; edit: Edit }) {
+  const { t } = useI18n()
+  const data = useSceneStore(s => s.data)
+  const emit = table.cues[cue]?.emit
+  if (!emit) return null
+  const count = data ? data.full.events.filter(x => x.name === cue).length : 0
+  return <div className="scene-sec">
+    <h3 title={`${t('scene.emit.hint')}
+emit`}>{t('scene.emit.heading')}</h3>
+    <div className="scene-event-variation">
+      <label title={`${t('scene.emit.during.hint')}
+during`}><span>{t('scene.emit.during')}</span>
+        <select value={emit.during} onChange={ev => { const d = ev.target.value; ev.target.blur(); edit(tb => setEmit(tb, cue, { during: d })) }}>
+          {!lib.loop_cues.includes(emit.during) && <option value={emit.during}>{emit.during}</option>}
+          {lib.loop_cues.map(c => <option key={c} value={c}>{c}</option>)}
+        </select></label>
+      <label title={`${t('scene.emit.intervalSec.hint')}
+intervalSec`}><span>{t('scene.emit.intervalSec')}</span>
+        <NumberField value={emit.intervalSec} min={EMIT_INTERVAL_RANGE[0]} max={EMIT_INTERVAL_RANGE[1]} step={0.05} label={t('scene.emit.intervalSec')}
+          onCommit={x => edit(tb => setEmit(tb, cue, { intervalSec: x }))} /></label>
+      <label title={`${t('scene.emit.jitterPct.hint')}
+jitterPct`}><span>{t('scene.emit.jitterPct')}</span>
+        <NumberField value={emit.jitterPct ?? 0} min={EMIT_JITTER_RANGE[0]} max={EMIT_JITTER_RANGE[1]} step={5} label={t('scene.emit.jitterPct')}
+          onCommit={x => edit(tb => setEmit(tb, cue, { jitterPct: x }))} /></label>
+    </div>
+    <div className="scene-row">
+      <span className="scene-dim scene-grow">{t('scene.emit.count', { count })}</span>
+      <button type="button" className="scene-icon-btn" title={t('scene.emit.reseed.hint')} onClick={ev => { ev.currentTarget.blur(); useSceneStore.getState().reseedEmit() }}>{t('scene.emit.reseed')}</button>
+    </div>
+  </div>
 }
 
 const DEFAULT_FALLOFF: DistanceFalloff = { nearCm: 560, farCm: 2000, farGain: 0.15 }

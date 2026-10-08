@@ -16,6 +16,7 @@ import type { SceneLib } from './sceneData'
  * whole, the rest is inherited from the cue), `variation` (jitter + how a
  * multi-material route / sound is picked), and multi-material `clips` on a
  * route / `sounds` on a sfx (exactly one of `clip` / `clips`, `sound` / `sounds`).
+ * DEC-088 adds `emit` on a pulse cue (fired by the game while a loop cue runs).
  */
 
 /** A route plays `clip`, or one of `clips` per firing (picked by `variation.pick`). */
@@ -51,6 +52,11 @@ export interface CueVariant {
  */
 export interface DistanceFalloff { nearCm: number; farCm: number; farGain: number; curve?: RampCurve }
 /**
+ * Emitted cue (DEC-088, pulse cues only): while the loop cue `during` runs, the game fires this cue by itself every
+ * intervalSec × (1 ± jitterPct %) seconds (see sceneEmit). The Scene tab makes these firings from the recorded layer.
+ */
+export interface CueEmit { during: string; intervalSec: number; jitterPct?: number; [key: string]: unknown }
+/**
  * Undecided vs none: a cue without the `sfx` / `haptics` key has not been decided yet;
  * `sfx: null` = no sound and `haptics: []` = no haptic (both decided). The game plays neither.
  */
@@ -59,6 +65,8 @@ export interface CueEntry {
   /** Scene multiplier by distance (null / absent = none). */
   distanceFalloff?: DistanceFalloff | null
   variants?: Record<string, CueVariant>; variation?: CueVariation
+  /** Fired by the game while a loop cue runs (DEC-088; saved before `review`). */
+  emit?: CueEmit
   review?: CueReview
   [key: string]: unknown
 }
@@ -146,6 +154,7 @@ export interface CueTableContext {
   soundFiles: Set<string>
 }
 
+const EMIT_KEYS = ['during', 'intervalSec', 'jitterPct']
 const inRange = (value: unknown, lo: number, hi: number) => typeof value === 'number' && Number.isFinite(value) && value >= lo && value <= hi
 
 /**
@@ -182,6 +191,11 @@ export function validateCueTable(table: CueTable, ctx: CueTableContext): string[
   if (names.length !== ctx.cueNames.length || names.some(n => !ctx.cueNames.includes(n))) err.push(`cues must be exactly ${ctx.cueNames.join(', ')}`)
   for (const [name, cue] of Object.entries(table.cues)) {
     validateCueFields(err, table, ctx, name, name, cue)
+    // emit (DEC-088): a pulse cue the game fires by itself while a continuous cue runs.
+    const emit = cue.emit as unknown
+    if (emit !== undefined && (isLoopCue(lib, name) || !isRecord(emit) || Object.keys(emit).some(k => !EMIT_KEYS.includes(k))
+      || typeof emit.during !== 'string' || !isLoopCue(lib, emit.during) || !inRange(emit.intervalSec, 0.05, 30) || !inRange(emit.jitterPct ?? 0, 0, 100)))
+      err.push(`${name}: emit must be {during: <loop cue>, intervalSec: 0.05..30, jitterPct?: 0..100} on a pulse cue`)
     for (const [vn, variant] of Object.entries(cue.variants ?? {})) {
       if (!VARIANT_NAME.test(vn)) err.push(`${name}: variant name ${vn} must match ${VARIANT_NAME.source}`)
       validateCueFields(err, table, ctx, name, `${name}:${vn}`, variant)

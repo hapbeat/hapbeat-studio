@@ -6,6 +6,7 @@ import { validateCueTable, type CueTable } from '@/utils/sceneCueTable'
 import { listWavs, openSceneProject, readProjectFile, readSceneTable, writeProjectFile, writeSceneSave, type PendingWavs } from '@/utils/sceneProject'
 import { CueTableSync } from '@/utils/cueTableSync'
 import { applyOverrides, type SceneOverride } from '@/utils/sceneOverrides'
+import { applyEmits, emitSignature, newEmitSeed } from '@/utils/sceneEmit'
 import { pageVisible, perfTrack } from '@/utils/perfRegistry'
 import { RATE } from '@/utils/sceneHaptics'
 import { lastSceneProject, lookupSceneProject, registerSceneProject, rememberSceneProject, restoreSceneHandle } from '@/utils/sceneRegistry'
@@ -33,7 +34,10 @@ interface SceneState {
   restored: boolean
   busy: boolean
   lib: SceneLib | null
-  /** The recording as Studio uses it: `recorded` with the firings the user changed (sceneOverrides) already renamed. */
+  /**
+   * The recording as Studio uses it: `recorded` with the firings the user changed (sceneOverrides) already renamed,
+   * and the firings of emitting cues (DEC-088) made from their `during` layer instead of the recorded ones (sceneEmit).
+   */
   data: SceneData | null
   /** The recording as read from the project (viewer-data). */
   recorded: SceneData | null
@@ -41,6 +45,9 @@ interface SceneState {
   overrides: SceneOverride[]
   /** Replaces the overrides (data / items recomputed; the caller saves the file). */
   setOverrides: (overrides: SceneOverride[]) => void
+  /** Seed of the emitted cues' firings (one per session, so a replay repeats them); `reseedEmit` draws a new one. */
+  emitSeed: number
+  reseedEmit: () => void
   items: SceneItem[]
   table: CueTable | null
   /** kit and cue names as loaded (the tab never changes them; save checks it). */
@@ -122,6 +129,13 @@ export function sceneVideoUrl(root: FileSystemDirectoryHandle, file: string): Pr
 export const useSceneStore = create<SceneState>((set, get) => {
   const note = (notice: SceneNotice) => set({ notice })
   const addLog = (text: string) => set(s => ({ log: [...s.log.slice(-199), `${new Date().toLocaleTimeString()}  ${text}`] }))
+  /** `data` for `table` (overrides applied, emitted cues' firings made); none while nothing is recorded. */
+  const derivedData = (table: CueTable | null, overrides = get().overrides, emitSeed = get().emitSeed): { data: SceneData } | Record<string, never> => {
+    const { recorded, lib } = get()
+    if (!recorded) return {}
+    const data = applyOverrides(recorded, overrides)
+    return { data: table && lib ? applyEmits(data, table, lib, emitSeed) : data }
+  }
 
   /** Reads the cue table and decodes every clip / cue sound of the open project. */
   const loadTable = async () => {
@@ -135,7 +149,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
       ...Object.keys(files.table.clips).map(async n => { pcm[n] = mono(await decode(await (await readProjectFile(root, `${lib.paths.clips}/${n}.wav`)).arrayBuffer(), RATE)) }),
       ...files.soundFiles.map(async n => { sfx[n] = await decode(await (await readProjectFile(root, `${lib.paths.sounds}/${n}.wav`)).arrayBuffer(), 48000) }),
     ])
-    set({ table: files.table, loaded: { kit: files.table.kit, cueNames: Object.keys(files.table.cues) }, clipFiles: files.clipFiles, soundFiles: files.soundFiles,
+    set({ table: files.table, ...derivedData(files.table), loaded: { kit: files.table.kit, cueNames: Object.keys(files.table.cues) }, clipFiles: files.clipFiles, soundFiles: files.soundFiles,
       pcm, sfx, pending: { clips: {}, sounds: {} }, dirty: false, saveError: null })
   }
 
@@ -176,7 +190,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
           // Reload the merged file (new WAVs decoded); an edit made during the write is kept and saved next.
           const edited = now !== table ? now : null
           await loadTable()
-          if (edited) { set({ table: edited, dirty: true }); scheduleSave() }
+          if (edited) { set({ table: edited, ...derivedData(edited), dirty: true }); scheduleSave() }
           if (result.conflicts.length) note({ id: 'scene.autosave.conflicts', params: { fields: result.conflicts.join(', ') }, error: true })
           else addLog(`merged outside changes into ${lib.paths.cues}`)
         } else if (now === table) set({ dirty: false, pending: { clips: {}, sounds: {} }, saveError: null })
@@ -251,7 +265,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
   return {
     root: null, remembered: null, restored: false, busy: false,
     lib: null, data: null, recorded: null, overrides: [], items: [], table: null, loaded: null, clipFiles: [], soundFiles: [],
-    pending: { clips: {}, sounds: {} }, pcm: {}, sfx: {}, dirty: false, saveError: null, cur: 0, sel: null,
+    pending: { clips: {}, sounds: {} }, pcm: {}, sfx: {}, dirty: false, saveError: null, cur: 0, sel: null, emitSeed: newEmitSeed(),
     notice: null, empty: null, log: [],
     note, addLog,
 
@@ -322,10 +336,13 @@ export const useSceneStore = create<SceneState>((set, get) => {
     },
     selectCue: (name, t) => set({ sel: { name, t } }),
     setOverrides: overrides => {
-      const recorded = get().recorded
-      if (!recorded) { set({ overrides }); return }
-      const data = applyOverrides(recorded, overrides)
-      set({ overrides, data, items: buildItems(data) })
+      const derived = derivedData(get().table, overrides)
+      if (!derived.data) { set({ overrides }); return }
+      set({ overrides, data: derived.data, items: buildItems(derived.data) })
+    },
+    reseedEmit: () => {
+      const emitSeed = newEmitSeed()
+      set({ emitSeed, ...derivedData(get().table, get().overrides, emitSeed) })
     },
 
     edit: change => {
@@ -333,7 +350,8 @@ export const useSceneStore = create<SceneState>((set, get) => {
       if (!table) return false
       const next = change(table)
       if (!next) return false
-      set({ table: next, dirty: true })
+      // New emitted firings only when an emit changed (every other edit keeps `data`).
+      set({ table: next, ...(emitSignature(next) !== emitSignature(table) ? derivedData(next) : {}), dirty: true })
       scheduleSave()
       return true
     },

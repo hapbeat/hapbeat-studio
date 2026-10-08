@@ -3,7 +3,7 @@ import type { MaterialReserve } from './editorUiSettings'
 import {
   type CueReview, type ReviewState,
   clampNumber, isLoopCue, soundAllowed, soundIntensity, positionsForCue, routeClips, sfxSounds, VARIANT_NAME,
-  type CueEntry, type CueRoute, type CueSfx, type CueTable, type CueVariant, type CueVariation, type PickMode, type RampCurve, type DistanceFalloff,
+  type CueEntry, type CueRoute, type CueSfx, type CueTable, type CueVariant, type CueVariation, type PickMode, type RampCurve, type DistanceFalloff, type CueEmit,
 } from './sceneCueTable'
 
 /**
@@ -592,6 +592,20 @@ export function falloffGain(f: DistanceFalloff | null, distCm: number | undefine
 /** Sets (an object), turns off here (null) or — on a variant — goes back to the cue's (undefined) distance falloff. */
 export function setDistanceFalloff(table: CueTable, ref: EventRef, value: DistanceFalloff | null | undefined): CueTable {
   return edited(table, ref, entry => { if (value === undefined || (value === null && ref.variant === null)) delete entry.distanceFalloff; else entry.distanceFalloff = value })
+}
+/**
+ * Changes an existing `emit` of a cue (DEC-088; interval 0.05..30 s, jitter 0..100 %). The key keeps its place
+ * (the demos write it before `review`); a cue without `emit` is left as it is (the game decides which cues emit).
+ */
+export function setEmit(table: CueTable, cue: string, patch: Partial<CueEmit>): CueTable {
+  return edited(table, { cue, variant: null }, entry => {
+    const target = entry as CueEntry, prev = target.emit
+    if (!prev) return
+    const next: CueEmit = { ...prev, ...patch }
+    next.intervalSec = clampNumber(next.intervalSec, 0.05, 30)
+    if (next.jitterPct !== undefined) next.jitterPct = clampNumber(next.jitterPct, 0, 100)
+    target.emit = next
+  })
 }
 export function fireShot(e: EffectiveEvent, loop: boolean, picker: MaterialPicker, random: () => number = Math.random, run: RunPosition = ONE, distCm?: number): Shot {
   const v = e.variation ?? {}, key = eventKey(e.ref)
