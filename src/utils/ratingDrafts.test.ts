@@ -68,6 +68,19 @@ function stores() {
 const trial2: TrialRequest = { ...trial, id: 't-2' }
 const withComment = (text: string): RatingForm => { const f = ratingToForm(trial, null); f.comment = text; return f }
 
+describe('rating drafts with a proposed starting intensity', () => {
+  it('a stored draft wins over the trial candidate intensity; an unreadable value falls back to it', () => {
+    const proposed: TrialRequest = { ...trial, candidates: [{ ...trial.candidates[0], intensity: 0.3 }, trial.candidates[1]] }
+    const form = ratingToForm(proposed, null)
+    expect(form.candidates.A.intensity).toBe(0.3)
+    form.candidates.A.intensity = 0.8
+    expect(parseRatingDraft(serializeRatingDraft('t-1', form, '2026-10-08T10:00:00+09:00'), proposed)?.form.candidates.A.intensity).toBe(0.8)
+    const messy = JSON.parse(serializeRatingDraft('t-1', form, '2026-10-08T10:00:00+09:00'))
+    messy.form.candidates.A.intensity = 'loud'
+    expect(parseRatingDraft(JSON.stringify(messy), proposed)?.form.candidates.A.intensity).toBe(0.3)
+  })
+})
+
 describe('DraftKeeper', () => {
   afterEach(() => { vi.useRealTimers() })
   let clock = 0

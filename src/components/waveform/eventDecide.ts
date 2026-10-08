@@ -13,16 +13,20 @@ import { intensityForPeak, normalizeGain, peakOf } from '@/utils/materialLevel'
 import { sameSound } from '@/utils/wavCompare'
 import { appendActivity } from '@/utils/activityLog'
 import { localIsoString } from '@/utils/hapticKnowledge'
+import { initialIntensity } from '@/utils/agentTrialUi'
 
 /**
  * The strength the rating chose for an AI candidate (its rating form value, unsaved too, else the saved rating's
- * `intensity`); 1 for an editor clip. Multiplied into the new material's intensity (intensityForPeak).
+ * `intensity`, else the trial's proposed starting `intensity`); 1 for an editor clip. Multiplied into the new material's intensity (intensityForPeak).
  */
 export function ratedIntensity(source: DecideSource): number {
   if (source.kind !== 'candidate') return 1
   const form = useEventStore.getState().levels[levelKey.candidate(source.trialId, source.candidateId)]
   if (form !== undefined) return form
-  return useAgentTrialStore.getState().trials.find(r => r.trial.id === source.trialId)?.rating?.candidates[source.candidateId]?.intensity ?? 1
+  const record = useAgentTrialStore.getState().trials.find(r => r.trial.id === source.trialId)
+  const rated = record?.rating?.candidates[source.candidateId]
+  if (rated) return rated.intensity ?? 1
+  return initialIntensity(record?.trial.candidates.find(c => c.id === source.candidateId))
 }
 
 /** Cue sounds are written at 48 kHz (the Scene tab's sound writer). */

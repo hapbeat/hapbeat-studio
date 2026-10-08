@@ -30,7 +30,9 @@ export interface RatingForm { context: RatingContextForm; comment: string; candi
 
 export const EMPTY_CONTEXT: RatingContextForm = { device: '', position: '', deviceWiper: '', volumeLabel: '', note: '' }
 
-const emptyCandidate = (): CandidateRatingForm => ({ overall: null, termMatch: {}, directions: {}, comment: '', useRange: [], verdict: null, useFor: '', intensity: 1 })
+/** The strength slider's starting value for a candidate without a saved rating or draft: the trial's proposed `intensity`, else 1. */
+export const initialIntensity = (c: Pick<TrialCandidate, 'intensity'> | undefined) => c?.intensity ?? 1
+const emptyCandidate = (c: TrialCandidate): CandidateRatingForm => ({ overall: null, termMatch: {}, directions: {}, comment: '', useRange: [], verdict: null, useFor: '', intensity: initialIntensity(c) })
 
 /** Pre-fills from the saved rating; a trial without a rating starts empty with the remembered context. */
 export function ratingToForm(trial: TrialRequest, rating: RatingBody | null, rememberedContext: RatingContextForm = EMPTY_CONTEXT): RatingForm {
@@ -41,20 +43,20 @@ export function ratingToForm(trial: TrialRequest, rating: RatingBody | null, rem
   const candidates: Record<string, CandidateRatingForm> = {}
   for (const c of trial.candidates) {
     const saved = rating?.candidates[c.id]
-    candidates[c.id] = saved ? { overall: saved.overall ?? null, termMatch: { ...saved.termMatch }, directions: { ...saved.directions }, comment: saved.comment ?? '', useRange: (saved.useRange ?? []).map(r => [r[0], r[1]] as [number, number]), verdict: saved.verdict ?? null, useFor: saved.useFor ?? '', intensity: saved.intensity ?? 1 } : emptyCandidate()
+    candidates[c.id] = saved ? { overall: saved.overall ?? null, termMatch: { ...saved.termMatch }, directions: { ...saved.directions }, comment: saved.comment ?? '', useRange: (saved.useRange ?? []).map(r => [r[0], r[1]] as [number, number]), verdict: saved.verdict ?? null, useFor: saved.useFor ?? '', intensity: saved.intensity ?? 1 } : emptyCandidate(c)
   }
   return { context, comment: rating?.comment ?? '', candidates }
 }
 
-/** Any input besides the score; a strength moved off 1 alone is kept too (saved as an intensity-only, unscored candidate). */
-const touched = (c: CandidateRatingForm) => Object.keys(c.termMatch).length > 0 || Object.keys(c.directions).length > 0 || c.comment.trim() !== '' || c.useRange.length > 0 || c.useFor.trim() !== '' || c.intensity !== 1
+/** Any input besides the score; a strength moved off its starting value alone is kept too (saved as an intensity-only, unscored candidate). */
+const touched = (c: CandidateRatingForm, start: number) => Object.keys(c.termMatch).length > 0 || Object.keys(c.directions).length > 0 || c.comment.trim() !== '' || c.useRange.length > 0 || c.useFor.trim() !== '' || c.intensity !== start
 
 /** Why the form cannot be saved yet: nothing rated, or a candidate has inputs but no overall score. */
 /** Why the form cannot be saved yet: nothing at all (no score and no comment anywhere), or a bad wiper. A candidate without a score is saved as "no score". */
-export function ratingFormIssue(form: RatingForm): { kind: 'none-rated' } | { kind: 'bad-wiper' } | null {
+export function ratingFormIssue(form: RatingForm, trial: Pick<TrialRequest, 'candidates'>): { kind: 'none-rated' } | { kind: 'bad-wiper' } | null {
   const wiper = form.context.deviceWiper.trim()
   if (wiper && parseWiper(wiper) === null) return { kind: 'bad-wiper' }
-  const anything = form.comment.trim() !== '' || Object.values(form.candidates).some(c => c.overall !== null || touched(c))
+  const anything = form.comment.trim() !== '' || trial.candidates.some(c => { const f = form.candidates[c.id]; return !!f && (f.overall !== null || touched(f, initialIntensity(c))) })
   return anything ? null : { kind: 'none-rated' }
 }
 
@@ -64,7 +66,7 @@ export function formToRating(form: RatingForm, trial: TrialRequest, ratedAt: str
   const candidates: RatingBody['candidates'] = {}
   for (const c of trial.candidates) {
     const f = form.candidates[c.id]
-    if (!f || (f.overall === null && !touched(f))) continue
+    if (!f || (f.overall === null && !touched(f, initialIntensity(c)))) continue
     const termMatch = Object.fromEntries(trial.terms.filter(term => f.termMatch[term] !== undefined).map(term => [term, f.termMatch[term]]))
     const comment = f.comment.trim()
     candidates[c.id] = {

@@ -28,9 +28,9 @@ describe('derived clip effect chain', () => {
 describe('rating form', () => {
   it('saves with any score or comment; a candidate without stars is saved as "no score"', () => {
     const form = ratingToForm(trial, null)
-    expect(ratingFormIssue(form)).toEqual({ kind: 'none-rated' })
+    expect(ratingFormIssue(form, trial)).toEqual({ kind: 'none-rated' })
     form.candidates.B.comment = 'too light'
-    expect(ratingFormIssue(form)).toBeNull()
+    expect(ratingFormIssue(form, trial)).toBeNull()
     const body = formToRating(form, trial, '2026-10-05T10:00:00+09:00')
     expect(body.candidates).toEqual({ B: { comment: 'too light' } })
     expect(ratingError(body, trial, [])).toBeNull()
@@ -38,7 +38,7 @@ describe('rating form', () => {
     // The trial-level comment alone is enough, and is saved / restored.
     const only = ratingToForm(trial, null)
     only.comment = '  B is closest, heavier '
-    expect(ratingFormIssue(only)).toBeNull()
+    expect(ratingFormIssue(only, trial)).toBeNull()
     const trialBody = formToRating(only, trial, '2026-10-05T10:00:00+09:00')
     expect(trialBody.comment).toBe('B is closest, heavier')
     expect(trialBody.candidates).toEqual({})
@@ -65,10 +65,30 @@ describe('rating form', () => {
     expect(ratingToForm(trial, body).candidates.A.intensity).toBe(0.5)
     // Only the strength moved: saved as an unscored candidate holding the intensity, and valid.
     const only = ratingToForm(trial, null); only.candidates.B.intensity = 0.4
-    expect(ratingFormIssue(only)).toBeNull()
+    expect(ratingFormIssue(only, trial)).toBeNull()
     const onlyBody = formToRating(only, trial, body.ratedAt)
     expect(onlyBody.candidates).toEqual({ B: { intensity: 0.4 } })
     expect(ratingError(onlyBody, trial, [])).toBeNull()
+  })
+
+  it('starts the strength slider at the trial candidate intensity; a saved rating wins', () => {
+    const proposed: TrialRequest = { ...trial, candidates: [{ ...trial.candidates[0], intensity: 0.2 }, trial.candidates[1]] }
+    const form = ratingToForm(proposed, null)
+    expect(form.candidates.A.intensity).toBe(0.2)
+    expect(form.candidates.B.intensity).toBe(1)
+    // The proposed start alone is not an input; with a score it is recorded (rendered audio × 0.2 was what the user heard).
+    expect(ratingFormIssue(form, proposed)).toEqual({ kind: 'none-rated' })
+    expect(formToRating(form, proposed, '2026-10-08T10:00:00+09:00').candidates).toEqual({})
+    form.candidates.A.overall = 4
+    expect(formToRating(form, proposed, '2026-10-08T10:00:00+09:00').candidates.A).toMatchObject({ overall: 4, intensity: 0.2 })
+    // Moved back to 1 from the proposed start: an input, saved without intensity (absent = 1).
+    const moved = ratingToForm(proposed, null); moved.candidates.A.intensity = 1
+    expect(ratingFormIssue(moved, proposed)).toBeNull()
+    expect(formToRating(moved, proposed, '2026-10-08T10:00:00+09:00').candidates).toEqual({ A: {} })
+    // A saved rating's value (or its absence = 1) wins over the proposed start.
+    const saved: RatingBody = { format: 'hapbeat-rating@1', trialId: 't1', ratedAt: '2026-10-08T10:00:00+09:00', candidates: { A: { overall: 3 } } }
+    expect(ratingToForm(proposed, saved).candidates.A.intensity).toBe(1)
+    expect(ratingToForm(proposed, { ...saved, candidates: { A: { overall: 3, intensity: 0.6 } } }).candidates.A.intensity).toBe(0.6)
   })
 
   it('round-trips a saved rating and prefers its context over the remembered one', () => {
@@ -117,7 +137,7 @@ describe('trial kind and rating wording', () => {
     expect(autoBest(form, ['A', 'B'])).toBeNull() // tie
     expect(formToRating(form, trial, '2026-09-29T15:42:00+09:00').best).toBeUndefined()
     form.context.deviceWiper = '128'
-    expect(ratingFormIssue(form)).toEqual({ kind: 'bad-wiper' })
+    expect(ratingFormIssue(form, trial)).toEqual({ kind: 'bad-wiper' })
     expect(parseWiper(' 100 ')).toBe(100)
   })
 })
@@ -132,7 +152,7 @@ describe('use only this part (useRange)', () => {
     expect(ranges).toEqual([[0.01, 0.05], [0.1, 0.523]])
     const form = ratingToForm(trial, null)
     form.candidates.A.useRange = ranges
-    expect(ratingFormIssue(form)).toBeNull()
+    expect(ratingFormIssue(form, trial)).toBeNull()
     form.candidates.A.overall = 4
     const body = formToRating(form, trial, '2026-10-05T10:00:00+09:00')
     expect(body.candidates.A.useRange).toEqual([[0.01, 0.05], [0.1, 0.523]])
@@ -157,7 +177,7 @@ describe('verdict / useFor (several usable candidates, best optional)', () => {
     // A verdict alone (it is derived from the stars) is not an input.
     const only = ratingToForm(trial, null)
     only.candidates.A.verdict = 'no'
-    expect(ratingFormIssue(only)).toEqual({ kind: 'none-rated' })
+    expect(ratingFormIssue(only, trial)).toEqual({ kind: 'none-rated' })
   })
 })
 

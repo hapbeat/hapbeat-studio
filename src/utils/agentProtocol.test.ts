@@ -30,6 +30,16 @@ describe('agentProtocol', () => {
     expect(error(request({ candidates: [JSON.parse(request()).candidates[0], JSON.parse(request()).candidates[0]] }))).toMatch(/duplicated/)
   })
 
+  it('accepts an optional candidate intensity (0 < x <= 1) and rejects others', () => {
+    const ok = parseTrialRequest(request({}, { intensity: 0.2 }), 't-01')
+    expect(ok.ok && ok.trial.candidates[0].intensity).toBe(0.2)
+    expect(parseTrialRequest(request({}, { intensity: 1 }), 't-01').ok).toBe(true)
+    for (const intensity of [0, -0.5, 1.5, '0.5', null]) {
+      const r = parseTrialRequest(request({}, { intensity }), 't-01')
+      expect(r.ok ? null : r.error).toMatch(/intensity must be/)
+    }
+  })
+
   it('accepts an optional kind', () => {
     const ok = parseTrialRequest(request({ kind: 'loop' }), 't-01')
     expect(ok.ok && ok.trial.kind).toBe('loop')

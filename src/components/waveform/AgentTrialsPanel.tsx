@@ -6,7 +6,7 @@ import { useWaveformStore } from '@/stores/waveformStore'
 import { localIsoString, type TrialRecord } from '@/utils/hapticKnowledge'
 import type { HapticFeatures } from '@/utils/hapticFeatures'
 import { clearRatingDraft, DraftKeeper, readFolderDraft, readLocalDraft, writeRatingDraft } from '@/utils/ratingDrafts'
-import { addUseRange, isFreePlanCandidate, poolCandidates, reserveCandidates, addReserves, autoRatingContext, EMPTY_CONTEXT, formToRating, loadRememberedContext, ratingFormIssue, ratingToForm, rememberContext, trialKind, verdictFromOverall, type CandidateRatingForm, type RatingForm } from '@/utils/agentTrialUi'
+import { addUseRange, isFreePlanCandidate, poolCandidates, reserveCandidates, addReserves, autoRatingContext, EMPTY_CONTEXT, formToRating, initialIntensity, loadRememberedContext, ratingFormIssue, ratingToForm, rememberContext, trialKind, verdictFromOverall, type CandidateRatingForm, type RatingForm } from '@/utils/agentTrialUi'
 import { trialTarget, type TrialKind } from '@/utils/agentProtocol'
 import { useAuditionPlan } from './EditorScenePanel'
 import { BODY_POSITIONS, resolvePlaybackTargets, routePlaybackTargets } from '@/utils/playbackDevices'
@@ -300,9 +300,9 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
   const editCandidate = (cid: string, patch: Partial<CandidateRatingForm>) => edit(f => ({ ...f, candidates: { ...f.candidates, [cid]: { ...f.candidates[cid], ...patch } } }))
   // The candidates' strengths (form values, unsaved too) for the audition gain and "→ Event" / auto-assign.
   useEffect(() => {
-    useEventStore.getState().setLevels(Object.fromEntries(trial.candidates.map(c => [levelKey.candidate(trial.id, c.id), form.candidates[c.id]?.intensity ?? 1])))
+    useEventStore.getState().setLevels(Object.fromEntries(trial.candidates.map(c => [levelKey.candidate(trial.id, c.id), form.candidates[c.id]?.intensity ?? initialIntensity(c)])))
   }, [form, trial])
-  const issue = ratingFormIssue(form)
+  const issue = ratingFormIssue(form, trial)
   /** The best candidate becomes the sound / haptic of the trial's events (rating save with "assign on save"). */
   const autoAssign = useEditorSettings(s => s.autoAssignOnRating)
   /**

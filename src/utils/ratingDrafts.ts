@@ -1,5 +1,5 @@
 import type { TrialRequest } from './agentProtocol'
-import type { CandidateRatingForm, RatingForm } from './agentTrialUi'
+import { initialIntensity, type CandidateRatingForm, type RatingForm } from './agentTrialUi'
 import { writeEditorFile } from './editorFolder'
 
 /**
@@ -26,16 +26,15 @@ export function parseRatingDraft(text: string | null, trial: Pick<TrialRequest, 
   try { v = JSON.parse(text) } catch { return null }
   if (!isRecord(v) || v.format !== DRAFT_FORMAT || v.trialId !== trial.id || typeof v.savedAt !== 'string' || !isRecord(v.form)) return null
   const f = v.form, ctx = isRecord(f.context) ? f.context : {}
-  const ids = trial.candidates.map(c => c.id)
   const candidates: Record<string, CandidateRatingForm> = {}
-  for (const id of ids) {
+  for (const { id, intensity: proposed } of trial.candidates) {
     const c = isRecord(f.candidates) && isRecord(f.candidates[id]) ? f.candidates[id] as Record<string, unknown> : {}
     const overall = typeof c.overall === 'number' && Number.isInteger(c.overall) && c.overall >= 1 && c.overall <= 5 ? c.overall : null
     const termMatch = Object.fromEntries(Object.entries(isRecord(c.termMatch) ? c.termMatch : {}).filter(([k, x]) => trial.terms.includes(k) && typeof x === 'number' && x >= -2 && x <= 2)) as Record<string, number>
     const directions = Object.fromEntries(Object.entries(isRecord(c.directions) ? c.directions : {}).filter(([, x]) => x === -1 || x === 0 || x === 1)) as CandidateRatingForm['directions']
     const useRange = (Array.isArray(c.useRange) ? c.useRange : []).filter((r): r is [number, number] => Array.isArray(r) && r.length === 2 && r.every(x => typeof x === 'number' && Number.isFinite(x)) && r[0] >= 0 && r[1] > r[0])
     const verdict = c.verdict === 'use' || c.verdict === 'maybe' || c.verdict === 'no' ? c.verdict : null
-    const intensity = typeof c.intensity === 'number' && Number.isFinite(c.intensity) && c.intensity >= 0 && c.intensity <= 1 ? c.intensity : 1
+    const intensity = typeof c.intensity === 'number' && Number.isFinite(c.intensity) && c.intensity >= 0 && c.intensity <= 1 ? c.intensity : initialIntensity({ intensity: proposed })
     candidates[id] = { overall, termMatch, directions, comment: str(c.comment), useRange, verdict, useFor: str(c.useFor).slice(0, 200), intensity }
   }
   const form: RatingForm = {

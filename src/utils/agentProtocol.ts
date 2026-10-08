@@ -40,6 +40,8 @@ export interface TrialCandidate {
   id: string; label: string; hypothesis?: string; method?: TrialMethod; source: CandidateSource; effects: EffectParams[]
   /** Haptic trials: the sound of the scene cue's pool (WAV name without .wav) this candidate was made for; played with its audition (default: the representative). */
   sound?: string
+  /** Optional starting strength of the rating form's strength slider (0 < x ≤ 1; absent = 1). The rendered WAV stays full scale. */
+  intensity?: number
 }
 export interface TrialRequest {
   format: typeof TRIAL_FORMAT
@@ -147,6 +149,7 @@ function candidateError(c: unknown, index: number): string | null {
   if (!optString(c.hypothesis, 400)) return `${at}.hypothesis must be a string of at most 400 characters`
   if (c.method !== undefined && !(TRIAL_METHODS as readonly unknown[]).includes(c.method)) return `${at}.method must be one of ${TRIAL_METHODS.join(', ')}`
   if (c.sound !== undefined && (typeof c.sound !== 'string' || !CANDIDATE_SOUND.test(c.sound))) return `${at}.sound must be a sound WAV name of the scene cue's pool without ".wav" (/^[A-Za-z0-9_-]{1,80}$/)`
+  if (c.intensity !== undefined && (typeof c.intensity !== 'number' || !Number.isFinite(c.intensity) || c.intensity <= 0 || c.intensity > 1)) return `${at}.intensity must be a number greater than 0 and at most 1 (the strength slider's starting value; keep the WAV full scale)`
   const s = c.source
   if (!isObject(s)) return `${at}.source must be an object`
   switch (s.kind) {
