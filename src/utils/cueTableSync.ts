@@ -76,6 +76,8 @@ export class CueTableSync<P> {
   /** The table as just read from the file. */
   reset(text: string, mtime: number) { this.base = parseCueTable(text); this.baseText = text; this.baseMtime = mtime }
   get known() { return this.base }
+  /** The file text as last read / written (the base Studio's unsaved edits are made on). */
+  get fileText() { return this.baseText }
 
   /** Saves Studio's table, applied onto the file's newer version when it changed outside Studio. `validate` sees the table to write and the file's cue names. */
   async save(ours: CueTable, pending: P, validate: (table: CueTable, external: boolean) => Promise<string[]>): Promise<SaveResult> {

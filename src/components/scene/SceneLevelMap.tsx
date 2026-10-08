@@ -5,7 +5,7 @@ import { offsetOf, type SceneLayer } from '@/utils/sceneData'
 import type { CueTable } from '@/utils/sceneCueTable'
 import { setLevelMap } from '@/utils/cueEvents'
 import { loopSoundLevel } from '@/utils/sceneLoopSounds'
-import { LEVEL_MAP_CURVES, LEVEL_MAP_GAIN_RANGE, LEVEL_MAP_MAX_POINTS, mapLevel, withLevelCurve, withLevelIntercept, withOutputAt, withoutLevelPoint, type LevelMap, type LevelMapCurve } from '@/utils/levelMap'
+import { LEVEL_MAP_CURVES, LEVEL_MAP_GAIN_RANGE, LEVEL_MAP_MAX_POINTS, mapLevel, withLevelCurve, withLevelIntercept, withOutputAt, withoutLevelPoint, withPointEdited, type LevelMap, type LevelMapCurve } from '@/utils/levelMap'
 import { NumberField, useAtLabel } from './SceneCuePanels'
 import { useScene } from './sceneContext'
 
@@ -89,13 +89,39 @@ function LevelMapEditor({ label, map, level, max, onChange }: { label: string; m
         <select value={map?.curve ?? 'linear'} disabled={!map} onChange={ev => { const c = ev.target.value as LevelMapCurve; ev.target.blur(); if (map) onChange(withLevelCurve(map, c)) }}>
           {LEVEL_MAP_CURVES.map(c => <option key={c} value={c}>{t(`scene.levelMap.curve.${c}` as MessageId)}</option>)}
         </select></label>
-      {!map ? <span className="scene-dim">{t('scene.levelMap.none')}</span>
-        : <ul className="scene-levelmap-points">{map.points.map(([l, g], i) => <li key={l}>
-          <span className="scene-levelmap-num">{l.toFixed(3)} → {g.toFixed(2)}</span>
-          <button type="button" className="scene-icon-btn" title={t('scene.levelMap.remove', { level: l })} aria-label={t('scene.levelMap.remove', { level: l })}
-            onClick={() => onChange(withoutLevelPoint(map, i))}>✕</button>
-        </li>)}</ul>}
+      {!map && <span className="scene-dim">{t('scene.levelMap.none')}</span>}
     </div>
+    {map && <LevelMapPoints map={map} onChange={onChange} />}
+  </div>
+}
+
+/**
+ * The points as small cards, each with its input and output editable in place (Enter / leaving the field commits; the
+ * points are sorted by input again) and a delete button. An input of 0 or less, or one another point has, is refused
+ * with a message in a fixed-height line (the field goes back to the point's value).
+ */
+function LevelMapPoints({ map, onChange }: { map: LevelMap; onChange: (map: LevelMap | undefined) => void }) {
+  const { t } = useI18n()
+  const [error, setError] = useState<string | null>(null)
+  /** Bumped on a refused edit, so the cards show the points' values again. */
+  const [revision, setRevision] = useState(0)
+  const commit = (index: number, input: number, output: number) => {
+    const next = withPointEdited(map, index, input, output)
+    if (next === 'input') { setError(t('scene.levelMap.point.badInput')); setRevision(r => r + 1); return }
+    if (next === 'duplicate') { setError(t('scene.levelMap.point.duplicate', { level: input.toFixed(3) })); setRevision(r => r + 1); return }
+    setError(null)
+    onChange(next)
+  }
+  return <div className="scene-levelmap-pointbox">
+    <ul className="scene-levelmap-points">{map.points.map(([l, g], i) => <li key={`${l}:${revision}`} className="scene-levelmap-point">
+      <span className="scene-dim">{t('scene.levelMap.input')}</span>
+      <NumberField value={l} min={0} max={1000} step={0.01} label={t('scene.levelMap.input')} onCommit={x => commit(i, x, g)} />
+      <span className="scene-dim">{t('scene.levelMap.output')}</span>
+      <NumberField value={g} min={LEVEL_MAP_GAIN_RANGE[0]} max={LEVEL_MAP_GAIN_RANGE[1]} step={0.05} label={t('scene.levelMap.output')} onCommit={x => commit(i, l, x)} />
+      <button type="button" className="scene-icon-btn" title={t('scene.levelMap.remove', { level: l })} aria-label={t('scene.levelMap.remove', { level: l })}
+        onClick={() => { setError(null); onChange(withoutLevelPoint(map, i)) }}>✕</button>
+    </li>)}</ul>
+    <div className="scene-levelmap-note scene-levelmap-error">{error ?? ' '}</div>
   </div>
 }
 

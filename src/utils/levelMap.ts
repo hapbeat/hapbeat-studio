@@ -74,6 +74,18 @@ export function withLevelPoint(map: LevelMap | null | undefined, input: number, 
   points.sort((a, b) => a[0] - b[0])
   return { ...(map ?? {}), points }
 }
+/**
+ * `map` with point `index` changed to (`input`, `output`) (rounded to 0.001; output clamped to 0..4), the points sorted
+ * by input again. `'input'` when the input rounds to 0 or less, `'duplicate'` when another point has that input.
+ */
+export function withPointEdited(map: LevelMap, index: number, input: number, output: number): LevelMap | 'input' | 'duplicate' {
+  const l = round3(input), g = round3(clampOutput(Number.isFinite(output) ? output : 0))
+  if (!(l > 0)) return 'input'
+  if (map.points.some((p, i) => i !== index && p[0] === l)) return 'duplicate'
+  const points = map.points.map((p, i): [number, number] => i === index ? [l, g] : p)
+  points.sort((a, b) => a[0] - b[0])
+  return { ...map, points }
+}
 /** `map` without point `index`; undefined (no map: the output is the input) when none is left. */
 export function withoutLevelPoint(map: LevelMap, index: number): LevelMap | undefined {
   const points = map.points.filter((_, i) => i !== index)

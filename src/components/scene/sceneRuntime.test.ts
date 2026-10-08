@@ -172,3 +172,47 @@ describe('A loop cue span plays in the full replay over its own range', () => {
     runtime.stop()
   })
 })
+
+describe('A levelMap edit reaches the haptic stream at once (DEC-090)', () => {
+  it('the next chunk after an unsaved Scene edit uses the new map for the route (hand route, right wrist)', async () => {
+    const { useSceneStore } = await import('@/stores/sceneStore')
+    const { useSceneSettings } = await import('@/stores/sceneSettings')
+    const { SceneRuntime } = await import('./sceneRuntime')
+    const { buildItems } = await import('@/utils/sceneData')
+    const { setLevelMap } = await import('@/utils/cueEvents')
+    const { mapLevel } = await import('@/utils/levelMap')
+    const { CHUNK } = await import('@/utils/sceneHaptics')
+    // Safety Mill's feed_loop: right hand at input 1.225 (its recorded max), the left hand still; rate 1.
+    const levels = Array.from({ length: 300 }, () => [0, 1.225, 1, 1])
+    const lib = { project_name: 'mill', paths: { cues: 'cues.json', clips: 'clips', sounds: 'sounds' }, layers: [{ cue: 'feed_loop', gain: [0, 1], rate: [2, 3], colors: [] }], loop_cues: ['feed_loop'], ticks: [] }
+    const table = { clips: { feed_loop: { intensity: 0.4202, loop: true } }, sounds: {},
+      cues: { feed_loop: { sfx: null, haptics: [{ clip: 'feed_loop', at: 'hand', gain: 1, levelMap: { points: [[0.08, 0.08], [1.225, 0.5]] } }] } } }
+    const data = { fps: 30, full: { file: 'full.mp4', levels, events: [] }, clips: [] }
+    useSceneSettings.setState({ pcSound: false, sendHaptics: true, hapticLeadMs: 0 })
+    useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: lib as never, table: table as never, loaded: null, data, recorded: data, items: buildItems(data), cur: 0,
+      pcm: { feed_loop: new Float32Array(4000).fill(1) }, sfx: {} })
+    let now = 1000
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    const sent: { type: string; payload: Record<string, unknown> }[] = []
+    const runtime = new SceneRuntime(), tick = () => (runtime as unknown as { tick(): void }).tick()
+    runtime.setHelper({ send: (type, payload) => sent.push({ type, payload }), connected: true, devices: [{ ipAddress: '10.0.0.2', address: 'p1/pos_r_wrist' }] })
+    runtime.start(); await flush()
+    video.readyState = 2; video.paused = false; video.seeking = false; video.currentTime = 3
+    const lastGain = () => {
+      const d = [...sent].reverse().find(x => x.type === 'stream_data')!
+      const pcm16 = new Int16Array(Uint8Array.from(atob(d.payload.data as string), c => c.charCodeAt(0)).buffer)
+      return pcm16[CHUNK] / 32767 // mid-chunk sample (L = R)
+    }
+    tick() // starts the clock (the stream may already be open, sending silence while paused)
+    now += 20; tick()
+    expect(lastGain()).toBeCloseTo(0.4202 * 0.5, 3)
+    // Unsaved edit (the 300 ms autosave has not run): 1.225 → 0.30.
+    useSceneStore.getState().edit(tb => setLevelMap(tb, 'feed_loop', 0, { points: [[0.08, 0.08], [1.225, 0.3]] }))
+    const before = sent.length
+    now += 20; tick() // one 10 ms tick later (plus slack): new chunks are rendered
+    expect(sent.length).toBeGreaterThan(before)
+    expect(lastGain()).toBeCloseTo(0.4202 * mapLevel({ points: [[0.08, 0.08], [1.225, 0.3]] }, 1.225), 3)
+    expect(lastGain()).toBeCloseTo(0.4202 * 0.3, 3)
+    runtime.stop(); clock.mockRestore()
+  })
+})

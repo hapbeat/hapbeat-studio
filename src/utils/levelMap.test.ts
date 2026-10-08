@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isLevelMap, LEVEL_MAP_CURVES, mapLevel, withLevelCurve, withLevelIntercept, withLevelPoint, withoutLevelPoint, type LevelMap, type LevelMapCurve } from './levelMap'
+import { isLevelMap, LEVEL_MAP_CURVES, mapLevel, withLevelCurve, withLevelIntercept, withLevelPoint, withoutLevelPoint, withPointEdited, type LevelMap, type LevelMapCurve } from './levelMap'
 import { curveAt } from './rampCurve'
 import { validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
 import { addMaterial, setLevelMap, setStarred, updateOwnRoute } from './cueEvents'
@@ -187,5 +187,19 @@ describe('loop cue spans on the Scene timeline', () => {
     expect(loopCueRuns(levels, 10, sampleLib(), 'feed_loop')).toEqual([[0.1, 0.3], [0.5, 0.7]])
     expect(loopCueRuns(levels, 10, sampleLib(), 'feed_loop:slow')).toEqual([[0.1, 0.3], [0.5, 0.7]])
     expect(loopCueRuns(levels, 10, sampleLib(), 'button')).toEqual([])
+  })
+})
+
+describe('levelMap point edited in place (Scene point cards)', () => {
+  const map: LevelMap = { points: [[0.08, 0.08], [1.225, 0.3]], curve: 'easeIn' }
+  it('changes input / output, re-sorts by input and keeps the rest', () => {
+    expect(withPointEdited(map, 1, 1.225, 0.5)).toEqual({ points: [[0.08, 0.08], [1.225, 0.5]], curve: 'easeIn' })
+    expect(withPointEdited(map, 1, 0.04, 9)).toEqual({ points: [[0.04, 4], [0.08, 0.08]], curve: 'easeIn' })
+    expect(withPointEdited(map, 0, 0.08, 0.1234)).toEqual({ points: [[0.08, 0.123], [1.225, 0.3]], curve: 'easeIn' })
+  })
+  it('rejects an input of 0 or less and an input another point has', () => {
+    expect(withPointEdited(map, 0, 0, 0.1)).toBe('input')
+    expect(withPointEdited(map, 0, -1, 0.1)).toBe('input')
+    expect(withPointEdited(map, 0, 1.2251, 0.1)).toBe('duplicate')
   })
 })

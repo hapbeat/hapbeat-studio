@@ -2,9 +2,10 @@ import { create } from 'zustand'
 import type { MessageId, MessageParams } from '@/i18n/messages'
 import { loadDirectoryHandle, saveDirectoryHandle } from '@/utils/localDirectory'
 import { buildItems, VIEWER_DIR, type SceneData, type SceneItem, type SceneLib } from '@/utils/sceneData'
-import { validateCueTable, type CueTable } from '@/utils/sceneCueTable'
+import { serializeCueTable, validateCueTable, type CueTable } from '@/utils/sceneCueTable'
 import { listWavs, openSceneProject, readProjectFile, readSceneTable, writeProjectFile, writeSceneSave, type PendingWavs } from '@/utils/sceneProject'
 import { CueTableSync } from '@/utils/cueTableSync'
+import { clearJournal, journalKey, readJournal, restoreFromJournal, writeJournal } from '@/utils/sceneJournal'
 import { applyOverrides, type SceneOverride } from '@/utils/sceneOverrides'
 import { applyEmits, emitSignature, newEmitSeed } from '@/utils/sceneEmit'
 import { pageVisible, perfTrack } from '@/utils/perfRegistry'
@@ -17,7 +18,9 @@ import { lastSceneProject, lookupSceneProject, registerSceneProject, rememberSce
  * clip / sound audio. Disk is the truth: every table edit is saved 300 ms later
  * (onto the file's newer version when it changed outside Studio, see
  * CueTableSync), and the file is read again when it changes while nothing is
- * unsaved. Only the folder handle is kept in IndexedDB (key `scenedir`).
+ * unsaved. Until the file has it, each edit is also kept in localStorage at once
+ * (sceneJournal) and applied again on the next open. Only the folder handle is
+ * kept in IndexedDB (key `scenedir`).
  */
 
 export interface SceneNotice { id: MessageId; params?: MessageParams; error?: boolean }
@@ -168,6 +171,31 @@ export const useSceneStore = create<SceneState>((set, get) => {
   })
   let saveTimer: ReturnType<typeof setTimeout> | null = null
   let saving: Promise<void> | null = null
+  const journalOf = () => { const lib = get().lib; return lib ? journalKey(lib.project_name, lib.paths.cues) : null }
+  /** Keeps `table` (unsaved) in the journal at once, with the file text it was edited on. */
+  const journal = (table: CueTable) => { const key = journalOf(); if (key && sync.known) writeJournal(key, table, sync.fileText) }
+  /** Clears the journal once the file reads back as `written` and no edit came after it. */
+  const clearJournalIfSaved = async (written: CueTable) => {
+    const { root, lib } = get(), key = journalOf()
+    if (!root || !lib || !key || get().table !== written) return
+    const text = await (await readProjectFile(root, lib.paths.cues)).text()
+    if (text === serializeCueTable(written) && get().table === written) clearJournal(key)
+  }
+  /** The notice of the journal restored by the last openFolder (shown instead of "loaded"). */
+  let restoredNotice: SceneNotice | null = null
+  /** Applies a journal left by an earlier page (edits the file never got) onto the file just read, and saves it. */
+  const restoreJournal = () => {
+    const key = journalOf(), j = key ? readJournal(key) : null
+    if (!key || !j) return
+    const restored = restoreFromJournal(j, sync.fileText)
+    if (!restored) { clearJournal(key); return }
+    set({ table: restored.table, ...derivedData(restored.table), dirty: true })
+    journal(restored.table)
+    scheduleSave()
+    addLog(`restored unsaved Scene edits from the journal → ${get().lib!.paths.cues}`)
+    restoredNotice = restored.conflicts.length ? { id: 'scene.journal.restoredConflicts', params: { fields: restored.conflicts.join(', ') } } : { id: 'scene.journal.restored' }
+    note(restoredNotice)
+  }
   const scheduleSave = () => { if (saveTimer) clearTimeout(saveTimer); saveTimer = setTimeout(() => { saveTimer = null; void saveNow() }, 300) }
   /** Writes Studio's table (merged onto an outside change); a later edit made during the write is saved next. */
   const saveNow = async (): Promise<void> => {
@@ -193,10 +221,11 @@ export const useSceneStore = create<SceneState>((set, get) => {
           // Reload the merged file (new WAVs decoded); an edit made during the write is kept and saved next.
           const edited = now !== table ? now : null
           await loadTable()
-          if (edited) { set({ table: edited, ...derivedData(edited), dirty: true }); scheduleSave() }
+          if (edited) { set({ table: edited, ...derivedData(edited), dirty: true }); journal(edited); scheduleSave() }
+          else await clearJournalIfSaved(get().table!)
           if (result.conflicts.length) note({ id: 'scene.autosave.conflicts', params: { fields: result.conflicts.join(', ') }, error: true })
           else addLog(`merged outside changes into ${lib.paths.cues}`)
-        } else if (now === table) set({ dirty: false, pending: { clips: {}, sounds: {} }, saveError: null })
+        } else if (now === table) { set({ dirty: false, pending: { clips: {}, sounds: {} }, saveError: null }); await clearJournalIfSaved(table) }
         else { set({ pending: { clips: {}, sounds: {} }, saveError: null }); scheduleSave() }
         addLog(`autosave → ${lib.paths.cues}`)
       } catch (error) {
@@ -222,15 +251,16 @@ export const useSceneStore = create<SceneState>((set, get) => {
     w.__sceneWatch?.()
     const timer = setInterval(() => void checkOutside(), 2000)
     const onFocus = () => void checkOutside()
-    // Leaving the page writes what is pending.
+    // Leaving the page starts writing what is pending; the write may not finish, so the journal (written at every edit) is what keeps it.
     const onHide = () => { if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; void saveNow() } }
-    window.addEventListener('focus', onFocus); window.addEventListener('pagehide', onHide)
+    window.addEventListener('focus', onFocus); window.addEventListener('pagehide', onHide); window.addEventListener('beforeunload', onHide)
     perfTrack('intervals', 1)
-    w.__sceneWatch = () => { clearInterval(timer); window.removeEventListener('focus', onFocus); window.removeEventListener('pagehide', onHide); perfTrack('intervals', -1) }
+    w.__sceneWatch = () => { clearInterval(timer); window.removeEventListener('focus', onFocus); window.removeEventListener('pagehide', onHide); window.removeEventListener('beforeunload', onHide); perfTrack('intervals', -1) }
   }
 
   /** Opens a project folder; a folder with a lib is remembered even when the recording is missing (one click after recording). */
   const openFolder = async (handle: FileSystemDirectoryHandle): Promise<boolean> => {
+    restoredNotice = null
     const opened = await openSceneProject(handle)
     if (!opened.ok && opened.reason === 'noLib') {
       const notice = { id: 'scene.open.noLib' as const, params: { folder: handle.name, dir: VIEWER_DIR }, error: true }
@@ -251,6 +281,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
     rememberSceneProject(opened.lib.project_name)
     set({ root: handle, lib: opened.lib, recorded: opened.data, overrides: [], data: opened.data, items: buildItems(opened.data), sel: null, cur: 0, empty: null, table: null })
     await loadTable()
+    restoreJournal()
     let start = 1
     try { start = Number(localStorage.getItem(clipKey(opened.lib.project_name))) || 1 } catch { /* preference only */ }
     get().select(Math.min(start, get().items.length - 1))
@@ -291,13 +322,13 @@ export const useSceneStore = create<SceneState>((set, get) => {
       let handle: FileSystemDirectoryHandle
       try { handle = await window.showDirectoryPicker({ id: 'hapbeat-scene-project', mode: 'readwrite' }) }
       catch (error) { if (!(error instanceof DOMException && error.name === 'AbortError')) note({ id: 'scene.open.failed', params: { error: message(error) }, error: true }); return }
-      await guarded(async () => { if (await openFolder(handle)) note({ id: 'scene.open.loaded', params: { folder: handle.name } }) })
+      await guarded(async () => { if (await openFolder(handle)) note(restoredNotice ?? { id: 'scene.open.loaded', params: { folder: handle.name } }) })
     },
     reconnect: async () => {
       const handle = get().remembered
       if (!handle) return
       if (await handle.requestPermission({ mode: 'readwrite' }) !== 'granted') return
-      await guarded(async () => { if (await openFolder(handle)) note({ id: 'scene.open.loaded', params: { folder: handle.name } }) })
+      await guarded(async () => { if (await openFolder(handle)) note(restoredNotice ?? { id: 'scene.open.loaded', params: { folder: handle.name } }) })
     },
 
     linkProject: async (name, interactive) => {
@@ -356,6 +387,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
       if (!next) return false
       // New emitted firings only when an emit changed (every other edit keeps `data`).
       set({ table: next, ...(emitSignature(next) !== emitSignature(table) ? derivedData(next) : {}), dirty: true })
+      journal(next)
       scheduleSave()
       return true
     },
@@ -377,6 +409,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
       if (problems.length) { for (const p of problems) addLog(p); return { ok: false, notice: { id: 'scene.save.invalid', params: { problems: problems.join(' / ') }, error: true }, problems } }
       // Saved like an edit: onto the file's newer version when the agent changed it meanwhile.
       set({ table: next, pending: wavs, dirty: true, busy: true })
+      journal(next)
       try { await saveNow() } finally { set({ busy: false }) }
       if (get().dirty) return { ok: false, notice: get().saveError ?? { id: 'scene.save.failed', params: { error: '' }, error: true } }
       await loadTable()
@@ -398,7 +431,8 @@ export const useSceneStore = create<SceneState>((set, get) => {
     },
     revert: async () => {
       if (!get().root) return
-      await guarded(async () => { await loadTable(); note({ id: 'scene.reverted' }) })
+      // Reverting drops the unsaved edits on purpose: the journal goes with them.
+      await guarded(async () => { const key = journalOf(); if (key) clearJournal(key); await loadTable(); note({ id: 'scene.reverted' }) })
     },
   }
 })
