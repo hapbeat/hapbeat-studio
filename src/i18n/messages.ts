@@ -1170,8 +1170,6 @@ export const messages = defineMessages({
   'editor.agent.targetFilter': { ja: '評価対象', en: 'Target' },
   'editor.agent.targetAll': { ja: 'すべて', en: 'All' },
   'editor.agent.targetHaptic': { ja: '触覚', en: 'Haptic' },
-  'editor.agent.rateSound': { ja: '{what} の効果音を評価', en: 'Rate the sound effect of {what}' },
-  'editor.agent.rateHaptic': { ja: '{what} の触覚を評価', en: 'Rate the haptic of {what}' },
   'editor.agent.video': { ja: '映像', en: 'Video' },
   'editor.agent.dismissAll': { ja: 'このプロジェクトの未評価をすべて後回し（{count} 件）', en: 'Set all unrated trials of this project aside for later ({count})' },
   'editor.agent.dismissAllConfirm': { ja: '未評価の {count} 件をすべて後回しにします（キューと知識の集計から外れます）。履歴から個別に戻せます。よろしいですか？', en: 'Set all {count} unrated trials aside for later (out of the queue and the knowledge)? Each can be restored from History.' },

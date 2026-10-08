@@ -151,13 +151,13 @@ export function AgentTrialsPanel() {
         <option value="haptic">{t('editor.agent.targetHaptic')}</option>
       </select>
     </div>
-    {/* One line: ‹ T9 › · what · [sound|haptic] · n left · History · Video · Dismiss. */}
+    {/* One line: ‹ T9 › · [event] · [sound|haptic] · n left · History · Video · Dismiss. */}
     <div className="agent-queue-nav">
       <button type="button" className="toolbar-btn" disabled={!prev} aria-label={t('editor.agent.prevTrial')} title={t('editor.agent.prevTrial')} onClick={() => prev && pickTrial(prev)}>‹</button>
       <span className="agent-short-id large" title={record?.trial.id ?? ''}>{record?.shortId ?? '—'}</span>
       <button type="button" className="toolbar-btn" disabled={!next} aria-label={t('editor.agent.nextTrial')} title={t('editor.agent.nextTrial')} onClick={() => next && pickTrial(next)}>›</button>
-      {record && <span className="agent-what" title={what}>{t(target === 'sound' ? 'editor.agent.rateSound' : 'editor.agent.rateHaptic', { what })}</span>}
-      {record?.trial.scene && <span className="target-cue-badge" title={t('editor.scene.targetHint')}>{record.trial.scene.cues.join(' + ')}</span>}
+      {record && <span className="target-cue-badge agent-what" title={record.trial.scene ? `${what}
+${t('editor.scene.targetHint')}` : what}>{what}</span>}
       {record && <span className={`agent-target-badge ${target}`}>{t(target === 'sound' ? 'editor.agent.targetSound' : 'editor.agent.targetHaptic')}</span>}
       <span className="agent-remaining">{record && !inQueue ? t(record.dismissed ? 'editor.agent.fromHistoryDismissed' : 'editor.agent.fromHistory') : t('editor.agent.remaining', { count: queue.length })}</span>
       <EditorMenu label={`${t('editor.agent.history')} ▾`} title={t('editor.agent.historyHint')} className="agent-history">

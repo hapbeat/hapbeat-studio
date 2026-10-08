@@ -877,6 +877,9 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 /* ---- Waveform panel ---- */
 .editor-comparison { display: flex; align-items: center; gap: 8px; padding: 8px 12px; flex-wrap: wrap; }
 .editor-comparison > .editor-active-name { flex: 1 1 160px; min-width: 0; margin: 0; max-width: none; height: 24px; line-height: 24px; }
+/* Fixed width (the longest line fits), so single / sequence and the counts never shift the header. */
+.editor-shown-layout { flex: 0 0 22em; width: 22em; height: 24px; line-height: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.editor-shown-layout.sequence { color: #34d399; }
 .editor-segmented { display: inline-flex; }
 .editor-segmented .toolbar-btn { border-radius: 0; margin-left: -1px; white-space: nowrap; }
 .editor-segmented .toolbar-btn:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
@@ -943,6 +946,10 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 /* Start marker of a plain click (stays after playing; the range selection is cyan) */
 
 .editor-start-marker { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px solid #fbbf24; pointer-events: none; z-index: 4; }
+/* A material placed at its event's firings: one tinted span per firing (alternating), a line at each start. */
+.editor-placements { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 1; }
+.editor-placement { position: absolute; top: 0; bottom: 0; box-sizing: border-box; border-left: 2px solid #34d399; background: rgba(52, 211, 153, .10); }
+.editor-placement.odd { border-left-color: #f472b6; background: rgba(244, 114, 182, .10); }
 /* Focus frame of every editor dock panel (EditorDockLayout PanelFrame): always reserved (no layout shift), coloured while the panel has focus. Drawn above the panel's own backgrounds. */
 .editor-dock-panel { position: relative; height: 100%; min-height: 0; box-sizing: border-box; overflow: hidden; }
 .editor-dock-panel:focus { outline: none; }
@@ -975,8 +982,12 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 /* Only the "what" text shrinks; ids, badges, menus, toggles and buttons keep one line. */
 .agent-queue-nav > :not(.agent-what) { flex-shrink: 0; white-space: nowrap; }
 .agent-topline .toolbar-btn, .agent-topline .agent-filter { flex-shrink: 0; white-space: nowrap; }
-.agent-what { flex: 1 1 8em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.agent-target-badge { flex: none; padding: 2px 10px; border-radius: 10px; font-size: 14px; font-weight: 700; border: 2px solid; }
+.agent-what { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The header row: buttons, menus and pills share one height; the event pill reads as the title. */
+.agent-queue-nav > .toolbar-btn, .agent-queue-nav .editor-menu-trigger, .agent-queue-nav > .target-cue-badge, .agent-queue-nav > .agent-target-badge {
+  box-sizing: border-box; height: 30px; display: inline-flex; align-items: center; }
+.agent-queue-nav > .target-cue-badge { padding: 0 12px; border-radius: 15px; font-size: 15px; font-weight: 700; line-height: 1; }
+.agent-target-badge { flex: none; padding: 0 12px; border-radius: 15px; font-size: 14px; font-weight: 700; border: 2px solid; }
 .agent-target-badge.sound { border-color: #36c5c0; color: #7fe3df; }
 .agent-target-badge.haptic { border-color: #a78bfa; color: #c4b5fd; }
 .agent-remaining { flex: none; color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
