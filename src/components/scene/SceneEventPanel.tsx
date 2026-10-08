@@ -169,21 +169,17 @@ function Emit({ table, lib, cue, edit }: { table: CueTable; lib: SceneLib; cue: 
   if (!emit) return null
   const count = data ? data.full.events.filter(x => x.name === cue).length : 0
   return <div className="scene-sec">
-    <h3 title={`${t('scene.emit.hint')}
-emit`}>{t('scene.emit.heading')}</h3>
+    <h3 title={`${t('scene.emit.hint')}\nemit`}>{t('scene.emit.heading')}</h3>
     <div className="scene-event-variation">
-      <label title={`${t('scene.emit.during.hint')}
-during`}><span>{t('scene.emit.during')}</span>
+      <label title={`${t('scene.emit.during.hint')}\nduring`}><span>{t('scene.emit.during')}</span>
         <select value={emit.during} onChange={ev => { const d = ev.target.value; ev.target.blur(); edit(tb => setEmit(tb, cue, { during: d })) }}>
           {!lib.loop_cues.includes(emit.during) && <option value={emit.during}>{emit.during}</option>}
           {lib.loop_cues.map(c => <option key={c} value={c}>{c}</option>)}
         </select></label>
-      <label title={`${t('scene.emit.intervalSec.hint')}
-intervalSec`}><span>{t('scene.emit.intervalSec')}</span>
+      <label title={`${t('scene.emit.intervalSec.hint')}\nintervalSec`}><span>{t('scene.emit.intervalSec')}</span>
         <NumberField value={emit.intervalSec} min={EMIT_INTERVAL_RANGE[0]} max={EMIT_INTERVAL_RANGE[1]} step={0.05} label={t('scene.emit.intervalSec')}
           onCommit={x => edit(tb => setEmit(tb, cue, { intervalSec: x }))} /></label>
-      <label title={`${t('scene.emit.jitterPct.hint')}
-jitterPct`}><span>{t('scene.emit.jitterPct')}</span>
+      <label title={`${t('scene.emit.jitterPct.hint')}\njitterPct`}><span>{t('scene.emit.jitterPct')}</span>
         <NumberField value={emit.jitterPct ?? 0} min={EMIT_JITTER_RANGE[0]} max={EMIT_JITTER_RANGE[1]} step={5} label={t('scene.emit.jitterPct')}
           onCommit={x => edit(tb => setEmit(tb, cue, { jitterPct: x }))} /></label>
     </div>
