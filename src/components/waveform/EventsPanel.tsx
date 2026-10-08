@@ -28,6 +28,7 @@ import { addReserves, removeReserve, requestAnswered, reviseAnswered } from '@/u
 import type { MaterialReserve, TrialReserve } from '@/utils/editorUiSettings'
 import { create } from 'zustand'
 import { openMaterialForAdjust } from './eventEditing'
+import { materialTrialByIds, materialTrialSummary, materialTrialTooltip, resolveMaterialTrial, type MaterialTrial } from '@/utils/materialTrial'
 import './EventsPanel.css'
 import '@/components/scene/VideoOverlay.css'
 
@@ -213,6 +214,7 @@ function EventDetail({ table, lib, e }: { table: CueTable; lib: SceneLib; e: Eff
       <button type="button" className="toolbar-btn" disabled={!clip || !soundAllowed(lib, e.ref.cue)} title={t('events.addHint')} onClick={() => assign('sound')}>{t('events.assignSound')}</button>
       <button type="button" className="toolbar-btn" disabled={!clip} title={t('events.addHint')} onClick={() => assign('haptic')}>{t('events.assignHaptic')}</button>
     </div>
+    <MaterialOrigin cue={e.ref.cue} />
     <SoundSection lib={lib} e={e} loop={loop} edit={edit} />
     <HapticSection table={table} lib={lib} e={e} loop={loop} edit={edit} />
     {e.ref.variant === null && variants.length > 0 && <p className="agent-muted" title={t('events.variantsInSceneHint')}>
@@ -232,6 +234,7 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
   const play = (s: string) => { if (!openEventSound(key, s, true)) missing(s) }
   const show = (s: string) => { if (!openEventSound(key, s)) missing(s) }
   const set = (list: string[]) => edit(tb => setSfxSounds(tb, e.ref, list))
+  const describe = useDescribeMaterial()
   // An approved sound is folded (its heading line stays); ▸ opens it.
   const [open, setOpen] = useState(e.review.sfx !== 'approved')
   return <section className="events-sec">
@@ -248,7 +251,7 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
       {e.variation?.paired === true ? sounds.length > 0 && <p className="agent-muted">{t('events.pair.inHaptics')}</p> : <MaterialList items={sounds} label={t('events.sound')} active={sounds.find(s => previewId === `${key}|sound|${s}`) ?? null} onPlay={play} onSelect={show}
         onReorder={set} onRemove={set}
         extra={s => <MaterialActions event={key} target="sound" wav={s} />}
-        below={s => <ReviseField cue={key} target="sound" material={s} />} />}
+        below={s => <ReviseField cue={key} target="sound" material={s} />} describe={describe} />}
       <Reserves cue={e.ref.cue} target="sound" />
       <select className="events-add-material" value="" aria-label={t('events.addSoundMulti')} title={t('events.soundDir', { dir: lib.paths.sounds })}
         onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) set([...sounds, x]) }}>
@@ -270,6 +273,7 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
   const fitting = clipsForCue(table, lib, e.ref.cue)
   const missing = (name: string) => useWaveformStore.getState().setError(t('events.preview.missing', { name }))
   const free = positionsForCue(lib, e.ref.cue).some(a => !e.haptics.some(r => r.at === a))
+  const describe = useDescribeMaterial()
   return <section className="events-sec">
     <h4 className="events-sec-head"><Fold open={hOpen} set={setHOpen} />{t('events.haptic')}{e.own.haptics && <><ReviewToggle e={e} field="haptics" edit={edit} /><DecisionBar e={e} field="haptics" edit={edit} /></>}</h4>
     {hOpen && !e.own.haptics && <Inherited e={e} field="haptics" edit={edit} />}
@@ -293,11 +297,11 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
           active={previewId ? previewId.split('|')[2] ?? null : null}
           onPlay={(_, sound, clip, at) => { if (clip && at) { if (!openEventHaptic(key, clip, at, true)) missing(clip) } else if (sound && !openEventSound(key, sound, true)) missing(sound) }}
           onShow={(target, name, at) => { if (target === 'haptic' ? !openEventHaptic(key, name, at ?? r.at) : !openEventSound(key, name)) missing(name) }}
-          extra={(target, name) => <MaterialActions event={key} target={target} wav={name} />} />
+          extra={(target, name) => <MaterialActions event={key} target={target} wav={name} />} describe={describe} />
         : <MaterialList items={clips} label={t('scene.route.clip')} active={clips.find(c => previewId === `${key}|haptic|${c}|${r.at}`) ?? null}
           onPlay={c => { if (!openEventHaptic(key, c, r.at, true)) missing(c) }} onSelect={c => { if (!openEventHaptic(key, c, r.at)) missing(c) }} onReorder={set} onRemove={set} minItems={1}
           extra={c => <MaterialActions event={key} target="haptic" wav={c} />}
-          below={c => <ReviseField cue={key} target="haptic" material={c} />} />}
+          below={c => <ReviseField cue={key} target="haptic" material={c} />} describe={describe} />}
       </div>
     })}
     <Reserves cue={e.ref.cue} target="haptic" />
@@ -375,6 +379,40 @@ function DecisionBar({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'ha
   </span>
 }
 
+type T = ReturnType<typeof useI18n>['t']
+/** Tooltip lines of an AI-made material (label, hypothesis, the trial's rationale and prompt, 「AI 提案 T90・候補 B」). */
+const originTooltip = (t: T, m: MaterialTrial) => materialTrialTooltip(m, t('events.mat.aiOrigin', { short: m.shortId, candidate: m.candidate.id }))
+
+/** Tooltip lines for a material name written from an AI candidate (`<cue>_T90_B`), null for any other material. */
+function useDescribeMaterial(): (name: string) => string | null {
+  const { t } = useI18n()
+  const trials = useAgentTrialStore(s => s.trials)
+  return (name: string) => { const m = resolveMaterialTrial(name, trials); return m ? originTooltip(t, m) : null }
+}
+
+/**
+ * Fixed-height line under the event head: the label and hypothesis of the AI candidate behind the material shown
+ * in the waveform panel (an event material or reserve of this cue, or an AI reserve being auditioned); empty otherwise.
+ * Always rendered so nothing below moves.
+ */
+function MaterialOrigin({ cue }: { cue: string }) {
+  const { t } = useI18n()
+  const trials = useAgentTrialStore(s => s.trials)
+  const audition = useAgentTrialStore(s => s.audition)
+  const preview = useEventStore(s => s.preview)
+  const reserves = useEditorSettings(s => s.eventReserves)
+  const origin = useMemo(() => {
+    if (audition) {
+      const reserved = Object.entries(reserves).some(([key, refs]) => parseEventKey(key).cue === cue && refs.some(r => !('material' in r) && r.trialId === audition.trialId && r.candidateId === audition.candidateId))
+      return reserved ? materialTrialByIds(audition.trialId, audition.candidateId, trials) : null
+    }
+    return preview && parseEventKey(preview.event).cue === cue ? resolveMaterialTrial(preview.material, trials) : null
+  }, [audition, preview, reserves, trials, cue])
+  return <p className="events-mat-origin" aria-live="polite" title={origin ? originTooltip(t, origin) : ''}>
+    {origin && <><span className="events-mat-origin-id">{t('events.mat.aiOrigin', { short: origin.shortId, candidate: origin.candidate.id })}</span> {materialTrialSummary(origin)}</>}
+  </p>
+}
+
 /**
  * The event's reserves (editor settings): faint rows under the materials. ★3 AI candidates kept aside: ▶ auditions
  * the candidate as rendered; "Adopt" does what "→ Event" does (writes the WAV, adds it to the end of the pool,
@@ -391,6 +429,7 @@ function Reserves({ cue, target }: { cue: string; target: 'sound' | 'haptic' }) 
   const [busy, setBusy] = useState(false)
   const atLabel = useAtLabel()
   const previewId = useEventStore(s => s.preview?.id)
+  const describe = useDescribeMaterial()
   const entries = Object.entries(all).filter(([key]) => parseEventKey(key).cue === cue).flatMap(([key, refs]) => refs.filter(r => r.target === target).map(r => ({ key, r })))
   const rows = entries.flatMap(({ key, r }) => 'material' in r ? [] : [{ key, ...r }])
   const materials = entries.flatMap(({ key, r }) => 'material' in r ? [{ key, r }] : [])
@@ -425,7 +464,7 @@ function Reserves({ cue, target }: { cue: string; target: 'sound' | 'haptic' }) 
       return <li key={`${key}/material/${r.target}/${r.material}/${r.at ?? ''}`} className={`events-mat events-reserve selectable ${previewId === id ? 'active' : ''}`}
         onClick={e => { if (!(e.target as HTMLElement).closest('button')) open(key, r, false) }}>
         <button type="button" className="agent-icon-btn" aria-label={t('events.mat.play', { name })} title={t('events.mat.play', { name })} onClick={() => open(key, r, true)}>▶</button>
-        <span className="events-mat-name" title={name}>{name}</span>
+        <span className="events-mat-name" title={[name, describe(r.material)].filter(Boolean).join('\n')}>{name}</span>
         <span />
         <button type="button" className="agent-icon-btn" title={t('events.reservePutBackHint')} onClick={() => putBack(key, r)}>{t('events.reservePutBack')}</button>
         <button type="button" className="agent-icon-btn" title={t('events.reserveRemoveMaterialHint')} onClick={() => drop(key, r)}>{t('events.mat.remove')}</button>
@@ -434,12 +473,13 @@ function Reserves({ cue, target }: { cue: string; target: 'sound' | 'haptic' }) 
     {rows.map(row => {
       const record = trials.find(r => r.trial.id === row.trialId)
       const name = `${record?.shortId ? `${record.shortId}-` : ''}${row.candidateId} ${record?.trial.candidates.find(c => c.id === row.candidateId)?.label ?? row.trialId}`
+      const origin = materialTrialByIds(row.trialId, row.candidateId, trials)
       // A click on the row (not its buttons) shows it in the waveform panel without playing; ▶ plays.
       return <li key={`${row.key}/${row.trialId}/${row.candidateId}`} className={`events-mat events-reserve selectable ${shownAudition === `${row.trialId}/${row.candidateId}` ? 'active' : ''}`}
         onClick={e => { if (record && !(e.target as HTMLElement).closest('button')) show(row) }}>
         <button type="button" className="agent-icon-btn" disabled={!record} aria-label={t('events.mat.play', { name })} title={t('events.mat.play', { name })}
           onClick={() => void useAgentTrialStore.getState().requestAudition(row.trialId, row.candidateId, true, false).catch(error => useWaveformStore.getState().setError(error))}>▶</button>
-        <span className="events-mat-name" title={`${name}${row.key !== cue ? ` (${row.key})` : ''}`}>{name}{row.key !== cue ? ` · ${row.key}` : ''}</span>
+        <span className="events-mat-name" title={[`${name}${row.key !== cue ? ` (${row.key})` : ''}`, origin ? originTooltip(t, origin) : ''].filter(Boolean).join('\n')}>{name}{row.key !== cue ? ` · ${row.key}` : ''}</span>
         <span />
         <button type="button" className="agent-icon-btn" disabled={busy || !record} title={t('events.reserveAdoptHint')} onClick={() => void adopt(row)}>{t('events.reserveAdopt')}</button>
         <button type="button" className="agent-icon-btn" title={t('events.reserveRemoveHint')} onClick={() => drop(row.key, row)}>{t('events.mat.remove')}</button>

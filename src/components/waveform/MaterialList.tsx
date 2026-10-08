@@ -8,7 +8,7 @@ import './EventsPanel.css'
  * With `onSelect`, a click anywhere on the row (not on its controls) selects the material; ▶ only plays.
  * Used by the editor's Events panel and the Scene tab's event details.
  */
-export function MaterialList({ items, active, onPlay, onSelect, onReorder, onRemove, minItems, extra, below, label }: {
+export function MaterialList({ items, active, onPlay, onSelect, onReorder, onRemove, minItems, extra, below, label, describe }: {
   items: readonly string[]
   /** The row shown in the waveform panel (highlighted). */
   active?: string | null
@@ -24,16 +24,19 @@ export function MaterialList({ items, active, onPlay, onSelect, onReorder, onRem
   /** A full-width line under the row (e.g. the remake comment field); null = none. */
   below?: (name: string) => ReactNode
   label: string
+  /** Extra tooltip lines for a material's name (editor: what the AI said about it); null = none. */
+  describe?: (name: string) => string | null
 }) {
   const { t } = useI18n()
   const removable = (minItems: number) => items.length > minItems
+  const titled = (base: string, name: string) => [base, describe?.(name)].filter(Boolean).join('\n')
   return <ul className="events-materials" aria-label={label}>
     {items.map((name, i) => <li key={name} className={`events-mat ${active === name ? 'active' : ''} ${onSelect ? 'selectable' : ''}`}
       onClick={onSelect ? e => { if (!(e.target as HTMLElement).closest('button, input, select, textarea, a')) onSelect(name) } : undefined}>
       <button type="button" className="agent-icon-btn" aria-label={t('events.mat.play', { name })} title={t('events.mat.play', { name })} onClick={() => onPlay(name)}>▶</button>
-      {onSelect ? <span className="events-mat-name" role="button" tabIndex={0} title={t('events.mat.show', { name })}
+      {onSelect ? <span className="events-mat-name" role="button" tabIndex={0} title={titled(t('events.mat.show', { name }), name)}
         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(name) } }}>{name}</span>
-        : <span className="events-mat-name" title={name}>{name}</span>}
+        : <span className="events-mat-name" title={titled(name, name)}>{name}</span>}
       {/* ★ only with two or more candidates (one is trivially the representative). */}
       {items.length < 2 ? <span /> : onReorder ? <button type="button" className={`agent-icon-btn events-mat-star ${i === 0 ? 'on' : ''}`} disabled={i === 0}
         aria-label={t(i === 0 ? 'events.mat.representative' : 'events.mat.makeRepresentative')} title={t(i === 0 ? 'events.mat.representative' : 'events.mat.makeRepresentative')}

@@ -1221,6 +1221,7 @@ export const messages = defineMessages({
   'scene.occ.message': { ja: 'イベントを変える依頼: {name} の {at} s の発生を {to} にしてください', en: 'Change event request: make the firing of {name} at {at} s {to}.' },
   'events.mat.play': { ja: '{name} を再生', en: 'Play {name}' },
   'events.mat.show': { ja: '{name} を波形パネルに表示（再生は ▶）', en: 'Show {name} in the waveform panel (▶ plays it)' },
+  'events.mat.aiOrigin': { ja: 'AI 提案 {short}・候補 {candidate}', en: 'AI proposal {short}, candidate {candidate}' },
   'events.pair.heading': { ja: '音と触覚の組', en: 'Sound and haptic pairs' },
   'events.pair.hint': { ja: 'paired の cue：選ばれた音と同じ番号の触覚を鳴らします。並べ替えは組ごとです', en: 'Paired cue: the haptic with the picked sound’s number plays. Reordering moves whole pairs.' },
   'events.pair.inHaptics': { ja: '音は「触覚」の欄に、触覚と組にして並べています', en: 'The sounds are listed with their haptics, as pairs, in the haptic section.' },

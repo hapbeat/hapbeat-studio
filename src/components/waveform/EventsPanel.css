@@ -95,6 +95,9 @@
 .events-mat.active { border-color: #67e8f9; }
 .events-mat > * { white-space: nowrap; }
 .events-mat-name { overflow: hidden; text-overflow: ellipsis; }
+/* What the AI said about the material shown (label — hypothesis): always two lines tall, empty when none (nothing below moves). */
+.events-mat-origin { margin: 0; height: calc(2 * 1.45em); line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.events-mat-origin-id { color: #c4a7f5; }
 .events-mat-star { color: var(--text-muted); }
 .events-mat-star.on { color: #f5d547; }
 .events-add-material { align-self: flex-start; max-width: 100%; }
