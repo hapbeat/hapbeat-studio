@@ -5,6 +5,7 @@ import type { Recipe } from '@/utils/recipe'
 import type { DeviceInfo } from '@/types/manager'
 import type { WaveformClip } from '@/types/waveform'
 import type { SceneVideoTarget } from '@/utils/editorSceneSync'
+import type { ShownLayout } from '@/utils/shownLayout'
 
 /** State the editor owns and every dock panel reads (panels render in dockview portals / popout windows). */
 export interface EditorShared {
@@ -17,6 +18,8 @@ export interface EditorShared {
   /** `trialId/candidateId` of the AI candidate shown instead of the clip, if any. */
   auditionKey: string | null
   audioBuffer: AudioBuffer | undefined
+  /** How `audioBuffer` holds the shown material: the file once, or one copy per firing of its event (null = nothing shown). */
+  shownLayout: ShownLayout | null
   /** The shown material's / AI candidate's strength (intensity, live while its slider moves): playback gain and "edited" drawing scale. */
   level: number
   player: EditorBufferPlayer

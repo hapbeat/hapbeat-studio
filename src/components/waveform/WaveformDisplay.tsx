@@ -21,8 +21,9 @@ type OverviewMode = 'left' | 'right' | 'move' | 'seek'
  * Mouse playback: a click plays from there (a click while playing stops), a drag selects a
  * range, a double click plays from the start. `transport` sits right under the waveform.
  * `scale` multiplies the drawing only (a material's intensity): a change redraws, nothing is decoded or rendered.
+ * `placements`: the copies of a material placed at its event's firings; each gets a start line and an alternating tint.
  */
-export function WaveformDisplay({ original, bufferOverride, player, viewKey, transport, scale = 1 }: { original: boolean; bufferOverride?: AudioBuffer; player: EditorBufferPlayer; viewKey?: string; transport?: ReactNode; scale?: number }) {
+export function WaveformDisplay({ original, bufferOverride, player, viewKey, transport, scale = 1, placements = [] }: { original: boolean; bufferOverride?: AudioBuffer; player: EditorBufferPlayer; viewKey?: string; transport?: ReactNode; scale?: number; placements?: readonly { start: number; end: number }[] }) {
   const { t } = useI18n()
   const { playAt, stopPlayback, isPlaybackActive, playFromStart } = useEditor()
   const height = useEditorSettings(s => s.height)
@@ -184,6 +185,14 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
         }
       }}>
       <div ref={container} className="waveform-container" />
+      {placements.length > 0 && ready && duration > 0 && (() => {
+        // One firing each: a line where it starts and a tint over its length, alternating so copies never read as one long file.
+        const width = surface.current?.clientWidth ?? 0, px = Math.max(zoom, width / duration)
+        return <div className="editor-placements" aria-hidden="true">{placements.map((p, i) => {
+          const left = (p.start - viewport.start) * px, right = (Math.min(duration, p.end) - viewport.start) * px
+          return right < 0 || left > width ? null : <div key={i} className={`editor-placement ${i % 2 ? 'odd' : ''}`} style={{ left, width: Math.max(1, right - left) }} />
+        })}</div>
+      })()}
       {marker !== null && !selection && ready && duration > 0 && (() => {
         const width = surface.current?.clientWidth ?? 0
         const x = (marker - viewport.start) * Math.max(zoom, width / duration)

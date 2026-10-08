@@ -42,6 +42,7 @@ import { openEventDefault, repeatBuffer, useDecidedSoundSync } from './eventAudi
 import { groupFirings, groupHapticsEnd, inSpans, mixGroupHaptics, shownSpans, type HapticPart } from '@/utils/groupPlayback'
 import { RATE as HAPTIC_RATE } from '@/utils/sceneHaptics'
 import { useAuditionPlan } from './EditorScenePanel'
+import type { ShownLayout } from '@/utils/shownLayout'
 
 export function WaveformEditor({ active }: { active: boolean }) {
   const { t } = useI18n()
@@ -152,6 +153,8 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const groupEndSec = useMemo(() => groupHapticsEnd(JSON.parse(groupKey) as HapticPart[], scenePcm), [groupKey, scenePcm])
   const audioBuffer = useMemo(() => shownBuffer && ((stretched && plan) || groupEndSec > shownBuffer.duration)
     ? repeatBuffer(shownBuffer, (stretched && plan ? plan.targets : [0]).map(atSec => ({ atSec, gain: 1, rate: 1 })), groupEndSec) : shownBuffer, [stretched, shownBuffer, plan, groupEndSec])
+  /** What the waveform panel shows: the file once, or the material placed at its event's firings (header line + per-firing marks). */
+  const shownLayout = useMemo((): ShownLayout | null => shownBuffer ? { materialSec: shownBuffer.duration, starts: stretched && plan ? plan.targets : null } : null, [shownBuffer, stretched, plan])
   // By value (groupKey): saving a strength rewrites the table but not these parts, so nothing is mixed again for it.
   const groupStream = useMemo(() => {
     const parts = JSON.parse(groupKey) as HapticPart[]
@@ -370,7 +373,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   }, [dockApi, t, s.setError, linkSceneProject])
   const focusEditorPanel = useCallback((id: Parameters<EditorShared['focusEditorPanel']>[0]) => { if (dockApi) focusPanel(dockApi, id, t) }, [dockApi, t])
   const shared: EditorShared = {
-    active, original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, level, player, playback, pending, togglePlay, playAt, stopPlayback, isPlaybackActive, playFromStart, toggleCandidate,
+    active, original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, shownLayout, level, player, playback, pending, togglePlay, playAt, stopPlayback, isPlaybackActive, playFromStart, toggleCandidate,
     openRecipe, provenanceText, isConnected, playbackDevices, targets, routing, setVisibleClipIds, openSceneVideo, linkSceneProject, focusEditorPanel,
   }
   return <EditorContext.Provider value={shared}>

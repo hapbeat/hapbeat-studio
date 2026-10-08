@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useEditorSettings } from '@/stores/editorSettings'
@@ -10,12 +11,13 @@ import { WaveformDisplay } from './WaveformDisplay'
 import { TransportBar } from './TransportBar'
 import { EditorMenu, EditorMenuItem, EditorMenuSection } from './EditorMenu'
 import { useEditor } from './editorContext'
+import { layoutPlacements, layoutStatus } from '@/utils/shownLayout'
 
 /** Waveform panel: edited / original toggle, the display and the transport. Edit commands sit in one menu. */
 export function WaveformPanel() {
   const { t } = useI18n()
   const s = useWaveformStore()
-  const { original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, level, player, playback, pending, togglePlay, playFromStart } = useEditor()
+  const { original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, shownLayout, level, player, playback, pending, togglePlay, playFromStart } = useEditor()
   const audition = !!auditionKey
   const eventPreview = useEventStore(state => state.preview)
   /** The event material being adjusted (its own editor document, linked to the WAV). */
@@ -40,10 +42,16 @@ export function WaveformPanel() {
     : original ? t('editor.originalHint')
     : pendingChain ? (preview.error || t(preview.status === 'rendering' ? 'editor.previewRendering' : 'editor.previewHint'))
     : t('editor.selectionHint')
+  // One file or the material placed at its firings (DEC-085 / DEC-088): always said, with the file's own length.
+  const layoutLine = shownLayout ? layoutStatus(shownLayout) : null
+  const placements = useMemo(() => shownLayout ? layoutPlacements(shownLayout) : [], [shownLayout])
   return <div className="editor-panel editor-waveform-panel">
     <div className="editor-comparison">
       <strong className={`editor-active-name ${audition ? 'editor-auditioning' : ''}`}>{eventPreview ? t('events.preview.name', { name: eventPreview.label }) : auditionKey ? t('editor.agent.auditioning', { name: auditionKey })
         : adjusting ? t('editor.adjusting', { event: adjusting.event, file: `${adjusting.wav}.wav` }) : s.clip?.name ?? t('editor.noClip')}</strong>
+      {/* Fixed width, always present (empty without a buffer): switching single / sequence never moves the controls. */}
+      <span className={`editor-shown-layout ${shownLayout?.starts ? 'sequence' : ''}`} role="status" title={shownLayout?.starts ? t('editor.shown.sequenceHint') : undefined}>
+        {layoutLine ? t(layoutLine.id, layoutLine.params) : ''}</span>
       {eventPreview ? <IntensitySlider key={eventPreview.material} target={eventPreview.target} wav={eventPreview.material} />
         : adjusting && !audition && <IntensitySlider key={adjusting.wav} target={adjusting.target} wav={adjusting.wav} project={adjusting.project} />}
       <div className="editor-segmented" role="group" aria-label={t('editor.showing')}>
@@ -72,7 +80,7 @@ export function WaveformPanel() {
     <div className="editor-preview-status" role="status">{status}</div>
     <div className="waveform-main">
       {!s.clip && !audition && <div className="waveform-empty"><div className="empty-icon">∿</div><div className="empty-message">{t('wave.drop')}</div><div className="empty-hint">{t('editor.emptyHint')}</div></div>}
-      <WaveformDisplay original={original} scale={level} bufferOverride={audioBuffer} player={player} viewKey={auditionKey ?? undefined}
+      <WaveformDisplay original={original} scale={level} bufferOverride={audioBuffer} player={player} viewKey={auditionKey ?? undefined} placements={placements}
         transport={<TransportBar player={player} available={!!audioBuffer} playback={playback} pending={pending} onToggle={togglePlay} onFromStart={() => playFromStart()} />} />
     </div>
   </div>
