@@ -46,7 +46,6 @@ export function SceneTopBar({ dockApi, notice }: { dockApi: DockviewApi | null; 
   }
   const revert = async () => { if (dirty && !await confirmDiscard()) return; await useSceneStore.getState().revert() }
   return <div className="editor-folder-bar scene-bar">
-    <span className="editor-beta-label" title={t('scene.betaHint')}>BETA</span>
     <EditorMenu label={`${t('scene.projectMenu')} ▾`} disabled={busy}>
       <EditorMenuItem disabled={!('showDirectoryPicker' in window)} onSelect={() => void open()}>{t('scene.open')}</EditorMenuItem>
       <EditorMenuItem disabled={!rememberedName} onSelect={() => void reopen()}>{rememberedName ? t('scene.reopenNamed', { name: rememberedName }) : t('scene.reopen')}</EditorMenuItem>

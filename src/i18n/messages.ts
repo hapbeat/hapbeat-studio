@@ -75,7 +75,6 @@ export const messages = defineMessages({
   "tabs.editor.main": { ja: "Editor", en: "Editor" },
   "tabs.editor.sub": { ja: "Waveform", en: "Waveform" },
   "editor.beta": { ja: "開発中のベータ機能", en: "Beta feature in development" },
-  "editor.betaHint": { ja: "波形エディターは開発中のベータ機能です。操作や保存形式は今後更新されます。", en: "The waveform editor is a beta feature. Its controls and project format may change." },
   "editor.pathHint": { ja: "ブラウザは絶対パスを公開しないため、選択フォルダ名を表示します。", en: "The browser exposes the selected folder name, not its absolute OS path." },
   "editor.reconnect": { ja: "前回のフォルダへのアクセスを許可", en: "Allow access to previous folder" },
   "editor.popupBlocked": { ja: "ポップアップを許可して再度開いてください。", en: "Allow popups, then try again." },
@@ -324,7 +323,6 @@ export const messages = defineMessages({
   'tabs.manage.sub': { ja: 'Config', en: 'Config' },
   'tabs.scene.main': { ja: 'Scene', en: 'Scene' },
   'tabs.scene.sub': { ja: 'シーン確認', en: 'Video sync' },
-  'scene.betaHint': { ja: 'ゲームの録画に合わせて触覚・効果音の割り当てを確認・編集します（試験提供中）', en: 'Check and edit haptic / sound cue assignments against recorded gameplay (beta).' },
   'scene.panel.video': { ja: '映像', en: 'Video' },
   'scene.panel.timeline': { ja: 'タイムライン', en: 'Timeline' },
   'scene.panel.moments': { ja: '場面とイベント', en: 'Moments and events' },
@@ -1302,7 +1300,6 @@ export const messages = defineMessages({
   'scene.event.paired': { ja: '音と触覚を組にする', en: 'Pair sounds and haptics' },
   'scene.event.pairedHint': { ja: 'オン: 選ばれた音の番号と同じ番号の clip を、各 route から鳴らします（音ごとに長さの違う breath など）。足音のように使い回すものはオフ', en: 'On: the clip with the picked sound’s index plays on every route (e.g. breath, whose sounds differ in length). Off for reused materials such as footsteps.' },
   'scene.event.pairedProblem': { ja: '組にできません: {problem}', en: 'Cannot pair: {problem}' },
-  'editor.agent.betaHint': { ja: 'AI 試行は開発中のベータ機能です。操作や保存形式は今後更新されます。', en: 'AI trials are a beta feature. Their controls and file formats may change.' },
 })
 
 export type MessageId = keyof typeof messages

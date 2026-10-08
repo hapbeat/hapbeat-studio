@@ -51,7 +51,6 @@ export function EditorTopBar({ dockApi, notice, onNotice }: { dockApi: DockviewA
     onNotice(t('editor.settings.imported', { file: file.name }))
   }
   return <div className="editor-folder-bar">
-    <span className="editor-beta-label" title={t('editor.betaHint')}>BETA</span>
     <button className="toolbar-btn" onClick={() => void s.openFolder()} disabled={s.isProcessing || !('showDirectoryPicker' in window)}>▱ {t('editor.folder')}</button>
     <div className="editor-folder-name" title={t('editor.pathHint')}><strong>{folderName ? `${folderName}/` : t('editor.chooseFirst')}</strong></div>
     {!s.folder && s.rememberedFolder && <button className="toolbar-btn" disabled={s.isProcessing} onClick={() => void s.reconnectFolder()}>{t('editor.reconnect')}</button>}

@@ -141,7 +141,6 @@ export function AgentTrialsPanel() {
     {dialog}
     {/* One line: watcher / MCP state, project and target filters. */}
     <div className="agent-topline">
-      <span className="editor-beta-label" title={t('editor.agent.betaHint')}>BETA</span>
       <span className={`agent-status ${storeError ? 'error' : ''}`} role="status" title={storeError ?? ''}>{storeError ?? t(!folder ? 'editor.agent.noFolder' : polling ? 'editor.agent.watching' : 'editor.agent.paused')}</span>
       <span className={`agent-mcp-status ${isConnected && folder ? 'ready' : ''}`} title={t('editor.agent.mcpHint')}>{t(!isConnected ? 'editor.agent.mcpHelperOff' : folder ? 'editor.agent.mcpReady' : 'editor.agent.mcpNoFolder')}</span>
       {projects.length > 0 && <select className="agent-filter" value={projectFilter} aria-label={t('editor.project')} title={t('editor.project')} onChange={e => {
