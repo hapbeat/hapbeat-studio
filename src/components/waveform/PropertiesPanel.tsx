@@ -76,7 +76,7 @@ export function PropertiesPanel() {
     <div className="editor-scene-row">
       <span>{t('editor.scene.row')}</span>
       <SceneChoiceSelect choice={scene} label={t('editor.scene.row')} />
-      <button className="toolbar-btn" title={t('editor.scene.openHint')} onClick={() => openSceneVideo({ kind: 'clip' }, scene.wanted ?? null)}>▶ {t('editor.scene.open')}</button>
+      <button className="toolbar-btn" title={t('editor.scene.openHint')} onClick={() => openSceneVideo({ kind: 'clip' })}>▶ {t('editor.scene.open')}</button>
     </div>
     <div className="editor-scene-row">
       <span>{t('events.menuSection')}</span>

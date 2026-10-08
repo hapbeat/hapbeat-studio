@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveTrialScene, sceneEventTime, sceneVideoTime, stepSceneFrame, trialSceneOptions } from './trialScene'
+import { resolveTrialScene, sceneEventTime, sceneProjectNeed, sceneVideoTime, stepSceneFrame, trialSceneOptions } from './trialScene'
 import { sampleData, sampleLib } from './sceneTestFixtures'
 
 describe('trial scene clips', () => {
@@ -34,6 +34,19 @@ describe('trial scene clips', () => {
     const old = resolveTrialScene({ lib, data })
     expect(old.kind === 'ready' && old.options.length === 2 && old.chosen).toBeNull()
     expect(resolveTrialScene({ lib, data, saved: { project: 'other', file: '01_button.mp4' } })).toEqual({ kind: 'otherProject', project: 'other' })
+  })
+
+  it('takes the video project only from the Events panel (a subject of another project gets a note, never a link)', () => {
+    const lib = sampleLib()
+    // A trex clip while Safety Mill (mill) is open: a note naming both, no link / switch.
+    const other = sceneProjectNeed(resolveTrialScene({ lib, data, saved: { project: 'trex', file: '01_button.mp4' } }), lib.project_name, 'mill')
+    expect(other).toEqual({ kind: 'otherProject', project: 'trex', open: lib.project_name })
+    // No project open: link the project last chosen in the Events panel, not the subject's.
+    expect(sceneProjectNeed(resolveTrialScene({ lib: null, data: null, scene: { project: 'trex', cues: ['roar'] } }), null, 'mill')).toEqual({ kind: 'link', project: 'mill' })
+    expect(sceneProjectNeed(resolveTrialScene({ lib: null, data: null }), null, null)).toEqual({ kind: 'link', project: null })
+    // No label, or the open project: nothing to do.
+    expect(sceneProjectNeed(resolveTrialScene({ lib, data }), lib.project_name, 'mill')).toBeNull()
+    expect(sceneProjectNeed(resolveTrialScene({ lib, data, scene: { project: lib.project_name, cues: ['grab'] } }), lib.project_name, null)).toBeNull()
   })
 
   it('maps playback time 0 to the cue mark', () => {

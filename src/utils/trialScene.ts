@@ -53,6 +53,19 @@ export type TrialSceneState =
   /** `chosen` null: an older trial without `scene` and no saved pick yet. */
   | { kind: 'ready'; options: SceneClipOption[]; chosen: SceneClipOption | null }
 
+/**
+ * What the editor's Scene video panel does about the Scene project. The project open in the Events panel is
+ * the only source of its video: a subject of another project gets a note (never a switch), and with no
+ * project open the panel links the project last chosen in the Events panel (`last`; null = any folder),
+ * not the subject's. null = the open project serves the subject.
+ */
+export type SceneProjectNeed = { kind: 'link'; project: string | null } | { kind: 'otherProject'; project: string; open: string } | null
+export function sceneProjectNeed(state: TrialSceneState, open: string | null, last: string | null): SceneProjectNeed {
+  if (state.kind === 'noProject') return { kind: 'link', project: last }
+  if (state.kind === 'otherProject') return { kind: 'otherProject', project: state.project, open: open ?? '' }
+  return null
+}
+
 /** The Scene project a trial / clip wants: the trial's `scene.project`, else the saved pick's, else `fallback` (a trial's `project` label). */
 export function wantedSceneProject(o: { scene?: TrialScene; saved?: TrialSceneChoice; fallback?: string }): string | undefined {
   return o.scene?.project ?? o.saved?.project ?? o.fallback

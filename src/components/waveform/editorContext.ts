@@ -46,10 +46,10 @@ export interface EditorShared {
   routing: { devices: DeviceInfo[]; unknown: DeviceInfo[]; positions: string[] | null }
   /** Clips in the order the clip list shows them (↑↓ navigation follows it). */
   setVisibleClipIds: (ids: string[]) => void
-  /** "▶ Video": shows the Scene video panel for the target in its own window, linking the Scene project `project` first if needed. Call from a click. */
-  openSceneVideo: (target: SceneVideoTarget, project: string | null) => void
+  /** "▶ Video": shows the Scene video panel for the target in its own window, linking the last chosen Scene project first when none is open. Call from a click. */
+  openSceneVideo: (target: SceneVideoTarget) => void
   /** Links the Scene project `name` through the registry (permission / one-time folder pick). Call from a click or a select change. */
-  linkSceneProject: (name: string | null, options?: { quietIfRefused?: boolean }) => Promise<boolean>
+  linkSceneProject: (name: string | null) => Promise<boolean>
   /** Shows a dock panel (re-adding it if closed) and brings its tab to the front. */
   focusEditorPanel: (id: 'clips' | 'events' | 'waveform' | 'properties' | 'effects' | 'agent' | 'scene') => void
 }

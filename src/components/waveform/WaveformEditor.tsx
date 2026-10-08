@@ -31,6 +31,7 @@ import { EditorTopBar } from './EditorTopBar'
 import { playStart, useStartMarker } from '@/utils/editorStartMarker'
 import { scenePause, scenePreRoll, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
 import { useSceneStore } from '@/stores/sceneStore'
+import { lastSceneProject } from '@/utils/sceneRegistry'
 import { levelKey, useEventStore } from '@/stores/eventStore'
 import { showDockPanel } from '@/utils/dockPanels'
 import { trialTarget } from '@/utils/agentProtocol'
@@ -338,23 +339,20 @@ export function WaveformEditor({ active }: { active: boolean }) {
       for (const popup of popoutWindows) { popup.removeEventListener('keydown', space, true); popup.removeEventListener('keydown', keydown) }
     }
   }, [active, original, audition, eventPreview, popoutWindows, stretched])
-  /** Project names whose folder link the user refused this session (the trials filter does not ask again). */
-  const refusedScenes = useRef(new Set<string>())
-  const linkSceneProject = useCallback(async (name: string | null, options?: { quietIfRefused?: boolean }) => {
-    if (options?.quietIfRefused && name && refusedScenes.current.has(name)) return false
+  const linkSceneProject = useCallback(async (name: string | null) => {
     const result = await useSceneStore.getState().linkProject(name, true)
-    if (result.ok) { if (name) refusedScenes.current.delete(name); return true }
-    if (name && (result.reason === 'cancelled' || result.reason === 'failed')) refusedScenes.current.add(name)
+    if (result.ok) return true
     if (result.notice) setNotice(t(result.notice.id, result.notice.params))
     return false
   }, [t])
   /**
-   * "▶ Video" (AI trial / Properties): picks what the Scene video panel shows, links its Scene
-   * project if it is not the open one (registered folder: permission if needed; else the folder
-   * picker once — both need this click), then shows the panel in its own window. A blocked pop-up
-   * leaves it docked in the editor with a notice.
+   * "▶ Video" (AI trial / Properties / Events): picks what the Scene video panel shows, then shows the
+   * panel in its own window. An open Scene project is never replaced (the Events panel chooses it); with
+   * none open, the project last chosen in the Events panel is linked first (registered folder: permission
+   * if needed; else the folder picker once — both need this click). A blocked pop-up leaves it docked in
+   * the editor with a notice.
    */
-  const openSceneVideo = useCallback((target: SceneVideoTarget, project: string | null) => {
+  const openSceneVideo = useCallback((target: SceneVideoTarget) => {
     useSceneVideoTarget.getState().setTarget(target)
     if (!dockApi) return
     const show = () => {
@@ -367,8 +365,8 @@ export function WaveformEditor({ active }: { active: boolean }) {
       })
     }
     const scene = useSceneStore.getState()
-    if (scene.root && scene.lib && (!project || scene.lib.project_name === project)) { show(); return }
-    void linkSceneProject(project).then(show, s.setError)
+    if (scene.root && scene.lib) { show(); return }
+    void linkSceneProject(lastSceneProject()).then(show, s.setError)
   }, [dockApi, t, s.setError, linkSceneProject])
   const focusEditorPanel = useCallback((id: Parameters<EditorShared['focusEditorPanel']>[0]) => { if (dockApi) focusPanel(dockApi, id, t) }, [dockApi, t])
   const shared: EditorShared = {

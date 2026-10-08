@@ -27,7 +27,6 @@ import { useEditor } from './editorContext'
 import { useSceneVideoTarget } from '@/utils/editorSceneSync'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useEditorSettings } from '@/stores/editorSettings'
-import { wantedSceneProject } from '@/utils/trialScene'
 
 /** Filter value for trials without a project (not a valid project name, so it cannot collide). */
 const UNASSIGNED_FILTER = ' '
@@ -57,21 +56,15 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
  */
 export function AgentTrialsPanel() {
   const { t } = useI18n()
-  const { playbackDevices, linkSceneProject } = useEditor()
+  const { playbackDevices } = useEditor()
   /** Trial picked by a click in the list: its first candidate is auditioned (not played) once its audio is loaded. */
   const [autoTrialId, setAutoTrialId] = useState<string | null>(null)
-  /** `interactive` (a click): may ask for the game folder; automatic opens only use an already permitted one. */
-  const pickTrial = (r: TrialRecord, interactive = true) => {
+  const pickTrial = (r: TrialRecord) => {
     setSelectedId(r.trial.id)
     setAutoTrialId(r.trial.id)
-    // The Scene video (window or docked panel, never opened here) switches to this trial's moment.
+    // The Scene video (window or docked panel, never opened here) switches to this trial's moment;
+    // its project stays the one open in the Events panel.
     useSceneVideoTarget.getState().setTarget({ kind: 'trial', trialId: r.trial.id })
-    const wanted = wantedSceneProject({ scene: r.trial.scene, saved: useEditorSettings.getState().trialScenes[r.trial.id], fallback: r.trial.project })
-    const scene = useSceneStore.getState()
-    // Same as "▶ Video": this click may grant the folder permission or link the folder once.
-    if (wanted && scene.lib?.project_name !== wanted) {
-      if (interactive) void linkSceneProject(wanted, { quietIfRefused: true }); else void useSceneStore.getState().linkProject(wanted, false)
-    }
   }
   const deviceNames = useMemo(() => [...new Set(playbackDevices.map(device => device.name).filter(Boolean))], [playbackDevices])
   /** '' = every trial; otherwise the trial's `project` (UNASSIGNED_FILTER = trials without one). */
@@ -103,14 +96,14 @@ export function AgentTrialsPanel() {
   // Work top-down: the unrated, not dismissed trials of the project, oldest first.
   const queue = useMemo(() => trialQueue(shown), [shown])
   const inQueue = !!record && queue.some(r => r.trial.id === record.trial.id)
-  // Opening the tab / changing project / finishing the shown trial: open the oldest unrated one (no folder prompt without a click).
+  // Opening the tab / changing project / finishing the shown trial: open the oldest unrated one.
   useEffect(() => {
     if (!folder || (record && shown.includes(record))) return
-    if (queue[0]) pickTrial(queue[0], false)
+    if (queue[0]) pickTrial(queue[0])
   }, [folder, projectFilter, targetFilter, record, shown, queue])
   const onDone = (info: DoneInfo) => {
     const next = nextAfter(queue, info.recordId)
-    if (next) pickTrial(next, false); else setSelectedId(null)
+    if (next) pickTrial(next); else setSelectedId(null)
   }
   const prev = stepQueue(queue, record?.trial.id ?? null, -1), next = stepQueue(queue, record?.trial.id ?? null, 1)
   const { openSceneVideo } = useEditor()
@@ -146,8 +139,6 @@ export function AgentTrialsPanel() {
       {projects.length > 0 && <select className="agent-filter" value={projectFilter} aria-label={t('editor.project')} title={t('editor.project')} onChange={e => {
         const value = e.target.value
         setProjectFilter(value)
-        // Choosing a project also links its game footage (registered folder, else one folder pick; refusals are not asked again).
-        if (value && value !== UNASSIGNED_FILTER) void linkSceneProject(value, { quietIfRefused: true })
       }}>
         <option value="">{t('editor.allProjects')}</option>
         {projects.map(name => <option key={name} value={name}>{name}</option>)}
@@ -178,7 +169,7 @@ export function AgentTrialsPanel() {
         <EditorMenuItem disabled={!queue.length} onSelect={() => void dismissAll()}>{t('editor.agent.dismissAll', { count: queue.length })}</EditorMenuItem>
       </EditorMenu>
       {record && <button className="toolbar-btn" title={t('editor.scene.openHint')}
-        onClick={() => openSceneVideo({ kind: 'trial', trialId: record.trial.id }, wantedSceneProject({ scene: record.trial.scene, saved: useEditorSettings.getState().trialScenes[record.trial.id], fallback: record.trial.project }) ?? null)}>▶ {t('editor.agent.video')}</button>}
+        onClick={() => openSceneVideo({ kind: 'trial', trialId: record.trial.id })}>▶ {t('editor.agent.video')}</button>}
       {record && (record.dismissed ? <button className="toolbar-btn" onClick={() => void restore(record)}>{t('editor.agent.restore')}</button>
         : !record.rating && <button className="toolbar-btn" title={t('editor.agent.dismissHint')} onClick={() => void dismiss(record)}>{t('editor.agent.dismissTrial')}</button>)}
     </div>

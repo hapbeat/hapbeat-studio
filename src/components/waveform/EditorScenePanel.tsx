@@ -4,7 +4,8 @@ import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useEditorSettings } from '@/stores/editorSettings'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { sceneVideoUrl, useSceneStore } from '@/stores/sceneStore'
-import { resolveTrialScene, sceneEventTime, sceneVideoTime, stepSceneFrame, wantedSceneProject, type TrialSceneState } from '@/utils/trialScene'
+import { resolveTrialScene, sceneEventTime, sceneProjectNeed, sceneVideoTime, stepSceneFrame, wantedSceneProject, type TrialSceneState } from '@/utils/trialScene'
+import { lastSceneProject } from '@/utils/sceneRegistry'
 import { FRAME_SEC, setScenePause, setScenePreRoll, useSceneVideoTarget, videoCorrection, type SceneVideoTarget } from '@/utils/editorSceneSync'
 import { eventSoundSec } from './eventAudio'
 import { useAdjustingLink } from './eventEditing'
@@ -164,23 +165,26 @@ export function EditorScenePanel() {
   const audition = useAgentTrialStore(s => s.audition)
   const subject = useShownSubject()
   const choice = useSceneChoice(subject)
-  const { state, chosen, trial, wanted } = choice
-  // Open the wanted project by name without asking when its folder is registered and still permitted;
-  // otherwise remember why, for the one-click link button.
-  // Another open project is not replaced without a click ("switch"); the page-load restore runs first.
-  const [linkNeed, setLinkNeed] = useState<'needsClick' | 'unregistered' | 'dirty' | 'otherOpen' | null>(null)
-  const needsLink = state.kind === 'noProject' || state.kind === 'otherProject'
+  const { state, chosen, trial } = choice
+  // The project open in the Events panel is the only source of the video: a subject of another project gets a
+  // note, never a switch. With none open, the project last chosen in the Events panel is opened without asking
+  // when its folder is registered and still permitted; otherwise remember why, for the one-click link button.
+  // The page-load restore runs first.
   const openProject = useSceneStore(s => s.lib?.project_name ?? null)
+  const need = sceneProjectNeed(state, openProject, lastSceneProject())
+  const needsLink = need?.kind === 'link'
+  const linkName = need?.kind === 'link' ? need.project : null
+  const [linkNeed, setLinkNeed] = useState<'needsClick' | 'unregistered' | 'dirty' | null>(null)
   useEffect(() => {
     setLinkNeed(null)
     if (!needsLink) return
     let cancelled = false
-    void useSceneStore.getState().restore().then(() => cancelled ? null : useSceneStore.getState().linkProject(wanted ?? null, false)).then(result => {
+    void useSceneStore.getState().restore().then(() => cancelled ? null : useSceneStore.getState().linkProject(linkName, false)).then(result => {
       if (cancelled || !result || result.ok) return
-      setLinkNeed(result.reason === 'needsClick' || result.reason === 'dirty' || result.reason === 'otherOpen' ? result.reason : 'unregistered')
+      setLinkNeed(result.reason === 'needsClick' || result.reason === 'dirty' ? result.reason : 'unregistered')
     })
     return () => { cancelled = true }
-  }, [needsLink, wanted, openProject])
+  }, [needsLink, linkName, openProject])
   const clipName = useWaveformStore(s => s.clip?.name ?? '')
   const leadSetting = useEditorSettings(s => s.sceneLeadSec)
   const [src, setSrc] = useState<string | null>(null)
@@ -317,13 +321,15 @@ export function EditorScenePanel() {
   }, [videoEl, end])
 
   if (!choice.id) return <div className="editor-scene-panel"><p className="agent-muted">{t('editor.scene.noSubject')}</p></div>
+  if (need?.kind === 'otherProject') return <div className="editor-scene-panel editor-scene-link">
+    <p className="agent-muted">{t('editor.scene.otherProject', { project: need.project, open: need.open })}</p>
+  </div>
   if (needsLink) {
-    const text = linkNeed === 'dirty' ? t('scene.link.dirty') : linkNeed === 'needsClick' ? t('editor.scene.allowNamed', { name: wanted ?? '' })
-      : linkNeed === 'otherOpen' ? t('editor.scene.switchNamed', { name: wanted ?? '' })
-      : wanted ? t('editor.scene.linkNamed', { name: wanted }) : t('editor.scene.linkAny')
+    const text = linkNeed === 'dirty' ? t('scene.link.dirty') : linkNeed === 'needsClick' ? t('editor.scene.allowNamed', { name: linkName ?? '' })
+      : linkName ? t('editor.scene.linkNamed', { name: linkName }) : t('editor.scene.linkAny')
     return <div className="editor-scene-panel editor-scene-link">
       <p className="agent-muted">{text}</p>
-      {linkNeed && linkNeed !== 'dirty' && <button className="toolbar-btn" onClick={() => void linkSceneProject(wanted ?? null)}>{t(linkNeed === 'needsClick' ? 'editor.scene.allowButton' : linkNeed === 'otherOpen' ? 'editor.scene.switchButton' : 'editor.scene.linkButton')}</button>}
+      {linkNeed && linkNeed !== 'dirty' && <button className="toolbar-btn" onClick={() => void linkSceneProject(linkName)}>{t(linkNeed === 'needsClick' ? 'editor.scene.allowButton' : 'editor.scene.linkButton')}</button>}
     </div>
   }
   const message = state.kind === 'noClips' ? t('editor.scene.noClips', { cues: state.cues.join(', ') }) : null

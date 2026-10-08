@@ -204,7 +204,7 @@ function EventDetail({ table, lib, e }: { table: CueTable; lib: SceneLib; e: Eff
   return <div className="events-detail">
     <div className="events-detail-head">
       <strong className="target-cue-badge events-target" title={t('editor.scene.targetHint')}>{key}</strong>
-      <button type="button" className="toolbar-btn" title={t('editor.scene.openHint')} onClick={() => openSceneVideo({ kind: 'event', key }, lib.project_name)}>▶ {t('editor.scene.open')}</button>
+      <button type="button" className="toolbar-btn" title={t('editor.scene.openHint')} onClick={() => openSceneVideo({ kind: 'event', key })}>▶ {t('editor.scene.open')}</button>
     </div>
     {e.description && <p className="agent-muted">{e.description}</p>}
     <div className="events-assign">
