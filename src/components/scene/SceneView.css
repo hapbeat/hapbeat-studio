@@ -54,6 +54,10 @@
 /* The moment of the firing selected on the timeline / here. */
 .scene-item.picked { outline: 1px solid var(--accent-light); outline-offset: -1px; }
 .scene-item.sel { background: rgba(124,92,191,.22); box-shadow: inset 3px 0 0 var(--accent-light); }
+/* A cue of a moment of several cues, and a loop cue's active span: indented rows of one fixed height under their row. */
+.scene-subitem { grid-template-columns: 10px minmax(0, 1fr) auto; height: 24px; padding-top: 0; padding-bottom: 0; padding-left: 34px; font-size: 12px; color: var(--text-secondary); }
+.scene-subitem.scene-span { padding-left: 44px; }
+.scene-subitem.sel { color: var(--text-primary); }
 /* "Change" on a moment: a one-line request over the following rows (nothing moves). */
 .scene-occ-form { position: absolute; left: 12px; right: 12px; top: 100%; z-index: 5; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 4px; padding: 4px; background: var(--bg-secondary); border: 1px solid var(--border-light); border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,.4); }
 /* A row's right-click menu at the pointer: a MenuPopup (portal on the body, fixed, kept in the window). */

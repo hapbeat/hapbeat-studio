@@ -62,6 +62,9 @@ interface SceneState {
   dirty: boolean
   cur: number
   sel: SceneSelection | null
+  /** The loop cue span playing in the full replay (replay seconds, without lead-in / post-roll; SceneRuntime.playSpan). */
+  span: [number, number] | null
+  setSpan: (span: [number, number] | null) => void
   notice: SceneNotice | null
   /** Shown in the video panel while no recording is loaded. */
   empty: SceneNotice | null
@@ -265,7 +268,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
   return {
     root: null, remembered: null, restored: false, busy: false,
     lib: null, data: null, recorded: null, overrides: [], items: [], table: null, loaded: null, clipFiles: [], soundFiles: [],
-    pending: { clips: {}, sounds: {} }, pcm: {}, sfx: {}, dirty: false, saveError: null, cur: 0, sel: null, emitSeed: newEmitSeed(),
+    pending: { clips: {}, sounds: {} }, pcm: {}, sfx: {}, dirty: false, saveError: null, cur: 0, sel: null, span: null, emitSeed: newEmitSeed(),
     notice: null, empty: null, log: [],
     note, addLog,
 
@@ -335,6 +338,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
       if (lib) try { localStorage.setItem(clipKey(lib.project_name), String(cur)) } catch { /* preference only */ }
     },
     selectCue: (name, t) => set({ sel: { name, t } }),
+    setSpan: span => set({ span }),
     setOverrides: overrides => {
       const derived = derivedData(get().table, overrides)
       if (!derived.data) { set({ overrides }); return }

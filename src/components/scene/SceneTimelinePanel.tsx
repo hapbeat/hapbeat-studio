@@ -17,6 +17,8 @@ import { useMomentPlace } from './SceneCuePanels'
 
 const SOUND_COLOR = '#36c5c0'
 type Hit = { x: number; y0: number; y1: number; name: string; t: number; from?: string }
+/** A drawn band of the selected loop cue: its lane's height and x range (CSS px). */
+type Band = { x0: number; x1: number; y0: number; y1: number }
 /** The visible stretch of the timeline: `start` (s) and `zoom` (px per s) for one moment (`key`); fit = the whole. */
 type View = { key: string; start: number; zoom: number; fit: boolean }
 const MAX_ZOOM = 2000
@@ -25,7 +27,8 @@ const MAX_ZOOM = 2000
  * Timeline: continuous-layer levels behind two lanes, sound (upper) and
  * haptics (lower), as in the editor; a cue shows in each lane it uses (a selected loop cue: its whole active
  * span, as long as its layer's recorded level is above 0, as bands in those lanes). Click a marker to edit
- * that cue (the moments list marks it too), elsewhere to seek; right-click a marker to change its event.
+ * that cue (the moments list marks it too), a band to play that span in the full replay (SceneRuntime.playSpan; within
+ * the span already playing: seek), elsewhere to seek; right-click a marker to change its event.
  * Ctrl + wheel zooms around the pointer, wheel / Shift + wheel pans (like the editor's waveform), also while playing.
  * Read-outs and output toggles above it.
  */
@@ -34,6 +37,7 @@ export function SceneTimelinePanel() {
   const { runtime } = useScene()
   const canvas = useRef<HTMLCanvasElement>(null)
   const hits = useRef<Hit[]>([])
+  const bands = useRef<Band[]>([])
   const title = useRef<HTMLSpanElement>(null)
   const note = useRef<HTMLSpanElement>(null)
   const levels = useRef<HTMLSpanElement>(null)
@@ -63,7 +67,7 @@ export function SceneTimelinePanel() {
       if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr) }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.clearRect(0, 0, w, h)
-      if (!it || !lib || !data) { hits.current = []; return }
+      if (!it || !lib || !data) { hits.current = []; bands.current = []; return }
       const fps = data.fps, layers = lib.layers, ticks = lib.ticks, sel = s.sel, table = s.table
       const series = layers.flatMap(l => l.gain.map((i, k) => ({ i, color: l.colors[k] })))
       const dur = v.duration || it.levels.length / fps || 1
@@ -114,16 +118,19 @@ export function SceneTimelinePanel() {
       // A selected loop cue: bands over its layer's active runs (the recorded firings are only the layer's starts).
       const rc = runs.current
       if (rc.levels !== L || rc.name !== (sel?.name ?? '')) { rc.levels = L; rc.name = sel?.name ?? ''; rc.runs = sel ? loopCueRuns(L, fps, lib, sel.name) : [] }
+      const drawnBands: Band[] = []
       if (rc.runs.length && sel) for (const [y0, y1, has, color] of lanes) {
         if (!has(sel.name)) continue
         ctx.fillStyle = color(sel.name)
         for (const [a, b] of rc.runs) {
           const x0 = Math.max(-1, X(a)), x1 = Math.min(w + 1, X(b))
           if (x1 <= x0) continue
+          drawnBands.push({ x0, x1, y0, y1 })
           ctx.globalAlpha = 0.22; ctx.fillRect(x0, y0 + 2, x1 - x0, y1 - y0 - 2)
           ctx.globalAlpha = 0.9; ctx.fillRect(x0, y0 + 2, x1 - x0, 2)
         }
       }
+      bands.current = drawnBands
       ctx.globalAlpha = 1
       const found: Hit[] = []
       for (const [y0, y1, has, color] of lanes) {
@@ -167,7 +174,23 @@ export function SceneTimelinePanel() {
     if (!useSceneStore.getState().items.length || event.button !== 0) return
     const { x, hit } = hitAt(event)
     if (hit) { useSceneStore.getState().selectCue(hit.name, hit.t); runtime.video.pause(); runtime.seek(hit.t - useSceneSettings.getState().leadSec); return }
-    runtime.seek(view.current.start + x / view.current.zoom)
+    const time = view.current.start + x / view.current.zoom
+    const run = bandRunAt(event, time)
+    if (run) { runtime.audio(); const lead = useSceneSettings.getState().leadSec; runtime.playSpan(run, lead, lead); return }
+    runtime.seek(time)
+  }
+  /**
+   * The selected loop cue's active span (full replay seconds) under a click at video time `time` on one of its bands,
+   * unless it is the span already playing (a click in it seeks).
+   */
+  const bandRunAt = (event: React.MouseEvent<HTMLCanvasElement>, time: number): [number, number] | null => {
+    const r = event.currentTarget.getBoundingClientRect(), x = event.clientX - r.left, y = event.clientY - r.top
+    if (!bands.current.some(b => x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1)) return null
+    const s = useSceneStore.getState(), it = s.items[s.cur]
+    if (!it || !s.data || !s.lib || !s.sel) return null
+    const replay = time + offsetOf(it)
+    const run = loopCueRuns(s.data.full.levels, s.data.fps, s.lib, s.sel.name).find(([a, b]) => replay >= a && replay <= b)
+    return run && !(s.span && s.span[0] === run[0] && s.span[1] === run[1]) ? run : null
   }
   /** Right-click a marker: "Change" (the moments list's), over the timeline. */
   const onContextMenu = (event: React.MouseEvent<HTMLCanvasElement>) => {

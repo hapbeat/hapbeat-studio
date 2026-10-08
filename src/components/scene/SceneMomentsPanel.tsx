@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
@@ -14,6 +14,7 @@ import { removeOverride, setOverride as setSceneOverride, type OverriddenClip } 
 import { saveSceneOverrides } from '@/hooks/useSceneOverrides'
 import { localIsoString } from '@/utils/hapticKnowledge'
 import { MenuPopup } from '@/components/waveform/EditorMenu'
+import { loopCueRuns } from '@/utils/loopStretch'
 
 /**
  * "Moments and events": the full replay, then one clip per cue moment, with which outputs its cues use. A click on
@@ -21,6 +22,8 @@ import { MenuPopup } from '@/components/waveform/EditorMenu'
  * request over the rows (nothing moves): an existing event or a new `cue:variant`, a comment, "Request" — a new
  * variant is made in the cue table at once (multipliers only, 1 / 1) so it can be tuned here, and the agent gets a
  * hapbeat-agent-message@1 `reassign` (the game's routing changes; the table holds no per-moment values).
+ * A moment of several cues lists each cue as its own row under it (one click selects that cue). A loop cue selected
+ * here lists its layer's active spans over the whole recording under its row; a span plays the full replay over it.
  */
 export function SceneMomentsPanel() {
   const { t } = useI18n()
@@ -37,6 +40,26 @@ export function SceneMomentsPanel() {
   const [menu, setMenu] = useState<{ k: number; x: number; y: number } | null>(null)
   // The firing selected here or on the timeline (Event panel follows it too): its moment's row is marked and scrolled to.
   const sel = useSceneStore(s => s.sel)
+  const data = useSceneStore(s => s.data)
+  const span = useSceneStore(s => s.span)
+  /** The loop cue (and its moment row) whose spans are listed: the last loop cue selected in this list. */
+  const [spansOf, setSpansOf] = useState<{ k: number; name: string } | null>(null)
+  const runs = useMemo(() => spansOf && data && lib ? loopCueRuns(data.full.levels, data.fps, lib, spansOf.name) : [], [spansOf, data, lib])
+  /** Plays moment `k` with cue `name` selected (its firing in the clip); a loop cue's spans are listed under it. */
+  const pickCue = (k: number, name: string) => {
+    const it = items[k]
+    runtime.audio(); runtime.playMoment(k, useSceneSettings.getState().leadSec)
+    if (it?.kind === 'clip') useSceneStore.getState().selectCue(name, it.event)
+    setSpansOf(lib && data && loopCueRuns(data.full.levels, data.fps, lib, name).length ? { k, name } : null)
+  }
+  /** The listed spans under the row of `name` in moment `k` (while that cue is selected). */
+  const spanRows = (k: number, name: string) => spansOf?.k !== k || spansOf.name !== name || sel?.name !== name ? null
+    : runs.map(([a, b], i) => <div key={`span${i}`} className={`scene-item scene-subitem scene-span ${span && span[0] === a && span[1] === b ? 'sel' : ''}`}
+      title={t('scene.span.hint', { name })} onClick={() => { runtime.audio(); const lead = useSceneSettings.getState().leadSec; runtime.playSpan([a, b], lead, lead) }}>
+      <span className="scene-dot" style={{ background: familyColor(lib!, name) }} />
+      <span className="scene-name">{t('scene.span.row', { n: i + 1, from: a.toFixed(1), to: b.toFixed(1) })}</span>
+      <span className="scene-num">{`${(b - a).toFixed(1)}s`}</span>
+    </div>)
   const picked = useMemo(() => {
     const it = items[cur]
     if (!sel || sel.t == null || !it) return -1
@@ -55,13 +78,14 @@ export function SceneMomentsPanel() {
       {items.map((it, k) => {
         // `cue:variant` names resolve like the game (an unknown variant plays its cue).
         const cues = it.kind === 'clip' && table ? it.names.map(n => { const r = resolveEventName(table, n); return r && effectiveEvent(table, r.ref) }).filter(e => !!e) : []
-        return <div key={k} className={`scene-item ${k === cur ? 'sel' : ''} ${k === picked ? 'picked' : ''}`} title={t('scene.moment.playHint')}
+        const several = it.kind === 'clip' && it.names.length > 1
+        return <Fragment key={k}><div className={`scene-item ${k === cur ? 'sel' : ''} ${k === picked ? 'picked' : ''}`} title={t('scene.moment.playHint')}
           onContextMenu={e => { if (!(it as OverriddenClip).from) return; e.preventDefault(); const at = { k, x: e.clientX, y: e.clientY }; setMenu(m => m?.k === k ? null : at) }}
           onClick={e => {
             if ((e.target as HTMLElement).closest('.scene-occ-form, button')) return
-            runtime.audio(); runtime.playMoment(k, useSceneSettings.getState().leadSec)
-            // The timeline marks the moment's firing (video time of the clip) and the Event panel shows it.
-            if (it.kind === 'clip') useSceneStore.getState().selectCue(it.name, it.event)
+            // The timeline marks the moment's firing (video time of the clip) and the Event panel shows it (its first cue).
+            if (it.kind === 'clip') pickCue(k, it.name)
+            else { runtime.audio(); runtime.playMoment(k, useSceneSettings.getState().leadSec); setSpansOf(null) }
           }}>
           <span className="scene-num">{k === 0 ? '▶' : String(k).padStart(2, '0')}</span>
           <span className="scene-dot" style={{ background: familyColor(lib, it.name) }} />
@@ -84,6 +108,16 @@ export function SceneMomentsPanel() {
             onSent={to => { setSent(s => ({ ...s, [k]: true })); setOpen(null); changedFiring((it as OverriddenClip).from ?? it.name, it.at, to) }}
             onError={changeFailed} />}
         </div>
+        {it.kind === 'clip' && !several && spanRows(k, it.name)}
+        {several && it.names.map(name => <Fragment key={name}>
+          <div className={`scene-item scene-subitem ${k === cur && sel?.name === name ? 'sel' : ''}`} title={t('scene.moment.cueHint', { name })}
+            onClick={() => pickCue(k, name)}>
+            <span className="scene-dot" style={{ background: familyColor(lib, name) }} />
+            <span className="scene-name">{name}</span>
+          </div>
+          {spanRows(k, name)}
+        </Fragment>)}
+        </Fragment>
       })}
     </div>
   </div>

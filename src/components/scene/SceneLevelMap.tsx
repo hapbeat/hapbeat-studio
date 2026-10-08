@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { offsetOf, type SceneLayer } from '@/utils/sceneData'
@@ -41,7 +41,8 @@ export function LevelMaps({ table, layer, cue, edit }: { table: CueTable; layer:
   const atLabel = useAtLabel()
   const data = useSceneStore(s => s.data)
   const level = usePlayheadLevel(layer)
-  const max = data ? data.full.levels.reduce((m, row) => Math.max(m, row[layer.gain[0]], row[layer.gain[1]]), 0) : 0
+  // Once per recording, not on every playhead poll.
+  const max = useMemo(() => data ? data.full.levels.reduce((m, row) => Math.max(m, row[layer.gain[0]], row[layer.gain[1]]), 0) : 0, [data, layer])
   const entry = table.cues[cue]
   return <div className="scene-sec scene-levelmap">
     <h3 title={`${t('scene.levelMap.hint')}\nlevelMap`}>{t('scene.levelMap.heading')}</h3>

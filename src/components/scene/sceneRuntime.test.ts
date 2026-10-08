@@ -143,3 +143,32 @@ describe('Scene loop-cue sounds follow the recorded layer level', () => {
     quiet.stop()
   })
 })
+
+describe('A loop cue span plays in the full replay over its own range', () => {
+  it('playSpan switches to the full replay, plays from the lead-in, repeats at the post-roll end; a moment ends it', async () => {
+    const { useSceneStore } = await import('@/stores/sceneStore')
+    const { SceneRuntime } = await import('./sceneRuntime')
+    const { buildItems } = await import('@/utils/sceneData')
+    const data = { fps: 30, full: { file: 'full.mp4', levels: [], events: [] }, clips: [{ file: '01.mp4', name: 'grab', names: ['grab', 'feed_loop'], hand: 'right', at: 4.3, note: '', event: 2, levels: [] }] }
+    useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: null, data, recorded: data, items: buildItems(data), cur: 1, table: null, span: null })
+    const runtime = new SceneRuntime()
+    runtime.start()
+    await flush()
+    // The second active span of feed_loop (38.5–43.8 s), 1 s lead-in and post-roll.
+    runtime.playSpan([38.5, 43.8], 1, 1)
+    await flush()
+    expect(useSceneStore.getState().cur).toBe(0)
+    expect(useSceneStore.getState().span).toEqual([38.5, 43.8])
+    expect(video.currentTime).toBe(37.5); expect(video.paused).toBe(false)
+    expect(runtime.part).toBe(true); expect(runtime.partAB).toEqual([37.5, 44.8])
+    // Reaching the end (span end + post-roll) goes back to the lead-in, not on to the rest of the replay.
+    video.currentTime = 44.8
+    ;(runtime as unknown as { tick: () => void }).tick()
+    expect(video.currentTime).toBe(37.5)
+    // A moment row ends the span: no part, no span shown.
+    runtime.playMoment(1, 1)
+    await flush()
+    expect(runtime.part).toBe(false); expect(runtime.partAB).toBeNull(); expect(useSceneStore.getState().span).toBeNull()
+    runtime.stop()
+  })
+})

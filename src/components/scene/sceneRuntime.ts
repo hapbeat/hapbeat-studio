@@ -24,9 +24,11 @@ export interface FiredShot { at: number; name: string; materials: string[]; durS
 export class SceneRuntime {
   readonly video: HTMLVideoElement
   speedIndex = 0
-  /** W: loop ±0.5 s around the focused cue. */
+  /** W: loop ±0.5 s around the focused cue; also on while a loop cue's span plays (playSpan, `span`). */
   part = false
   partAB: [number, number] | null = null
+  /** The part is a loop cue's span (playSpan), not W's ±0.5 s: a moment, W or another span ends it. */
+  private span = false
   private actx: AudioContext | null = null
   private scheduledSfx: { src: AudioBufferSourceNode; at: number }[] = []
   private mixer: SceneHapticMixer
@@ -124,6 +126,7 @@ export class SceneRuntime {
   cycleSpeed() { this.speedIndex = (this.speedIndex + 1) % SPEEDS.length; this.video.playbackRate = SPEEDS[this.speedIndex] }
   /** W: loop ±0.5 s around the focused cue; `play` false only cues it (a moment just loaded). */
   setPart(on: boolean, play = true) {
+    this.endSpan()
     this.part = on
     this.partAB = null
     const it = this.item()
@@ -137,6 +140,7 @@ export class SceneRuntime {
   playMoment(index: number, leadSec: number) {
     const s = useSceneStore.getState(), it = s.items[index]
     if (!it) return
+    if (this.span) { this.endSpan(); this.part = false; this.partAB = null; this.applyLoop() }
     const t = it.kind === 'clip' ? Math.max(0, it.event - leadSec) : 0
     if (s.cur === index && this.video.readyState >= 1) { this.seek(t); void this.video.play().catch(() => {}); return }
     this.pendingStart = t
@@ -149,6 +153,23 @@ export class SceneRuntime {
     this.pendingStart = t
     const index = s.items.findIndex(it => it.kind === 'full')
     if (index >= 0) s.select(index)
+  }
+  /**
+   * Plays a loop cue's active span `run` (replay seconds) in the full replay, from `leadSec` before its start to
+   * `postSec` after its end, repeated like W's part until a moment, W or another span is chosen.
+   */
+  playSpan(run: [number, number], leadSec: number, postSec: number) {
+    this.span = true
+    this.part = true
+    this.partAB = [Math.max(0, run[0] - leadSec), run[1] + postSec]
+    useSceneStore.getState().setSpan(run)
+    this.applyLoop()
+    this.playFull(this.partAB[0])
+  }
+  private endSpan() {
+    if (!this.span) return
+    this.span = false
+    useSceneStore.getState().setSpan(null)
   }
   restart() { this.seek(this.part && this.partAB ? this.partAB[0] : 0); void this.video.play().catch(() => {}) }
 
