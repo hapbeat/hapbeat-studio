@@ -5,7 +5,7 @@ import type { Recipe } from '@/utils/recipe'
 import type { DeviceInfo } from '@/types/manager'
 import type { WaveformClip } from '@/types/waveform'
 import type { SceneVideoTarget } from '@/utils/editorSceneSync'
-import type { ShownLayout } from '@/utils/shownLayout'
+import type { FoldView, ShownLayout } from '@/utils/shownLayout'
 import type { SoundLane } from '@/utils/soundLane'
 
 /** State the editor owns and every dock panel reads (panels render in dockview portals / popout windows). */
@@ -18,7 +18,12 @@ export interface EditorShared {
   preview: { status: 'idle' | 'rendering' | 'ready' | 'error'; error: string }
   /** `trialId/candidateId` of the AI candidate shown instead of the clip, if any. */
   auditionKey: string | null
+  /** What is played (an audition at the scene timing: the stretch). */
   audioBuffer: AudioBuffer | undefined
+  /** What the waveform panel draws: `audioBuffer`, or the material file once when 「発生に合わせて並べる」 is off (`foldView` maps the playback onto it). */
+  drawnBuffer: AudioBuffer | undefined
+  /** How the played stretch folds onto the drawn file (playhead, seeks); null when the drawing is what plays. */
+  foldView: FoldView | null
   /** How `audioBuffer` holds the shown material: the file once, or one copy per firing of its event (null = nothing shown). */
   shownLayout: ShownLayout | null
   /** The PC sounds played with a haptic audition, on the same time axis (drawn above the haptic); null = none. */

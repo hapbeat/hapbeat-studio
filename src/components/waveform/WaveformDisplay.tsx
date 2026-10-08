@@ -17,6 +17,7 @@ import { laneColumns, lanePxPerSec, laneX, type SoundLane } from '@/utils/soundL
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { NumberField } from '@/components/scene/SceneCuePanels'
 import type { LoopStretch } from '@/utils/loopStretch'
+import { foldTime, unfoldTime, type FoldView } from '@/utils/shownLayout'
 
 type OverviewMode = 'left' | 'right' | 'move' | 'seek'
 
@@ -28,10 +29,12 @@ type OverviewMode = 'left' | 'right' | 'move' | 'seek'
  * `placements`: the copies of a material placed at its event's firings; each gets a start line and an alternating tint.
  * `loop`: a loop cue's material looped over its layer's active segments: each segment gets a start and an end line, and
  * the recorded level is drawn as a line over the haptic (bottom = 0, top = 1).
+ * `fold`: the played stretch folded onto the drawn material file (「発生に合わせて並べる」 off): the playhead shows the material
+ * time playing now (hidden in a gap between firings / segments), and a click / seek at material time t goes to the first firing + t.
  * `soundLane`: the PC sounds of a haptic audition, drawn in a fixed-height lane above the haptic on the same time axis
  * (same zoom, scroll and playhead); null = the haptic alone.
  */
-export function WaveformDisplay({ original, bufferOverride, player, viewKey, transport, scale = 1, placements = [], loop = null, soundLane = null }: { original: boolean; bufferOverride?: AudioBuffer; player: EditorBufferPlayer; viewKey?: string; transport?: ReactNode; scale?: number; placements?: readonly { start: number; end: number }[]; loop?: Pick<LoopStretch, 'segments' | 'envelope'> | null; soundLane?: SoundLane | null }) {
+export function WaveformDisplay({ original, bufferOverride, player, viewKey, transport, scale = 1, placements = [], loop = null, fold = null, soundLane = null }: { original: boolean; bufferOverride?: AudioBuffer; player: EditorBufferPlayer; viewKey?: string; transport?: ReactNode; scale?: number; placements?: readonly { start: number; end: number }[]; loop?: Pick<LoopStretch, 'segments' | 'envelope'> | null; fold?: FoldView | null; soundLane?: SoundLane | null }) {
   const { t } = useI18n()
   const { playAt, stopPlayback, isPlaybackActive, playFromStart } = useEditor()
   const height = useEditorSettings(s => s.height)
@@ -58,6 +61,9 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
   const loadedClip = useRef<string>()
   const viewId = viewKey ?? clip?.id
   const duration = buffer?.duration ?? 0
+  /** Playback time of drawn time `t` (the drawn time playing at a playback time: foldTime, null in a gap). */
+  const toPlay = (t: number) => fold ? unfoldTime(fold, t) : t
+  const [inGap, setInGap] = useState(false)
   useEffect(() => {
     if (!container.current) return
     const plugin = RegionsPlugin.create()
@@ -112,10 +118,14 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
   useEffect(() => { if (drawScale.current === scale) return; drawScale.current = scale; if (ready) ws.current?.setOptions({barHeight: scale}) }, [scale, ready])
   useEffect(() => {
     if (!ready) return
-    const update = (time: number) => {ws.current?.setTime(Math.min(duration, time)); setTime(Math.min(duration, time))}
+    const update = (playTime: number) => {
+      const time = fold ? foldTime(fold, playTime) : playTime
+      setInGap(time === null)
+      if (time !== null) { ws.current?.setTime(Math.min(duration, time)); setTime(Math.min(duration, time)) }
+    }
     update(player.getCurrentTime())
     return player.on('timeupdate', update)
-  }, [player, ready, duration])
+  }, [player, ready, duration, fold])
   useEffect(() => {
     const element = surface.current
     if (!element || !ready) return
@@ -134,7 +144,7 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
         instance.setScrollTime(zoomAtTime(time, x, next, bounds.width, duration))
       } else {
         const next = Math.max(0, Math.min(duration, instance.getCurrentTime() + delta / Math.max(zoom, bounds.width / duration)))
-        player.setTime(next)
+        player.setTime(toPlay(next))
         instance.setScrollTime(Math.max(0, next - bounds.width / zoom / 2))
       }
     }
@@ -162,13 +172,13 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
     drag.current = null; anchor.current = 0
     selectAt(0, duration)
     fitRange(0, duration)
-    player.setTime(0)
+    player.setTime(toPlay(0))
   }
   const moveOverview = (event: PointerEvent<HTMLDivElement>) => {
     if (!ready) return
     const bounds = event.currentTarget.getBoundingClientRect()
     const next = Math.max(0, Math.min(duration, (event.clientX - bounds.left) / bounds.width * duration))
-    player.setTime(next)
+    player.setTime(toPlay(next))
     ws.current?.setScrollTime(Math.max(0, next - (viewport.end - viewport.start) / 2))
   }
   /** Which part of the overview frame is under the pointer (edges within 6 px resize the visible range). */
@@ -193,7 +203,7 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
         }
       }}>
       {soundLane && ready && duration > 0 && <SoundLaneView lane={soundLane} viewStart={viewport.start} zoom={zoom} duration={duration} time={time} />}
-      <div ref={container} className="waveform-container" />
+      <div ref={container} className={`waveform-container ${inGap ? 'playhead-gap' : ''}`} />
       {soundLane && ready && <span className="editor-lane-label haptic" aria-hidden="true" style={{ top: SOUND_LANE_HEIGHT }}>{t('editor.lane.haptic')}</span>}
       {placements.length > 0 && ready && duration > 0 && (() => {
         // One firing each: a line where it starts and a tint over its length, alternating so copies never read as one long file.
@@ -219,7 +229,9 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
       })()}
       {marker !== null && !selection && ready && duration > 0 && (() => {
         const width = surface.current?.clientWidth ?? 0
-        const x = (marker - viewport.start) * Math.max(zoom, width / duration)
+        const at = fold ? foldTime(fold, marker) : marker
+        if (at === null) return null
+        const x = (at - viewport.start) * Math.max(zoom, width / duration)
         return x >= 0 && x <= width ? <div className="editor-start-marker" aria-hidden="true" style={{ left: x }} /> : null
       })()}
       <div className="editor-wave-pointer" role="group" aria-label={t('editor.selectionHint')}
@@ -231,7 +243,7 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
           const next = pointerTime(event)
           // While playing, a click stops (on pointer up); the playhead is not moved by the press.
           const wasPlaying = isPlaybackActive()
-          if (!wasPlaying) player.setTime(next)
+          if (!wasPlaying) player.setTime(toPlay(next))
           if (event.shiftKey) { selectAt(anchor.current, next); return }
           let base = next
           if (selection && Math.abs(next - selection.start) * zoom < 8) base = selection.end
@@ -250,7 +262,7 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
           if (state) {
             // A plain click plays from there (the start marker moves there) or, while playing, stops; a drag made a range.
             // While the Scene video is paused a click only seeks (done on pointer down; the video follows).
-            if (!state.moved && !scenePause()?.paused()) { if (state.wasPlaying) stopPlayback(); else playAt(state.time) }
+            if (!state.moved && !scenePause()?.paused()) { if (state.wasPlaying) stopPlayback(); else playAt(toPlay(state.time)) }
           }
           drag.current = null
           if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
@@ -293,10 +305,10 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
       onPointerCancel={() => { overviewDrag.current = null }}>
       {buffer && <WaveformThumbnail buffer={buffer} />}
       <div className="editor-viewport" aria-hidden="true" style={{left: `${duration ? viewport.start/duration*100 : 0}%`, width: `${duration ? Math.min(100,(viewport.end-viewport.start)/duration*100) : 100}%`}} />
-      <div className="editor-overview-playhead" style={{left: `${duration ? time/duration*100 : 0}%`}} />
+      <div className="editor-overview-playhead" style={{left: `${duration ? time/duration*100 : 0}%`, visibility: inGap ? 'hidden' : undefined}} />
     </div>
     <div className="editor-seek-row">
-      <label>{t('editor.seek')}<input type="range" min={0} max={duration || 1} step={.001} value={time} disabled={!ready} onChange={event => player.setTime(Number(event.target.value))} /></label>
+      <label>{t('editor.seek')}<input type="range" min={0} max={duration || 1} step={.001} value={time} disabled={!ready} onChange={event => player.setTime(toPlay(Number(event.target.value)))} /></label>
       <span>{t('editor.visibleRange')} {viewport.start.toFixed(3)}–{viewport.end.toFixed(3)} s</span>
     </div>
   </div>

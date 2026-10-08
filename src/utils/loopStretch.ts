@@ -56,3 +56,15 @@ export function renderLoopStretch(channels: readonly Float32Array[], rate: numbe
   }
   return out
 }
+
+/**
+ * The material position (seconds, 0..`materialSec`) a loop plays at playback time `sec`: the recorded rate integrated
+ * from its segment's start (`step` s), wrapped; null outside the segments.
+ */
+export function loopPhaseAt(stretch: Pick<LoopStretch, 'segments' | 'level'>, materialSec: number, sec: number, step = 0.01): number | null {
+  const segment = stretch.segments.find(p => sec >= p.start && sec < p.end)
+  if (!segment || materialSec <= 0) return null
+  let ph = 0
+  for (let t = segment.start; t < sec; t += step) ph += stretch.level(t).rate * Math.min(step, sec - t)
+  return ph % materialSec
+}

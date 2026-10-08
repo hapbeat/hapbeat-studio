@@ -1115,6 +1115,8 @@ export const messages = defineMessages({
   'events.preview.hapticHint': { ja: 'イベントの触覚を表示中（編集不可・ゲームと同じ強さ）。「触覚を送信」がオンならデバイスにも送ります。決定済みの音も一緒に鳴ります', en: 'Showing an event haptic (read only, at the game level). Sent to the devices while "Send haptics" is on; the decided sound plays with it.' },
   'editor.shown.single': { ja: '素材ファイル 1 本（{sec} s）', en: 'One material file ({sec} s)' },
   'editor.shown.sequence': { ja: '発生に合わせた並び（{count} 回・素材 {sec} s）', en: 'Placed at the firings ({count}× · material {sec} s)' },
+  'editor.shown.place': { ja: '発生に合わせて並べる', en: 'Place at the firings' },
+  'editor.shown.placeHint': { ja: 'オフ：素材ファイル 1 本を、そのままの長さで表示します。オン：代表場面の発生に合わせて並べて表示します（ループ cue は録画の強さで連続表示）。試聴はどちらでも場面のタイミングで鳴ります', en: 'Off: the material file is shown once at its own length. On: it is shown placed at the firings of the representative scene (a loop cue: continuous, at the recorded strength). Auditions play at the scene timing either way.' },
   'editor.shown.loop': { ja: 'ループ（素材 {sec} s を繰り返し、強さは録画のレベル）', en: 'Loop (material {sec} s repeated, strength from the recorded level)' },
   'editor.lane.sound': { ja: '音（PC）', en: 'Sound (PC)' },
   'editor.lane.haptic': { ja: '触覚（デバイス）', en: 'Haptics (device)' },

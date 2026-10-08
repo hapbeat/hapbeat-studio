@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { layoutPlacements, layoutStatus } from './shownLayout'
+import { foldTime, layoutPlacements, layoutStatus, unfoldTime } from './shownLayout'
+import { loopPhaseAt } from './loopStretch'
+import { DEFAULT_UI_SETTINGS, sanitizeUiSettings } from './editorUiSettings'
 import { formatMessage, messages } from '@/i18n/messages'
 import { applyEmits } from './sceneEmit'
 import { resolveTrialScene } from './trialScene'
@@ -48,5 +50,42 @@ describe('emit cue (DEC-088): the sequence follows the generated firings', () =>
     expect(fired.length).toBeGreaterThan(1)
     fired.forEach(t => expect(generated).toContain(t))
     expect(fired).not.toContain(3.1)
+  })
+})
+
+describe('「発生に合わせて並べる」 off: the scene-timed playback folded onto the file drawn once', () => {
+  it('is off by default (folder-synced editor setting)', () => {
+    expect(DEFAULT_UI_SETTINGS.placeAtFirings).toBe(false)
+    expect(sanitizeUiSettings({ ...DEFAULT_UI_SETTINGS, placeAtFirings: true }).placeAtFirings).toBe(true)
+    expect(sanitizeUiSettings({ placeAtFirings: 'yes' }).placeAtFirings).toBe(false)
+  })
+
+  it('one-shots: the playhead is the time since the latest firing, hidden after the material until the next one', () => {
+    const view = { materialSec: 0.12, starts: [0, 0.4, 0.9], loop: null }
+    expect(foldTime(view, 0.05)).toBeCloseTo(0.05)
+    expect(foldTime(view, 0.2)).toBeNull()
+    expect(foldTime(view, 0.45)).toBeCloseTo(0.05)
+    expect(foldTime(view, 1.0)).toBeCloseTo(0.1)
+    expect(foldTime(view, 1.5)).toBeNull()
+    // A click at material time t plays from the first firing + t.
+    expect(unfoldTime(view, 0.07)).toBeCloseTo(0.07)
+    expect(unfoldTime({ ...view, starts: [0.3, 0.8] }, 0.07)).toBeCloseTo(0.37)
+  })
+
+  it('loop: the playhead is the phase within the material, hidden between segments; a click maps from the first segment', () => {
+    const loop = { segments: [{ start: 0.1, end: 2.1 }, { start: 3, end: 4 }], level: () => ({ gain: 1, rate: 1 }) }
+    const view = { materialSec: 0.5, starts: [0], loop }
+    expect(foldTime(view, 0.05)).toBeNull()
+    expect(foldTime(view, 0.3)).toBeCloseTo(0.2)
+    expect(foldTime(view, 0.85)).toBeCloseTo(0.25)
+    expect(foldTime(view, 2.5)).toBeNull()
+    expect(foldTime(view, 3.2)).toBeCloseTo(0.2)
+    expect(unfoldTime(view, 0.2)).toBeCloseTo(0.3)
+  })
+
+  it('loop phase follows the recorded rate', () => {
+    const loop = { segments: [{ start: 0, end: 2 }], level: () => ({ gain: 1, rate: 2 }) }
+    expect(loopPhaseAt(loop, 0.5, 0.2)).toBeCloseTo(0.4)
+    expect(loopPhaseAt(loop, 0.5, 0.3)).toBeCloseTo(0.1)
   })
 })

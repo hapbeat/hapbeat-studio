@@ -42,7 +42,7 @@ import { loopBuffer, openEventDefault, repeatBuffer, useDecidedSoundSync, useSce
 import { groupFirings, groupHapticsEnd, mixGroupHaptics, type HapticPart } from '@/utils/groupPlayback'
 import { RATE as HAPTIC_RATE } from '@/utils/sceneHaptics'
 import { useAuditionPlan, useLoopAudition } from './EditorScenePanel'
-import type { ShownLayout } from '@/utils/shownLayout'
+import { unfoldTime, type FoldView, type ShownLayout } from '@/utils/shownLayout'
 import { sceneStopSec } from '@/utils/sceneStop'
 import { contextHapticParts, renderContextLoops } from '@/utils/trialContext'
 import { useSceneSettings } from '@/stores/sceneSettings'
@@ -176,9 +176,16 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const audioBuffer = useMemo(() => shownBuffer && looped && loopRun ? loopBuffer(shownBuffer, loopRun, minSec)
     : shownBuffer && ((stretched && plan) || minSec > shownBuffer.duration)
     ? repeatBuffer(shownBuffer, (stretched && plan ? plan.targets : [0]).map(atSec => ({ atSec, gain: 1, rate: 1 })), minSec) : shownBuffer, [looped, loopRun, stretched, shownBuffer, plan, minSec])
+  // 「発生に合わせて並べる」 (editor setting, default off): the scene-timed playback is drawn as it plays; off, the material
+  // file is drawn once at its own length and the playback is folded onto it (the playhead in the current firing / loop phase).
+  const placeAtFirings = useEditorSettings(state => state.placeAtFirings)
+  const folded = !!shownBuffer && !!audioBuffer && audioBuffer !== shownBuffer && !placeAtFirings
+  const drawnBuffer = folded ? shownBuffer : audioBuffer
+  const foldView = useMemo((): FoldView | null => folded && shownBuffer ? { materialSec: shownBuffer.duration, starts: stretched && plan ? plan.targets : [0], loop: looped ? loopRun : null } : null,
+    [folded, shownBuffer, stretched, plan, looped, loopRun])
   /** What the waveform panel shows: the file once, the material placed at its event's firings (header line + per-firing marks), or looped over a loop cue's active segments. */
-  const shownLayout = useMemo((): ShownLayout | null => shownBuffer ? { materialSec: shownBuffer.duration, starts: stretched && plan ? plan.targets : null,
-    loop: looped && loopRun ? { segments: loopRun.segments, envelope: loopRun.envelope } : null } : null, [shownBuffer, stretched, plan, looped, loopRun])
+  const shownLayout = useMemo((): ShownLayout | null => shownBuffer ? { materialSec: shownBuffer.duration, starts: stretched && plan && !folded ? plan.targets : null,
+    loop: looped && loopRun && !folded ? { segments: loopRun.segments, envelope: loopRun.envelope } : null } : null, [shownBuffer, stretched, plan, looped, loopRun, folded])
   // By value (groupKey): saving a strength rewrites the table but not these parts, so nothing is mixed again for it.
   // The context's loop cues: their haptics at the recorded layer levels over the playback (mono, to the same devices).
   const sceneData = useSceneStore(state => state.data)
@@ -228,10 +235,12 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const leadSec = hapticAudition && targets.length ? hapticLeadMs / 1000 : 0
   useDecidedSoundSync(player, sceneSounds, leadSec)
   const soundLane = useMemo((): SoundLane | null => {
-    if (!hapticAudition || !audioBuffer) return null
-    const parts = soundLaneParts(sceneSounds, leadSec)
-    return parts.length ? { data: mixLane(parts, audioBuffer.duration), rate: LANE_RATE, leadMs: leadSec * 1000 } : null
-  }, [hapticAudition, audioBuffer, sceneSounds, leadSec])
+    if (!hapticAudition || !drawnBuffer) return null
+    // Drawn once: the sounds from the first firing on (material 0 s), cut at the file's length.
+    const offset = foldView ? unfoldTime(foldView, 0) : 0
+    const parts = soundLaneParts(sceneSounds, leadSec).map(p => ({ ...p, atSec: p.atSec - offset }))
+    return parts.length ? { data: mixLane(parts, drawnBuffer.duration), rate: LANE_RATE, leadMs: leadSec * 1000 } : null
+  }, [hapticAudition, drawnBuffer, foldView, sceneSounds, leadSec])
   useAdjustPersistence()
   // An adjusted event material: what its chain renders (live preview, or the clip without pending changes) goes back to the WAV.
   useMaterialWriteBack(previewActive ? (preview.status === 'ready' ? preview.buffer ?? null : null) : pendingChain ? null : s.clip?.buffer ?? null,
@@ -239,8 +248,8 @@ export function WaveformEditor({ active }: { active: boolean }) {
   player.setBuffer(audioBuffer ?? null)
   useEffect(() => {
     const selection = useWaveformStore.getState().selectedRegion
-    if (selection && audioBuffer) useWaveformStore.getState().setSelectedRegion(selection, original, audioBuffer.duration)
-  }, [audioBuffer, original])
+    if (selection && drawnBuffer) useWaveformStore.getState().setSelectedRegion(selection, original, drawnBuffer.duration)
+  }, [drawnBuffer, original])
   const [pending, setPending] = useState(false)
   const playback = useMemo(() => {
     let cached: {buffer: AudioBuffer; start: number; end: number; blob: Promise<Blob>} | null = null
@@ -366,7 +375,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
       if (original || audition || eventPreview) return
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? state.redo() : state.undo() }
       // An adjusted material shown at its event's firings: a region on that stretch is not a region of the material.
-      if (event.key === 'Delete' && state.selectedRegion && !stretched && !looped) { event.preventDefault(); state.deleteRegion() }
+      if (event.key === 'Delete' && state.selectedRegion && (folded || (!stretched && !looped))) { event.preventDefault(); state.deleteRegion() }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         const ids = visibleClipIds.current
         const index = ids.indexOf(state.clip?.id ?? '')
@@ -382,7 +391,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
       window.removeEventListener('keydown', keydown)
       for (const popup of popoutWindows) { popup.removeEventListener('keydown', space, true); popup.removeEventListener('keydown', keydown) }
     }
-  }, [active, original, audition, eventPreview, popoutWindows, stretched, looped])
+  }, [active, original, audition, eventPreview, popoutWindows, stretched, looped, folded])
   const linkSceneProject = useCallback(async (name: string | null) => {
     const result = await useSceneStore.getState().linkProject(name, true)
     if (result.ok) return true
@@ -414,7 +423,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   }, [dockApi, t, s.setError, linkSceneProject])
   const focusEditorPanel = useCallback((id: Parameters<EditorShared['focusEditorPanel']>[0]) => { if (dockApi) focusPanel(dockApi, id, t) }, [dockApi, t])
   const shared: EditorShared = {
-    active, original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, shownLayout, soundLane, level, player, playback, pending, togglePlay, playAt, stopPlayback, isPlaybackActive, playFromStart, toggleCandidate,
+    active, original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, drawnBuffer, foldView, shownLayout, soundLane, level, player, playback, pending, togglePlay, playAt, stopPlayback, isPlaybackActive, playFromStart, toggleCandidate,
     openRecipe, provenanceText, isConnected, playbackDevices, targets, routing, setVisibleClipIds, openSceneVideo, linkSceneProject, focusEditorPanel,
   }
   return <EditorContext.Provider value={shared}>

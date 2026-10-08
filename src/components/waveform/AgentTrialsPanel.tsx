@@ -228,7 +228,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
 }) {
   const { t } = useI18n()
   const { toast } = useToast()
-  const { focusEditorPanel, player, pending, toggleCandidate } = useEditor()
+  const { focusEditorPanel, player, pending, toggleCandidate, foldView, shownLayout } = useEditor()
   /** The editor playback is sounding (the ▶ / ■ of the auditioned card). */
   const [playing, setPlaying] = useState(false)
   useEffect(() => {
@@ -305,10 +305,12 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
   const marks = useEditorSettings(s => s.eventMarks)
   /** The waveform selection while a candidate is auditioned: recorded as its "use only this part" range. */
   const region = useWaveformStore(s => s.selectedRegion)
-  // On a stretch played at several firings the range is taken as seconds of one play.
+  // On a stretch played at several firings the range is taken as seconds of one play: drawn once (「発生に合わせて並べる」
+  // off) it already is; placed, from the firing (a loop cue's segment) it starts in.
   const plan = useAuditionPlan()
   const auditionSec = useAgentTrialStore(s => s.audition?.buffer.duration ?? 0)
-  const selection = useMemo(() => toFirstPlay(region, plan?.targets ?? null, auditionSec), [region, plan, auditionSec])
+  const selection = useMemo(() => toFirstPlay(region, foldView ? null : shownLayout?.loop ? shownLayout.loop.segments.map(p => p.start) : plan?.targets ?? null, auditionSec),
+    [region, foldView, shownLayout, plan, auditionSec])
   /** Every change goes to the draft keeper (memory and localStorage now, the folder copy after 300 ms). */
   const edit = (update: (f: RatingForm) => RatingForm) => { const next = update(form); setForm(next); drafts.change(trial.id, next); setDirty(true); setSaveError(null) }
   const editCandidate = (cid: string, patch: Partial<CandidateRatingForm>) => edit(f => ({ ...f, candidates: { ...f.candidates, [cid]: { ...f.candidates[cid], ...patch } } }))
