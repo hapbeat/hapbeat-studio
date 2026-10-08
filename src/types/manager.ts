@@ -216,6 +216,7 @@ export interface ManagerToStudioMessage {
     | 'write_progress'
     | 'deploy_result'
     | 'stream_ack'
+    | 'stream_displaced'        // a newer BEGIN took this client's stream's devices
     | 'space_result'
     | 'volume_result'
     | 'volume_changed'

@@ -147,6 +147,8 @@ export class EditorPlayback {
         }
       }, {signal: controller.signal, control: {consumeSeek: () => {const seek = this.seekRequest; this.seekRequest = null; return seek}, getIntensity: at => this.level?.(range.start + at) ?? 1}})
     } catch (error) {
+      // The helper took the devices from this stream (audioStreamer StreamLostError): the sound plays on, the notice says why the haptics stopped.
+      if (!controller.signal.aborted && error instanceof Error && error.name === 'StreamLostError') { this.failed(error); return }
       if (!controller.signal.aborted) {
         if (this.controller === controller) this.stop()
         throw error

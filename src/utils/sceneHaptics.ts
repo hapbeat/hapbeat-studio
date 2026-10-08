@@ -145,6 +145,12 @@ export interface HapticDevice { ipAddress: string; address: string; name?: strin
 export type HelperSend = (type: string, payload: Record<string, unknown>) => void
 /** The helper's reply to stream_begin (hapbeat-helper `stream_ack`). */
 export interface StreamAck { stream_id?: string; status?: string; targets?: string[]; deferred?: string[]; message?: string }
+/**
+ * hapbeat-helper `stream_displaced`: a newer BEGIN (`by`) took these devices
+ * from the stream. `same_client`: the newer stream came from this connection
+ * (this tab's editor audition, or this mixer's own re-BEGIN).
+ */
+export interface StreamDisplaced { stream_id?: string; targets?: string[]; by?: string; same_client?: boolean }
 
 /** A BEGIN without a `stream_ack` within this long counts as lost. */
 export const ACK_TIMEOUT_MS = 1000
@@ -159,19 +165,28 @@ export const RETRY_MS = 1000
  * deferred or not among `targets`) or does not acknowledge within
  * ACK_TIMEOUT_MS drops that device's session, and the next `pump()` after
  * RETRY_MS opens a new one with a new stream_id (instead of sending DATA the
- * helper drops).
+ * helper drops). A `no_session` ack (DATA / END of a stream that owns no
+ * device) is such a rejection too. `onDisplaced()`: a device taken by another
+ * client's stream is re-opened the same way; one taken by a stream of this tab
+ * (`same_client`, e.g. the editor audition) is left to it while
+ * `streamOpen(by)` and re-opened after it ends. A stream counts as playing
+ * while its session is open (until QUIET_END_MS after playback stops); acks and
+ * notices of ended streams are ignored.
  */
 export class SceneHapticMixer {
   private sessions = new Map<string, { id: string; address: string; wall: number; bytes: number; begun: number; acked: boolean }>()
   /** Per device ip: no BEGIN before this time (ms, the pump clock). */
   private retryAt = new Map<string, number>()
+  /** Per device ip: the same-client stream that took it; no BEGIN while that stream is open. */
+  private heldBy = new Map<string, string>()
   private sid = 0
   private quietSince = 0
   voices: OneShotVoice[] = []
   loopVoices: LoopVoice[] = []
   clock: PlayClock | null = null
 
-  constructor(private send: HelperSend, private log: (text: string) => void = () => {}) {}
+  /** `streamOpen`: whether a stream of this tab (by stream_id, not this mixer's) is still sending. */
+  constructor(private send: HelperSend, private log: (text: string) => void = () => {}, private streamOpen: (streamId: string) => boolean = () => false) {}
 
   get streaming() { return this.sessions.size > 0 }
   /** Whether `streamId` is one of this mixer's open sessions (its acks belong here). */
@@ -184,6 +199,7 @@ export class SceneHapticMixer {
     for (const [ip, s] of this.sessions) { this.send('stream_end', { stream_id: s.id, targets: [ip] }); this.log(`stream_end ${s.id} → ${ip}`) }
     this.sessions.clear()
     this.retryAt.clear()
+    this.heldBy.clear()
   }
 
   /** A `stream_ack` from the helper (acks of other streams are ignored). */
@@ -192,6 +208,19 @@ export class SceneHapticMixer {
       if (s.id !== ack.stream_id) continue
       if (ack.status === 'ok' && ack.targets?.includes(ip) && !ack.deferred?.includes(ip)) { s.acked = true; continue }
       this.drop(ip, now, `${ack.status ?? '?'}${ack.deferred?.includes(ip) ? ', deferred' : ''}${ack.status === 'ok' && !ack.targets?.includes(ip) ? ', not in targets' : ''}`)
+    }
+  }
+
+  /**
+   * A `stream_displaced` from the helper (other streams are ignored). Another
+   * client's stream: re-open after the back-off. A stream of this tab: wait
+   * until it ends (`streamOpen`), then re-open after the back-off.
+   */
+  onDisplaced(note: StreamDisplaced, now: number) {
+    for (const [ip, s] of this.sessions) {
+      if (s.id !== note.stream_id || (note.targets && !note.targets.includes(ip))) continue
+      if (note.same_client && note.by) this.heldBy.set(ip, note.by)
+      this.drop(ip, now, `displaced by ${note.by ?? '?'}${note.same_client ? ', same client: held until it ends' : ''}`)
     }
   }
 
@@ -219,6 +248,12 @@ export class SceneHapticMixer {
     }
     for (const d of o.devices) {
       if (!d.ipAddress || this.sessions.has(d.ipAddress) || (this.retryAt.get(d.ipAddress) ?? -Infinity) > now) continue
+      const holder = this.heldBy.get(d.ipAddress)
+      if (holder !== undefined) {
+        if (this.streamOpen(holder)) continue
+        this.heldBy.delete(d.ipAddress)
+        this.log(`stream ${holder} ended → re-open ${d.ipAddress}`)
+      }
       const id = `scene-${Date.now().toString(36)}-${++this.sid}`
       this.send('stream_begin', { stream_id: id, targets: [d.ipAddress], target: d.address, sample_rate: RATE, channels: 2, format: 'pcm16', total_samples: 0, gain: 1.0 })
       this.sessions.set(d.ipAddress, { id, address: d.address, wall: now, bytes: 0, begun: now, acked: false })

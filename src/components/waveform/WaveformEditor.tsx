@@ -263,9 +263,9 @@ export function WaveformEditor({ active }: { active: boolean }) {
       return cached.blob
     }, targetKey ? targetKey.split(',') : [], send, async (blob, route, options) => {
       let key = keys.get(blob); if (!key) {key = crypto.randomUUID(); keys.set(blob, key)}
-      await (await import('@/utils/audioStreamer')).streamClip(blob, route, {...options, cacheKey: key})
-    }, setPending, s.setError)
-  }, [player, targetKey, send, s.setError])
+      await (await import('@/utils/audioStreamer')).streamClip(blob, route, {...options, cacheKey: key, subscribe})
+    }, setPending, error => error instanceof Error && error.name === 'StreamLostError' ? setNotice(t('editor.stream.lost')) : s.setError(error))
+  }, [player, targetKey, send, subscribe, s.setError, t])
   // The Scene video panel's lead-in (audio / haptics start on the cue mark).
   playback.preRoll = scenePreRoll
   playback.level = () => mixedRef.current ? 1 : levelRef.current

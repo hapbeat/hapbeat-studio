@@ -6,7 +6,8 @@ import { isLoopCue, routeClips, sfxSounds, type CueRoute, type CueSfx, soundInte
 import { effectiveEvent, fireShot, MaterialPicker, resolveEventName } from '@/utils/cueEvents'
 import { runPosition } from '@/utils/sceneSegments'
 import { buildLoopSounds, LoopSoundPlayer, loopSoundLevel, type LoopSound } from '@/utils/sceneLoopSounds'
-import { buildLoopVoices, shotVoices, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, SceneHapticMixer, targetsOf, type HapticDevice, type HelperSend, type StreamAck } from '@/utils/sceneHaptics'
+import { buildLoopVoices, shotVoices, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, SceneHapticMixer, targetsOf, type HapticDevice, type HelperSend, type StreamAck, type StreamDisplaced } from '@/utils/sceneHaptics'
+import { isStreamOpen } from '@/utils/openStreams'
 
 export const SPEEDS = [1, 0.5, 0.25]
 
@@ -53,7 +54,7 @@ export class SceneRuntime {
     this.video = document.createElement('video')
     this.video.muted = true; this.video.playsInline = true; this.video.preload = 'auto'
     this.video.className = 'scene-video'
-    this.mixer = new SceneHapticMixer((type, payload) => this.helper.send(type, payload), text => useSceneStore.getState().addLog(text))
+    this.mixer = new SceneHapticMixer((type, payload) => this.helper.send(type, payload), text => useSceneStore.getState().addLog(text), isStreamOpen)
   }
 
   start() {
@@ -88,6 +89,8 @@ export class SceneRuntime {
   ownsStream(streamId: string | undefined) { return this.mixer.owns(streamId) }
   /** A helper `stream_ack`: a rejected / partial BEGIN re-opens that device's stream after a back-off. */
   streamAck(ack: StreamAck) { this.mixer.onAck(ack, performance.now()) }
+  /** A helper `stream_displaced`: another client's stream re-opens after the back-off, this tab's waits until it ends. */
+  streamDisplaced(note: StreamDisplaced) { this.mixer.onDisplaced(note, performance.now()) }
   /** Sends stream_end for every open device stream (page unload: React cleanups do not run). */
   endStreams() { this.mixer.endSessions() }
 

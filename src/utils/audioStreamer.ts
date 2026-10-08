@@ -18,6 +18,7 @@
  */
 
 import type { ManagerMessage } from '@/types/manager'
+import { markStreamClosed, markStreamOpen } from '@/utils/openStreams'
 
 /** UDP payload は firmware の RX バッファ (MTU 1500B) を超えないよう制限する。
  *  frame_size (channels × 2B) で割って 1 チャンクあたりの frames を決める:
@@ -48,7 +49,9 @@ let streamIdCounter = 0
  */
 export interface StreamControl {
   /** Returns true while the user wants the stream paused. The streamer
-   *  busy-waits in 50 ms increments until this flips back to false. */
+   *  ends the stream (stream-session-v2 inactivity timeout: no session stays
+   *  open without DATA), busy-waits in 50 ms increments until this flips back
+   *  to false, then BEGINs a new stream (new stream_id) from the paused position. */
   isPaused?: () => boolean
   /** Returns a 0..1 fractional position when the user just released the
    *  seek bar, then null on subsequent calls. The streamer consumes the
@@ -74,6 +77,18 @@ export interface StreamOptions {
   control?: StreamControl
   /** Stable logical source key. When supplied, decoded/resampled PCM is cached. */
   cacheKey?: string
+  /** Helper messages. When supplied, the stream stops (StreamLostError) once the
+   *  helper reports it lost its devices: `stream_displaced` by another client,
+   *  or a `no_session` ack. */
+  subscribe?: (listener: (message: ManagerMessage) => void) => () => void
+}
+
+/** The helper no longer routes this stream to any device (no auto re-BEGIN: the next play opens a new one). */
+export class StreamLostError extends Error {
+  constructor(readonly streamId: string, readonly reason: 'displaced' | 'no_session', readonly by?: string) {
+    super(`Stream ${streamId} lost its devices (${reason}${by ? ` by ${by}` : ''})`)
+    this.name = 'StreamLostError'
+  }
 }
 
 /**
@@ -93,7 +108,7 @@ export async function streamClip(
   const targetChannels = 2
   const intensity = options?.intensity ?? 1.0
   const control = options?.control
-  const streamId = createStreamId()
+  let streamId = createStreamId()
 
   throwIfAborted(signal)
   const arrayBuffer = await audioBlob.arrayBuffer()
@@ -116,98 +131,127 @@ export async function streamClip(
   const frameSize = channels * 2 // PCM16
   const chunkFrames = Math.max(1, Math.floor(MAX_PAYLOAD_BYTES / frameSize))
 
+  // The helper's word that this stream reaches no device any more (a same-client
+  // displacement is ignored here: its DATA then gets the `no_session` ack).
+  let lost: StreamLostError | null = null
+  const unsubscribe = options?.subscribe?.(message => {
+    const p = message.payload ?? {}
+    if (lost || p.stream_id !== streamId) return
+    if (message.type === 'stream_displaced' && !p.same_client) lost = new StreamLostError(streamId, 'displaced', typeof p.by === 'string' ? p.by : undefined)
+    else if (message.type === 'stream_ack' && p.status === 'no_session') lost = new StreamLostError(streamId, 'no_session')
+  })
   // Send STREAM_BEGIN. Destination = whatever the caller-wrapped `send`
   // injects as `targets` (see module header); bare `send` broadcasts.
-  send({
-    type: 'stream_begin',
-    payload: {
-      stream_id: streamId,
-      sample_rate: targetRate,
-      channels: channels,
-      format: 'pcm16',
-      total_samples: totalFrames,
-    },
-  })
-
-  // Pacing anchors. We use a movable anchor so a pause-resume or
-  // seek can re-zero the wall-clock vs. audio-position relationship
-  // without drifting. After a seek to frame F, anchorFrame=F and
-  // anchorTime=now, so subsequent expected times are
-  //   anchorTime + (frameOffset - anchorFrame) / sampleRate * 1000.
-  let anchorFrame = 0
-  let anchorTime = performance.now()
-
-  // Send data in chunks (PCM16 = 2 bytes per sample, interleaved when stereo)
-  let frameOffset = 0
-  while (frameOffset < totalFrames) {
-    if (signal?.aborted) {
-      send({ type: 'stream_end', payload: { stream_id: streamId } })
-      throw abortError()
-    }
-
-    // Pause: spin in 50 ms increments. On resume, re-anchor pacing so
-    // the next chunk isn't dispatched as fast as possible to "catch up".
-    if (control?.isPaused?.()) {
-      while (control.isPaused?.() && !signal?.aborted) {
-        await delay(50)
-      }
-      if (signal?.aborted) continue
-      anchorFrame = frameOffset
-      anchorTime = performance.now()
-    }
-
-    // Seek: consume the latest request, jump the read offset, re-anchor.
-    const seek = control?.consumeSeek?.() ?? null
-    if (seek != null) {
-      const target = Math.max(0, Math.min(totalFrames - 1, Math.floor(totalFrames * seek)))
-      frameOffset = target - (target % chunkFrames) // align to chunk grid
-      anchorFrame = frameOffset
-      anchorTime = performance.now()
-      if (frameOffset >= totalFrames) break
-    }
-
-    const endFrame = Math.min(frameOffset + chunkFrames, totalFrames)
-    const chunk = pcm16.slice(frameOffset * channels, endFrame * channels)
-
-    // Apply current intensity per-chunk. `slice` already returned a
-    // new buffer so this mutation doesn't affect the source pcm16.
-    const liveIntensity = control?.getIntensity?.(frameOffset / targetRate) ?? intensity
-    if (liveIntensity !== 1.0) {
-      for (let i = 0; i < chunk.length; i++) {
-        let val = Math.round(chunk[i] * liveIntensity)
-        if (val > 32767) val = 32767
-        if (val < -32768) val = -32768
-        chunk[i] = val
-      }
-    }
-
-    // Convert Int16Array to bytes
-    const bytes = new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength)
-    const base64 = uint8ArrayToBase64(bytes)
-
-    const byteOffset = frameOffset * channels * 2 // 2 bytes/sample × channels
+  const begin = () => {
+    markStreamOpen(streamId)
     send({
-      type: 'stream_data',
+      type: 'stream_begin',
       payload: {
         stream_id: streamId,
-        offset: byteOffset,
-        data: base64,
+        sample_rate: targetRate,
+        channels: channels,
+        format: 'pcm16',
+        total_samples: totalFrames,
       },
     })
-
-    frameOffset = endFrame
-    control?.onProgress?.(frameOffset, totalFrames, targetRate)
-
-    // Pace to real-time relative to the current anchor.
-    const expectedTime = anchorTime + ((frameOffset - anchorFrame) / targetRate) * 1000
-    const now = performance.now()
-    if (expectedTime > now) {
-      await delay(expectedTime - now)
-    }
   }
+  try {
+    begin()
 
-  // Send STREAM_END
-  send({ type: 'stream_end', payload: { stream_id: streamId } })
+    // Pacing anchors. We use a movable anchor so a pause-resume or
+    // seek can re-zero the wall-clock vs. audio-position relationship
+    // without drifting. After a seek to frame F, anchorFrame=F and
+    // anchorTime=now, so subsequent expected times are
+    //   anchorTime + (frameOffset - anchorFrame) / sampleRate * 1000.
+    let anchorFrame = 0
+    let anchorTime = performance.now()
+
+    // Send data in chunks (PCM16 = 2 bytes per sample, interleaved when stereo)
+    let frameOffset = 0
+    while (frameOffset < totalFrames) {
+      // No END: the helper holds no session for it any more.
+      if (lost) throw lost
+      if (signal?.aborted) {
+        send({ type: 'stream_end', payload: { stream_id: streamId } })
+        throw abortError()
+      }
+
+      // Pause: the device ends a session after 5 s without DATA
+      // (contracts stream-session-v2 "Inactivity timeout"), so END now, spin
+      // in 50 ms increments, and resume on a new stream (new stream_id). On
+      // resume, re-anchor pacing so the next chunk isn't dispatched as fast
+      // as possible to "catch up".
+      if (control?.isPaused?.()) {
+        send({ type: 'stream_end', payload: { stream_id: streamId } })
+        markStreamClosed(streamId)
+        while (control.isPaused?.() && !signal?.aborted) {
+          await delay(50)
+        }
+        if (signal?.aborted) throw abortError() // already ended
+        streamId = createStreamId()
+        lost = null
+        begin()
+        anchorFrame = frameOffset
+        anchorTime = performance.now()
+      }
+
+      // Seek: consume the latest request, jump the read offset, re-anchor.
+      const seek = control?.consumeSeek?.() ?? null
+      if (seek != null) {
+        const target = Math.max(0, Math.min(totalFrames - 1, Math.floor(totalFrames * seek)))
+        frameOffset = target - (target % chunkFrames) // align to chunk grid
+        anchorFrame = frameOffset
+        anchorTime = performance.now()
+        if (frameOffset >= totalFrames) break
+      }
+
+      const endFrame = Math.min(frameOffset + chunkFrames, totalFrames)
+      const chunk = pcm16.slice(frameOffset * channels, endFrame * channels)
+
+      // Apply current intensity per-chunk. `slice` already returned a
+      // new buffer so this mutation doesn't affect the source pcm16.
+      const liveIntensity = control?.getIntensity?.(frameOffset / targetRate) ?? intensity
+      if (liveIntensity !== 1.0) {
+        for (let i = 0; i < chunk.length; i++) {
+          let val = Math.round(chunk[i] * liveIntensity)
+          if (val > 32767) val = 32767
+          if (val < -32768) val = -32768
+          chunk[i] = val
+        }
+      }
+
+      // Convert Int16Array to bytes
+      const bytes = new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength)
+      const base64 = uint8ArrayToBase64(bytes)
+
+      const byteOffset = frameOffset * channels * 2 // 2 bytes/sample × channels
+      send({
+        type: 'stream_data',
+        payload: {
+          stream_id: streamId,
+          offset: byteOffset,
+          data: base64,
+        },
+      })
+
+      frameOffset = endFrame
+      control?.onProgress?.(frameOffset, totalFrames, targetRate)
+
+      // Pace to real-time relative to the current anchor.
+      const expectedTime = anchorTime + ((frameOffset - anchorFrame) / targetRate) * 1000
+      const now = performance.now()
+      if (expectedTime > now) {
+        await delay(expectedTime - now)
+      }
+    }
+
+    if (lost) throw lost
+    // Send STREAM_END
+    send({ type: 'stream_end', payload: { stream_id: streamId } })
+  } finally {
+    unsubscribe?.()
+    markStreamClosed(streamId)
+  }
 }
 
 // ---- Helpers ----

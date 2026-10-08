@@ -147,6 +147,69 @@ describe('scene haptic streams', () => {
     expect(begins(sent)).toHaveLength(2)
   })
 
+  it('a no_session ack while the stream plays drops it and BEGINs again after the back-off', () => {
+    const { sent, mixer, pump } = run()
+    pump(1000)
+    const [id] = begins(sent)
+    mixer.onAck({ stream_id: id, status: 'ok', targets: ['10.0.0.2'] }, 1005)
+    mixer.onAck({ stream_id: id, status: 'no_session' }, 1100)
+    expect(mixer.streaming).toBe(false)
+    pump(1100 + RETRY_MS - 1)
+    expect(begins(sent)).toHaveLength(1)
+    pump(1100 + RETRY_MS)
+    expect(begins(sent)).toHaveLength(2)
+  })
+
+  it('a no_session ack after the stream ended (stopped, duplicate END) is ignored', () => {
+    const { sent, mixer, pump } = run()
+    pump(1000)
+    const [id] = begins(sent)
+    pump(1000 + QUIET_END_MS + 1, { playing: false })
+    expect(mixer.owns(id)).toBe(false)
+    mixer.onAck({ stream_id: id, status: 'no_session' }, 1000 + QUIET_END_MS + 2)
+    pump(1000 + QUIET_END_MS + 2 + RETRY_MS, { playing: false })
+    expect(begins(sent)).toEqual([id])
+  })
+
+  it('displaced by another client: drop, then BEGIN again after the back-off', () => {
+    const { sent, mixer, pump } = run()
+    pump(1000)
+    const [id] = begins(sent)
+    mixer.onAck({ stream_id: id, status: 'ok', targets: ['10.0.0.2'] }, 1005)
+    mixer.onDisplaced({ stream_id: id, targets: ['10.0.0.2'], by: 'other-tab', same_client: false }, 1200)
+    expect(mixer.streaming).toBe(false)
+    const before = sent.length
+    pump(1200 + RETRY_MS - 1)
+    expect(sent.length).toBe(before)
+    pump(1200 + RETRY_MS)
+    expect(begins(sent)).toHaveLength(2)
+  })
+
+  it('displaced by a stream of this tab: no BEGIN while it is open, BEGIN once it ended', () => {
+    const open = new Set(['studio-1'])
+    const sent: { type: string; payload: Record<string, unknown> }[] = []
+    const mixer = new SceneHapticMixer((type, payload) => sent.push({ type, payload }), () => {}, id => open.has(id))
+    const pump = (now: number) => mixer.pump(now, { enabled: true, playing: true, devices: [device], leadMs: 0, pcm: {}, level: () => [0, 1] })
+    pump(1000)
+    const [id] = begins(sent)
+    mixer.onAck({ stream_id: id, status: 'ok', targets: ['10.0.0.2'] }, 1005)
+    mixer.onDisplaced({ stream_id: id, targets: ['10.0.0.2'], by: 'studio-1', same_client: true }, 1200)
+    expect(mixer.streaming).toBe(false)
+    const before = sent.length
+    pump(1200 + RETRY_MS); pump(1200 + 5 * RETRY_MS)
+    expect(sent.length).toBe(before) // nothing sent while the editor audition holds the device
+    open.delete('studio-1')
+    pump(1200 + 5 * RETRY_MS + 10)
+    expect(begins(sent)).toHaveLength(2)
+  })
+
+  it('displacement notices for other streams are ignored', () => {
+    const { mixer, pump } = run()
+    pump(1000)
+    mixer.onDisplaced({ stream_id: 'editor-1', targets: ['10.0.0.2'], by: 'x', same_client: false }, 1005)
+    expect(mixer.streaming).toBe(true)
+  })
+
   it('acks of other streams (the editor, another tab) are ignored', () => {
     const { sent, mixer, pump } = run()
     pump(1000)

@@ -164,3 +164,17 @@ describe('editor playback routing without physical output', () => {
     expect(events).toEqual(['first:stream_begin', 'first:stream_end', 'second:stream_begin', 'second:stream_end'])
   })
 })
+describe('editor playback when the helper drops the device stream', () => {
+  it('a lost stream (displaced / no_session) reports a notice and keeps the sound playing', async () => {
+    const pc = player(), failed = vi.fn(), sent: ManagerMessage[] = []
+    const stream = vi.fn(async (_blob: Blob, send: (message: ManagerMessage) => void) => {
+      send({type: 'stream_begin', payload: {stream_id: 's1'}})
+      throw Object.assign(new Error('lost'), {name: 'StreamLostError'})
+    })
+    const playback = new EditorPlayback(pc, vi.fn().mockResolvedValue(new Blob()), ['10.0.0.2'], message => sent.push(message), stream, vi.fn(), failed)
+    await playback.play(0, 4)
+    expect(failed).toHaveBeenCalledWith(expect.objectContaining({name: 'StreamLostError'}))
+    expect(pc.play).toHaveBeenCalledWith(0, 4); expect(pc.pause).toHaveBeenCalledTimes(1) // only the stop() at the start of play()
+    expect(sent.map(m => m.type)).toEqual(['stream_begin']); expect(playback.pending).toBe(false)
+  })
+})
