@@ -7,11 +7,11 @@ import { useWaveformStore } from '@/stores/waveformStore'
 import { useEditorSettings } from '@/stores/editorSettings'
 import { lastSceneProject, sceneProjectNames } from '@/utils/sceneRegistry'
 import { useSceneVideoTarget } from '@/utils/editorSceneSync'
-import { clipsForCue, isLoopCue, soundAllowed, positionsForCue, routeClips, sfxSounds, type CueTable } from '@/utils/sceneCueTable'
+import { clipsForCue, isLoopCue, soundAllowed, positionsForCue, routeAlternates, routeClips, sfxAlternates, sfxSounds, type CueTable } from '@/utils/sceneCueTable'
 import type { SceneLib } from '@/utils/sceneData'
 import {
   addPositionRoute, assignEventsForTrial, effectiveEvent, eventKey, listEvents, parseEventKey, removeOwnRoute, shownEventKey,
-  setRouteClips, setSfxSounds, trialsForEvent, updateOwnRoute, firstFirings,
+  addMaterial, removeMaterial, setStarred, trialsForEvent, updateOwnRoute, firstFirings,
   resetAllReviews, setNone, setOverride, setReview, setUndecided, hasOwnMaterials, undecidedReserves, restoreReserve, soundFirstNote, noSoundNote,
   type EffectiveEvent, type EventRow, type SoundStatus,
 } from '@/utils/cueEvents'
@@ -39,7 +39,7 @@ const NEW_FOLDER = ' new'
 /**
  * "Events": the cues of the game project open in the Scene tab (same store, picked
  * through the project registry), whether each has its sound / haptic decided, and
- * per cue: its sound and haptic material candidates (▶ / ★ representative / ×5 /
+ * per cue: its sound and haptic materials (▶ / ★ plays or not, DEC-089 / ×5 /
  * remove), the AI trials made for it, and "add" of the selected editor clip.
  * Variation, creating / removing variants and scene multipliers live in the Scene tab (DEC-085); a variant that writes its own
  * sfx or haptics (DEC-085 addendum, 2026-10-06) is a child row of its cue (`bite › tear`) with the same material editing.
@@ -243,17 +243,16 @@ function EventDetail({ table, lib, e }: { table: CueTable; lib: SceneLib; e: Eff
   </div>
 }
 
-/** The event's sound candidates (`sfx.sounds`; ★ = representative): a row click shows one in the waveform panel, ▶ plays it (PC only). */
+/** The event's sounds (★ = `sfx.sounds`, played; the rest = `sfx.alternates`): a row click shows one in the waveform panel, ▶ plays it (PC only). */
 function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent; loop: boolean; edit: Edit }) {
   const { t } = useI18n()
   const allowed = soundAllowed(lib, e.ref.cue)
   const soundFiles = useSceneStore(s => s.soundFiles)
   const previewId = useEventStore(s => s.preview?.id)
-  const key = eventKey(e.ref), sounds = sfxSounds(e.sfx)
+  const key = eventKey(e.ref), sounds = sfxSounds(e.sfx), alternates = sfxAlternates(e.sfx)
   const missing = (name: string) => useWaveformStore.getState().setError(t('events.preview.missing', { name }))
   const play = (s: string) => { if (!openEventSound(key, s, true)) missing(s) }
   const show = (s: string) => { if (!openEventSound(key, s)) missing(s) }
-  const set = (list: string[]) => edit(tb => setSfxSounds(tb, e.ref, list))
   const describe = useDescribeMaterial()
   // An approved sound is folded (its heading line stays); ▸ opens it.
   const [open, setOpen] = useState(e.review.sfx !== 'approved')
@@ -268,21 +267,22 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
       {loop && <p className="agent-muted">{t('events.loopSoundHint')}</p>}
       {!sounds.length && <p className="agent-muted">{t(noSoundNote(e))}</p>}
       {/* A paired cue's sounds are listed as pairs in the haptic section. */}
-      {e.variation?.paired === true ? sounds.length > 0 && <p className="agent-muted">{t('events.pair.inHaptics')}</p> : <MaterialList items={sounds} label={t('events.sound')} active={sounds.find(s => previewId === `${key}|sound|${s}`) ?? null} onPlay={play} onSelect={show}
-        onReorder={set} onRemove={set}
+      {e.variation?.paired === true ? sounds.length > 0 && <p className="agent-muted">{t('events.pair.inHaptics')}</p> : <MaterialList items={sounds} alternates={alternates} label={t('events.sound')}
+        active={[...sounds, ...alternates].find(s => previewId === `${key}|sound|${s}`) ?? null} onPlay={play} onSelect={show}
+        onStar={(s, on) => edit(tb => setStarred(tb, e.ref, 'sound', 0, s, on))} onRemove={s => edit(tb => removeMaterial(tb, e.ref, 'sound', 0, s))}
         extra={s => <MaterialActions event={key} target="sound" wav={s} />}
         below={s => <ReviseField cue={key} target="sound" material={s} />} describe={describe} />}
       <Reserves cue={e.ref.cue} target="sound" />
       <select className="events-add-material" value="" aria-label={t('events.addSoundMulti')} title={t('events.soundDir', { dir: lib.paths.sounds })}
-        onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) set([...sounds, x]) }}>
+        onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) edit(tb => addMaterial(tb, e.ref, 'sound', 0, x)) }}>
         <option value="">{t('events.addSoundMulti')}</option>
-        {soundFiles.filter(s => !sounds.includes(s)).map(s => <option key={s} value={s}>{s}</option>)}
+        {soundFiles.filter(s => !sounds.includes(s) && !alternates.includes(s)).map(s => <option key={s} value={s}>{s}</option>)}
       </select>
     </>}
   </section>
 }
 
-/** Haptic output: one block per route (body position × gain) with its clip candidates (★ = representative); "＋ add position" plays the event on another position at the same time. */
+/** Haptic output: one block per route (body position × gain) with its clips (★ = `clips`, played; the rest = `alternates`); "＋ add position" plays the event on another position at the same time. */
 function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: SceneLib; e: EffectiveEvent; loop: boolean; edit: Edit }) {
   const { t } = useI18n()
   // An approved haptic is folded (its heading line stays); ▸ opens it.
@@ -301,15 +301,15 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
     <SoundFirstNote note={soundFirstNote(e, loop)} />
     {!e.haptics.length && <p className="agent-muted">{t(e.decided.haptics ? 'events.hapticNone' : 'events.undecidedHaptic')}</p>}
     {e.haptics.map((r, i) => {
-      const clips = routeClips(r), set = (list: string[]) => edit(tb => setRouteClips(tb, e.ref, i, list))
+      const clips = routeClips(r), alternates = routeAlternates(r)
       return <div key={i} className="events-route" title={t('events.hapticRowsHint')}>
         <div className="events-route-head">
           <select value={r.at} aria-label={t('scene.route.at')} onChange={ev => { const v = ev.target.value; ev.target.blur(); edit(tb => updateOwnRoute(tb, e.ref, i, { at: v })) }}>
             {[...new Set([...positionsForCue(lib, e.ref.cue), r.at])].map(a => <option key={a} value={a}>{atLabel(a)}</option>)}
           </select>
-          <select className="events-add-material" value="" aria-label={t('events.addClipMulti')} onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) set([...clips, x]) }}>
+          <select className="events-add-material" value="" aria-label={t('events.addClipMulti')} onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) edit(tb => addMaterial(tb, e.ref, 'haptic', i, x)) }}>
             <option value="">{t('events.addClipMulti')}</option>
-            {fitting.filter(c => !clips.includes(c)).map(c => <option key={c} value={c}>{c}</option>)}
+            {fitting.filter(c => !clips.includes(c) && !alternates.includes(c)).map(c => <option key={c} value={c}>{c}</option>)}
           </select>
           <button type="button" className="scene-icon-btn" aria-label={t('scene.route.remove')} title={t('scene.route.remove')} onClick={() => edit(tb => removeOwnRoute(tb, e.ref, i))}>✕</button>
         </div>
@@ -318,8 +318,9 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
           onPlay={(_, sound, clip, at) => { if (clip && at) { if (!openEventHaptic(key, clip, at, true)) missing(clip) } else if (sound && !openEventSound(key, sound, true)) missing(sound) }}
           onShow={(target, name, at) => { if (target === 'haptic' ? !openEventHaptic(key, name, at ?? r.at) : !openEventSound(key, name)) missing(name) }}
           extra={(target, name) => <MaterialActions event={key} target={target} wav={name} />} describe={describe} />
-        : <MaterialList items={clips} label={t('scene.route.clip')} active={clips.find(c => previewId === `${key}|haptic|${c}|${r.at}`) ?? null}
-          onPlay={c => { if (!openEventHaptic(key, c, r.at, true)) missing(c) }} onSelect={c => { if (!openEventHaptic(key, c, r.at)) missing(c) }} onReorder={set} onRemove={set} minItems={1}
+        : <MaterialList items={clips} alternates={alternates} label={t('scene.route.clip')} active={[...clips, ...alternates].find(c => previewId === `${key}|haptic|${c}|${r.at}`) ?? null}
+          onPlay={c => { if (!openEventHaptic(key, c, r.at, true)) missing(c) }} onSelect={c => { if (!openEventHaptic(key, c, r.at)) missing(c) }}
+          onStar={(c, on) => edit(tb => setStarred(tb, e.ref, 'haptic', i, c, on))} onRemove={c => edit(tb => removeMaterial(tb, e.ref, 'haptic', i, c))} minItems={1}
           extra={c => <MaterialActions event={key} target="haptic" wav={c} />}
           below={c => <ReviseField cue={key} target="haptic" material={c} />} describe={describe} />}
       </div>
@@ -440,11 +441,11 @@ function MaterialOrigin({ cue }: { cue: string }) {
 }
 
 /**
- * The event's reserves (editor settings): faint rows under the materials. ★3 AI candidates kept aside: ▶ auditions
- * the candidate as rendered; "Adopt" does what "→ Event" does (writes the WAV, adds it to the end of the pool,
- * tentative) and drops it from the reserves. Materials taken off by "back to undecided": ▶ plays the event's WAV;
- * "Put back" adds it to the end of the pool (tentative; the first back is the representative) and drops it from the
- * reserves. "Remove" only drops a reserve.
+ * The event's reserves (editor settings, not the cue table — unlike the unstarred alternates, which are): faint rows
+ * under the materials. ★3 AI candidates kept aside: ▶ auditions the candidate as rendered; "Adopt" does what
+ * "→ Event" does (writes the WAV, adds it unstarred — starred when nothing is starred, DEC-089) and drops it from the
+ * reserves. Materials taken off by "back to undecided": ▶ plays the event's WAV; "Put back" adds it the same way
+ * (restoreReserve) and drops it from the reserves. "Remove" only drops a reserve.
  */
 function Reserves({ cue, target }: { cue: string; target: 'sound' | 'haptic' }) {
   const { t } = useI18n()

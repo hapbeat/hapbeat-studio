@@ -17,7 +17,7 @@ import { useToast } from '@/components/common/Toast'
 import { toFirstPlay } from '@/utils/sceneSegments'
 import { levelKey, revealEvent, useEventStore } from '@/stores/eventStore'
 import { LevelSlider } from './LevelSlider'
-import { assignEventsForTrial, candidateSound, companionSoundName, effectiveEvent, parseEventKey, trialEvent, cueRoutePositions, soundFirstNote } from '@/utils/cueEvents'
+import { assignEventsForTrial, companionSoundName, effectiveEvent, parseEventKey, trialEvent, cueRoutePositions, soundFirstNote } from '@/utils/cueEvents'
 import { runDecision } from './eventDecide'
 import { SoundFirstNote } from './EventsPanel'
 import { isLoopCue, sfxSounds } from '@/utils/sceneCueTable'
@@ -322,8 +322,8 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
   /** The best candidate becomes the sound / haptic of the trial's events (rating save with "assign on save"). */
   const autoAssign = useEditorSettings(s => s.autoAssignOnRating)
   /**
-   * Adds the ★4+ candidates (best first, free-plan output excluded) to the material pool of the trial's first scene
-   * cue, one decision each (each adds to the list: no duplicates, the existing representative stays first).
+   * Adds the ★4+ candidates (best first, free-plan output excluded) to the trial's first scene cue, one decision each
+   * (DEC-089: to its alternates; the first one is starred only while the event has nothing starred; no duplicates).
    */
   const addToPool = async (ids: string[]): Promise<{ added: string[]; excluded: { candidate: string; reason: string }[]; failures: string[] }> => {
     const scene = useSceneStore.getState()
@@ -333,8 +333,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
     const added: string[] = [], excluded: { candidate: string; reason: string }[] = [], failures: string[] = []
     for (const id of ids) {
       try {
-        const r = await runDecision({ target, source: { kind: 'candidate', trialId: trial.id, candidateId: id }, events, name: null, at: null,
-          pairSound: target === 'haptic' ? candidateSound(trial, id, useEditorSettings.getState().candidateSounds) : null })
+        const r = await runDecision({ target, source: { kind: 'candidate', trialId: trial.id, candidateId: id }, events, name: null, at: null })
         if (r.ok) added.push(r.result.name)
         // A refusal that is not an error (the same sound is already there) is an exclusion, not a failure.
         else if (r.notice.error) failures.push(t(r.notice.id, r.notice.params))
@@ -359,7 +358,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
     // What saving did goes to the operation log (console + .hapbeat-editor/activity-log.jsonl); only failures are shown.
     const excluded: { candidate: string; reason: string }[] = [], failures: string[] = []
     let added: string[] = []
-    // Every ★4+ candidate joins the event's material pool (the pool, not one best, is what the game picks from).
+    // Every ★4+ candidate joins the event's materials (alternates; starred only when the event has none — the user stars what plays).
     const pooled = poolCandidates(trial, body)
     for (const c of trial.candidates) if ((body.candidates[c.id]?.overall ?? 0) >= 4 && isFreePlanCandidate(c)) excluded.push({ candidate: c.id, reason: t('editor.agent.excludedFreePlan') })
     if (pooled.length && !trial.scene) excluded.push(...pooled.map(candidate => ({ candidate, reason: t('editor.agent.excludedNoScene') })))

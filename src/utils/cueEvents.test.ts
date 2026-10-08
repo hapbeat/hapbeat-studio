@@ -3,6 +3,7 @@ import {
   addEventMark, addPositionRoute, fireShot, resetAllReviews, setNone, setReview, setUndecided, addVariant, simultaneousGroups, firstFirings, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
   effectiveEvent, eventSceneCues, jitterGain, listEvents, MaterialPicker, matchesName, materialUsers, needsRouteForm, overwriteUsers,
   parseEventKey, removeVariant, representativeSound, candidateSound, hasOwnMaterials, shownEventKey, resolveEventName, cueRoutePositions, materialRoutePositions, pairedClips, setOverride, setRouteClips, setSfxSounds, setVariation, soundFirstNote, noSoundNote, trialEvent, trialsForEvent,
+  setStarred, isLastStar, removeMaterial, addMaterial, movePair, setOwnSfxVolume, setDistanceFalloff, undecidedReserves,
 } from './cueEvents'
 import { validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
 import { cueVoices, tableTargets } from './sceneHaptics'
@@ -169,19 +170,20 @@ describe('decide', () => {
     expect(overwriteUsers(t, 'clip', 'fresh', ['grab'])).toEqual([])
   })
 
-  it('haptic: adds to the first route candidates keeping at / gain (no duplicates), or adds a route; adds the clip entry', () => {
+  it('haptic: adds to the first route\'s alternates keeping at / gain (no duplicates), or adds a starred route; adds the clip entry', () => {
     const lib = sampleLib()
     const kept = applyHapticDecision(v2Table(), lib, { ref: { cue: 'button', variant: 'soft' }, clip: 'press2', at: 'hand', gain: 1 })
-    expect(kept.cues.button.variants!.soft.haptics).toEqual([{ clips: ['click', 'thump', 'press2'], at: 'pos_neck', gain: 0.4 }])
+    expect(kept.cues.button.variants!.soft.haptics).toEqual([{ clips: ['click', 'thump'], alternates: ['press2'], at: 'pos_neck', gain: 0.4 }])
     const again = applyHapticDecision(kept, lib, { ref: { cue: 'button', variant: 'soft' }, clip: 'thump', at: 'hand', gain: 1 })
-    expect(again.cues.button.variants!.soft.haptics![0].clips).toEqual(['click', 'thump', 'press2'])
+    expect(again.cues.button.variants!.soft.haptics).toEqual(kept.cues.button.variants!.soft.haptics)
+    expect(applyHapticDecision(kept, lib, { ref: { cue: 'button', variant: 'soft' }, clip: 'press2', at: 'hand', gain: 1 }).cues.button.variants!.soft.haptics).toEqual(kept.cues.button.variants!.soft.haptics)
     expect(kept.clips.press2).toMatchObject({ intensity: 1, loop: false })
     const added = applyHapticDecision(v2Table(), lib, { ref: { cue: 'grab', variant: null }, clip: 'thump', at: 'pos_chest', gain: 0.7 })
     expect(added.cues.grab.haptics).toEqual([{ clip: 'thump', at: 'pos_chest', gain: 0.7 }])
     expect(added.clips.thump.intensity).toBe(0.5) // an existing entry keeps its intensity
     // An inheriting variant gets its own copy; the cue is untouched.
     const own = applyHapticDecision(v2Table(), lib, { ref: { cue: 'button', variant: 'plain' }, clip: 'thump', at: 'hand', gain: 1 })
-    expect(own.cues.button.variants!.plain.haptics).toEqual([{ clips: ['click', 'thump'], at: 'hand', gain: 1 }])
+    expect(own.cues.button.variants!.plain.haptics).toEqual([{ clip: 'click', alternates: ['thump'], at: 'hand', gain: 1 }])
     expect(own.cues.button.haptics![0].clip).toBe('click')
     expect(needsRouteForm(v2Table(), { cue: 'grab', variant: null })).toBe(true)
     expect(needsRouteForm(v2Table(), { cue: 'button', variant: 'plain' })).toBe(false)
@@ -189,9 +191,9 @@ describe('decide', () => {
     expect(validateCueTable(table, ctx({ clipFiles: new Set(['click', 'thump', 'hum', 'grab']) }))).toEqual([])
   })
 
-  it('sound: adds to the candidate list (first = representative, no duplicates), keeping the volume (1.0 when new)', () => {
+  it('sound: adds to the alternates (starred when none is; no duplicates), keeping the volume (1.0 when new)', () => {
     const button = v2Table().cues.button.sfx!
-    expect(applySoundDecision(v2Table(), { cue: 'button', variant: null }, 'Clack').cues.button.sfx).toEqual({ sounds: [...button.sound ? [button.sound] : button.sounds!, 'Clack'], volume: button.volume })
+    expect(applySoundDecision(v2Table(), { cue: 'button', variant: null }, 'Clack').cues.button.sfx).toEqual({ ...button, alternates: ['Clack'] })
     expect(applySoundDecision(v2Table(), { cue: 'grab', variant: null }, 'Clack').cues.grab.sfx).toEqual({ sound: 'Clack', volume: 1 })
     const t = v2Table()
     t.cues.grab.sfx = { sounds: ['Click', 'Clack'], volume: 0.8 }
@@ -457,27 +459,23 @@ describe('paired sounds and haptics (variation.paired)', () => {
     // A third clip added by auto-assign: reported until the sounds match.
     t.cues.grab.haptics = [{ clips: ['click', 'thump', 'hum'], at: 'hand', gain: 1 }]
     expect(validateCueTable(t, okCtx)).toEqual(expect.arrayContaining(['grab: variation.paired: route 1 has 3 clip(s) for 2 sound(s)']))
-    // A candidate made for sound i of a paired cue goes to position i (replacing the clip there), else to the end.
+    // An adopted clip of a paired cue goes to the alternates (DEC-089): the starred pairs stay as they are.
     t.cues.grab.haptics = [{ clips: ['click', 'thump'], at: 'hand', gain: 1 }]
-    const lib = sampleLib()
-    const at1 = applyHapticDecision(t, lib, { ref: { cue: 'grab', variant: null }, clip: 'hum', at: 'hand', gain: 1, pairSound: 'Clack' })
-    expect(at1.cues.grab.haptics![0].clips).toEqual(['click', 'hum'])
-    const noPair = applyHapticDecision(t, lib, { ref: { cue: 'grab', variant: null }, clip: 'hum', at: 'hand', gain: 1 })
-    expect(noPair.cues.grab.haptics![0].clips).toEqual(['click', 'thump', 'hum'])
-    const unpaired = structuredClone(t); unpaired.cues.grab.variation = {}
-    expect(applyHapticDecision(unpaired, lib, { ref: { cue: 'grab', variant: null }, clip: 'hum', at: 'hand', gain: 1, pairSound: 'Clack' }).cues.grab.haptics![0].clips).toEqual(['click', 'thump', 'hum'])
+    const adopted = applyHapticDecision(t, sampleLib(), { ref: { cue: 'grab', variant: null }, clip: 'hum', at: 'hand', gain: 1 })
+    expect(adopted.cues.grab.haptics).toEqual([{ clips: ['click', 'thump'], alternates: ['hum'], at: 'hand', gain: 1 }])
+    expect(validateCueTable(adopted, okCtx).filter(p => p.includes('paired'))).toEqual([])
     t.cues.grab.variation = { paired: 'yes' as never }
     expect(validateCueTable(t, okCtx)).toEqual(expect.arrayContaining(['grab: variation.paired must be true/false']))
   })
 })
 
 describe('back to undecided keeps the materials as reserves', () => {
-  it('lists the pool representative first, puts back representative-first (tentative), never twice', async () => {
+  it('lists the starred (representative first) then the alternates, puts back starred only when none is, never twice', async () => {
     const { undecidedReserves, restoreReserve } = await import('./cueEvents')
     const { addReserves, removeReserve } = await import('./agentTrialUi')
     let t = sampleTable()
-    t.cues.button.sfx = { sounds: ['Clack', 'Click'], volume: 0.8 }
-    t.cues.button.haptics = [{ clips: ['thump', 'click'], at: 'hand', gain: 0.5 }, { clip: 'hum', at: 'pos_neck', gain: 1 }]
+    t.cues.button.sfx = { sound: 'Clack', alternates: ['Click'], volume: 0.8 }
+    t.cues.button.haptics = [{ clip: 'thump', alternates: ['click'], at: 'hand', gain: 0.5 }, { clip: 'hum', at: 'pos_neck', gain: 1 }]
     t = setReview(setReview(t, { cue: 'button', variant: null }, 'sfx', 'approved'), { cue: 'button', variant: null }, 'haptics', 'approved')
     const sounds = undecidedReserves(t, 'button', 'sfx'), clips = undecidedReserves(t, 'button', 'haptics')
     expect(sounds).toEqual([{ material: 'Clack', target: 'sound' }, { material: 'Click', target: 'sound' }])
@@ -487,21 +485,126 @@ describe('back to undecided keeps the materials as reserves', () => {
     expect(map.button.map(r => 'material' in r ? r.material : '')).toEqual(['Clack', 'Click', 'thump', 'click', 'hum'])
     t = setUndecided(setUndecided(t, 'button', 'sfx'), 'button', 'haptics')
     expect('sfx' in t.cues.button || 'haptics' in t.cues.button).toBe(false)
-    // Put back: the first one back is the representative; tentative; a second put-back of the same does not duplicate.
+    // Put back: the first one back is starred (the representative, tentative), the next to the alternates; never twice.
     t = restoreReserve(t, 'button', sounds[0]); map = removeReserve(map, 'button', sounds[0])
     t = restoreReserve(t, 'button', sounds[1]); map = removeReserve(map, 'button', sounds[1])
     t = restoreReserve(t, 'button', sounds[1])
-    expect(t.cues.button.sfx).toEqual({ sounds: ['Clack', 'Click'], volume: 1 })
+    expect(t.cues.button.sfx).toEqual({ sound: 'Clack', alternates: ['Click'], volume: 1 })
     t = restoreReserve(t, 'button', clips[0])
     t = restoreReserve(t, 'button', clips[2])
     t = restoreReserve(t, 'button', clips[1])
     t = restoreReserve(t, 'button', clips[1])
-    expect(t.cues.button.haptics).toEqual([{ clips: ['thump', 'click'], at: 'hand', gain: 0.5 }, { clip: 'hum', at: 'pos_neck', gain: 1 }])
+    expect(t.cues.button.haptics).toEqual([{ clip: 'thump', alternates: ['click'], at: 'hand', gain: 0.5 }, { clip: 'hum', at: 'pos_neck', gain: 1 }])
     expect(effectiveEvent(t, { cue: 'button', variant: null })!.review).toEqual({ sfx: 'tentative', haptics: 'tentative' })
     expect(map.button.map(r => 'material' in r ? r.material : '')).toEqual(['thump', 'click', 'hum'])
-    // Approved before a put-back goes back to tentative.
+    // A put-back to the alternates does not change what plays: an approved sound stays approved.
     t = setReview(t, { cue: 'button', variant: null }, 'sfx', 'approved')
-    t = setSfxSounds(t, { cue: 'button', variant: null }, ['Clack'])
-    expect(restoreReserve(t, 'button', sounds[1]).cues.button.review?.sfx).toBeUndefined()
+    const other = restoreReserve(t, 'button', { material: 'Other', target: 'sound' })
+    expect(other.cues.button.sfx).toEqual({ sound: 'Clack', alternates: ['Click', 'Other'], volume: 1 })
+    expect(other.cues.button.review?.sfx).toBe('approved')
+  })
+})
+
+describe('starred and alternates (DEC-089)', () => {
+  const ref = { cue: 'button', variant: null }
+  const withAlts = () => {
+    const t = sampleTable()
+    t.cues.button.sfx = { sound: 'Click', alternates: ['Clack'], volume: 0.6 }
+    t.cues.button.haptics = [{ clip: 'click', alternates: ['thump'], at: 'hand', gain: 1 }]
+    return t
+  }
+
+  it('validation: accepts alternates; rejects unknown names, duplicates and names also starred', () => {
+    expect(validateCueTable(withAlts(), ctx())).toEqual([])
+    const t = withAlts()
+    t.cues.button.sfx = { sound: 'Click', alternates: ['Click', 'Nope', 'Nope'], volume: 0.6 }
+    t.cues.button.haptics = [{ clip: 'click', alternates: ['click', 'ghost'], at: 'hand', gain: 1 }]
+    t.cues.grab.sfx = { sound: 'Click', alternates: 'Clack' as never, volume: 1 }
+    t.cues.detent.haptics = [{ clip: 'thump', alternates: ['click', 'click'], at: 'hand', gain: 1 }]
+    expect(validateCueTable(t, ctx())).toEqual(expect.arrayContaining([
+      'button: Content/Audio/Nope.wav missing',
+      'button: sfx alternates list Nope twice',
+      'button: sfx alternates Click are also starred (sound / sounds)',
+      'button: route alternates must be clip names of this table',
+      'grab: sfx alternates must be a list of sound names',
+      'detent: route alternates list click twice',
+    ]))
+  })
+
+  it('★ moves a material between the starred list and the alternates; the last ★ cannot be taken off', () => {
+    let t = setStarred(withAlts(), ref, 'sound', 0, 'Clack', true)!
+    expect(t.cues.button.sfx).toEqual({ sounds: ['Click', 'Clack'], volume: 0.6 })
+    t = setStarred(t, ref, 'sound', 0, 'Click', false)!
+    expect(t.cues.button.sfx).toEqual({ sound: 'Clack', alternates: ['Click'], volume: 0.6 })
+    expect(setStarred(t, ref, 'sound', 0, 'Clack', false)).toBeNull()
+    expect(isLastStar(t, ref, 'sound', 0, 'Clack')).toBe(true)
+    expect(setStarred(t, ref, 'sound', 0, 'Missing', true)).toBeNull()
+    const h = setStarred(withAlts(), ref, 'haptic', 0, 'thump', true)!
+    expect(h.cues.button.haptics).toEqual([{ clips: ['click', 'thump'], at: 'hand', gain: 1 }])
+    expect(setStarred(withAlts(), ref, 'haptic', 0, 'click', false)).toBeNull()
+    // Changing what plays makes it tentative again.
+    const approved = setReview(withAlts(), ref, 'sfx', 'approved')
+    expect(setStarred(approved, ref, 'sound', 0, 'Clack', true)!.cues.button.review?.sfx).toBe('tentative')
+  })
+
+  it('remove: an alternate goes; the last starred one stays while alternates remain', () => {
+    expect(removeMaterial(withAlts(), ref, 'sound', 0, 'Clack')!.cues.button.sfx).toEqual({ sound: 'Click', volume: 0.6 })
+    expect(removeMaterial(withAlts(), ref, 'sound', 0, 'Click')).toBeNull()
+    expect(removeMaterial(sampleTable(), ref, 'sound', 0, 'Click')!.cues.button.sfx).toBeNull()
+    expect(removeMaterial(withAlts(), ref, 'haptic', 0, 'click')).toBeNull()
+    expect(removeMaterial(withAlts(), ref, 'haptic', 0, 'thump')!.cues.button.haptics).toEqual([{ clip: 'click', at: 'hand', gain: 1 }])
+  })
+
+  it('add: to the alternates, starred when nothing is', () => {
+    expect(addMaterial(sampleTable(), ref, 'sound', 0, 'Clack')!.cues.button.sfx).toEqual({ sound: 'Click', alternates: ['Clack'], volume: 0.6 })
+    expect(addMaterial(sampleTable(), { cue: 'grab', variant: null }, 'sound', 0, 'Clack')!.cues.grab.sfx).toEqual({ sound: 'Clack', volume: 1 })
+    expect(addMaterial(withAlts(), ref, 'haptic', 0, 'thump')).toBeNull()
+  })
+
+  it('every edit keeps the alternates; empty alternates are never written', () => {
+    const t = withAlts()
+    const tb = setSfxSounds(t, ref, ['Click', 'Clack'])
+    expect(tb.cues.button.sfx).toEqual({ sounds: ['Click', 'Clack'], volume: 0.6 })
+    expect(setSfxSounds(t, ref, ['Clack', 'Click']).cues.button.sfx!.alternates).toBeUndefined()
+    expect(setRouteClips(t, ref, 0, ['click', 'hum']).cues.button.haptics![0].alternates).toEqual(['thump'])
+    expect(setOwnSfxVolume(t, ref, 0.9).cues.button.sfx!.alternates).toEqual(['Clack'])
+    expect(setDistanceFalloff(t, ref, { nearCm: 0, farCm: 100, farGain: 0.5 }).cues.button.sfx!.alternates).toEqual(['Clack'])
+    expect(setReview(t, ref, 'sfx', 'approved').cues.button.haptics![0].alternates).toEqual(['thump'])
+    // A variant's own copy keeps them.
+    const v = setOverride(setOverride(addVariant(t, 'button', 'loud'), { cue: 'button', variant: 'loud' }, 'sfx', true), { cue: 'button', variant: 'loud' }, 'haptics', true)
+    expect(v.cues.button.variants!.loud.sfx!.alternates).toEqual(['Clack'])
+    expect(v.cues.button.variants!.loud.haptics![0].alternates).toEqual(['thump'])
+    // Paired: only the starred lists pair and move.
+    const p = withAlts()
+    p.cues.button.sfx = { sounds: ['Click', 'Clack'], alternates: ['Other'], volume: 1 }
+    p.cues.button.haptics = [{ clips: ['click', 'thump'], alternates: ['hum'], at: 'hand', gain: 1 }]
+    p.cues.button.variation = { paired: true }
+    const moved = movePair(p, ref, 0, 1)
+    expect(moved.cues.button.sfx).toEqual({ sounds: ['Clack', 'Click'], alternates: ['Other'], volume: 1 })
+    expect(moved.cues.button.haptics).toEqual([{ clips: ['thump', 'click'], alternates: ['hum'], at: 'hand', gain: 1 }])
+    expect(validateCueTable({ ...p, sounds: { Other: { intensity: 1 } } }, ctx({ soundFiles: new Set(['Click', 'Clack', 'Other']) })).filter(x => x.includes('paired'))).toEqual([])
+    // Untouched tables round-trip unchanged (no alternates key appears).
+    const plain = sampleTable()
+    expect(JSON.stringify(setReview(plain, ref, 'sfx', 'approved').cues.button.sfx)).toBe(JSON.stringify(plain.cues.button.sfx))
+    expect(JSON.stringify(applySoundDecision(plain, ref, 'Click').cues.button.sfx)).toBe(JSON.stringify(plain.cues.button.sfx))
+    expect(JSON.stringify(setSfxSounds(plain, ref, ['Click']).cues.button.sfx)).not.toContain('alternates')
+  })
+
+  it('back to undecided moves the alternates to the reserves too', () => {
+    expect(undecidedReserves(withAlts(), 'button', 'sfx').map(r => r.material)).toEqual(['Click', 'Clack'])
+    expect(undecidedReserves(withAlts(), 'button', 'haptics').map(r => r.material)).toEqual(['click', 'thump'])
+  })
+
+  it('playback: only starred materials play (pick, paired, representative)', () => {
+    const t = withAlts()
+    t.cues.button.sfx = { sounds: ['Click'], alternates: ['Clack'], volume: 1 }
+    t.cues.button.variation = { pick: 'random', paired: true }
+    const e = effectiveEvent(t, ref)!
+    const picker = new MaterialPicker(() => 0.99)
+    const shots = Array.from({ length: 10 }, () => fireShot(e, false, picker, Math.random))
+    expect(new Set(shots.map(s => s.sound))).toEqual(new Set(['Click']))
+    expect(new Set(shots.flatMap(s => s.routes.map(r => r.clip)))).toEqual(new Set(['click']))
+    expect(representativeSound(t, sampleLib(), ['button'], { Click: 'c', Clack: 'k' }, 'Clack')).toMatchObject({ buffer: 'c' })
+    expect(pairedClips(e, 0)).toEqual([{ clip: 'click', at: 'hand' }])
   })
 })

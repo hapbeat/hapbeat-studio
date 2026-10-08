@@ -98,6 +98,8 @@
 .events-mat-origin-id { color: #c4a7f5; }
 .events-mat-star { color: var(--text-muted); }
 .events-mat-star.on { color: #f5d547; }
+/* Unstarred alternates (DEC-089): kept in the event, never played. */
+.events-mat.alternate { opacity: .6; border-style: dotted; }
 .events-add-material { align-self: flex-start; max-width: 100%; }
 .events-route { display: flex; flex-direction: column; gap: 2px; }
 .events-route-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }

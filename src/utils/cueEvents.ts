@@ -2,7 +2,7 @@ import type { SceneLib } from './sceneData'
 import type { MaterialReserve } from './editorUiSettings'
 import {
   type CueReview, type ReviewState,
-  clampNumber, isLoopCue, soundAllowed, soundIntensity, positionsForCue, routeClips, sfxSounds, VARIANT_NAME,
+  clampNumber, isLoopCue, soundAllowed, soundIntensity, positionsForCue, routeAlternates, routeClips, sfxAlternates, sfxSounds, VARIANT_NAME,
   type CueEntry, type CueRoute, type CueSfx, type CueTable, type CueVariant, type CueVariation, type PickMode, type RampCurve, type DistanceFalloff, type CueEmit,
 } from './sceneCueTable'
 
@@ -245,52 +245,66 @@ function edited(table: CueTable, ref: EventRef, change: (entry: CueEntry | CueVa
   return next
 }
 
-export interface HapticDecision { ref: EventRef; clip: string; /** at / gain for a new route (used only when the event has none). */ at: string; gain: number; /** A new clip entry's intensity (default 1). */ intensity?: number
-  /** The sound the clip was made for (an AI candidate's `sound`): with `variation.paired` it goes to that sound's position. */
-  pairSound?: string | null }
+export interface HapticDecision { ref: EventRef; clip: string; /** at / gain for a new route (used only when the event has none). */ at: string; gain: number; /** A new clip entry's intensity (default 1). */ intensity?: number }
+
+// ── Starred (played) and alternates (DEC-089) ──
+
+const uniqueNot = (list: readonly string[], starred: readonly string[]) => [...new Set(list)].filter(x => !starred.includes(x))
 /**
- * Clip entry (added with intensity 1.0 and the cue's loop kind; an existing
- * entry keeps its values) + the event's haptics: `clip` joins the first route's
- * candidate list (its at / gain kept; the first clip stays the representative,
- * a clip already listed is not added again), or a new route when there is none.
- * A variant that inherited its haptics gets its own copy first. (DEC-085: adopting adds, never replaces.)
+ * A sfx playing `sounds` (one = `sound`, several = `sounds`) with `alternates` (unstarred; omitted when empty, a
+ * starred name never listed there); every other field of `prev` kept, volume 1.0 when new.
  */
-/**
- * Where a new clip joins the first route's list: at the end, or — when the event's variation is `paired` and the
- * clip was made for sound `pairSound` (index i of the sounds) — at position i: replacing the clip there (the pairs
- * stay aligned), or appended when the list is not that long yet.
- */
-function pairedSlot(clips: string[], clip: string, e: EffectiveEvent, pairSound: string | null | undefined): string[] {
-  const i = pairSound && e.variation?.paired === true ? sfxSounds(e.sfx).indexOf(pairSound) : -1
-  if (i < 0 || i >= clips.length) return [...clips, clip]
-  return clips.map((c, k) => k === i ? clip : c)
+export function sfxWith(prev: CueSfx | null | undefined, sounds: readonly string[], alternates: readonly string[] = sfxAlternates(prev)): CueSfx {
+  const { sound: _one, sounds: _many, alternates: _alts, volume, ...rest } = prev ?? { volume: 1.0 }
+  const alts = uniqueNot(alternates, sounds)
+  return { ...(sounds.length === 1 ? { sound: sounds[0] } : { sounds: [...sounds] }), volume: volume ?? 1.0, ...rest, ...(alts.length ? { alternates: alts } : {}) }
 }
+/** `route` playing `clips` (one = `clip`) with `alternates` (omitted when empty); at / gain and other fields kept. */
+export function routeWith(route: CueRoute, clips: readonly string[], alternates: readonly string[] = routeAlternates(route)): CueRoute {
+  const { clip: _one, clips: _many, alternates: _alts, ...rest } = route
+  const alts = uniqueNot(alternates, clips)
+  return { ...rest, ...(clips.length === 1 ? { clip: clips[0] } : { clips: [...clips] }), ...(alts.length ? { alternates: alts } : {}) }
+}
+/**
+ * Where an adopted / added / put back material goes (DEC-089): to the alternates, or — when nothing is starred
+ * yet — starred (it becomes the representative). Unchanged (null) when it is already starred or an alternate.
+ */
+function adoptInto(starred: readonly string[], alternates: readonly string[], name: string): { starred: string[]; alternates: string[] } | null {
+  if (starred.includes(name) || alternates.includes(name)) return null
+  return starred.length ? { starred: [...starred], alternates: [...alternates, name] } : { starred: [name], alternates: [...alternates] }
+}
+
+/**
+ * Clip entry (added with intensity 1.0 and the cue's loop kind; an existing entry keeps its values) + the event's
+ * haptics: `clip` joins the first route's alternates (DEC-089; the user stars what plays), or becomes its starred
+ * clip when the route has none; a new route when there is none. Never twice. A variant that inherited its haptics
+ * gets its own copy first. The review goes back to tentative only when what plays changed.
+ */
 export function applyHapticDecision(table: CueTable, lib: SceneLib, d: HapticDecision): CueTable {
   const next = edited(table, d.ref, (entry, effective) => {
     const routes = effective.haptics
+    let plays = true
     if (routes.length) {
-      const clips = routeClips(routes[0]), { clips: _drop, clip: _one, ...rest } = routes[0]
-      const next = clips.includes(d.clip) ? clips : pairedSlot(clips, d.clip, effective, d.pairSound)
-      routes[0] = next.length === 1 ? { ...rest, clip: next[0] } : { ...rest, clips: next }
-    }
-    else routes.push({ clip: d.clip, at: d.at, gain: clampNumber(d.gain, 0, 2) })
+      const before = routeClips(routes[0]), placed = adoptInto(before, routeAlternates(routes[0]), d.clip)
+      if (placed) routes[0] = routeWith(routes[0], placed.starred, placed.alternates)
+      plays = !!placed && placed.starred.length !== before.length
+    } else routes.push({ clip: d.clip, at: d.at, gain: clampNumber(d.gain, 0, 2) })
     entry.haptics = routes
-    // A decision is tentative until the user approves it.
-    entry.review = { ...(entry.review ?? {}), haptics: 'tentative' }
+    // A decision that changes what plays is tentative until the user approves it.
+    if (plays) entry.review = { ...(entry.review ?? {}), haptics: 'tentative' }
   })
   if (!next.clips[d.clip]) next.clips[d.clip] = { intensity: clampNumber(d.intensity ?? 1, 0, 1), loop: isLoopCue(lib, d.ref.cue), description: `Decided in Studio for ${eventKey(d.ref)}` }
   return next
 }
 /**
- * `sound` joins the event's candidate list (`sfx.sounds`; the first is the representative, a sound already
- * listed is not added again; one sound stays `sound`, two or more become `sounds`). Volume kept, 1.0 when new.
+ * `sound` joins the event's alternates (DEC-089), or becomes its starred sound (the representative) when none is
+ * starred; never twice. Volume kept, 1.0 when new. The review goes back to tentative only when what plays changed.
  */
 export function applySoundDecision(table: CueTable, ref: EventRef, sound: string): CueTable {
   return edited(table, ref, (entry, effective) => {
-    const sounds = sfxSounds(effective.sfx), next = sounds.includes(sound) ? sounds : [...sounds, sound]
-    const volume = effective.sfx ? effective.sfx.volume : 1.0
-    entry.sfx = next.length === 1 ? { sound: next[0], volume } : { sounds: next, volume }
-    entry.review = { ...(entry.review ?? {}), sfx: 'tentative' }
+    const before = sfxSounds(effective.sfx), placed = adoptInto(before, sfxAlternates(effective.sfx), sound)
+    entry.sfx = placed ? sfxWith(effective.sfx, placed.starred, placed.alternates) : effective.sfx
+    if (placed && placed.starred.length !== before.length) entry.review = { ...(entry.review ?? {}), sfx: 'tentative' }
   })
 }
 
@@ -365,23 +379,19 @@ export function movePair(table: CueTable, ref: EventRef, index: number, dir: -1 
     if (j < 0 || j >= sounds.length || index >= sounds.length) return
     const swap = <T,>(list: T[]) => { const next = [...list]; [next[index], next[j]] = [next[j], next[index]]; return next }
     const nextSounds = swap(sounds)
-    entry.sfx = effective.sfx && (nextSounds.length === 1 ? { sound: nextSounds[0], volume: effective.sfx.volume } : { sounds: nextSounds, volume: effective.sfx.volume })
+    entry.sfx = effective.sfx && sfxWith(effective.sfx, nextSounds)
     entry.haptics = effective.haptics.map(r => {
       const clips = routeClips(r)
-      if (clips.length !== sounds.length) return r
-      const { clip: _c, clips: _cs, ...rest } = r
-      return { ...rest, clips: swap(clips) }
+      return clips.length !== sounds.length ? r : routeWith(r, swap(clips))
     })
   })
 }
-/** Route `index` of what `ref` writes plays `clips` (one = `clip`, several = `clips`). */
+/** Route `index` of what `ref` writes plays `clips` (one = `clip`, several = `clips`); its alternates are kept (less any now starred). */
 export function setRouteClips(table: CueTable, ref: EventRef, index: number, clips: string[]): CueTable {
   if (!clips.length) return table
   return edited(table, ref, entry => {
     const route = entry.haptics?.[index]
-    if (!route) return
-    delete route.clip; delete route.clips
-    if (clips.length === 1) route.clip = clips[0]; else route.clips = [...clips]
+    if (route) entry.haptics![index] = routeWith(route, clips)
   })
 }
 export function updateOwnRoute(table: CueTable, ref: EventRef, index: number, patch: { at?: string; gain?: number }): CueTable {
@@ -395,16 +405,72 @@ export function updateOwnRoute(table: CueTable, ref: EventRef, index: number, pa
 export function removeOwnRoute(table: CueTable, ref: EventRef, index: number): CueTable {
   return edited(table, ref, entry => { entry.haptics?.splice(index, 1) })
 }
-/** The sfx `ref` writes plays `sounds` (one = `sound`, several = `sounds`; empty = no sound); volume kept (1.0 when new). */
 /** The scene multiplier of the sound `ref` writes (sfx.volume, 0..2; DEC-086 3rd layer). */
 export function setOwnSfxVolume(table: CueTable, ref: EventRef, volume: number): CueTable {
   return edited(table, ref, entry => { if (entry.sfx) entry.sfx = { ...entry.sfx, volume: clampNumber(volume, 0, 2) } })
 }
+/**
+ * The sfx `ref` writes plays `sounds` (one = `sound`, several = `sounds`; empty = no sound, its alternates go too);
+ * volume and alternates kept (less any now starred; volume 1.0 when new).
+ */
 export function setSfxSounds(table: CueTable, ref: EventRef, sounds: string[]): CueTable {
-  return edited(table, ref, entry => {
-    const volume = entry.sfx ? entry.sfx.volume : 1.0
-    entry.sfx = !sounds.length ? null : sounds.length === 1 ? { sound: sounds[0], volume } : { sounds: [...sounds], volume }
+  return edited(table, ref, entry => { entry.sfx = !sounds.length ? null : sfxWith(entry.sfx, sounds) })
+}
+/** The starred and alternate materials of what `ref` writes (a sound, or route `route`'s clips); null when it does not write them. */
+function ownMaterials(table: CueTable, ref: EventRef, target: 'sound' | 'haptic', route: number): { starred: string[]; alternates: string[] } | null {
+  const e = effectiveEvent(table, ref)
+  if (!e) return null
+  if (target === 'sound') return e.own.sfx ? { starred: sfxSounds(e.sfx), alternates: sfxAlternates(e.sfx) } : null
+  const r = e.own.haptics ? e.haptics[route] : undefined
+  return r ? { starred: routeClips(r), alternates: routeAlternates(r) } : null
+}
+/** Writes the starred / alternate lists of what `ref` writes (a sound, or route `route`). */
+function writeMaterials(table: CueTable, ref: EventRef, target: 'sound' | 'haptic', route: number, starred: string[], alternates: string[], review: boolean): CueTable {
+  return edited(table, ref, (entry, effective) => {
+    if (target === 'sound') entry.sfx = sfxWith(effective.sfx, starred, alternates)
+    else entry.haptics![route] = routeWith(effective.haptics[route], starred, alternates)
+    if (review) entry.review = { ...(entry.review ?? {}), [target === 'sound' ? 'sfx' : 'haptics']: 'tentative' }
   })
+}
+/**
+ * ★ of one material of what `ref` writes (DEC-089; `route` = the route index for a haptic): on = from the
+ * alternates to the end of the starred list, off = from the starred list to the end of the alternates (what plays
+ * changed: tentative). Null when nothing changes, or when it would leave nothing starred (refused: the validators
+ * need a starred material; "none" is how an event is silenced).
+ */
+export function setStarred(table: CueTable, ref: EventRef, target: 'sound' | 'haptic', route: number, name: string, on: boolean): CueTable | null {
+  const m = ownMaterials(table, ref, target, route)
+  if (!m || (on ? !m.alternates.includes(name) : !m.starred.includes(name) || m.starred.length === 1)) return null
+  return on ? writeMaterials(table, ref, target, route, [...m.starred, name], m.alternates.filter(x => x !== name), true)
+    : writeMaterials(table, ref, target, route, m.starred.filter(x => x !== name), [...m.alternates, name], true)
+}
+/** True when `name` is the only starred material of what `ref` writes (its ★ cannot be taken off). */
+export function isLastStar(table: CueTable, ref: EventRef, target: 'sound' | 'haptic', route: number, name: string): boolean {
+  const m = ownMaterials(table, ref, target, route)
+  return !!m && m.starred.length === 1 && m.starred[0] === name
+}
+/**
+ * "＋ add" of a material to what `ref` writes (a sound, or route `route`'s clips): to the alternates, or starred when
+ * nothing is starred yet (DEC-089, like an adoption). Null when it is already there or `ref` does not write it.
+ */
+export function addMaterial(table: CueTable, ref: EventRef, target: 'sound' | 'haptic', route: number, name: string): CueTable | null {
+  const m = ownMaterials(table, ref, target, route)
+  const placed = m && adoptInto(m.starred, m.alternates, name)
+  return placed ? writeMaterials(table, ref, target, route, placed.starred, placed.alternates, placed.starred.length !== m!.starred.length) : null
+}
+/**
+ * Takes one material off what `ref` writes (a starred one or an alternate). Null when it is not there, or when it is
+ * the last starred one while it cannot go (a route's last clip; a sound with alternates): unstar another or "none".
+ * The last starred sound without alternates leaves no sound (`sfx: null`), as before.
+ */
+export function removeMaterial(table: CueTable, ref: EventRef, target: 'sound' | 'haptic', route: number, name: string): CueTable | null {
+  const m = ownMaterials(table, ref, target, route)
+  if (!m) return null
+  if (m.alternates.includes(name)) return writeMaterials(table, ref, target, route, m.starred, m.alternates.filter(x => x !== name), false)
+  if (!m.starred.includes(name)) return null
+  const left = m.starred.filter(x => x !== name)
+  if (!left.length && (target === 'haptic' || m.alternates.length)) return null
+  return target === 'sound' ? setSfxSounds(table, ref, left) : setRouteClips(table, ref, route, left)
 }
 
 // ── Playback of v2 events (Scene tab, editor previews) ──
@@ -539,39 +605,42 @@ export function setUndecided(table: CueTable, cue: string, field: 'sfx' | 'hapti
 }
 /**
  * The materials "back to undecided" takes off a cue's sound / haptic, to keep as the event's reserves: the sounds
- * (representative first), or each route's clips in route order with the route's position and gain.
+ * (representative first, then the alternates), or each route's clips and alternates in route order with the route's
+ * position and gain.
  */
 export function undecidedReserves(table: CueTable, cue: string, field: 'sfx' | 'haptics'): MaterialReserve[] {
   const entry = table.cues[cue]
   if (!entry) return []
-  if (field === 'sfx') return sfxSounds(entry.sfx).map(material => ({ material, target: 'sound' as const }))
-  return (entry.haptics ?? []).flatMap(r => routeClips(r).map(material => ({ material, target: 'haptic' as const, at: r.at, gain: r.gain })))
+  if (field === 'sfx') return [...sfxSounds(entry.sfx), ...sfxAlternates(entry.sfx)].map(material => ({ material, target: 'sound' as const }))
+  return (entry.haptics ?? []).flatMap(r => [...routeClips(r), ...routeAlternates(r)].map(material => ({ material, target: 'haptic' as const, at: r.at, gain: r.gain })))
 }
 /**
- * "Put back" of a reserved material: added to the end of the cue's pool (the first one back is the representative),
- * a haptic onto the route at its position (a new route when there is none); never twice. The review goes to tentative.
+ * "Put back" of a reserved material: to the cue's alternates, or starred when nothing is starred yet (DEC-089; it
+ * becomes the representative); a haptic onto the route at its position (a new route, starred, when there is none);
+ * never twice. The review goes to tentative when what plays changed.
  */
 export function restoreReserve(table: CueTable, cue: string, r: MaterialReserve): CueTable {
   const ref: EventRef = { cue, variant: null }
+  let plays = false
   const next = edited(table, ref, entry => {
     if (r.target === 'sound') {
-      const sounds = sfxSounds(entry.sfx)
-      if (sounds.includes(r.material)) return
-      const volume = entry.sfx ? entry.sfx.volume : 1.0, list = [...sounds, r.material]
-      entry.sfx = list.length === 1 ? { sound: list[0], volume } : { sounds: list, volume }
+      const placed = adoptInto(sfxSounds(entry.sfx), sfxAlternates(entry.sfx), r.material)
+      if (!placed) return
+      plays = !sfxSounds(entry.sfx).length
+      entry.sfx = sfxWith(entry.sfx, placed.starred, placed.alternates)
       return
     }
     const routes = entry.haptics ?? [], at = r.at ?? routes[0]?.at
     if (!at) return
-    const route = routes.find(x => x.at === at)
-    if (!route) { entry.haptics = [...routes, { clip: r.material, at, gain: r.gain ?? 1.0 }]; return }
-    const clips = routeClips(route)
-    if (clips.includes(r.material)) return
-    delete route.clip; delete route.clips
-    route.clips = [...clips, r.material]
+    const i = routes.findIndex(x => x.at === at)
+    if (i < 0) { entry.haptics = [...routes, { clip: r.material, at, gain: r.gain ?? 1.0 }]; plays = true; return }
+    const placed = adoptInto(routeClips(routes[i]), routeAlternates(routes[i]), r.material)
+    if (!placed) return
+    plays = !routeClips(routes[i]).length
+    routes[i] = routeWith(routes[i], placed.starred, placed.alternates)
     entry.haptics = routes
   })
-  return setReview(next, ref, r.target === 'sound' ? 'sfx' : 'haptics', 'tentative')
+  return plays ? setReview(next, ref, r.target === 'sound' ? 'sfx' : 'haptics', 'tentative') : next
 }
 // ── One firing (shared by the Scene tab and the editor) ──
 

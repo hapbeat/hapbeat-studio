@@ -196,8 +196,9 @@ export function isFreePlanCandidate(c: Pick<TrialCandidate, 'label' | 'source'>)
 }
 
 /**
- * Candidates a saved rating adds to the event's material pool: every one rated ★4+ (verdict "use"), best
- * first (overall descending, then id), except free-plan output. The pool's existing representative stays first.
+ * Candidates a saved rating adds to the event: every one rated ★4+ (verdict "use"), best first (overall
+ * descending, then id), except free-plan output. They go to its alternates (DEC-089); the first is starred only
+ * when the event has nothing starred yet (it becomes the representative).
  */
 export function poolCandidates(trial: Pick<TrialRequest, 'candidates'>, rating: Pick<RatingBody, 'candidates'>): string[] {
   return trial.candidates

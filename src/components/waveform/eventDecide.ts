@@ -134,8 +134,6 @@ export interface DecisionInput {
   at: string | null
   /** Pre-encoded WAV (the dialog encodes once to suggest a name). */
   wav?: ArrayBuffer
-  /** Haptic: the sound the candidate was made for (paired cues place the clip at that sound's position). */
-  pairSound?: string | null
   /** The intensity of a new material written from `wav` (its size before normalizing × the rated strength). */
   intensity?: number
 }
@@ -168,7 +166,7 @@ export async function runDecision(input: DecisionInput): Promise<{ ok: true; res
   for (const key of input.events) {
     const ref = parseEventKey(key)
     next = input.target === 'haptic'
-      ? applyHapticDecision(next, lib, { ref, clip: picked.name, at: input.at ?? defaultAt(lib, ref.cue), gain: 1, intensity: encoded.intensity, pairSound: input.pairSound })
+      ? applyHapticDecision(next, lib, { ref, clip: picked.name, at: input.at ?? defaultAt(lib, ref.cue), gain: 1, intensity: encoded.intensity })
       : applySoundDecision(next, ref, picked.name)
   }
   // A new sound gets its base level; one already in the table keeps its own.

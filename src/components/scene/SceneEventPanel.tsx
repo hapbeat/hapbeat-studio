@@ -2,11 +2,11 @@ import { useState } from 'react'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
-import { isLoopCue, pairedProblem, PICK_MODES, routeClips, sfxSounds, soundAllowed, VARIANT_NAME, clipsForCue, type CueTable, type CueVariation, type VariationNumberKey, RAMP_CURVES, type RampCurve, type DistanceFalloff } from '@/utils/sceneCueTable'
+import { isLoopCue, pairedProblem, PICK_MODES, routeAlternates, routeClips, sfxAlternates, sfxSounds, soundAllowed, VARIANT_NAME, clipsForCue, type CueTable, type CueVariation, type VariationNumberKey, RAMP_CURVES, type RampCurve, type DistanceFalloff } from '@/utils/sceneCueTable'
 import { EMIT_INTERVAL_RANGE, EMIT_JITTER_RANGE } from '@/utils/sceneEmit'
 import type { SceneLib } from '@/utils/sceneData'
 import {
-  addVariant, effectiveEvent, eventKey, pairedClips, removeVariant, resolveEventName, setOverride, setOwnSfxVolume, setRouteClips, setSfxSounds, setVariation,
+  addMaterial, addVariant, effectiveEvent, eventKey, pairedClips, removeMaterial, removeVariant, resolveEventName, setOverride, setOwnSfxVolume, setStarred, setVariation,
   setVariantKind, setVariantScale, updateOwnRoute, variantKind, curveAt, rampValue, setDistanceFalloff, setEmit,
   type EffectiveEvent, type OverridableField,
 } from '@/utils/cueEvents'
@@ -28,7 +28,7 @@ const VARIATION_FIELDS: { key: VariationNumberKey; max: number; step: number; lo
  * "Event" details of the selected cue / variant (DEC-085 addendum: the editor only picks materials; how they
  * are used by situation is decided here): its variants and their kind (own materials, or multipliers only:
  * sfxVolume / hapticsGain / rampTo), the scene multipliers (sfx.volume, route gain; DEC-086 3rd layer), the
- * variation (pick, gain / pitch / rate jitter, paired), the order of the material candidates (★ = representative)
+ * variation (pick, gain / pitch / rate jitter, paired), which materials play (★, DEC-089; the rest are alternates)
  * and removal, and playing the event's run of the recording through (its real firings, as the game computes
  * them). Edits go to the same table and are saved with it.
  */
@@ -258,13 +258,12 @@ function OverrideBar({ e, field, edit }: { e: EffectiveEvent; field: Overridable
   </div>
 }
 
-/** Sound candidates: order (★ first = representative) and removal; ▶ plays one on the PC. */
+/** Sounds: ★ = played (first = representative), the rest alternates; removal; ▶ plays one on the PC (alternates too). */
 function Sounds({ e, edit, allowed }: { e: EffectiveEvent; edit: Edit; allowed: boolean }) {
   const { t } = useI18n()
   const { runtime } = useScene()
   const soundFiles = useSceneStore(s => s.soundFiles)
-  const sounds = sfxSounds(e.sfx), own = e.own.sfx
-  const set = (list: string[]) => edit(tb => setSfxSounds(tb, e.ref, list))
+  const sounds = sfxSounds(e.sfx), alternates = sfxAlternates(e.sfx), own = e.own.sfx
   if (!allowed) return null
   return <div className="scene-sec">
     <h3>{t('events.repeat.sounds')}</h3>
@@ -273,16 +272,17 @@ function Sounds({ e, edit, allowed }: { e: EffectiveEvent; edit: Edit; allowed: 
       <NumberField value={e.sfx.volume} min={0} max={2} step={0.05} label={t('scene.sound.volume')} onCommit={x => edit(tb => setOwnSfxVolume(tb, e.ref, x))} /></label>}
     {!sounds.length ? <div className="scene-dim">{t('events.soundNone')}</div>
       : e.variation?.paired === true ? <div className="scene-dim">{t('events.pair.inHaptics')}</div>
-      : <MaterialList items={sounds} label={t('events.repeat.sounds')} onReorder={own ? set : null} onRemove={own ? set : null}
+      : <MaterialList items={sounds} alternates={alternates} label={t('events.repeat.sounds')}
+        onStar={own ? (s, on) => edit(tb => setStarred(tb, e.ref, 'sound', 0, s, on)) : null} onRemove={own ? s => edit(tb => removeMaterial(tb, e.ref, 'sound', 0, s)) : null}
         onPlay={s => { runtime.audio(); runtime.testSound({ sound: s, volume: e.sfx?.volume ?? 1 }) }} />}
-    {own && <select value="" aria-label={t('events.addSoundMulti')} onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) set([...sounds, x]) }}>
+    {own && <select value="" aria-label={t('events.addSoundMulti')} onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) edit(tb => addMaterial(tb, e.ref, 'sound', 0, x)) }}>
       <option value="">{t('events.addSoundMulti')}</option>
-      {soundFiles.filter(s => !sounds.includes(s)).map(s => <option key={s} value={s}>{s}</option>)}
+      {soundFiles.filter(s => !sounds.includes(s) && !alternates.includes(s)).map(s => <option key={s} value={s}>{s}</option>)}
     </select>}
   </div>
 }
 
-/** Clip candidates per route (body position): order and removal; ▶ sends one to the route's devices. */
+/** Clips per route (body position): ★ = played, the rest alternates; removal; ▶ sends one to the route's devices (alternates too). */
 function Clips({ table, e, edit }: { table: CueTable; e: EffectiveEvent; edit: Edit }) {
   const { t } = useI18n()
   const { runtime } = useScene()
@@ -294,7 +294,7 @@ function Clips({ table, e, edit }: { table: CueTable; e: EffectiveEvent; edit: E
     <OverrideBar e={e} field="haptics" edit={edit} />
     {!e.haptics.length && <div className="scene-dim">{t('events.hapticNone')}</div>}
     {e.haptics.map((r, i) => {
-      const clips = routeClips(r), set = (list: string[]) => edit(tb => setRouteClips(tb, e.ref, i, list))
+      const clips = routeClips(r), alternates = routeAlternates(r)
       return <div key={i}>
         <label className="scene-row" title={t('scene.event.gainHint')}><span className="scene-dim scene-grow">{atLabel(r.at)} · {t('scene.route.gain')}</span>
           {own ? <NumberField value={r.gain} min={0} max={2} step={0.05} label={t('scene.route.gain')} onCommit={x => edit(tb => updateOwnRoute(tb, e.ref, i, { gain: x }))} />
@@ -305,11 +305,12 @@ function Clips({ table, e, edit }: { table: CueTable; e: EffectiveEvent; edit: E
             if (sound) runtime.testSound({ sound, volume: e.sfx?.volume ?? 1 })
             if (clip) runtime.testRoute({ clip, at: r.at, gain: r.gain })
           }} />
-          : <MaterialList items={clips} label={atLabel(r.at)} onReorder={own ? set : null} onRemove={own ? set : null} minItems={1}
+          : <MaterialList items={clips} alternates={alternates} label={atLabel(r.at)} minItems={1}
+            onStar={own ? (c, on) => edit(tb => setStarred(tb, e.ref, 'haptic', i, c, on)) : null} onRemove={own ? c => edit(tb => removeMaterial(tb, e.ref, 'haptic', i, c)) : null}
             onPlay={c => runtime.testRoute({ clip: c, at: r.at, gain: r.gain })} />}
-        {own && <select value="" aria-label={t('events.addClipMulti')} onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) set([...clips, x]) }}>
+        {own && <select value="" aria-label={t('events.addClipMulti')} onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) edit(tb => addMaterial(tb, e.ref, 'haptic', i, x)) }}>
           <option value="">{t('events.addClipMulti')}</option>
-          {clipsForCue(table, lib, e.ref.cue).filter(c => !clips.includes(c)).map(c => <option key={c} value={c}>{c}</option>)}
+          {clipsForCue(table, lib, e.ref.cue).filter(c => !clips.includes(c) && !alternates.includes(c)).map(c => <option key={c} value={c}>{c}</option>)}
         </select>}
       </div>
     })}

@@ -17,12 +17,14 @@ import type { SceneLib } from './sceneData'
  * multi-material route / sound is picked), and multi-material `clips` on a
  * route / `sounds` on a sfx (exactly one of `clip` / `clips`, `sound` / `sounds`).
  * DEC-088 adds `emit` on a pulse cue (fired by the game while a loop cue runs).
+ * DEC-089: only starred materials play — `sound` / `sounds` and a route's `clip` / `clips` (first = representative);
+ * `alternates` on a sfx / route holds unstarred candidates (names) that are never played. Omitted when empty.
  */
 
-/** A route plays `clip`, or one of `clips` per firing (picked by `variation.pick`). */
-export interface CueRoute { clip?: string; clips?: string[]; at: string; gain: number; [key: string]: unknown }
-/** A cue sound: `sound`, or one of `sounds` per firing. */
-export interface CueSfx { sound?: string; sounds?: string[]; volume: number; [key: string]: unknown }
+/** A route plays `clip`, or one of `clips` per firing (picked by `variation.pick`); `alternates`: unstarred clips (never played, DEC-089). */
+export interface CueRoute { clip?: string; clips?: string[]; alternates?: string[]; at: string; gain: number; [key: string]: unknown }
+/** A cue sound: `sound`, or one of `sounds` per firing; `alternates`: unstarred sounds (never played, DEC-089). */
+export interface CueSfx { sound?: string; sounds?: string[]; alternates?: string[]; volume: number; [key: string]: unknown }
 export const PICK_MODES = ['random', 'roundRobin'] as const
 export type PickMode = typeof PICK_MODES[number]
 /** `paired`: the clip with the picked sound's index is played on every route (sounds and each route's clips line up). */
@@ -83,6 +85,10 @@ export type VariationNumberKey = keyof typeof VARIATION_RANGES
 export const routeClips = (route: CueRoute): string[] => Array.isArray(route.clips) ? route.clips : typeof route.clip === 'string' ? [route.clip] : []
 /** The sounds a sfx may play (one for `sound`). */
 export const sfxSounds = (sfx: CueSfx | null | undefined): string[] => !sfx ? [] : Array.isArray(sfx.sounds) ? sfx.sounds : typeof sfx.sound === 'string' ? [sfx.sound] : []
+/** A route's unstarred clips (DEC-089: kept for quick swaps, never played). */
+export const routeAlternates = (route: CueRoute | null | undefined): string[] => Array.isArray(route?.alternates) ? route.alternates : []
+/** A sfx's unstarred sounds (DEC-089: kept for quick swaps, never played). */
+export const sfxAlternates = (sfx: CueSfx | null | undefined): string[] => Array.isArray(sfx?.alternates) ? sfx.alternates : []
 export interface ClipEntry { intensity: number; loop: boolean; description?: string; [key: string]: unknown }
 /** A sound's base level (DEC-086): the WAV holds the shape at full scale, `intensity` how strong it is (0..1; absent = 1). */
 export interface SoundEntry { intensity: number; [key: string]: unknown }
@@ -239,6 +245,15 @@ function validateCueFields(err: string[], table: CueTable, ctx: CueTableContext,
       if (typeof sound !== 'string' || !soundRe.test(sound) || lib.loop_sounds.includes(sound)) err.push(`${label}: bad sound ${String(sound)}`)
       else if (!ctx.soundFiles.has(sound)) err.push(`${label}: ${lib.paths.sounds}/${sound}.wav missing`)
     }
+    // DEC-089: alternates = unstarred candidates (kept for quick swaps, never played).
+    const alts = sfx.alternates as unknown
+    if (alts !== undefined) {
+      if (!Array.isArray(alts) || alts.some(x => typeof x !== 'string' || !soundRe.test(x))) err.push(`${label}: sfx alternates must be a list of sound names`)
+      else {
+        for (const x of alts as string[]) if (!ctx.soundFiles.has(x)) err.push(`${label}: ${lib.paths.sounds}/${x}.wav missing`)
+        alternatesProblems(err, label, 'sfx', alts as string[], sfxSounds(sfx))
+      }
+    }
     if (!inRange(sfx.volume, 0, 2)) err.push(`${label}: sfx volume must be 0..2`)
   }
   for (const r of entry.haptics ?? []) {
@@ -248,6 +263,11 @@ function validateCueFields(err: string[], table: CueTable, ctx: CueTableContext,
     else for (const clip of hasMany ? r.clips! : [r.clip]) {
       if (typeof clip !== 'string' || !Object.prototype.hasOwnProperty.call(clips, clip)) err.push(`${label}: unknown clip ${String(clip)}`)
       else if (clips[clip].loop !== isLoopCue(lib, cue)) err.push(`${label}: clip ${clip} loop=${clips[clip].loop} does not fit this cue`)
+    }
+    const alts = r.alternates as unknown
+    if (alts !== undefined) {
+      if (!Array.isArray(alts) || alts.some(x => typeof x !== 'string' || !Object.prototype.hasOwnProperty.call(clips, x))) err.push(`${label}: route alternates must be clip names of this table`)
+      else alternatesProblems(err, label, 'route', alts as string[], routeClips(r))
     }
     if (!lib.at.includes(r.at)) err.push(`${label}: at must be one of ${lib.at.join(', ')}`)
     else if (!positionsForCue(lib, cue).includes(r.at)) err.push(`${label}: continuous layers allow at = ${positionsForCue(lib, cue).join(', ')}`)
@@ -281,6 +301,13 @@ function validateCueFields(err: string[], table: CueTable, ctx: CueTableContext,
     const problem = pairedProblem(effective.sfx ?? null, effective.haptics ?? [])
     if (problem) err.push(`${label}: variation.paired: ${problem}`)
   }
+}
+
+/** Studio's own checks on alternates (the demos accept them): no name twice, none that is also starred. */
+function alternatesProblems(err: string[], label: string, kind: 'sfx' | 'route', alts: readonly string[], starred: readonly string[]): void {
+  const twice = alts.filter((x, i) => alts.indexOf(x) !== i), both = alts.filter(x => starred.includes(x))
+  if (twice.length) err.push(`${label}: ${kind} alternates list ${[...new Set(twice)].join(', ')} twice`)
+  if (both.length) err.push(`${label}: ${kind} alternates ${both.join(', ')} are also starred (${kind === 'sfx' ? 'sound / sounds' : 'clip / clips'})`)
 }
 
 /** Why sounds and clips cannot be paired (null when they line up): every route needs as many clips as there are sounds. */
