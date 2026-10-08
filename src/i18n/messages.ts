@@ -1248,7 +1248,7 @@ export const messages = defineMessages({
   'scene.occ.newVariant': { ja: '新しい variant {name} を倍率だけの variant として作ります', en: 'Creates the new variant {name} (multipliers only).' },
   'scene.occ.reassign': { ja: 'イベントを変える…', en: 'Change event…' },
   'scene.moment.change': { ja: '変更', en: 'Change' },
-  'scene.timeline.hint': { ja: '印をクリックで選択、右クリックで「変更」。選んだループ cue の帯をクリックでその区間を全編で再生。Ctrl＋スクロールで拡大縮小、スクロール（Shift＋スクロール）で左右に移動', en: 'Click a marker to select it, right-click to change its event. Click a band of the selected loop cue to play that span in the full replay. Ctrl + wheel zooms, wheel (Shift + wheel) pans.' },
+  'scene.timeline.hint': { ja: 'クリックで移動、Ctrl+クリックでそのイベントに切り替え（印：その cue を選択、選んだループ cue の帯：その区間を全編で再生。Mac は Cmd+クリック）。右クリックで「変更」。Ctrl＋スクロールで拡大縮小、スクロール（Shift＋スクロール）で左右に移動', en: 'Click to seek, Ctrl + click to switch to that event (a marker: select its cue; a band of the selected loop cue: play that span in the full replay; Cmd + click on Mac). Right-click a marker to change its event. Ctrl + wheel zooms, wheel (Shift + wheel) pans.' },
   'scene.override.hint': { ja: 'ゲームの変更待ち（記録では {from}）。録画を撮り直すと実際の記録に置き換わります。右クリックで「戻す」', en: 'Waiting for the game change (recorded as {from}). Re-recording the scene replaces it with the real recording. Right-click to undo.' },
   'scene.override.undoTo': { ja: '戻す（録画どおり {from} に）', en: 'Undo (back to the recorded {from})' },
   'scene.override.undoHint': { ja: 'この発生の差し替えを外し、録画どおりのイベントに戻します（エージェントへの取り消しは送りません）', en: 'Removes this firing’s change and shows the recorded event again (nothing is sent to the agent).' },

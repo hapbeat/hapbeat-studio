@@ -17,21 +17,21 @@ import { useMomentPlace } from './SceneCuePanels'
 import type { CueTable } from '@/utils/sceneCueTable'
 import { mapLevel } from '@/utils/levelMap'
 import { laneY, layerLanes, layerScaleMax, outputCurves, outputScaleMax, sideLevel, type Lane, type OutputCurve } from '@/utils/sceneTimelineLevels'
+import { spanWindow, stepView, timelineClick, type TimelineView } from '@/utils/sceneTimelineView'
 
 const SOUND_COLOR = '#36c5c0'
 type Hit = { x: number; y0: number; y1: number; name: string; t: number; from?: string }
 /** A drawn band of the selected loop cue: its lane's height and x range (CSS px). */
 type Band = { x0: number; x1: number; y0: number; y1: number }
-/** The visible stretch of the timeline: `start` (s) and `zoom` (px per s) for one moment (`key`); fit = the whole. */
-type View = { key: string; start: number; zoom: number; fit: boolean }
 const MAX_ZOOM = 2000
 
 /**
  * Timeline: two lanes, sound (upper) and haptics (lower), as in the editor, each with its continuous-layer levels
  * scaled inside it (a selected loop cue: also its output, levelMap applied); a cue shows in each lane it uses (a selected loop cue: its whole active
- * span, as long as its layer's recorded level is above 0, as bands in those lanes). Click a marker to edit
- * that cue (the moments list marks it too), a band to play that span in the full replay (SceneRuntime.playSpan; within
- * the span already playing: seek), elsewhere to seek; right-click a marker to change its event.
+ * span, as long as its layer's recorded level is above 0, as bands in those lanes). A click seeks (timelineClick);
+ * Ctrl (Cmd) + click a marker to edit that cue (the moments list marks it too), a band to play that span in the full
+ * replay (SceneRuntime.playSpan; within the span already playing: seek); right-click a marker to change its event.
+ * While a loop cue's span plays, the timeline shows only that span with its lead-in / post-roll (sceneTimelineView).
  * Ctrl + wheel zooms around the pointer, wheel / Shift + wheel pans (like the editor's waveform), also while playing.
  * Read-outs and output toggles above it.
  */
@@ -48,7 +48,7 @@ export function SceneTimelinePanel() {
   const tRef = useRef(t); tRef.current = t
   const placeOf = useMomentPlace()
   const placeRef = useRef(placeOf); placeRef.current = placeOf
-  const view = useRef<View>({ key: '', start: 0, zoom: 1, fit: true })
+  const view = useRef<TimelineView>({ key: '', start: 0, zoom: 1, fit: true, span: false })
   const [change, setChange] = useState<{ from: string; at: number } | null>(null)
   /** The selected loop cue's active runs over the shown moment's levels (computed again only when either changes). */
   const runs = useRef<{ levels: number[][] | null; name: string; runs: [number, number][] }>({ levels: null, name: '', runs: [] })
@@ -77,12 +77,11 @@ export function SceneTimelinePanel() {
       if (!it || !lib || !data) { hits.current = []; bands.current = []; return }
       const fps = data.fps, layers = lib.layers, ticks = lib.ticks, sel = s.sel, table = s.table
       const dur = v.duration || it.levels.length / fps || 1
-      // The visible stretch: the whole moment until zoomed; while playing, the playhead is kept in view.
-      const vw = view.current, key = `${s.cur}:${it.file}`, fit = w / dur
-      if (vw.key !== key || vw.fit || vw.zoom < fit) { vw.key = key; vw.zoom = Math.max(fit, vw.fit || vw.key !== key ? fit : vw.zoom); vw.start = vw.fit ? 0 : vw.start; vw.fit = vw.zoom <= fit }
+      // The visible stretch: a playing loop cue span's window (in the full replay), else the whole moment until zoomed.
+      const shownSpan = it.kind === 'full' && s.span ? spanWindow(runtime.partAB, dur) : null
+      const vw = view.current, key = `${s.cur}:${it.file}${shownSpan ? `:${shownSpan[0]}-${shownSpan[1]}` : ''}`
+      stepView(vw, key, shownSpan, w, dur, MAX_ZOOM, !v.paused, v.currentTime)
       const span = w / vw.zoom
-      if (!v.paused && (v.currentTime < vw.start || v.currentTime > vw.start + span)) vw.start = Math.max(0, Math.min(dur - span, v.currentTime - span * 0.1))
-      vw.start = Math.max(0, Math.min(Math.max(0, dur - span), vw.start))
       const X = (time: number) => (time - vw.start) * vw.zoom, top = 6, base = h - 16, mid = Math.round((top + base) / 2)
       if (runtime.part && runtime.partAB) { ctx.fillStyle = 'rgba(78,161,255,.13)'; ctx.fillRect(X(runtime.partAB[0]), 0, X(runtime.partAB[1]) - X(runtime.partAB[0]), h) }
       ctx.fillStyle = '#1a1d21'; ctx.fillRect(0, mid, w, 1)
@@ -207,12 +206,11 @@ export function SceneTimelinePanel() {
   }
   const onMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
     if (!useSceneStore.getState().items.length || event.button !== 0) return
-    const { x, hit } = hitAt(event)
-    if (hit) { useSceneStore.getState().selectCue(hit.name, hit.t); runtime.video.pause(); runtime.seek(hit.t - useSceneSettings.getState().leadSec); return }
-    const time = view.current.start + x / view.current.zoom
-    const run = bandRunAt(event, time)
-    if (run) { runtime.audio(); const lead = useSceneSettings.getState().leadSec; runtime.playSpan(run, lead, lead); return }
-    runtime.seek(time)
+    const { x, hit } = hitAt(event), time = view.current.start + x / view.current.zoom
+    const click = timelineClick(event.ctrlKey || event.metaKey, hit ?? null, bandRunAt(event, time), time)
+    if (click.kind === 'select') { useSceneStore.getState().selectCue(click.name, click.t); runtime.video.pause(); runtime.seek(click.t - useSceneSettings.getState().leadSec); return }
+    if (click.kind === 'span') { runtime.audio(); const lead = useSceneSettings.getState().leadSec; runtime.playSpan(click.run, lead, lead); return }
+    runtime.seek(click.t)
   }
   /**
    * The selected loop cue's active span (full replay seconds) under a click at video time `time` on one of its bands,
@@ -246,8 +244,8 @@ export function SceneTimelinePanel() {
       if (event.ctrlKey) {
         const x = Math.max(0, Math.min(r.width, event.clientX - r.left)), time = vw.start + x / vw.zoom
         const next = Math.min(MAX_ZOOM, Math.max(fit, vw.zoom * Math.exp(-delta * WHEEL_ZOOM_RATE)))
-        vw.start = zoomAtTime(time, x, next, r.width, dur); vw.zoom = next; vw.fit = next <= fit
-      } else vw.start = Math.max(0, Math.min(Math.max(0, dur - r.width / vw.zoom), vw.start + delta / vw.zoom))
+        vw.start = zoomAtTime(time, x, next, r.width, dur); vw.zoom = next; vw.fit = next <= fit; vw.span = false
+      } else { vw.start = Math.max(0, Math.min(Math.max(0, dur - r.width / vw.zoom), vw.start + delta / vw.zoom)); vw.span = false }
     }
     cv.addEventListener('wheel', wheel, { passive: false })
     return () => cv.removeEventListener('wheel', wheel)
