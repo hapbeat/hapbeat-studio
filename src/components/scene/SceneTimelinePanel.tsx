@@ -17,8 +17,8 @@ import { mapLevel } from '@/utils/levelMap'
 import { laneY, layerLanes, layerScaleMax, outputCurves, outputScaleMax, sideLevel, type Lane, type OutputCurve } from '@/utils/sceneTimelineLevels'
 import { spanWindow, stepView, timelineClick, type TimelineView } from '@/utils/sceneTimelineView'
 import { firingBar, firingKey, recordingFiringGains, type FiringGains } from '@/utils/sceneFiringGain'
+import { kindColor } from '@/utils/kindColors'
 
-const SOUND_COLOR = '#36c5c0'
 /** A drawn marker; `gain`: what that firing plays at in its lane (null: a loop cue / tick, drawn as before). */
 type Hit = { x: number; y0: number; y1: number; name: string; t: number; lane: Lane; gain: number | null }
 /** A drawn band of the selected loop cue: its lane's height and x range (CSS px). */
@@ -87,7 +87,11 @@ export function SceneTimelinePanel() {
       stepView(vw, key, shownSpan, w, dur, MAX_ZOOM, !v.paused, v.currentTime)
       const span = w / vw.zoom
       const X = (time: number) => (time - vw.start) * vw.zoom, top = 6, base = h - 16, mid = Math.round((top + base) / 2)
-      if (runtime.part && runtime.partAB) { ctx.fillStyle = 'rgba(78,161,255,.13)'; ctx.fillRect(X(runtime.partAB[0]), 0, X(runtime.partAB[1]) - X(runtime.partAB[0]), h) }
+      // Lane tints (sound blue above, haptics orange below); the part playing: a neutral wash (not a lane colour).
+      const soundColor = kindColor('sound'), hapticColor = kindColor('haptic')
+      ctx.fillStyle = kindColor('sound', 'soft'); ctx.globalAlpha = 0.5; ctx.fillRect(0, top, w, mid - top)
+      ctx.fillStyle = kindColor('haptic', 'soft'); ctx.fillRect(0, mid + 1, w, base - mid - 1); ctx.globalAlpha = 1
+      if (runtime.part && runtime.partAB) { ctx.fillStyle = 'rgba(255,255,255,.07)'; ctx.fillRect(X(runtime.partAB[0]), 0, X(runtime.partAB[1]) - X(runtime.partAB[0]), h) }
       ctx.fillStyle = '#1a1d21'; ctx.fillRect(0, mid, w, 1)
       ctx.font = '10px Segoe UI, sans-serif'
       // Seconds grid (a clip counts from its cue).
@@ -119,7 +123,7 @@ export function SceneTimelinePanel() {
       const effective = (name: string) => { const r = table ? resolveEventName(table, name) : null; return r && table ? effectiveEvent(table, r.ref) : null }
       // Sound above, haptics below (as in the editor).
       const lanes: [number, number, (name: string) => boolean, (name: string) => string, Lane][] = [
-        [top, mid, name => !!effective(name)?.sfx, () => SOUND_COLOR, 'sound'],
+        [top, mid, name => !!effective(name)?.sfx, () => soundColor, 'sound'],
         [mid + 1, base, name => { const e = effective(name); return !!e && (e.haptics.length > 0 || lib.loop_cues.includes(e.ref.cue)) }, name => familyColor(lib, name), 'haptics'],
       ]
       const gc = gains.current
@@ -210,7 +214,8 @@ export function SceneTimelinePanel() {
           lx -= 16; swatch(lx, l.colors[k], 2, mine ? INPUT_DASH : []); lx -= 12
         }
       }
-      ctx.fillStyle = '#5c636c'; ctx.fillText(tr('scene.lane.sound'), 3, top + 24); ctx.fillText(tr('scene.lane.haptics'), 3, mid + 24)
+      ctx.fillStyle = soundColor; ctx.fillText(tr('scene.lane.sound'), 3, top + 24)
+      ctx.fillStyle = hapticColor; ctx.fillText(tr('scene.lane.haptics'), 3, mid + 24)
       // Playhead.
       ctx.fillStyle = '#fff'; ctx.fillRect(X(v.currentTime) - 0.5, 0, 1.5, h)
       // Read-outs.

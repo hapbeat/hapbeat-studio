@@ -28,6 +28,8 @@ export interface EditorShared {
   shownLayout: ShownLayout | null
   /** The PC sounds played with a haptic audition, on the same time axis (drawn above the haptic); null = none. */
   soundLane: SoundLane | null
+  /** A sound is shown (AI sound candidate, event sound, adjusted sound material): drawn in the sound colour, else the haptic one. */
+  soundShown: boolean
   /** The shown material's / AI candidate's strength (intensity, live while its slider moves): playback gain and "edited" drawing scale. */
   level: number
   player: EditorBufferPlayer

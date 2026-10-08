@@ -11,7 +11,6 @@
 .scene-on { color: #8dd5b1; }
 .scene-grow { flex: 1; min-width: 0; }
 .scene-panel-empty { padding: 16px; color: var(--text-muted); font-size: 13px; }
-.scene-icon { display: inline-block; vertical-align: -2px; }
 
 /* Video */
 .scene-stage { position: relative; height: 100%; display: flex; align-items: center; justify-content: center; background: #000; cursor: pointer; overflow: hidden; }
@@ -35,14 +34,21 @@
 .scene-timeline-canvas { flex: 1; min-height: 60px; width: 100%; display: block; background: #111316; cursor: pointer; }
 .scene-help { padding: 4px 12px; color: var(--text-muted); font-size: 11px; border-top: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .scene-toggles { display: inline-flex; gap: 6px; align-items: center; flex: none; }
-.scene-toggle { display: inline-flex; gap: 5px; align-items: center; padding: 1px 9px; border-radius: 12px; border: 1px solid #4a525c; background: none;
-  color: var(--text-muted); font-size: 12px; cursor: pointer; }
-.scene-toggle.on { background: rgba(62,207,142,.22); border-color: #3ecf8e; color: #e2fbef; }
+/* One fixed height, centred icon / label / ON|OFF (the ON / OFF text is stacked: the width never changes). */
+.scene-toggle { display: inline-flex; gap: 5px; align-items: center; justify-content: center; box-sizing: border-box; height: 26px; padding: 0 10px; line-height: 1;
+  border-radius: 13px; border: 1px solid #4a525c; background: none; color: var(--text-muted); font-size: 12px; font-family: inherit; cursor: pointer; }
+.scene-toggle > span { display: inline-flex; align-items: center; }
+.scene-toggle > .scene-stack { display: inline-grid; min-width: 2.2em; font-weight: 600; text-align: left; }
+.scene-toggle:not(.on) .kind-icon { opacity: .55; }
+.scene-toggle.on.sound { background: var(--sound-soft); border-color: var(--sound); color: var(--sound-strong); }
+.scene-toggle.on.haptic { background: var(--haptic-soft); border-color: var(--haptic); color: var(--haptic-strong); }
 .scene-toggle-status { color: var(--warning); font-size: 12px; }
 
 /* Moments */
 .scene-moments { font-size: 13px; }
 .scene-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 8px 12px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: 12px; }
+.scene-kind-head { display: flex; align-items: center; gap: 5px; }
+.scene-legend-kind { display: inline-flex; align-items: center; gap: 4px; }
 .scene-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; }
 /* Six cells: number, dot, name (the only one that shrinks), kinds, time, Change. */
 .scene-item { position: relative; display: grid; grid-template-columns: 26px 10px minmax(0, 1fr) 38px auto auto; gap: 6px; align-items: center; padding: 5px 12px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,.04); }
@@ -55,7 +61,7 @@
 .scene-item.picked { outline: 1px solid var(--accent-light); outline-offset: -1px; }
 .scene-item.sel { background: rgba(124,92,191,.22); box-shadow: inset 3px 0 0 var(--accent-light); }
 /* A cue of a moment of several cues: indented rows of one fixed height under their row. */
-.scene-subitem { grid-template-columns: 10px minmax(0, 1fr) auto; height: 24px; padding-top: 0; padding-bottom: 0; padding-left: 34px; font-size: 12px; color: var(--text-secondary); }
+.scene-subitem { grid-template-columns: 10px minmax(0, 1fr) 38px; height: 24px; padding-top: 0; padding-bottom: 0; padding-left: 34px; font-size: 12px; color: var(--text-secondary); }
 .scene-subitem.sel { color: var(--text-primary); }
 /* "Change" on a moment: a one-line request over the following rows (nothing moves). */
 .scene-occ-form { position: absolute; left: 12px; right: 12px; top: 100%; z-index: 5; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 4px; padding: 4px; background: var(--bg-secondary); border: 1px solid var(--border-light); border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,.4); }
@@ -66,8 +72,9 @@
 .scene-dot { width: 9px; height: 9px; border-radius: 50%; }
 .scene-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .scene-name small { color: var(--text-muted); margin-left: 4px; }
-.scene-kinds { color: var(--text-muted); font-size: 11px; letter-spacing: 1px; }
-.scene-kinds .h { color: #4ea1ff; } .scene-kinds .s { color: #36c5c0; }
+/* Haptic / sound marks in two fixed slots (a cue's own row; a moment of one cue). */
+.scene-kinds { display: inline-grid; grid-template-columns: 16px 16px; gap: 4px; align-items: center; }
+.scene-kinds > span { display: inline-flex; justify-content: center; }
 
 /* Cue editors */
 .scene-cue-panel, .scene-project { font-size: 13px; }

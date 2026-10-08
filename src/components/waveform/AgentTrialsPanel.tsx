@@ -22,6 +22,8 @@ import { runDecision } from './eventDecide'
 import { SoundFirstNote } from './EventsPanel'
 import { isLoopCue, sfxSounds } from '@/utils/sceneCueTable'
 import { WaveformThumbnail } from './WaveformThumbnail'
+import { EventMarkBadge } from './EventMarkBadges'
+import { KindIcon } from '@/components/common/KindIcon'
 import { EditorMenu, EditorMenuItem } from './EditorMenu'
 import { filterTrials, nextAfter, stepQueue, trialQueue, trialToOpen } from '@/utils/trialQueue'
 import { useConfirm } from '@/components/common/useConfirm'
@@ -172,7 +174,7 @@ export function AgentTrialsPanel() {
 ${t('events.openInEvents')}
 ${t('editor.scene.targetHint')}`} onClick={() => revealEvent(pillEvent, focusEditorPanel)}>{what}</button>
         : <span className="target-cue-badge agent-what" title={what}>{what}</span>)}
-      {record && <span className={`agent-target-badge ${target}`}>{t(target === 'sound' ? 'editor.agent.targetSound' : 'editor.agent.targetHaptic')}</span>}
+      {record && target && <span className={`agent-target-badge ${target}`}><KindIcon kind={target} decorative />{t(target === 'sound' ? 'editor.agent.targetSound' : 'editor.agent.targetHaptic')}</span>}
       <span className="agent-remaining">{record && !inQueue ? t(record.dismissed ? 'editor.agent.fromHistoryDismissed' : 'editor.agent.fromHistory') : t('editor.agent.remaining', { count: queue.length })}</span>
       <EditorMenu label={`${t('editor.agent.history')} ▾`} title={t('editor.agent.historyHint')} className="agent-history">
         {shown.length === 0 && <p className="editor-menu-note">{t('editor.agent.empty')}</p>}
@@ -413,7 +415,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
           onAudition({ trialId: trial.id, candidateId: requested.id }, buffer)
         }
         const sounding = active && (playing || pending)
-        return <article key={requested.id} className={`agent-candidate ${active ? 'auditioning' : ''} ${sounding ? 'playing' : ''} ${buffer ? 'selectable' : ''}`} aria-current={active || undefined} onClick={select}
+        return <article key={requested.id} className={`agent-candidate ${target} ${active ? 'auditioning' : ''} ${sounding ? 'playing' : ''} ${buffer ? 'selectable' : ''}`} aria-current={active || undefined} onClick={select}
           tabIndex={0} data-trial-id={trial.id} data-candidate-id={requested.id}>
           {/*
             One grid, laid out by the card's own width (container query, not the viewport):
@@ -451,7 +453,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
                 onChange={e => { const value = e.target.value; e.target.blur(); useEditorSettings.getState().update({ candidateSounds: { ...useEditorSettings.getState().candidateSounds, [`${trial.id}/${requested.id}`]: value } }) }}>
                 {soundPool.map((s, i) => <option key={s} value={s}>{i === 0 ? `★ ${s}` : s}</option>)}
               </select>}
-              {(marks[`${trial.id}/${requested.id}`] ?? []).map(m => <span key={`${m.project}:${m.event}:${m.target}`} className="editor-event-badge" title={m.project}>{m.target === 'sound' ? '♪' : '≋'} {m.event}</span>)}
+              {(marks[`${trial.id}/${requested.id}`] ?? []).map(m => <EventMarkBadge key={`${m.project}:${m.event}:${m.target}`} mark={m} />)}
             </div>
             <CandidateNotes value={form.candidates[requested.id]} onChange={patch => editCandidate(requested.id, patch)} selection={active ? selection : null} />
           </div>

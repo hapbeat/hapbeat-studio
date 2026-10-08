@@ -32,7 +32,7 @@
 .events-row-badges { display: flex; gap: 4px; flex-shrink: 0; }
 .events-row-desc { grid-column: 1 / -1; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Fixed width: the badge text changes between ✓ / 未 / — without moving the row. */
-.events-badge { display: inline-block; white-space: nowrap; min-width: 7.6em; padding: 0 5px; border-radius: 4px; font-size: 11px; text-align: center; border: 1px solid var(--border-light); color: var(--text-secondary); }
+.events-badge { display: inline-flex; align-items: center; justify-content: center; gap: 3px; white-space: nowrap; min-width: calc(7.6em + 17px); padding: 0 5px; border-radius: 4px; font-size: 11px; text-align: center; border: 1px solid var(--border-light); color: var(--text-secondary); }
 .events-badge.undecided { border-color: #c9a34a; color: #e3c27a; }
 .events-badge.none { border-color: #6b7280; color: #9ca3af; }
 .events-badge.none.approved { background: rgba(107,114,128,.18); }
@@ -42,6 +42,7 @@
 /* A request to the agent is open (remake / go to haptics). */
 .events-badge.requested { border-color: #a78bfa; color: #c4b5fd; background: rgba(167,139,250,.15); }
 .events-sec-head { display: flex; align-items: center; gap: 8px; }
+.events-sec-head > .kind-icon { margin-right: -3px; }
 .events-review { display: inline-flex; align-items: center; gap: 4px; font-weight: normal; }
 .events-detail { display: flex; flex-direction: column; gap: 6px; }
 .events-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
@@ -77,17 +78,19 @@
 .events-decide-dialog .events-decided { font-size: 13px; }
 /* Clip list: decided-for badges. */
 .editor-event-badges { display: flex; flex-wrap: wrap; gap: 3px; }
-.editor-event-badge { padding: 0 5px; border-radius: 4px; font-size: 10px; font-weight: normal; border: 1px solid #4f9e7a; color: #8dd5b1; }
+.editor-event-badge { display: inline-flex; align-items: center; gap: 3px; padding: 0 5px; border-radius: 4px; font-size: 11px; font-weight: normal; border: 1px solid; }
+.editor-event-badge.sound { border-color: var(--sound); color: var(--sound-strong); background: var(--sound-soft); }
+.editor-event-badge.haptic { border-color: var(--haptic); color: var(--haptic-strong); background: var(--haptic-soft); }
 
 .events-decision { display: inline-flex; gap: 4px; flex: none; font-weight: normal; }
 /* Fixed widths: the head line never shifts when a decision or review changes. */
 .events-review .agent-icon-btn, .events-decision .agent-icon-btn { width: 6.5em; justify-content: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .events-sec-head { flex-wrap: wrap; }
 
-/* Material candidates (MaterialList): ▶ · name (shrinks) · ★ · remove · extra — one grid row each. */
+/* Material candidates (MaterialList): sound / haptic icon · ▶ · name (shrinks) · ★ · remove · extra — one grid row each. */
 .events-materials { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 /* One line per material, 38 px tall (a click target); the whole row shows the material in the waveform panel. */
-.events-mat { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; align-items: center; gap: 4px 6px; min-height: 38px; box-sizing: border-box; padding: 2px 6px; border: 1px solid var(--border); border-radius: 4px; }
+.events-mat { display: grid; grid-template-columns: 16px auto minmax(0, 1fr) auto auto auto; align-items: center; gap: 4px 6px; min-height: 38px; box-sizing: border-box; padding: 2px 6px; border: 1px solid var(--border); border-radius: 4px; }
 .events-mat.selectable { cursor: pointer; }
 .events-mat.selectable:hover { background: var(--bg-hover, rgba(255, 255, 255, .04)); }
 .events-mat.active { border-color: #67e8f9; }
@@ -119,13 +122,12 @@
 .events-head-field + .events-haptic-request { margin-left: 8px; }
 .events-fold { flex: none; width: 18px; padding: 0; border: none; background: none; color: var(--text-secondary); cursor: pointer; }
 .events-request-send { flex: none; width: 6em; justify-content: center; }
-/* Paired cue: one line per pair — number, ▶, ♪ sound (strength) ↔ ≋ clip (strength), ↑ ↓; wraps when narrow. */
+/* Paired cue: one line per pair — number, ▶, sound icon + sound (strength) ↔ haptic icon + clip (strength), ↑ ↓; wraps when narrow. */
 .events-pairs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .events-pair { display: grid; grid-template-columns: 18px auto minmax(0, 1fr) auto minmax(0, 1fr) auto; align-items: center; gap: 4px 6px; min-height: 38px; box-sizing: border-box; padding: 2px 6px; border: 1px solid var(--border); border-radius: 4px; }
 .events-pair-num { color: var(--text-muted); text-align: right; font-variant-numeric: tabular-nums; }
 .events-pair-side { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; min-width: 0; }
 .events-pair-side.active { outline: 1px solid #67e8f9; outline-offset: 1px; border-radius: 3px; }
-.events-pair-kind { color: var(--text-muted); }
 .events-pair-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .events-pair-level { width: 46px; }
 .events-pair-arrow { color: var(--text-muted); }

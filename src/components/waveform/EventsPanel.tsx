@@ -21,6 +21,7 @@ import { useEditor } from './editorContext'
 import { EditorMenu, EditorMenuItem, EditorMenuSection } from './EditorMenu'
 import { openEventDefault, openEventHaptic, openEventSound } from './eventAudio'
 import { MaterialList } from './MaterialList'
+import { HapticIcon, KindIcon, SoundIcon } from '@/components/common/KindIcon'
 import { PairedList } from './PairedList'
 import { useToast } from '@/components/common/Toast'
 import { runDecision } from './eventDecide'
@@ -195,14 +196,14 @@ function EventRowButton({ row, selected, onSelect, requested }: { row: EventRow;
   const { t } = useI18n()
   // 音 未定 (yellow) / 音 なし 仮|OK (grey) / 音 仮|OK (blue | green); — for a loop cue's sound where the project has none;
   // 「依頼済み」 (purple) while a request to the agent for it is open. Fixed width.
-  const badge = (label: string, status: SoundStatus, asked: boolean) => asked ? <span className="events-badge requested" title={t('events.requested.hint')}>{label} {t('events.requested')}</span>
-    : status === 'na' ? <span className="events-badge na">{label} —</span>
-    : <span className={`events-badge ${status.state} ${status.state === 'undecided' ? '' : status.review}`}>{label} {status.state === 'undecided' ? t('events.undecided')
+  const badge = (kind: 'sound' | 'haptic', label: string, status: SoundStatus, asked: boolean) => asked ? <span className="events-badge requested" title={t('events.requested.hint')}><KindIcon kind={kind} size={14} decorative />{label} {t('events.requested')}</span>
+    : status === 'na' ? <span className="events-badge na"><KindIcon kind={kind} size={14} decorative />{label} —</span>
+    : <span className={`events-badge ${status.state} ${status.state === 'undecided' ? '' : status.review}`}><KindIcon kind={kind} size={14} decorative />{label} {status.state === 'undecided' ? t('events.undecided')
       : `${status.state === 'none' ? `${t('events.noneShort')} ` : ''}${t(status.review === 'approved' ? 'events.reviewApproved' : 'events.reviewTentative')}`}</span>
   const child = row.ref.variant !== null
   return <button type="button" role="option" aria-selected={selected} className={`events-row ${child ? 'variant' : ''} ${selected ? 'selected' : ''}`} onClick={() => onSelect(row.key)} title={row.description ?? ''}>
     <span className="events-row-name">{child ? `${row.ref.cue} › ${row.ref.variant}` : row.key}{row.loop && <small>{t('events.loop')}</small>}</span>
-    <span className="events-row-badges">{badge(t('events.badge.sound'), row.sound, requested.sound)}{badge(t('events.badge.haptic'), row.haptic, requested.haptic)}</span>
+    <span className="events-row-badges">{badge('sound', t('events.badge.sound'), row.sound, requested.sound)}{badge('haptic', t('events.badge.haptic'), row.haptic, requested.haptic)}</span>
     {row.description && <small className="events-row-desc">{row.description}</small>}
   </button>
 }
@@ -255,7 +256,7 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
   // The material lists fold together (editor setting, open by default; the heading line stays).
   const [open, setOpen] = useMaterialsOpen()
   return <section className="events-sec">
-    <h4 className="events-sec-head"><Fold open={open} set={setOpen} />{t('events.sound')}{allowed && e.own.sfx && <><ReviewToggle e={e} field="sfx" edit={edit} /><DecisionBar e={e} field="sfx" edit={edit} /></>}
+    <h4 className="events-sec-head"><Fold open={open} set={setOpen} /><SoundIcon decorative />{t('events.sound')}{allowed && e.own.sfx && <><ReviewToggle e={e} field="sfx" edit={edit} /><DecisionBar e={e} field="sfx" edit={edit} /></>}
       {/* Ask for (more) sound candidates; after checking the sound (OK): on to the haptic — also for a cue without a sound. */}
       <span className="events-haptic-request"><button type="button" className="agent-icon-btn" title={t('events.soundRequest.hint')}
         onClick={() => { const k = `sound|${key}`; useReviseOpen.getState().set(useReviseOpen.getState().open === k ? null : k) }}>{t('events.soundRequest.button')}</button>
@@ -265,7 +266,7 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
       {loop && <p className="agent-muted">{t('events.loopSoundHint')}</p>}
       {!sounds.length && <p className="agent-muted">{t(noSoundNote(e))}</p>}
       {/* A paired cue's sounds are listed as pairs in the haptic section. */}
-      {e.variation?.paired === true ? sounds.length > 0 && <p className="agent-muted">{t('events.pair.inHaptics')}</p> : <MaterialList items={sounds} alternates={alternates} label={t('events.sound')}
+      {e.variation?.paired === true ? sounds.length > 0 && <p className="agent-muted">{t('events.pair.inHaptics')}</p> : <MaterialList kind="sound" items={sounds} alternates={alternates} label={t('events.sound')}
         active={[...sounds, ...alternates].find(s => previewId === `${key}|sound|${s}`) ?? null} onPlay={play} onSelect={show}
         onStar={(s, on) => edit(tb => setStarred(tb, e.ref, 'sound', 0, s, on))} onRemove={s => edit(tb => removeMaterial(tb, e.ref, 'sound', 0, s))}
         extra={s => <MaterialActions event={key} target="sound" wav={s} />}
@@ -292,7 +293,7 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
   const free = positionsForCue(lib, e.ref.cue).some(a => !e.haptics.some(r => r.at === a))
   const describe = useDescribeMaterial()
   return <section className="events-sec">
-    <h4 className="events-sec-head"><Fold open={hOpen} set={setHOpen} />{t('events.haptic')}{e.own.haptics && <><ReviewToggle e={e} field="haptics" edit={edit} /><DecisionBar e={e} field="haptics" edit={edit} /></>}</h4>
+    <h4 className="events-sec-head"><Fold open={hOpen} set={setHOpen} /><HapticIcon decorative />{t('events.haptic')}{e.own.haptics && <><ReviewToggle e={e} field="haptics" edit={edit} /><DecisionBar e={e} field="haptics" edit={edit} /></>}</h4>
     {hOpen && !e.own.haptics && <Inherited e={e} field="haptics" edit={edit} />}
     {hOpen && e.own.haptics && <>
     <SoundFirstNote note={soundFirstNote(e, loop)} />
@@ -315,7 +316,7 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
           onPlay={(_, sound, clip, at) => { if (clip && at) { if (!openEventHaptic(key, clip, at, true)) missing(clip) } else if (sound && !openEventSound(key, sound, true)) missing(sound) }}
           onShow={(target, name, at) => { if (target === 'haptic' ? !openEventHaptic(key, name, at ?? r.at) : !openEventSound(key, name)) missing(name) }}
           extra={(target, name) => <MaterialActions event={key} target={target} wav={name} />} describe={describe} />
-        : <MaterialList items={clips} alternates={alternates} label={t('scene.route.clip')} active={[...clips, ...alternates].find(c => previewId === `${key}|haptic|${c}|${r.at}`) ?? null}
+        : <MaterialList kind="haptic" items={clips} alternates={alternates} label={t('scene.route.clip')} active={[...clips, ...alternates].find(c => previewId === `${key}|haptic|${c}|${r.at}`) ?? null}
           onPlay={c => { if (!openEventHaptic(key, c, r.at, true)) missing(c) }} onSelect={c => { if (!openEventHaptic(key, c, r.at)) missing(c) }}
           onStar={(c, on) => edit(tb => setStarred(tb, e.ref, 'haptic', i, c, on))} onRemove={c => edit(tb => removeMaterial(tb, e.ref, 'haptic', i, c))} minItems={1}
           extra={c => <MaterialActions event={key} target="haptic" wav={c} />}

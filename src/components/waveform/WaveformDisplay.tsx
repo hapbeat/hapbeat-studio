@@ -18,6 +18,8 @@ import { useSceneSettings } from '@/stores/sceneSettings'
 import { NumberField } from '@/components/scene/SceneCuePanels'
 import type { LoopStretch } from '@/utils/loopStretch'
 import { foldTime, unfoldTime, type FoldView } from '@/utils/shownLayout'
+import { kindColor } from '@/utils/kindColors'
+import { HapticIcon, SoundIcon } from '@/components/common/KindIcon'
 
 type OverviewMode = 'left' | 'right' | 'move' | 'seek'
 
@@ -36,7 +38,7 @@ type OverviewMode = 'left' | 'right' | 'move' | 'seek'
  */
 export function WaveformDisplay({ original, bufferOverride, player, viewKey, transport, scale = 1, placements = [], loop = null, fold = null, soundLane = null }: { original: boolean; bufferOverride?: AudioBuffer; player: EditorBufferPlayer; viewKey?: string; transport?: ReactNode; scale?: number; placements?: readonly { start: number; end: number }[]; loop?: Pick<LoopStretch, 'segments' | 'envelope'> | null; fold?: FoldView | null; soundLane?: SoundLane | null }) {
   const { t } = useI18n()
-  const { playAt, stopPlayback, isPlaybackActive, playFromStart } = useEditor()
+  const { playAt, stopPlayback, isPlaybackActive, playFromStart, soundShown } = useEditor()
   const height = useEditorSettings(s => s.height)
   const surface = useRef<HTMLDivElement>(null)
   const resize = useRef<{y: number; height: number} | null>(null)
@@ -68,12 +70,14 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
     if (!container.current) return
     const plugin = RegionsPlugin.create()
     regions.current = plugin
-    const instance = WaveSurfer.create({ container: container.current, height: 180, waveColor: '#9a88d2', progressColor: '#9a88d2', cursorColor: '#fff', normalize: false, interact: false, hideScrollbar: true, renderFunction: (channels, ctx) => renderSampleWaveform(channels, ctx, drawScale.current), plugins: [plugin] })
+    const instance = WaveSurfer.create({ container: container.current, height: 180, waveColor: kindColor('haptic'), progressColor: kindColor('haptic'), cursorColor: '#fff', normalize: false, interact: false, hideScrollbar: true, renderFunction: (channels, ctx) => renderSampleWaveform(channels, ctx, drawScale.current), plugins: [plugin] })
     instance.setMuted(true); ws.current = instance
     const removeScroll = instance.on('scroll', (start, end) => setViewport({start, end}))
     const removeTime = instance.on('timeupdate', setTime)
     return () => { removeScroll(); removeTime(); instance.destroy(); ws.current = null; regions.current = null }
   }, [])
+  // A sound shown draws in the sound colour, a haptic in the haptic one.
+  useEffect(() => { const color = kindColor(soundShown ? 'sound' : 'haptic'); ws.current?.setOptions({ waveColor: color, progressColor: color }) }, [soundShown])
   useEffect(() => {
     const instance = ws.current
     if (!instance) return
@@ -204,7 +208,7 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
       }}>
       {soundLane && ready && duration > 0 && <SoundLaneView lane={soundLane} viewStart={viewport.start} zoom={zoom} duration={duration} time={time} />}
       <div ref={container} className={`waveform-container ${inGap ? 'playhead-gap' : ''}`} />
-      {soundLane && ready && <span className="editor-lane-label haptic" aria-hidden="true" style={{ top: SOUND_LANE_HEIGHT }}>{t('editor.lane.haptic')}</span>}
+      {soundLane && ready && <span className="editor-lane-label haptic" aria-hidden="true" style={{ top: SOUND_LANE_HEIGHT }}><HapticIcon size={14} decorative />{t('editor.lane.haptic')}</span>}
       {placements.length > 0 && ready && duration > 0 && (() => {
         // One firing each: a line where it starts and a tint over its length, alternating so copies never read as one long file.
         const width = surface.current?.clientWidth ?? 0, px = Math.max(zoom, width / duration)
@@ -279,7 +283,7 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
       <button className="toolbar-btn" disabled={!buffer || !ready} onClick={() => fitRange(0,duration)}>{t('editor.fit')}</button>
       <span>{duration.toFixed(3)} s · {buffer?.sampleRate} Hz</span>
     </div>
-    <div className={`editor-overview hover-${overviewDrag.current?.mode ?? overviewHover}`} title={t('editor.overviewHint')}
+    <div className={`editor-overview ${soundShown ? 'sound' : 'haptic'} hover-${overviewDrag.current?.mode ?? overviewHover}`} title={t('editor.overviewHint')}
       onPointerDown={event => {
         if (!ready || event.button !== 0) return
         event.currentTarget.setPointerCapture(event.pointerId)
@@ -342,7 +346,7 @@ function SoundLaneView({ lane, viewStart, zoom, duration, time }: { lane: SoundL
     c.width = Math.round(width * ratio); c.height = Math.round(height * ratio)
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0); ctx.clearRect(0, 0, width, height)
     const mid = height / 2
-    ctx.fillStyle = '#60a5fa'
+    ctx.fillStyle = kindColor('sound')
     laneColumns(lane.data, lane.rate, viewStart, px, Math.ceil(width)).forEach(([lo, hi], x) => {
       const top = mid - Math.min(1, hi) * mid, bottom = mid - Math.max(-1, lo) * mid
       ctx.fillRect(x, top, 1, Math.max(1, bottom - top))
@@ -352,7 +356,7 @@ function SoundLaneView({ lane, viewStart, zoom, duration, time }: { lane: SoundL
   const signed = (ms: number) => `${ms > 0 ? '+' : ms < 0 ? '−' : '±'}${Math.abs(Math.round(ms))}`
   return <div className="editor-sound-lane" style={{ height: SOUND_LANE_HEIGHT }}>
     <div className="editor-lane-header">
-      <span className="editor-lane-label">{t('editor.lane.sound')}</span>
+      <span className="editor-lane-label sound"><SoundIcon size={14} decorative />{t('editor.lane.sound')}</span>
       <label className="editor-lane-lead" title={t('editor.lane.leadHint')}>{t('editor.lane.lead')}
         <NumberField value={setting} step={5} min={-200} max={400} label={t('editor.lane.lead')} onCommit={x => useSceneSettings.getState().update({ hapticLeadMs: Math.max(-200, Math.min(400, x)) })} /> ms</label>
       {/* Fixed width: switching applied / not applied never moves the header. */}

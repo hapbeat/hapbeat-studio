@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useToast } from '@/components/common/Toast'
 import './EventsPanel.css'
+import { KindIcon } from '@/components/common/KindIcon'
 
 /**
  * An event's materials (DEC-089): the starred ones that play (`sfx.sounds` / a route's `clips`; the first is the
@@ -10,7 +11,9 @@ import './EventsPanel.css'
  * With `onSelect`, a click anywhere on the row (not on its controls) selects the material; ▶ only plays.
  * Used by the editor's Events panel and the Scene tab's event details.
  */
-export function MaterialList({ items, alternates = [], active, onPlay, onSelect, onStar, onRemove, minItems, extra, below, label, describe }: {
+export function MaterialList({ kind, items, alternates = [], active, onPlay, onSelect, onStar, onRemove, minItems, extra, below, label, describe }: {
+  /** Sound or haptic materials: each row starts with that icon. */
+  kind: 'sound' | 'haptic'
   /** The starred materials (first = representative). */
   items: readonly string[]
   /** The unstarred materials (listed after the starred ones). */
@@ -43,6 +46,7 @@ export function MaterialList({ items, alternates = [], active, onPlay, onSelect,
   return <ul className="events-materials" aria-label={label}>
     {rows.map(({ name, starred, first }) => <li key={name} className={`events-mat ${starred ? '' : 'alternate'} ${active === name ? 'active' : ''} ${onSelect ? 'selectable' : ''}`}
       onClick={onSelect ? e => { if (!(e.target as HTMLElement).closest('button, input, select, textarea, a')) onSelect(name) } : undefined}>
+      <KindIcon kind={kind} />
       <button type="button" className="agent-icon-btn" aria-label={t('events.mat.play', { name })} title={t('events.mat.play', { name })} onClick={() => onPlay(name)}>▶</button>
       {onSelect ? <span className="events-mat-name" role="button" tabIndex={0} title={titled(t('events.mat.show', { name }), name)}
         onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(name) } }}>{name}</span>

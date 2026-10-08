@@ -7,7 +7,7 @@ import { useWaveformStore } from '@/stores/waveformStore'
 import { familyColor, offsetOf } from '@/utils/sceneData'
 import { addVariant, allEventKeys, effectiveEvent, parseEventKey, resolveEventName } from '@/utils/cueEvents'
 import { VARIANT_NAME, type CueTable } from '@/utils/sceneCueTable'
-import { HapticIcon } from './HapticIcon'
+import { HapticIcon, SoundIcon } from '@/components/common/KindIcon'
 import { useMomentPlace } from './SceneCuePanels'
 import { useScene } from './sceneContext'
 import { removeOverride, setOverride as setSceneOverride, type OverriddenClip } from '@/utils/sceneOverrides'
@@ -72,13 +72,11 @@ export function SceneMomentsPanel() {
   return <div className="scene-moments">
     <div className="scene-legend">
       {lib.families.map(f => <span key={f.label}><i style={{ background: f.color }} />{f.label}</span>)}
-      <span><b className="scene-kinds"><span className="h"><HapticIcon /></span></b> {t('scene.legend.haptics')}</span>
-      <span><b className="scene-kinds"><span className="s">♪</span></b> {t('scene.legend.sound')}</span>
+      <span className="scene-legend-kind"><HapticIcon size={14} decorative /> {t('scene.legend.haptics')}</span>
+      <span className="scene-legend-kind"><SoundIcon size={14} decorative /> {t('scene.legend.sound')}</span>
     </div>
     <div ref={list}>
       {items.map((it, k) => {
-        // `cue:variant` names resolve like the game (an unknown variant plays its cue).
-        const cues = it.kind === 'clip' && table ? it.names.map(n => { const r = resolveEventName(table, n); return r && effectiveEvent(table, r.ref) }).filter(e => !!e) : []
         const several = it.kind === 'clip' && it.names.length > 1
         const rowSel = span ? it.kind === 'clip' && !several && spanPlaying(k, it.name) : k === cur
         return <Fragment key={k}><div className={`scene-item ${rowSel ? 'sel' : ''} ${k === picked ? 'picked' : ''}`}
@@ -95,7 +93,8 @@ export function SceneMomentsPanel() {
           <span className="scene-name">{it.kind === 'full' ? t('scene.full') : <>{(it as OverriddenClip).from
             ? <span className="scene-overridden" title={t('scene.override.hint', { from: (it as OverriddenClip).from! })}><i aria-hidden="true">◌</i>{it.names.join(' + ')}</span>
             : it.names.join(' + ')}{(() => { const p = placeOf(table, it.names, it.hand); return <small title={`${p.title}\n${t('scene.placeHint')}`}>{p.text}</small> })()}</>}</span>
-          <span className="scene-kinds">{cues.length > 0 && <><span className="h">{cues.some(c => c.haptics.length) ? <HapticIcon /> : null}</span><span className="s">{cues.some(c => c.sfx) ? '♪' : ''}</span></>}</span>
+          {/* A moment of several cues: the marks are on each cue's own row below. */}
+          <CueKinds table={table} name={it.kind === 'clip' && !several ? it.name : null} />
           <span className="scene-num">{it.kind === 'full' ? '' : `${it.at.toFixed(1)}s`}</span>
           {it.kind === 'clip' && <span className="scene-item-actions">
             <button type="button" className="scene-icon-btn scene-open-editor" aria-expanded={open === k} title={`${t('scene.occ.reassignHint')}${sent[k] ? `\n${t('scene.occ.sent')}` : ''}`}
@@ -115,11 +114,22 @@ export function SceneMomentsPanel() {
           title={rowSpan(k, name) ? t('scene.span.hint', { name }) : t('scene.moment.cueHint', { name })} onClick={() => pickCue(k, name)}>
           <span className="scene-dot" style={{ background: familyColor(lib, name) }} />
           <span className="scene-name">{name}</span>
+          <CueKinds table={table} name={name} />
         </div>)}
         </Fragment>
       })}
     </div>
   </div>
+}
+
+/** Which outputs cue `name` uses (haptic / sound marks in fixed slots); empty for no name or an unknown cue. */
+function CueKinds({ table, name }: { table: CueTable | null; name: string | null }) {
+  // `cue:variant` names resolve like the game (an unknown variant plays its cue).
+  const r = table && name ? resolveEventName(table, name) : null, e = r && table ? effectiveEvent(table, r.ref) : null
+  return <span className="scene-kinds">
+    <span>{e && e.haptics.length > 0 && <HapticIcon size={14} />}</span>
+    <span>{e?.sfx && <SoundIcon size={14} />}</span>
+  </span>
 }
 
 /** After a "Change" request: noted, and the firing is the new event at once (scene-overrides, until re-recorded). */

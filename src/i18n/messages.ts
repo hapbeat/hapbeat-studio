@@ -1067,6 +1067,8 @@ export const messages = defineMessages({
   'events.loop': { ja: 'ループ', en: 'loop' },
   'events.badge.sound': { ja: '音', en: 'Sound' },
   'events.badge.haptic': { ja: '触覚', en: 'Haptic' },
+  'kind.sound': { ja: '音', en: 'Sound' },
+  'kind.haptic': { ja: '触覚', en: 'Haptic' },
   'events.decideSound': { ja: '音に決定', en: 'Decide as sound' },
   'events.decideHaptic': { ja: '触覚に決定', en: 'Decide as haptic' },
   'events.decideHint': { ja: 'この候補をイベントに決定し、ゲームの WAV とイベント表に書き込みます', en: 'Decide this candidate for an event: writes the WAV and the cue table of the game project.' },

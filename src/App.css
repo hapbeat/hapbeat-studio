@@ -43,6 +43,14 @@ body.is-dragging .char-cell.empty:hover {
   --success: #4caf50;
   --warning: #ff9800;
   --error: #f44336;
+  /* Sound vs haptic (every list mark, badge, lane and toggle): blue / orange, a colour-blind-safe pair.
+     Plain = marks / borders / canvas, -strong = text on the dark bg (AA), -soft = fills. */
+  --sound: #4ea8ff;
+  --sound-soft: rgba(78, 168, 255, .16);
+  --sound-strong: #8cc8ff;
+  --haptic: #ff9f43;
+  --haptic-soft: rgba(255, 159, 67, .16);
+  --haptic-strong: #ffc285;
   --border: #2a2a4e;
   --border-light: #3a3a5e;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
@@ -51,6 +59,11 @@ body.is-dragging .char-cell.empty:hover {
   --radius-lg: 10px;
   --transition: 150ms ease;
 }
+
+/* Sound / haptic marks (KindIcon): one colour each, aligned with the text they sit in. */
+.kind-icon { display: inline-block; flex: none; vertical-align: -3px; }
+.kind-icon.sound { color: var(--sound); }
+.kind-icon.haptic { color: var(--haptic); }
 
 * {
   margin: 0;

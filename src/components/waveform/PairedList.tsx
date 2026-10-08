@@ -5,13 +5,14 @@ import { useSceneStore } from '@/stores/sceneStore'
 import { movePair, removeMaterial, setStarred, type EffectiveEvent } from '@/utils/cueEvents'
 import { materialIntensity, routeAlternates, routeClips, setClipIntensity, setSoundIntensity, sfxAlternates, sfxSounds, type CueTable } from '@/utils/sceneCueTable'
 import { MaterialList } from './MaterialList'
+import { KindIcon } from '@/components/common/KindIcon'
 import './EventsPanel.css'
 
 type Edit = (change: (tb: CueTable) => CueTable | null) => boolean
 
 /**
  * A paired cue's materials as pairs (variation.paired: sound i plays with clip i of every route), one line each:
- * `1  ♪ sound  ↔  ≋ clip`, ▶ (both together), the strengths of both (intensity, DEC-086) and ↑ / ↓ (the pair moves as
+ * `1  [sound icon] sound  ↔  [haptic icon] clip`, ▶ (both together), the strengths of both (intensity, DEC-086) and ↑ / ↓ (the pair moves as
  * one, on every route of the same length). A side without a partner is shown in red. Shown for the first route; the
  * other routes follow the same order. Only starred materials pair (DEC-089): each side's ★ unstars it, and the
  * unstarred alternates (sounds, then the first route's clips) are listed under the pairs with ☆ to star them (appended).
@@ -41,7 +42,7 @@ export function PairedList({ e, edit, onPlay, onShow, active, extra, describe }:
   const own = (target: 'sound' | 'haptic') => target === 'sound' ? e.own.sfx : e.own.haptics
   const star = (target: 'sound' | 'haptic', name: string, on: boolean) => edit(tb => setStarred(tb, e.ref, target, 0, name, on))
   const remove = (target: 'sound' | 'haptic', name: string) => edit(tb => removeMaterial(tb, e.ref, target, 0, name))
-  const alternates = (target: 'sound' | 'haptic', names: string[]) => names.length > 0 && <MaterialList items={[]} alternates={names} label={t(target === 'sound' ? 'events.sound' : 'events.haptic')}
+  const alternates = (target: 'sound' | 'haptic', names: string[]) => names.length > 0 && <MaterialList kind={target} items={[]} alternates={names} label={t(target === 'sound' ? 'events.sound' : 'events.haptic')}
     active={active} onPlay={name => target === 'sound' ? onPlay(-1, name, undefined, undefined) : onPlay(-1, undefined, name, route?.at)}
     onSelect={onShow ? name => onShow(target, name, route?.at) : undefined}
     onStar={own(target) ? (name, on) => star(target, name, on) : null} onRemove={own(target) ? name => remove(target, name) : null}
@@ -52,7 +53,7 @@ export function PairedList({ e, edit, onPlay, onShow, active, extra, describe }:
   const side = (target: 'sound' | 'haptic', name: string | undefined) => !name
     ? <span className="events-pair-missing">{t('events.pair.noPartner')}</span>
     : <span className={`events-pair-side ${active === name ? 'active' : ''}`}>
-      <span className="events-pair-kind" aria-hidden="true">{target === 'sound' ? '♪' : '≋'}</span>
+      <KindIcon kind={target} />
       {own(target) ? <button type="button" className="agent-icon-btn events-mat-star on" aria-pressed title={t('events.mat.starred')}
         onClick={() => { if (!star(target, name, false)) toast(t('events.mat.lastStar'), 'warning') }}>★</button>
         : <span className="events-mat-star on" aria-hidden="true">★</span>}

@@ -14,6 +14,7 @@ import {
 import { longestRun, sceneSegment } from '@/utils/sceneSegments'
 import { MaterialList } from '@/components/waveform/MaterialList'
 import { PairedList } from '@/components/waveform/PairedList'
+import { HapticIcon, SoundIcon } from '@/components/common/KindIcon'
 import { CuePicker, NumberField, useAtLabel } from './SceneCuePanels'
 import { useScene } from './sceneContext'
 import { LevelMaps } from './SceneLevelMap'
@@ -269,13 +270,13 @@ function Sounds({ e, edit, allowed }: { e: EffectiveEvent; edit: Edit; allowed: 
   const sounds = sfxSounds(e.sfx), alternates = sfxAlternates(e.sfx), own = e.own.sfx
   if (!allowed) return null
   return <div className="scene-sec">
-    <h3>{t('events.repeat.sounds')}</h3>
+    <h3 className="scene-kind-head"><SoundIcon decorative />{t('events.repeat.sounds')}</h3>
     <OverrideBar e={e} field="sfx" edit={edit} />
     {own && e.sfx && <label className="scene-row" title={t('scene.event.volumeHint')}><span className="scene-dim scene-grow">{t('scene.sound.volume')}</span>
       <NumberField value={e.sfx.volume} min={0} max={2} step={0.05} label={t('scene.sound.volume')} onCommit={x => edit(tb => setOwnSfxVolume(tb, e.ref, x))} /></label>}
     {!sounds.length ? <div className="scene-dim">{t('events.soundNone')}</div>
       : e.variation?.paired === true ? <div className="scene-dim">{t('events.pair.inHaptics')}</div>
-      : <MaterialList items={sounds} alternates={alternates} label={t('events.repeat.sounds')}
+      : <MaterialList kind="sound" items={sounds} alternates={alternates} label={t('events.repeat.sounds')}
         onStar={own ? (s, on) => edit(tb => setStarred(tb, e.ref, 'sound', 0, s, on)) : null} onRemove={own ? s => edit(tb => removeMaterial(tb, e.ref, 'sound', 0, s)) : null}
         onPlay={s => { runtime.audio(); runtime.testSound({ sound: s, volume: e.sfx?.volume ?? 1 }) }} />}
     {own && <select value="" aria-label={t('events.addSoundMulti')} onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) edit(tb => addMaterial(tb, e.ref, 'sound', 0, x)) }}>
@@ -293,7 +294,7 @@ function Clips({ table, e, edit }: { table: CueTable; e: EffectiveEvent; edit: E
   const lib = useSceneStore(s => s.lib)!
   const own = e.own.haptics
   return <div className="scene-sec">
-    <h3>{t('events.repeat.clips')}</h3>
+    <h3 className="scene-kind-head"><HapticIcon decorative />{t('events.repeat.clips')}</h3>
     <OverrideBar e={e} field="haptics" edit={edit} />
     {!e.haptics.length && <div className="scene-dim">{t('events.hapticNone')}</div>}
     {e.haptics.map((r, i) => {
@@ -308,7 +309,7 @@ function Clips({ table, e, edit }: { table: CueTable; e: EffectiveEvent; edit: E
             if (sound) runtime.testSound({ sound, volume: e.sfx?.volume ?? 1 })
             if (clip) runtime.testRoute({ clip, at: r.at, gain: r.gain })
           }} />
-          : <MaterialList items={clips} alternates={alternates} label={atLabel(r.at)} minItems={1}
+          : <MaterialList kind="haptic" items={clips} alternates={alternates} label={atLabel(r.at)} minItems={1}
             onStar={own ? (c, on) => edit(tb => setStarred(tb, e.ref, 'haptic', i, c, on)) : null} onRemove={own ? c => edit(tb => removeMaterial(tb, e.ref, 'haptic', i, c)) : null}
             onPlay={c => runtime.testRoute({ clip: c, at: r.at, gain: r.gain })} />}
         {own && <select value="" aria-label={t('events.addClipMulti')} onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) edit(tb => addMaterial(tb, e.ref, 'haptic', i, x)) }}>

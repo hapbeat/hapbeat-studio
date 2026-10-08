@@ -426,7 +426,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   }, [dockApi, t, s.setError, linkSceneProject])
   const focusEditorPanel = useCallback((id: Parameters<EditorShared['focusEditorPanel']>[0]) => { if (dockApi) focusPanel(dockApi, id, t) }, [dockApi, t])
   const shared: EditorShared = {
-    active, original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, drawnBuffer, foldView, shownLayout, soundLane, level, player, playback, pending, togglePlay, playAt, stopPlayback, isPlaybackActive, playFromStart, toggleCandidate,
+    active, original, setOriginal, pendingChain, preview, auditionKey, audioBuffer, drawnBuffer, foldView, shownLayout, soundLane, soundShown, level, player, playback, pending, togglePlay, playAt, stopPlayback, isPlaybackActive, playFromStart, toggleCandidate,
     openRecipe, provenanceText, isConnected, playbackDevices, targets, routing, setVisibleClipIds, openSceneVideo, linkSceneProject, focusEditorPanel,
   }
   return <EditorContext.Provider value={shared}>
