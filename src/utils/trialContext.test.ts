@@ -49,9 +49,9 @@ describe('audition context (scene.context, simultaneous groups)', () => {
     const pcm = { feed: new Float32Array([1, 1, 1, 1]) }
     const out = renderContextLoops(TABLE, LIB, DATA, { layers: [0], mark: 0.5 }, pcm, 1)!
     expect(out.length).toBe(RATE)
-    // Before 1 s of the replay (0.5 s of the playback) the layer is off; after it, clip × level 1 × intensity 0.5 × route gain 0.5.
+    // Before 1 s of the replay (0.5 s of the playback) the layer is off; after it, clip × level 1 × intensity 0.5 (no route gain, like the one-shots).
     expect(out[Math.round(0.2 * RATE)]).toBe(0)
-    expect(out[Math.round(0.8 * RATE)]).toBeCloseTo(0.25)
+    expect(out[Math.round(0.8 * RATE)]).toBeCloseTo(0.5)
     // A sound-only loop cue has no haptic.
     expect(renderContextLoops(TABLE, LIB, DATA, { layers: [1], mark: 0 }, pcm, 1)).toBeNull()
   })
@@ -75,7 +75,7 @@ describe('audition context (scene.context, simultaneous groups)', () => {
     expect(contextSoundFirings(TABLE, plan).map(f => [f.sound, Number(f.atSec.toFixed(3))])).toEqual([['Chip', 0.2], ['Chip', 1.5]])
     expect(contextHapticParts(TABLE, plan).map(p => [p.clip, Number(p.atSec.toFixed(3)), p.gain])).toEqual([['chip_h', 0.2, 1], ['chip_h', 1.5, 1]])
     // cut_loop's sound (sfx.volume × intensity 1); feed_loop has none.
-    expect(contextLoopSounds(TABLE, { ...LIB, loop_cue_sounds: true } as SceneLib, { layers: [0, 1] })).toEqual([{ layer: 1, sound: 'Cutting', gain: 0.8 }])
+    expect(contextLoopSounds(TABLE, { ...LIB, loop_cue_sounds: true } as SceneLib, { layers: [0, 1] })).toEqual([{ layer: 1, sound: 'Cutting', gain: 1 }])  // the sound's intensity only (sfx.volume 0.8 not applied)
     expect(contextLoopSounds(TABLE, LIB, { layers: [0] })).toEqual([])
     // Playback 0.5 s with the PC sounds 0.1 s late: the levels of replay time 1.4 s.
     expect(contextReplayTime(plan, 0.5, 0.1)).toBeCloseTo(1.4)

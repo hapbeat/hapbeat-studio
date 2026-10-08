@@ -1,5 +1,5 @@
 import { levelAt, type SceneData, type SceneLib } from './sceneData'
-import { isLoopCue, routeClips, type CueTable } from './sceneCueTable'
+import { isLoopCue, routeClips, soundIntensity, type CueTable } from './sceneCueTable'
 import { effectiveEvent, parseEventKey, resolveEventName } from './cueEvents'
 import { groupContext } from './eventGroups'
 import { groupFirings, type SoundFiring } from './groupPlayback'
@@ -51,11 +51,12 @@ export function contextPlan(data: Pick<SceneData, 'full'>, lib: Pick<SceneLib, '
 /**
  * The context loop cues' haptics as one mono stream (RATE), `durationSec` long: each route's clip looped at its layer's
  * recorded level and rate (renderChunk's loop voices, sceneHaptics). The editor sends one stream, so a `hand` route's two
- * wrists become one voice following the louder hand. Gain = clip intensity × route gain, as the Scene tab plays it.
+ * wrists become one voice following the louder hand. Gain = clip intensity only (no scene route gain), like the context's one-shots.
  */
 export function renderContextLoops(table: CueTable, lib: SceneLib, data: Pick<SceneData, 'full' | 'fps'>, plan: Pick<ContextPlan, 'layers' | 'mark'>,
   pcm: Record<string, Float32Array>, durationSec: number): Float32Array | null {
-  const voices: LoopVoice[] = buildLoopVoices(table, lib).filter(v => plan.layers.includes(v.layer) && v.side !== 1).map(v => ({ ...v, side: -1 }))
+  const voices: LoopVoice[] = buildLoopVoices(table, lib).filter(v => plan.layers.includes(v.layer) && v.side !== 1)
+    .map(v => ({ ...v, side: -1, gain: table.clips[v.clip]?.intensity ?? 1 }))
   const live = voices.filter(v => pcm[v.clip]?.length)
   if (!live.length) return null
   const out = new Float32Array(Math.max(1, Math.round(durationSec * RATE)))
@@ -96,9 +97,9 @@ export function contextHapticParts(table: CueTable, plan: Pick<ContextPlan, 'fir
   })
 }
 
-/** The context loop cues' sounds (lib.loop_cue_sounds; the Scene tab's loop sounds of those layers). */
+/** The context loop cues' sounds (lib.loop_cue_sounds; those layers' loop sounds) at the sound's intensity only (no sfx.volume), like the context's one-shots. */
 export function contextLoopSounds(table: CueTable, lib: SceneLib, plan: Pick<ContextPlan, 'layers'>): LoopSound[] {
-  return buildLoopSounds(table, lib).filter(x => plan.layers.includes(x.layer))
+  return buildLoopSounds(table, lib).filter(x => plan.layers.includes(x.layer)).map(x => ({ ...x, gain: soundIntensity(table, x.sound) }))
 }
 
 /** The full replay time whose recorded loop levels play at editor playback time `playSec` (the PC sounds play `leadSec` later). */
