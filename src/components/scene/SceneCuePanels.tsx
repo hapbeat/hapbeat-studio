@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
+import { openSceneSelectionInEditor } from '@/stores/eventStore'
 import { familyColor, momentCues } from '@/utils/sceneData'
 import { effectiveEvent, resolveEventName } from '@/utils/cueEvents'
 import type { CueTable } from '@/utils/sceneCueTable'
@@ -84,6 +85,9 @@ export function CuePicker() {
       <option value="">{t('scene.pickHint')}</option>
       {Object.keys(table.cues).map(n => <option key={n} value={n}>{n}</option>)}
     </select>
+    {/* The selected event (a variant as itself) in the editor's Events / Event detail panels; O. Kept (disabled) without one. */}
+    <button type="button" className="scene-icon-btn scene-open-editor" disabled={!name} title={t('scene.openInEditor.hint')}
+      onClick={e => { e.currentTarget.blur(); openSceneSelectionInEditor(table, sel) }}>{t('scene.openInEditor')}</button>
     <div className="scene-chips">
       {others.length > 0 && <>{t('scene.sameMoment')}{others.map(n => <button key={n} type="button" style={{ color: familyColor(lib, n) }}
         onClick={e => { e.currentTarget.blur(); useSceneStore.getState().selectCue(n, sel!.t) }}>{n}</button>)}</>}

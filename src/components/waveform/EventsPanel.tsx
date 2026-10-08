@@ -13,7 +13,7 @@ import {
   addPositionRoute, assignEventsForTrial, effectiveEvent, eventKey, listEvents, parseEventKey, removeOwnRoute, shownEventKey,
   addMaterial, removeMaterial, setStarred, trialsForEvent, updateOwnRoute,
   resetAllReviews, setNone, setOverride, setReview, setUndecided, hasOwnMaterials, undecidedReserves, restoreReserve, soundFirstNote, noSoundNote,
-  type EffectiveEvent, type EventRow, type SoundStatus,
+  materialPill, materialStatus, type EffectiveEvent, type EventRow, type MaterialStatus, type SoundStatus,
 } from '@/utils/cueEvents'
 import { useConfirm } from '@/components/common/useConfirm'
 import { useAtLabel } from '@/components/scene/SceneCuePanels'
@@ -194,18 +194,34 @@ function ProjectPicker() {
 
 function EventRowButton({ row, selected, onSelect, requested }: { row: EventRow; selected: boolean; onSelect: (key: string) => void; requested: { sound: boolean; haptic: boolean } }) {
   const { t } = useI18n()
-  // 音 未定 (yellow) / 音 なし 仮|OK (grey) / 音 仮|OK (blue | green); — for a loop cue's sound where the project has none;
-  // 「依頼済み」 (purple) while a request to the agent for it is open. Fixed width.
+  // 音 未定 (yellow) / 音 なし 仮 (grey outline) / 音 なし ✓ (green outline: approved as no sound) / 音 仮 (blue) / 音 OK (green);
+  // — for a loop cue's sound where the project has none; 「依頼済み」 (purple) while a request to the agent for it is open. Fixed width.
   const badge = (kind: 'sound' | 'haptic', label: string, status: SoundStatus, asked: boolean) => asked ? <span className="events-badge requested" title={t('events.requested.hint')}><KindIcon kind={kind} size={14} decorative />{label} {t('events.requested')}</span>
     : status === 'na' ? <span className="events-badge na"><KindIcon kind={kind} size={14} decorative />{label} —</span>
-    : <span className={`events-badge ${status.state} ${status.state === 'undecided' ? '' : status.review}`}><KindIcon kind={kind} size={14} decorative />{label} {status.state === 'undecided' ? t('events.undecided')
-      : `${status.state === 'none' ? `${t('events.noneShort')} ` : ''}${t(status.review === 'approved' ? 'events.reviewApproved' : 'events.reviewTentative')}`}</span>
+    : <MaterialPillBadge kind={kind} status={status} label={label} />
   const child = row.ref.variant !== null
   return <button type="button" role="option" aria-selected={selected} className={`events-row ${child ? 'variant' : ''} ${selected ? 'selected' : ''}`} onClick={() => onSelect(row.key)} title={row.description ?? ''}>
     <span className="events-row-name">{child ? `${row.ref.cue} › ${row.ref.variant}` : row.key}{row.loop && <small>{t('events.loop')}</small>}</span>
     <span className="events-row-badges">{badge('sound', t('events.badge.sound'), row.sound, requested.sound)}{badge('haptic', t('events.badge.haptic'), row.haptic, requested.haptic)}</span>
     {row.description && <small className="events-row-desc">{row.description}</small>}
   </button>
+}
+
+/**
+ * The state pill of a sound / haptic (`materialPill`): the kind icon (slashed for "none") and `label` (音 / 触覚; left
+ * out next to a heading that already says it) with 未定 / なし 仮 / なし ✓ / 仮 / OK.
+ */
+function MaterialPillBadge({ kind, status, label }: { kind: 'sound' | 'haptic'; status: MaterialStatus; label?: string }) {
+  const { t } = useI18n()
+  const pill = materialPill(status)
+  const none = pill === 'none-tentative' || pill === 'none-approved'
+  const text = pill === 'undecided' ? t('events.undecided')
+    : pill === 'none-tentative' ? `${t('events.noneShort')} ${t('events.reviewTentative')}`
+    : pill === 'none-approved' ? t('events.noneShort')
+    : t(pill === 'approved' ? 'events.reviewApproved' : 'events.reviewTentative')
+  const title = pill === 'none-approved' ? t(kind === 'sound' ? 'events.noneOk.sound' : 'events.noneOk.haptic') : undefined
+  return <span className={`events-badge ${pill}`} title={title}><KindIcon kind={kind} size={14} decorative slashed={none} />
+    {label ? `${label} ${text}` : text}{pill === 'none-approved' && <span className="events-badge-check" aria-hidden="true">✓</span>}</span>
 }
 
 type Edit = (change: (tb: CueTable) => CueTable | null) => boolean
@@ -373,7 +389,7 @@ function ReviewToggle({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'h
   const { t } = useI18n()
   const approved = e.review[field] === 'approved'
   return <span className="events-review" style={{ visibility: e.decided[field] ? 'visible' : 'hidden' }}>
-    <span className={`events-badge ${e.review[field]}`}>{t(approved ? 'events.reviewApproved' : 'events.reviewTentative')}</span>
+    <MaterialPillBadge kind={field === 'sfx' ? 'sound' : 'haptic'} status={materialStatus(e, field)} />
     <button type="button" className="agent-icon-btn" title={t(approved ? 'events.reviewBackHint' : 'events.reviewApproveHint')}
       onClick={() => edit(tb => setReview(tb, e.ref, field, approved ? 'tentative' : 'approved'))}>{t(approved ? 'events.reviewBack' : 'events.reviewApprove')}</button>
   </span>

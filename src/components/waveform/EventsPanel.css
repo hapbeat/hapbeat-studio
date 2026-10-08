@@ -34,10 +34,13 @@
 /* Fixed width: the badge text changes between ✓ / 未 / — without moving the row. */
 .events-badge { display: inline-flex; align-items: center; justify-content: center; gap: 3px; white-space: nowrap; min-width: calc(7.6em + 17px); padding: 0 5px; border-radius: 4px; font-size: 11px; text-align: center; border: 1px solid var(--border-light); color: var(--text-secondary); }
 .events-badge.undecided { border-color: #c9a34a; color: #e3c27a; }
-.events-badge.none { border-color: #6b7280; color: #9ca3af; }
-.events-badge.none.approved { background: rgba(107,114,128,.18); }
-.events-badge.set.approved, .events-badge.approved { border-color: #4f9e7a; color: #8dd5b1; background: rgba(79,158,122,.15); }
-.events-badge.set.tentative, .events-badge.tentative:not(.none) { border-color: #6b8fd6; color: #a9c3f0; }
+.events-badge.approved { border-color: #4f9e7a; color: #8dd5b1; background: rgba(79,158,122,.15); }
+.events-badge.tentative { border-color: #6b8fd6; color: #a9c3f0; }
+/* No material: outline only, the icon slashed in the pill's colour; grey while tentative, green with ✓ once approved. */
+.events-badge.none-tentative { border-color: #6b7280; color: #9ca3af; background: transparent; }
+.events-badge.none-approved { border-color: #4f9e7a; color: #8dd5b1; background: transparent; }
+.events-badge.none-tentative > .kind-icon, .events-badge.none-approved > .kind-icon { color: inherit; }
+.events-badge-check { color: #4fd18f; font-weight: 700; }
 .events-badge.unset { border-color: #c9a34a; color: #e3c27a; }
 /* A request to the agent is open (remake / go to haptics). */
 .events-badge.requested { border-color: #a78bfa; color: #c4b5fd; background: rgba(167,139,250,.15); }

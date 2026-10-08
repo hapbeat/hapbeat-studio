@@ -3,7 +3,7 @@ import {
   addEventMark, addPositionRoute, fireShot, resetAllReviews, setNone, setReview, setUndecided, addVariant, simultaneousGroups, firstFirings, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
   effectiveEvent, eventSceneCues, jitterGain, listEvents, MaterialPicker, matchesName, materialUsers, needsRouteForm, overwriteUsers,
   parseEventKey, removeVariant, representativeSound, candidateSound, hasOwnMaterials, shownEventKey, resolveEventName, cueRoutePositions, materialRoutePositions, pairedClips, setOverride, setRouteClips, setSfxSounds, setVariation, soundFirstNote, noSoundNote, trialEvent, trialsForEvent,
-  setStarred, isLastStar, removeMaterial, addMaterial, movePair, setOwnSfxVolume, setDistanceFalloff, undecidedReserves,
+  setStarred, isLastStar, removeMaterial, addMaterial, movePair, setOwnSfxVolume, setDistanceFalloff, undecidedReserves, materialPill, materialStatus,
 } from './cueEvents'
 import { validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
 import { cueVoices, tableTargets } from './sceneHaptics'
@@ -606,5 +606,28 @@ describe('starred and alternates (DEC-089)', () => {
     expect(new Set(shots.flatMap(s => s.routes.map(r => r.clip)))).toEqual(new Set(['click']))
     expect(representativeSound(t, sampleLib(), ['button'], { Click: 'c', Clack: 'k' }, 'Clack')).toMatchObject({ buffer: 'c' })
     expect(pairedClips(e, 0)).toEqual([{ clip: 'click', at: 'hand' }])
+  })
+})
+
+describe('Events status pills (materialPill)', () => {
+  it('tells an approved "none" apart from an approved material', () => {
+    expect(materialPill({ state: 'undecided', review: 'tentative' })).toBe('undecided')
+    expect(materialPill({ state: 'undecided', review: 'approved' })).toBe('undecided')
+    expect(materialPill({ state: 'none', review: 'tentative' })).toBe('none-tentative')
+    expect(materialPill({ state: 'none', review: 'approved' })).toBe('none-approved')
+    expect(materialPill({ state: 'set', review: 'tentative' })).toBe('tentative')
+    expect(materialPill({ state: 'set', review: 'approved' })).toBe('approved')
+  })
+
+  it('maps a cue decided as no sound and approved to none-approved (sfx: null), haptics: [] likewise', () => {
+    const t = v2Table()
+    let n = setNone(t, { cue: 'grab', variant: null }, 'sfx')
+    n = setReview(n, { cue: 'grab', variant: null }, 'sfx', 'approved')
+    n = setNone(n, { cue: 'grab', variant: null }, 'haptics')
+    const e = effectiveEvent(n, { cue: 'grab', variant: null })!
+    expect(materialPill(materialStatus(e, 'sfx'))).toBe('none-approved')
+    expect(materialPill(materialStatus(e, 'haptics'))).toBe('none-tentative')
+    const b = effectiveEvent(t, { cue: 'button', variant: null })!
+    expect(materialStatus(b, 'haptics').state).toBe('set')
   })
 })

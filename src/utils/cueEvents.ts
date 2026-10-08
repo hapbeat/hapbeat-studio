@@ -96,8 +96,23 @@ export function noSoundNote(e: Pick<EffectiveEvent, 'decided'>): 'events.soundNo
 /** Undecided (no key) / decided as none (null / []) / a material; each decided state is tentative or approved. */
 export type MaterialState = 'undecided' | 'none' | 'set'
 export interface MaterialStatus { state: MaterialState; review: ReviewState }
+/** The state of an event's sound (`sfx`) or haptics. */
+export function materialStatus(e: Pick<EffectiveEvent, 'sfx' | 'haptics' | 'decided' | 'review'>, field: 'sfx' | 'haptics'): MaterialStatus {
+  const has = field === 'sfx' ? !!e.sfx : e.haptics.length > 0
+  return { state: !e.decided[field] ? 'undecided' : has ? 'set' : 'none', review: e.review[field] }
+}
 /** 'na': a loop cue's sound where the project has no looping cue sounds. */
 export type SoundStatus = MaterialStatus | 'na'
+/**
+ * How an Events status pill shows a material state: 未定 / なし 仮 (grey outline, slashed icon) / なし OK (green outline,
+ * slashed icon, ✓: "approved: no material") / 仮 / OK (solid green).
+ */
+export type MaterialPill = 'undecided' | 'none-tentative' | 'none-approved' | 'tentative' | 'approved'
+export function materialPill(s: MaterialStatus): MaterialPill {
+  if (s.state === 'undecided') return 'undecided'
+  if (s.state === 'none') return s.review === 'approved' ? 'none-approved' : 'none-tentative'
+  return s.review
+}
 export interface EventRow {
   key: string
   ref: EventRef
@@ -111,10 +126,9 @@ export interface EventRow {
 
 function row(table: CueTable, lib: SceneLib, ref: EventRef, variants: EventRow[]): EventRow {
   const e = effectiveEvent(table, ref)!, loop = isLoopCue(lib, ref.cue)
-  const status = (decided: boolean, has: boolean, review: ReviewState): MaterialStatus => ({ state: !decided ? 'undecided' : has ? 'set' : 'none', review })
   return { key: eventKey(ref), ref, description: e.description, loop,
-    sound: soundAllowed(lib, ref.cue) ? status(e.decided.sfx, !!e.sfx, e.review.sfx) : 'na',
-    haptic: status(e.decided.haptics, e.haptics.length > 0, e.review.haptics), variants }
+    sound: soundAllowed(lib, ref.cue) ? materialStatus(e, 'sfx') : 'na',
+    haptic: materialStatus(e, 'haptics'), variants }
 }
 
 /** A variant that writes its own sfx or haptics (shown in the editor as a child row of its cue; DEC-085 addendum). */

@@ -32,7 +32,7 @@ import { playStart, useStartMarker } from '@/utils/editorStartMarker'
 import { scenePause, scenePreRoll, useSceneVideoTarget, type SceneVideoTarget } from '@/utils/editorSceneSync'
 import { useSceneStore } from '@/stores/sceneStore'
 import { lastSceneProject } from '@/utils/sceneRegistry'
-import { levelKey, useEventStore } from '@/stores/eventStore'
+import { levelKey, revealEvent, useEventStore } from '@/stores/eventStore'
 import { showDockPanel } from '@/utils/dockPanels'
 import { trialTarget } from '@/utils/agentProtocol'
 import { waveformOnPc } from '@/utils/agentTrialUi'
@@ -68,13 +68,17 @@ export function WaveformEditor({ active }: { active: boolean }) {
   useEffect(() => { if (audition) { useEventStore.getState().clearPreview(); setOriginal(false) } }, [audition])
   const focusRequest = useAgentTrialStore(state => state.focusRequest)
   useEffect(() => { if (focusRequest && dockApi) focusPanel(dockApi, 'agent', t) }, [focusRequest, dockApi])
-  // Scene tab "open in editor": the Events panel with the event selected, and its moment in the Scene video panel.
+  // Scene tab "open in editor": the Events / Event detail panels with the event selected, and its moment in the Scene
+  // video panel. Each request is consumed once (a later dock re-creation does not repeat it).
   const eventFocusRequest = useEventStore(state => state.focusRequest)
+  const consumedEventFocus = useRef(0)
   useEffect(() => {
+    if (!eventFocusRequest || !dockApi || consumedEventFocus.current === eventFocusRequest) return
+    consumedEventFocus.current = eventFocusRequest
     const key = useEventStore.getState().selected
-    if (!eventFocusRequest || !dockApi) return
-    focusPanel(dockApi, 'events', t)
-    if (key) { useSceneVideoTarget.getState().setTarget({ kind: 'event', key }); openEventDefault(key) }
+    if (!key) { focusPanel(dockApi, 'events', t); return }
+    revealEvent(key, id => focusPanel(dockApi, id, t))
+    useSceneVideoTarget.getState().setTarget({ kind: 'event', key }); openEventDefault(key)
   }, [eventFocusRequest, dockApi])
   /** A sound AI trial (target "sound") is auditioned on the PC only: no haptic targets while one is shown. */
   const auditionIsSound = useAgentTrialStore(state => {

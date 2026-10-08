@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import type { TrialSceneChoice } from '@/utils/editorUiSettings'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
+import { eventKey, resolveEventName } from '@/utils/cueEvents'
+import type { CueTable } from '@/utils/sceneCueTable'
 
 /**
  * Event-centred authoring (DEC-083) state shared by the editor's Events panel,
@@ -48,7 +50,7 @@ export const levelKey = {
 
 interface EventState {
   selected: string | null
-  /** Bumped when the editor should bring the Events panel forward (Scene tab "open in editor"). */
+  /** Bumped when the editor should bring the Events / Event detail panels forward (Scene tab "open in editor"); consumed once. */
   focusRequest: number
   decide: DecideRequest | null
   /** Scene video moment picked per event key (this session). */
@@ -65,7 +67,7 @@ interface EventState {
   showPreview: (preview: EventPreview) => void
   clearPreview: () => void
   pickScene: (key: string, choice: TrialSceneChoice | null) => void
-  /** Selects `key`, switches to the editor tab and focuses the Events panel. */
+  /** Selects `key`, switches to the editor tab and focuses the Events / Event detail panels. */
   openInEditor: (key: string) => void
   /** The event whose firings the Scene tab lists (DEC-085: every moment of an event is checked there). */
   sceneOccurrences: string | null
@@ -83,6 +85,18 @@ export function revealEvent(key: string, focus: (id: 'events' | 'eventDetail') =
   useEventStore.getState().select(key)
   focus('events')
   focus('eventDetail')
+}
+
+/**
+ * Scene tab 「エディタで開く」 (button / O key): opens the event selected in the Scene event panel (a variant as
+ * `cue:variant`; `table` / `sel` = sceneStore's) in the editor. Returns its key (null: no event selected).
+ */
+export function openSceneSelectionInEditor(table: CueTable | null, sel: { name: string } | null): string | null {
+  const resolved = table && sel ? resolveEventName(table, sel.name) : null
+  if (!resolved) return null
+  const key = eventKey(resolved.ref)
+  useEventStore.getState().openInEditor(key)
+  return key
 }
 
 /** App listens for this and switches tabs (detail = tab id). */

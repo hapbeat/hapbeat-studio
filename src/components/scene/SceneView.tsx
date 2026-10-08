@@ -15,6 +15,7 @@ import { resolvePlaybackTargets } from '@/utils/playbackDevices'
 import { matchesAddress, RETRY_MS, tableTargets, type HapticDevice, type StreamAck, type StreamDisplaced } from '@/utils/sceneHaptics'
 import { focusEvent } from '@/utils/sceneData'
 import { isTypingTarget } from '@/utils/playbackShortcut'
+import { openSceneSelectionInEditor } from '@/stores/eventStore'
 import { SceneRuntime } from './sceneRuntime'
 import { SceneContext, type SceneShared } from './sceneContext'
 import { SceneDockLayout } from './SceneDockLayout'
@@ -92,7 +93,8 @@ export function SceneView({ active }: { active: boolean }) {
   }, [])
 
   // Keys (viewer's): ↑↓ item, Space play (App forwards it as studio:scene-playback), ←→ frame / Shift 1 s,
-  // E before the cue, W ±0.5 s loop, R restart, F back to the full replay (where the moment / span is now), S speed, L loop, , . previous / next cue, M sound, H haptics.
+  // E before the cue, W ±0.5 s loop, R restart, F back to the full replay (where the moment / span is now), S speed, L loop, , . previous / next cue, M sound, H haptics,
+  // O the selected event in the editor.
   useEffect(() => {
     if (!active) return
     const playback = () => { if (useSceneStore.getState().items.length) { runtime.audio(); runtime.togglePlay() } }
@@ -115,6 +117,7 @@ export function SceneView({ active }: { active: boolean }) {
       else if (key === 'l') { useSceneSettings.getState().update({ loop: !useSceneSettings.getState().loop }); runtime.applyLoop() }
       else if (key === 'm') useSceneSettings.getState().update({ pcSound: !useSceneSettings.getState().pcSound })
       else if (key === 'h') useSceneSettings.getState().update({ sendHaptics: !useSceneSettings.getState().sendHaptics })
+      else if (key === 'o') { if (!openSceneSelectionInEditor(s.table, s.sel)) return }
       else if (key === ',' || key === '.') {
         const ev = runtime.events().filter(x => !ticks.includes(x.name)), time = v.currentTime
         const next = key === '.' ? ev.find(x => x.t > time + 0.05) : [...ev].reverse().find(x => x.t < time - 0.3)
