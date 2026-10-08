@@ -5,7 +5,8 @@ import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { localIsoString, type TrialRecord } from '@/utils/hapticKnowledge'
 import type { HapticFeatures } from '@/utils/hapticFeatures'
-import { clearRatingDraft, DraftKeeper, readFolderDraft, readLocalDraft, writeRatingDraft } from '@/utils/ratingDrafts'
+import { clearRatingDraft, DraftKeeper, readFolderDraft, readLocalDraft, rememberedOpenTrial, rememberOpenTrial, writeFolderDraft, writeLocalDraft } from '@/utils/ratingDrafts'
+import { onPageHide } from '@/utils/pageHide'
 import { addUseRange, isFreePlanCandidate, poolCandidates, reserveCandidates, addReserves, autoRatingContext, EMPTY_CONTEXT, formToRating, initialIntensity, loadRememberedContext, ratingFormIssue, ratingToForm, rememberContext, trialKind, verdictFromOverall, type CandidateRatingForm, type RatingForm } from '@/utils/agentTrialUi'
 import { trialTarget, type TrialKind } from '@/utils/agentProtocol'
 import { useAuditionPlan } from './EditorScenePanel'
@@ -22,7 +23,7 @@ import { SoundFirstNote } from './EventsPanel'
 import { isLoopCue, sfxSounds } from '@/utils/sceneCueTable'
 import { WaveformThumbnail } from './WaveformThumbnail'
 import { EditorMenu, EditorMenuItem } from './EditorMenu'
-import { filterTrials, nextAfter, stepQueue, trialQueue } from '@/utils/trialQueue'
+import { filterTrials, nextAfter, stepQueue, trialQueue, trialToOpen } from '@/utils/trialQueue'
 import { useConfirm } from '@/components/common/useConfirm'
 import { useEditor } from './editorContext'
 import { useSceneVideoTarget } from '@/utils/editorSceneSync'
@@ -42,11 +43,12 @@ const editorRoot = () => useWaveformStore.getState().folder?.root ?? null
 const drafts = new DraftKeeper({
   readLocal: readLocalDraft,
   readFolder: async trial => { const root = editorRoot(); return root ? readFolderDraft(root, trial) : null },
-  write: (trialId, form, savedAt) => writeRatingDraft(editorRoot(), trialId, form, savedAt),
+  writeLocal: writeLocalDraft,
+  writeFolder: (trialId, form, savedAt) => writeFolderDraft(editorRoot(), trialId, form, savedAt),
   clear: trialId => clearRatingDraft(editorRoot(), trialId),
 }, () => localIsoString(new Date()))
-// Typing then closing / reloading the page within the debounce still keeps the last change.
-if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') window.addEventListener('pagehide', () => drafts.flush())
+// Closing / reloading / hiding the page within the debounce still writes the folder copy (localStorage already has it).
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') onPageHide(() => drafts.flush())
 
 /**
  * "AI trials": trials that a local agent dropped into hapbeat-agent/inbox/, their
@@ -97,14 +99,18 @@ export function AgentTrialsPanel() {
   // Work top-down: the unrated, not dismissed trials of the project, oldest first.
   const queue = useMemo(() => trialQueue(shown), [shown])
   const inQueue = !!record && queue.some(r => r.trial.id === record.trial.id)
-  // Opening the tab / changing project / finishing the shown trial: open the oldest unrated one.
+  // Opening the tab / changing project / finishing the shown trial: open the oldest unrated one,
+  // except after a reload: the trial open before it comes back (with its draft).
   useEffect(() => {
     if (!folder || (record && shown.includes(record))) return
-    if (queue[0]) pickTrial(queue[0])
+    const open = trialToOpen(shown, queue, rememberedOpenTrial())
+    if (open) pickTrial(open)
   }, [folder, projectFilter, targetFilter, record, shown, queue])
+  // Remembered for that reload (cleared only where the panel closes the trial on purpose; null while loading is not stored).
+  useEffect(() => { if (selectedId) rememberOpenTrial(selectedId) }, [selectedId])
   const onDone = (info: DoneInfo) => {
     const next = nextAfter(queue, info.recordId)
-    if (next) pickTrial(next); else setSelectedId(null)
+    if (next) pickTrial(next); else { setSelectedId(null); rememberOpenTrial(null) }
   }
   const prev = stepQueue(queue, record?.trial.id ?? null, -1), next = stepQueue(queue, record?.trial.id ?? null, 1)
   const { openSceneVideo, focusEditorPanel } = useEditor()
@@ -126,7 +132,7 @@ export function AgentTrialsPanel() {
   const dismissAll = async () => {
     if (!queue.length || !await ask({ message: t('editor.agent.dismissAllConfirm', { count: queue.length }), danger: true })) return
     try {
-      await useAgentTrialStore.getState().dismissMany(queue.map(r => r.trial.id)); setSelectedId(null)
+      await useAgentTrialStore.getState().dismissMany(queue.map(r => r.trial.id)); setSelectedId(null); rememberOpenTrial(null)
     } catch (error) { setPanelNotice(message(error)) }
   }
   const target = record ? trialTarget(record.trial) : null
@@ -303,7 +309,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
   const plan = useAuditionPlan()
   const auditionSec = useAgentTrialStore(s => s.audition?.buffer.duration ?? 0)
   const selection = useMemo(() => toFirstPlay(region, plan?.targets ?? null, auditionSec), [region, plan, auditionSec])
-  /** Every change goes to the draft keeper (memory now, the stores after 300 ms). */
+  /** Every change goes to the draft keeper (memory and localStorage now, the folder copy after 300 ms). */
   const edit = (update: (f: RatingForm) => RatingForm) => { const next = update(form); setForm(next); drafts.change(trial.id, next); setDirty(true); setSaveError(null) }
   const editCandidate = (cid: string, patch: Partial<CandidateRatingForm>) => edit(f => ({ ...f, candidates: { ...f.candidates, [cid]: { ...f.candidates[cid], ...patch } } }))
   // The candidates' strengths (form values, unsaved too) for the audition gain and "→ Event" / auto-assign.

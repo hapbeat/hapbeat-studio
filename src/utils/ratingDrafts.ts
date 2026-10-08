@@ -5,14 +5,25 @@ import { writeEditorFile } from './editorFolder'
 /**
  * Unsaved AI-trial rating forms, kept so a reload or a dev-server restart does
  * not lose them: one JSON per trial in `<editor folder>/.hapbeat-editor/rating-drafts/`
- * and a localStorage copy. Written (debounced) on every change, restored when the
- * trial is opened again, removed once the rating is saved. These files are
- * Studio's own temporary drafts, so removing them is allowed (no `_archive`).
+ * and a localStorage copy. The localStorage copy is written at once on every change
+ * (a reload at any moment keeps the last input), the folder copy after a debounce;
+ * restored when the trial is opened again, removed once the rating is saved. These
+ * files are Studio's own temporary drafts, so removing them is allowed (no `_archive`).
  */
 export const DRAFT_FORMAT = 'hapbeat-rating-draft@1'
 export const DRAFT_DIR = 'rating-drafts'
+/** Delay of the folder copy after the last change (the localStorage copy is not delayed). */
 export const DRAFT_DEBOUNCE_MS = 300
 const storageKey = (trialId: string) => `hapbeat-rating-draft:${trialId}`
+const OPEN_TRIAL_KEY = 'hapbeat-agent-open-trial'
+
+/** The trial open in the AI trials panel, so a reload opens the same one again (null = none open). */
+export function rememberOpenTrial(trialId: string | null) {
+  try { if (trialId) localStorage.setItem(OPEN_TRIAL_KEY, trialId); else localStorage.removeItem(OPEN_TRIAL_KEY) } catch { /* storage unavailable: the queue head opens */ }
+}
+export function rememberedOpenTrial(): string | null {
+  try { return localStorage.getItem(OPEN_TRIAL_KEY) } catch { return null }
+}
 
 export interface RatingDraft { format: typeof DRAFT_FORMAT; trialId: string; savedAt: string; form: RatingForm }
 
@@ -59,11 +70,13 @@ async function draftDir(root: FileSystemDirectoryHandle, create: boolean) {
 export async function readFolderDraft(root: FileSystemDirectoryHandle, trial: Pick<TrialRequest, 'id' | 'candidates' | 'terms'>): Promise<RatingDraft | null> {
   try { return parseRatingDraft(await (await (await (await draftDir(root, false)).getFileHandle(`${trial.id}.json`)).getFile()).text(), trial) } catch { return null }
 }
-/** Both copies; the folder write is best effort (localStorage still holds the draft). */
-export async function writeRatingDraft(root: FileSystemDirectoryHandle | null, trialId: string, form: RatingForm, savedAt: string): Promise<void> {
-  const text = serializeRatingDraft(trialId, form, savedAt)
-  try { localStorage.setItem(storageKey(trialId), text) } catch { /* storage unavailable: the folder copy remains */ }
-  if (root) await writeEditorFile(await draftDir(root, true), `${trialId}.json`, text)
+/** The localStorage copy (synchronous, so it is in place even when the page is reloaded right after). */
+export function writeLocalDraft(trialId: string, form: RatingForm, savedAt: string): void {
+  try { localStorage.setItem(storageKey(trialId), serializeRatingDraft(trialId, form, savedAt)) } catch { /* storage unavailable: the folder copy remains */ }
+}
+/** The folder copy; best effort (localStorage still holds the draft). */
+export async function writeFolderDraft(root: FileSystemDirectoryHandle | null, trialId: string, form: RatingForm, savedAt: string): Promise<void> {
+  if (root) await writeEditorFile(await draftDir(root, true), `${trialId}.json`, serializeRatingDraft(trialId, form, savedAt))
 }
 /** Removes both copies after the rating is saved (Studio's own temporary file). */
 export async function clearRatingDraft(root: FileSystemDirectoryHandle | null, trialId: string): Promise<void> {
@@ -77,8 +90,10 @@ type DraftTrial = Pick<TrialRequest, 'id' | 'candidates' | 'terms'>
 export interface DraftStores {
   readLocal: (trial: DraftTrial) => RatingDraft | null
   readFolder: (trial: DraftTrial) => Promise<RatingDraft | null>
-  /** Writes both copies (the localStorage one synchronously). */
-  write: (trialId: string, form: RatingForm, savedAt: string) => Promise<void>
+  /** Synchronous: called on every change. */
+  writeLocal: (trialId: string, form: RatingForm, savedAt: string) => void
+  /** Debounced (and on flush). */
+  writeFolder: (trialId: string, form: RatingForm, savedAt: string) => Promise<void>
   clear: (trialId: string) => Promise<void>
 }
 
@@ -86,8 +101,9 @@ export interface DraftStores {
  * Keeps unsaved rating forms across trial switches, reloads and restarts.
  * Opening a trial always restores: this page's memory, else the stored draft
  * (localStorage now, the newer folder copy when it arrives — unless the user
- * typed meanwhile). Every change is written after `delayMs` (and at once on
- * flush, e.g. when the page is hidden); only `done` (saved, moving on) removes it.
+ * typed meanwhile). Every change goes to localStorage at once and to the folder
+ * after `delayMs` (at once on flush, e.g. when the page is hidden); only `done`
+ * (saved, moving on) removes it.
  * Nothing here depends on React effects, so a double-run effect (StrictMode)
  * or an auto-open racing the restore cannot wipe a draft.
  */
@@ -114,18 +130,19 @@ export class DraftKeeper {
     this.memory.set(trial.id, { form: found.form, savedAt: found.savedAt })
     return found
   }
-  /** Records a change: memory now, the stores after the debounce. */
+  /** Records a change: memory and localStorage now, the folder copy after the debounce. */
   change(trialId: string, form: RatingForm) {
     const savedAt = this.now()
     this.memory.set(trialId, { form, savedAt })
+    this.stores.writeLocal(trialId, form, savedAt)
     const before = this.pending.get(trialId)
     if (before) clearTimeout(before.timer)
-    const timer = setTimeout(() => { this.pending.delete(trialId); void this.stores.write(trialId, form, savedAt).catch(() => {}) }, this.delayMs)
+    const timer = setTimeout(() => { this.pending.delete(trialId); void this.stores.writeFolder(trialId, form, savedAt).catch(() => {}) }, this.delayMs)
     this.pending.set(trialId, { timer, form, savedAt })
   }
-  /** Writes pending changes now (page hide / unload). */
+  /** Writes the pending folder copies now (page hide / unload). */
   flush() {
-    for (const [trialId, p] of this.pending) { clearTimeout(p.timer); void this.stores.write(trialId, p.form, p.savedAt).catch(() => {}) }
+    for (const [trialId, p] of this.pending) { clearTimeout(p.timer); void this.stores.writeFolder(trialId, p.form, p.savedAt).catch(() => {}) }
     this.pending.clear()
   }
   /** The rating was saved: the draft goes (memory, pending write, both stored copies). */

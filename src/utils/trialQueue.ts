@@ -18,6 +18,11 @@ export function stepQueue<T extends QueueRecord>(queue: readonly T[], currentId:
   return queue[i + dir] ?? null
 }
 
+/** The trial to open when none of `shown` is open: the one open before a reload (`rememberedId`) while it is shown, else the queue head. */
+export function trialToOpen<T extends QueueRecord>(shown: readonly T[], queue: readonly T[], rememberedId: string | null): T | null {
+  return (rememberedId ? shown.find(r => r.trial.id === rememberedId) : undefined) ?? queue[0] ?? null
+}
+
 /** After rating / dismissing `doneId`: the next queued trial after it, else the first remaining one. */
 export function nextAfter<T extends QueueRecord>(queueBefore: readonly T[], doneId: string): T | null {
   const i = queueBefore.findIndex(r => r.trial.id === doneId)

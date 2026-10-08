@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { nextAfter, stepQueue, trialQueue } from './trialQueue'
+import { nextAfter, stepQueue, trialQueue, trialToOpen } from './trialQueue'
 import { aggregateTerm, buildIndex, knownSlugs, SEED_DIMENSIONS, type TrialRecord } from './hapticKnowledge'
 
 const rec = (id: string, receivedAt: string, rated = false, dismissed?: string) => ({ trial: { id, receivedAt }, rating: rated ? {} : null, ...(dismissed ? { dismissed } : {}) })
@@ -18,6 +18,14 @@ describe('trial queue (top-down)', () => {
     expect(nextAfter(q, 'b')?.trial.id).toBe('c')
     expect(nextAfter(q, 'c')?.trial.id).toBe('a') // the last one done: back to the first remaining
     expect(nextAfter([q[0]], 'a')).toBeNull()
+  })
+  it('after a reload the trial open before it comes back, not the queue head', () => {
+    const q = trialQueue(records)
+    expect(trialToOpen(records, q, 'c')?.trial.id).toBe('c')
+    expect(trialToOpen(records, q, 'r')?.trial.id).toBe('r') // a rated one opened from the history too
+    expect(trialToOpen(records, q, 'gone')?.trial.id).toBe('a') // no longer listed (other folder / project filter): the queue head
+    expect(trialToOpen(records, q, null)?.trial.id).toBe('a')
+    expect(trialToOpen([], [], 'c')).toBeNull()
   })
   it('dismissed trials stay out of the knowledge and are flagged in the index', () => {
     const at = '2026-10-05T10:00:00+09:00'

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useEventStore } from '@/stores/eventStore'
 import { LevelCommit, levelText } from '@/utils/levelCommit'
+import { onPageHide } from '@/utils/pageHide'
 
 /**
  * A strength slider (0..1, dB shown too) for `levelKey`: a move applies at once — the editor reads `liveLevel`
  * for the playback gain (PC GainNode, device stream gain) and the "edited" drawing scale; `onSave` runs on release
- * or 500 ms after the last move (LevelCommit) and must update what `saved` reads synchronously, so the level never
+ * or 500 ms after the last move (LevelCommit; at once when the page is hidden / unloaded) and must update what `saved` reads synchronously, so the level never
  * jumps back when the live value is dropped. Nothing is rendered or decoded for it.
  * Keyboard: a click on the label focuses the slider; ←/→ step 0.01, Shift+←/→ 0.1. A press anywhere on the track moves
  * the thumb there and keeps dragging.
@@ -20,6 +21,8 @@ export function LevelSlider({ levelKey: key, saved, onSave, label, title, classN
     if (useEventStore.getState().liveLevel?.key === key) useEventStore.getState().setLiveLevel(null)
   }), [key])
   useEffect(() => () => commit.flush(), [commit])
+  // Unmount cleanups do not run on a reload / close: a value moved within the 500 ms is saved then too.
+  useEffect(() => onPageHide(() => commit.flush()), [commit])
   const value = live ?? saved
   const input = useRef<HTMLInputElement>(null)
   const set = (v: number) => { const next = Math.round(Math.max(0, Math.min(1, v)) * 100) / 100; useEventStore.getState().setLiveLevel({ key, value: next }); commit.input(next) }
