@@ -243,9 +243,11 @@ export interface DuoWlV4Draft {
 }
 
 const DEFAULT_DRAFT: DuoWlV4Draft = {
-  pamDb: { value: 24, dirty: false },
-  lineoutDb: { value: 6, dirty: false },
-  boostDb: { value: 0, dirty: false },
+  // Firmware gain-staging defaults (duowl_v4_audio.cpp DEF_PAM_DB /
+  // DEF_LINEOUT_DB / DEF_BOOST_DB, restaged 2026-10 against the motor hiss).
+  pamDb: { value: 12, dirty: false },
+  lineoutDb: { value: 0, dirty: false },
+  boostDb: { value: 17, dirty: false },
   hpDb: { value: -10, dirty: false },
   bufferMs: { value: 0, dirty: false },
   avDelayMs: { value: 0, dirty: false },

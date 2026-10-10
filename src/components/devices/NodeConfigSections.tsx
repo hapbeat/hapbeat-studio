@@ -2133,6 +2133,9 @@ export function EspNowDisplayPowerSection({
 // ---------------------------------------------------------------------
 
 const PAM_GAIN_STEPS = [6, 12, 18, 24] as const
+// The top step is labelled "max, noisy": every PAM dB also amplifies the DAC /
+// line-driver noise floor (DuoWL v4 motor hiss, 2026-10).
+const PAM_MAX_STEP = PAM_GAIN_STEPS[PAM_GAIN_STEPS.length - 1]
 
 function clampPamDb(v: number): number {
   if (!Number.isFinite(v)) return 24
@@ -2625,6 +2628,9 @@ export function DuoWlV4AudioSection({
               disabled={offline}
             >
               {v} dB
+              {v === PAM_MAX_STEP && (
+                <span style={{ fontSize: 11, marginLeft: 4 }}>({t('node.audio.pamMaxNoisy')})</span>
+              )}
             </button>
           ))}
         </div>
@@ -2659,6 +2665,12 @@ export function DuoWlV4AudioSection({
       <div className="form-status muted" style={{ fontSize: 12 }}>
         {t('node.audio.lineoutHint')}
       </div>
+      {/* Line out above 0 dB amplifies the DAC / driver noise (motor hiss).
+          min-height reserved so the warning never shifts the rows below when
+          it appears (layout-shift rule). */}
+      <div className="form-status warn" style={{ minHeight: 18, fontSize: 12 }}>
+        {lineout.value > 0 ? t('node.audio.lineoutWarn') : ''}
+      </div>
 
       <div className="form-action-row" style={{ marginTop: 8 }}>
         <button className="form-button" onClick={applyHapticGain} disabled={offline}>
@@ -2666,7 +2678,8 @@ export function DuoWlV4AudioSection({
         </button>
       </div>
 
-      {/* 3. AIC3204 DAC digital make-up boost (affects BOTH codecs) */}
+      {/* 3. AIC3204 DAC digital make-up boost — haptic codec (U1) only; the HP
+          codec's DAC volume is pinned to 0 dB in firmware. */}
       <div className="form-row" style={{ marginTop: 12 }}>
         <label>{t('node.audio.dacBoost')}<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>AIC3204 DAC</span></label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
