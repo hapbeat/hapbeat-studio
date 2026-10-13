@@ -57,6 +57,8 @@ export type EffectType =
   | 'band-split'
   | 'compressor'
   | 'saturate'
+  | 'spectral-denoise'
+  | 'isolate-hit'
 
 export interface PitchShiftParams {
   type: 'pitch-shift'
@@ -177,6 +179,11 @@ export interface SaturateParams {
   outputDb: number
 }
 
+/** Spectral gate for steady noise (cleanupDsp): bins at ≤ floor × thresholdK go down to floorDb, ≥ 2× that pass. */
+export interface SpectralDenoiseParams { type: 'spectral-denoise'; thresholdK: number; floorDb: number; percentile: number }
+/** Keeps the loudest hit: cut where it decays endDb below its peak or before a later re-attack (≥ riseDb), with a fade. */
+export interface IsolateHitParams { type: 'isolate-hit'; endDb: number; fadeMs: number; riseDb: number }
+
 export interface RepitchParams { type: 'repitch'; semitones: number }
 export interface NoiseGateParams { type: 'noise-gate'; thresholdDb: number; attackMs: number; releaseMs: number }
 
@@ -200,6 +207,8 @@ export type EffectParams =
   | BandSplitParams
   | CompressorParams
   | SaturateParams
+  | SpectralDenoiseParams
+  | IsolateHitParams
 
 /** A queued or applied effect */
 export interface EffectEntry {
@@ -241,6 +250,8 @@ export const EFFECT_LABELS: Record<EffectType, string> = {
   'band-split': 'Band Split',
   'compressor': 'Compressor',
   'saturate': 'Saturate',
+  'spectral-denoise': 'Spectral denoise',
+  'isolate-hit': 'Isolate hit',
 }
 
 /** Effects whose haptic usefulness is not yet backed by research; shown with a badge. */
@@ -296,5 +307,9 @@ export function getDefaultParams(type: EffectType): EffectParams {
       return { type, thresholdDb: -24, ratio: 4, attackMs: 5, releaseMs: 100, kneeDb: 6, makeupDb: 0 }
     case 'saturate':
       return { type, driveDb: 6, mode: 'soft', mix: 1, outputDb: 0 }
+    case 'spectral-denoise':
+      return { type, thresholdK: 2, floorDb: -24, percentile: 20 }
+    case 'isolate-hit':
+      return { type, endDb: -50, fadeMs: 25, riseDb: 9 }
   }
 }

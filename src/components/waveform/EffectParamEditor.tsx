@@ -17,6 +17,8 @@ import type {
   BandSplitParams,
   CompressorParams,
   SaturateParams,
+  SpectralDenoiseParams,
+  IsolateHitParams,
 } from '@/types/waveform'
 import { useI18n } from '@/i18n/I18nProvider'
 import { AM_SHAPES, CARRIER_SHAPES, EFFECT_RANGES, NOISE_COLORS, SATURATE_MODES, SEED_RANGE, type ParamRange } from '@/utils/effectRanges'
@@ -67,6 +69,10 @@ export function EffectParamEditor({ params, onChange }: EffectParamEditorProps) 
       return <CompressorEditor params={params} onChange={onChange} />
     case 'saturate':
       return <SaturateEditor params={params} onChange={onChange} />
+    case 'spectral-denoise':
+      return <SpectralDenoiseEditor params={params} onChange={onChange} />
+    case 'isolate-hit':
+      return <IsolateHitEditor params={params} onChange={onChange} />
   }
 }
 
@@ -566,6 +572,32 @@ function SaturateEditor({ params, onChange }: { params: SaturateParams; onChange
       <EnumSelect label="Mode" value={params.mode} options={SATURATE_MODES} onChange={mode => onChange({ ...params, mode })} />
       <RangeSlider label="Mix" value={params.mix} range={r.mix} format={v => `${Math.round(v * 100)}%`} onChange={mix => onChange({ ...params, mix })} />
       <RangeSlider label="Output" value={params.outputDb} range={r.outputDb} format={signedDb} onChange={outputDb => onChange({ ...params, outputDb })} />
+    </>
+  )
+}
+
+function SpectralDenoiseEditor({ params, onChange }: { params: SpectralDenoiseParams; onChange: (p: EffectParams) => void }) {
+  const { t } = useI18n()
+  const r = EFFECT_RANGES['spectral-denoise']
+  return (
+    <>
+      <p className="effect-param-hint">{t('editor.spectralDenoiseHint')}</p>
+      <RangeSlider label="Threshold (× noise floor)" value={params.thresholdK} range={r.thresholdK} format={v => `×${v.toFixed(1)}`} onChange={thresholdK => onChange({ ...params, thresholdK })} />
+      <RangeSlider label="Reduce to" value={params.floorDb} range={r.floorDb} format={signedDb} onChange={floorDb => onChange({ ...params, floorDb })} />
+      <RangeSlider label="Noise floor percentile" value={params.percentile} range={r.percentile} format={v => `${v}%`} onChange={percentile => onChange({ ...params, percentile })} />
+    </>
+  )
+}
+
+function IsolateHitEditor({ params, onChange }: { params: IsolateHitParams; onChange: (p: EffectParams) => void }) {
+  const { t } = useI18n()
+  const r = EFFECT_RANGES['isolate-hit']
+  return (
+    <>
+      <p className="effect-param-hint">{t('editor.isolateHitHint')}</p>
+      <RangeSlider label="End below peak" value={params.endDb} range={r.endDb} format={signedDb} onChange={endDb => onChange({ ...params, endDb })} />
+      <RangeSlider label="Fade-out" value={params.fadeMs} range={r.fadeMs} format={v => `${v} ms`} onChange={fadeMs => onChange({ ...params, fadeMs })} />
+      <RangeSlider label="Second hit rise" value={params.riseDb} range={r.riseDb} format={v => `+${v} dB`} onChange={riseDb => onChange({ ...params, riseDb })} />
     </>
   )
 }

@@ -232,7 +232,7 @@ function rmsEnvelope(channels: Float32Array[], window: number): Float32Array {
 // ---- Frequency shift ----
 
 /** In-place iterative radix-2 complex FFT. `inverse` includes the 1/N scale. */
-function fft(re: Float64Array, im: Float64Array, inverse: boolean) {
+export function fft(re: Float64Array, im: Float64Array, inverse: boolean) {
   const n = re.length
   for (let i = 1, j = 0; i < n; i++) {
     let bit = n >> 1
@@ -391,15 +391,18 @@ export interface OnsetSettings {
 }
 export const ONSET_WINDOW_MS = 5
 export const ONSET_RISE_MS = 20
-/** Onset positions (samples) with the material's 5 ms level there (0–1 of its peak), at most `max`. */
-export function detectOnsets(data: Float32Array, sampleRate: number, settings: OnsetSettings, max = 64): { index: number; level: number }[] {
+/**
+ * Onset positions (samples) with the material's 5 ms level there (0–1 of its peak), at most `max`. `peak`: where the
+ * rise levels off (the 5 ms level's maximum within the rise window after `index`).
+ */
+export function detectOnsets(data: Float32Array, sampleRate: number, settings: OnsetSettings, max = 64): { index: number; level: number; peak: number }[] {
   const env = amplitudeEnvelope(data, sampleRate, ONSET_WINDOW_MS)
   let peak = 0
   for (const v of env) peak = Math.max(peak, v)
   if (peak <= 0) return []
   const db = (v: number) => 20 * Math.log10(Math.max(v / peak, 1e-6))
   const back = Math.max(1, Math.round(sampleRate * ONSET_RISE_MS / 1000)), gap = Math.round(sampleRate * settings.minGapMs / 1000)
-  const out: { index: number; level: number }[] = []
+  const out: { index: number; level: number; peak: number }[] = []
   let last = -Infinity
   for (let i = 1; i < env.length && out.length < max; i++) {
     if (i - last < gap) continue
@@ -408,7 +411,7 @@ export function detectOnsets(data: Float32Array, sampleRate: number, settings: O
     // The onset sits where the rise starts to level off: take the local maximum within the rise window.
     let top = i
     for (let j = i; j < Math.min(env.length, i + back); j++) if (env[j] > env[top]) top = j
-    out.push({ index: i, level: env[top] / peak })
+    out.push({ index: i, level: env[top] / peak, peak: top })
     last = i
   }
   return out

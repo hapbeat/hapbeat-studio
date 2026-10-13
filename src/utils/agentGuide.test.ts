@@ -18,7 +18,7 @@ describe('agent guide and catalog', () => {
     expect(catalog.clips[0]).toMatchObject({ id: 'c1', name: 'Cloth', durationSec: 0.1, sampleRate: 48000, channels: 1, effects: [{ type: 'gain', gainDb: -3 }] })
     expect(catalog.clips[0].features.dominantHz).toBeCloseTo(100, -1)
     expect(Object.keys(catalog.effectTypes).sort()).toEqual(Object.keys(EFFECT_RANGES).sort())
-    expect(catalog.effectTypes.lpf.params).toBe(EFFECT_RANGES.lpf)
+    expect(catalog.effectTypes.lpf.params).toEqual(EFFECT_RANGES.lpf)
   })
 
   it('stamps the generated guide', () => {

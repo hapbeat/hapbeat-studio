@@ -21,6 +21,7 @@ import {
   noiseMix,
   saturate,
 } from './textureDsp'
+import { isolateHit, spectralDenoise } from './cleanupDsp'
 
 // ---- Helper: create a new AudioBuffer from channel data ----
 
@@ -446,6 +447,10 @@ export async function applyEffect(
       return mapChannels(buffer, data => compress(data, buffer.sampleRate, params))
     case 'saturate':
       return mapChannels(buffer, data => saturate(data, params.driveDb, params.mode, params.mix, params.outputDb))
+    case 'spectral-denoise':
+      return mapChannels(buffer, data => spectralDenoise(data, buffer.sampleRate, params))
+    case 'isolate-hit':
+      return mapChannels(buffer, data => isolateHit(data, buffer.sampleRate, params))
   }
 }
 

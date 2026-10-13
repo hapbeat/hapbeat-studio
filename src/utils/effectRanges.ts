@@ -95,6 +95,16 @@ export const EFFECT_RANGES: Record<EffectType, Record<string, ParamRange>> = {
     mix: { min: 0, max: 1, step: 0.01 },
     outputDb: { min: -24, max: 6, step: 0.5, unit: 'dB' },
   },
+  'spectral-denoise': {
+    thresholdK: { min: 1, max: 8, step: 0.1, unit: 'x' },
+    floorDb: { min: -60, max: 0, step: 1, unit: 'dB' },
+    percentile: { min: 1, max: 50, step: 1, unit: '%' },
+  },
+  'isolate-hit': {
+    endDb: { min: -80, max: -10, step: 1, unit: 'dB' },
+    fadeMs: { min: 1, max: 500, step: 1, unit: 'ms' },
+    riseDb: { min: 3, max: 30, step: 0.5, unit: 'dB' },
+  },
 }
 
 const TONE_SOURCE: Record<string, ParamRange> = {
