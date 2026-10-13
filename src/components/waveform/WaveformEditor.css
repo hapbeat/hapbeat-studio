@@ -1008,18 +1008,19 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 .agent-topline .toolbar-btn, .agent-topline .agent-filter { flex-shrink: 0; white-space: nowrap; }
 .agent-what { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The header row: buttons, menus and pills share one height; the event pill reads as the title. */
-.agent-queue-nav .toolbar-btn, .agent-queue-nav .editor-menu-trigger, .agent-queue-nav .target-cue-badge, .agent-queue-nav .agent-target-badge {
+.agent-queue-nav .toolbar-btn, .agent-queue-nav .editor-menu-trigger, .agent-trial-head .target-cue-badge, .agent-trial-head .agent-target-badge {
   box-sizing: border-box; height: 30px; display: inline-flex; align-items: center; }
-.agent-queue-nav .target-cue-badge { padding: 0 12px; border-radius: 15px; font-size: 15px; font-weight: 700; line-height: 1; }
+.agent-trial-head .target-cue-badge { padding: 0 12px; border-radius: 15px; font-size: 15px; font-weight: 700; line-height: 1; }
 /*
- * Sticky header: the trial header is the panel's first line and stays on top while the panel (the scroll container,
- * padding 10px) scrolls, so the event is always in view. Full-bleed over the padding so nothing shows through; sticky
- * insets count from inside the padding, hence top: -10px.
+ * Sticky header: one line of fixed height (event pill + sound / haptic pill) that stays on top while the panel (the
+ * scroll container, padding 10px) scrolls. Full-bleed over the padding so nothing shows through; sticky insets count
+ * from inside the padding, hence top: -10px. The event pill shrinks with an ellipsis; nothing wraps.
  */
-.agent-queue-nav { position: sticky; top: -10px; z-index: 2; margin: -10px -10px 0; padding: 10px 10px 6px; background: var(--bg-primary); border-bottom: 1px solid var(--border); }
-/* Event pill + sound/haptic badge: a fixed basis, so where the line wraps never depends on the event name; the pill shrinks with an ellipsis. */
-.agent-queue-nav > .agent-what-slot { flex: 1 1 9em; min-width: 9em; display: flex; align-items: center; gap: 6px; }
-.agent-what-slot > .agent-target-badge { flex-shrink: 0; }
+.agent-trial-head { position: sticky; top: -10px; z-index: 2; display: flex; align-items: center; gap: 6px; min-width: 0; box-sizing: content-box; height: 30px; flex-wrap: nowrap;
+  margin: -10px -10px 0; padding: 10px 10px 6px; background: var(--bg-primary); border-bottom: 1px solid var(--border); }
+.agent-trial-head > .agent-target-badge { flex-shrink: 0; }
+/* The event pill is the part that gives way (.target-cue-badge alone is flex: none); a block box so the ellipsis shows. */
+.agent-trial-head > .agent-what { flex: 0 1 auto; min-width: 0; display: block; line-height: 30px; }
 /* State-dependent parts keep one size (T9 … T1234, 「残り n 件」/「履歴（評価済み）」, 「後回し」/「元に戻す」/ none). */
 .agent-queue-nav > .agent-short-id.large { min-width: 3.6em; text-align: center; }
 .agent-queue-nav > .agent-remaining { min-width: 8.5em; }

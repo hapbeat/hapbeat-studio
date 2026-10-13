@@ -172,22 +172,20 @@ export function AgentTrialsPanel() {
     ? trialEvent(sceneTable, record.trial.scene) : null) ?? record.trial.scene.cues[0] ?? null : null
   return <div className="agent-panel">
     {dialog}
-    {/*
-      Sticky header, the panel's first line: ‹ T9 › · [event] · [sound|haptic] · n left · History · Video · Later. It stays in
-      view while the panel scrolls; its height depends only on the panel width (the event slot has a fixed basis, the
-      state labels a fixed width), never on the event name.
-    */}
+    {/* Sticky header, one line of fixed height: the trial's event and sound / haptic, in view while the panel scrolls. */}
+    <div className="agent-trial-head">
+      {record ? <>{pillEvent ? <button type="button" className="target-cue-badge agent-what agent-what-btn" title={`${what}
+${t('events.openInEvents')}
+${t('editor.scene.targetHint')}`} onClick={() => revealEvent(pillEvent, focusEditorPanel)}>{what}</button>
+        : <span className="target-cue-badge agent-what" title={what}>{what}</span>}
+      {target && <span className={`agent-target-badge ${target}`}><KindIcon kind={target} decorative />{t(target === 'sound' ? 'editor.agent.targetSound' : 'editor.agent.targetHaptic')}</span>}</>
+        : <span className="agent-muted">—</span>}
+    </div>
+    {/* ‹ T9 › · n left · History · Video · Later (scrolls with the panel; fixed widths, so its wrapping depends only on the panel width). */}
     <div className="agent-queue-nav">
       <button type="button" className="toolbar-btn" disabled={!prev} aria-label={t('editor.agent.prevTrial')} title={t('editor.agent.prevTrial')} onClick={() => prev && pickTrial(prev)}>‹</button>
       <span className="agent-short-id large" title={record?.trial.id ?? ''}>{record?.shortId ?? '—'}</span>
       <button type="button" className="toolbar-btn" disabled={!next} aria-label={t('editor.agent.nextTrial')} title={t('editor.agent.nextTrial')} onClick={() => next && pickTrial(next)}>›</button>
-      <span className="agent-what-slot">
-      {record && (pillEvent ? <button type="button" className="target-cue-badge agent-what agent-what-btn" title={`${what}
-${t('events.openInEvents')}
-${t('editor.scene.targetHint')}`} onClick={() => revealEvent(pillEvent, focusEditorPanel)}>{what}</button>
-        : <span className="target-cue-badge agent-what" title={what}>{what}</span>)}
-      {record && target && <span className={`agent-target-badge ${target}`}><KindIcon kind={target} decorative />{t(target === 'sound' ? 'editor.agent.targetSound' : 'editor.agent.targetHaptic')}</span>}
-      </span>
       <span className="agent-remaining">{record && !inQueue ? t(record.dismissed ? 'editor.agent.fromHistoryDismissed' : 'editor.agent.fromHistory') : t('editor.agent.remaining', { count: queue.length })}</span>
       <EditorMenu label={`${t('editor.agent.history')} ▾`} title={t('editor.agent.historyHint')} className="agent-history">
         {shown.length === 0 && <p className="editor-menu-note">{t('editor.agent.empty')}</p>}
