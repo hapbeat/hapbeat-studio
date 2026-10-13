@@ -8,6 +8,7 @@ import type { HapticFeatures } from '@/utils/hapticFeatures'
 import { clearRatingDraft, DraftKeeper, readFolderDraft, readLocalDraft, rememberedOpenTrial, rememberOpenTrial, writeFolderDraft, writeLocalDraft } from '@/utils/ratingDrafts'
 import { onPageHide } from '@/utils/pageHide'
 import { perfTiming } from '@/utils/perfRegistry'
+import { cardProps, onCardListKey } from '@/utils/cardListKeys'
 import { addUseRange, isFreePlanCandidate, poolCandidates, reserveCandidates, addReserves, autoRatingContext, EMPTY_CONTEXT, formToRating, initialIntensity, loadRememberedContext, ratingFormIssue, ratingToForm, rememberContext, trialKind, verdictFromOverall, type CandidateRatingForm, type RatingForm } from '@/utils/agentTrialUi'
 import { trialTarget, type RatingBody, type TrialKind } from '@/utils/agentProtocol'
 import { useAuditionPlan } from './EditorScenePanel'
@@ -262,7 +263,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
 }) {
   const { t } = useI18n()
   const { toast } = useToast()
-  const { focusEditorPanel, player, pending, toggleCandidate, foldView, shownLayout } = useEditor()
+  const { focusEditorPanel, player, pending, toggleCandidate, foldView, shownLayout, stopPlayback, isPlaybackActive } = useEditor()
   /** The editor playback is sounding (the ▶ / ■ of the auditioned card). */
   const [playing, setPlaying] = useState(false)
   useEffect(() => {
@@ -464,7 +465,8 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
     {kind === 'sequence' && <p className="agent-muted">{t('editor.agent.sequenceNote')}</p>}
     <SoundFirstNote note={soundNote} />
     <div className="agent-notice" role="status">{notice}</div>
-    <div className="agent-candidates">
+    {/* ↑/↓ step through the cards (shown in the waveform panel, what played stops), Space plays the focused one — as in the Kit editor. */}
+    <div className="agent-candidates" onKeyDown={e => { onCardListKey(e, () => { if (isPlaybackActive()) stopPlayback() }) }}>
       {trial.candidates.map(requested => {
         const file = record.candidates.find(c => c.id === requested.id)
         /** Its audio was moved to haptic-knowledge/_archive/ (rated ★1–2): not playable until rated higher. */
@@ -478,7 +480,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
         }
         const sounding = active && (playing || pending)
         return <article key={requested.id} className={`agent-candidate ${target} ${active ? 'auditioning' : ''} ${sounding ? 'playing' : ''} ${buffer ? 'selectable' : ''}`} aria-current={active || undefined} onClick={select}
-          tabIndex={0} data-trial-id={trial.id} data-candidate-id={requested.id}>
+          {...cardProps(() => { if (buffer && !active) onAudition({ trialId: trial.id, candidateId: requested.id }, buffer) })} tabIndex={0} data-trial-id={trial.id} data-candidate-id={requested.id}>
           {/*
             One grid, laid out by the card's own width (container query, not the viewport):
             narrow — head / meta (waveform, ★) / axes / notes; wide — head | meta, axes | notes.
@@ -558,7 +560,7 @@ function featureText(f: HapticFeatures | null): string {
 /** Overall 1–5 as stars (click the same star again to clear). */
 function Stars({ value, onChange }: { value: number | null; onChange: (value: number | null) => void }) {
   const { t } = useI18n()
-  return <span className="agent-stars" role="group" aria-label={t('editor.agent.overall')} title={t('editor.agent.overallHint')}>
+  return <span className="agent-stars" data-keeps-arrows role="group" aria-label={t('editor.agent.overall')} title={t('editor.agent.overallHint')}>
     {[1, 2, 3, 4, 5].map(n => <button key={n} type="button" className={`agent-star ${value !== null && n <= value ? 'on' : ''}`} aria-pressed={value === n} aria-label={`${n}`}
       onClick={() => onChange(value === n ? null : n)}>★</button>)}
   </span>

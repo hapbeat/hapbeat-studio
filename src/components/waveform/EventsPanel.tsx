@@ -32,6 +32,7 @@ import { openMaterialForAdjust } from './eventEditing'
 import { materialTrialByIds, materialTrialSummary, materialTrialTooltip, resolveMaterialTrial, type MaterialTrial } from '@/utils/materialTrial'
 import { useEventGroups } from './useEventGroups'
 import { detachCue, eventListItems, firstTimes, groupLabel, joinGroupOf, type GroupEdits } from '@/utils/eventGroups'
+import { cardProps, onCardListKey } from '@/utils/cardListKeys'
 import './EventsPanel.css'
 import '@/components/scene/VideoOverlay.css'
 
@@ -232,13 +233,15 @@ type Edit = (change: (tb: CueTable) => CueTable | null) => boolean
  */
 function EventDetail({ table, lib, e }: { table: CueTable; lib: SceneLib; e: EffectiveEvent }) {
   const { t } = useI18n()
-  const { openSceneVideo } = useEditor()
+  const { openSceneVideo, stopPlayback, isPlaybackActive } = useEditor()
   const key = eventKey(e.ref), loop = isLoopCue(lib, e.ref.cue)
   const clip = useWaveformStore(s => s.clip)
   const assign = (target: DecideTarget) => { if (clip) useEventStore.getState().requestDecide({ target, source: { kind: 'clip', clipId: clip.id }, event: key }) }
   const edit: Edit = change => useSceneStore.getState().edit(change)
   const variants = Object.keys(table.cues[e.ref.cue]?.variants ?? {})
-  return <div className="events-detail">
+  // ↑/↓ step through the event's material and reserve cards (each shown in the waveform panel, what played stops), Space
+  // plays the shown one — as in the Kit editor (cardListKeys).
+  return <div className="events-detail" onKeyDown={ev => { onCardListKey(ev, () => { if (isPlaybackActive()) stopPlayback() }) }}>
     <div className="events-detail-head">
       <strong className="target-cue-badge events-target" title={t('editor.scene.targetHint')}>{key}</strong>
       <button type="button" className="toolbar-btn" title={t('editor.scene.openHint')} onClick={() => openSceneVideo({ kind: 'event', key })}>▶ {t('editor.scene.open')}</button>
@@ -503,7 +506,7 @@ function Reserves({ cue, target }: { cue: string; target: 'sound' | 'haptic' }) 
       const name = r.target === 'haptic' && r.at ? `${r.material} · ${atLabel(r.at)}` : r.material
       const id = r.target === 'sound' ? `${key}|sound|${r.material}` : `${key}|haptic|${r.material}|${r.at ?? ''}`
       return <li key={`${key}/material/${r.target}/${r.material}/${r.at ?? ''}`} className={`events-mat events-reserve selectable ${previewId === id ? 'active' : ''}`}
-        onClick={e => { if (!(e.target as HTMLElement).closest('button')) open(key, r, false) }}>
+        {...cardProps(() => open(key, r, false))} onClick={e => { if (!(e.target as HTMLElement).closest('button')) open(key, r, false) }}>
         <button type="button" className="agent-icon-btn" aria-label={t('events.mat.play', { name })} title={t('events.mat.play', { name })} onClick={() => open(key, r, true)}>▶</button>
         <span className="events-mat-name" title={[name, describe(r.material)].filter(Boolean).join('\n')}>{name}</span>
         <span />
@@ -517,7 +520,7 @@ function Reserves({ cue, target }: { cue: string; target: 'sound' | 'haptic' }) 
       const origin = materialTrialByIds(row.trialId, row.candidateId, trials)
       // A click on the row (not its buttons) shows it in the waveform panel without playing; ▶ plays.
       return <li key={`${row.key}/${row.trialId}/${row.candidateId}`} className={`events-mat events-reserve selectable ${shownAudition === `${row.trialId}/${row.candidateId}` ? 'active' : ''}`}
-        onClick={e => { if (record && !(e.target as HTMLElement).closest('button')) show(row) }}>
+        {...cardProps(() => { if (record) show(row) })} onClick={e => { if (record && !(e.target as HTMLElement).closest('button')) show(row) }}>
         <button type="button" className="agent-icon-btn" disabled={!record} aria-label={t('events.mat.play', { name })} title={t('events.mat.play', { name })}
           onClick={() => void useAgentTrialStore.getState().requestAudition(row.trialId, row.candidateId, true, false).catch(error => useWaveformStore.getState().setError(error))}>▶</button>
         <span className="events-mat-name" title={[`${name}${row.key !== cue ? ` (${row.key})` : ''}`, origin ? originTooltip(t, origin) : ''].filter(Boolean).join('\n')}>{name}{row.key !== cue ? ` · ${row.key}` : ''}</span>

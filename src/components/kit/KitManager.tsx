@@ -20,6 +20,7 @@ import { ClipModeInfoModal } from './editor/ClipModeInfoModal'
 import { ClipCard } from './shared/ClipCard'
 import { ClipEditModal } from './shared/ClipEditModal'
 import { DevicePill } from '@/components/devices/DevicePill'
+import { arrowKeyOwner, stepIndex } from '@/utils/cardListKeys'
 import './KitManager.css'
 
 const DND_TYPE_CLIP = 'application/x-hapbeat-clip'
@@ -837,17 +838,16 @@ function ClipsPanel() {
     const onKey = (e: KeyboardEvent) => {
       const panel = panelRef.current
       if (!panel || panel.getClientRects().length === 0) return
-      // テキスト入力中はスキップ。range スライダー (intensity) 上では:
+      // テキスト入力中はスキップ（判定は cardListKeys.arrowKeyOwner: AI 提案・Events の素材と共通）。range スライダー (intensity) 上では:
       //   - ←→ は native の value adjust に任せる (既存挙動)
       //   - ↑↓ は card 切替に振る (panel handler で扱う + e.preventDefault で
       //     native value change も同時に抑制する)。
       //   こうしないとスライダーに focus している間 ↑↓ で intensity も
       //   動いてカード移動できない問題が起きる。
       const active = document.activeElement as HTMLElement | null
-      const tag = active?.tagName
-      const isRange = tag === 'INPUT' && (active as HTMLInputElement).type === 'range'
-      const isTextField = tag === 'TEXTAREA' || (tag === 'INPUT' && !isRange)
-      if (isTextField) return
+      const owner = arrowKeyOwner(active)
+      const isRange = owner === 'range'
+      if (owner === 'typing') return
       if (isRange && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return
       if (editingClipId) return
       // Page-wide single selection: this handler only runs when the
@@ -865,8 +865,7 @@ function ClipsPanel() {
 
       const curIdx = selectedId ? orderedClips.findIndex((c) => c.id === selectedId) : -1
       const moveTo = (idx: number) => {
-        const clamped = Math.max(0, Math.min(orderedClips.length - 1, idx))
-        const next = orderedClips[clamped]
+        const next = orderedClips[idx]
         if (!next || next.id === selectedId) return
         // Blur any range input that still has focus from the previous
         // row — without this, ←→ continues to target the OLD slider
@@ -880,12 +879,9 @@ function ClipsPanel() {
 
       switch (e.key) {
         case 'ArrowDown':
-          e.preventDefault()
-          moveTo(curIdx < 0 ? 0 : curIdx + 1)
-          break
         case 'ArrowUp':
           e.preventDefault()
-          moveTo(curIdx < 0 ? 0 : curIdx - 1)
+          moveTo(stepIndex(curIdx, orderedClips.length, e.key))
           break
         case 'ArrowRight':
           if (selectedId) { e.preventDefault(); setIntensity(selectedId, getIntensity(selectedId) + 0.05) }
@@ -1390,17 +1386,16 @@ function KitEditor() {
       if (editLocked) return
       const panel = kitPanelRef.current
       if (!panel || panel.getClientRects().length === 0 || !activeKit) return
-      // テキスト入力中はスキップ。range スライダー (intensity) 上では:
+      // テキスト入力中はスキップ（判定は cardListKeys.arrowKeyOwner: AI 提案・Events の素材と共通）。range スライダー (intensity) 上では:
       //   - ←→ は native の value adjust に任せる (既存挙動)
       //   - ↑↓ は card 切替に振る (panel handler で扱う + e.preventDefault で
       //     native value change も同時に抑制する)。
       //   こうしないとスライダーに focus している間 ↑↓ で intensity も
       //   動いてカード移動できない問題が起きる。
       const active = document.activeElement as HTMLElement | null
-      const tag = active?.tagName
-      const isRange = tag === 'INPUT' && (active as HTMLInputElement).type === 'range'
-      const isTextField = tag === 'TEXTAREA' || (tag === 'INPUT' && !isRange)
-      if (isTextField) return
+      const owner = arrowKeyOwner(active)
+      const isRange = owner === 'range'
+      if (owner === 'typing') return
       if (isRange && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return
       // Page-wide single selection: only the panel that owns the
       // current selection handles arrow keys. If library has it, bail
@@ -1418,8 +1413,7 @@ function KitEditor() {
 
       const curIdx = selectedEventId ? events.findIndex((ev) => ev.id === selectedEventId) : -1
       const moveTo = (idx: number) => {
-        const clamped = Math.max(0, Math.min(events.length - 1, idx))
-        const next = events[clamped]
+        const next = events[idx]
         if (!next || next.id === selectedEventId) return
         // Blur the range input that still has focus on the previous
         // row — otherwise ←→ keeps adjusting the OLD card's intensity
@@ -1433,12 +1427,9 @@ function KitEditor() {
 
       switch (e.key) {
         case 'ArrowDown':
-          e.preventDefault()
-          moveTo(curIdx < 0 ? 0 : curIdx + 1)
-          break
         case 'ArrowUp':
           e.preventDefault()
-          moveTo(curIdx < 0 ? 0 : curIdx - 1)
+          moveTo(stepIndex(curIdx, events.length, e.key))
           break
         case 'ArrowRight':
           if (currentEvent) {

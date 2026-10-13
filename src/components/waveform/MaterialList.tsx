@@ -3,12 +3,14 @@ import { useI18n } from '@/i18n/I18nProvider'
 import { useToast } from '@/components/common/Toast'
 import './EventsPanel.css'
 import { KindIcon } from '@/components/common/KindIcon'
+import { cardProps } from '@/utils/cardListKeys'
 
 /**
  * An event's materials (DEC-089): the starred ones that play (`sfx.sounds` / a route's `clips`; the first is the
  * representative), then the unstarred alternates (muted, never played). One grid row each: ▶ (auditions it, starred
  * or not), the name, ★ (toggle: star / unstar), remove, plus `extra`. Taking off the last ★ is refused with a hint.
- * With `onSelect`, a click anywhere on the row (not on its controls) selects the material; ▶ only plays.
+ * With `onSelect`, a click anywhere on the row (not on its controls) selects the material; ▶ only plays; the rows are cards
+ * of a list (cardListKeys: ↑/↓ in the editor's event details select the next one, Space plays it).
  * Used by the editor's Events panel and the Scene tab's event details.
  */
 export function MaterialList({ kind, items, alternates = [], active, onPlay, onSelect, onStar, onRemove, minItems, extra, below, label, describe }: {
@@ -45,7 +47,7 @@ export function MaterialList({ kind, items, alternates = [], active, onPlay, onS
   const starTitle = (starred: boolean, first: boolean) => t(!starred ? 'events.mat.alternate' : first ? 'events.mat.representative' : 'events.mat.starred')
   return <ul className="events-materials" aria-label={label}>
     {rows.map(({ name, starred, first }) => <li key={name} className={`events-mat ${starred ? '' : 'alternate'} ${active === name ? 'active' : ''} ${onSelect ? 'selectable' : ''}`}
-      onClick={onSelect ? e => { if (!(e.target as HTMLElement).closest('button, input, select, textarea, a')) onSelect(name) } : undefined}>
+      {...(onSelect ? cardProps(() => onSelect(name)) : {})} onClick={onSelect ? e => { if (!(e.target as HTMLElement).closest('button, input, select, textarea, a')) onSelect(name) } : undefined}>
       <KindIcon kind={kind} />
       <button type="button" className="agent-icon-btn" aria-label={t('events.mat.play', { name })} title={t('events.mat.play', { name })} onClick={() => onPlay(name)}>▶</button>
       {onSelect ? <span className="events-mat-name" role="button" tabIndex={0} title={titled(t('events.mat.show', { name }), name)}

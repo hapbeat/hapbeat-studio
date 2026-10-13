@@ -117,7 +117,7 @@ export const messages = defineMessages({
   "editor.clips": { ja: "素材 / 比較", en: "Clips / compare" },
   "editor.import": { ja: "＋ 音声を追加", en: "+ Add audio" },
   "editor.variant": { ja: "比較用コピーを作る", en: "Create comparison copy" },
-  "editor.shortcuts": { ja: "↑↓ 素材切替 · Space 再生 · Ctrl+Z 元に戻す。元音声と編集後を切り替えて比較できます。", en: "\u2191\u2193 Switch clips \u00b7 Space Play \u00b7 Ctrl+Z Undo. Compare the original and edited clip." },
+  "editor.shortcuts": { ja: "↑↓ 素材切替（AI 提案・イベント詳細ではカード切替）· Space 再生 · Ctrl+Z 元に戻す。元音声と編集後を切り替えて比較できます。", en: "↑↓ Switch clips (cards in AI trials / event details) · Space Play · Ctrl+Z Undo. Compare the original and edited clip." },
   "editor.edited": { ja: "編集後", en: "Edited" },
   "editor.original": { ja: "元音声", en: "Original" },
   "editor.originalHint": { ja: "元音声から範囲を選択して、新しいクリップに切り出せます。", en: "Select a range from the original and extract it as a new clip." },
