@@ -52,6 +52,8 @@ You help the user design vibration (haptic) clips for Hapbeat, a wearable vibrot
       candidates/<cid>.json  Resolved spec + features (+ error if rendering failed).
       audio/<cid>.wav     Rendered candidate, 48 kHz mono 16-bit.
       rating.json         The user's rating (latest) + history.
+    _archive/trials/<YYYY-MM>/<trialId>/audio/<cid>.wav
+                          Audio of ★1–2 candidates the user archived (see "Archived audio").
 \`\`\`
 
 ## Recommended workflow
@@ -194,6 +196,7 @@ From the user's clicks: "Change event…" on a firing (Scene tab, \`reassign\`),
 - \`overall\` (optional): 1–5 (stars). A candidate may be saved with a comment only and no \`overall\` ("no score"): use its comment, but it is not counted in the knowledge. \`verdict\` is written from it: 4–5 = \`"use"\`, 3 = \`"maybe"\`, 1–2 = \`"no"\` (there is no separate input). \`termMatch\` (per term, −2…+2) is no longer asked: Studio does not write it; older ratings may still have it.
 - \`directions\` (optional; Studio no longer asks for it — older ratings may have it; read the comments instead) per axis id: +1 = "should be more <high pole>", −1 = "more <low pole>", 0 = fine. Haptic trials use dimensions.json without \`pleasantness\` (the overall score covers it); \`regularity\` / \`continuity\` only for \`kind\` loop / sequence. Sound trials use their own axes: \`weight\` (bass), \`roughness\` (smooth ↔ rough), \`sharpness\`, \`intensity\` (volume), \`length\` (short ↔ long) and \`regularity\` (regular ↔ random, for every sound trial); they never enter the haptic knowledge.
 - Trials set aside for later: the user may skip a trial without rating it (\`dismissed.json\` in its folder with \`"reason": "later"\`; \`"dismissed": true\` in \`index.json\`). It means "not now", not "bad material": it is left out of \`terms/\` and \`byMethod\` and out of the queue until the user restores it; do not read it as a rejection, and do not build on it as if it were rated.
+- Archived audio: the user may move the audio of candidates rated ★1–2 to \`haptic-knowledge/_archive/trials/<YYYY-MM>/<trialId>/audio/\` (Studio: AI trials → History). Their \`candidates/<cid>.json\` and the rating stay, so they still count in \`terms/\` (\`counterExamples\`); only listening is gone: \`audition\` of such a candidate fails and \`get_trial\` lists them in \`archivedAudio\`. Do not move the files back yourself.
 - Short ids: Studio numbers trials in reception order (\`T1\`, \`T2\` …; a candidate is \`T27-B\`). They are in \`index.json\`, \`list_trials\` and \`get_trial\` as \`shortId\`; the user refers to trials and candidates by them.
 - \`verdict\`: \`"use"\` / \`"maybe"\` / \`"no"\`, derived from \`overall\` as above; \`useFor\` (optional, ≤ 200 chars, older ratings): what it is good for ("idle growl", "on the out-breath"). Several candidates may be \`"use"\`. There is no "best" input: Studio writes \`best\` = the \`"use"\` candidate with the highest \`overall\` when exactly one has it (absent on a tie or with no \`"use"\`), and, on Save, every \`"use"\` candidate (except free-plan output) is added to the first scene cue's alternates (see "Receiving ratings"). Which materials play (★), variants and variation are decided by the user in Studio. When two or more are \`"use"\`, ask the user whether to star them all for one event (several starred clips / sounds with \`variation.pick\`, so each firing varies) or to make separate variants (\`cue:variant\`) per \`useFor\`.
 - \`useRange\` (optional): \`[[startSec, endSec], …]\` (1–8) — "use only this part" of the rendered candidate (seconds on its 48 kHz audio, after the effects). In the next trial, keep the candidate's source and effects and append \`{ "type": "trim", "start": startSec, "end": endSec }\` as the last effect (one candidate per range when there are several); for a \`sample\` recipe layer you may instead set \`maxSec\` / \`onsetsSec\`. Say in \`rationale\` that the range came from \`useRange\`.
@@ -281,7 +284,8 @@ Knowledge base of human ratings for Hapbeat vibration designs. Hierarchy: dimens
 | dimensions.json | human | Perceptual dimensions (\`dimensions[]\`: id, ja, en, poles) and vocabulary (\`terms[]\`: term, aliases, dimensions −2..+2, source). Studio writes a seed only when missing. |
 | insights.md | human + agents | "Confirmed" is edited by the user; agents append to "Proposed" with evidence. |
 | trials/<YYYY-MM>/<id>/ | Studio (append-only) | trial.json, request.json, candidates/<cid>.json, audio/<cid>.wav, rating.json (latest + history). |
-| index.json | derived | Regenerated from trials/ on every rating and inbox import. |
+| _archive/trials/<YYYY-MM>/<id>/audio/ | user (via Studio) | Audio of ★1–2 candidates moved out of trials/ on request; the JSON stays in trials/. Studio never deletes it; the user may, from the OS, when listening is no longer needed. |
+| index.json | derived | Regenerated from trials/ after every rating, dismissal and inbox import (a moment after the save). |
 | terms/<slug>.json | derived | Regenerated from trials/. A term file not listed in index.json is stale (for example after an alias change) and can be removed by the user. |
 
 Derived files can always be rebuilt from trials/ and dimensions.json. See \`../hapbeat-agent/GUIDE.md\` for the formats.

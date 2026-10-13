@@ -21,7 +21,8 @@ function bridgeDeps(): AgentBridgeDeps {
     studioVersion: CURRENT_STUDIO_VERSION,
     folderName: () => useWaveformStore.getState().folder?.root.name ?? null,
     clipCount: () => useWaveformStore.getState().documents.length,
-    loadTrials: async () => (await folder()).listTrials(),
+    // The trials the store holds (kept current by its polling and saves): never read from every trial folder.
+    loadTrials: async () => { await folder(); return agent().trials },
     loadDimensions: async () => (await folder()).readDimensions(),
     readInsights: async () => (await folder()).readInsights(),
     guide: () => mcpGuideMarkdown(CURRENT_STUDIO_VERSION),

@@ -7,7 +7,7 @@ export const ACTIVITY_LOG = 'activity-log.jsonl'
 
 export interface ActivityEntry {
   at: string
-  kind: 'rated' | 'dismissed' | 'decided' | 'material-updated'
+  kind: 'rated' | 'dismissed' | 'decided' | 'material-updated' | 'audio-archived'
   trialId?: string
   /** decided / material-updated: the events and the WAV. */
   events?: string[]
@@ -20,6 +20,8 @@ export interface ActivityEntry {
   reserved?: string[]
   /** Candidates not added, with the reason. */
   excluded?: { candidate: string; reason: string }[]
+  /** audio-archived: `trialId/candidateId` whose WAV moved to haptic-knowledge/_archive/. */
+  archived?: string[]
   /** What could not be done. */
   failures?: string[]
 }

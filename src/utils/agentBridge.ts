@@ -81,9 +81,9 @@ const handlers: Record<string, Handler> = {
   },
   get_trial: async (params, deps) => {
     const record = await findTrial(deps, id(params, 'trialId', TRIAL_ID))
-    const { trial, candidates, rating } = record
-    // Short id for conversation ("T27"; a candidate is "T27-B").
-    return { shortId: record.shortId ?? shortTrialIds(await deps.loadTrials()).get(trial.id), trial, candidates, rating }
+    const { trial, candidates, rating, archivedAudio } = record
+    // Short id for conversation ("T27"; a candidate is "T27-B"). archivedAudio: candidates whose audio the user moved to _archive (cannot be auditioned).
+    return { shortId: record.shortId ?? shortTrialIds(await deps.loadTrials()).get(trial.id), trial, candidates, rating, ...(archivedAudio?.length ? { archivedAudio } : {}) }
   },
   list_trials: async (params, deps) => {
     const limit = params.limit ?? 20

@@ -69,6 +69,8 @@ export interface TrialRecord {
   shortId?: string
   /** Set when the user dismissed the trial without rating it (`dismissed.json` in its folder): left out of the knowledge. */
   dismissed?: string
+  /** Candidates whose audio the user moved to `haptic-knowledge/_archive/` (their JSON stays: knowledge keeps them, audition cannot). */
+  archivedAudio?: string[]
 }
 export const DISMISSED_FILE = 'dismissed.json'
 
@@ -81,9 +83,10 @@ export function shortTrialIds(records: readonly Pick<TrialRecord, 'trial'>[]): M
   const order = [...records].sort((a, b) => Date.parse(a.trial.receivedAt) - Date.parse(b.trial.receivedAt) || a.trial.id.localeCompare(b.trial.id))
   return new Map(order.map((r, i) => [r.trial.id, `T${i + 1}`]))
 }
+/** Records with their short ids; a record whose id is unchanged keeps its identity. */
 export const withShortIds = <T extends Pick<TrialRecord, 'trial'> & { shortId?: string }>(records: T[]): T[] => {
   const ids = shortTrialIds(records)
-  return records.map(r => ({ ...r, shortId: ids.get(r.trial.id) }))
+  return records.map(r => r.shortId === ids.get(r.trial.id) ? r : { ...r, shortId: ids.get(r.trial.id) })
 }
 export interface FeatureStat { median: number; p25: number; p75: number }
 export interface FeatureGroup { n: number; features: Record<string, FeatureStat> }
@@ -204,6 +207,23 @@ export function aggregateTerm(slug: string, dims: DimensionsDoc, records: TrialR
   }
 }
 
+/**
+ * Candidates rated ★1–2 (overall ≤ 2 in the current rating) whose rendered audio is still in trials/: what
+ * "archive low-rated audio" moves. `keep`: `trialId/candidateId` to leave alone (used by an event).
+ */
+export function lowRatedAudio(records: readonly TrialRecord[], keep: ReadonlySet<string> = new Set()): { month: string; trialId: string; candidateId: string }[] {
+  const out: { month: string; trialId: string; candidateId: string }[] = []
+  for (const r of records) {
+    if (!r.rating) continue
+    for (const c of r.candidates) {
+      const overall = r.rating.candidates[c.id]?.overall
+      if (overall === undefined || overall > 2 || !c.audio || c.error || r.archivedAudio?.includes(c.id) || keep.has(`${r.trial.id}/${c.id}`)) continue
+      out.push({ month: r.month, trialId: r.trial.id, candidateId: c.id })
+    }
+  }
+  return out
+}
+
 /** Every slug known from dimensions.json plus every term used in a trial, sorted. */
 export function knownSlugs(dims: DimensionsDoc, records: TrialRecord[]): string[] {
   return [...new Set([...dims.terms.map(t => termSlug(t.term)), ...records.filter(r => !r.dismissed).flatMap(r => trialSlugs(r.trial, dims))])].sort()
@@ -272,7 +292,7 @@ async function listEntries(dir: FileSystemDirectoryHandle, kind: 'file' | 'direc
 }
 /**
  * Move within the chosen folder: copy, verify the copy closed, then remove the source.
- * Only used for inbox → trial / _rejected. Never exported as a delete API.
+ * Only used for inbox → trial / _rejected and trial audio → _archive. Never exported as a delete API.
  */
 async function moveFile(from: FileSystemDirectoryHandle, name: string, to: FileSystemDirectoryHandle, target: string) {
   const file = await (await from.getFileHandle(name)).getFile()
@@ -287,6 +307,19 @@ async function moveFile(from: FileSystemDirectoryHandle, name: string, to: FileS
 
 export interface InboxEntry { name: string; file: File }
 export type TrialState = { state: 'none' } | { state: 'incomplete' | 'complete'; month: string }
+
+/**
+ * Studio's own copy of every trial record (audio excluded) in `.hapbeat-editor/`, so opening a folder reads one
+ * file instead of every trial. Derived: rebuilt from trials/ when missing, unreadable, or when index.json was
+ * written by someone else (`indexStamp` = index.json's lastModified right after Studio wrote both).
+ */
+export const TRIAL_CACHE_FILE = 'trial-cache.json'
+/** Trials whose files changed after the last cache write (read again from trials/ when the folder opens). */
+export const TRIAL_CACHE_PENDING_FILE = 'trial-cache-pending.json'
+const EDITOR_DIR = '.hapbeat-editor'
+export interface TrialCache { format: 'hapbeat-trial-cache@1'; indexStamp: number | null; trials: TrialRecord[] }
+/** Where archived trial files go: `haptic-knowledge/_archive/trials/<month>/<id>/…` (the user deletes it, Studio never does). */
+const ARCHIVE_DIR = '_archive'
 
 export class KnowledgeFolder {
   private constructor(readonly root: FileSystemDirectoryHandle, readonly agent: FileSystemDirectoryHandle, readonly knowledge: FileSystemDirectoryHandle) {}
@@ -357,27 +390,74 @@ export class KnowledgeFolder {
   async appendInsight(statement: string, evidence: string[], at: string) {
     await writeEditorFile(this.knowledge, 'insights.md', appendProposedInsight(await this.readInsights(), statement, evidence, at))
   }
-  async listTrials(): Promise<TrialRecord[]> {
+  /** The trial folders (directory listing only, no file is read). */
+  async listTrialDirs(): Promise<{ month: string; id: string }[]> {
     const trials = await this.knowledge.getDirectoryHandle('trials', { create: true })
+    const dirs: { month: string; id: string }[] = []
+    for (const month of await listEntries(trials, 'directory')) for (const id of await listEntries(await trials.getDirectoryHandle(month), 'directory')) dirs.push({ month, id })
+    return dirs
+  }
+  /** One trial from its folder (null when it has no trial.json yet). No short id. */
+  async readTrial(month: string, id: string): Promise<TrialRecord | null> {
+    const monthDir = await subdir(await this.knowledge.getDirectoryHandle('trials', { create: true }), month)
+    const dir = monthDir && await subdir(monthDir, id)
+    const trialText = dir && await readText(dir, 'trial.json')
+    if (!dir || trialText === null) return null
+    try {
+      const candidates: CandidateFile[] = []
+      const candDir = await subdir(dir, 'candidates')
+      if (candDir) for (const name of await listEntries(candDir, 'file')) if (name.endsWith('.json')) candidates.push(JSON.parse((await readText(candDir, name))!))
+      const ratingText = await readText(dir, 'rating.json')
+      const dismissedText = await readText(dir, DISMISSED_FILE)
+      const dismissedAt = dismissedText === null ? undefined : (() => { try { return String(JSON.parse(dismissedText).dismissedAt ?? 'yes') } catch { return 'yes' } })()
+      const archived = await this.archivedAudio(month, id)
+      return { month, trial: JSON.parse(trialText), candidates, rating: ratingText === null ? null : JSON.parse(ratingText), ...(dismissedAt ? { dismissed: dismissedAt } : {}), ...(archived.length ? { archivedAudio: archived } : {}) }
+    } catch (error) { throw new Error(`haptic-knowledge/trials/${month}/${id}: ${error instanceof Error ? error.message : String(error)}`) }
+  }
+  /** Every trial read from trials/ (one file at a time: slow for many trials; the store reads the trial cache instead). */
+  async listTrials(): Promise<TrialRecord[]> {
     const records: TrialRecord[] = []
-    for (const month of await listEntries(trials, 'directory')) {
-      const monthDir = await trials.getDirectoryHandle(month)
-      for (const id of await listEntries(monthDir, 'directory')) {
-        const dir = await monthDir.getDirectoryHandle(id)
-        const trialText = await readText(dir, 'trial.json')
-        if (trialText === null) continue
-        try {
-          const candidates: CandidateFile[] = []
-          const candDir = await subdir(dir, 'candidates')
-          if (candDir) for (const name of await listEntries(candDir, 'file')) if (name.endsWith('.json')) candidates.push(JSON.parse((await readText(candDir, name))!))
-          const ratingText = await readText(dir, 'rating.json')
-          const dismissedText = await readText(dir, DISMISSED_FILE)
-          const dismissedAt = dismissedText === null ? undefined : (() => { try { return String(JSON.parse(dismissedText).dismissedAt ?? 'yes') } catch { return 'yes' } })()
-          records.push({ month, trial: JSON.parse(trialText), candidates, rating: ratingText === null ? null : JSON.parse(ratingText), ...(dismissedAt ? { dismissed: dismissedAt } : {}) })
-        } catch (error) { throw new Error(`haptic-knowledge/trials/${month}/${id}: ${error instanceof Error ? error.message : String(error)}`) }
-      }
-    }
+    for (const { month, id } of await this.listTrialDirs()) { const record = await this.readTrial(month, id); if (record) records.push(record) }
     return withShortIds(records)
+  }
+  /** index.json's lastModified (null when missing): every Studio that changes trials/ writes index.json afterwards. */
+  async indexStamp(): Promise<number | null> { return (await readFile(this.knowledge, 'index.json'))?.lastModified ?? null }
+  /** The trial cache, or null when missing or not readable as one (then trials/ is read instead). */
+  async readTrialCache(): Promise<TrialCache | null> {
+    const dir = await subdir(this.root, EDITOR_DIR)
+    const text = dir && await readText(dir, TRIAL_CACHE_FILE)
+    if (!text) return null
+    try {
+      const data = JSON.parse(text)
+      return data?.format === 'hapbeat-trial-cache@1' && Array.isArray(data.trials) && (data.indexStamp === null || Number.isFinite(data.indexStamp)) ? data : null
+    } catch { return null }
+  }
+  async writeTrialCache(records: readonly TrialRecord[], indexStamp: number | null) {
+    const cache: TrialCache = { format: 'hapbeat-trial-cache@1', indexStamp, trials: records.map(({ shortId: _s, ...r }) => r) }
+    await writeEditorFile(await this.root.getDirectoryHandle(EDITOR_DIR, { create: true }), TRIAL_CACHE_FILE, JSON.stringify(cache))
+  }
+  async readPendingTrials(): Promise<string[]> {
+    const dir = await subdir(this.root, EDITOR_DIR)
+    const text = dir && await readText(dir, TRIAL_CACHE_PENDING_FILE)
+    try { const ids = text ? JSON.parse(text).trials : []; return Array.isArray(ids) ? ids.filter((id: unknown): id is string => typeof id === 'string') : [] }
+    catch { return [] }
+  }
+  async writePendingTrials(ids: readonly string[]) {
+    await writeEditorFile(await this.root.getDirectoryHandle(EDITOR_DIR, { create: true }), TRIAL_CACHE_PENDING_FILE, json({ format: 'hapbeat-trial-cache-pending@1', trials: [...ids].sort() }))
+  }
+  /** Candidate ids whose audio is in `_archive/trials/<month>/<id>/audio/`. */
+  private async archivedAudio(month: string, id: string): Promise<string[]> {
+    let dir: FileSystemDirectoryHandle
+    try { dir = await dirPath(this.knowledge, [ARCHIVE_DIR, 'trials', month, id, 'audio'], false) }
+    catch (error) { if (isNotFound(error)) return []; throw error }
+    return (await listEntries(dir, 'file')).filter(n => /\.wav$/i.test(n)).map(n => n.replace(/\.wav$/i, ''))
+  }
+  /** Moves a candidate's rendered audio to `_archive/trials/<month>/<id>/audio/` (its JSON stays). Returns the bytes moved. */
+  async archiveCandidateAudio(month: string, trialId: string, candidateId: string): Promise<number> {
+    const audio = await (await this.trialDir(month, trialId)).getDirectoryHandle('audio')
+    const name = `${candidateId}.wav`, size = (await (await audio.getFileHandle(name)).getFile()).size
+    await moveFile(audio, name, await dirPath(this.knowledge, [ARCHIVE_DIR, 'trials', month, trialId, 'audio'], true), name)
+    return size
   }
   /**
    * Sets a trial aside for later (`reason: "later"` — "not now", not "bad material"): out of the queue and the

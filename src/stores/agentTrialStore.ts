@@ -10,10 +10,11 @@ import { ratingError, trialTarget, type RatingBody } from '@/utils/agentProtocol
 import { SOUND_DIMENSIONS } from '@/utils/agentTrialUi'
 import { processInbox, readAgentBytes, submitTrialRequest, encodePcm16Wav, type AcceptResult, type InboxDeps, type InboxResult } from '@/utils/agentInbox'
 import { buildCatalog } from '@/utils/agentGuide'
-import { pageVisible, perfTrack } from '@/utils/perfRegistry'
+import { pageVisible, perfTiming, perfTrack } from '@/utils/perfRegistry'
 import { buildAgentMessage, outboxFileName, writeOutboxMessage, type HapticRequest, type Reassign, type Revise, type SoundRequest } from '@/utils/agentOutbox'
 import type { CueTable } from '@/utils/sceneCueTable'
-import { KnowledgeFolder, localIsoString, trialSlugs, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
+import type { TrialFile } from '@/utils/agentProtocol'
+import { KnowledgeFolder, localIsoString, lowRatedAudio, trialSlugs, withShortIds, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
 
 const POLL_MS = 2000
 const CATALOG_DEBOUNCE_MS = 2000
@@ -37,8 +38,13 @@ interface AgentTrialState {
   focusRequest: number
   /** Set by requestAudition(…, play = true); WaveformEditor starts the usual playback and clears it. */
   playRequested: boolean
-  /** Binds to the open editor folder, imports inbox requests and reloads trials. */
+  /**
+   * Binds to the open editor folder (trials from the trial cache), imports inbox requests and takes changes another
+   * tab / Studio wrote (seen from index.json's timestamp). Never reads every trial unless the cache is missing or stale.
+   */
   refresh: () => Promise<void>
+  /** Reads every trial from trials/ again and rewrites the derived files and the trial cache (History → reload). */
+  rebuild: () => Promise<void>
   /**
    * Polls every 2 s (skipped while the page is hidden) and keeps catalog.json in sync with editor documents.
    * `sceneCueTable`: the open Scene project's cue table by project name (null = not open), to check a trial's `scene.context`.
@@ -52,6 +58,11 @@ interface AgentTrialState {
   setDismissed: (trialId: string, dismissed: boolean) => Promise<void>
   /** Dismisses several trials at once (one knowledge regeneration). */
   dismissMany: (trialIds: string[]) => Promise<void>
+  /**
+   * Moves the rendered audio of every ★1–2 candidate (current rating) to haptic-knowledge/_archive/ (lowRatedAudio);
+   * their JSON stays, so the knowledge keeps them as counter-examples. `keep`: `trialId/candidateId` left alone.
+   */
+  archiveLowRatedAudio: (keep: ReadonlySet<string>) => Promise<{ moved: string[]; bytes: number; failures: string[] }>
   loadCandidateAudio: (trialId: string, candidateId: string) => Promise<AudioBuffer>
   /** Creates a new editor clip from a candidate: its source as the original, its effects as a not-yet-applied chain. */
   adoptCandidate: (trialId: string, candidateId: string) => Promise<{ clipId: string; name: string }>
@@ -75,7 +86,7 @@ let unsubscribeDocuments: (() => void) | undefined
 let running: Promise<void> | null = null
 /** Set by startPolling: what scene.context is checked against (InboxDeps.sceneCueTable). */
 let cueTableOf: ((project: string) => CueTable | null) | undefined
-/** Serializes inbox imports and direct submissions (both write trials/ and the derived files). */
+/** Serializes inbox imports, direct submissions and the background writes of derived files (all write trials/ or derived files). */
 let queue: Promise<unknown> = Promise.resolve()
 function exclusive<T>(job: () => Promise<T>): Promise<T> {
   const next = queue.then(job)
@@ -103,30 +114,200 @@ const inboxDeps = (): InboxDeps => ({
   encodeWav: encodePcm16Wav,
   sceneCueTable: cueTableOf,
 })
+const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 const newestFirst = (records: TrialRecord[]) => [...records].sort((a, b) => Date.parse(b.trial.receivedAt) - Date.parse(a.trial.receivedAt) || a.trial.id.localeCompare(b.trial.id))
+/** The trials as the store holds them: short ids, newest first. */
+const shown = (records: TrialRecord[]) => newestFirst(withShortIds(records))
+const withDismissed = ({ dismissed: _d, ...record }: TrialRecord, at: string | undefined): TrialRecord => at ? { ...record, dismissed: at } : record
+type Update = [trialId: string, update: (current: TrialRecord | undefined) => TrialRecord | null]
+
+/**
+ * Per bound folder: what keeps the in-memory trials, the trial cache (.hapbeat-editor/trial-cache.json) and the
+ * derived knowledge files in step without reading every trial again.
+ */
+interface Sync {
+  /** Trials changed in memory (with a version per change) and not yet in the written trial cache. */
+  unflushed: Map<string, number>
+  /** Trials whose files are being written right now (count per trial). */
+  inFlight: Map<string, number>
+  /** index.json's lastModified as this tab last wrote or read it: anything else means another writer. */
+  knownStamp: number | null | undefined
+  /** Trials whose terms the next background write regenerates ('all': every term), null = none scheduled. */
+  derived: Map<string, TrialFile> | 'all' | null
+  /** Serializes read-modify-writes of the pending file. */
+  pendingLock: Promise<unknown>
+  version: number
+}
+const newSync = (): Sync => ({ unflushed: new Map(), inFlight: new Map(), knownStamp: undefined, derived: null, pendingLock: Promise.resolve(), version: 0 })
 
 export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
-  /** Opens (and scaffolds) the agent folders when the editor folder changes. */
+  let sync = newSync()
+  let binding: { root: FileSystemDirectoryHandle; promise: Promise<KnowledgeFolder> } | null = null
+  /** Opens (and scaffolds) the agent folders when the editor folder changes, and loads its trials. */
   const bind = async (): Promise<KnowledgeFolder | null> => {
     const root = useWaveformStore.getState().folder?.root ?? null
     const current = get().folder
     const reset = { trials: [], dimensions: null, selectedTrialId: null, audition: null, playRequested: false }
-    if (!root) { if (current) set({ folder: null, ...reset }); return null }
+    if (!root) { if (current) { sync = newSync(); set({ folder: null, ...reset }) } return null }
     if (current?.root === root) return current
-    const folder = await KnowledgeFolder.open(root)
-    await folder.writeScaffold(CURRENT_STUDIO_VERSION)
-    set({ folder, ...reset })
-    await get().writeCatalog()
-    return folder
+    if (binding?.root === root) return binding.promise
+    const promise = (async () => {
+      const folder = await KnowledgeFolder.open(root)
+      await folder.writeScaffold(CURRENT_STUDIO_VERSION)
+      sync = newSync()
+      set({ folder, ...reset })
+      await get().writeCatalog()
+      await load(folder)
+      return folder
+    })()
+    binding = { root, promise }
+    try { return await promise } finally { if (binding?.promise === promise) binding = null }
   }
   const readDimensions = async (folder: KnowledgeFolder) => {
     try { return await folder.readDimensions() }
-    catch (error) { set({ error: error instanceof Error ? error.message : String(error) }); return null }
+    catch (error) { set({ error: message(error) }); return null }
   }
   const openFolder = async () => {
     const folder = await bind()
     if (!folder) throw new Error('No editor folder is open')
     return folder
+  }
+  /** Updates the trials shown, by id (an update returning null drops the trial); every other record stays as it is. */
+  const apply = (folder: KnowledgeFolder, updates: Update[]) => {
+    if (get().folder !== folder || !updates.length) return
+    const byId = new Map(get().trials.map(r => [r.trial.id, r]))
+    for (const [id, update] of updates) { const next = update(byId.get(id)); if (next) byId.set(id, next); else byId.delete(id) }
+    set({ trials: shown([...byId.values()]) })
+  }
+  /** Trials read from disk while this tab has writes in flight or not yet cached: those keep the in-memory record. */
+  const keepOwnWrites = (records: TrialRecord[]) => {
+    const own = new Map(get().trials.filter(r => sync.unflushed.has(r.trial.id) || sync.inFlight.has(r.trial.id)).map(r => [r.trial.id, r]))
+    return own.size ? records.map(r => own.get(r.trial.id) ?? r) : records
+  }
+  /** Read-modify-write of the pending file, one at a time (another tab may share it). */
+  const editPending = (folder: KnowledgeFolder, s: Sync, edit: (ids: Set<string>) => void) => {
+    const run = s.pendingLock.then(async () => {
+      const ids = new Set(await folder.readPendingTrials()), before = [...ids].sort().join('\n')
+      edit(ids)
+      if ([...ids].sort().join('\n') !== before) await folder.writePendingTrials([...ids])
+    })
+    s.pendingLock = run.catch(() => {})
+    return run
+  }
+  /**
+   * Cached records brought up to date with one directory listing: trials added or removed since, and those
+   * marked pending (written after the cache), read again. `changed`: old and new versions of what differed.
+   */
+  const reconcile = async (folder: KnowledgeFolder, cached: TrialRecord[], pendingFile: string[]) => {
+    const dirs = await folder.listTrialDirs()
+    const pending = new Set([...pendingFile, ...sync.unflushed.keys(), ...sync.inFlight.keys()])
+    const byId = new Map(cached.map(r => [r.trial.id, r]))
+    const records: TrialRecord[] = [], changed: TrialRecord[] = []
+    for (const { month, id } of dirs) {
+      const old = byId.get(id)
+      byId.delete(id)
+      if (old && old.month === month && !pending.has(id)) { records.push(old); continue }
+      const fresh = await folder.readTrial(month, id)
+      if (fresh) records.push(fresh)
+      changed.push(...[old, fresh].filter((r): r is TrialRecord => !!r))
+    }
+    changed.push(...byId.values())
+    return { records, changed }
+  }
+  /** Pending marks read from the file are cleared by the next background write (it caches what was read again). */
+  const adoptPending = (s: Sync, pendingFile: string[]) => { for (const id of pendingFile) if (!s.unflushed.has(id)) s.unflushed.set(id, ++s.version) }
+  /** A freshly bound folder: the trial cache and what changed since, else (no / stale cache) every trial once. */
+  const load = async (folder: KnowledgeFolder) => {
+    const t0 = performance.now()
+    const dimensions = await readDimensions(folder)
+    const stamp = await folder.indexStamp()
+    const cache = stamp === null ? null : await folder.readTrialCache()
+    const fromCache = !!cache && cache.indexStamp === stamp
+    const pendingFile = await folder.readPendingTrials()
+    const { records, changed } = fromCache ? await reconcile(folder, cache.trials, pendingFile) : { records: await folder.listTrials(), changed: [] }
+    if (get().folder !== folder) return
+    sync.knownStamp = stamp
+    adoptPending(sync, pendingFile)
+    set({ trials: shown(records), ...(dimensions ? { dimensions } : {}) })
+    // A rebuilt list writes index.json (all terms when it was missing) and the cache; a cached one only what changed.
+    if (!fromCache) scheduleDerived(folder, stamp === null ? 'all' : [])
+    else if (changed.length) scheduleDerived(folder, changed.map(r => r.trial))
+    perfTiming(fromCache ? 'trials.load' : 'trials.loadAll', performance.now() - t0)
+  }
+  /** Another tab or Studio wrote index.json since this tab did: take the trial cache it left, else read every trial. */
+  const checkExternal = async (folder: KnowledgeFolder) => {
+    const stamp = await folder.indexStamp()
+    if (stamp === sync.knownStamp) return
+    const s = sync, t0 = performance.now()
+    const cache = stamp === null ? null : await folder.readTrialCache()
+    const fromCache = !!cache && cache.indexStamp === stamp
+    const pendingFile = await folder.readPendingTrials()
+    const records = fromCache ? (await reconcile(folder, cache.trials, pendingFile)).records : await folder.listTrials()
+    if (s !== sync || get().folder !== folder) return
+    s.knownStamp = stamp
+    adoptPending(s, pendingFile)
+    set({ trials: shown(keepOwnWrites(records)) })
+    if (!fromCache) scheduleDerived(folder, stamp === null ? 'all' : [])
+    perfTiming('trials.external', performance.now() - t0)
+  }
+  /** Queues the background write of the derived files (terms of `trials`, index.json) and the trial cache; repeated calls merge. */
+  const scheduleDerived = (folder: KnowledgeFolder, trials: TrialFile[] | 'all') => {
+    const s = sync, first = s.derived === null
+    if (trials === 'all') s.derived = 'all'
+    else if (s.derived !== 'all') { const map = s.derived ?? new Map<string, TrialFile>(); for (const t of trials) map.set(t.id, t); s.derived = map }
+    if (first) void exclusive(() => flushDerived(folder, s))
+  }
+  const flushDerived = async (folder: KnowledgeFolder, s: Sync) => {
+    const job = s.derived
+    s.derived = null
+    if (!job || s !== sync || get().folder !== folder) return
+    const t0 = performance.now()
+    try {
+      // Another writer since this tab's last write: take its trials first, or this write would drop them.
+      await checkExternal(folder)
+      const dimensions = await readDimensions(folder)
+      const records = get().trials, covered = new Map(s.unflushed)
+      if (dimensions) {
+        await folder.regenerate(records, dimensions, job === 'all' ? undefined : [...new Set([...job.values()].flatMap(t => trialSlugs(t, dimensions)))])
+        set({ dimensions })
+      }
+      const stamp = await folder.indexStamp()
+      await folder.writeTrialCache(records, stamp)
+      s.knownStamp = stamp
+      for (const [id, version] of covered) if (s.unflushed.get(id) === version) s.unflushed.delete(id)
+      await editPending(folder, s, ids => { for (const id of covered.keys()) if (!s.unflushed.has(id) && !s.inFlight.has(id)) ids.delete(id) })
+    } catch (error) { set({ error: message(error) }) }
+    perfTiming('trials.derived', performance.now() - t0)
+  }
+  /**
+   * Changes files of existing trials: marked pending first (a reload before the cache catches up reads them again),
+   * then written; the list updates at once and the knowledge files and the cache follow in the background.
+   */
+  const mutate = async (folder: KnowledgeFolder, ids: string[], write: () => Promise<Update[]>) => {
+    const s = sync
+    for (const id of ids) s.inFlight.set(id, (s.inFlight.get(id) ?? 0) + 1)
+    try {
+      await editPending(folder, s, pending => ids.forEach(id => pending.add(id)))
+      const updates = await write()
+      if (s !== sync) return
+      apply(folder, updates)
+      for (const id of ids) s.unflushed.set(id, ++s.version)
+      const touched = new Set(ids)
+      scheduleDerived(folder, get().trials.filter(r => touched.has(r.trial.id)).map(r => r.trial))
+    } finally {
+      for (const id of ids) { const n = (s.inFlight.get(id) ?? 1) - 1; if (n > 0) s.inFlight.set(id, n); else s.inFlight.delete(id) }
+    }
+  }
+  /** Trials just accepted (inbox / MCP) join the list; their terms, index.json and the cache follow in the background. */
+  const addAccepted = async (folder: KnowledgeFolder, ids: string[]) => {
+    const fresh: TrialRecord[] = []
+    for (const id of ids) {
+      const state = await folder.trialState(id)
+      const record = state.state === 'none' ? null : await folder.readTrial(state.month, id)
+      if (record) fresh.push(record)
+    }
+    apply(folder, fresh.map(r => [r.trial.id, () => r]))
+    scheduleDerived(folder, fresh.map(r => r.trial))
   }
   return {
     folder: null, trials: [], dimensions: null, polling: false, lastResult: null, error: null,
@@ -134,22 +315,31 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
     refresh: async () => {
       if (running) return running
       running = exclusive(async () => {
+        const t0 = performance.now()
         try {
           const folder = await bind()
           if (!folder) return
+          // Only the inbox listing and index.json's timestamp: trials are not read again.
           const lastResult = await processInbox(folder, inboxDeps())
-          const records = await folder.listTrials()
-          const dimensions = await readDimensions(folder)
-          if (dimensions && lastResult.accepted.length) {
-            const accepted = records.filter(r => lastResult.accepted.includes(r.trial.id))
-            await folder.regenerate(records, dimensions, [...new Set(accepted.flatMap(r => trialSlugs(r.trial, dimensions)))])
-          }
-          set({ trials: newestFirst(records), dimensions: dimensions ?? get().dimensions, lastResult, ...(dimensions ? { error: null } : {}) })
-        } catch (error) { set({ error: error instanceof Error ? error.message : String(error) }) }
-        finally { running = null }
+          if (lastResult.accepted.length || lastResult.rejected.length) set({ lastResult })
+          if (lastResult.accepted.length) await addAccepted(folder, lastResult.accepted)
+          await checkExternal(folder)
+          if (get().error) set({ error: null })
+        } catch (error) { set({ error: message(error) }) }
+        finally { running = null; perfTiming('trials.poll', performance.now() - t0) }
       })
       return running
     },
+    rebuild: () => exclusive(async () => {
+      const folder = get().folder
+      if (!folder) return
+      const t0 = performance.now()
+      const records = await folder.listTrials()
+      if (get().folder !== folder) return
+      set({ trials: shown(keepOwnWrites(records)) })
+      scheduleDerived(folder, 'all')
+      perfTiming('trials.loadAll', performance.now() - t0)
+    }),
     startPolling: sceneCueTable => {
       cueTableOf = sceneCueTable
       if (pollTimer !== undefined) return
@@ -182,40 +372,67 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
       catch (error) { set({ error: error instanceof Error ? error.message : String(error) }) }
     },
     saveRating: async (trialId, rating) => {
+      const t0 = performance.now()
       const folder = get().folder, record = get().trials.find(r => r.trial.id === trialId)
       if (!folder || !record) throw new Error(`Trial "${trialId}" is not loaded`)
       const dimensions = await folder.readDimensions()
       // Sound trials are rated on their own axes (SOUND_DIMENSIONS, incl. length), never in dimensions.json.
       const error = ratingError(rating, record.trial, trialTarget(record.trial) === 'sound' ? SOUND_DIMENSIONS.map(d => d.id) : dimensions.dimensions.map(d => d.id))
       if (error) throw new Error(error)
-      await folder.saveRating(record.month, rating)
-      const records = await folder.listTrials()
-      await folder.regenerate(records, dimensions, trialSlugs(record.trial, dimensions))
-      set({ trials: newestFirst(records), dimensions, error: null })
+      await mutate(folder, [trialId], async () => {
+        const file = await folder.saveRating(record.month, rating)
+        return [[trialId, current => current ? { ...current, rating: file } : null]]
+      })
+      perfTiming('trials.save', performance.now() - t0)
     },
     setDismissed: async (trialId, dismissed) => {
       const folder = get().folder, record = get().trials.find(r => r.trial.id === trialId)
       if (!folder || !record) throw new Error(`Trial "${trialId}" is not loaded`)
-      if (dismissed) await folder.dismissTrial(record.month, trialId, localIsoString(new Date()))
-      else await folder.restoreTrial(record.month, trialId)
-      const records = await folder.listTrials()
-      const dimensions = await folder.readDimensions()
-      await folder.regenerate(records, dimensions, trialSlugs(record.trial, dimensions))
-      set({ trials: newestFirst(records), dimensions, error: null })
+      const at = localIsoString(new Date())
+      await mutate(folder, [trialId], async () => {
+        if (dismissed) await folder.dismissTrial(record.month, trialId, at)
+        else await folder.restoreTrial(record.month, trialId)
+        return [[trialId, current => current ? withDismissed(current, dismissed ? at : undefined) : null]]
+      })
     },
     dismissMany: async trialIds => {
       const folder = get().folder
       if (!folder) throw new Error('No editor folder is open')
       const at = localIsoString(new Date())
-      for (const id of trialIds) { const record = get().trials.find(r => r.trial.id === id); if (record) await folder.dismissTrial(record.month, id, at) }
-      const records = await folder.listTrials()
-      const dimensions = await folder.readDimensions()
-      await folder.regenerate(records, dimensions)
-      set({ trials: newestFirst(records), dimensions, error: null })
+      const records = trialIds.flatMap(id => get().trials.filter(r => r.trial.id === id))
+      await mutate(folder, records.map(r => r.trial.id), async () => {
+        for (const record of records) await folder.dismissTrial(record.month, record.trial.id, at)
+        return records.map((r): Update => [r.trial.id, current => current ? withDismissed(current, at) : null])
+      })
+    },
+    archiveLowRatedAudio: async keep => {
+      const folder = get().folder
+      if (!folder) throw new Error('No editor folder is open')
+      const byTrial = new Map<string, { month: string; ids: string[] }>()
+      for (const { month, trialId, candidateId } of lowRatedAudio(get().trials, keep)) {
+        const entry = byTrial.get(trialId) ?? { month, ids: [] }
+        entry.ids.push(candidateId); byTrial.set(trialId, entry)
+      }
+      const moved: string[] = [], failures: string[] = []
+      let bytes = 0
+      await mutate(folder, [...byTrial.keys()], async () => {
+        const updates: Update[] = []
+        for (const [trialId, { month, ids }] of byTrial) {
+          const done: string[] = []
+          for (const id of ids) {
+            try { bytes += await folder.archiveCandidateAudio(month, trialId, id); done.push(id); moved.push(`${trialId}/${id}`) }
+            catch (error) { failures.push(`${trialId}/${id}: ${message(error)}`) }
+          }
+          if (done.length) updates.push([trialId, current => current ? { ...current, archivedAudio: [...new Set([...current.archivedAudio ?? [], ...done])].sort() } : null])
+        }
+        return updates
+      })
+      return { moved, bytes, failures }
     },
     loadCandidateAudio: async (trialId, candidateId) => {
       const folder = get().folder, record = get().trials.find(r => r.trial.id === trialId)
       if (!folder || !record) throw new Error(`Trial "${trialId}" is not loaded`)
+      if (record.archivedAudio?.includes(candidateId)) throw new Error(`The audio of "${candidateId}" was moved to haptic-knowledge/_archive/ (move it back into the trial's audio/ folder to listen again)`)
       return decodeAudioFile(await folder.readCandidateAudio(record.month, trialId, candidateId))
     },
     adoptCandidate: async (trialId, candidateId) => {
@@ -270,12 +487,7 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
     submitTrial: trial => exclusive(async () => {
       const folder = await openFolder()
       const result = await submitTrialRequest(folder, trial, inboxDeps())
-      if (!result.ok) return result
-      const records = await folder.listTrials()
-      const dimensions = await readDimensions(folder)
-      const accepted = records.find(r => r.trial.id === result.trialId)
-      if (dimensions && accepted) await folder.regenerate(records, dimensions, trialSlugs(accepted.trial, dimensions))
-      set({ trials: newestFirst(records), dimensions: dimensions ?? get().dimensions })
+      if (result.ok) await addAccepted(folder, [result.trialId])
       return result
     }),
     sendAgentMessage: async message => {

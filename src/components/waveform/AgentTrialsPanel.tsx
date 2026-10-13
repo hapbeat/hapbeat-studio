@@ -3,12 +3,13 @@ import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useAgentTrialStore, type AuditionTarget } from '@/stores/agentTrialStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useWaveformStore } from '@/stores/waveformStore'
-import { localIsoString, type TrialRecord } from '@/utils/hapticKnowledge'
+import { localIsoString, lowRatedAudio, type TrialRecord } from '@/utils/hapticKnowledge'
 import type { HapticFeatures } from '@/utils/hapticFeatures'
 import { clearRatingDraft, DraftKeeper, readFolderDraft, readLocalDraft, rememberedOpenTrial, rememberOpenTrial, writeFolderDraft, writeLocalDraft } from '@/utils/ratingDrafts'
 import { onPageHide } from '@/utils/pageHide'
+import { perfTiming } from '@/utils/perfRegistry'
 import { addUseRange, isFreePlanCandidate, poolCandidates, reserveCandidates, addReserves, autoRatingContext, EMPTY_CONTEXT, formToRating, initialIntensity, loadRememberedContext, ratingFormIssue, ratingToForm, rememberContext, trialKind, verdictFromOverall, type CandidateRatingForm, type RatingForm } from '@/utils/agentTrialUi'
-import { trialTarget, type TrialKind } from '@/utils/agentProtocol'
+import { trialTarget, type RatingBody, type TrialKind } from '@/utils/agentProtocol'
 import { useAuditionPlan } from './EditorScenePanel'
 import { BODY_POSITIONS, resolvePlaybackTargets, routePlaybackTargets } from '@/utils/playbackDevices'
 import { useDeviceStore } from '@/stores/deviceStore'
@@ -51,6 +52,9 @@ const drafts = new DraftKeeper({
 }, () => localIsoString(new Date()))
 // Closing / reloading / hiding the page within the debounce still writes the folder copy (localStorage already has it).
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') onPageHide(() => drafts.flush())
+/** Work after a saved rating (materials, reserves, log), one save at a time and off the "save and next" path. */
+let afterSaveQueue: Promise<void> = Promise.resolve()
+const afterSave = (job: () => Promise<void>) => { afterSaveQueue = afterSaveQueue.then(job).catch(error => console.warn('[agent] after saving a rating', error)) }
 
 /**
  * "AI trials": trials that a local agent dropped into hapbeat-agent/inbox/, their
@@ -137,6 +141,22 @@ export function AgentTrialsPanel() {
       await useAgentTrialStore.getState().dismissMany(queue.map(r => r.trial.id)); setSelectedId(null); rememberOpenTrial(null)
     } catch (error) { setPanelNotice(message(error)) }
   }
+  /** Candidates an event uses (marks, AI reserves): their audio is never archived. */
+  const eventMarks = useEditorSettings(s => s.eventMarks), eventReserves = useEditorSettings(s => s.eventReserves)
+  const keepAudio = useMemo(() => new Set([...Object.keys(eventMarks).filter(key => key.includes('/')),
+    ...Object.values(eventReserves).flat().flatMap(r => 'trialId' in r ? [`${r.trialId}/${r.candidateId}`] : [])]), [eventMarks, eventReserves])
+  const lowRated = useMemo(() => lowRatedAudio(trials, keepAudio), [trials, keepAudio])
+  /** History > move the audio of every ★1–2 candidate to haptic-knowledge/_archive/ (confirmed; the ratings stay in the knowledge). */
+  const archiveLowRated = async () => {
+    if (!lowRated.length || !await ask({ message: t('editor.agent.archiveLowRatedConfirm', { count: lowRated.length }) })) return
+    try {
+      const { moved, bytes, failures } = await useAgentTrialStore.getState().archiveLowRatedAudio(keepAudio)
+      setPanelNotice([t('editor.agent.archivedLowRated', { count: moved.length, mb: (bytes / 1e6).toFixed(1) }), ...failures].join(' / '))
+      const root = useWaveformStore.getState().folder?.root
+      if (root && (moved.length || failures.length)) void appendActivity(root, { at: localIsoString(new Date()), kind: 'audio-archived', archived: moved, ...(failures.length ? { failures } : {}) }).catch(() => {})
+    } catch (error) { setPanelNotice(message(error)) }
+  }
+  const reloadTrials = () => { setPanelNotice(''); useAgentTrialStore.getState().rebuild().catch(error => setPanelNotice(message(error))) }
   const target = record ? trialTarget(record.trial) : null
   const what = record ? (record.trial.scene ? record.trial.scene.cues.join(' + ') : record.trial.terms.join(' · ')) : ''
   const sceneLib = useSceneStore(s => s.lib)
@@ -183,6 +203,8 @@ ${t('editor.scene.targetHint')}`} onClick={() => revealEvent(pillEvent, focusEdi
           <small className="agent-history-state">{t(trialTarget(r.trial) === 'sound' ? 'editor.agent.targetSound' : 'editor.agent.targetHaptic')} · {t(r.dismissed ? 'editor.agent.dismissedBadge' : r.rating ? 'editor.agent.rated' : 'editor.agent.unrated')}</small>
         </EditorMenuItem>)}
         <EditorMenuItem disabled={!queue.length} onSelect={() => void dismissAll()}>{t('editor.agent.dismissAll', { count: queue.length })}</EditorMenuItem>
+        <EditorMenuItem disabled={!lowRated.length} onSelect={() => void archiveLowRated()}>{t('editor.agent.archiveLowRated', { count: lowRated.length })}</EditorMenuItem>
+        <EditorMenuItem onSelect={reloadTrials}>{t('editor.agent.reloadTrials')}</EditorMenuItem>
       </EditorMenu>
       {record && <button className="toolbar-btn" title={t('editor.scene.openHint')}
         onClick={() => openSceneVideo({ kind: 'trial', trialId: record.trial.id })}>▶ {t('editor.agent.video')}</button>}
@@ -266,7 +288,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
     setForm(ratingToForm(trial, rating, loadRememberedContext())); setDirty(false)
   }, [rating?.ratedAt])
   const [audio, setAudio] = useState<Record<string, AudioBuffer | { error: string }>>({})
-  const renderable = record.candidates.filter(c => c.audio && !c.error).map(c => c.id).join(',')
+  const renderable = record.candidates.filter(c => c.audio && !c.error && !record.archivedAudio?.includes(c.id)).map(c => c.id).join(',')
   useEffect(() => {
     let cancelled = false
     for (const cid of renderable ? renderable.split(',') : []) void useAgentTrialStore.getState().loadCandidateAudio(trial.id, cid)
@@ -344,9 +366,13 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
     }
     return { added, excluded, failures }
   }
-  /** Saves, then (auto-assign / auto-send) and hands over to the panel, which moves to the next unrated trial and shows what happened. */
+  /**
+   * Saves (rating.json and the trial list at once), hands over to the panel, which moves to the next unrated trial,
+   * then adds the event materials / reserves and logs in the background (afterSave, one save at a time).
+   */
   const save = async () => {
     if (issue || saving) return
+    const t0 = performance.now()
     setSaving(true)
     const withAuto = target === 'sound' ? { ...form, context: EMPTY_CONTEXT } : { ...form, context: { ...form.context, ...(auto.device ? { device: auto.device } : {}), ...(auto.position ? { position: auto.position } : {}),
       ...(auto.deviceWiper !== null ? { deviceWiper: String(auto.deviceWiper), volumeLabel: auto.volumeLabel } : { volumeLabel: '' }) } }
@@ -357,6 +383,16 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
       await drafts.done(trial.id).catch(() => {})
     } catch (error) { setSaveError(message(error)); setSaving(false); return }
     setSaving(false)
+    onDone({ recordId: trial.id })
+    perfTiming('trials.saveNext', performance.now() - t0)
+    afterSave(async () => {
+      const t1 = performance.now()
+      await finishSave(body)
+      perfTiming('trials.afterSave', performance.now() - t1)
+    })
+  }
+  /** What follows a saved rating: ★4+ into the event's materials, ★3 into its reserves, the operation log; only failures are shown. */
+  const finishSave = async (body: RatingBody) => {
     // What saving did goes to the operation log (console + .hapbeat-editor/activity-log.jsonl); only failures are shown.
     const excluded: { candidate: string; reason: string }[] = [], failures: string[] = []
     let added: string[] = []
@@ -376,7 +412,6 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
     if (root) void appendActivity(root, { at: localIsoString(new Date()), kind: 'rated', trialId: trial.id, ...(record.shortId ? { shortId: record.shortId } : {}),
       ...(added.length ? { added } : {}), ...(reserved.length ? { reserved } : {}), ...(excluded.length ? { excluded } : {}), ...(failures.length ? { failures } : {}) }).catch(error => console.warn('[activity] not written', error))
     if (failures.length) toast(t('editor.agent.saveFailures', { id: record.shortId ?? trial.id, failures: failures.join(' / ') }), 'error')
-    onDone({ recordId: trial.id })
   }
   const adopt = async (cid: string, label: string) => {
     try { await useAgentTrialStore.getState().adoptCandidate(trial.id, cid); setNotice(t('editor.agent.adopted', { name: label })) }
@@ -407,6 +442,8 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
     <div className="agent-candidates">
       {trial.candidates.map(requested => {
         const file = record.candidates.find(c => c.id === requested.id)
+        /** Its audio was moved to haptic-knowledge/_archive/ (History → archive ★1–2 audio): rated, not playable. */
+        const archived = !!record.archivedAudio?.includes(requested.id)
         const loaded = audio[requested.id], buffer = loaded && !('error' in loaded) ? loaded : null
         const active = audition?.trialId === trial.id && audition.candidateId === requested.id
         // Clicking anywhere on the card (except its own controls) auditions it in the waveform panel.
@@ -423,7 +460,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
           */}
           <div className="agent-card">
             <div className="agent-card-head">
-              <button className="toolbar-btn agent-play-btn" disabled={!file?.audio || !!file?.error} aria-label={t(sounding ? 'wave.stop' : 'wave.play')} title={t('editor.agent.playHint')}
+              <button className="toolbar-btn agent-play-btn" disabled={!file?.audio || !!file?.error || archived} aria-label={t(sounding ? 'wave.stop' : 'wave.play')} title={t('editor.agent.playHint')}
                 onClick={() => toggleCandidate(trial.id, requested.id)}>
                 <span className="transport-label-stack" aria-hidden="true"><span style={{ visibility: sounding ? 'hidden' : 'visible' }}>▶</span><span style={{ visibility: sounding ? 'visible' : 'hidden' }}>■</span></span>
               </button>
@@ -440,7 +477,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
             </div>
             <div className="agent-card-meta">
               <span className="agent-thumb" title={featureText(file?.features ?? null)}>{buffer ? <WaveformThumbnail buffer={buffer} />
-                : <small className={file?.error || loaded ? 'error' : ''}>{file?.error ? t('editor.agent.renderError', { message: file.error }) : loaded && 'error' in loaded ? loaded.error : file ? t('editor.agent.loadingAudio') : ''}</small>}</span>
+                : <small className={file?.error || loaded ? 'error' : ''}>{file?.error ? t('editor.agent.renderError', { message: file.error }) : archived ? t('editor.agent.audioArchived') : loaded && 'error' in loaded ? loaded.error : file ? t('editor.agent.loadingAudio') : ''}</small>}</span>
               <Stars value={form.candidates[requested.id].overall} onChange={overall => editCandidate(requested.id, { overall })} />
               <VerdictTag overall={form.candidates[requested.id].overall} />
               {/* The strength (saved in the rating as `intensity`): this candidate's audition gain, live. */}
