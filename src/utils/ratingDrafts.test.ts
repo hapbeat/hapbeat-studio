@@ -209,4 +209,39 @@ describe('DraftKeeper', () => {
     expect(s.local.has('t-1') || s.folder.has('t-1') || k.has('t-1')).toBe(false)
     expect(k.open(trial, () => ratingToForm(trial, null)).restored).toBe(false)
   })
+
+  it('while a rating is written in the background: the trial shows the rating, a reload still finds the draft; failed → the draft comes back', async () => {
+    vi.useFakeTimers()
+    const s = stores(); const k = s.keeper(now)
+    k.change('t-1', withComment('B is closest'))
+    k.beginSave('t-1', withComment('B is closest'))
+    expect(s.folder.has('t-1')).toBe(true) // the pending folder copy is written at once
+    expect(k.has('t-1')).toBe(false)
+    expect(k.open(trial, () => withComment('from the rating')).form.comment).toBe('from the rating')
+    expect(s.keeper(now).open(trial, () => ratingToForm(trial, null)).form.comment).toBe('B is closest') // a reload before the write
+    await k.endSave('t-1', true)
+    expect(s.local.has('t-1') || s.folder.has('t-1')).toBe(false)
+    k.change('t-1', withComment('second'))
+    k.beginSave('t-1', withComment('second'))
+    await k.endSave('t-1', false)
+    expect(k.has('t-1')).toBe(true)
+    expect(k.open(trial, () => ratingToForm(trial, null))).toMatchObject({ restored: true, form: { comment: 'second' } })
+  })
+
+  it('a draft typed while the save was in flight survives the end of that save', async () => {
+    vi.useFakeTimers()
+    const s = stores(); const k = s.keeper(now)
+    k.beginSave('t-1', withComment('saved'))
+    k.change('t-1', withComment('typed after'))
+    await k.endSave('t-1', true)
+    expect(k.open(trial, () => ratingToForm(trial, null)).form.comment).toBe('typed after')
+    expect(s.local.has('t-1')).toBe(true)
+    // Two saves of one trial in flight: only the last to end decides.
+    const k2 = s.keeper(now)
+    k2.beginSave('t-2', withComment('one')); k2.beginSave('t-2', withComment('two'))
+    await k2.endSave('t-2', false)
+    expect(k2.has('t-2')).toBe(false)
+    await k2.endSave('t-2', false)
+    expect(k2.open(trial2, () => ratingToForm(trial2, null)).form.comment).toBe('two')
+  })
 })

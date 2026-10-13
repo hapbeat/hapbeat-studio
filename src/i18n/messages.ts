@@ -1246,6 +1246,7 @@ export const messages = defineMessages({
   'editor.agent.audioArchived': { ja: '音声は _archive へ（★3 以上で戻る）', en: 'Audio in _archive (back at ★3+)' },
   'editor.agent.reloadTrials': { ja: '試行をフォルダから読み直す', en: 'Reload trials from the folder' },
   'editor.agent.saveNext': { ja: '保存して次へ', en: 'Save and next' },
+  'editor.agent.saveFailedLater': { ja: '{id} の評価を保存できませんでした: {message}（入力は下書きに戻しました。開いて保存し直してください）', en: 'Could not save the rating of {id}: {message} (the form is back as a draft; open it and save again)' },
   'editor.agent.assignShort': { ja: 'イベントへ割当', en: 'Assign to event' },
   'editor.agent.statusNeedsScore': { ja: '未入力', en: 'empty' },
   'editor.agent.statusWiper': { ja: '音量の値が不正', en: 'bad volume' },

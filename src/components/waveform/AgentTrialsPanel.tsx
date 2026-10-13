@@ -285,16 +285,16 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
     void drafts.newerFromFolder(trial, opened.savedAt).then(found => { if (!cancelled && found) { setForm(found.form); setDirty(true); setRestored(true) } })
     return () => { cancelled = true }
   }, [trial.id, editorFolder])
-  const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
-  // A rating written after this view opened (by this panel's save or elsewhere) replaces the form.
+  // A rating written after this view opened (by this panel's save or elsewhere) replaces the form; with a draft (typed
+  // here, or a background save that failed and gave its form back) the form stays and reads as unsaved.
   // Compared by value, so a re-run effect (StrictMode) never resets a restored draft.
   const seenRatedAt = useRef(rating?.ratedAt)
   useEffect(() => {
     if (rating?.ratedAt === seenRatedAt.current) return
     seenRatedAt.current = rating?.ratedAt
-    if (drafts.has(trial.id)) return
+    if (drafts.has(trial.id)) { setDirty(true); return }
     setForm(ratingToForm(trial, rating, loadRememberedContext())); setDirty(false)
   }, [rating?.ratedAt])
   const [audio, setAudio] = useState<Record<string, AudioBuffer | { error: string }>>({})
@@ -377,25 +377,31 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
     return { added, excluded, failures }
   }
   /**
-   * Saves (rating.json and the trial list at once), hands over to the panel, which moves to the next unrated trial,
-   * then adds the event materials / reserves and logs in the background (afterSave, one save at a time).
+   * "Save and next" moves on as fast as ‹ ›: the list shows the rating at once and the panel opens the next unrated
+   * trial before anything is written. rating.json (in order per trial), then the audio tidy, event materials, reserves
+   * and log follow in the background (afterSave, one save at a time). The draft stays stored until the write lands;
+   * a failed write gives the form back as the draft, restores the previous rating and says so.
    */
-  const save = async () => {
-    if (issue || saving) return
+  const save = () => {
+    if (issue) return
     const t0 = performance.now()
-    setSaving(true)
     const withAuto = target === 'sound' ? { ...form, context: EMPTY_CONTEXT } : { ...form, context: { ...form.context, ...(auto.device ? { device: auto.device } : {}), ...(auto.position ? { position: auto.position } : {}),
       ...(auto.deviceWiper !== null ? { deviceWiper: String(auto.deviceWiper), volumeLabel: auto.volumeLabel } : { volumeLabel: '' }) } }
     const body = formToRating(withAuto, trial, localIsoString(new Date()))
-    try {
-      await useAgentTrialStore.getState().saveRating(trial.id, body); if (target === 'haptic') rememberContext(withAuto.context); setDirty(false); setRestored(false)
-      // Saved (and moving on): the only case the draft goes.
-      await drafts.done(trial.id).catch(() => {})
-    } catch (error) { setSaveError(message(error)); setSaving(false); return }
-    setSaving(false)
+    let written: Promise<void>
+    try { written = useAgentTrialStore.getState().saveRating(trial.id, body, () => { void drafts.endSave(trial.id, false) }) }
+    catch (error) { setSaveError(message(error)); return }
+    written.catch(() => {})
+    drafts.beginSave(trial.id, form)
+    if (target === 'haptic') rememberContext(withAuto.context)
+    setDirty(false); setRestored(false)
     onDone({ recordId: trial.id })
     perfTiming('trials.saveNext', performance.now() - t0)
+    const id = record.shortId ?? trial.id
     afterSave(async () => {
+      try { await written }
+      catch (error) { toast(t('editor.agent.saveFailedLater', { id, message: message(error) }), 'error'); return }
+      void drafts.endSave(trial.id, true).catch(() => {})
       const t1 = performance.now()
       await finishSave(body)
       perfTiming('trials.afterSave', performance.now() - t1)
@@ -534,7 +540,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
       <TrialComment value={form.comment} onChange={comment => edit(f => ({ ...f, comment }))} />
       {/* One line: [Save and next] [Assign to event] (toggle) · status (the full reason on hover). Saving is the agent's cue (it watches rating.json). */}
       <div className="agent-save">
-        <span title={issue ? issueText : ''}><button className="apply-effects-btn" disabled={!!issue || saving || (!dirty && !!rating)} onClick={() => void save()}>{t('editor.agent.saveNext')}</button></span>
+        <span title={issue ? issueText : ''}><button className="apply-effects-btn" disabled={!!issue || (!dirty && !!rating)} onClick={save}>{t('editor.agent.saveNext')}</button></span>
         {trial.scene && <button type="button" className="agent-save-toggle" aria-pressed={autoAssign} title={t('events.auto.hint')}
           onClick={() => useEditorSettings.getState().update({ autoAssignOnRating: !autoAssign })}>{t('editor.agent.assignShort')}</button>}
         <span className={`agent-save-status ${saveError ? 'error' : !dirty && rating ? 'saved' : ''}`} role="status" title={saveStatus}>{shortStatus}</span>

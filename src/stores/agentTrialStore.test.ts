@@ -98,6 +98,30 @@ describe('AI trial store: no full reread on poll, save or dismissal', () => {
     expect(readTrial).not.toHaveBeenCalled()
   })
 
+  it('shows a saved rating before writing it; writes of one trial keep their order; a failed write puts the previous rating back', async () => {
+    const { root } = await seed(['t1'])
+    await open(root)
+    const first = store().saveRating('t1', rating('t1', { A: 2 }))
+    expect(find('t1')?.rating?.candidates.A.overall).toBe(2) // before anything is written
+    const second = store().saveRating('t1', rating('t1', { A: 5 }))
+    expect(find('t1')?.rating?.candidates.A.overall).toBe(5)
+    await first
+    expect(find('t1')?.rating?.candidates.A.overall).toBe(5) // the earlier write leaves the later rating shown
+    await second
+    const file = await root.json<{ candidates: { A: { overall: number } }; history: { candidates: { A: { overall: number } } }[] }>(`haptic-knowledge/trials/${MONTH}/t1/rating.json`)
+    expect(file.candidates.A.overall).toBe(5)
+    expect(file.history.map(h => h.candidates.A.overall)).toEqual([2])
+    expect(() => store().saveRating('t1', { ...rating('t1', { A: 9 }) })).toThrow(/overall/) // invalid: nothing shown, nothing written
+    expect(find('t1')?.rating?.candidates.A.overall).toBe(5)
+    vi.spyOn(KnowledgeFolder.prototype, 'saveRating').mockRejectedValueOnce(new Error('disk full'))
+    const onFailure = vi.fn(() => expect(find('t1')?.rating?.candidates.A.overall).toBe(1))
+    const failed = store().saveRating('t1', rating('t1', { A: 1 }), onFailure)
+    expect(find('t1')?.rating?.candidates.A.overall).toBe(1)
+    await expect(failed).rejects.toThrow('disk full')
+    expect(onFailure).toHaveBeenCalledTimes(1)
+    expect(find('t1')?.rating?.candidates.A.overall).toBe(5)
+  })
+
   it('a reload before the cache caught up reads the trials marked pending again', async () => {
     const { root, folder } = await seed(['t1', 't2'])
     await open(root)

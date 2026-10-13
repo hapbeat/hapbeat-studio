@@ -6,15 +6,14 @@ import { decodeAudioFile } from '@/utils/wavIO'
 import { sha256Hex } from '@/utils/sha256'
 import { loadRecipeSamples, renderRecipe, type Recipe } from '@/utils/recipe'
 import { CURRENT_STUDIO_VERSION } from '@/utils/studioVersions'
-import { ratingError, trialTarget, type RatingBody } from '@/utils/agentProtocol'
+import { ratingError, trialTarget, type RatingBody, type RatingFile, type TrialFile } from '@/utils/agentProtocol'
 import { SOUND_DIMENSIONS } from '@/utils/agentTrialUi'
 import { processInbox, readAgentBytes, submitTrialRequest, encodePcm16Wav, type AcceptResult, type InboxDeps, type InboxResult } from '@/utils/agentInbox'
 import { buildCatalog } from '@/utils/agentGuide'
 import { pageVisible, perfTiming, perfTrack } from '@/utils/perfRegistry'
 import { buildAgentMessage, outboxFileName, writeOutboxMessage, type HapticRequest, type Reassign, type Revise, type SoundRequest } from '@/utils/agentOutbox'
 import type { CueTable } from '@/utils/sceneCueTable'
-import type { TrialFile } from '@/utils/agentProtocol'
-import { audioToRestore, KnowledgeFolder, localIsoString, lowRatedAudio, trialSlugs, withShortIds, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
+import { audioToRestore, KnowledgeFolder, localIsoString, lowRatedAudio, SEED_DIMENSIONS, trialSlugs, withShortIds, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
 
 const POLL_MS = 2000
 const CATALOG_DEBOUNCE_MS = 2000
@@ -53,7 +52,12 @@ interface AgentTrialState {
   stopPolling: () => void
   /** Writes hapbeat-agent/catalog.json from the current editor documents now. */
   writeCatalog: () => Promise<void>
-  saveRating: (trialId: string, rating: RatingBody) => Promise<void>
+  /**
+   * Shows the rating at once (the list holds it before anything is written) and writes rating.json in the background,
+   * in order per trial; throws at once when the rating is invalid. The promise settles when the file is written; on a
+   * failed write `onFailure` runs first, then the trial's previous rating comes back and the promise rejects.
+   */
+  saveRating: (trialId: string, rating: RatingBody, onFailure?: () => void) => Promise<void>
   /** Dismisses (true) or restores (false) a trial: dismissed trials are not rated and stay out of the knowledge. */
   setDismissed: (trialId: string, dismissed: boolean) => Promise<void>
   /** Dismisses several trials at once (one knowledge regeneration). */
@@ -144,6 +148,8 @@ const newSync = (): Sync => ({ unflushed: new Map(), inFlight: new Map(), knownS
 
 export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
   let sync = newSync()
+  /** Per trial: the last rating write queued (writes of one trial run in order). */
+  const ratingWrites = new Map<string, Promise<void>>()
   let binding: { root: FileSystemDirectoryHandle; promise: Promise<KnowledgeFolder> } | null = null
   /** Opens (and scaffolds) the agent folders when the editor folder changes, and loads its trials. */
   const bind = async (): Promise<KnowledgeFolder | null> => {
@@ -174,12 +180,21 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
     if (!folder) throw new Error('No editor folder is open')
     return folder
   }
-  /** Updates the trials shown, by id (an update returning null drops the trial); every other record stays as it is. */
+  /**
+   * Updates the trials shown, by id (an update returning null drops the trial); every other record stays as it is.
+   * Nothing changed (every update returned the record it got) = no new list, so nothing re-renders.
+   */
   const apply = (folder: KnowledgeFolder, updates: Update[]) => {
     if (get().folder !== folder || !updates.length) return
     const byId = new Map(get().trials.map(r => [r.trial.id, r]))
-    for (const [id, update] of updates) { const next = update(byId.get(id)); if (next) byId.set(id, next); else byId.delete(id) }
-    set({ trials: shown([...byId.values()]) })
+    let changed = false
+    for (const [id, update] of updates) {
+      const current = byId.get(id), next = update(current)
+      if (next === current || (!next && !current)) continue
+      changed = true
+      if (next) byId.set(id, next); else byId.delete(id)
+    }
+    if (changed) set({ trials: shown([...byId.values()]) })
   }
   /** Trials read from disk while this tab has writes in flight or not yet cached: those keep the in-memory record. */
   const keepOwnWrites = (records: TrialRecord[]) => {
@@ -373,19 +388,41 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
       try { await folder.writeCatalog(buildCatalog(useWaveformStore.getState().documents, CURRENT_STUDIO_VERSION, localIsoString(new Date()))) }
       catch (error) { set({ error: error instanceof Error ? error.message : String(error) }) }
     },
-    saveRating: async (trialId, rating) => {
+    saveRating: (trialId, rating, onFailure) => {
       const t0 = performance.now()
       const folder = get().folder, record = get().trials.find(r => r.trial.id === trialId)
       if (!folder || !record) throw new Error(`Trial "${trialId}" is not loaded`)
-      const dimensions = await folder.readDimensions()
       // Sound trials are rated on their own axes (SOUND_DIMENSIONS, incl. length), never in dimensions.json.
-      const error = ratingError(rating, record.trial, trialTarget(record.trial) === 'sound' ? SOUND_DIMENSIONS.map(d => d.id) : dimensions.dimensions.map(d => d.id))
+      const error = ratingError(rating, record.trial, trialTarget(record.trial) === 'sound' ? SOUND_DIMENSIONS.map(d => d.id) : (get().dimensions ?? SEED_DIMENSIONS).dimensions.map(d => d.id))
       if (error) throw new Error(error)
-      await mutate(folder, [trialId], async () => {
-        const file = await folder.saveRating(record.month, rating)
-        return [[trialId, current => current ? { ...current, rating: file } : null]]
-      })
-      perfTiming('trials.save', performance.now() - t0)
+      // What rating.json will hold (the previous rating moves to history), shown before it is written.
+      const previous = record.rating, s = sync
+      const shownRating: RatingFile = { ...rating, history: previous ? [...previous.history ?? [], (({ history: _h, ...body }) => body)(previous)] : [] }
+      s.inFlight.set(trialId, (s.inFlight.get(trialId) ?? 0) + 1)
+      apply(folder, [[trialId, current => current ? { ...current, rating: shownRating } : null]])
+      // A later save of this trial replaces what is shown; an earlier write finishing then leaves it alone.
+      const stillShown = (current: TrialRecord | undefined) => current?.rating === shownRating
+      const run = (ratingWrites.get(trialId) ?? Promise.resolve())
+        .then(() => mutate(folder, [trialId], async () => {
+          const file = await folder.saveRating(record.month, rating)
+          // Written as shown (the usual case): the list keeps its record, nothing re-renders.
+          const same = JSON.stringify(file) === JSON.stringify(shownRating)
+          return [[trialId, current => current ? stillShown(current) && !same ? { ...current, rating: file } : current : null]]
+        }))
+        .catch(error => {
+          onFailure?.()
+          apply(folder, [[trialId, current => current ? stillShown(current) ? { ...current, rating: previous } : current : null]])
+          throw error
+        })
+        .finally(() => {
+          const n = (s.inFlight.get(trialId) ?? 1) - 1
+          if (n > 0) s.inFlight.set(trialId, n); else s.inFlight.delete(trialId)
+          perfTiming('trials.save', performance.now() - t0)
+        })
+      const settled = run.catch(() => {})
+      ratingWrites.set(trialId, settled)
+      void settled.then(() => { if (ratingWrites.get(trialId) === settled) ratingWrites.delete(trialId) })
+      return run
     },
     setDismissed: async (trialId, dismissed) => {
       const folder = get().folder, record = get().trials.find(r => r.trial.id === trialId)

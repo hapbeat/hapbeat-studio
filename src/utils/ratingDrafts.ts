@@ -110,12 +110,16 @@ export interface DraftStores {
 export class DraftKeeper {
   private memory = new Map<string, { form: RatingForm; savedAt: string }>()
   private pending = new Map<string, { timer: ReturnType<typeof setTimeout>; form: RatingForm; savedAt: string }>()
+  /** Ratings being written (beginSave … endSave): the form saved and how many saves of the trial are in flight. */
+  private saving = new Map<string, { form: RatingForm; count: number }>()
   constructor(private stores: DraftStores, private now: () => string = () => new Date().toISOString(), private delayMs = DRAFT_DEBOUNCE_MS) {}
 
   /** What to show when `trial` opens; `savedAt` identifies the version shown (null = fresh form). */
   open(trial: DraftTrial, fresh: () => RatingForm): { form: RatingForm; restored: boolean; savedAt: string | null } {
     const m = this.memory.get(trial.id)
     if (m) return { form: m.form, restored: true, savedAt: m.savedAt }
+    // Being saved: the rating shown is the one being written, not a draft (the stored copies only back it up).
+    if (this.saving.has(trial.id)) return { form: fresh(), restored: false, savedAt: null }
     const local = this.stores.readLocal(trial)
     if (local) { this.memory.set(trial.id, { form: local.form, savedAt: local.savedAt }); return { form: local.form, restored: true, savedAt: local.savedAt } }
     return { form: fresh(), restored: false, savedAt: null }
@@ -123,7 +127,7 @@ export class DraftKeeper {
   /** The folder copy when it is newer than the version shown and nothing was typed since; it becomes the current draft. */
   async newerFromFolder(trial: DraftTrial, shownSavedAt: string | null): Promise<RatingDraft | null> {
     const found = await this.stores.readFolder(trial)
-    if (!found) return null
+    if (!found || this.saving.has(trial.id)) return null
     const current = this.memory.get(trial.id)
     if ((current?.savedAt ?? null) !== shownSavedAt) return null
     if (shownSavedAt && Date.parse(found.savedAt) <= Date.parse(shownSavedAt)) return null
@@ -152,6 +156,29 @@ export class DraftKeeper {
     this.pending.delete(trialId)
     this.memory.delete(trialId)
     await this.stores.clear(trialId)
+  }
+  /**
+   * The rating is being written in the background: the draft leaves memory (the trial shows the rating), its stored
+   * copies stay until endSave so a reload before the write still finds it. A pending folder copy is written now.
+   */
+  beginSave(trialId: string, form: RatingForm) {
+    const p = this.pending.get(trialId)
+    if (p) { clearTimeout(p.timer); this.pending.delete(trialId); void this.stores.writeFolder(trialId, p.form, p.savedAt).catch(() => {}) }
+    this.memory.delete(trialId)
+    this.saving.set(trialId, { form, count: (this.saving.get(trialId)?.count ?? 0) + 1 })
+  }
+  /**
+   * The write finished. Saved: the stored copies go. Failed: the form comes back as the draft. Either way a draft typed
+   * since (the trial was opened and edited meanwhile) wins, and a later save still in flight decides instead.
+   */
+  async endSave(trialId: string, ok: boolean) {
+    const s = this.saving.get(trialId)
+    if (!s) return
+    if (--s.count > 0) return
+    this.saving.delete(trialId)
+    if (this.memory.has(trialId)) return
+    if (ok) await this.stores.clear(trialId)
+    else this.change(trialId, s.form)
   }
   has(trialId: string) { return this.memory.has(trialId) }
 }
