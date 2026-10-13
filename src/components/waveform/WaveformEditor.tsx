@@ -48,6 +48,7 @@ import { contextHapticParts, renderContextLoops } from '@/utils/trialContext'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { LANE_RATE, mixLane, soundLaneParts, type SoundLane } from '@/utils/soundLane'
 import { usePageVisible } from '@/hooks/usePageVisible'
+import { ratingSavesInFlight } from '@/utils/ratingSaveProgress'
 
 export function WaveformEditor({ active }: { active: boolean }) {
   const { t } = useI18n()
@@ -378,7 +379,8 @@ export function WaveformEditor({ active }: { active: boolean }) {
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
       const state = useWaveformStore.getState()
-      if (state.isProcessing || ['pending', 'saving', 'error'].includes(state.saveStatus)) { event.preventDefault(); event.returnValue = '' }
+      // Also while a saved AI rating is still being written in the background (rating.json, knowledge, event materials).
+      if (state.isProcessing || ['pending', 'saving', 'error'].includes(state.saveStatus) || ratingSavesInFlight() > 0) { event.preventDefault(); event.returnValue = '' }
     }
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)

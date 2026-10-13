@@ -9,6 +9,7 @@ import { clearRatingDraft, DraftKeeper, readFolderDraft, readLocalDraft, remembe
 import { onPageHide } from '@/utils/pageHide'
 import { perfTiming } from '@/utils/perfRegistry'
 import { cardProps, onCardListKey } from '@/utils/cardListKeys'
+import { trackRatingSave } from '@/utils/ratingSaveProgress'
 import { addUseRange, isFreePlanCandidate, poolCandidates, reserveCandidates, addReserves, autoRatingContext, EMPTY_CONTEXT, formToRating, initialIntensity, loadRememberedContext, ratingFormIssue, ratingToForm, rememberContext, trialKind, verdictFromOverall, type CandidateRatingForm, type RatingForm } from '@/utils/agentTrialUi'
 import { trialTarget, type RatingBody, type TrialKind } from '@/utils/agentProtocol'
 import { useAuditionPlan } from './EditorScenePanel'
@@ -399,20 +400,31 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
     onDone({ recordId: trial.id })
     perfTiming('trials.saveNext', performance.now() - t0)
     const id = record.shortId ?? trial.id
+    // The log footer shows the save until all of its background work is done (the page asks before closing meanwhile).
+    const end = trackRatingSave({
+      progress: left => t('editor.agent.ratingWriting', { id, count: left }), done: t('editor.agent.ratingWritten', { id }),
+      failed: error => t('editor.agent.ratingWriteFailed', { id, message: error }),
+    })
     afterSave(async () => {
-      try { await written }
-      catch (error) { toast(t('editor.agent.saveFailedLater', { id, message: message(error) }), 'error'); return }
-      void drafts.endSave(trial.id, true).catch(() => {})
-      const t1 = performance.now()
-      await finishSave(body)
-      perfTiming('trials.afterSave', performance.now() - t1)
+      let failure: string | undefined
+      try {
+        try { await written }
+        catch (error) { failure = message(error); toast(t('editor.agent.saveFailedLater', { id, message: failure }), 'error'); return }
+        void drafts.endSave(trial.id, true).catch(() => {})
+        const t1 = performance.now()
+        const failures = await finishSave(body)
+        if (failures.length) failure = failures.join(' / ')
+        await useAgentTrialStore.getState().idle()
+        perfTiming('trials.afterSave', performance.now() - t1)
+      } catch (error) { failure = message(error); throw error }
+      finally { end(failure) }
     })
   }
   /**
    * What follows a saved rating: ★1–2 audio to _archive (and back for candidates rated higher since), ★4+ into the
    * event's materials, ★3 into its reserves, the operation log; only failures are shown.
    */
-  const finishSave = async (body: RatingBody) => {
+  const finishSave = async (body: RatingBody): Promise<string[]> => {
     // What saving did goes to the operation log (console + .hapbeat-editor/activity-log.jsonl); only failures are shown.
     const excluded: { candidate: string; reason: string }[] = [], failures: string[] = []
     // First, so a candidate raised from ★1–2 has its audio back before it joins the event.
@@ -438,6 +450,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
       ...(added.length ? { added } : {}), ...(reserved.length ? { reserved } : {}), ...(tidy.moved.length ? { archived: tidy.moved } : {}), ...(tidy.restored.length ? { restored: tidy.restored } : {}),
       ...(excluded.length ? { excluded } : {}), ...(failures.length ? { failures } : {}) }).catch(error => console.warn('[activity] not written', error))
     if (failures.length) toast(t('editor.agent.saveFailures', { id: record.shortId ?? trial.id, failures: failures.join(' / ') }), 'error')
+    return failures
   }
   const adopt = async (cid: string, label: string) => {
     try { await useAgentTrialStore.getState().adoptCandidate(trial.id, cid); setNotice(t('editor.agent.adopted', { name: label })) }

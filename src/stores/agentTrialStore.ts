@@ -58,6 +58,8 @@ interface AgentTrialState {
    * failed write `onFailure` runs first, then the trial's previous rating comes back and the promise rejects.
    */
   saveRating: (trialId: string, rating: RatingBody, onFailure?: () => void) => Promise<void>
+  /** Settles when the background writes queued so far are done: rating files, then the knowledge files and the trial cache. */
+  idle: () => Promise<void>
   /** Dismisses (true) or restores (false) a trial: dismissed trials are not rated and stay out of the knowledge. */
   setDismissed: (trialId: string, dismissed: boolean) => Promise<void>
   /** Dismisses several trials at once (one knowledge regeneration). */
@@ -423,6 +425,10 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
       ratingWrites.set(trialId, settled)
       void settled.then(() => { if (ratingWrites.get(trialId) === settled) ratingWrites.delete(trialId) })
       return run
+    },
+    idle: async () => {
+      await Promise.all([...ratingWrites.values()])
+      await exclusive(async () => {})
     },
     setDismissed: async (trialId, dismissed) => {
       const folder = get().folder, record = get().trials.find(r => r.trial.id === trialId)
