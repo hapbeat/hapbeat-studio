@@ -14,7 +14,7 @@ import { pageVisible, perfTiming, perfTrack } from '@/utils/perfRegistry'
 import { buildAgentMessage, outboxFileName, writeOutboxMessage, type HapticRequest, type Reassign, type Revise, type SoundRequest } from '@/utils/agentOutbox'
 import type { CueTable } from '@/utils/sceneCueTable'
 import type { TrialFile } from '@/utils/agentProtocol'
-import { KnowledgeFolder, localIsoString, lowRatedAudio, trialSlugs, withShortIds, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
+import { audioToRestore, KnowledgeFolder, localIsoString, lowRatedAudio, trialSlugs, withShortIds, type DimensionsDoc, type TrialRecord } from '@/utils/hapticKnowledge'
 
 const POLL_MS = 2000
 const CATALOG_DEBOUNCE_MS = 2000
@@ -59,10 +59,12 @@ interface AgentTrialState {
   /** Dismisses several trials at once (one knowledge regeneration). */
   dismissMany: (trialIds: string[]) => Promise<void>
   /**
-   * Moves the rendered audio of every ★1–2 candidate (current rating) to haptic-knowledge/_archive/ (lowRatedAudio);
-   * their JSON stays, so the knowledge keeps them as counter-examples. `keep`: `trialId/candidateId` left alone.
+   * Moves the rendered audio of ★1–2 candidates (current rating) to haptic-knowledge/_archive/ (lowRatedAudio) and back
+   * the audio of archived candidates rated higher since (audioToRestore); their JSON always stays, so the knowledge
+   * keeps them as counter-examples. Every trial, or only `trialIds` (after saving a rating). `keep`: `trialId/candidateId`
+   * an event uses (never archived; restored when archived).
    */
-  archiveLowRatedAudio: (keep: ReadonlySet<string>) => Promise<{ moved: string[]; bytes: number; failures: string[] }>
+  tidyAudio: (keep: ReadonlySet<string>, trialIds?: readonly string[]) => Promise<{ moved: string[]; restored: string[]; bytes: number; failures: string[] }>
   loadCandidateAudio: (trialId: string, candidateId: string) => Promise<AudioBuffer>
   /** Creates a new editor clip from a candidate: its source as the original, its effects as a not-yet-applied chain. */
   adoptCandidate: (trialId: string, candidateId: string) => Promise<{ clipId: string; name: string }>
@@ -405,29 +407,33 @@ export const useAgentTrialStore = create<AgentTrialState>((set, get) => {
         return records.map((r): Update => [r.trial.id, current => current ? withDismissed(current, at) : null])
       })
     },
-    archiveLowRatedAudio: async keep => {
+    tidyAudio: async (keep, trialIds) => {
       const folder = get().folder
       if (!folder) throw new Error('No editor folder is open')
-      const byTrial = new Map<string, { month: string; ids: string[] }>()
-      for (const { month, trialId, candidateId } of lowRatedAudio(get().trials, keep)) {
-        const entry = byTrial.get(trialId) ?? { month, ids: [] }
-        entry.ids.push(candidateId); byTrial.set(trialId, entry)
-      }
-      const moved: string[] = [], failures: string[] = []
+      const only = trialIds && new Set(trialIds)
+      const records = only ? get().trials.filter(r => only.has(r.trial.id)) : get().trials
+      const jobs = [...lowRatedAudio(records, keep).map(j => ({ ...j, archive: true })), ...audioToRestore(records, keep).map(j => ({ ...j, archive: false }))]
+      const moved: string[] = [], restored: string[] = [], failures: string[] = []
       let bytes = 0
-      await mutate(folder, [...byTrial.keys()], async () => {
-        const updates: Update[] = []
-        for (const [trialId, { month, ids }] of byTrial) {
-          const done: string[] = []
-          for (const id of ids) {
-            try { bytes += await folder.archiveCandidateAudio(month, trialId, id); done.push(id); moved.push(`${trialId}/${id}`) }
-            catch (error) { failures.push(`${trialId}/${id}: ${message(error)}`) }
-          }
-          if (done.length) updates.push([trialId, current => current ? { ...current, archivedAudio: [...new Set([...current.archivedAudio ?? [], ...done])].sort() } : null])
+      if (!jobs.length) return { moved, restored, bytes, failures }
+      await mutate(folder, [...new Set(jobs.map(j => j.trialId))], async () => {
+        const done = new Map<string, { archived: string[]; back: string[] }>()
+        for (const { month, trialId, candidateId, archive } of jobs) {
+          const key = `${trialId}/${candidateId}`, entry = done.get(trialId) ?? { archived: [], back: [] }
+          try {
+            if (archive) { bytes += await folder.archiveCandidateAudio(month, trialId, candidateId); entry.archived.push(candidateId); moved.push(key) }
+            else { await folder.restoreCandidateAudio(month, trialId, candidateId); entry.back.push(candidateId); restored.push(key) }
+            done.set(trialId, entry)
+          } catch (error) { failures.push(`${key}: ${message(error)}`) }
         }
-        return updates
+        return [...done].map(([trialId, { archived, back }]): Update => [trialId, current => {
+          if (!current) return null
+          const ids = [...new Set([...current.archivedAudio ?? [], ...archived])].filter(id => !back.includes(id)).sort()
+          const { archivedAudio: _a, ...rest } = current
+          return ids.length ? { ...rest, archivedAudio: ids } : rest
+        }])
       })
-      return { moved, bytes, failures }
+      return { moved, restored, bytes, failures }
     },
     loadCandidateAudio: async (trialId, candidateId) => {
       const folder = get().folder, record = get().trials.find(r => r.trial.id === trialId)

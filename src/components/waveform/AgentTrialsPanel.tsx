@@ -26,6 +26,7 @@ import { WaveformThumbnail } from './WaveformThumbnail'
 import { EventMarkBadge } from './EventMarkBadges'
 import { KindIcon } from '@/components/common/KindIcon'
 import { EditorMenu, EditorMenuItem } from './EditorMenu'
+import type { ReserveRef } from '@/utils/editorUiSettings'
 import { filterTrials, nextAfter, stepQueue, trialQueue, trialToOpen } from '@/utils/trialQueue'
 import { useConfirm } from '@/components/common/useConfirm'
 import { useEditor } from './editorContext'
@@ -52,7 +53,10 @@ const drafts = new DraftKeeper({
 }, () => localIsoString(new Date()))
 // Closing / reloading / hiding the page within the debounce still writes the folder copy (localStorage already has it).
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') onPageHide(() => drafts.flush())
-/** Work after a saved rating (materials, reserves, log), one save at a time and off the "save and next" path. */
+/** Candidates an event uses (marks by `trialId/candidateId`, AI reserves): their audio is never archived. */
+const usedCandidates = (marks: Record<string, unknown>, reserves: Record<string, ReserveRef[]>) =>
+  new Set([...Object.keys(marks).filter(key => key.includes('/')), ...Object.values(reserves).flat().flatMap(r => 'trialId' in r ? [`${r.trialId}/${r.candidateId}`] : [])])
+/** Work after a saved rating (audio tidy, materials, reserves, log), one save at a time and off the "save and next" path. */
 let afterSaveQueue: Promise<void> = Promise.resolve()
 const afterSave = (job: () => Promise<void>) => { afterSaveQueue = afterSaveQueue.then(job).catch(error => console.warn('[agent] after saving a rating', error)) }
 
@@ -141,19 +145,21 @@ export function AgentTrialsPanel() {
       await useAgentTrialStore.getState().dismissMany(queue.map(r => r.trial.id)); setSelectedId(null); rememberOpenTrial(null)
     } catch (error) { setPanelNotice(message(error)) }
   }
-  /** Candidates an event uses (marks, AI reserves): their audio is never archived. */
   const eventMarks = useEditorSettings(s => s.eventMarks), eventReserves = useEditorSettings(s => s.eventReserves)
-  const keepAudio = useMemo(() => new Set([...Object.keys(eventMarks).filter(key => key.includes('/')),
-    ...Object.values(eventReserves).flat().flatMap(r => 'trialId' in r ? [`${r.trialId}/${r.candidateId}`] : [])]), [eventMarks, eventReserves])
+  const keepAudio = useMemo(() => usedCandidates(eventMarks, eventReserves), [eventMarks, eventReserves])
   const lowRated = useMemo(() => lowRatedAudio(trials, keepAudio), [trials, keepAudio])
-  /** History > move the audio of every ★1–2 candidate to haptic-knowledge/_archive/ (confirmed; the ratings stay in the knowledge). */
+  /**
+   * History > the audio of every ★1–2 candidate not yet moved (rated before saving did it, or by an older Studio) to
+   * haptic-knowledge/_archive/ (confirmed; the ratings stay in the knowledge).
+   */
   const archiveLowRated = async () => {
     if (!lowRated.length || !await ask({ message: t('editor.agent.archiveLowRatedConfirm', { count: lowRated.length }) })) return
     try {
-      const { moved, bytes, failures } = await useAgentTrialStore.getState().archiveLowRatedAudio(keepAudio)
+      const { moved, restored, bytes, failures } = await useAgentTrialStore.getState().tidyAudio(keepAudio)
       setPanelNotice([t('editor.agent.archivedLowRated', { count: moved.length, mb: (bytes / 1e6).toFixed(1) }), ...failures].join(' / '))
       const root = useWaveformStore.getState().folder?.root
-      if (root && (moved.length || failures.length)) void appendActivity(root, { at: localIsoString(new Date()), kind: 'audio-archived', archived: moved, ...(failures.length ? { failures } : {}) }).catch(() => {})
+      if (root && (moved.length || restored.length || failures.length)) void appendActivity(root, { at: localIsoString(new Date()), kind: 'audio-archived',
+        ...(moved.length ? { archived: moved } : {}), ...(restored.length ? { restored } : {}), ...(failures.length ? { failures } : {}) }).catch(() => {})
     } catch (error) { setPanelNotice(message(error)) }
   }
   const reloadTrials = () => { setPanelNotice(''); useAgentTrialStore.getState().rebuild().catch(error => setPanelNotice(message(error))) }
@@ -166,6 +172,38 @@ export function AgentTrialsPanel() {
     ? trialEvent(sceneTable, record.trial.scene) : null) ?? record.trial.scene.cues[0] ?? null : null
   return <div className="agent-panel">
     {dialog}
+    {/*
+      Sticky header, the panel's first line: ‹ T9 › · [event] · [sound|haptic] · n left · History · Video · Later. It stays in
+      view while the panel scrolls; its height depends only on the panel width (the event slot has a fixed basis, the
+      state labels a fixed width), never on the event name.
+    */}
+    <div className="agent-queue-nav">
+      <button type="button" className="toolbar-btn" disabled={!prev} aria-label={t('editor.agent.prevTrial')} title={t('editor.agent.prevTrial')} onClick={() => prev && pickTrial(prev)}>‹</button>
+      <span className="agent-short-id large" title={record?.trial.id ?? ''}>{record?.shortId ?? '—'}</span>
+      <button type="button" className="toolbar-btn" disabled={!next} aria-label={t('editor.agent.nextTrial')} title={t('editor.agent.nextTrial')} onClick={() => next && pickTrial(next)}>›</button>
+      <span className="agent-what-slot">
+      {record && (pillEvent ? <button type="button" className="target-cue-badge agent-what agent-what-btn" title={`${what}
+${t('events.openInEvents')}
+${t('editor.scene.targetHint')}`} onClick={() => revealEvent(pillEvent, focusEditorPanel)}>{what}</button>
+        : <span className="target-cue-badge agent-what" title={what}>{what}</span>)}
+      {record && target && <span className={`agent-target-badge ${target}`}><KindIcon kind={target} decorative />{t(target === 'sound' ? 'editor.agent.targetSound' : 'editor.agent.targetHaptic')}</span>}
+      </span>
+      <span className="agent-remaining">{record && !inQueue ? t(record.dismissed ? 'editor.agent.fromHistoryDismissed' : 'editor.agent.fromHistory') : t('editor.agent.remaining', { count: queue.length })}</span>
+      <EditorMenu label={`${t('editor.agent.history')} ▾`} title={t('editor.agent.historyHint')} className="agent-history">
+        {shown.length === 0 && <p className="editor-menu-note">{t('editor.agent.empty')}</p>}
+        {shown.map(r => <EditorMenuItem key={r.trial.id} checked={r.trial.id === selectedId} onSelect={() => pickTrial(r)}>
+          <span className="agent-short-id">{r.shortId ?? ''}</span> {r.trial.scene ? r.trial.scene.cues.join(' + ') : r.trial.terms.join(' · ')}
+          <small className="agent-history-state">{t(trialTarget(r.trial) === 'sound' ? 'editor.agent.targetSound' : 'editor.agent.targetHaptic')} · {t(r.dismissed ? 'editor.agent.dismissedBadge' : r.rating ? 'editor.agent.rated' : 'editor.agent.unrated')}</small>
+        </EditorMenuItem>)}
+        <EditorMenuItem disabled={!queue.length} onSelect={() => void dismissAll()}>{t('editor.agent.dismissAll', { count: queue.length })}</EditorMenuItem>
+        <EditorMenuItem disabled={!lowRated.length} onSelect={() => void archiveLowRated()}>{t('editor.agent.archiveLowRated', { count: lowRated.length })}</EditorMenuItem>
+        <EditorMenuItem onSelect={reloadTrials}>{t('editor.agent.reloadTrials')}</EditorMenuItem>
+      </EditorMenu>
+      {record && <button className="toolbar-btn" title={t('editor.scene.openHint')}
+        onClick={() => openSceneVideo({ kind: 'trial', trialId: record.trial.id })}>▶ {t('editor.agent.video')}</button>}
+      <span className="agent-later-slot">{record && (record.dismissed ? <button className="toolbar-btn" onClick={() => void restore(record)}>{t('editor.agent.restore')}</button>
+        : !record.rating && <button className="toolbar-btn" title={t('editor.agent.dismissHint')} onClick={() => void dismiss(record)}>{t('editor.agent.dismissTrial')}</button>)}</span>
+    </div>
     {/* One line: watcher / MCP state, project and target filters. */}
     <div className="agent-topline">
       <span className={`agent-status ${storeError ? 'error' : ''}`} role="status" title={storeError ?? ''}>{storeError ?? t(!folder ? 'editor.agent.noFolder' : polling ? 'editor.agent.watching' : 'editor.agent.paused')}</span>
@@ -184,32 +222,6 @@ export function AgentTrialsPanel() {
         <option value="sound">{t('editor.agent.targetSound')}</option>
         <option value="haptic">{t('editor.agent.targetHaptic')}</option>
       </select>
-    </div>
-    {/* One line: ‹ T9 › · [event] · [sound|haptic] · n left · History · Video · Dismiss. */}
-    <div className="agent-queue-nav">
-      <button type="button" className="toolbar-btn" disabled={!prev} aria-label={t('editor.agent.prevTrial')} title={t('editor.agent.prevTrial')} onClick={() => prev && pickTrial(prev)}>‹</button>
-      <span className="agent-short-id large" title={record?.trial.id ?? ''}>{record?.shortId ?? '—'}</span>
-      <button type="button" className="toolbar-btn" disabled={!next} aria-label={t('editor.agent.nextTrial')} title={t('editor.agent.nextTrial')} onClick={() => next && pickTrial(next)}>›</button>
-      {record && (pillEvent ? <button type="button" className="target-cue-badge agent-what agent-what-btn" title={`${what}
-${t('events.openInEvents')}
-${t('editor.scene.targetHint')}`} onClick={() => revealEvent(pillEvent, focusEditorPanel)}>{what}</button>
-        : <span className="target-cue-badge agent-what" title={what}>{what}</span>)}
-      {record && target && <span className={`agent-target-badge ${target}`}><KindIcon kind={target} decorative />{t(target === 'sound' ? 'editor.agent.targetSound' : 'editor.agent.targetHaptic')}</span>}
-      <span className="agent-remaining">{record && !inQueue ? t(record.dismissed ? 'editor.agent.fromHistoryDismissed' : 'editor.agent.fromHistory') : t('editor.agent.remaining', { count: queue.length })}</span>
-      <EditorMenu label={`${t('editor.agent.history')} ▾`} title={t('editor.agent.historyHint')} className="agent-history">
-        {shown.length === 0 && <p className="editor-menu-note">{t('editor.agent.empty')}</p>}
-        {shown.map(r => <EditorMenuItem key={r.trial.id} checked={r.trial.id === selectedId} onSelect={() => pickTrial(r)}>
-          <span className="agent-short-id">{r.shortId ?? ''}</span> {r.trial.scene ? r.trial.scene.cues.join(' + ') : r.trial.terms.join(' · ')}
-          <small className="agent-history-state">{t(trialTarget(r.trial) === 'sound' ? 'editor.agent.targetSound' : 'editor.agent.targetHaptic')} · {t(r.dismissed ? 'editor.agent.dismissedBadge' : r.rating ? 'editor.agent.rated' : 'editor.agent.unrated')}</small>
-        </EditorMenuItem>)}
-        <EditorMenuItem disabled={!queue.length} onSelect={() => void dismissAll()}>{t('editor.agent.dismissAll', { count: queue.length })}</EditorMenuItem>
-        <EditorMenuItem disabled={!lowRated.length} onSelect={() => void archiveLowRated()}>{t('editor.agent.archiveLowRated', { count: lowRated.length })}</EditorMenuItem>
-        <EditorMenuItem onSelect={reloadTrials}>{t('editor.agent.reloadTrials')}</EditorMenuItem>
-      </EditorMenu>
-      {record && <button className="toolbar-btn" title={t('editor.scene.openHint')}
-        onClick={() => openSceneVideo({ kind: 'trial', trialId: record.trial.id })}>▶ {t('editor.agent.video')}</button>}
-      {record && (record.dismissed ? <button className="toolbar-btn" onClick={() => void restore(record)}>{t('editor.agent.restore')}</button>
-        : !record.rating && <button className="toolbar-btn" title={t('editor.agent.dismissHint')} onClick={() => void dismiss(record)}>{t('editor.agent.dismissTrial')}</button>)}
     </div>
     {panelNotice && <p className="agent-muted" role="status">{panelNotice}</p>}
     {trials.length === 0 && rejected.length === 0 && <p className="agent-muted">{t('editor.agent.empty')}</p>}
@@ -391,10 +403,18 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
       perfTiming('trials.afterSave', performance.now() - t1)
     })
   }
-  /** What follows a saved rating: ★4+ into the event's materials, ★3 into its reserves, the operation log; only failures are shown. */
+  /**
+   * What follows a saved rating: ★1–2 audio to _archive (and back for candidates rated higher since), ★4+ into the
+   * event's materials, ★3 into its reserves, the operation log; only failures are shown.
+   */
   const finishSave = async (body: RatingBody) => {
     // What saving did goes to the operation log (console + .hapbeat-editor/activity-log.jsonl); only failures are shown.
     const excluded: { candidate: string; reason: string }[] = [], failures: string[] = []
+    // First, so a candidate raised from ★1–2 has its audio back before it joins the event.
+    const { eventMarks, eventReserves } = useEditorSettings.getState()
+    const tidy = await useAgentTrialStore.getState().tidyAudio(usedCandidates(eventMarks, eventReserves), [trial.id])
+      .catch(error => ({ moved: [] as string[], restored: [] as string[], failures: [message(error)] }))
+    failures.push(...tidy.failures)
     let added: string[] = []
     // Every ★4+ candidate joins the event's materials (alternates; starred only when the event has none — the user stars what plays).
     const pooled = poolCandidates(trial, body)
@@ -410,7 +430,8 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
     }
     const root = useWaveformStore.getState().folder?.root
     if (root) void appendActivity(root, { at: localIsoString(new Date()), kind: 'rated', trialId: trial.id, ...(record.shortId ? { shortId: record.shortId } : {}),
-      ...(added.length ? { added } : {}), ...(reserved.length ? { reserved } : {}), ...(excluded.length ? { excluded } : {}), ...(failures.length ? { failures } : {}) }).catch(error => console.warn('[activity] not written', error))
+      ...(added.length ? { added } : {}), ...(reserved.length ? { reserved } : {}), ...(tidy.moved.length ? { archived: tidy.moved } : {}), ...(tidy.restored.length ? { restored: tidy.restored } : {}),
+      ...(excluded.length ? { excluded } : {}), ...(failures.length ? { failures } : {}) }).catch(error => console.warn('[activity] not written', error))
     if (failures.length) toast(t('editor.agent.saveFailures', { id: record.shortId ?? trial.id, failures: failures.join(' / ') }), 'error')
   }
   const adopt = async (cid: string, label: string) => {
@@ -442,7 +463,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
     <div className="agent-candidates">
       {trial.candidates.map(requested => {
         const file = record.candidates.find(c => c.id === requested.id)
-        /** Its audio was moved to haptic-knowledge/_archive/ (History → archive ★1–2 audio): rated, not playable. */
+        /** Its audio was moved to haptic-knowledge/_archive/ (rated ★1–2): not playable until rated higher. */
         const archived = !!record.archivedAudio?.includes(requested.id)
         const loaded = audio[requested.id], buffer = loaded && !('error' in loaded) ? loaded : null
         const active = audition?.trialId === trial.id && audition.candidateId === requested.id

@@ -208,8 +208,8 @@ export function aggregateTerm(slug: string, dims: DimensionsDoc, records: TrialR
 }
 
 /**
- * Candidates rated ★1–2 (overall ≤ 2 in the current rating) whose rendered audio is still in trials/: what
- * "archive low-rated audio" moves. `keep`: `trialId/candidateId` to leave alone (used by an event).
+ * Candidates rated ★1–2 (overall ≤ 2 in the current rating) whose rendered audio is still in trials/: what is moved
+ * to _archive (on saving a rating, and History → archive). `keep`: `trialId/candidateId` to leave alone (used by an event).
  */
 export function lowRatedAudio(records: readonly TrialRecord[], keep: ReadonlySet<string> = new Set()): { month: string; trialId: string; candidateId: string }[] {
   const out: { month: string; trialId: string; candidateId: string }[] = []
@@ -220,6 +220,16 @@ export function lowRatedAudio(records: readonly TrialRecord[], keep: ReadonlySet
       if (overall === undefined || overall > 2 || !c.audio || c.error || r.archivedAudio?.includes(c.id) || keep.has(`${r.trial.id}/${c.id}`)) continue
       out.push({ month: r.month, trialId: r.trial.id, candidateId: c.id })
     }
+  }
+  return out
+}
+
+/** Archived candidates that should be playable again: rated above ★2 since (or unscored), or now used by an event. */
+export function audioToRestore(records: readonly TrialRecord[], keep: ReadonlySet<string> = new Set()): { month: string; trialId: string; candidateId: string }[] {
+  const out: { month: string; trialId: string; candidateId: string }[] = []
+  for (const r of records) for (const id of r.archivedAudio ?? []) {
+    const overall = r.rating?.candidates[id]?.overall
+    if (overall === undefined || overall > 2 || keep.has(`${r.trial.id}/${id}`)) out.push({ month: r.month, trialId: r.trial.id, candidateId: id })
   }
   return out
 }
@@ -410,7 +420,7 @@ export class KnowledgeFolder {
       const ratingText = await readText(dir, 'rating.json')
       const dismissedText = await readText(dir, DISMISSED_FILE)
       const dismissedAt = dismissedText === null ? undefined : (() => { try { return String(JSON.parse(dismissedText).dismissedAt ?? 'yes') } catch { return 'yes' } })()
-      const archived = await this.archivedAudio(month, id)
+      const archived = await this.archivedAudio(month, id, dir)
       return { month, trial: JSON.parse(trialText), candidates, rating: ratingText === null ? null : JSON.parse(ratingText), ...(dismissedAt ? { dismissed: dismissedAt } : {}), ...(archived.length ? { archivedAudio: archived } : {}) }
     } catch (error) { throw new Error(`haptic-knowledge/trials/${month}/${id}: ${error instanceof Error ? error.message : String(error)}`) }
   }
@@ -445,12 +455,13 @@ export class KnowledgeFolder {
   async writePendingTrials(ids: readonly string[]) {
     await writeEditorFile(await this.root.getDirectoryHandle(EDITOR_DIR, { create: true }), TRIAL_CACHE_PENDING_FILE, json({ format: 'hapbeat-trial-cache-pending@1', trials: [...ids].sort() }))
   }
-  /** Candidate ids whose audio is in `_archive/trials/<month>/<id>/audio/`. */
-  private async archivedAudio(month: string, id: string): Promise<string[]> {
+  /** Candidate ids whose audio is in `_archive/trials/<month>/<id>/audio/` and not (again) in the trial's audio/. */
+  private async archivedAudio(month: string, id: string, trialDir: FileSystemDirectoryHandle): Promise<string[]> {
     let dir: FileSystemDirectoryHandle
     try { dir = await dirPath(this.knowledge, [ARCHIVE_DIR, 'trials', month, id, 'audio'], false) }
     catch (error) { if (isNotFound(error)) return []; throw error }
-    return (await listEntries(dir, 'file')).filter(n => /\.wav$/i.test(n)).map(n => n.replace(/\.wav$/i, ''))
+    const audio = await subdir(trialDir, 'audio'), present = new Set(audio ? await listEntries(audio, 'file') : [])
+    return (await listEntries(dir, 'file')).filter(n => /\.wav$/i.test(n) && !present.has(n)).map(n => n.replace(/\.wav$/i, ''))
   }
   /** Moves a candidate's rendered audio to `_archive/trials/<month>/<id>/audio/` (its JSON stays). Returns the bytes moved. */
   async archiveCandidateAudio(month: string, trialId: string, candidateId: string): Promise<number> {
@@ -458,6 +469,13 @@ export class KnowledgeFolder {
     const name = `${candidateId}.wav`, size = (await (await audio.getFileHandle(name)).getFile()).size
     await moveFile(audio, name, await dirPath(this.knowledge, [ARCHIVE_DIR, 'trials', month, trialId, 'audio'], true), name)
     return size
+  }
+  /** Moves an archived candidate's audio back into the trial's audio/ (left in _archive when the trial already has one). */
+  async restoreCandidateAudio(month: string, trialId: string, candidateId: string) {
+    const name = `${candidateId}.wav`
+    const audio = await (await this.trialDir(month, trialId)).getDirectoryHandle('audio', { create: true })
+    if (await readFile(audio, name)) return
+    await moveFile(await dirPath(this.knowledge, [ARCHIVE_DIR, 'trials', month, trialId, 'audio'], false), name, audio, name)
   }
   /**
    * Sets a trial aside for later (`reason: "later"` — "not now", not "bad material"): out of the queue and the

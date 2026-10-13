@@ -20,8 +20,10 @@ export interface ActivityEntry {
   reserved?: string[]
   /** Candidates not added, with the reason. */
   excluded?: { candidate: string; reason: string }[]
-  /** audio-archived: `trialId/candidateId` whose WAV moved to haptic-knowledge/_archive/. */
+  /** rated / audio-archived: `trialId/candidateId` whose WAV moved to haptic-knowledge/_archive/ (★1–2) … */
   archived?: string[]
+  /** … and back from it (rated higher since, or used by an event). */
+  restored?: string[]
   /** What could not be done. */
   failures?: string[]
 }
