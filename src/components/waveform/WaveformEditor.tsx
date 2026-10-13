@@ -49,6 +49,7 @@ import { useSceneSettings } from '@/stores/sceneSettings'
 import { LANE_RATE, mixLane, soundLaneParts, type SoundLane } from '@/utils/soundLane'
 import { usePageVisible } from '@/hooks/usePageVisible'
 import { ratingSavesInFlight } from '@/utils/ratingSaveProgress'
+import { selectionAfterShow } from '@/utils/shownSelection'
 
 export function WaveformEditor({ active }: { active: boolean }) {
   const { t } = useI18n()
@@ -257,10 +258,19 @@ export function WaveformEditor({ active }: { active: boolean }) {
   useMaterialWriteBack(previewActive ? (preview.status === 'ready' ? preview.buffer ?? null : null) : pendingChain ? null : s.clip?.buffer ?? null,
     previewActive && preview.status === 'error' ? preview.error : null)
   player.setBuffer(audioBuffer ?? null)
+  // A selection belongs to what the waveform shows: another candidate / material / clip starts from its whole length
+  // (selectionAfterShow), the same one drawn again keeps its range cut to the new length.
+  const shownItem = audition ? `audition:${audition.trialId}/${audition.candidateId}` : eventPreview ? `event:${eventPreview.id}` : `clip:${s.clip?.id ?? ''}`
+  const drawnFor = useRef<{ item: string; buffer: AudioBuffer | null }>({ item: shownItem, buffer: drawnBuffer ?? null })
   useEffect(() => {
+    const before = drawnFor.current
+    if (before.buffer === (drawnBuffer ?? null) && before.item === shownItem) return
+    drawnFor.current = { item: shownItem, buffer: drawnBuffer ?? null }
     const selection = useWaveformStore.getState().selectedRegion
-    if (selection && drawnBuffer) useWaveformStore.getState().setSelectedRegion(selection, original, drawnBuffer.duration)
-  }, [drawnBuffer, original])
+    if (!drawnBuffer) return
+    const next = selectionAfterShow(selection, before.item === shownItem, drawnBuffer.duration)
+    if (next) useWaveformStore.getState().setSelectedRegion(next, original, drawnBuffer.duration)
+  }, [drawnBuffer, original, shownItem])
   const [pending, setPending] = useState(false)
   const playback = useMemo(() => {
     let cached: {buffer: AudioBuffer; start: number; end: number; blob: Promise<Blob>} | null = null
