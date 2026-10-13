@@ -112,7 +112,9 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
     }
   }, [selection, original, ready])
   useEffect(() => {
-    if (!ready || !ws.current || !container.current) return
+    // `ready` can still be true for a render in which a newer load has already emptied WaveSurfer (a quick switch, or
+    // an applied chain that changed the length): zoom only what is loaded (WaveSurfer throws "No audio loaded").
+    if (!ready || !ws.current?.getDecodedData() || !container.current) return
     ws.current.zoom(zoom)
     const start = ws.current.getScroll() / zoom
     setViewport({start, end: Math.min(duration, start + container.current.clientWidth / zoom)})
@@ -137,7 +139,7 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
       if ((!event.ctrlKey && !event.shiftKey) || !element.contains(element.ownerDocument.activeElement)) return
       event.preventDefault(); event.stopPropagation()
       const instance = ws.current
-      if (!instance) return
+      if (!instance?.getDecodedData()) return
       const bounds = element.getBoundingClientRect()
       const delta = wheelPixels(event, bounds.width)
       if (event.ctrlKey) {
@@ -156,7 +158,7 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
     return () => element.removeEventListener('wheel', wheel)
   }, [ready, zoom, duration, player])
   const fitRange = (start: number, end: number) => {
-    if (!container.current || !ws.current || end <= start) return
+    if (!container.current || !ws.current?.getDecodedData() || end <= start) return
     const nextZoom = Math.min(200000, Math.max(1, (container.current.clientWidth - 4) / (end - start)))
     useWaveformStore.getState().setZoom(nextZoom)
     ws.current.zoom(nextZoom)
