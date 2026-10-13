@@ -229,6 +229,15 @@ Computed on the mono signal (candidates: the rendered 48 kHz audio; catalog: eac
 
 If you synthesize material (Python, ElevenLabs sound effects, …) save it as WAV (or MP3) under \`hapbeat-agent/sources/\` and reference it with \`{ "kind": "file" }\`. API keys belong to the user's environment variables; Studio does not handle them.
 
+### Recording where material came from (material ledger)
+
+Record every downloaded or generated original, even CC0, in the helper's material ledger before you use it, so its origin survives renames and its license can be checked before release. The ledger is keyed by SHA-256; no metadata is written into the files.
+
+- An original you downloaded or generated (keep the file as it is): \`hapbeat-helper materials ingest <file> --page <material page URL> --url <download URL> --original-name "<title / file name at the source>" --note "<author, how it was obtained>"\` (for ElevenLabs: \`--url https://api.elevenlabs.io/v1/sound-generation\` and the prompt in \`--note\`).
+- A file you cut, converted or normalized from it: \`hapbeat-helper materials derive <file> --from <original file or sha256> --tool "<tool>" --note "<what was done>"\`.
+- Licenses come from the site rules; for sites with per-file licenses (Freesound, OpenGameArt) add \`hapbeat-helper materials set-license --sha <sha256> --license-id CC0-1.0 --url <material page> --verified\` after checking the page.
+- Check with \`hapbeat-helper materials show <file>\` (resolves a derived file to its originals) and \`hapbeat-helper materials credits <folder>\`.
+
 ### Using ElevenLabs sound effects (optional)
 
 \`\`\`
