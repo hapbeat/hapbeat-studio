@@ -139,6 +139,8 @@ Processing: stereo sources are averaged to mono, effects are applied in order, t
 
 The user rates in Studio and presses Save — that is the signal (there is no separate "send").
 
+If the user says a trial you submitted does not appear: check with \`list_trials\` that it arrived (it then has a short id such as \`T107\`). If it did, the usual cause is the AI trials panel's **project** and **type (sound / haptic)** filters at its top — they are remembered, so a filter left on an earlier project hides every trial of a new one. Ask the user to set them to the trial's \`project\` and \`target\`, or to "All".
+
 1. After a trial: \`wait_for_rating\` (MCP; waits for one trial).
 2. Several trials at once, or a long session: watch the files instead —
    - \`haptic-knowledge/trials/**/rating.json\` (new or updated = a rating was saved),
