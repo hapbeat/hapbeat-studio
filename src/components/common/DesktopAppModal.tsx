@@ -6,6 +6,7 @@ import {
   type DesktopHelperStatus,
   type DesktopUpdateResult,
 } from '@/config/desktopShell'
+import type { HelperCompat } from '@/config/helperCompat'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useI18n } from '@/i18n/I18nProvider'
 import { DiscoveryRecoverySection } from './DiscoveryRecoverySection'
@@ -43,7 +44,7 @@ export function useDesktopHelperStatus(onUnrecoverable?: () => void): DesktopHel
 type Translate = ReturnType<typeof useI18n>['t']
 
 function helperStateText(status: DesktopHelperStatus | null, t: Translate): string {
-  if (!status) return t('desktop.helper.state.browser')
+  if (!status) return desktopApi() ? t('desktop.helper.state.checking') : t('desktop.helper.state.browser')
   switch (status.state) {
     case 'running':
       return t('desktop.helper.state.running', { version: status.version ?? '?' })
@@ -81,13 +82,14 @@ interface DesktopAppModalProps {
   open: boolean
   onClose: () => void
   helperStatus: DesktopHelperStatus | null
+  helperCompat: HelperCompat
 }
 
 /**
  * Desktop app panel: replaces the pipx-based Helper setup / management modals
  * inside the app (the helper is built in, so there is nothing to install).
  */
-export function DesktopAppModal({ open, onClose, helperStatus }: DesktopAppModalProps) {
+export function DesktopAppModal({ open, onClose, helperStatus, helperCompat }: DesktopAppModalProps) {
   const { t } = useI18n()
   const { isConnected } = useHelperConnection()
   const fullUi = useDesktopUi((s) => s.fullUi)
@@ -168,12 +170,17 @@ export function DesktopAppModal({ open, onClose, helperStatus }: DesktopAppModal
             <p className="desktop-app-status-line desktop-app-status-line--muted">
               {isConnected ? t('desktop.helper.connected') : t('desktop.helper.disconnected')}
             </p>
+            {/* Studio deploys reach the app at once; its helper only with an app update. */}
+            {helperCompat === 'outdated' && (
+              <p className="helper-modal-section-desc desktop-app-warning">{t('desktop.helper.outdated')}</p>
+            )}
             <div className="desktop-app-actions">
               <button
                 type="button"
                 className="form-button-secondary desktop-app-fixed-btn"
                 onClick={() => void restartHelper()}
-                disabled={!api || restarting}
+                disabled={!api || restarting || helperStatus?.state === 'external'}
+                title={helperStatus?.state === 'external' ? t('desktop.helper.externalRestart') : undefined}
               >
                 {restarting ? t('desktop.helper.restarting') : t('desktop.helper.restart')}
               </button>

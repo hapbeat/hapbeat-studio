@@ -17,9 +17,7 @@ export interface DesktopHelperStatus {
   /** 'bundled' = the app's own helper; 'external' = one that was already running (e.g. pipx). */
   source: 'bundled' | 'external' | null
   version: string | null
-  pid: number | null
   port: number
-  logFile: string
   error: string | null
 }
 
@@ -31,6 +29,8 @@ export interface DesktopUpdateResult {
 
 export interface HapbeatDesktopApi {
   shell: 'electron'
+  /** Raised by the app when this API changes; check it before using calls added later. */
+  apiVersion?: number
   getInfo(): Promise<{ appVersion: string; platform: string; helper: DesktopHelperStatus }>
   helper: {
     status(): Promise<DesktopHelperStatus>

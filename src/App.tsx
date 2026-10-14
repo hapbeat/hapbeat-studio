@@ -307,6 +307,7 @@ export function App() {
           open={desktopPanelOpen}
           onClose={() => setDesktopPanelOpen(false)}
           helperStatus={desktopHelper}
+          helperCompat={helperCompat}
         />
       ) : (
         <>

@@ -15,6 +15,10 @@
   font-size: 12px;
 }
 
+.desktop-app-warning {
+  color: var(--warning, #f0b429);
+}
+
 .desktop-app-actions {
   display: flex;
   align-items: center;

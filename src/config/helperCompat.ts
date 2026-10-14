@@ -14,6 +14,11 @@
  * "does this Studio + Helper combo work?". Keeping it out of code that
  * happens to call it makes it easy to grep + bump in a one-line PR
  * alongside the feature commit that introduced the dependency.
+ *
+ * The Windows app (hapbeat-studio-desktop, DEC-094) loads this Studio as soon
+ * as it is deployed but bundles its helper. Before deploying a bump above the
+ * app's bundled helper (`helper/helper-version.txt` there), publish an app
+ * release with that helper, or app users are stuck with an outdated Helper.
  */
 export const MIN_HELPER_VERSION = '0.1.3'
 
