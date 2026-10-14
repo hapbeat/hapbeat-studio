@@ -8,9 +8,10 @@ import { EMIT_INTERVAL_RANGE, EMIT_JITTER_RANGE } from '@/utils/sceneEmit'
 import type { SceneLib } from '@/utils/sceneData'
 import {
   addMaterial, addVariant, effectiveEvent, eventKey, pairedClips, removeMaterial, removeVariant, resolveEventName, setOverride, setOwnSfxVolume, setStarred, setVariation,
-  setVariantKind, setVariantScale, updateOwnRoute, variantKind, rampValue, setDistanceFalloff, setEmit,
+  setVariantScale, updateOwnRoute, rampValue, setDistanceFalloff, setEmit, holdsField,
   type EffectiveEvent, type OverridableField,
 } from '@/utils/cueEvents'
+import { HeldBy } from '@/components/waveform/HeldBy'
 import { longestRun, sceneSegment } from '@/utils/sceneSegments'
 import { MaterialList } from '@/components/waveform/MaterialList'
 import { PairedList } from '@/components/waveform/PairedList'
@@ -29,8 +30,8 @@ const VARIATION_FIELDS: { key: VariationNumberKey; max: number; step: number; lo
 
 /**
  * "Event" details of the selected cue / variant (DEC-085 addendum: the editor only picks materials; how they
- * are used by situation is decided here): its variants and their kind (own materials, or multipliers only:
- * sfxVolume / hapticsGain / rampTo), the scene multipliers (sfx.volume, route gain; DEC-086 3rd layer), the
+ * are used by situation is decided here): its variants, who holds the sound / haptics (the cue for all its variants,
+ * or each variant, DEC-091) and a shared variant's multipliers (sfxVolume / hapticsGain / rampTo), the scene multipliers (sfx.volume, route gain; DEC-086 3rd layer), the
  * variation (pick, gain / pitch / rate jitter, paired), which materials play (★, DEC-089; the rest are alternates)
  * and removal, a loop cue's level → multiplier (levelMap, DEC-090), and playing the event's run of the recording
  * through (its real firings, as the game computes them). Edits go to the same table and are saved with it.
@@ -61,7 +62,7 @@ export function SceneEventPanel() {
       {run?.repeating && <button type="button" className="scene-icon-btn scene-event-run" title={t('scene.event.runHint')}
         onClick={ev => { ev.currentTarget.blur(); runtime.audio(); runtime.playFull(Math.max(0, run.marks[0].t - useSceneSettings.getState().leadSec)) }}>{t('scene.event.run', { at: run.marks[0].t.toFixed(1), count: run.marks.filter(m => m.target).length })}</button>}
     </div>
-    {!loop || lib.loop_cue_sounds ? <Sounds e={e} edit={edit} allowed={soundAllowed(lib, e.ref.cue)} /> : null}
+    {!loop || lib.loop_cue_sounds ? <Sounds table={table} e={e} edit={edit} allowed={soundAllowed(lib, e.ref.cue)} /> : null}
     <Clips table={table} e={e} edit={edit} />
     {loop && e.ref.variant === null && layer && <LevelMaps table={table} layer={layer} cue={e.ref.cue} edit={edit} />}
     <div className="scene-sec">
@@ -101,14 +102,14 @@ function Variants({ table, e, select, edit }: { table: CueTable; e: EffectiveEve
 }
 
 /**
- * A variant's kind — own materials (overrides its sfx / haptics) or multipliers only (inherits the materials) — and
- * the multipliers on what it inherits: sfxVolume, hapticsGain and rampTo (over a run of firings the multipliers go
- * linearly to rampTo; here by which firing of the run it is).
+ * A variant's multipliers on what it shares with its cue (DEC-091: the cue holds it): sfxVolume, hapticsGain and
+ * rampTo (over a run of firings the multipliers go to rampTo along its curve, or one value per firing). Whether a
+ * variant has materials of its own is switched per sound / haptics in their sections (HeldBy).
  */
 function VariantScale({ e, edit }: { e: EffectiveEvent; edit: Edit }) {
   const { t } = useI18n()
   const table = useSceneStore(s => s.table)
-  const kind = variantKind(e), v = table?.cues[e.ref.cue]?.variants?.[e.ref.variant!] ?? {}
+  const v = table?.cues[e.ref.cue]?.variants?.[e.ref.variant!] ?? {}
   const data = useSceneStore(s => s.data)
   const ramp = typeof v.rampTo === 'number', steps = Array.isArray(v.rampSteps) ? v.rampSteps : null, gradual = ramp || !!steps
   const curve: RampCurve = v.rampCurve ?? 'linear'
@@ -128,10 +129,6 @@ function VariantScale({ e, edit }: { e: EffectiveEvent; edit: Edit }) {
   </div>
   const inherits = !e.own.sfx || !e.own.haptics
   return <>
-    <div className="scene-event-variants" role="group" aria-label={t('scene.variant.kind')}>
-      {(['scale', 'materials'] as const).map(k => <button key={k} type="button" className={`scene-toggle ${kind === k ? 'on' : ''}`} title={t(`scene.variant.kind.${k}.hint` as MessageId)}
-        onClick={() => { if (kind !== k) edit(tb => setVariantKind(tb, e.ref, k)) }}>{t(`scene.variant.kind.${k}` as MessageId)}</button>)}
-    </div>
     {inherits && <>
       <h3>{t('scene.variant.scaleHeading', { cue: e.ref.cue })}</h3>
       {!e.own.sfx && row('sfxVolume')}
@@ -251,10 +248,15 @@ function CurvePreview({ curve }: { curve: RampCurve }) {
   </svg>
 }
 
-/** For a variant: "inherited from the cue" with an override button, or "own" with a button back to inheriting. */
-function OverrideBar({ e, field, edit }: { e: EffectiveEvent; field: OverridableField; edit: Edit }) {
+/**
+ * For a variant's variation: "inherited from the cue" with an override button, or "own" with a button back to
+ * inheriting. For its sound / haptics only in an older table where the variant overrides its cue (DEC-091 keeps a
+ * field either on the cue or on each variant; HeldBy switches that).
+ */
+function OverrideBar({ table, e, field, edit }: { table?: CueTable; e: EffectiveEvent; field: OverridableField; edit: Edit }) {
   const { t } = useI18n()
   if (e.ref.variant === null) return null
+  if (field !== 'variation' && (!table || !e.own[field] || table.cues[e.ref.cue]?.[field] === undefined)) return null
   const own = e.own[field]
   return <div className="scene-row">
     <span className="scene-dim scene-grow">{t(own ? 'events.variant.own' : 'events.variant.inherited', { cue: e.ref.cue })}</span>
@@ -262,16 +264,22 @@ function OverrideBar({ e, field, edit }: { e: EffectiveEvent; field: Overridable
   </div>
 }
 
-/** Sounds: ★ = played (first = representative), the rest alternates; removal; ▶ plays one on the PC (alternates too). */
-function Sounds({ e, edit, allowed }: { e: EffectiveEvent; edit: Edit; allowed: boolean }) {
+/**
+ * Sounds: ★ = played (first = representative), the rest alternates; removal; ▶ plays one on the PC (alternates too).
+ * The side that does not hold the sound (DEC-091) shows only who does and the switch.
+ */
+function Sounds({ table, e, edit, allowed }: { table: CueTable; e: EffectiveEvent; edit: Edit; allowed: boolean }) {
   const { t } = useI18n()
   const { runtime } = useScene()
   const soundFiles = useSceneStore(s => s.soundFiles)
-  const sounds = sfxSounds(e.sfx), alternates = sfxAlternates(e.sfx), own = e.own.sfx
+  const sounds = sfxSounds(e.sfx), alternates = sfxAlternates(e.sfx), own = holdsField(table, e.ref, 'sfx')
   if (!allowed) return null
+  if (!own) return <div className="scene-sec">
+    <h3 className="scene-kind-head"><SoundIcon decorative />{t('events.repeat.sounds')}<HeldBy table={table} e={e} field="sfx" edit={edit} buttonClass="scene-icon-btn" /></h3>
+  </div>
   return <div className="scene-sec">
     <h3 className="scene-kind-head"><SoundIcon decorative />{t('events.repeat.sounds')}</h3>
-    <OverrideBar e={e} field="sfx" edit={edit} />
+    <OverrideBar table={table} e={e} field="sfx" edit={edit} />
     {own && e.sfx && <label className="scene-row" title={t('scene.event.volumeHint')}><span className="scene-dim scene-grow">{t('scene.sound.volume')}</span>
       <NumberField value={e.sfx.volume} min={0} max={2} step={0.05} label={t('scene.sound.volume')} onCommit={x => edit(tb => setOwnSfxVolume(tb, e.ref, x))} /></label>}
     {!sounds.length && !alternates.length ? <div className="scene-dim">{t('events.soundNone')}</div>
@@ -286,16 +294,22 @@ function Sounds({ e, edit, allowed }: { e: EffectiveEvent; edit: Edit; allowed: 
   </div>
 }
 
-/** Clips per route (body position): ★ = played, the rest alternates; removal; ▶ sends one to the route's devices (alternates too). */
+/**
+ * Clips per route (body position): ★ = played, the rest alternates; removal; ▶ sends one to the route's devices
+ * (alternates too). The side that does not hold the haptics (DEC-091) shows only who does and the switch.
+ */
 function Clips({ table, e, edit }: { table: CueTable; e: EffectiveEvent; edit: Edit }) {
   const { t } = useI18n()
   const { runtime } = useScene()
   const atLabel = useAtLabel()
   const lib = useSceneStore(s => s.lib)!
-  const own = e.own.haptics
+  const own = holdsField(table, e.ref, 'haptics')
+  if (!own) return <div className="scene-sec">
+    <h3 className="scene-kind-head"><HapticIcon decorative />{t('events.repeat.clips')}<HeldBy table={table} e={e} field="haptics" edit={edit} buttonClass="scene-icon-btn" /></h3>
+  </div>
   return <div className="scene-sec">
     <h3 className="scene-kind-head"><HapticIcon decorative />{t('events.repeat.clips')}</h3>
-    <OverrideBar e={e} field="haptics" edit={edit} />
+    <OverrideBar table={table} e={e} field="haptics" edit={edit} />
     {!e.haptics.length && <div className="scene-dim">{t('events.hapticNone')}</div>}
     {e.haptics.map((r, i) => {
       const clips = routeClips(r), alternates = routeAlternates(r)

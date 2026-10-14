@@ -7,7 +7,7 @@ import { resample } from '@/utils/audioDsp'
 import { encodePcm16Wav, isLoopCue } from '@/utils/sceneCueTable'
 import { readProjectFile, writeProjectFile } from '@/utils/sceneProject'
 import { RATE } from '@/utils/sceneHaptics'
-import { addEventMark, applyHapticDecision, applySoundDecision, defaultAt, effectiveEvent, nextWavName, parseEventKey, safeWavName, sameBytes, wavBaseName } from '@/utils/cueEvents'
+import { addEventMark, applyHapticDecision, applySoundDecision, defaultAt, effectiveEvent, nextWavName, ownerKeys, parseEventKey, safeWavName, sameBytes, wavBaseName } from '@/utils/cueEvents'
 import { routeClips, setSoundIntensity, sfxSounds } from '@/utils/sceneCueTable'
 import { intensityForPeak, normalizeGain, peakOf } from '@/utils/materialLevel'
 import { sameSound } from '@/utils/wavCompare'
@@ -126,7 +126,10 @@ async function sameAsEventMaterial(target: DecideTarget, wav: ArrayBuffer, event
 export interface DecisionInput {
   target: DecideTarget
   source: DecideSource
-  /** Event keys; one WAV is assigned to all of them in one table write (one undo). */
+  /**
+   * Event keys; one WAV is assigned to all of them in one table write (one undo). Each goes to whoever holds the
+   * field (ownerKeys, DEC-091): a shared variant's to its cue, a cue's whose variants each hold it to every variant.
+   */
   events: string[]
   /** WAV name, or null = automatic (source name, numbered on a content clash, reused when identical). */
   name: string | null
@@ -155,15 +158,16 @@ export async function runDecision(input: DecisionInput): Promise<{ ok: true; res
   const before = useSceneStore.getState()
   if (!before.table || !before.lib || !input.events.length) return { ok: false, notice: { id: 'scene.save.noProject', error: true } }
   const lib = before.lib
+  const events = [...new Set(input.events.flatMap(key => ownerKeys(before.table!, key, input.target === 'haptic' ? 'haptics' : 'sfx')))]
   // The same sound as a material the event already has (an AI candidate that just re-renders it): nothing to add.
-  const duplicate = await sameAsEventMaterial(input.target, wav, input.events)
+  const duplicate = await sameAsEventMaterial(input.target, wav, events)
   if (duplicate) return { ok: false, notice: { id: 'events.decide.duplicate', params: { name: duplicate } } }
-  const picked = input.name ? { name: input.name, same: false } : await autoWavName(input.target, input.source, wav, input.events)
+  const picked = input.name ? { name: input.name, same: false } : await autoWavName(input.target, input.source, wav, events)
   const previous = await existingWav(input.target, picked.name)
   const same = picked.same || (!!previous && sameBytes(previous, wav))
   const table = useSceneStore.getState().table!
   let next = table
-  for (const key of input.events) {
+  for (const key of events) {
     const ref = parseEventKey(key)
     next = input.target === 'haptic'
       ? applyHapticDecision(next, lib, { ref, clip: picked.name, at: input.at ?? defaultAt(lib, ref.cue), gain: 1, intensity: encoded.intensity })
@@ -178,11 +182,11 @@ export async function runDecision(input: DecisionInput): Promise<{ ok: true; res
   if (!committed.ok) return committed
   const subject = input.source.kind === 'clip' ? input.source.clipId : `${input.source.trialId}/${input.source.candidateId}`
   let marks = useEditorSettings.getState().eventMarks
-  for (const key of input.events) marks = addEventMark(marks, subject, { project: lib.project_name, event: key, target: input.target })
+  for (const key of events) marks = addEventMark(marks, subject, { project: lib.project_name, event: key, target: input.target })
   useEditorSettings.getState().update({ eventMarks: marks })
-  const result: DecideResult = { id: Date.now(), events: input.events, target: input.target, name: picked.name, file: `${dirOf(input.target)}/${picked.name}.wav`,
+  const result: DecideResult = { id: Date.now(), events, target: input.target, name: picked.name, file: `${dirOf(input.target)}/${picked.name}.wav`,
     importCommand: lib.import_command, reused: same }
   const root = useWaveformStore.getState().folder?.root
-  if (root) void appendActivity(root, { at: localIsoString(new Date()), kind: 'decided', events: input.events, file: result.file, note: `${input.target}${same ? ' (same bytes, reused)' : ''}; import: ${lib.import_command}` }).catch(() => {})
+  if (root) void appendActivity(root, { at: localIsoString(new Date()), kind: 'decided', events, file: result.file, note: `${input.target}${same ? ' (same bytes, reused)' : ''}; import: ${lib.import_command}` }).catch(() => {})
   return { ok: true, result }
 }

@@ -33,7 +33,6 @@
 .events-row.variant { margin-left: 14px; width: calc(100% - 14px); border-left: 1px dashed var(--border-light); border-radius: 0 3px 3px 0; }
 /* A cue with its child variant rows (own sfx / haptics). */
 .events-family { display: flex; flex-direction: column; }
-.events-inherited { display: flex; align-items: center; gap: 8px; margin: 2px 0; color: var(--text-muted); }
 .events-row-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .events-row-name small { margin-left: 6px; font-weight: normal; color: var(--text-muted); }
 .events-row-badges { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
@@ -54,11 +53,15 @@
 .events-badge.unset { border-color: #c9a34a; color: #e3c27a; }
 /* A request to the agent is open (remake / go to haptics). */
 .events-badge.requested { border-color: #a78bfa; color: #c4b5fd; background: rgba(167,139,250,.15); }
+/* DEC-091: the side of a cue group that does not hold the sound / haptics — no state, only who holds it (dashed, muted). */
+.events-badge.held-elsewhere { border-style: dashed; color: var(--text-muted); }
 .events-sec-head { display: flex; align-items: center; gap: 8px; }
 .events-sec-head > .kind-icon { margin-right: -3px; }
 /* The head line's pill and buttons are each an item of its wrapping flex line (no fixed groups): one moves to the next
    line at a time when the panel narrows. */
-.events-review, .events-decision, .events-haptic-request { display: contents; font-weight: normal; }
+.events-review, .events-decision, .events-haptic-request, .events-held { display: contents; font-weight: normal; }
+.events-held-by { padding: 0 6px; border: 1px dashed var(--border-light); border-radius: 4px; color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
+.events-shared-with { margin: 0 0 2px; }
 .events-sec-head .agent-icon-btn { flex: none; justify-content: center; white-space: nowrap; }
 .events-detail { display: flex; flex-direction: column; gap: 6px; }
 .events-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }

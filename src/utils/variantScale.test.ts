@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { effectiveEvent, fireShot, hasOwnMaterials, scaleAt, MaterialPicker, setRouteClips, setVariantKind, setVariantScale } from './cueEvents'
+import { effectiveEvent, fireShot, holdsField, scaleAt, MaterialPicker, setRouteClips, setVariantScale, shareField, splitField } from './cueEvents'
 import { curveAt } from './rampCurve'
 import { parseCueTable, serializeCueTable, validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
 import { mergeCueTables } from './cueTableSync'
@@ -30,7 +30,7 @@ describe('multiplier-only variants (sfxVolume / hapticsGain / rampTo)', () => {
     expect(e.scale).toEqual({ sfx: 0.3, haptics: 0.35, rampTo: 1, curve: 'linear', steps: null })
     // The occurrences list's per-firing multiplier: the 2nd of 4 firings.
     expect(scaleAt(e, { index: 1, count: 4 }).sfx).toBeCloseTo(0.5333, 3); expect(scaleAt(e, { index: 1, count: 4 }).haptics).toBeCloseTo(0.5667, 3)
-    expect(hasOwnMaterials(approach(), ref)).toBe(false) // not in the editor's Events panel
+    expect([holdsField(approach(), ref, 'sfx'), holdsField(approach(), ref, 'haptics')]).toEqual([false, false]) // shares button's (DEC-091)
     const shot = (progress: number) => fireShot(e, false, new MaterialPicker(() => 0), () => 0.5, { index: progress * 2, count: 3 })
     expect(shot(0).soundGain).toBeCloseTo(0.6 * 0.3); expect(shot(0).routes[0].gain).toBeCloseTo(1 * 0.35)
     expect(shot(0.5).soundGain).toBeCloseTo(0.6 * 0.65); expect(shot(0.5).routes[0].gain).toBeCloseTo(0.675)
@@ -69,14 +69,15 @@ describe('multiplier-only variants (sfxVolume / hapticsGain / rampTo)', () => {
     expect(mergeCueTables(base, ours, theirs).table.cues.button.variants!.approach).toEqual({ sfxVolume: 0.25, hapticsGain: 0.35, rampSteps: [0.3, 1] })
   })
 
-  it('switching kinds: own materials keep how it sounded (multipliers baked in), back to multipliers only', () => {
-    const own = setVariantKind(approach(), ref, 'materials')
+  it('separate per variant keeps how it sounded (multipliers baked in); sharing again gives the loudness back as multipliers', () => {
+    const own = splitField(splitField(approach(), 'button', 'sfx')!, 'button', 'haptics')!
     const v = own.cues.button.variants!.approach
     expect(v.sfx).toEqual({ sound: 'Click', volume: 0.18 }); expect(v.haptics![0].gain).toBeCloseTo(0.35)
     expect(v.sfxVolume).toBeUndefined(); expect(v.hapticsGain).toBeUndefined(); expect(v.rampTo).toBeUndefined()
     expect(validateCueTable(own, ctx())).toEqual([])
-    const back = setVariantKind(own, ref, 'scale')
+    const back = shareField(shareField(own, 'button', 'sfx')!, 'button', 'haptics')!
     expect(back.cues.button.variants!.approach).toEqual({})
+    expect(back.cues.button.sfx!.volume).toBeCloseTo(0.18)
     // Any edit that gives a variant its own haptics drops hapticsGain (never both).
     const t = approach(); t.cues.button.variants!.approach.haptics = [{ clip: 'click', at: 'hand', gain: 1 }]
     expect(setRouteClips(t, ref, 0, ['click', 'thump']).cues.button.variants!.approach.hapticsGain).toBeUndefined()

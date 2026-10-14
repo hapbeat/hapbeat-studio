@@ -122,6 +122,8 @@ export interface EventRow {
   haptic: MaterialStatus
   /** A sound or route of its own has nothing starred (hasNoStar): ▲ in the list. */
   noStar: boolean
+  /** Whether the row holds its sound / haptics (holdsField); the other side says "by the group" / "by each variant". */
+  held: { sound: boolean; haptic: boolean }
   /** The cue's variants (empty for a variant row). */
   variants: EventRow[]
 }
@@ -134,27 +136,108 @@ export function hasNoStar(e: Pick<EffectiveEvent, 'sfx' | 'haptics' | 'own'>): b
   return (e.own.sfx && !!e.sfx && !sfxSounds(e.sfx).length) || (e.own.haptics && e.haptics.some(r => !routeClips(r).length))
 }
 
+// ── The group or each variant (DEC-091) ──
+
+/**
+ * Who holds a cue's sound or haptics (DEC-091): `group` = the cue (its variants share it; also a cue without variants
+ * or with it undecided), `each` = its variants (the cue has no key; a variant without one is undecided), `both` = the
+ * cue and a variant (an older table: the variant overrides the cue for its situation).
+ */
+export type FieldOwner = 'group' | 'each' | 'both'
+export function fieldOwner(table: CueTable, cue: string, field: 'sfx' | 'haptics'): FieldOwner {
+  const entry = table.cues[cue]
+  if (!entry || !Object.values(entry.variants ?? {}).some(v => v[field] !== undefined)) return 'group'
+  return entry[field] === undefined ? 'each' : 'both'
+}
+/**
+ * Whether `ref` holds the field — its state, buttons and materials show: the cue unless each variant holds it, a
+ * variant when each does (in an older table, when it writes it). The other side only says who holds it.
+ */
+export function holdsField(table: CueTable, ref: EventRef, field: 'sfx' | 'haptics'): boolean {
+  const owner = fieldOwner(table, ref.cue, field)
+  if (ref.variant === null) return owner !== 'each'
+  return owner === 'each' || (owner === 'both' && variantOf(table, ref)?.[field] !== undefined)
+}
+/** The variants of a cue as event keys (`cue:variant`, table order). */
+export const variantKeys = (table: CueTable, cue: string) => Object.keys(table.cues[cue]?.variants ?? {}).map(v => `${cue}:${v}`)
+/**
+ * Where a material decided for event `key` goes (DEC-091): the cue while the group holds the field (a shared variant
+ * gets no copy of its own), the variant while each holds it (the cue itself: every variant), else `key` (older tables).
+ */
+export function ownerKeys(table: CueTable, key: string, field: 'sfx' | 'haptics'): string[] {
+  const ref = parseEventKey(key), owner = fieldOwner(table, ref.cue, field)
+  if (owner === 'group') return [ref.cue]
+  if (owner === 'each') return ref.variant !== null ? [key] : variantKeys(table, ref.cue)
+  return [key]
+}
+const dropReview = (entry: CueEntry | CueVariant, field: 'sfx' | 'haptics') => {
+  if (entry.review) { delete entry.review[field]; if (!Object.keys(entry.review).length) delete entry.review }
+}
+/**
+ * "Each variant" (DEC-091): every variant gets its own copy of the cue's sound / haptics — starred and alternates, its
+ * multiplier baked into the copy (as setOverride), the review kept — and the cue's goes. Null unless the group holds
+ * a decided field and the cue has variants (an undecided field has nothing to copy).
+ */
+export function splitField(table: CueTable, cue: string, field: 'sfx' | 'haptics'): CueTable | null {
+  const entry = table.cues[cue], names = Object.keys(entry?.variants ?? {})
+  if (!entry || !names.length || fieldOwner(table, cue, field) !== 'group' || entry[field] === undefined) return null
+  const review = entry.review?.[field]
+  let next = table
+  for (const variant of names) next = edited(setOverride(next, { cue, variant }, field, true), { cue, variant }, v => { if (review) v.review = { ...(v.review ?? {}), [field]: review } })
+  return edited(next, { cue, variant: null }, e => { delete e[field]; dropReview(e, field) })
+}
+/**
+ * "The group" (DEC-091): the cue gets one sound / haptics from its variants' — the first variant's (table order) that
+ * has one, every other variant's materials added as alternates so nothing is lost (a position only another variant
+ * uses becomes a route with alternates only, DEC-092) — tentative, and the variants' own go. Each variant keeps its
+ * loudness against the group's as its multiplier (sfxVolume / hapticsGain). Null unless each variant holds it.
+ */
+export function shareField(table: CueTable, cue: string, field: 'sfx' | 'haptics'): CueTable | null {
+  if (!table.cues[cue] || fieldOwner(table, cue, field) !== 'each') return null
+  const next = structuredClone(table), group = next.cues[cue], variants = Object.values(group.variants ?? {})
+  const owning = variants.filter(v => v[field] !== undefined)
+  if (field === 'sfx') {
+    const sounding = owning.map(v => v.sfx).filter((s): s is CueSfx => !!s)
+    group.sfx = !sounding.length ? null
+      : sfxWith(sounding[0], sfxSounds(sounding[0]), [...sfxAlternates(sounding[0]), ...sounding.slice(1).flatMap(s => [...sfxSounds(s), ...sfxAlternates(s)])])
+  } else {
+    const [first, ...others] = owning.map(v => v.haptics ?? []).filter(h => h.length)
+    const routes = structuredClone(first ?? [])
+    for (const r of others.flat()) {
+      const names = [...routeClips(r), ...routeAlternates(r)], i = routes.findIndex(x => x.at === r.at)
+      if (i >= 0) routes[i] = routeWith(routes[i], routeClips(routes[i]), [...routeAlternates(routes[i]), ...names])
+      else routes.push(routeWith(structuredClone(r), [], names))
+    }
+    group.haptics = routes
+  }
+  group.review = { ...(group.review ?? {}), [field]: 'tentative' }
+  for (const v of owning) {
+    const route = v.haptics?.[0], match = route && group.haptics?.find(x => x.at === route.at)
+    const ratio = field === 'sfx' ? (v.sfx && group.sfx && group.sfx.volume > 0 ? v.sfx.volume / group.sfx.volume : 1)
+      : route && match && match.gain > 0 ? route.gain / match.gain : 1
+    delete v[field]
+    dropReview(v, field)
+    if (Math.abs(ratio - 1) > 1e-6) v[field === 'sfx' ? 'sfxVolume' : 'hapticsGain'] = Math.round(clampNumber(ratio, 0, 2) * 1000) / 1000
+  }
+  return next
+}
+
 function row(table: CueTable, lib: SceneLib, ref: EventRef, variants: EventRow[]): EventRow {
   const e = effectiveEvent(table, ref)!, loop = isLoopCue(lib, ref.cue)
   return { key: eventKey(ref), ref, description: e.description, loop,
     sound: soundAllowed(lib, ref.cue) ? materialStatus(e, 'sfx') : 'na',
-    haptic: materialStatus(e, 'haptics'), noStar: hasNoStar(e), variants }
-}
-
-/** A variant that writes its own sfx or haptics (shown in the editor as a child row of its cue; DEC-085 addendum). */
-export function hasOwnMaterials(table: CueTable, ref: EventRef): boolean {
-  const v = variantOf(table, ref)
-  return !!v && (v.sfx !== undefined || v.haptics !== undefined)
+    haptic: materialStatus(e, 'haptics'), noStar: hasNoStar(e),
+    held: { sound: holdsField(table, ref, 'sfx'), haptic: holdsField(table, ref, 'haptics') }, variants }
 }
 
 /**
- * The event the editor's Events list highlights and the event detail panel shows for the selected key: a variant with
- * its own sfx / haptics as itself; any other variant (opened from the Scene tab, an AI trial) as its cue.
+ * The event the editor's Events list highlights and the event detail panel shows for the selected key: itself (every
+ * variant has a row, DEC-091); a variant the table does not have as its cue.
  */
 export function shownEventKey(table: CueTable | null, selected: string | null): string | null {
   if (!selected) return null
   const ref = parseEventKey(selected)
-  return eventKey(table && (ref.variant === null || !hasOwnMaterials(table, ref)) ? { cue: ref.cue, variant: null } : ref)
+  return eventKey(table && ref.variant !== null && !variantOf(table, ref) ? { cue: ref.cue, variant: null } : ref)
 }
 
 /** Every cue in table order, each with its variants nested. */
@@ -214,19 +297,20 @@ export function sameBytes(a: ArrayBuffer, b: ArrayBuffer): boolean {
   return true
 }
 /**
- * Events a rated trial's best candidate is assigned to: per cue named in
- * `scene.cues`, the cue itself when it is listed (its variants inherit it),
- * else each listed variant. Unknown names are skipped, and loop cues for sounds
- * unless the project plays loop-cue sounds.
+ * Events a rated trial's best candidate is assigned to, per name in `scene.cues` (ownerKeys, DEC-091): the cue while
+ * its variants share the field (a `cue:variant` too), the named variant while each variant holds it (the cue: every
+ * variant). In an older table (cue and variant both hold it) the cue when it is listed, else each listed variant.
+ * Unknown names are skipped, and loop cues for sounds unless the project plays loop-cue sounds.
  */
 export function assignEventsForTrial(table: CueTable, lib: SceneLib, cues: readonly string[], target: 'sound' | 'haptic'): string[] {
   const refs = cues.map(name => resolveEventName(table, name)).filter((r): r is NonNullable<typeof r> => !!r && !r.unknownVariant).map(r => r.ref)
+  const field = target === 'sound' ? 'sfx' : 'haptics'
   const out: string[] = []
   for (const ref of refs) {
     // A loop cue takes a sound only where the project plays loop-cue sounds (lib.loop_cue_sounds).
     if (target === 'sound' && !soundAllowed(lib, ref.cue)) continue
-    const key = refs.some(r => r.cue === ref.cue && r.variant === null) ? ref.cue : eventKey(ref)
-    if (!out.includes(key)) out.push(key)
+    const key = fieldOwner(table, ref.cue, field) === 'both' && refs.some(r => r.cue === ref.cue && r.variant === null) ? ref.cue : eventKey(ref)
+    for (const k of ownerKeys(table, key, field)) if (!out.includes(k)) out.push(k)
   }
   return out
 }
@@ -381,14 +465,6 @@ export function setVariantScale(table: CueTable, ref: EventRef, patch: Partial<P
     if (entry.rampTo === undefined) delete entry.rampCurve
   })
 }
-/** Variant kinds: "materials" (own sfx + haptics, a copy of the inherited ones) or "scale" (inherits both; multipliers only). */
-export function setVariantKind(table: CueTable, ref: EventRef, kind: 'materials' | 'scale'): CueTable {
-  if (ref.variant === null) return table
-  if (kind === 'materials') return setOverride(setOverride(table, ref, 'sfx', true), ref, 'haptics', true)
-  return edited(table, ref, entry => { delete entry.sfx; delete entry.haptics })
-}
-/** The kind of variant `ref`: own materials (either field) or multipliers only. */
-export const variantKind = (e: EffectiveEvent): 'materials' | 'scale' => e.own.sfx || e.own.haptics ? 'materials' : 'scale'
 /** Sets / clears (undefined) `variation` fields of what `ref` writes; an emptied variation is removed (a variant then inherits again only through setOverride). */
 export function setVariation(table: CueTable, ref: EventRef, patch: Partial<CueVariation>): CueTable {
   return edited(table, ref, entry => {
@@ -460,8 +536,10 @@ export function setSfxSounds(table: CueTable, ref: EventRef, sounds: string[]): 
 function ownMaterials(table: CueTable, ref: EventRef, target: 'sound' | 'haptic', route: number): { starred: string[]; alternates: string[] } | null {
   const e = effectiveEvent(table, ref)
   if (!e) return null
-  if (target === 'sound') return e.own.sfx ? { starred: sfxSounds(e.sfx), alternates: sfxAlternates(e.sfx) } : null
-  const r = e.own.haptics ? e.haptics[route] : undefined
+  // A variant without a key of its own while each variant holds the field (DEC-091) starts from nothing (the cue has none).
+  const holds = (field: 'sfx' | 'haptics') => e.own[field] || (ref.variant !== null && fieldOwner(table, ref.cue, field) === 'each')
+  if (target === 'sound') return holds('sfx') ? { starred: sfxSounds(e.sfx), alternates: sfxAlternates(e.sfx) } : null
+  const r = holds('haptics') ? e.haptics[route] : undefined
   return r ? { starred: routeClips(r), alternates: routeAlternates(r) } : null
 }
 /** Writes the starred / alternate lists of what `ref` writes (a sound, or route `route`). */
@@ -629,20 +707,20 @@ export function setNone(table: CueTable, ref: EventRef, field: 'sfx' | 'haptics'
     entry.review = { ...(entry.review ?? {}), [field]: 'tentative' }
   })
 }
-/** Back to undecided (a cue only: the key and its review go; a variant uses "inherit" instead). */
-export function setUndecided(table: CueTable, cue: string, field: 'sfx' | 'haptics'): CueTable {
-  return edited(table, { cue, variant: null }, entry => {
-    delete entry[field]
-    if (entry.review) { delete entry.review[field]; if (!Object.keys(entry.review).length) delete entry.review }
-  })
+/**
+ * Back to undecided for event `key` (a cue, or a variant while each variant holds the field, DEC-091): the key and its
+ * review go. When no variant holds it any more, the group holds it again (undecided).
+ */
+export function setUndecided(table: CueTable, key: string, field: 'sfx' | 'haptics'): CueTable {
+  return edited(table, parseEventKey(key), entry => { delete entry[field]; dropReview(entry, field) })
 }
 /**
- * The materials "back to undecided" takes off a cue's sound / haptic, to keep as the event's reserves: the sounds
+ * The materials "back to undecided" takes off event `key`'s sound / haptic, to keep as its reserves: the sounds
  * (representative first, then the alternates), or each route's clips and alternates in route order with the route's
  * position and gain.
  */
-export function undecidedReserves(table: CueTable, cue: string, field: 'sfx' | 'haptics'): MaterialReserve[] {
-  const entry = table.cues[cue]
+export function undecidedReserves(table: CueTable, key: string, field: 'sfx' | 'haptics'): MaterialReserve[] {
+  const entry = ownEntry(table, parseEventKey(key))
   if (!entry) return []
   if (field === 'sfx') return [...sfxSounds(entry.sfx), ...sfxAlternates(entry.sfx)].map(material => ({ material, target: 'sound' as const }))
   return (entry.haptics ?? []).flatMap(r => [...routeClips(r), ...routeAlternates(r)].map(material => ({ material, target: 'haptic' as const, at: r.at, gain: r.gain })))
@@ -652,8 +730,11 @@ export function undecidedReserves(table: CueTable, cue: string, field: 'sfx' | '
  * becomes the representative); a haptic onto the route at its position (a new route, starred, when there is none);
  * never twice. The review goes to tentative when what plays changed.
  */
-export function restoreReserve(table: CueTable, cue: string, r: MaterialReserve): CueTable {
-  const ref: EventRef = { cue, variant: null }
+export function restoreReserve(table: CueTable, key: string, r: MaterialReserve): CueTable {
+  // Into whoever holds the field now (DEC-091): the group, or the variant (a cue's reserve: every variant).
+  return ownerKeys(table, key, r.target === 'sound' ? 'sfx' : 'haptics').reduce((t, k) => restoreInto(t, parseEventKey(k), r), table)
+}
+function restoreInto(table: CueTable, ref: EventRef, r: MaterialReserve): CueTable {
   let plays = false
   const next = edited(table, ref, entry => {
     if (r.target === 'sound') {

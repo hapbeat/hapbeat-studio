@@ -12,9 +12,10 @@ import type { SceneLib } from '@/utils/sceneData'
 import {
   addPositionRoute, assignEventsForTrial, effectiveEvent, eventKey, listEvents, parseEventKey, removeOwnRoute, shownEventKey,
   addMaterial, removeMaterial, setStarred, trialsForEvent, updateOwnRoute,
-  resetAllReviews, setNone, setOverride, setReview, setUndecided, hasOwnMaterials, undecidedReserves, restoreReserve, soundFirstNote, noSoundNote,
-  materialPill, materialStatus, type EffectiveEvent, type EventRow, type MaterialStatus, type SoundStatus,
+  resetAllReviews, setNone, setOverride, setReview, setUndecided, undecidedReserves, restoreReserve, soundFirstNote, noSoundNote,
+  materialPill, materialStatus, fieldOwner, holdsField, type EffectiveEvent, type EventRow, type MaterialStatus, type SoundStatus,
 } from '@/utils/cueEvents'
+import { HeldBy } from './HeldBy'
 import { useConfirm } from '@/components/common/useConfirm'
 import { useAtLabel } from '@/components/scene/SceneCuePanels'
 import { useEditor } from './editorContext'
@@ -43,8 +44,9 @@ const NEW_FOLDER = ' new'
  * through the project registry), whether each has its sound / haptic decided, and
  * per cue: its sound and haptic materials (▶ / ★ plays or not, DEC-089 / ×5 /
  * remove), the AI trials made for it, and "add" of the selected editor clip.
- * Variation, creating / removing variants and scene multipliers live in the Scene tab (DEC-085); a variant that writes its own
- * sfx or haptics (DEC-085 addendum, 2026-10-06) is a child row of its cue (`bite › tear`) with the same material editing.
+ * Variation, creating / removing variants and scene multipliers live in the Scene tab (DEC-085); every variant is a child
+ * row of its cue (`bite › tear`). A sound / haptics is held by the cue (shared by its variants) or by each variant
+ * (DEC-091): only the side that holds it shows its state and buttons, the other says who holds it (HeldBy).
  * Cues the recording plays at the same moment are grouped
  * (display only). Edits mark the table unsaved (Save / Revert at the top, same
  * as the Scene tab); "decide" writes at once.
@@ -83,11 +85,8 @@ export function EventsPanel() {
   const requested = useOpenRequests()
   const one = (r: EventRow) => <EventRowButton key={r.key} row={r} selected={shown === r.key} onSelect={select}
     requested={{ sound: requested.has(`${r.key}|sound`), haptic: requested.has(`${r.key}|haptic`) }} />
-  // A cue and, under it, its variants that write their own materials.
-  const block = (r: EventRow) => {
-    const children = table ? r.variants.filter(v => hasOwnMaterials(table, v.ref)) : []
-    return children.length ? <div key={r.key} className="events-family">{one(r)}{children.map(one)}</div> : one(r)
-  }
+  // A cue and, under it, its variants (DEC-091: shared ones too).
+  const block = (r: EventRow) => r.variants.length ? <div key={r.key} className="events-family">{one(r)}{r.variants.map(one)}</div> : one(r)
   // When each cue first plays (a loop: its layer's first run): the order inside a group and 「grab（3.2 秒）」 in the menu.
   const firsts = useMemo(() => table && lib && data ? firstTimes(table, lib, data) : {}, [table, lib, data])
   // A group is a header plus every event as its own row, in play order (never merged into one row).
@@ -198,15 +197,17 @@ function EventRowButton({ row, selected, onSelect, requested }: { row: EventRow;
   // 音 未定 (yellow) / 音 なし 仮 (grey outline) / 音 なし ✓ (green outline: approved as no sound) / 音 仮 (blue) / 音 OK (green);
   // — for a loop cue's sound where the project has none; 「依頼済み」 (purple) while a request to the agent for it is open. Fixed width.
   // ▲ (a fixed slot before the pills): a sound or route of its own has nothing starred, so it plays nothing (DEC-092).
-  const badge = (kind: 'sound' | 'haptic', label: string, status: SoundStatus, asked: boolean) => asked ? <span className="events-badge requested" title={t('events.requested.hint')}><KindIcon kind={kind} size={14} decorative />{label} {t('events.requested')}</span>
-    : status === 'na' ? <span className="events-badge na"><KindIcon kind={kind} size={14} decorative />{label} —</span>
-    : <MaterialPillBadge kind={kind} status={status} label={label} />
+  // The side that does not hold a field (DEC-091) shows who does instead of a state: 「グループ」 / 「各強弱」 (dashed).
   const child = row.ref.variant !== null
+  const badge = (kind: 'sound' | 'haptic', label: string, status: SoundStatus, asked: boolean, held: boolean) => status === 'na' ? <span className="events-badge na"><KindIcon kind={kind} size={14} decorative />{label} —</span>
+    : !held ? <span className="events-badge held-elsewhere" title={t(child ? 'events.byGroup' : 'events.byEach')}><KindIcon kind={kind} size={14} decorative />{label} {t(child ? 'events.byGroup.short' : 'events.byEach.short')}</span>
+    : asked ? <span className="events-badge requested" title={t('events.requested.hint')}><KindIcon kind={kind} size={14} decorative />{label} {t('events.requested')}</span>
+    : <MaterialPillBadge kind={kind} status={status} label={label} />
   return <button type="button" role="option" aria-selected={selected} className={`events-row ${child ? 'variant' : ''} ${selected ? 'selected' : ''}`} onClick={() => onSelect(row.key)} title={row.description ?? ''}>
     <span className="events-row-name">{child ? `${row.ref.cue} › ${row.ref.variant}` : row.key}{row.loop && <small>{t('events.loop')}</small>}</span>
     <span className="events-row-badges"><span className="events-row-warn" style={{ visibility: row.noStar ? 'visible' : 'hidden' }}
       title={row.noStar ? t('events.noStar') : undefined} aria-label={row.noStar ? t('events.noStar') : undefined} aria-hidden={!row.noStar}>▲</span>
-      {badge('sound', t('events.badge.sound'), row.sound, requested.sound)}{badge('haptic', t('events.badge.haptic'), row.haptic, requested.haptic)}</span>
+      {badge('sound', t('events.badge.sound'), row.sound, requested.sound, row.held.sound)}{badge('haptic', t('events.badge.haptic'), row.haptic, requested.haptic, row.held.haptic)}</span>
     {row.description && <small className="events-row-desc">{row.description}</small>}
   </button>
 }
@@ -256,7 +257,7 @@ function EventDetail({ table, lib, e }: { table: CueTable; lib: SceneLib; e: Eff
       <button type="button" className="toolbar-btn" disabled={!clip} title={t('events.addHint')} onClick={() => assign('haptic')}>{t('events.assignHaptic')}</button>
     </div>
     <MaterialOrigin cue={e.ref.cue} />
-    <SoundSection lib={lib} e={e} loop={loop} edit={edit} />
+    <SoundSection table={table} lib={lib} e={e} loop={loop} edit={edit} />
     <HapticSection table={table} lib={lib} e={e} loop={loop} edit={edit} />
     {e.ref.variant === null && variants.length > 0 && <p className="agent-muted" title={t('events.variantsInSceneHint')}>
       <button type="button" className="agent-link" onClick={() => useEventStore.getState().openInScene(key)}>{t('events.variantsInScene', { count: variants.length })}</button></p>}
@@ -264,10 +265,13 @@ function EventDetail({ table, lib, e }: { table: CueTable; lib: SceneLib; e: Eff
   </div>
 }
 
-/** The event's sounds (★ = `sfx.sounds`, played; the rest = `sfx.alternates`): a row click shows one in the waveform panel, ▶ plays it (PC only). */
-function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent; loop: boolean; edit: Edit }) {
+/**
+ * The event's sounds (★ = `sfx.sounds`, played; the rest = `sfx.alternates`): a row click shows one in the waveform panel,
+ * ▶ plays it (PC only). On the side that does not hold the sound (DEC-091) only who holds it and the switch (HeldBy).
+ */
+function SoundSection({ table, lib, e, loop, edit }: { table: CueTable; lib: SceneLib; e: EffectiveEvent; loop: boolean; edit: Edit }) {
   const { t } = useI18n()
-  const allowed = soundAllowed(lib, e.ref.cue)
+  const allowed = soundAllowed(lib, e.ref.cue), held = holdsField(table, e.ref, 'sfx')
   const soundFiles = useSceneStore(s => s.soundFiles)
   const previewId = useEventStore(s => s.preview?.id)
   const key = eventKey(e.ref), sounds = sfxSounds(e.sfx), alternates = sfxAlternates(e.sfx)
@@ -278,13 +282,15 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
   // The material lists fold together (editor setting, open by default; the heading line stays).
   const [open, setOpen] = useMaterialsOpen()
   return <section className="events-sec">
-    <h4 className="events-sec-head"><Fold open={open} set={setOpen} /><SoundIcon decorative />{t('events.sound')}{allowed && e.own.sfx && <><ReviewToggle e={e} field="sfx" edit={edit} /><DecisionBar e={e} field="sfx" edit={edit} /></>}
+    <h4 className="events-sec-head"><Fold open={open} set={setOpen} /><SoundIcon decorative />{t('events.sound')}{allowed && (held ? <><ReviewToggle e={e} field="sfx" edit={edit} /><DecisionBar table={table} e={e} field="sfx" edit={edit} /></>
+        : <HeldBy table={table} e={e} field="sfx" edit={edit} buttonClass="agent-icon-btn" />)}
       {/* Ask for (more) sound candidates; after checking the sound (OK): on to the haptic — also for a cue without a sound. */}
-      <span className="events-haptic-request"><button type="button" className="agent-icon-btn" title={t('events.soundRequest.hint')}
+      {(held || !allowed) && <span className="events-haptic-request"><button type="button" className="agent-icon-btn" title={t('events.soundRequest.hint')}
         onClick={() => { const k = `sound|${key}`; useReviseOpen.getState().set(useReviseOpen.getState().open === k ? null : k) }}>{t('events.soundRequest.button')}</button>
-      <HapticRequestButton e={e} /></span></h4>
+      <HapticRequestButton e={e} /></span>}</h4>
     <SoundRequestField cue={key} />
-    {!open ? null : !allowed ? <p className="agent-muted">{t('scene.sound.loopCue')}</p> : !e.own.sfx ? <Inherited e={e} field="sfx" edit={edit} /> : <>
+    {allowed && held && <SharedWith table={table} e={e} field="sfx" />}
+    {!open || (allowed && !held) ? null : !allowed ? <p className="agent-muted">{t('scene.sound.loopCue')}</p> : <>
       {loop && <p className="agent-muted">{t('events.loopSoundHint')}</p>}
       {!e.sfx && <p className="agent-muted">{t(noSoundNote(e))}</p>}
       {/* A paired cue's sounds are listed as pairs in the haptic section. */}
@@ -303,9 +309,14 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
   </section>
 }
 
-/** Haptic output: one block per route (body position × gain) with its clips (★ = `clips`, played; the rest = `alternates`); "＋ add position" plays the event on another position at the same time. */
+/**
+ * Haptic output: one block per route (body position × gain) with its clips (★ = `clips`, played; the rest = `alternates`);
+ * "＋ add position" plays the event on another position at the same time. On the side that does not hold the haptics
+ * (DEC-091) only who holds it and the switch (HeldBy).
+ */
 function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: SceneLib; e: EffectiveEvent; loop: boolean; edit: Edit }) {
   const { t } = useI18n()
+  const held = holdsField(table, e.ref, 'haptics')
   const [hOpen, setHOpen] = useMaterialsOpen()
   const atLabel = useAtLabel()
   const previewId = useEventStore(s => s.preview?.id)
@@ -315,9 +326,10 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
   const free = positionsForCue(lib, e.ref.cue).some(a => !e.haptics.some(r => r.at === a))
   const describe = useDescribeMaterial()
   return <section className="events-sec">
-    <h4 className="events-sec-head"><Fold open={hOpen} set={setHOpen} /><HapticIcon decorative />{t('events.haptic')}{e.own.haptics && <><ReviewToggle e={e} field="haptics" edit={edit} /><DecisionBar e={e} field="haptics" edit={edit} /></>}</h4>
-    {hOpen && !e.own.haptics && <Inherited e={e} field="haptics" edit={edit} />}
-    {hOpen && e.own.haptics && <>
+    <h4 className="events-sec-head"><Fold open={hOpen} set={setHOpen} /><HapticIcon decorative />{t('events.haptic')}{held ? <><ReviewToggle e={e} field="haptics" edit={edit} /><DecisionBar table={table} e={e} field="haptics" edit={edit} /></>
+      : <HeldBy table={table} e={e} field="haptics" edit={edit} buttonClass="agent-icon-btn" />}</h4>
+    {held && <SharedWith table={table} e={e} field="haptics" />}
+    {hOpen && held && <>
     <SoundFirstNote note={soundFirstNote(e, loop)} />
     {!e.haptics.length && <p className="agent-muted">{t(e.decided.haptics ? 'events.hapticNone' : 'events.undecidedHaptic')}</p>}
     {e.haptics.map((r, i) => {
@@ -408,27 +420,29 @@ function ReviewToggle({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'h
 }
 
 /**
- * Decided vs undecided: "None" (sfx: null / haptics: []) and, on a cue, "Back to undecided" (the key removed; its
- * materials move to the event's reserves, representative first, so nothing is lost).
- * A variant goes back to inheriting with the override bar instead.
+ * Decided vs undecided: "None" (sfx: null / haptics: []) and "Back to undecided" (the key removed; its materials move to
+ * the event's reserves, representative first, so nothing is lost) — on a cue, and on a variant while each variant holds
+ * the field (DEC-091). In an older table where a variant overrides its cue, the variant goes back to the cue's instead.
  */
-function DecisionBar({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'haptics'; edit: Edit }) {
+function DecisionBar({ table, e, field, edit }: { table: CueTable; e: EffectiveEvent; field: 'sfx' | 'haptics'; edit: Edit }) {
   const { t } = useI18n()
   const isNone = e.decided[field] && (field === 'sfx' ? !e.sfx : e.haptics.length === 0)
+  const key = eventKey(e.ref)
   const toUndecided = () => {
-    const table = useSceneStore.getState().table
-    const moved = table ? undecidedReserves(table, e.ref.cue, field) : []
-    if (!edit(tb => setUndecided(tb, e.ref.cue, field)) || !moved.length) return
+    const current = useSceneStore.getState().table
+    const moved = current ? undecidedReserves(current, key, field) : []
+    if (!edit(tb => setUndecided(tb, key, field)) || !moved.length) return
     const settings = useEditorSettings.getState()
-    settings.update({ eventReserves: addReserves(settings.eventReserves, e.ref.cue, moved) })
+    settings.update({ eventReserves: addReserves(settings.eventReserves, key, moved) })
   }
+  const older = e.ref.variant !== null && fieldOwner(table, e.ref.cue, field) === 'both'
   // Fixed slots on the section's head line: a button that does not apply is hidden, not removed (nothing moves). Each
   // button of the line wraps on its own (the groups are `display: contents`).
   return <span className="events-decision">
     <button type="button" className="agent-icon-btn" style={{ visibility: isNone ? 'hidden' : 'visible' }} title={t(field === 'sfx' ? 'events.setNoneSoundHint' : 'events.setNoneHapticHint')} onClick={() => edit(tb => setNone(tb, e.ref, field))}>{t('events.setNone')}</button>
-    {/* A cue: back to undecided; a variant (child row): back to its cue's (the override removed). */}
-    {e.ref.variant === null
-      ? <button type="button" className="agent-icon-btn" style={{ visibility: e.decided[field] ? 'visible' : 'hidden' }} title={t('events.setUndecidedHint')} onClick={toUndecided}>{t('events.setUndecided')}</button>
+    {/* Back to undecided; an older table's overriding variant: back to its cue's (the override removed). */}
+    {!older
+      ? <button type="button" className="agent-icon-btn" style={{ visibility: e.decided[field] && (e.ref.variant === null || e.own[field]) ? 'visible' : 'hidden' }} title={t('events.setUndecidedHint')} onClick={toUndecided}>{t('events.setUndecided')}</button>
       : <button type="button" className="agent-icon-btn" title={t('events.backToParentHint', { parent: e.ref.cue })} onClick={() => edit(tb => setOverride(tb, e.ref, field, false))}>{t('events.backToParent', { parent: e.ref.cue })}</button>}
   </span>
 }
@@ -494,7 +508,7 @@ function Reserves({ cue, target }: { cue: string; target: 'sound' | 'haptic' }) 
     const ok = r.target === 'sound' ? openEventSound(key, r.material, autoplay) : openEventHaptic(key, r.material, r.at ?? '', autoplay)
     if (!ok) missing(r.material)
   }
-  const putBack = (key: string, r: MaterialReserve) => { if (useSceneStore.getState().edit(tb => restoreReserve(tb, parseEventKey(key).cue, r))) drop(key, r) }
+  const putBack = (key: string, r: MaterialReserve) => { if (useSceneStore.getState().edit(tb => restoreReserve(tb, key, r))) drop(key, r) }
   const adopt = async (row: typeof rows[number]) => {
     const scene = useSceneStore.getState()
     if (!scene.table || !scene.lib) { useWaveformStore.getState().setError(t('scene.save.noProject')); return }
@@ -661,16 +675,11 @@ function SoundRequestField({ cue }: { cue: string }) {
     }} />
 }
 
-/**
- * A child row's field it inherits (DEC-085 addendum): "same as <cue>" and one button that gives this situation its own
- * copy (an override to edit here). Variation and the variants themselves stay in the Scene tab.
- */
-function Inherited({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'haptics'; edit: Edit }) {
+/** On a cue whose variants share its sound / haptics (DEC-091): which variants use them too. */
+function SharedWith({ table, e, field }: { table: CueTable; e: EffectiveEvent; field: 'sfx' | 'haptics' }) {
   const { t } = useI18n()
-  return <p className="events-inherited">
-    <span>{t('events.inherited', { parent: e.ref.cue })}</span>
-    <button type="button" className="agent-icon-btn" title={t('events.overrideHereHint', { parent: e.ref.cue })} onClick={() => edit(tb => setOverride(tb, e.ref, field, true))}>{t('events.overrideHere')}</button>
-  </p>
+  const variants = e.ref.variant === null && fieldOwner(table, e.ref.cue, field) === 'group' ? Object.keys(table.cues[e.ref.cue]?.variants ?? {}) : []
+  return variants.length > 0 && <p className="agent-muted events-shared-with">{t('events.sharedWith', { variants: variants.join('・') })}</p>
 }
 
 /** "Play the group" / "This row only" (editor setting, default the group): what an audition plays at the stretch. Fixed width. */
