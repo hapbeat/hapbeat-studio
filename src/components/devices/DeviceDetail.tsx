@@ -36,6 +36,7 @@ import { useDeviceTransport } from '@/hooks/useDeviceTransport'
 import { useSerialMaster } from '@/stores/serialMaster'
 import { roleBadge } from '@/utils/roleLabels'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
+import { useSimpleUi, visibleSubTabs } from '@/config/desktopShell'
 
 type SubTab =
   | 'wifi' | 'config' | 'kit' | 'test' | 'firmware' | 'espnow'
@@ -168,6 +169,8 @@ const SUBTAB_KEY = 'hapbeat-studio-devices-subtab'
  */
 export function DeviceDetail() {
   const { t } = useI18n()
+  // Desktop app's simple layout: no playback / command test, PWM bench or debug dump.
+  const simpleUi = useSimpleUi()
   const { devices, lastMessage, send, injectMessage } = useHelperConnection()
   const pushLog = useLogStore((s) => s.push)
   const selectedIp = useDeviceStore((s) => s.selectedIp)
@@ -811,9 +814,9 @@ export function DeviceDetail() {
   const nodeTransport: NodeTransport =
     cachedInfo?.transport ?? device.transport ?? nodeTransports[0] ?? 'wifi_udp'
 
-  const subTabs = computeSubTabs(
+  const subTabs = visibleSubTabs(computeSubTabs(
     nodeRole, nodeTransport, nodeTransports, cachedInfo?.board, !!cachedInfo?.haptic_pwm,
-  )
+  ), simpleUi)
   const activeSubTab: SubTab = subTabs.includes(subTab) ? subTab : (subTabs[0] ?? 'firmware')
 
   return (
@@ -927,11 +930,13 @@ export function DeviceDetail() {
                 sendTo={sendTo}
               />
             )}
-            <DebugDumpSection
-              device={device}
-              dump={debugDump}
-              sendTo={sendTo}
-            />
+            {!simpleUi && (
+              <DebugDumpSection
+                device={device}
+                dump={debugDump}
+                sendTo={sendTo}
+              />
+            )}
             {/* Non-DuoWL-v4 (v3-family) haptic-only Wi-Fi/UDP receivers
                 (necklace_v3 / band_v2/v3/v4): software haptic EQ, gated
                 purely on eq_engine === "sw" (presence-driven — see
