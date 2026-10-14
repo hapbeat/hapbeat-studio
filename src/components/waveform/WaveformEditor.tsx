@@ -45,7 +45,7 @@ import { useAuditionPlan, useLoopAudition } from './EditorScenePanel'
 import { unfoldTime, type FoldView, type ShownLayout } from '@/utils/shownLayout'
 import { sceneStopSec } from '@/utils/sceneStop'
 import { contextHapticParts, renderContextLoops } from '@/utils/trialContext'
-import { useSceneSettings } from '@/stores/sceneSettings'
+import { usePcTiming } from '@/stores/pcTiming'
 import { LANE_RATE, mixLane, soundLaneParts, syncShiftSec, type SoundLane } from '@/utils/soundLane'
 import { useSyncView } from './SyncPoints'
 import { usePageVisible } from '@/hooks/usePageVisible'
@@ -241,11 +241,11 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const player = useMemo(() => new EditorBufferPlayer(null, undefined, s.setError), [s.clip?.id, original, auditionKey])
   useEffect(() => {player.activate(); return () => player.dispose()}, [player])
   useEffect(() => { player.setLevel(level) }, [player, level])
-  // A haptic audition going to devices: the PC sounds play the scene's haptic lead later (hapticLeadMs, > 0 = the haptic
-  // is sent earlier than the sound; the Scene tab's calibration), and the waveform panel draws them that much later.
+  // A haptic audition going to devices: this PC's offset (DEC-093, + = the haptic later) moves the PC sounds the other
+  // way (they start that much earlier; a lead-in, nothing is cut), and the waveform panel draws them there.
   const hapticAudition = (!!audition && !auditionIsSound) || (!audition && eventPreview?.target === 'haptic') || adjusting?.target === 'haptic'
-  const hapticLeadMs = useSceneSettings(state => state.hapticLeadMs)
-  const leadSec = hapticAudition && targets.length ? hapticLeadMs / 1000 : 0
+  const pcOffsetMs = usePcTiming(state => state.offsetMs)
+  const leadSec = hapticAudition && targets.length ? -pcOffsetMs / 1000 : 0
   // The sync points of the shown haptic and its event's sound (DEC-093): the sound plays and is drawn so they meet.
   const sync = useSyncView({ enabled: hapticAudition && !looped, sound: sceneSounds.picked, starts: shownLayout?.starts ?? null,
     haptic: shownBuffer ? { buffer: shownBuffer, name: audition ? null : eventPreview?.target === 'haptic' ? eventPreview.material : adjusting?.target === 'haptic' && adjusting.project === sceneLib?.project_name ? adjusting.wav : null } : null })

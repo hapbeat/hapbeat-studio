@@ -1,7 +1,7 @@
 /**
  * The PC-sound lane of the waveform panel: during a haptic audition the event's sound (the candidate's companion
  * sound / the decided sound, and the scene's other sounds at their firings) drawn above the haptic on the same
- * time axis (the playback's seconds), where it is heard. The haptic lead (scene hapticLeadMs, > 0 = the haptic is
+ * time axis (the playback's seconds), where it is heard. The lead (−this PC's offset, DEC-093; > 0 = the haptic is
  * sent that much earlier than the PC sound) puts every sound that much later on the axis — the same shift the
  * editor applies when it plays them (useDecidedSoundSync), so what is drawn is what is played. The shown event's own
  * sound is moved further so that its sync point meets the haptic's (DEC-093, SyncView).

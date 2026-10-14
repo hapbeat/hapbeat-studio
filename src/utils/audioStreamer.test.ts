@@ -175,3 +175,28 @@ describe('streamClip live samples', () => {
     expect(sentSamples(none)).toEqual(sentSamples(plain)); expect(sentSamples(wrong)).toEqual(sentSamples(plain))
   })
 })
+
+describe('streamClip pacing (DEC-093)', () => {
+  it('sends the first STREAM_SEND_AHEAD_MS at once, then paces the rest that far ahead of real time', async () => {
+    FakeAudioBuffer.frames = 2048 // 8 chunks of 256 frames = 16 ms
+    const at: number[] = []
+    await streamClip(new Blob([new Uint8Array([1])]), message => { if (message.type === 'stream_data') at.push(performance.now()) }, { cacheKey: 'pace-a' })
+    expect(at.length).toBe(8)
+    // 0, 16, 32, 48 ms of audio are due ≤ 50 ms ahead: sent together; 64 ms is due at 14 ms, 112 ms at 62 ms.
+    expect(at[3] - at[0]).toBeLessThan(8)
+    expect(at[4] - at[0]).toBeGreaterThan(8)
+    expect(at[7] - at[0]).toBeGreaterThan(50)
+    expect(at[7] - at[0]).toBeLessThan(100)
+  })
+  it('a seek after DATA ends the stream and begins a new one (the device drops what it had queued)', async () => {
+    FakeAudioBuffer.frames = 8000
+    const messages: ManagerMessage[] = []
+    let seek: number | null = null
+    setTimeout(() => { seek = .5 }, 60)
+    await streamClip(new Blob([new Uint8Array([1])]), message => messages.push(message), { cacheKey: 'pace-b', control: { consumeSeek: () => { const s = seek; seek = null; return s } } })
+    const kinds = messages.map(m => m.type)
+    expect(kinds.filter(k => k === 'stream_begin').length).toBe(2)
+    expect(new Set(messages.map(m => m.payload?.stream_id)).size).toBe(2)
+    expect(kinds.indexOf('stream_end')).toBeLessThan(kinds.lastIndexOf('stream_begin'))
+  })
+})

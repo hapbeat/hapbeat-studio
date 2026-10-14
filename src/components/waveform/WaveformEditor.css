@@ -965,7 +965,6 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 .editor-sound-lane { position: relative; display: flex; flex-direction: column; box-sizing: border-box; border-bottom: 1px solid var(--border-color, #3f3f46); }
 .editor-lane-header { position: relative; z-index: 5; display: flex; align-items: center; gap: 10px; height: 22px; padding: 0 6px; font-size: 11px; white-space: nowrap; }
 .editor-lane-header .scene-number { width: 56px; }
-.editor-lane-lead { display: inline-flex; align-items: center; gap: 4px; }
 .editor-lane-status { display: inline-block; min-width: 16em; color: #fbbf24; overflow: hidden; text-overflow: ellipsis; }
 .editor-lane-label { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; }
 .editor-lane-label.sound { color: var(--sound-strong); }

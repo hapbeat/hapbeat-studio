@@ -26,6 +26,14 @@ import { markStreamClosed, markStreamOpen } from '@/utils/openStreams'
  *    stereo (4B/frame) → 256 frames
  *  Manager 側 (main_window.py の file streamer) と同じポリシー。 */
 const MAX_PAYLOAD_BYTES = 1024
+/**
+ * DATA is sent this far ahead of real time (DEC-093). The device plays the first chunk on arrival and keeps the rest
+ * queued, so Wi-Fi jitter up to this much never runs it dry. Sent at exactly real time it ran dry on every late
+ * packet, held the last sample to fill the gap and played everything after it that much later — the haptic drifted
+ * later through a long clip. Equal to the device's default stream depth (CLIP_DEFAULT_TARGET 800 frames = 50 ms), so
+ * its drift correction leaves the queue alone; the onset latency is unchanged.
+ */
+export const STREAM_SEND_AHEAD_MS = 50
 const PCM_CACHE_MAX_BYTES = 16 * 1024 * 1024
 
 interface PreparedAudio {
@@ -209,10 +217,19 @@ export async function streamClip(
         anchorTime = performance.now()
       }
 
-      // Seek: consume the latest request, jump the read offset, re-anchor.
+      // Seek: consume the latest request, jump the read offset, re-anchor. Once DATA was sent the device has up to
+      // STREAM_SEND_AHEAD_MS of the old position queued: a new stream makes it drop that (STREAM_BEGIN flushes a
+      // residual over 32 ms) instead of playing it before the new position.
       const seek = control?.consumeSeek?.() ?? null
       if (seek != null) {
         const target = Math.max(0, Math.min(totalFrames - 1, Math.floor(totalFrames * seek)))
+        if (frameOffset > 0) {
+          send({ type: 'stream_end', payload: { stream_id: streamId } })
+          markStreamClosed(streamId)
+          streamId = createStreamId()
+          lost = null
+          begin()
+        }
         frameOffset = target - (target % chunkFrames) // align to chunk grid
         anchorFrame = frameOffset
         anchorTime = performance.now()
@@ -252,8 +269,8 @@ export async function streamClip(
       frameOffset = endFrame
       control?.onProgress?.(frameOffset, totalFrames, targetRate)
 
-      // Pace to real-time relative to the current anchor.
-      const expectedTime = anchorTime + ((frameOffset - anchorFrame) / targetRate) * 1000
+      // Pace to real time relative to the current anchor, STREAM_SEND_AHEAD_MS ahead.
+      const expectedTime = anchorTime + ((frameOffset - anchorFrame) / targetRate) * 1000 - STREAM_SEND_AHEAD_MS
       const now = performance.now()
       if (expectedTime > now) {
         await delay(expectedTime - now)

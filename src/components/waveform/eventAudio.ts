@@ -191,7 +191,7 @@ const NO_SCENE_SOUNDS: SceneSounds = { picked: null, firings: null, loops: null 
  * The sound is chosen by value (buffer + volume): store refreshes (the AI trials
  * poll every 2 s) never restart or stop what is playing (CompanionSound).
  *
- * `leadSec`: the haptic lead (scene hapticLeadMs) while the haptic goes to devices — every sound plays that much
+ * `leadSec`: this PC's offset while the haptic goes to devices (−offset, DEC-093) — every sound plays that much
  * later on the playback (< 0: earlier), the same shift the sound lane draws (soundLaneParts). `ownSec`: the shown
  * event's own sound (the picked one) that much more, so its sync point meets the haptic's (DEC-093, syncShiftSec).
  *

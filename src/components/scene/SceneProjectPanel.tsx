@@ -1,10 +1,10 @@
 import { useEffect, useRef } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
-import { useSceneSettings } from '@/stores/sceneSettings'
 import { matchesAddress, tableTargets } from '@/utils/sceneHaptics'
 import { useScene } from './sceneContext'
-import { NumberField, useAtLabel } from './SceneCuePanels'
+import { useAtLabel } from './SceneCuePanels'
+import { PcOffsetField } from '@/components/common/PcTiming'
 
 /** Applying the saved table to the game (step ③), the cue table on disk, haptic timing, device coverage and the stream log. */
 export function SceneProjectPanel() {
@@ -17,7 +17,6 @@ export function SceneProjectPanel() {
   const soundFiles = useSceneStore(s => s.soundFiles)
   const dirty = useSceneStore(s => s.dirty)
   const log = useSceneStore(s => s.log)
-  const lead = useSceneSettings(s => s.hapticLeadMs)
   const logBox = useRef<HTMLPreElement>(null)
   useEffect(() => { const el = logBox.current; if (el) el.scrollTop = el.scrollHeight }, [log])
   if (!lib || !table || !root) return <div className="scene-panel-empty">{t('scene.noProject')}</div>
@@ -41,9 +40,7 @@ export function SceneProjectPanel() {
     </div>
     <div className="scene-sec">
       <h3>{t('scene.output.heading')}</h3>
-      <label className="scene-row"><span className="scene-dim">{t('scene.output.lead')}</span>
-        <NumberField value={lead} step={10} min={-200} max={400} label={t('scene.output.lead')} onCommit={x => useSceneSettings.getState().update({ hapticLeadMs: Math.max(-200, Math.min(400, x)) })} />
-        <span className="scene-dim">{t('scene.output.leadHint')}</span></label>
+      <div className="scene-row"><PcOffsetField /></div>
       <div className="scene-coverage">{t('scene.output.coverage')}{' '}
         {!helperConnected ? <span className="scene-dim">{t('scene.output.noHelper')}</span>
           : targets.length ? targets.map(tg => { const n = devices.filter(d => matchesAddress(tg, d.address)).length

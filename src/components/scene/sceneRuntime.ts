@@ -1,4 +1,5 @@
 import { useSceneStore, sceneVideoUrl } from '@/stores/sceneStore'
+import { usePcTiming } from '@/stores/pcTiming'
 import { perfTrack } from '@/utils/perfRegistry'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { clipEnd, focusEvent, itemEvents, levelAt, offsetOf, type SceneItem, type VisibleEvent } from '@/utils/sceneData'
@@ -303,7 +304,7 @@ export class SceneRuntime {
       this.loopPlayer.update(() => this.audio(), this.loopSounds, s.sfx, layer => loopSoundLevel(data.full.levels, data.fps, lib.layers[layer], t))
     } else if (this.actx) this.loopPlayer.stopAll(this.actx)
     this.mixer.pump(now, {
-      enabled: settings.sendHaptics && this.helper.connected, playing, devices: this.helper.devices, leadMs: settings.hapticLeadMs, pcm: s.pcm,
+      enabled: settings.sendHaptics && this.helper.connected, playing, devices: this.helper.devices, leadMs: -usePcTiming.getState().offsetMs, pcm: s.pcm,
       level: (t, layer, side) => data && lib ? levelAt(data.full.levels, data.fps, lib.layers[layer], t, side) : [0, 1],
     })
   }

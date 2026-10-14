@@ -1,0 +1,13 @@
+/* This PC's sound / haptics offset (DEC-093): the field where Studio plays both, and its test pattern dialog. */
+.pc-offset-field { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.pc-offset-field .scene-number { width: 56px; }
+.pc-offset-field .toolbar-btn { height: 18px; padding: 0 6px; font-size: 11px; }
+.pc-timing-dialog { max-width: 480px; }
+.pc-timing-row { display: flex; align-items: center; gap: 6px; margin: 10px 0; }
+.pc-timing-row input[type="range"] { flex: 1; }
+.pc-timing-row .scene-number { width: 64px; }
+.pc-timing-end { font-size: 12px; color: var(--text-secondary, #a1a1aa); white-space: nowrap; }
+/* Fixed height: the status line never moves the buttons below when it changes. */
+.pc-timing-status { min-height: 2.6em; margin: 0; font-size: 12px; color: var(--text-secondary, #a1a1aa); }
+.pc-timing-stack { display: grid; }
+.pc-timing-stack > span { grid-area: 1 / 1; }

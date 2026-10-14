@@ -4,9 +4,9 @@ import { DEFAULT_SCENE_UI, parseSceneUiFile, parseStoredSceneUi, resolveSceneUi,
 const layout = { grid: { root: {} }, panels: { video: {} } }
 
 describe('scene UI settings', () => {
-  it('keeps valid fields, clamps the lead and keeps haptic send (on by default)', () => {
+  it('keeps valid fields, drops unknown ones (the old haptic lead: DEC-093) and keeps haptic send (on by default)', () => {
     const s = sanitizeSceneUi({ pcSound: false, hapticLeadMs: 900, loop: 'x', dockLayout: layout, sendHaptics: false })
-    expect(s).toEqual({ ...DEFAULT_SCENE_UI, pcSound: false, hapticLeadMs: 400, dockLayout: layout, sendHaptics: false })
+    expect(s).toEqual({ ...DEFAULT_SCENE_UI, pcSound: false, dockLayout: layout, sendHaptics: false })
     expect(DEFAULT_SCENE_UI.sendHaptics).toBe(true)
     expect(sanitizeSceneUi({}).sendHaptics).toBe(true)
   })
@@ -20,9 +20,9 @@ describe('scene UI settings', () => {
   })
 
   it('prefers the project copy, then localStorage, then defaults', () => {
-    const folder = serializeSceneUi({ ...DEFAULT_SCENE_UI, hapticLeadMs: 20 })
-    expect(resolveSceneUi(folder, '{"hapticLeadMs":40}')).toMatchObject({ source: 'folder', settings: { hapticLeadMs: 20 } })
-    expect(resolveSceneUi('{bad', '{"hapticLeadMs":40}')).toMatchObject({ source: 'local', settings: { hapticLeadMs: 40 }, folderMalformed: expect.any(String) })
+    const folder = serializeSceneUi({ ...DEFAULT_SCENE_UI, leadSec: 2 })
+    expect(resolveSceneUi(folder, '{"leadSec":4}')).toMatchObject({ source: 'folder', settings: { leadSec: 2 } })
+    expect(resolveSceneUi('{bad', '{"leadSec":4}')).toMatchObject({ source: 'local', settings: { leadSec: 4 }, folderMalformed: expect.any(String) })
     expect(resolveSceneUi(null, null)).toMatchObject({ source: 'default' })
   })
 })

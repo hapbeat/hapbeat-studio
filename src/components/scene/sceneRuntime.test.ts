@@ -263,7 +263,7 @@ describe('A levelMap edit reaches the haptic stream at once (DEC-090)', () => {
     const table = { clips: { feed_loop: { intensity: 0.4202, loop: true } }, sounds: {},
       cues: { feed_loop: { sfx: null, haptics: [{ clip: 'feed_loop', at: 'hand', gain: 1, levelMap: { points: [[0.08, 0.08], [1.225, 0.5]] } }] } } }
     const data = { fps: 30, full: { file: 'full.mp4', levels, events: [] }, clips: [] }
-    useSceneSettings.setState({ pcSound: false, sendHaptics: true, hapticLeadMs: 0 })
+    useSceneSettings.setState({ pcSound: false, sendHaptics: true })
     useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: lib as never, table: table as never, loaded: null, data, recorded: data, items: buildItems(data), cur: 0,
       pcm: { feed_loop: new Float32Array(4000).fill(1) }, sfx: {} })
     let now = 1000
@@ -299,7 +299,7 @@ describe('Scene haptic streams end when the page goes away', () => {
     const { SceneRuntime } = await import('./sceneRuntime')
     const { buildItems } = await import('@/utils/sceneData')
     const data = { fps: 30, full: { file: 'full.mp4', levels: [], events: [] }, clips: [] }
-    useSceneSettings.setState({ pcSound: false, sendHaptics: true, hapticLeadMs: 0 })
+    useSceneSettings.setState({ pcSound: false, sendHaptics: true })
     useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: null, table: { clips: {}, sounds: {}, cues: {} } as never, data, recorded: data, items: buildItems(data), cur: 0, pcm: {}, sfx: {} })
     const sent: { type: string; payload: Record<string, unknown> }[] = []
     const runtime = new SceneRuntime(), tick = () => (runtime as unknown as { tick(): void }).tick()
@@ -352,7 +352,7 @@ describe('A one-shot firing takes its gains from the table when it fires', () =>
     const data = { fps: 30, full: { file: 'full.mp4', levels: [], events }, clips: [] }
     const table = { clips: { b: { intensity: 0.5, loop: false } }, sounds: { Bite: { intensity: 0.5 } },
       cues: { bite: { sfx: { sound: 'Bite', volume: 1 }, haptics: [{ clip: 'b', at: 'both', gain: 1 }] } } }
-    useSceneSettings.setState({ pcSound: true, sendHaptics: true, hapticLeadMs: 0 })
+    useSceneSettings.setState({ pcSound: true, sendHaptics: true })
     useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: { project_name: 'mill', paths: { cues: 'cues.json', clips: 'clips', sounds: 'sounds' }, layers: [], loop_cues: [], ticks: [] } as never, table: table as never, loaded: null,
       data: data as never, recorded: data as never, items: buildItems(data as never), cur: 0, pcm: { b: new Float32Array(1600).fill(1) }, sfx: { Bite: { duration: 0.1 } as AudioBuffer } })
     const runtime = new SceneRuntime(), tick = () => (runtime as unknown as { tick(): void }).tick()

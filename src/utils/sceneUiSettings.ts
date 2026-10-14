@@ -1,5 +1,5 @@
 /**
- * Scene tab UI preferences (dock layout, PC sound, haptic lead, loop, send haptics, lead-in before a mark). Kept in
+ * Scene tab UI preferences (dock layout, PC sound, loop, send haptics, lead-in before a mark). Kept in
  * three places like the editor's: localStorage, `Saved/HapticViewer/studio-scene-ui.json`
  * in the opened game project, and a user-exported JSON file. "Send haptics" is on by
  * default and keeps its last state across reloads.
@@ -10,8 +10,6 @@ export const SCENE_UI_STORAGE_KEY = 'hapbeat-scene-settings'
 export interface SceneUiSettings {
   /** Play cue sounds on the PC (Web Audio). */
   pcSound: boolean
-  /** Haptics are sent this much earlier than the video (ms; raise it when haptics feel late). */
-  hapticLeadMs: number
   /** Loop the selected clip. */
   loop: boolean
   /** Send haptics to the devices during Scene playback (on by default; kept across reloads). */
@@ -22,7 +20,7 @@ export interface SceneUiSettings {
   dockLayout: Record<string, unknown> | null
 }
 
-export const DEFAULT_SCENE_UI: SceneUiSettings = { pcSound: true, hapticLeadMs: 0, loop: true, sendHaptics: true, leadSec: 1, dockLayout: null }
+export const DEFAULT_SCENE_UI: SceneUiSettings = { pcSound: true, loop: true, sendHaptics: true, leadSec: 1, dockLayout: null }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const isDockLayout = (value: unknown): value is Record<string, unknown> => isRecord(value) && isRecord(value.grid) && isRecord(value.panels)
@@ -33,7 +31,6 @@ export function sanitizeSceneUi(value: unknown): SceneUiSettings {
   const d = DEFAULT_SCENE_UI
   return {
     pcSound: typeof v.pcSound === 'boolean' ? v.pcSound : d.pcSound,
-    hapticLeadMs: typeof v.hapticLeadMs === 'number' && Number.isFinite(v.hapticLeadMs) ? Math.max(-200, Math.min(400, v.hapticLeadMs)) : d.hapticLeadMs,
     loop: typeof v.loop === 'boolean' ? v.loop : d.loop,
     sendHaptics: typeof v.sendHaptics === 'boolean' ? v.sendHaptics : d.sendHaptics,
     leadSec: typeof v.leadSec === 'number' && Number.isFinite(v.leadSec) ? Math.max(0, Math.min(10, v.leadSec)) : d.leadSec,

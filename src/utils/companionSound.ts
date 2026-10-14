@@ -27,7 +27,7 @@ export class CompanionSound {
   get loops() { return !!this.source?.loop }
   /**
    * (Re)starts from `timeSec` of the playback (nothing past the end of a non-looping sound). `leadSec`: the haptic lead
-   * (scene hapticLeadMs) — the sound sits that much later on the playback (> 0: it waits; < 0: it starts part way).
+   * (−this PC's offset, plus the sync shift) — the sound sits that much later on the playback (> 0: it waits; < 0: it starts part way).
    */
   play(timeSec: number, leadSec = 0) {
     this.stop()

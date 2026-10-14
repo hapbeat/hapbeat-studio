@@ -15,8 +15,8 @@ import { scenePause } from '@/utils/editorSceneSync'
 import { useEditor } from './editorContext'
 import { laneLine, lanePxPerSec, laneX, type SoundLane } from '@/utils/soundLane'
 import { SOUND_LANE_MAX, SOUND_LANE_MIN } from '@/utils/editorUiSettings'
-import { useSceneSettings } from '@/stores/sceneSettings'
-import { NumberField } from '@/components/scene/SceneCuePanels'
+import { usePcTiming } from '@/stores/pcTiming'
+import { PcOffsetField } from '@/components/common/PcTiming'
 import type { LoopStretch } from '@/utils/loopStretch'
 import { foldTime, unfoldTime, type FoldView } from '@/utils/shownLayout'
 import { kindColor } from '@/utils/kindColors'
@@ -348,8 +348,8 @@ const HAPTIC_MIN = 100
 /**
  * The PC sound above the haptic, `height` px (the editor setting; it changes only by dragging the border, never with
  * what the lane shows): the lane's samples as a line, like a file drawn alone (laneLine, the same stroke and centre
- * line as renderSampleWaveform), at the haptic lane's scroll and zoom; the playhead across it, a mark where the haptic
- * lead puts the sound's 0, and the lead (scene hapticLeadMs) to edit.
+ * line as renderSampleWaveform), at the haptic lane's scroll and zoom; the playhead across it, a mark where this PC's
+ * offset puts the sound's 0, the offset to edit (PcOffsetField) and the sync points (SyncFields).
  */
 function SoundLaneView({ lane, height: laneHeight, viewStart, zoom, duration, time }: { lane: SoundLane; height: number; viewStart: number; zoom: number; duration: number; time: number }) {
   const { t } = useI18n()
@@ -357,7 +357,7 @@ function SoundLaneView({ lane, height: laneHeight, viewStart, zoom, duration, ti
   const canvas = useRef<HTMLCanvasElement>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
   const width = size.width
-  const setting = useSceneSettings(s => s.hapticLeadMs)
+  const setting = usePcTiming(s => s.offsetMs)
   useEffect(() => {
     const element = box.current
     if (!element) return
@@ -392,15 +392,14 @@ function SoundLaneView({ lane, height: laneHeight, viewStart, zoom, duration, ti
   return <div className="editor-sound-lane" style={{ height: laneHeight }}>
     <div className="editor-lane-header">
       <span className="editor-lane-label sound"><SoundIcon size={14} decorative />{t('editor.lane.sound')}</span>
-      <label className="editor-lane-lead" title={t('editor.lane.leadHint')}>{t('editor.lane.lead')}
-        <NumberField value={setting} step={5} min={-200} max={400} label={t('editor.lane.lead')} onCommit={x => useSceneSettings.getState().update({ hapticLeadMs: Math.max(-200, Math.min(400, x)) })} /> ms</label>
+      <PcOffsetField />
       {/* Fixed width: switching applied / not applied never moves the header. */}
-      <span className="editor-lane-status" role="status">{lane.leadMs || setting === 0 ? t('editor.lane.applied', { ms: signed(lane.leadMs) }) : t('editor.lane.notApplied')}</span>
+      <span className="editor-lane-status" role="status">{lane.leadMs || setting === 0 ? t('editor.lane.applied', { ms: signed(-lane.leadMs) }) : t('editor.lane.notApplied')}</span>
       {lane.sync && <SyncFields sync={lane.sync} />}
     </div>
     <div ref={box} className="editor-lane-wave">
       <canvas ref={canvas} />
-      {lane.leadMs !== 0 && mark >= 0 && mark <= width && <div className="editor-lane-lead-mark" style={{ left: mark }} title={t('editor.lane.applied', { ms: signed(lane.leadMs) })} />}
+      {lane.leadMs !== 0 && mark >= 0 && mark <= width && <div className="editor-lane-lead-mark" style={{ left: mark }} title={t('editor.lane.applied', { ms: signed(-lane.leadMs) })} />}
       {head >= 0 && head <= width && <div className="editor-lane-playhead" style={{ left: head }} />}
       {/* The sound's sync point, drawn where it meets the haptic's (the sound is placed so). */}
       {lane.sync && lane.sync.starts.map((start, i) => <SyncLine key={i} side={lane.sync!.sound} x={laneX(start + lane.sync!.haptic.ms / 1000, viewStart, px)} top={0} height={size.height} pxPerSec={px} width={width} label={t('editor.sync.sound')} />)}
