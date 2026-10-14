@@ -974,6 +974,11 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 .editor-lane-wave canvas { display: block; width: 100%; height: 100%; }
 .editor-lane-playhead { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid #fff; pointer-events: none; }
 .editor-lane-lead-mark { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed #fbbf24; pointer-events: none; }
+/* The border between the sound lane and the haptic: drag (or ↑ / ↓) to share the height between them. Above the pointer layer. */
+.editor-lane-split { position: absolute; left: 0; right: 0; height: 9px; z-index: 6; cursor: row-resize; touch-action: none; }
+.editor-lane-split::after { content: ''; position: absolute; left: 0; right: 0; top: 4px; border-top: 1px solid transparent; }
+.editor-lane-split:hover::after, .editor-lane-split:focus-visible::after { border-top: 2px solid var(--accent-light); }
+.editor-lane-split:focus-visible { outline: none; }
 /* Focus frame of every editor dock panel (EditorDockLayout PanelFrame): always reserved (no layout shift), coloured while the panel has focus. Drawn above the panel's own backgrounds. */
 .editor-dock-panel { position: relative; height: 100%; min-height: 0; box-sizing: border-box; overflow: hidden; }
 .editor-dock-panel:focus { outline: none; }

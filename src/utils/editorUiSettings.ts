@@ -16,11 +16,15 @@ export type ClipGroupBy = 'project' | 'source'
 export interface TrialSceneChoice { project: string; file: string }
 /** An editor clip / AI candidate decided as an event's sound or haptic (clip-list badge). */
 export interface EventMark { project: string; event: string; target: 'sound' | 'haptic' }
+/** Bounds of the sound lane's height (px): its header and a readable line stay; the haptic keeps at least 100 px. */
+export const SOUND_LANE_MIN = 48, SOUND_LANE_MAX = 600
 export interface EditorUiSettings {
   loop: boolean
   loopDelay: number
-  /** Waveform display height in px. */
+  /** Waveform display height in px (the haptic's, under the sound lane when both show). */
   height: number
+  /** Height in px of the sound lane above the haptic (a haptic audition with sounds); its border with the haptic is dragged. */
+  soundLaneHeight: number
   /** PC audio muted during editor playback. */
   muted: boolean
   /** Stream haptics to the selected devices during editor playback (off = PC-only audition). Kit is unaffected. */
@@ -78,7 +82,7 @@ export interface EditorUiSettings {
 }
 
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
-  loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
+  loop: false, loopDelay: 0, height: 180, soundLaneHeight: 84, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
   sceneLeadSec: 1, scenePostRollSec: 1, sceneContext: true, eventGroupEdits: {}, trialScenes: {}, clipScenes: {}, eventMarks: {}, reservesOpen: true, materialsOpen: true, groupPlayback: true, placeAtFirings: false, candidateSounds: {}, materialLinks: {}, hapticOnPc: false, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
 }
@@ -152,6 +156,7 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     loop: typeof v.loop === 'boolean' ? v.loop : d.loop,
     loopDelay: clamp(v.loopDelay, 0, 60, d.loopDelay),
     height: clamp(v.height, 100, 700, d.height),
+    soundLaneHeight: clamp(v.soundLaneHeight, SOUND_LANE_MIN, SOUND_LANE_MAX, d.soundLaneHeight),
     muted: typeof v.muted === 'boolean' ? v.muted : d.muted,
     sendHaptics: typeof v.sendHaptics === 'boolean' ? v.sendHaptics : d.sendHaptics,
     clipThumbnails: typeof v.clipThumbnails === 'boolean' ? v.clipThumbnails : d.clipThumbnails,

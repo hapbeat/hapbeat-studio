@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { FiringScheduler, type AudioContextLike } from './firingScheduler'
 import { CompanionSound, type SoundSource } from './companionSound'
-import { laneColumns, lanePxPerSec, laneX, leadFirings, mixLane, soundLaneParts, type LaneBuffer } from './soundLane'
+import { laneLine, lanePxPerSec, laneX, leadFirings, mixLane, soundLaneParts, type LaneBuffer } from './soundLane'
 
 /** A mono buffer with one full-scale sample at `peakSec`. */
 function click(durationSec: number, peakSec: number, sampleRate = 48000): LaneBuffer & { duration: number } {
@@ -61,15 +61,20 @@ describe('sound lane (stacked above the haptic, same time axis)', () => {
     expect(soundLaneParts({ picked: { buffer: sound, volume: 0.5 }, firings: null }, -0.01)).toEqual([{ atSec: -0.01, buffer: sound, gain: 0.5, loop: false }])
     expect(soundLaneParts({ picked: null, firings: null }, 0.02)).toEqual([])
   })
-  it('a sound peak and a haptic peak at the same time land in the same pixel column', () => {
+  it('a sound peak and a haptic peak at the same time land at the same x', () => {
     // Haptic peaks 2/121/241/360 ms; the sound placed 3 ms earlier is drawn 3 ms earlier at any zoom / scroll.
     const width = 800, duration = 0.5, zoom = 4000, viewStart = 0.1
     const px = lanePxPerSec(zoom, width, duration)
     expect(px).toBe(4000)
     expect(laneX(0.121, viewStart, px)).toBeCloseTo(84, 6)
-    const lane = mixLane([{ atSec: 0, buffer: click(0.5, 0.121), gain: 1 }], duration, 8000)
-    const cols = laneColumns(lane, 8000, viewStart, px, width)
-    expect(cols.findIndex(([, hi]) => hi > 0.5)).toBe(Math.round(laneX(0.121, viewStart, px)))
+    const lane = mixLane([{ atSec: 0, buffer: click(0.5, 0.121), gain: 1 }], duration)
+    const peak = laneLine(lane, 48000, viewStart, px, width).find(p => p.value > 0.5)!
+    expect(peak.x).toBeCloseTo(laneX(0.121, viewStart, px), 6)
+    // Zoomed out (many samples per pixel) the peak is still drawn, at its own x; the line starts at the view's start.
+    const wide = laneLine(lane, 48000, 0, lanePxPerSec(1, 800, duration), 800)
+    expect(wide.find(p => p.value > 0.5)!.x).toBeCloseTo(laneX(0.121, 0, 1600), 6)
+    expect(wide[0]).toEqual({ x: 0, value: 0 })
+    expect(laneLine(lane, 48000, 1, px, width)).toEqual([])
     // A short buffer is stretched to the width, like WaveSurfer.
     expect(lanePxPerSec(1, 800, 0.5)).toBe(1600)
   })

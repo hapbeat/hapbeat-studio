@@ -1157,6 +1157,7 @@ export const messages = defineMessages({
   'editor.shown.placeHint': { ja: 'オフ：素材ファイル 1 本を、そのままの長さで表示します。オン：代表場面の発生に合わせて並べて表示します（ループ cue は録画の強さで連続表示）。試聴はどちらでも場面のタイミングで鳴ります', en: 'Off: the material file is shown once at its own length. On: it is shown placed at the firings of the representative scene (a loop cue: continuous, at the recorded strength). Auditions play at the scene timing either way.' },
   'editor.shown.loop': { ja: 'ループ（素材 {sec} s を繰り返し、強さは録画のレベル）', en: 'Loop (material {sec} s repeated, strength from the recorded level)' },
   'editor.lane.sound': { ja: '音（PC）', en: 'Sound (PC)' },
+  'editor.lane.resize': { ja: '音と触覚の境界：ドラッグ（または ↑ / ↓）で 2 つの高さの配分を変えます', en: 'Border between sound and haptic: drag (or ↑ / ↓) to share the height between them.' },
   'editor.lane.haptic': { ja: '触覚（デバイス）', en: 'Haptics (device)' },
   'editor.lane.lead': { ja: '触覚の送り出し', en: 'Haptic send-ahead' },
   'editor.lane.leadHint': { ja: 'シーンタブの「触覚の先行」と同じ設定（ms）。正の値 = 触覚をその分早く送り出す：PC の音をその分遅らせて再生し、上の音の波形もその分右へずらして表示する（負の値 = 音を早め、音の頭が欠ける）。触覚が音より遅れて感じたら増やす。デバイスへ送っている間だけ適用', en: 'The same setting as the Scene tab’s “Haptic lead” (ms). Positive = haptics are sent that much earlier: the PC sound plays that much later and the sound lane above is drawn that much to the right (negative = the sound earlier, its start cut). Raise it when haptics feel late against the sound. Applied only while sending to devices.' },

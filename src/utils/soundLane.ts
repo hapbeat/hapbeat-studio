@@ -13,8 +13,8 @@ export interface LanePart { atSec: number; buffer: LaneBuffer; gain: number; loo
 /** The lane as drawn: mono samples at `rate` on the playback's axis; `leadMs` = the haptic lead applied (0 = none). */
 export interface SoundLane { data: Float32Array; rate: number; leadMs: number }
 
-/** Sample rate of the drawn lane (a shape to read timing from, not audio). */
-export const LANE_RATE = 8000
+/** Sample rate of the drawn lane: the rate of the materials, so the lane's line looks like the sound drawn alone. */
+export const LANE_RATE = 48000
 
 /** Firings `leadSec` later on the playback (the haptic lead applied to the PC sounds; the same list when 0). */
 export function leadFirings<F extends { atSec: number }>(firings: readonly F[], leadSec: number): F[] {
@@ -38,7 +38,10 @@ export function mixLane(parts: readonly LanePart[], durationSec: number, rate = 
     const b = p.buffer, n = b.numberOfChannels, len = Math.floor(b.duration * b.sampleRate)
     if (!len || !n) continue
     const channels = Array.from({ length: n }, (_, c) => b.getChannelData(c))
-    for (let i = 0; i < out.length; i++) {
+    // Only the samples the part covers (a looped part: all of them); the edges are checked per sample below.
+    const from = p.loop ? 0 : Math.max(0, Math.floor(p.atSec * rate) - 1)
+    const to = p.loop ? out.length : Math.min(out.length, Math.ceil((p.atSec + len / b.sampleRate) * rate) + 1)
+    for (let i = from; i < to; i++) {
       let k = Math.round((i / rate - p.atSec) * b.sampleRate)
       if (p.loop) k = ((k % len) + len) % len
       else if (k < 0 || k >= len) continue
@@ -56,14 +59,26 @@ export const lanePxPerSec = (zoom: number, width: number, durationSec: number) =
 /** x (px) of time `sec` in a lane scrolled to `viewStartSec`. */
 export const laneX = (sec: number, viewStartSec: number, pxPerSec: number) => (sec - viewStartSec) * pxPerSec
 
-/** Min / max of the lane per pixel column 0..width-1, from `viewStartSec` at `pxPerSec` (0, 0 outside the lane). */
-export function laneColumns(data: Float32Array, rate: number, viewStartSec: number, pxPerSec: number, width: number): [number, number][] {
-  const cols: [number, number][] = []
-  for (let x = 0; x < width; x++) {
-    const a = Math.max(0, Math.floor((viewStartSec + x / pxPerSec) * rate)), b = Math.min(data.length, Math.max(a + 1, Math.floor((viewStartSec + (x + 1) / pxPerSec) * rate)))
-    let lo = 0, hi = 0
-    for (let i = a; i < b; i++) { const v = data[i]; if (v < lo) lo = v; if (v > hi) hi = v }
-    cols.push([lo, hi])
+/**
+ * The lane as a line over pixels 0..width, from `viewStartSec` at `pxPerSec` — drawn like the waveform of a file alone
+ * (editorWaveform sampleLine): per pixel column the first, lowest, highest and last sample in time order, so brief
+ * peaks of either sign stay; zoomed in to a few samples per pixel, every sample. Nothing before 0 or after the end.
+ */
+export function laneLine(data: Float32Array, rate: number, viewStartSec: number, pxPerSec: number, width: number): { x: number; value: number }[] {
+  const points: { x: number; value: number }[] = []
+  const first = Math.max(0, Math.floor(viewStartSec * rate)), last = Math.min(data.length - 1, Math.ceil((viewStartSec + width / pxPerSec) * rate))
+  const x = (i: number) => (i / rate - viewStartSec) * pxPerSec
+  if (last < first || width <= 0) return points
+  if (rate / pxPerSec <= 4) {
+    for (let i = first; i <= last; i++) points.push({ x: x(i), value: data[i] })
+    return points
   }
-  return cols
+  for (let col = Math.floor(x(first)); col <= Math.ceil(x(last)); col++) {
+    const a = Math.max(first, Math.floor((viewStartSec + col / pxPerSec) * rate)), b = Math.min(last + 1, Math.floor((viewStartSec + (col + 1) / pxPerSec) * rate))
+    if (b <= a) continue
+    let min = a, max = a
+    for (let i = a + 1; i < b; i++) { if (data[i] < data[min]) min = i; if (data[i] > data[max]) max = i }
+    for (const i of [...new Set([a, min, max, b - 1])].sort((p, q) => p - q)) points.push({ x: x(i), value: data[i] })
+  }
+  return points
 }
