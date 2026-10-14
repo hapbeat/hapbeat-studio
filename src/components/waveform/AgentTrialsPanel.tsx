@@ -493,7 +493,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
         }
         const sounding = active && (playing || pending)
         return <article key={requested.id} className={`agent-candidate ${target} ${active ? 'auditioning' : ''} ${sounding ? 'playing' : ''} ${buffer ? 'selectable' : ''}`} aria-current={active || undefined} onClick={select}
-          {...cardProps(() => { if (buffer && !active) onAudition({ trialId: trial.id, candidateId: requested.id }, buffer) })} tabIndex={0} data-trial-id={trial.id} data-candidate-id={requested.id}>
+          {...cardProps(() => { if (buffer && !active) onAudition({ trialId: trial.id, candidateId: requested.id }, buffer) })} data-trial-id={trial.id} data-candidate-id={requested.id}>
           {/*
             One grid, laid out by the card's own width (container query, not the viewport):
             narrow — head / meta (waveform, ★) / axes / notes; wide — head | meta, axes | notes.

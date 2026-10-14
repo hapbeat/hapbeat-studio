@@ -1,4 +1,4 @@
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+import type { FocusEvent as ReactFocusEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { isTypingTarget } from '@/utils/playbackShortcut'
 
 /**
@@ -23,13 +23,29 @@ export function stepIndex(current: number, length: number, key: string): number 
   return Math.max(0, Math.min(length - 1, current < 0 ? 0 : current + (key === 'ArrowDown' ? 1 : -1)))
 }
 
-/** A card of a list: `[data-card]`, focusable, with what selecting it does (cardRef). */
+/** A card of a list: `[data-card]`, focusable, with what selecting it does (cardProps). */
 const selects = new WeakMap<Element, () => void>()
-/** Ref + attributes for a card: `select` runs when ↑/↓ lands on it (shows it; Space then plays it). */
+const isSlider = (el: EventTarget | null) => el instanceof HTMLInputElement && el.type === 'range'
+/**
+ * Tab stops of a card: the card itself and its strength slider(s) only. Everything else inside (★, comments, buttons,
+ * selects, ▶) stays usable with the mouse but leaves the Tab order — keyboard work on a card is ↑/↓, Space, ←/→.
+ * Applied after every render of the card (its ref), so controls that appear later follow too. Tab from a field
+ * entered with a click goes on to the next stop in page order (the next card).
+ */
+function keepTabStops(card: HTMLElement) {
+  for (const el of card.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]')) {
+    if (el !== card && !isSlider(el) && el.tabIndex !== -1) el.tabIndex = -1
+  }
+}
+/**
+ * Props for a card: `select` runs when the card or its strength slider takes focus (Tab, a click, ↑/↓), so Space plays
+ * the card the keyboard is on (it shows it in the waveform panel).
+ */
 export const cardProps = (select: () => void) => ({
   'data-card': '',
-  tabIndex: -1,
-  ref: (el: HTMLElement | null) => { if (el) selects.set(el, select) },
+  tabIndex: 0,
+  ref: (el: HTMLElement | null) => { if (el) { selects.set(el, select); keepTabStops(el) } },
+  onFocus: (event: ReactFocusEvent<HTMLElement>) => { if (event.target === event.currentTarget || isSlider(event.target)) select() },
 })
 
 /**
