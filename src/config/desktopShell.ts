@@ -31,6 +31,11 @@ export interface HapbeatDesktopApi {
   shell: 'electron'
   /** Raised by the app when this API changes; check it before using calls added later. */
   apiVersion?: number
+  /**
+   * (apiVersion 2, Windows) getDisplayMedia from a click returns what the PC plays,
+   * without a picker: PC sound → Hapbeat (`systemAudioCapture`).
+   */
+  systemAudio?: boolean
   getInfo(): Promise<{ appVersion: string; platform: string; helper: DesktopHelperStatus }>
   helper: {
     status(): Promise<DesktopHelperStatus>
@@ -50,6 +55,11 @@ declare global {
 /** The app's API, or null in a browser (including a browser opened with `?shell=desktop`). */
 export function desktopApi(): HapbeatDesktopApi | null {
   return typeof window === 'undefined' ? null : window.hapbeatDesktop ?? null
+}
+
+/** The app can hand Studio what the PC plays (Windows app, apiVersion 2 and later). */
+export function desktopSystemAudio(): boolean {
+  return desktopApi()?.systemAudio === true
 }
 
 function detectDesktopShell(): boolean {

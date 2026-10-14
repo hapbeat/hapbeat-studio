@@ -11,6 +11,8 @@ import { roleBadge } from '@/utils/roleLabels'
 import { isHapbeatBoard, isKnownNonHapbeatBoard } from '@/utils/hapbeatBoard'
 import { useOtaStore, OTA_DEFAULT } from '@/stores/otaStore'
 import { UsbInfoModal } from './UsbInfoModal'
+import { SystemAudioPanel } from './SystemAudioPanel'
+import { desktopSystemAudio } from '@/config/desktopShell'
 import type { ManagerMessage } from '@/types/manager'
 import { useI18n } from '@/i18n/I18nProvider'
 
@@ -700,6 +702,8 @@ export function DeviceList({ hapbeatOnly = false, selectionScope = 'manage' }: D
         )}
       {isManageScope && <UsbPortsSection />}
       </div>
+      {/* Desktop app (Windows): PC sound → the chosen devices. */}
+      {isManageScope && desktopSystemAudio() && <SystemAudioPanel />}
     </aside>
   )
 }
