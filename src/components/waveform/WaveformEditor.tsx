@@ -46,7 +46,8 @@ import { unfoldTime, type FoldView, type ShownLayout } from '@/utils/shownLayout
 import { sceneStopSec } from '@/utils/sceneStop'
 import { contextHapticParts, renderContextLoops } from '@/utils/trialContext'
 import { useSceneSettings } from '@/stores/sceneSettings'
-import { LANE_RATE, mixLane, soundLaneParts, type SoundLane } from '@/utils/soundLane'
+import { LANE_RATE, mixLane, soundLaneParts, syncShiftSec, type SoundLane } from '@/utils/soundLane'
+import { useSyncView } from './SyncPoints'
 import { usePageVisible } from '@/hooks/usePageVisible'
 import { ratingSavesInFlight } from '@/utils/ratingSaveProgress'
 import { selectionAfterShow } from '@/utils/shownSelection'
@@ -245,14 +246,18 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const hapticAudition = (!!audition && !auditionIsSound) || (!audition && eventPreview?.target === 'haptic') || adjusting?.target === 'haptic'
   const hapticLeadMs = useSceneSettings(state => state.hapticLeadMs)
   const leadSec = hapticAudition && targets.length ? hapticLeadMs / 1000 : 0
-  useDecidedSoundSync(player, sceneSounds, leadSec)
+  // The sync points of the shown haptic and its event's sound (DEC-093): the sound plays and is drawn so they meet.
+  const sync = useSyncView({ enabled: hapticAudition && !looped, sound: sceneSounds.picked, starts: shownLayout?.starts ?? null,
+    haptic: shownBuffer ? { buffer: shownBuffer, name: audition ? null : eventPreview?.target === 'haptic' ? eventPreview.material : adjusting?.target === 'haptic' && adjusting.project === sceneLib?.project_name ? adjusting.wav : null } : null })
+  const ownSec = syncShiftSec(sync)
+  const leadIn = useDecidedSoundSync(player, sceneSounds, leadSec, ownSec)
   const soundLane = useMemo((): SoundLane | null => {
     if (!hapticAudition || !drawnBuffer) return null
     // Drawn once: the sounds from the first firing on (material 0 s), cut at the file's length.
     const offset = foldView ? unfoldTime(foldView, 0) : 0
-    const parts = soundLaneParts(sceneSounds, leadSec).map(p => ({ ...p, atSec: p.atSec - offset }))
-    return parts.length ? { data: mixLane(parts, drawnBuffer.duration), rate: LANE_RATE, leadMs: leadSec * 1000 } : null
-  }, [hapticAudition, drawnBuffer, foldView, sceneSounds, leadSec])
+    const parts = soundLaneParts(sceneSounds, leadSec, ownSec).map(p => ({ ...p, atSec: p.atSec - offset }))
+    return parts.length ? { data: mixLane(parts, drawnBuffer.duration), rate: LANE_RATE, leadMs: leadSec * 1000, sync } : null
+  }, [hapticAudition, drawnBuffer, foldView, sceneSounds, leadSec, ownSec, sync])
   useAdjustPersistence()
   // An adjusted event material: what its chain renders (live preview, or the clip without pending changes) goes back to the WAV.
   useMaterialWriteBack(previewActive ? (preview.status === 'ready' ? preview.buffer ?? null : null) : pendingChain ? null : s.clip?.buffer ?? null,
@@ -288,6 +293,8 @@ export function WaveformEditor({ active }: { active: boolean }) {
   }, [player, targetKey, send, subscribe, s.setError, t])
   // The Scene video panel's lead-in (audio / haptics start on the cue mark).
   playback.preRoll = scenePreRoll
+  // A sound placed before the haptic (its sync point) starts that much earlier instead of having its start cut.
+  playback.leadIn = leadIn
   playback.level = () => mixedRef.current ? 1 : levelRef.current
   // The group / context mix as it is now, chunk by chunk: a strength, gain or volume edited while it plays (the mix is made
   // again from the table) reaches the devices from the next chunk, not the next play. Only a mix of what the player plays.

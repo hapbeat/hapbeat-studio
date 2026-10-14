@@ -21,6 +21,7 @@ import type { LoopStretch } from '@/utils/loopStretch'
 import { foldTime, unfoldTime, type FoldView } from '@/utils/shownLayout'
 import { kindColor } from '@/utils/kindColors'
 import { HapticIcon, SoundIcon } from '@/components/common/KindIcon'
+import { SyncFields, SyncLine } from './SyncPoints'
 
 type OverviewMode = 'left' | 'right' | 'move' | 'seek'
 
@@ -227,6 +228,11 @@ export function WaveformDisplay({ original, bufferOverride, player, viewKey, tra
         onPointerUp={event => { split.current = null; if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId) }}
         onPointerCancel={() => { split.current = null }}
         onKeyDown={event => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); event.stopPropagation(); setLane(laneHeight + (event.key === 'ArrowDown' ? 10 : -10), laneHeight + height) } }} />}
+      {soundLane?.sync && ready && duration > 0 && (() => {
+        // The haptic's sync point on each drawn copy (DEC-093); the sound's line in the lane above meets it.
+        const sync = soundLane.sync, width = surface.current?.clientWidth ?? 0, px = Math.max(zoom, width / duration)
+        return sync.starts.map((start, i) => <SyncLine key={i} side={sync.haptic} x={(start + sync.haptic.ms / 1000 - viewport.start) * px} top={laneHeight} height={height} pxPerSec={px} width={width} label={t('editor.sync.haptic')} />)
+      })()}
       {placements.length > 0 && ready && duration > 0 && (() => {
         // One firing each: a line where it starts and a tint over its length, alternating so copies never read as one long file.
         const width = surface.current?.clientWidth ?? 0, px = Math.max(zoom, width / duration)
@@ -390,11 +396,14 @@ function SoundLaneView({ lane, height: laneHeight, viewStart, zoom, duration, ti
         <NumberField value={setting} step={5} min={-200} max={400} label={t('editor.lane.lead')} onCommit={x => useSceneSettings.getState().update({ hapticLeadMs: Math.max(-200, Math.min(400, x)) })} /> ms</label>
       {/* Fixed width: switching applied / not applied never moves the header. */}
       <span className="editor-lane-status" role="status">{lane.leadMs || setting === 0 ? t('editor.lane.applied', { ms: signed(lane.leadMs) }) : t('editor.lane.notApplied')}</span>
+      {lane.sync && <SyncFields sync={lane.sync} />}
     </div>
     <div ref={box} className="editor-lane-wave">
       <canvas ref={canvas} />
       {lane.leadMs !== 0 && mark >= 0 && mark <= width && <div className="editor-lane-lead-mark" style={{ left: mark }} title={t('editor.lane.applied', { ms: signed(lane.leadMs) })} />}
       {head >= 0 && head <= width && <div className="editor-lane-playhead" style={{ left: head }} />}
+      {/* The sound's sync point, drawn where it meets the haptic's (the sound is placed so). */}
+      {lane.sync && lane.sync.starts.map((start, i) => <SyncLine key={i} side={lane.sync!.sound} x={laneX(start + lane.sync!.haptic.ms / 1000, viewStart, px)} top={0} height={size.height} pxPerSec={px} width={width} label={t('editor.sync.sound')} />)}
     </div>
   </div>
 }

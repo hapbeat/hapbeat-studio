@@ -117,6 +117,43 @@ describe('editor playback routing without physical output', () => {
     expect(pc.play).toHaveBeenCalledTimes(1)
   })
 
+  it('starts the sounds of a lead-in first and the PC playback after it; Stop cancels it (DEC-093)', async () => {
+    vi.useFakeTimers(); const pc = player(), begin = vi.fn(), cancel = vi.fn()
+    const playback = new EditorPlayback(pc, vi.fn(), [], vi.fn(), vi.fn())
+    playback.leadIn = {seconds: start => start === 0 ? .12 : 0, begin, cancel}
+    const job = playback.play(0, 4)
+    await vi.advanceTimersByTimeAsync(0); expect(begin).toHaveBeenCalledWith(0, .12); expect(pc.play).not.toHaveBeenCalled(); expect(playback.pending).toBe(true)
+    await vi.advanceTimersByTimeAsync(120); await job; expect(pc.play).toHaveBeenCalledWith(0, 4); expect(cancel).not.toHaveBeenCalled()
+    const again = playback.play(0, 4); await vi.advanceTimersByTimeAsync(50); playback.stop(); await again
+    expect(cancel).toHaveBeenCalledTimes(1); expect(pc.play).toHaveBeenCalledTimes(1)
+    await playback.play(2, 4); expect(pc.play).toHaveBeenLastCalledWith(2, 4); expect(begin).toHaveBeenCalledTimes(2)
+  })
+  it('shortens the pre-roll by the lead-in (the lead-in is part of the time before the mark)', async () => {
+    vi.useFakeTimers(); const pc = player(), order: string[] = []
+    const playback = new EditorPlayback(pc, vi.fn(), [], vi.fn(), vi.fn())
+    playback.preRoll = () => ({seconds: .5, begin: () => order.push('video'), cancel: vi.fn()})
+    playback.leadIn = {seconds: () => .2, begin: () => order.push('sounds'), cancel: vi.fn()}
+    const job = playback.play(0, 4)
+    await vi.advanceTimersByTimeAsync(299); expect(order).toEqual(['video'])
+    await vi.advanceTimersByTimeAsync(1); expect(order).toEqual(['video', 'sounds'])
+    await vi.advanceTimersByTimeAsync(200); await job; expect(pc.play).toHaveBeenCalledTimes(1)
+  })
+  it('with devices: the lead-in starts at stream begin, the stream holds its data and the PC waits as long', async () => {
+    vi.useFakeTimers(); const pc = player(), begin = vi.fn(), cancel = vi.fn()
+    let options: StreamOptions | null = null
+    const stream = vi.fn(async (_: Blob, route: (m: ManagerMessage) => void, o: StreamOptions) => {
+      options = o
+      route({type: 'stream_begin', payload: {}})
+      expect(begin).toHaveBeenCalledWith(0, .1); expect(pc.play).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(100)
+      expect(pc.play).toHaveBeenCalledWith(0, 4)
+      route({type: 'stream_end', payload: {}})
+    })
+    const playback = new EditorPlayback(pc, async () => new Blob(), ['192.0.2.1'], vi.fn(), stream)
+    playback.leadIn = {seconds: () => .1, begin, cancel}
+    await playback.play(0, 4)
+    expect(options!.leadInSec).toBe(.1); expect(cancel).not.toHaveBeenCalled()
+  })
   it('plays PC only when no connected target is selected', async () => {
     const pc = player(), encode = vi.fn(), send = vi.fn(), stream = vi.fn()
     await new EditorPlayback(pc, encode, [], send, stream).toggle()

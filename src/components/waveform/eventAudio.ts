@@ -17,6 +17,8 @@ import { useAuditionPlan } from './EditorScenePanel'
 import { useAdjustingLink } from './eventEditing'
 import { decidedSoundEvents } from '@/utils/decidedSound'
 import { leadFirings } from '@/utils/soundLane'
+import { soundLeadInSec } from '@/utils/syncPoint'
+import type { PlaybackLeadIn } from '@/utils/editorPlayback'
 import { contextLoopSounds, contextReplayTime, contextSoundFirings, type ContextPlan } from '@/utils/trialContext'
 import { LoopSoundPlayer, loopSoundLevel } from '@/utils/sceneLoopSounds'
 import { renderLoopStretch, type LoopStretch } from '@/utils/loopStretch'
@@ -164,7 +166,7 @@ export function useSceneSounds(): SceneSounds {
   const firings = useMemo((): Firing[] | null => {
     if (!plan || picked?.loop || !table) return null
     const out: Firing[] = []
-    if (picked) for (const atSec of plan.targets) out.push({ buffer: picked.buffer, atSec, gain: picked.volume })
+    if (picked) for (const atSec of plan.targets) out.push({ buffer: picked.buffer, atSec, gain: picked.volume, own: true })
     // The other firings' sounds (group members and other cues alike; their haptics go with the device stream, groupPlayback).
     for (const f of groupFirings(table, plan, { event: '', target: 'haptic', material: '' }, false).sounds) { const b = buffers[f.sound]; if (b) out.push({ buffer: b, atSec: f.atSec, gain: f.gain }) }
     // The context's one-shot cues (scene.context, the 「同時」 group): their decided sounds at their firings.
@@ -190,21 +192,36 @@ const NO_SCENE_SOUNDS: SceneSounds = { picked: null, firings: null, loops: null 
  * poll every 2 s) never restart or stop what is playing (CompanionSound).
  *
  * `leadSec`: the haptic lead (scene hapticLeadMs) while the haptic goes to devices — every sound plays that much
- * later on the playback (< 0: earlier, the start cut), the same shift the sound lane draws (soundLaneParts).
+ * later on the playback (< 0: earlier), the same shift the sound lane draws (soundLaneParts). `ownSec`: the shown
+ * event's own sound (the picked one) that much more, so its sync point meets the haptic's (DEC-093, syncShiftSec).
+ *
+ * Returns the lead-in of a play (EditorPlayback.leadIn): a sound that starts before the play's start (a negative shift)
+ * starts that much before the haptic and the playback instead of having its start cut.
  */
-export function useDecidedSoundSync(player: EditorBufferPlayer, { picked, firings, loops }: SceneSounds, leadSec = 0) {
+export function useDecidedSoundSync(player: EditorBufferPlayer, { picked, firings, loops }: SceneSounds, leadSec = 0, ownSec = 0): PlaybackLeadIn {
   const muted = useEditorSettings(s => s.muted)
   const companion = useMemo(() => new CompanionSound(startOnPc), [])
   const scheduler = useMemo(() => new FiringScheduler(() => audio()), [])
   const leadRef = useRef(leadSec); leadRef.current = leadSec
-  const shifted = useMemo(() => firings && leadSec ? leadFirings(firings, leadSec) : firings, [firings, leadSec])
+  /** The picked sound's shift (CompanionSound plays only the picked sound, always the event's own). */
+  const pickedShift = useRef(leadSec + ownSec); pickedShift.current = leadSec + ownSec
+  const shifted = useMemo(() => firings && (leadSec || ownSec) ? leadFirings(firings, leadSec, ownSec) : firings, [firings, leadSec, ownSec])
+  /** What a play's lead-in reads: the sounds as they play now (null when silent). */
+  const current = useRef<{ firings: Firing[] | null; picked: SoundSource | null } | null>(null)
+  current.current = muted ? null : { firings: shifted, picked: firings ? null : picked }
+  /** The start a lead-in already started the sounds for: the playback's own start at it does not start them again. */
+  const prestarted = useRef<number | null>(null)
   // By value (see CompanionSound / FiringScheduler): recomputing the same sounds keeps them playing.
   useEffect(() => {
     scheduler.setFirings(muted || !shifted ? [] : shifted)
     companion.setSource(muted || firings ? null : picked)
   }, [companion, scheduler, muted, shifted, firings, picked?.buffer, picked?.volume, picked?.loop])
   useEffect(() => {
-    const play = (time: number) => { companion.play(time, leadRef.current); scheduler.play(time) }
+    const play = (time: number) => {
+      const early = prestarted.current; prestarted.current = null
+      if (early !== null && Math.abs(time - early) < .005) return
+      companion.play(time, pickedShift.current); scheduler.play(time)
+    }
     const unsubs = [
       player.on('play', play),
       player.on('seeking', time => { if (player.isPlaying()) play(time) }),
@@ -215,6 +232,17 @@ export function useDecidedSoundSync(player: EditorBufferPlayer, { picked, firing
     return () => { unsubs.forEach(unsub => unsub()); companion.stop(); scheduler.stop() }
   }, [player, companion, scheduler])
   useContextLoopSounds(player, muted ? null : loops, leadRef)
+  return useMemo((): PlaybackLeadIn => ({
+    seconds: start => {
+      const c = current.current
+      if (!c) return 0
+      const sounds = c.firings ? c.firings.map(f => ({ atSec: f.atSec, durSec: f.buffer.duration }))
+        : c.picked ? [{ atSec: pickedShift.current, durSec: c.picked.buffer.duration, loop: c.picked.loop }] : []
+      return soundLeadInSec(sounds, start)
+    },
+    begin: (start, seconds) => { prestarted.current = start; companion.play(start - seconds, pickedShift.current); scheduler.play(start - seconds) },
+    cancel: () => { prestarted.current = null; companion.stop(); scheduler.stop() },
+  }), [companion, scheduler])
 }
 
 /**

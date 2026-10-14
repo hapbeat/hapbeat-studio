@@ -1,6 +1,7 @@
 import type { SceneLib } from './sceneData'
 import { isLevelMap, LEVEL_MAP_RULE, type LevelMap } from './levelMap'
 import { RAMP_CURVES, type RampCurve } from './rampCurve'
+import { SYNC_MAX_MS } from './syncPoint'
 
 /**
  * The project's cue table (`lib.paths.cues`, e.g. Safety Mill
@@ -95,9 +96,10 @@ export const sfxSounds = (sfx: CueSfx | null | undefined): string[] => !sfx ? []
 export const routeAlternates = (route: CueRoute | null | undefined): string[] => Array.isArray(route?.alternates) ? route.alternates : []
 /** A sfx's unstarred sounds (DEC-089: kept for quick swaps, never played). */
 export const sfxAlternates = (sfx: CueSfx | null | undefined): string[] => Array.isArray(sfx?.alternates) ? sfx.alternates : []
-export interface ClipEntry { intensity: number; loop: boolean; description?: string; [key: string]: unknown }
+/** `syncMs` (clips and sounds, DEC-093): the material's sync point, ms from the file start (absent = 0 in the game; see syncPoint). */
+export interface ClipEntry { intensity: number; loop: boolean; description?: string; syncMs?: number; [key: string]: unknown }
 /** A sound's base level (DEC-086): the WAV holds the shape at full scale, `intensity` how strong it is (0..1; absent = 1). */
-export interface SoundEntry { intensity: number; [key: string]: unknown }
+export interface SoundEntry { intensity: number; syncMs?: number; [key: string]: unknown }
 export interface CueTable { kit?: string; clips: Record<string, ClipEntry>; sounds?: Record<string, SoundEntry>; cues: Record<string, CueEntry>; [key: string]: unknown }
 
 /** WAV peak the materials are written at (−0.5 dBFS, DEC-086). */
@@ -185,6 +187,7 @@ export function validateCueTable(table: CueTable, ctx: CueTableContext): string[
     if (!clipRe.test(name)) err.push(`clip name ${name} must match ${lib.clip_name}`)
     if (!inRange(c.intensity, 0, 1)) err.push(`clip ${name}: intensity must be 0..1`)
     if (typeof c.loop !== 'boolean') err.push(`clip ${name}: loop must be true/false`)
+    if (c.syncMs !== undefined && !inRange(c.syncMs, 0, SYNC_MAX_MS)) err.push(`clip ${name}: syncMs must be a number of ms ≥ 0`)
     if (!ctx.clipFiles.has(name)) err.push(`clip ${name}: ${lib.paths.clips}/${name}.wav missing`)
   }
   const sounds = table.sounds as unknown
@@ -195,6 +198,7 @@ export function validateCueTable(table: CueTable, ctx: CueTableContext): string[
       for (const [name, entry] of Object.entries(sounds)) {
         if (!soundRe.test(name)) err.push(`sound name ${name} must match ${lib.sound_name}`)
         if (!isRecord(entry) || !inRange(entry.intensity, 0, 1)) err.push(`sound ${name}: intensity must be 0..1`)
+        else if (entry.syncMs !== undefined && !inRange(entry.syncMs, 0, SYNC_MAX_MS)) err.push(`sound ${name}: syncMs must be a number of ms ≥ 0`)
         if (!ctx.soundFiles.has(name)) err.push(`sound ${name}: ${lib.paths.sounds}/${name}.wav missing`)
       }
     }

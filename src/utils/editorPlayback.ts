@@ -15,6 +15,12 @@ interface Player {
  * `begin` is called when the lead-in starts, `cancel` when Stop interrupts it.
  */
 export interface PlaybackPreRoll { seconds: number; begin: (start: number) => void; cancel: () => void }
+/**
+ * Sounds that start before the play's start (a sound moved earlier than the haptic, DEC-093): `seconds(start)` is how
+ * long before the haptic and the playback they must start (0 = none); `begin` starts them that early, `cancel` stops
+ * them when Stop interrupts the lead-in. The haptic stream and the playback start `seconds` later, so nothing is cut.
+ */
+export interface PlaybackLeadIn { seconds: (start: number) => number; begin: (start: number, seconds: number) => void; cancel: () => void }
 /** Loop repeats start at least this long apart (a near-zero range or an instant end never spins). */
 export const MIN_LOOP_PERIOD_MS = 50
 export class EditorPlayback {
@@ -28,6 +34,8 @@ export class EditorPlayback {
   samples: ((time: number, frames: number) => Float32Array | null) | null = null
   /** Read at every play; null or 0 s = start at once. */
   preRoll: (() => PlaybackPreRoll | null) | null = null
+  /** Read at every play (after the pre-roll, which it shortens: the lead-in is part of the time before the mark); null = none. */
+  leadIn: PlaybackLeadIn | null = null
   // Finish the previous stream_end before starting another clip or target set.
   private static settled: Promise<void> = Promise.resolve()
   private controller: AbortController | null = null
@@ -123,17 +131,19 @@ export class EditorPlayback {
       await unlocked
       await previous
       if (controller.signal.aborted) return
+      const leadIn = this.leadIn, leadSec = leadIn?.seconds(start) ?? 0
       const preRoll = override !== undefined ? override : this.preRoll?.()
       if (preRoll && preRoll.seconds > 0) {
         preRoll.begin(start)
-        await new Promise<void>(resolve => {
-          const timer = setTimeout(() => { controller.signal.removeEventListener('abort', abort); resolve() }, preRoll.seconds * 1000)
-          const abort = () => { clearTimeout(timer); preRoll.cancel(); resolve() }
-          controller.signal.addEventListener('abort', abort, {once: true})
-        })
+        await wait(controller.signal, Math.max(0, preRoll.seconds - leadSec), () => preRoll.cancel())
         if (controller.signal.aborted) return
       }
       if (!this.targets.length) {
+        if (leadIn && leadSec > 0) {
+          leadIn.begin(start, leadSec)
+          await wait(controller.signal, leadSec, () => leadIn.cancel())
+          if (controller.signal.aborted) return
+        }
         this.pending = false; this.changed(false)
         await this.player.play(start, end)
         return
@@ -142,16 +152,26 @@ export class EditorPlayback {
       const blob = await this.encode(range.start, range.end)
       if (controller.signal.aborted) return
       this.seek(start)
+      // The lead-in runs from the first stream_begin: the sounds start then, the haptic (the stream waits leadInSec before
+      // its data) and the playback leadSec later.
+      let leading = leadIn && leadSec > 0 ? leadIn : null, leadTimer: ReturnType<typeof setTimeout> | null = null
+      const stopLead = () => { if (leadTimer) { clearTimeout(leadTimer); leadTimer = null; leadIn?.cancel() } }
+      controller.signal.addEventListener('abort', stopLead, {once: true})
+      const go = () => {
+        this.pending = false; this.changed(false)
+        void this.player.play(start, end).catch(error => {
+          if (this.controller === controller) { this.stop(); this.failed(error) }
+        })
+      }
       await this.stream(blob, message => {
         if (controller.signal.aborted && message.type !== 'stream_end') return
         this.send({type: message.type, payload: {...message.payload, targets: this.targets}})
         if (message.type === 'stream_begin') {
-          this.pending = false; this.changed(false)
-          void this.player.play(start, end).catch(error => {
-            if (this.controller === controller) { this.stop(); this.failed(error) }
-          })
+          if (!leading) { go(); return }
+          leading.begin(start, leadSec); leading = null
+          leadTimer = setTimeout(() => { leadTimer = null; if (!controller.signal.aborted) go() }, leadSec * 1000)
         }
-      }, {signal: controller.signal, control: {consumeSeek: () => {const seek = this.seekRequest; this.seekRequest = null; return seek}, getIntensity: at => this.level?.(range.start + at) ?? 1,
+      }, {signal: controller.signal, leadInSec: leadSec, control: {consumeSeek: () => {const seek = this.seekRequest; this.seekRequest = null; return seek}, getIntensity: at => this.level?.(range.start + at) ?? 1,
         liveChunk: (at, frames) => this.samples?.(range.start + at, frames) ?? null}})
     } catch (error) {
       // The helper took the devices from this stream (audioStreamer StreamLostError): the sound plays on, the notice says why the haptics stopped.
@@ -164,4 +184,13 @@ export class EditorPlayback {
       if (this.controller === controller) {this.controller = null; this.pending = false; this.changed(false)}
     }
   }
+}
+/** Waits `seconds`, or until `signal` aborts (then `aborted` runs). */
+function wait(signal: AbortSignal, seconds: number, aborted: () => void): Promise<void> {
+  if (seconds <= 0 || signal.aborted) return Promise.resolve()
+  return new Promise<void>(resolve => {
+    const timer = setTimeout(() => { signal.removeEventListener('abort', abort); resolve() }, seconds * 1000)
+    const abort = () => { clearTimeout(timer); aborted(); resolve() }
+    signal.addEventListener('abort', abort, {once: true})
+  })
 }

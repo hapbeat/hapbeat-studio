@@ -879,13 +879,13 @@ export interface PlannedShot extends Shot { index: number; atSec: number }
  * candidates) or the one picked for an AI candidate (`prefer`), always the same, without jitter — picking among
  * the pool and the variation are for the Scene tab's playback only.
  */
-export function representativeSound<B>(table: CueTable, lib: SceneLib, names: readonly string[], buffers: Record<string, B>, prefer: string | null = null): { buffer: B; volume: number; loop: boolean } | null {
+export function representativeSound<B>(table: CueTable, lib: SceneLib, names: readonly string[], buffers: Record<string, B>, prefer: string | null = null): { buffer: B; volume: number; loop: boolean; name: string } | null {
   for (const name of names) {
     const r = resolveEventName(table, name), e = r && effectiveEvent(table, r.ref)
     // `prefer`: a sound of the event's pool picked for what is shown (an AI candidate's `sound`), else the representative.
     const sounds = sfxSounds(e?.sfx), first = prefer && sounds.includes(prefer) && buffers[prefer] ? prefer : sounds[0]
     // The editor plays a material at its base level only (DEC-086: sfx.volume is the scene multiplier).
-    if (e?.sfx && first && buffers[first]) return { buffer: buffers[first], volume: soundIntensity(table, first), loop: isLoopCue(lib, e.ref.cue) }
+    if (e?.sfx && first && buffers[first]) return { buffer: buffers[first], volume: soundIntensity(table, first), loop: isLoopCue(lib, e.ref.cue), name: first }
   }
   return null
 }

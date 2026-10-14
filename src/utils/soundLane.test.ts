@@ -79,3 +79,13 @@ describe('sound lane (stacked above the haptic, same time axis)', () => {
     expect(lanePxPerSec(1, 800, 0.5)).toBe(1600)
   })
 })
+
+describe('sync shift of the own sound (DEC-093)', () => {
+  it('moves only the own firings by the sync shift, all by the lead', () => {
+    const b = { duration: 1, sampleRate: 1000, numberOfChannels: 1, getChannelData: () => new Float32Array(1000) }
+    const moved = leadFirings([{ atSec: 1, own: true }, { atSec: 2 }], .05, -.02)
+    expect(moved[0].atSec).toBeCloseTo(1.03); expect(moved[1].atSec).toBeCloseTo(2.05)
+    expect(soundLaneParts({ picked: { buffer: b, volume: 1 }, firings: null }, 0, -.02)[0].atSec).toBeCloseTo(-.02)
+    expect(soundLaneParts({ picked: null, firings: [{ atSec: 1, buffer: b, gain: 1, own: true }] }, 0, .01)[0].atSec).toBeCloseTo(1.01)
+  })
+})

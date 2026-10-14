@@ -81,6 +81,8 @@ export interface StreamOptions {
   control?: StreamControl
   /** Stable logical source key. When supplied, decoded/resampled PCM is cached. */
   cacheKey?: string
+  /** Seconds between STREAM_BEGIN and the first DATA (the haptic starts that much later; a sound lead-in, EditorPlayback.leadIn). */
+  leadInSec?: number
   /** Helper messages. When supplied, the stream stops (StreamLostError) once the
    *  helper reports it lost its devices: `stream_displaced` by another client,
    *  or a `no_session` ack. */
@@ -161,6 +163,14 @@ export async function streamClip(
   }
   try {
     begin()
+    const leadIn = options?.leadInSec ?? 0
+    if (leadIn > 0) {
+      await delay(leadIn * 1000)
+      if (signal?.aborted) {
+        send({ type: 'stream_end', payload: { stream_id: streamId } })
+        throw abortError()
+      }
+    }
 
     // Pacing anchors. We use a movable anchor so a pause-resume or
     // seek can re-zero the wall-clock vs. audio-position relationship

@@ -6,7 +6,8 @@
  * sound that is playing alone. Before this, each poll rebuilt the source object
  * and its effect cleanup stopped the sound about a second into a 7 s roar.
  */
-export interface SoundSource { buffer: AudioBuffer; volume: number; loop?: boolean }
+/** `name`: the cue table's sound name, when it is one (its sync point, DEC-093). */
+export interface SoundSource { buffer: AudioBuffer; volume: number; loop?: boolean; name?: string }
 export interface PlayingSound { stop: () => void }
 /** Starts `source` from `offsetSec` into it, `delaySec` from now (0 = at once). */
 export type StartSound = (source: SoundSource, offsetSec: number, delaySec: number) => PlayingSound

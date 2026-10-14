@@ -8,7 +8,8 @@
  * effects re-run) keeps what is playing; a list that differs only in gains (a strength / volume edited while it
  * plays) keeps it too and gives the firings not started yet their new gain; any other change stops it.
  */
-export interface Firing<B = AudioBuffer> { atSec: number; buffer: B; gain: number }
+/** `own`: the shown event's own sound (moved by the sync points of it and the shown haptic, DEC-093). */
+export interface Firing<B = AudioBuffer> { atSec: number; buffer: B; gain: number; own?: boolean }
 
 interface SourceLike { buffer: unknown; connect(node: unknown): unknown; start(when: number, offset?: number): void; stop(): void }
 interface GainLike { gain: { value: number }; connect(node: unknown): unknown }
