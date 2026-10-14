@@ -197,7 +197,8 @@ function EventRowButton({ row, selected, onSelect, requested }: { row: EventRow;
   // 音 未定 (yellow) / 音 なし 仮 (grey outline) / 音 なし ✓ (green outline: approved as no sound) / 音 仮 (blue) / 音 OK (green);
   // — for a loop cue's sound where the project has none; 「依頼済み」 (purple) while a request to the agent for it is open. Fixed width.
   // ▲ (a fixed slot before the pills): a sound or route of its own has nothing starred, so it plays nothing (DEC-092).
-  // The side that does not hold a field (DEC-091) shows who does instead of a state: 「グループ」 / 「各強弱」 (dashed).
+  // The side that does not hold a field (DEC-091) shows who does instead of a state: 「グループ」 / 「各強弱」, faint and
+  // without the kind icon (its place kept, so nothing moves).
   const child = row.ref.variant !== null
   const badge = (kind: 'sound' | 'haptic', label: string, status: SoundStatus, asked: boolean, held: boolean) => status === 'na' ? <span className="events-badge na"><KindIcon kind={kind} size={14} decorative />{label} —</span>
     : !held ? <span className="events-badge held-elsewhere" title={t(child ? 'events.byGroup' : 'events.byEach')}><KindIcon kind={kind} size={14} decorative />{label} {t(child ? 'events.byGroup.short' : 'events.byEach.short')}</span>
@@ -282,7 +283,7 @@ function SoundSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sce
   // The material lists fold together (editor setting, open by default; the heading line stays).
   const [open, setOpen] = useMaterialsOpen()
   return <section className="events-sec">
-    <h4 className="events-sec-head"><Fold open={open} set={setOpen} /><SoundIcon decorative />{t('events.sound')}{allowed && (held ? <><ReviewToggle e={e} field="sfx" edit={edit} /><DecisionBar table={table} e={e} field="sfx" edit={edit} /></>
+    <h4 className={`events-sec-head ${allowed && !held ? 'held-elsewhere' : ''}`}><Fold open={open} set={setOpen} /><SoundIcon decorative />{t('events.sound')}{allowed && (held ? <><ReviewToggle e={e} field="sfx" edit={edit} /><DecisionBar table={table} e={e} field="sfx" edit={edit} /></>
         : <HeldBy table={table} e={e} field="sfx" edit={edit} buttonClass="agent-icon-btn" />)}
       {/* Ask for (more) sound candidates; after checking the sound (OK): on to the haptic — also for a cue without a sound. */}
       {(held || !allowed) && <span className="events-haptic-request"><button type="button" className="agent-icon-btn" title={t('events.soundRequest.hint')}
@@ -326,7 +327,7 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
   const free = positionsForCue(lib, e.ref.cue).some(a => !e.haptics.some(r => r.at === a))
   const describe = useDescribeMaterial()
   return <section className="events-sec">
-    <h4 className="events-sec-head"><Fold open={hOpen} set={setHOpen} /><HapticIcon decorative />{t('events.haptic')}{held ? <><ReviewToggle e={e} field="haptics" edit={edit} /><DecisionBar table={table} e={e} field="haptics" edit={edit} /></>
+    <h4 className={`events-sec-head ${held ? '' : 'held-elsewhere'}`}><Fold open={hOpen} set={setHOpen} /><HapticIcon decorative />{t('events.haptic')}{held ? <><ReviewToggle e={e} field="haptics" edit={edit} /><DecisionBar table={table} e={e} field="haptics" edit={edit} /></>
       : <HeldBy table={table} e={e} field="haptics" edit={edit} buttonClass="agent-icon-btn" />}</h4>
     {held && <SharedWith table={table} e={e} field="haptics" />}
     {hOpen && held && <>

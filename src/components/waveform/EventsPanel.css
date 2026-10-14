@@ -54,13 +54,16 @@
 /* A request to the agent is open (remake / go to haptics). */
 .events-badge.requested { border-color: #a78bfa; color: #c4b5fd; background: rgba(167,139,250,.15); }
 /* DEC-091: the side of a cue group that does not hold the sound / haptics — no state, only who holds it (dashed, muted). */
-.events-badge.held-elsewhere { border-style: dashed; color: var(--text-muted); }
+.events-badge.held-elsewhere { border-color: transparent; background: none; box-shadow: none; color: var(--text-muted); opacity: .45; }
 .events-sec-head { display: flex; align-items: center; gap: 8px; }
 .events-sec-head > .kind-icon { margin-right: -3px; }
 /* The head line's pill and buttons are each an item of its wrapping flex line (no fixed groups): one moves to the next
    line at a time when the panel narrows. */
 .events-review, .events-decision, .events-haptic-request, .events-held { display: contents; font-weight: normal; }
-.events-held-by { padding: 0 6px; border: 1px dashed var(--border-light); border-radius: 4px; color: var(--text-secondary); font-size: 12px; white-space: nowrap; }
+.events-held-by { padding: 0 2px; color: var(--text-muted); opacity: .6; font-size: 12px; font-weight: normal; white-space: nowrap; }
+/* The side that does not hold the field: no kind icon (its place kept, nothing moves) and a faint heading; the switch stays usable. */
+.held-elsewhere > .kind-icon { visibility: hidden; }
+.events-sec-head.held-elsewhere, .scene-kind-head.held-elsewhere { color: var(--text-muted); }
 .events-shared-with { margin: 0 0 2px; }
 .events-sec-head .agent-icon-btn { flex: none; justify-content: center; white-space: nowrap; }
 .events-detail { display: flex; flex-direction: column; gap: 6px; }

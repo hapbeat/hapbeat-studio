@@ -275,7 +275,7 @@ function Sounds({ table, e, edit, allowed }: { table: CueTable; e: EffectiveEven
   const sounds = sfxSounds(e.sfx), alternates = sfxAlternates(e.sfx), own = holdsField(table, e.ref, 'sfx')
   if (!allowed) return null
   if (!own) return <div className="scene-sec">
-    <h3 className="scene-kind-head"><SoundIcon decorative />{t('events.repeat.sounds')}<HeldBy table={table} e={e} field="sfx" edit={edit} buttonClass="scene-icon-btn" /></h3>
+    <h3 className="scene-kind-head held-elsewhere"><SoundIcon decorative />{t('events.repeat.sounds')}<HeldBy table={table} e={e} field="sfx" edit={edit} buttonClass="scene-icon-btn" /></h3>
   </div>
   return <div className="scene-sec">
     <h3 className="scene-kind-head"><SoundIcon decorative />{t('events.repeat.sounds')}</h3>
@@ -305,7 +305,7 @@ function Clips({ table, e, edit }: { table: CueTable; e: EffectiveEvent; edit: E
   const lib = useSceneStore(s => s.lib)!
   const own = holdsField(table, e.ref, 'haptics')
   if (!own) return <div className="scene-sec">
-    <h3 className="scene-kind-head"><HapticIcon decorative />{t('events.repeat.clips')}<HeldBy table={table} e={e} field="haptics" edit={edit} buttonClass="scene-icon-btn" /></h3>
+    <h3 className="scene-kind-head held-elsewhere"><HapticIcon decorative />{t('events.repeat.clips')}<HeldBy table={table} e={e} field="haptics" edit={edit} buttonClass="scene-icon-btn" /></h3>
   </div>
   return <div className="scene-sec">
     <h3 className="scene-kind-head"><HapticIcon decorative />{t('events.repeat.clips')}</h3>
