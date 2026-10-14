@@ -12,7 +12,7 @@ import type { SceneLib } from '@/utils/sceneData'
 import {
   addPositionRoute, assignEventsForTrial, effectiveEvent, eventKey, listEvents, parseEventKey, removeOwnRoute, shownEventKey,
   addMaterial, removeMaterial, setStarred, trialsForEvent, updateOwnRoute,
-  resetAllReviews, setNone, setOverride, setReview, setUndecided, undecidedReserves, restoreReserve, soundFirstNote, noSoundNote,
+  resetAllReviews, setNone, setReview, setUndecided, undecidedReserves, restoreReserve, soundFirstNote, noSoundNote,
   materialPill, materialStatus, fieldOwner, holdsField, type EffectiveEvent, type EventRow, type MaterialStatus, type SoundStatus,
 } from '@/utils/cueEvents'
 import { HeldBy } from './HeldBy'
@@ -421,8 +421,9 @@ function ReviewToggle({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'h
 
 /**
  * Decided vs undecided: "None" (sfx: null / haptics: []) and "Back to undecided" (the key removed; its materials move to
- * the event's reserves, representative first, so nothing is lost) — on a cue, and on a variant while each variant holds
- * the field (DEC-091). In an older table where a variant overrides its cue, the variant goes back to the cue's instead.
+ * the event's reserves, representative first, so nothing is lost). On a variant that holds the field (DEC-091) the
+ * same removal reads "back to <cue>" while the cue has one to share (the variant shares it again), else "back to
+ * undecided".
  */
 function DecisionBar({ table, e, field, edit }: { table: CueTable; e: EffectiveEvent; field: 'sfx' | 'haptics'; edit: Edit }) {
   const { t } = useI18n()
@@ -435,15 +436,15 @@ function DecisionBar({ table, e, field, edit }: { table: CueTable; e: EffectiveE
     const settings = useEditorSettings.getState()
     settings.update({ eventReserves: addReserves(settings.eventReserves, key, moved) })
   }
-  const older = e.ref.variant !== null && fieldOwner(table, e.ref.cue, field) === 'both'
+  const sharesBack = e.ref.variant !== null && table.cues[e.ref.cue]?.[field] !== undefined
   // Fixed slots on the section's head line: a button that does not apply is hidden, not removed (nothing moves). Each
   // button of the line wraps on its own (the groups are `display: contents`).
   return <span className="events-decision">
     <button type="button" className="agent-icon-btn" style={{ visibility: isNone ? 'hidden' : 'visible' }} title={t(field === 'sfx' ? 'events.setNoneSoundHint' : 'events.setNoneHapticHint')} onClick={() => edit(tb => setNone(tb, e.ref, field))}>{t('events.setNone')}</button>
-    {/* Back to undecided; an older table's overriding variant: back to its cue's (the override removed). */}
-    {!older
-      ? <button type="button" className="agent-icon-btn" style={{ visibility: e.decided[field] && (e.ref.variant === null || e.own[field]) ? 'visible' : 'hidden' }} title={t('events.setUndecidedHint')} onClick={toUndecided}>{t('events.setUndecided')}</button>
-      : <button type="button" className="agent-icon-btn" title={t('events.backToParentHint', { parent: e.ref.cue })} onClick={() => edit(tb => setOverride(tb, e.ref, field, false))}>{t('events.backToParent', { parent: e.ref.cue })}</button>}
+    {/* Back to undecided; a variant with a cue to share: back to the cue's (its own key removed, the same edit). */}
+    <button type="button" className="agent-icon-btn" style={{ visibility: e.decided[field] && (e.ref.variant === null || e.own[field]) ? 'visible' : 'hidden' }}
+      title={sharesBack ? t('events.backToParentHint', { parent: e.ref.cue }) : t('events.setUndecidedHint')} onClick={toUndecided}>
+      {sharesBack ? t('events.backToParent', { parent: e.ref.cue }) : t('events.setUndecided')}</button>
   </span>
 }
 

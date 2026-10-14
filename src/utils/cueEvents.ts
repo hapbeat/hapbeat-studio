@@ -140,8 +140,9 @@ export function hasNoStar(e: Pick<EffectiveEvent, 'sfx' | 'haptics' | 'own'>): b
 
 /**
  * Who holds a cue's sound or haptics (DEC-091): `group` = the cue (its variants share it; also a cue without variants
- * or with it undecided), `each` = its variants (the cue has no key; a variant without one is undecided), `both` = the
- * cue and a variant (an older table: the variant overrides the cue for its situation).
+ * or with it undecided), `each` = its variants (the cue has no key, as degree variants like soft / hard are written; a
+ * variant without one is undecided), `both` = the cue as the default and some variants with their own (a situational
+ * override like T-Rex bite:tear; the others share the cue's). All three are valid.
  */
 export type FieldOwner = 'group' | 'each' | 'both'
 export function fieldOwner(table: CueTable, cue: string, field: 'sfx' | 'haptics'): FieldOwner {
@@ -150,8 +151,9 @@ export function fieldOwner(table: CueTable, cue: string, field: 'sfx' | 'haptics
   return entry[field] === undefined ? 'each' : 'both'
 }
 /**
- * Whether `ref` holds the field — its state, buttons and materials show: the cue unless each variant holds it, a
- * variant when each does (in an older table, when it writes it). The other side only says who holds it.
+ * Whether `ref` holds the field — its state, buttons and materials show: the cue unless only its variants hold it, a
+ * variant when it writes it (or, with the cue holding nothing, when its siblings do: it is undecided). The other side
+ * only says who holds it (「グループで指定」 / 「各強弱で指定」).
  */
 export function holdsField(table: CueTable, ref: EventRef, field: 'sfx' | 'haptics'): boolean {
   const owner = fieldOwner(table, ref.cue, field)
@@ -161,36 +163,41 @@ export function holdsField(table: CueTable, ref: EventRef, field: 'sfx' | 'hapti
 /** The variants of a cue as event keys (`cue:variant`, table order). */
 export const variantKeys = (table: CueTable, cue: string) => Object.keys(table.cues[cue]?.variants ?? {}).map(v => `${cue}:${v}`)
 /**
- * Where a material decided for event `key` goes (DEC-091): the cue while the group holds the field (a shared variant
- * gets no copy of its own), the variant while each holds it (the cue itself: every variant), else `key` (older tables).
+ * Where a material decided for event `key` goes (DEC-091): a variant that holds the field gets it, a shared variant's
+ * goes to its cue (it gets no copy of its own); the cue's goes to the cue, or to every variant when only they hold it.
  */
 export function ownerKeys(table: CueTable, key: string, field: 'sfx' | 'haptics'): string[] {
-  const ref = parseEventKey(key), owner = fieldOwner(table, ref.cue, field)
-  if (owner === 'group') return [ref.cue]
-  if (owner === 'each') return ref.variant !== null ? [key] : variantKeys(table, ref.cue)
-  return [key]
+  const ref = parseEventKey(key)
+  if (ref.variant === null) return fieldOwner(table, ref.cue, field) === 'each' ? variantKeys(table, ref.cue) : [ref.cue]
+  return holdsField(table, ref, field) ? [key] : [ref.cue]
 }
 const dropReview = (entry: CueEntry | CueVariant, field: 'sfx' | 'haptics') => {
   if (entry.review) { delete entry.review[field]; if (!Object.keys(entry.review).length) delete entry.review }
 }
 /**
- * "Each variant" (DEC-091): every variant gets its own copy of the cue's sound / haptics — starred and alternates, its
- * multiplier baked into the copy (as setOverride), the review kept — and the cue's goes. Null unless the group holds
- * a decided field and the cue has variants (an undecided field has nothing to copy).
+ * "Separate" for one shared variant (DEC-091): it gets its own copy of the cue's starred materials (the alternates stay
+ * with the cue — each side keeps its own; a field with nothing starred is copied whole), its multiplier baked in, the
+ * review kept. The cue keeps its own. Null unless the variant shares a decided field of its cue. "Share again" is
+ * setUndecided on the variant (its key goes; the editor keeps its materials as reserves).
  */
-export function splitField(table: CueTable, cue: string, field: 'sfx' | 'haptics'): CueTable | null {
-  const entry = table.cues[cue], names = Object.keys(entry?.variants ?? {})
-  if (!entry || !names.length || fieldOwner(table, cue, field) !== 'group' || entry[field] === undefined) return null
+export function splitField(table: CueTable, ref: EventRef, field: 'sfx' | 'haptics'): CueTable | null {
+  const entry = table.cues[ref.cue], v = variantOf(table, ref)
+  if (ref.variant === null || !entry || !v || v[field] !== undefined || entry[field] === undefined) return null
   const review = entry.review?.[field]
-  let next = table
-  for (const variant of names) next = edited(setOverride(next, { cue, variant }, field, true), { cue, variant }, v => { if (review) v.review = { ...(v.review ?? {}), [field]: review } })
-  return edited(next, { cue, variant: null }, e => { delete e[field]; dropReview(e, field) })
+  return edited(table, ref, (own, effective) => {
+    if (field === 'sfx') {
+      const sfx = effective.sfx
+      own.sfx = sfx && { ...(sfxSounds(sfx).length ? sfxWith(sfx, sfxSounds(sfx), []) : sfx), volume: clampNumber(sfx.volume * effective.scale.sfx, 0, 2) }
+    } else own.haptics = effective.haptics.map(r => ({ ...(routeClips(r).length ? routeWith(r, routeClips(r), []) : r), gain: clampNumber(r.gain * effective.scale.haptics, 0, 2) }))
+    if (review) own.review = { ...(own.review ?? {}), [field]: review }
+  })
 }
 /**
- * "The group" (DEC-091): the cue gets one sound / haptics from its variants' — the first variant's (table order) that
- * has one, every other variant's materials added as alternates so nothing is lost (a position only another variant
- * uses becomes a route with alternates only, DEC-092) — tentative, and the variants' own go. Each variant keeps its
- * loudness against the group's as its multiplier (sfxVolume / hapticsGain). Null unless each variant holds it.
+ * "Share in the group" on a cue whose variants only hold the field (DEC-091): the cue gets one sound / haptics from
+ * theirs — the first variant's (table order) that has one, every other variant's materials added as alternates so
+ * nothing is lost (a position only another variant uses becomes a route with alternates only, DEC-092) — tentative,
+ * and the variants' own go. Each variant keeps its loudness against the group's as its multiplier (sfxVolume /
+ * hapticsGain). Null unless only the variants hold it.
  */
 export function shareField(table: CueTable, cue: string, field: 'sfx' | 'haptics'): CueTable | null {
   if (!table.cues[cue] || fieldOwner(table, cue, field) !== 'each') return null

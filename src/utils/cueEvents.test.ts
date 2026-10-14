@@ -150,10 +150,10 @@ describe('decide', () => {
     expect(await nextWavName('fresh', a, existing, n => n === 'fresh')).toEqual({ name: 'fresh_2', same: false })
   })
 
-  it('assigns a rated trial to the cue, or to each listed variant when the cue is not listed', () => {
+  it('assigns a rated trial to the cue, or to each listed variant when the cue is not listed (a shared one: its cue)', () => {
     const t = v2Table(), lib = sampleLib()
     expect(assignEventsForTrial(t, lib, ['button', 'button:soft', 'grab'], 'haptic')).toEqual(['button', 'grab'])
-    expect(assignEventsForTrial(t, lib, ['button:soft', 'button:plain', 'nope', 'button:loud'], 'haptic')).toEqual(['button:soft', 'button:plain'])
+    expect(assignEventsForTrial(t, lib, ['button:soft', 'button:plain', 'nope', 'button:loud'], 'haptic')).toEqual(['button:soft', 'button'])
     expect(assignEventsForTrial(t, lib, ['feed_loop', 'grab'], 'sound')).toEqual(['grab'])
     // A loop cue's sound (rub in the T-Rex project) is assigned where the project plays loop-cue sounds.
     const loopSounds = { ...lib, loop_cue_sounds: true }
@@ -379,16 +379,24 @@ describe('the group or each variant (DEC-091)', () => {
     t.cues.button.variants = { soft: { sfxVolume: 0.5, hapticsGain: 0.5 }, hard: {} }
     return t
   }
+  /** Degree variants written one level only: soft / hard each hold the sound, the cue none. */
+  const each = () => {
+    const t = group()
+    delete t.cues.button.sfx; delete t.cues.button.review
+    t.cues.button.variants = { soft: { sfx: { sound: 'Click', volume: 0.3 } }, hard: { sfx: { sound: 'Clack', alternates: ['Click'], volume: 0.9 } } }
+    return t
+  }
 
-  it('who holds a field: the cue (shared), each variant, or both (an older table); every variant is a row', () => {
+  it('who holds a field: the cue (shared), the variants only, or the cue as default and a variant overriding; all valid', () => {
     expect(fieldOwner(group(), 'button', 'sfx')).toBe('group')
     expect([holdsField(group(), cue, 'sfx'), holdsField(group(), soft, 'sfx')]).toEqual([true, false])
-    const each = splitField(group(), 'button', 'sfx')!
-    expect(fieldOwner(each, 'button', 'sfx')).toBe('each')
-    expect([holdsField(each, cue, 'sfx'), holdsField(each, soft, 'sfx'), holdsField(each, hard, 'sfx')]).toEqual([false, true, true])
-    expect(fieldOwner(v2Table(), 'button', 'haptics')).toBe('both')
-    expect([holdsField(v2Table(), { cue: 'button', variant: 'soft' }, 'haptics'), holdsField(v2Table(), { cue: 'button', variant: 'plain' }, 'haptics')]).toEqual([true, false])
-    const rows = listEvents(each, sampleLib()).find(r => r.key === 'button')!
+    expect(fieldOwner(each(), 'button', 'sfx')).toBe('each')
+    expect([holdsField(each(), cue, 'sfx'), holdsField(each(), soft, 'sfx'), holdsField(each(), hard, 'sfx')]).toEqual([false, true, true])
+    const both = splitField(group(), soft, 'sfx')!
+    expect(fieldOwner(both, 'button', 'sfx')).toBe('both')
+    expect([holdsField(both, cue, 'sfx'), holdsField(both, soft, 'sfx'), holdsField(both, hard, 'sfx')]).toEqual([true, true, false])
+    for (const t of [group(), each(), both, v2Table()]) expect(validateCueTable(t, ctx())).toEqual([])
+    const rows = listEvents(each(), sampleLib()).find(r => r.key === 'button')!
     expect([rows.held, rows.variants.map(v => [v.key, v.held])]).toEqual([{ sound: false, haptic: true },
       [['button:soft', { sound: true, haptic: false }], ['button:hard', { sound: true, haptic: false }]]])
     expect(shownEventKey(group(), 'button:soft')).toBe('button:soft')
@@ -396,29 +404,26 @@ describe('the group or each variant (DEC-091)', () => {
     expect(shownEventKey(group(), null)).toBeNull()
   })
 
-  it('separate: each variant gets the materials (multiplier baked in, review kept), the cue none', () => {
-    const t = splitField(group(), 'button', 'sfx')!
-    expect(t.cues.button.sfx).toBeUndefined()
-    expect(t.cues.button.review).toBeUndefined()
-    expect(t.cues.button.variants).toEqual({
-      soft: { hapticsGain: 0.5, sfx: { sound: 'Click', alternates: ['Clack'], volume: 0.3 }, review: { sfx: 'approved' } },
-      hard: { sfx: { sound: 'Click', alternates: ['Clack'], volume: 0.6 }, review: { sfx: 'approved' } },
-    })
-    expect(validateCueTable(t, ctx())).toEqual([])
-    // Nothing to copy (undecided), no variants, or already separate: refused.
+  it('separate one variant: a copy of the cue\'s starred materials (multiplier baked in, review kept); the cue and the others stay', () => {
+    const t = splitField(group(), soft, 'sfx')!
+    expect(t.cues.button.sfx).toEqual(group().cues.button.sfx)
+    expect(t.cues.button.variants).toEqual({ soft: { hapticsGain: 0.5, sfx: { sound: 'Click', volume: 0.3 }, review: { sfx: 'approved' } }, hard: {} })
+    const h = splitField(group(), hard, 'haptics')!
+    expect(h.cues.button.variants!.hard.haptics).toEqual([{ clip: 'click', at: 'hand', gain: 1 }])
+    // Nothing to copy (undecided), already its own, or a cue: refused.
     const undecided = group(); delete undecided.cues.button.sfx
-    expect(splitField(undecided, 'button', 'sfx')).toBeNull()
-    expect(splitField(sampleTable(), 'button', 'sfx')).toBeNull()
-    expect(splitField(t, 'button', 'sfx')).toBeNull()
-    // "None" splits as none on each.
-    const none = group(); none.cues.button.sfx = null
-    expect(splitField(none, 'button', 'sfx')!.cues.button.variants!.hard.sfx).toBeNull()
+    expect(splitField(undecided, soft, 'sfx')).toBeNull()
+    expect(splitField(t, soft, 'sfx')).toBeNull()
+    expect(splitField(group(), cue, 'sfx')).toBeNull()
+    // Share again = its key removed.
+    expect(setUndecided(t, 'button:soft', 'sfx').cues.button.variants!.soft).toEqual({ hapticsGain: 0.5 })
   })
 
-  it('share: the first variant\'s starred play, every other material stays as alternates, loudness kept as multipliers', () => {
-    const t = splitField(splitField(group(), 'button', 'sfx')!, 'button', 'haptics')!
-    t.cues.button.variants!.hard.sfx = { sound: 'Clack', alternates: ['Click'], volume: 0.9 }
+  it('share in the group (variants only): the first variant\'s starred play, the other materials stay as alternates, loudness as multipliers', () => {
+    const t = each()
+    t.cues.button.variants!.soft.haptics = [{ clip: 'click', at: 'hand', gain: 0.5 }]
     t.cues.button.variants!.hard.haptics = [{ clip: 'thump', at: 'hand', gain: 1 }, { clip: 'click', at: 'pos_neck', gain: 0.8 }]
+    delete t.cues.button.haptics
     const s = shareField(shareField(t, 'button', 'sfx')!, 'button', 'haptics')!
     expect(s.cues.button.sfx).toEqual({ sound: 'Click', alternates: ['Clack'], volume: 0.3 })
     expect(s.cues.button.haptics).toEqual([{ clip: 'click', at: 'hand', gain: 0.5, alternates: ['thump'] }, { at: 'pos_neck', gain: 0.8, alternates: ['click'] }])
@@ -426,26 +431,28 @@ describe('the group or each variant (DEC-091)', () => {
     expect(s.cues.button.variants).toEqual({ soft: {}, hard: { sfxVolume: 2, hapticsGain: 2 } })
     expect(validateCueTable(s, ctx())).toEqual([])
     expect(shareField(group(), 'button', 'sfx')).toBeNull()
+    expect(shareField(splitField(group(), soft, 'sfx')!, 'button', 'sfx')).toBeNull()
   })
 
   it('decisions and put-backs go to whoever holds the field', () => {
     const lib = sampleLib()
     expect(ownerKeys(group(), 'button:soft', 'sfx')).toEqual(['button'])
     expect(assignEventsForTrial(group(), lib, ['button:soft'], 'sound')).toEqual(['button'])
-    const each = splitField(group(), 'button', 'sfx')!
-    expect(ownerKeys(each, 'button:soft', 'sfx')).toEqual(['button:soft'])
-    expect(ownerKeys(each, 'button', 'sfx')).toEqual(['button:soft', 'button:hard'])
-    expect(assignEventsForTrial(each, lib, ['button:hard'], 'sound')).toEqual(['button:hard'])
-    expect(assignEventsForTrial(each, lib, ['button'], 'sound')).toEqual(['button:soft', 'button:hard'])
+    const both = splitField(group(), soft, 'sfx')!
+    expect([ownerKeys(both, 'button:soft', 'sfx'), ownerKeys(both, 'button:hard', 'sfx'), ownerKeys(both, 'button', 'sfx')]).toEqual([['button:soft'], ['button'], ['button']])
+    expect(ownerKeys(each(), 'button:soft', 'sfx')).toEqual(['button:soft'])
+    expect(ownerKeys(each(), 'button', 'sfx')).toEqual(['button:soft', 'button:hard'])
+    expect(assignEventsForTrial(each(), lib, ['button:hard'], 'sound')).toEqual(['button:hard'])
+    expect(assignEventsForTrial(each(), lib, ['button'], 'sound')).toEqual(['button:soft', 'button:hard'])
     // A variant's "back to undecided" leaves it undecided while the other still holds it; the last one gives it back to the group.
-    const one = setUndecided(each, 'button:soft', 'sfx')
-    expect([fieldOwner(one, 'button', 'sfx'), one.cues.button.variants!.soft.sfx]).toEqual(['each', undefined])
+    const one = setUndecided(each(), 'button:soft', 'sfx')
+    expect([fieldOwner(one, 'button', 'sfx'), holdsField(one, soft, 'sfx'), one.cues.button.variants!.soft.sfx]).toEqual(['each', true, undefined])
     expect(fieldOwner(setUndecided(one, 'button:hard', 'sfx'), 'button', 'sfx')).toBe('group')
     // Put back into the undecided variant: it becomes its starred sound.
     expect(restoreInto(one, 'button:soft', { material: 'Clack', target: 'sound' }).cues.button.variants!.soft.sfx).toEqual({ sound: 'Clack', volume: 1 })
-    // A variant's reserve while the group holds the field goes to the cue.
+    // A shared variant's reserve goes to the cue.
     expect(restoreInto(group(), 'button:soft', { material: 'Other', target: 'sound' }).cues.button.sfx!.alternates).toEqual(['Clack', 'Other'])
-    // Adding to a variant without materials yet while each holds the field.
+    // Adding to a variant without materials yet while only the variants hold the field.
     expect(addMaterial(one, soft, 'sound', 0, 'Clack')!.cues.button.variants!.soft.sfx).toEqual({ sound: 'Clack', volume: 1 })
   })
 })

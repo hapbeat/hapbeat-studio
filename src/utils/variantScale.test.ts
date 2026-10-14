@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { effectiveEvent, fireShot, holdsField, scaleAt, MaterialPicker, setRouteClips, setVariantScale, shareField, splitField } from './cueEvents'
+import { effectiveEvent, fireShot, holdsField, scaleAt, MaterialPicker, setRouteClips, setUndecided, setVariantScale, splitField } from './cueEvents'
 import { curveAt } from './rampCurve'
 import { parseCueTable, serializeCueTable, validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
 import { mergeCueTables } from './cueTableSync'
@@ -69,15 +69,16 @@ describe('multiplier-only variants (sfxVolume / hapticsGain / rampTo)', () => {
     expect(mergeCueTables(base, ours, theirs).table.cues.button.variants!.approach).toEqual({ sfxVolume: 0.25, hapticsGain: 0.35, rampSteps: [0.3, 1] })
   })
 
-  it('separate per variant keeps how it sounded (multipliers baked in); sharing again gives the loudness back as multipliers', () => {
-    const own = splitField(splitField(approach(), 'button', 'sfx')!, 'button', 'haptics')!
+  it('separate keeps how it sounded (multipliers baked in); sharing again uses the cue\'s materials', () => {
+    const own = splitField(splitField(approach(), ref, 'sfx')!, ref, 'haptics')!
     const v = own.cues.button.variants!.approach
     expect(v.sfx).toEqual({ sound: 'Click', volume: 0.18 }); expect(v.haptics![0].gain).toBeCloseTo(0.35)
     expect(v.sfxVolume).toBeUndefined(); expect(v.hapticsGain).toBeUndefined(); expect(v.rampTo).toBeUndefined()
     expect(validateCueTable(own, ctx())).toEqual([])
-    const back = shareField(shareField(own, 'button', 'sfx')!, 'button', 'haptics')!
+    // Sharing again (its keys removed) uses button's materials with no multiplier.
+    const back = setUndecided(setUndecided(own, 'button:approach', 'sfx'), 'button:approach', 'haptics')
     expect(back.cues.button.variants!.approach).toEqual({})
-    expect(back.cues.button.sfx!.volume).toBeCloseTo(0.18)
+    expect(back.cues.button.sfx).toEqual(approach().cues.button.sfx)
     // Any edit that gives a variant its own haptics drops hapticsGain (never both).
     const t = approach(); t.cues.button.variants!.approach.haptics = [{ clip: 'click', at: 'hand', gain: 1 }]
     expect(setRouteClips(t, ref, 0, ['click', 'thump']).cues.button.variants!.approach.hapticsGain).toBeUndefined()
