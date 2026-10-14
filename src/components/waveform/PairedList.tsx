@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
-import { useToast } from '@/components/common/Toast'
 import { useSceneStore } from '@/stores/sceneStore'
 import { movePair, removeMaterial, setStarred, type EffectiveEvent } from '@/utils/cueEvents'
 import { materialIntensity, routeAlternates, routeClips, setClipIntensity, setSoundIntensity, sfxAlternates, sfxSounds, type CueTable } from '@/utils/sceneCueTable'
@@ -32,7 +31,6 @@ export function PairedList({ e, edit, onPlay, onShow, active, extra, describe }:
   describe?: (name: string) => string | null
 }) {
   const { t } = useI18n()
-  const { toast } = useToast()
   const table = useSceneStore(s => s.table)
   const titled = (base: string, name: string) => [base, describe?.(name)].filter(Boolean).join('\n')
   const sounds = sfxSounds(e.sfx), route = e.haptics[0], clips = route ? routeClips(route) : []
@@ -55,7 +53,7 @@ export function PairedList({ e, edit, onPlay, onShow, active, extra, describe }:
     : <span className={`events-pair-side ${active === name ? 'active' : ''}`}>
       <KindIcon kind={target} />
       {own(target) ? <button type="button" className="agent-icon-btn events-mat-star on" aria-pressed title={t('events.mat.starred')}
-        onClick={() => { if (!star(target, name, false)) toast(t('events.mat.lastStar'), 'warning') }}>★</button>
+        onClick={() => star(target, name, false)}>★</button>
         : <span className="events-mat-star on" aria-hidden="true">★</span>}
       {onShow ? <button type="button" className="agent-link events-pair-name" title={titled(t('events.mat.show', { name }), name)} onClick={() => onShow(target, name, route?.at)}>{name}</button>
         : <span className="events-pair-name" title={titled(name, name)}>{name}</span>}

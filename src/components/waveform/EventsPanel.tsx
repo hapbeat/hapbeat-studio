@@ -197,13 +197,16 @@ function EventRowButton({ row, selected, onSelect, requested }: { row: EventRow;
   const { t } = useI18n()
   // 音 未定 (yellow) / 音 なし 仮 (grey outline) / 音 なし ✓ (green outline: approved as no sound) / 音 仮 (blue) / 音 OK (green);
   // — for a loop cue's sound where the project has none; 「依頼済み」 (purple) while a request to the agent for it is open. Fixed width.
+  // ▲ (a fixed slot before the pills): a sound or route of its own has nothing starred, so it plays nothing (DEC-092).
   const badge = (kind: 'sound' | 'haptic', label: string, status: SoundStatus, asked: boolean) => asked ? <span className="events-badge requested" title={t('events.requested.hint')}><KindIcon kind={kind} size={14} decorative />{label} {t('events.requested')}</span>
     : status === 'na' ? <span className="events-badge na"><KindIcon kind={kind} size={14} decorative />{label} —</span>
     : <MaterialPillBadge kind={kind} status={status} label={label} />
   const child = row.ref.variant !== null
   return <button type="button" role="option" aria-selected={selected} className={`events-row ${child ? 'variant' : ''} ${selected ? 'selected' : ''}`} onClick={() => onSelect(row.key)} title={row.description ?? ''}>
     <span className="events-row-name">{child ? `${row.ref.cue} › ${row.ref.variant}` : row.key}{row.loop && <small>{t('events.loop')}</small>}</span>
-    <span className="events-row-badges">{badge('sound', t('events.badge.sound'), row.sound, requested.sound)}{badge('haptic', t('events.badge.haptic'), row.haptic, requested.haptic)}</span>
+    <span className="events-row-badges"><span className="events-row-warn" style={{ visibility: row.noStar ? 'visible' : 'hidden' }}
+      title={row.noStar ? t('events.noStar') : undefined} aria-label={row.noStar ? t('events.noStar') : undefined} aria-hidden={!row.noStar}>▲</span>
+      {badge('sound', t('events.badge.sound'), row.sound, requested.sound)}{badge('haptic', t('events.badge.haptic'), row.haptic, requested.haptic)}</span>
     {row.description && <small className="events-row-desc">{row.description}</small>}
   </button>
 }
@@ -283,7 +286,7 @@ function SoundSection({ lib, e, loop, edit }: { lib: SceneLib; e: EffectiveEvent
     <SoundRequestField cue={key} />
     {!open ? null : !allowed ? <p className="agent-muted">{t('scene.sound.loopCue')}</p> : !e.own.sfx ? <Inherited e={e} field="sfx" edit={edit} /> : <>
       {loop && <p className="agent-muted">{t('events.loopSoundHint')}</p>}
-      {!sounds.length && <p className="agent-muted">{t(noSoundNote(e))}</p>}
+      {!e.sfx && <p className="agent-muted">{t(noSoundNote(e))}</p>}
       {/* A paired cue's sounds are listed as pairs in the haptic section. */}
       {e.variation?.paired === true ? sounds.length > 0 && <p className="agent-muted">{t('events.pair.inHaptics')}</p> : <MaterialList kind="sound" items={sounds} alternates={alternates} label={t('events.sound')}
         active={[...sounds, ...alternates].find(s => previewId === `${key}|sound|${s}`) ?? null} onPlay={play} onSelect={show}
@@ -387,14 +390,20 @@ function AdjustButton({ event, target, wav }: { event: string; target: DecideTar
   return <button type="button" className="agent-icon-btn events-edit-clip" disabled={busy} title={t('events.adjustHint')} onClick={() => void open()}>{t('events.adjust')}</button>
 }
 
-/** "Tentative" ↔ "OK" of an assigned sound / haptic (decisions start tentative; saved with the table). Kept in place (hidden) while undecided. */
+/**
+ * "Tentative" ↔ "OK" of an assigned sound / haptic (decisions start tentative; saved with the table). Kept in place
+ * (hidden) while undecided; the button is as wide as its longer label (both stacked), so switching moves nothing.
+ */
 function ReviewToggle({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'haptics'; edit: Edit }) {
   const { t } = useI18n()
   const approved = e.review[field] === 'approved'
   return <span className="events-review" style={{ visibility: e.decided[field] ? 'visible' : 'hidden' }}>
     <MaterialPillBadge kind={field === 'sfx' ? 'sound' : 'haptic'} status={materialStatus(e, field)} />
     <button type="button" className="agent-icon-btn" title={t(approved ? 'events.reviewBackHint' : 'events.reviewApproveHint')}
-      onClick={() => edit(tb => setReview(tb, e.ref, field, approved ? 'tentative' : 'approved'))}>{t(approved ? 'events.reviewBack' : 'events.reviewApprove')}</button>
+      aria-label={t(approved ? 'events.reviewBack' : 'events.reviewApprove')}
+      onClick={() => edit(tb => setReview(tb, e.ref, field, approved ? 'tentative' : 'approved'))}>
+      <span className="transport-label-stack" aria-hidden="true"><span style={{ visibility: approved ? 'hidden' : 'visible' }}>{t('events.reviewApprove')}</span>
+        <span style={{ visibility: approved ? 'visible' : 'hidden' }}>{t('events.reviewBack')}</span></span></button>
   </span>
 }
 
@@ -413,7 +422,8 @@ function DecisionBar({ e, field, edit }: { e: EffectiveEvent; field: 'sfx' | 'ha
     const settings = useEditorSettings.getState()
     settings.update({ eventReserves: addReserves(settings.eventReserves, e.ref.cue, moved) })
   }
-  // Fixed slots on the section's head line: a button that does not apply is hidden, not removed (nothing moves).
+  // Fixed slots on the section's head line: a button that does not apply is hidden, not removed (nothing moves). Each
+  // button of the line wraps on its own (the groups are `display: contents`).
   return <span className="events-decision">
     <button type="button" className="agent-icon-btn" style={{ visibility: isNone ? 'hidden' : 'visible' }} title={t(field === 'sfx' ? 'events.setNoneSoundHint' : 'events.setNoneHapticHint')} onClick={() => edit(tb => setNone(tb, e.ref, field))}>{t('events.setNone')}</button>
     {/* A cue: back to undecided; a variant (child row): back to its cue's (the override removed). */}

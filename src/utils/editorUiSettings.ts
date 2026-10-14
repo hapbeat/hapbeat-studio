@@ -61,8 +61,6 @@ export interface EditorUiSettings {
   materialLinks: Record<string, MaterialLink>
   /** Haptic auditions (AI haptic candidates, event haptic materials) also play their waveform on the PC (off: devices only). */
   hapticOnPc: boolean
-  /** AI trials: saving a rating adds its ★4+ candidates to the material pool of the trial's first scene cue. */
-  autoAssignOnRating: boolean
   /** Reserves per event (a trial's first scene cue): ★3 candidates kept aside, by reference — not in the cue table, never played by the game. */
   eventReserves: Record<string, ReserveRef[]>
   /** The one-time backfill of ★3 ratings saved before reserves existed has run. */
@@ -82,7 +80,7 @@ export interface EditorUiSettings {
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, scenePostRollSec: 1, sceneContext: true, eventGroupEdits: {}, trialScenes: {}, clipScenes: {}, eventMarks: {}, reservesOpen: true, materialsOpen: true, groupPlayback: true, placeAtFirings: false, candidateSounds: {}, materialLinks: {}, hapticOnPc: false, autoAssignOnRating: true, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
+  sceneLeadSec: 1, scenePostRollSec: 1, sceneContext: true, eventGroupEdits: {}, trialScenes: {}, clipScenes: {}, eventMarks: {}, reservesOpen: true, materialsOpen: true, groupPlayback: true, placeAtFirings: false, candidateSounds: {}, materialLinks: {}, hapticOnPc: false, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -183,7 +181,6 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     materialLinks: isRecord(v.materialLinks) ? Object.fromEntries(Object.entries(v.materialLinks).filter((e): e is [string, MaterialLink] => isRecord(e[1]) && typeof e[1].project === 'string'
       && typeof e[1].event === 'string' && typeof e[1].wav === 'string' && (e[1].target === 'sound' || e[1].target === 'haptic')).slice(0, 500)
       .map(([id, l]) => [id, { project: l.project, event: l.event, target: l.target, wav: l.wav }])) : {},
-    autoAssignOnRating: typeof v.autoAssignOnRating === 'boolean' ? v.autoAssignOnRating : d.autoAssignOnRating,
     trialProjectFilter: typeof v.trialProjectFilter === 'string' && v.trialProjectFilter.length <= 200 ? v.trialProjectFilter : d.trialProjectFilter,
     trialTargetFilter: v.trialTargetFilter === 'sound' || v.trialTargetFilter === 'haptic' ? v.trialTargetFilter : '',
   }

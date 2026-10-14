@@ -350,13 +350,11 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
   /** Every change goes to the draft keeper (memory and localStorage now, the folder copy after 300 ms). */
   const edit = (update: (f: RatingForm) => RatingForm) => { const next = update(form); setForm(next); drafts.change(trial.id, next); setDirty(true); setSaveError(null) }
   const editCandidate = (cid: string, patch: Partial<CandidateRatingForm>) => edit(f => ({ ...f, candidates: { ...f.candidates, [cid]: { ...f.candidates[cid], ...patch } } }))
-  // The candidates' strengths (form values, unsaved too) for the audition gain and "→ Event" / auto-assign.
+  // The candidates' strengths (form values, unsaved too) for the audition gain, "→ Event" and the materials added on save.
   useEffect(() => {
     useEventStore.getState().setLevels(Object.fromEntries(trial.candidates.map(c => [levelKey.candidate(trial.id, c.id), form.candidates[c.id]?.intensity ?? initialIntensity(c)])))
   }, [form, trial])
   const issue = ratingFormIssue(form, trial)
-  /** The best candidate becomes the sound / haptic of the trial's events (rating save with "assign on save"). */
-  const autoAssign = useEditorSettings(s => s.autoAssignOnRating)
   /**
    * Adds the ★4+ candidates (best first, free-plan output excluded) to the trial's first scene cue, one decision each
    * (DEC-089: to its alternates; the first one is starred only while the event has nothing starred; no duplicates).
@@ -437,7 +435,6 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
     const pooled = poolCandidates(trial, body)
     for (const c of trial.candidates) if ((body.candidates[c.id]?.overall ?? 0) >= 4 && isFreePlanCandidate(c)) excluded.push({ candidate: c.id, reason: t('editor.agent.excludedFreePlan') })
     if (pooled.length && !trial.scene) excluded.push(...pooled.map(candidate => ({ candidate, reason: t('editor.agent.excludedNoScene') })))
-    else if (pooled.length && !autoAssign) excluded.push(...pooled.map(candidate => ({ candidate, reason: t('editor.agent.excludedAssignOff') })))
     else if (pooled.length) { const r = await addToPool(pooled); added = r.added; excluded.push(...r.excluded); failures.push(...r.failures) }
     // ★3: the event's reserves (by reference, in the editor settings; not the cue table).
     const reserved = trial.scene ? reserveCandidates(trial, body) : []
@@ -553,11 +550,10 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
       </fieldset>}
       {/* The comment on the whole trial: comparisons between candidates ("B is closest, heavier") — the agent's main input. */}
       <TrialComment value={form.comment} onChange={comment => edit(f => ({ ...f, comment }))} />
-      {/* One line: [Save and next] [Assign to event] (toggle) · status (the full reason on hover). Saving is the agent's cue (it watches rating.json). */}
+      {/* One line: [Save and next] · status (the full reason on hover). Saving is the agent's cue (it watches rating.json); it always
+          adds the ★4+ candidates to the trial's event (★3 to its reserves). */}
       <div className="agent-save">
         <span title={issue ? issueText : ''}><button className="apply-effects-btn" disabled={!!issue || (!dirty && !!rating)} onClick={save}>{t('editor.agent.saveNext')}</button></span>
-        {trial.scene && <button type="button" className="agent-save-toggle" aria-pressed={autoAssign} title={t('events.auto.hint')}
-          onClick={() => useEditorSettings.getState().update({ autoAssignOnRating: !autoAssign })}>{t('editor.agent.assignShort')}</button>}
         <span className={`agent-save-status ${saveError ? 'error' : !dirty && rating ? 'saved' : ''}`} role="status" title={saveStatus}>{shortStatus}</span>
       </div>
     </div>

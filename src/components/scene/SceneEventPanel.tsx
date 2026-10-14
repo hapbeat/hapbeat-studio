@@ -274,7 +274,7 @@ function Sounds({ e, edit, allowed }: { e: EffectiveEvent; edit: Edit; allowed: 
     <OverrideBar e={e} field="sfx" edit={edit} />
     {own && e.sfx && <label className="scene-row" title={t('scene.event.volumeHint')}><span className="scene-dim scene-grow">{t('scene.sound.volume')}</span>
       <NumberField value={e.sfx.volume} min={0} max={2} step={0.05} label={t('scene.sound.volume')} onCommit={x => edit(tb => setOwnSfxVolume(tb, e.ref, x))} /></label>}
-    {!sounds.length ? <div className="scene-dim">{t('events.soundNone')}</div>
+    {!sounds.length && !alternates.length ? <div className="scene-dim">{t('events.soundNone')}</div>
       : e.variation?.paired === true ? <div className="scene-dim">{t('events.pair.inHaptics')}</div>
       : <MaterialList kind="sound" items={sounds} alternates={alternates} label={t('events.repeat.sounds')}
         onStar={own ? (s, on) => edit(tb => setStarred(tb, e.ref, 'sound', 0, s, on)) : null} onRemove={own ? s => edit(tb => removeMaterial(tb, e.ref, 'sound', 0, s)) : null}

@@ -120,15 +120,25 @@ export interface EventRow {
   loop: boolean
   sound: SoundStatus
   haptic: MaterialStatus
+  /** A sound or route of its own has nothing starred (hasNoStar): ▲ in the list. */
+  noStar: boolean
   /** The cue's variants (empty for a variant row). */
   variants: EventRow[]
+}
+
+/**
+ * The event's own sound or one of its own routes has nothing starred, only alternates (DEC-092: the last ★ taken
+ * off): it plays nothing in the game. Not "none" (`sfx: null` / `haptics: []`), which the user decided.
+ */
+export function hasNoStar(e: Pick<EffectiveEvent, 'sfx' | 'haptics' | 'own'>): boolean {
+  return (e.own.sfx && !!e.sfx && !sfxSounds(e.sfx).length) || (e.own.haptics && e.haptics.some(r => !routeClips(r).length))
 }
 
 function row(table: CueTable, lib: SceneLib, ref: EventRef, variants: EventRow[]): EventRow {
   const e = effectiveEvent(table, ref)!, loop = isLoopCue(lib, ref.cue)
   return { key: eventKey(ref), ref, description: e.description, loop,
     sound: soundAllowed(lib, ref.cue) ? materialStatus(e, 'sfx') : 'na',
-    haptic: materialStatus(e, 'haptics'), variants }
+    haptic: materialStatus(e, 'haptics'), noStar: hasNoStar(e), variants }
 }
 
 /** A variant that writes its own sfx or haptics (shown in the editor as a child row of its cue; DEC-085 addendum). */
@@ -266,20 +276,24 @@ export interface HapticDecision { ref: EventRef; clip: string; /** at / gain for
 // ── Starred (played) and alternates (DEC-089) ──
 
 const uniqueNot = (list: readonly string[], starred: readonly string[]) => [...new Set(list)].filter(x => !starred.includes(x))
+/** `sound` / `sounds` (or `clip` / `clips`) for a starred list: one, several, or none at all (nothing starred, DEC-092). */
+const starredFields = (one: 'sound' | 'clip', many: 'sounds' | 'clips', starred: readonly string[]) =>
+  starred.length === 1 ? { [one]: starred[0] } : starred.length ? { [many]: [...starred] } : {}
 /**
- * A sfx playing `sounds` (one = `sound`, several = `sounds`) with `alternates` (unstarred; omitted when empty, a
- * starred name never listed there); every other field of `prev` kept, volume 1.0 when new.
+ * A sfx playing `sounds` (one = `sound`, several = `sounds`, none = only alternates: plays nothing, DEC-092) with
+ * `alternates` (unstarred; omitted when empty, a starred name never listed there); every other field of `prev` kept,
+ * volume 1.0 when new.
  */
 export function sfxWith(prev: CueSfx | null | undefined, sounds: readonly string[], alternates: readonly string[] = sfxAlternates(prev)): CueSfx {
   const { sound: _one, sounds: _many, alternates: _alts, volume, ...rest } = prev ?? { volume: 1.0 }
   const alts = uniqueNot(alternates, sounds)
-  return { ...(sounds.length === 1 ? { sound: sounds[0] } : { sounds: [...sounds] }), volume: volume ?? 1.0, ...rest, ...(alts.length ? { alternates: alts } : {}) }
+  return { ...starredFields('sound', 'sounds', sounds), volume: volume ?? 1.0, ...rest, ...(alts.length ? { alternates: alts } : {}) }
 }
-/** `route` playing `clips` (one = `clip`) with `alternates` (omitted when empty); at / gain and other fields kept. */
+/** `route` playing `clips` (one = `clip`, none = only alternates, DEC-092) with `alternates` (omitted when empty); at / gain and other fields kept. */
 export function routeWith(route: CueRoute, clips: readonly string[], alternates: readonly string[] = routeAlternates(route)): CueRoute {
   const { clip: _one, clips: _many, alternates: _alts, ...rest } = route
   const alts = uniqueNot(alternates, clips)
-  return { ...rest, ...(clips.length === 1 ? { clip: clips[0] } : { clips: [...clips] }), ...(alts.length ? { alternates: alts } : {}) }
+  return { ...rest, ...starredFields('clip', 'clips', clips), ...(alts.length ? { alternates: alts } : {}) } as CueRoute
 }
 /**
  * Where an adopted / added / put back material goes (DEC-089): to the alternates, or — when nothing is starred
@@ -461,19 +475,14 @@ function writeMaterials(table: CueTable, ref: EventRef, target: 'sound' | 'hapti
 /**
  * ★ of one material of what `ref` writes (DEC-089; `route` = the route index for a haptic): on = from the
  * alternates to the end of the starred list, off = from the starred list to the end of the alternates (what plays
- * changed: tentative). Null when nothing changes, or when it would leave nothing starred (refused: the validators
- * need a starred material; "none" is how an event is silenced).
+ * changed: tentative). The last ★ comes off too (DEC-092): the sound / route then plays nothing and the Events list
+ * marks the event (hasNoStar) — unlike "none", which is a decision. Null when nothing changes.
  */
 export function setStarred(table: CueTable, ref: EventRef, target: 'sound' | 'haptic', route: number, name: string, on: boolean): CueTable | null {
   const m = ownMaterials(table, ref, target, route)
-  if (!m || (on ? !m.alternates.includes(name) : !m.starred.includes(name) || m.starred.length === 1)) return null
+  if (!m || (on ? !m.alternates.includes(name) : !m.starred.includes(name))) return null
   return on ? writeMaterials(table, ref, target, route, [...m.starred, name], m.alternates.filter(x => x !== name), true)
     : writeMaterials(table, ref, target, route, m.starred.filter(x => x !== name), [...m.alternates, name], true)
-}
-/** True when `name` is the only starred material of what `ref` writes (its ★ cannot be taken off). */
-export function isLastStar(table: CueTable, ref: EventRef, target: 'sound' | 'haptic', route: number, name: string): boolean {
-  const m = ownMaterials(table, ref, target, route)
-  return !!m && m.starred.length === 1 && m.starred[0] === name
 }
 /**
  * "＋ add" of a material to what `ref` writes (a sound, or route `route`'s clips): to the alternates, or starred when
@@ -485,18 +494,16 @@ export function addMaterial(table: CueTable, ref: EventRef, target: 'sound' | 'h
   return placed ? writeMaterials(table, ref, target, route, placed.starred, placed.alternates, placed.starred.length !== m!.starred.length) : null
 }
 /**
- * Takes one material off what `ref` writes (a starred one or an alternate). Null when it is not there, or when it is
- * the last starred one while it cannot go (a route's last clip; a sound with alternates): unstar another or "none".
- * The last starred sound without alternates leaves no sound (`sfx: null`), as before.
+ * Takes one material off what `ref` writes (a starred one or an alternate; the last starred one too, leaving only
+ * alternates, DEC-092). The sound's last material leaves no sound (`sfx: null`), as before; a route keeps its last
+ * one (null; ✕ removes the route). Null when it is not there.
  */
 export function removeMaterial(table: CueTable, ref: EventRef, target: 'sound' | 'haptic', route: number, name: string): CueTable | null {
   const m = ownMaterials(table, ref, target, route)
-  if (!m) return null
-  if (m.alternates.includes(name)) return writeMaterials(table, ref, target, route, m.starred, m.alternates.filter(x => x !== name), false)
-  if (!m.starred.includes(name)) return null
-  const left = m.starred.filter(x => x !== name)
-  if (!left.length && (target === 'haptic' || m.alternates.length)) return null
-  return target === 'sound' ? setSfxSounds(table, ref, left) : setRouteClips(table, ref, route, left)
+  if (!m || (!m.starred.includes(name) && !m.alternates.includes(name))) return null
+  const starred = m.starred.filter(x => x !== name), alternates = m.alternates.filter(x => x !== name)
+  if (!starred.length && !alternates.length) return target === 'sound' ? setSfxSounds(table, ref, []) : null
+  return writeMaterials(table, ref, target, route, starred, alternates, false)
 }
 
 // ── Playback of v2 events (Scene tab, editor previews) ──

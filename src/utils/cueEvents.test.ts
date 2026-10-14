@@ -3,7 +3,7 @@ import {
   addEventMark, addPositionRoute, fireShot, resetAllReviews, setNone, setReview, setUndecided, addVariant, simultaneousGroups, firstFirings, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
   effectiveEvent, eventSceneCues, jitterGain, listEvents, MaterialPicker, matchesName, materialUsers, needsRouteForm, overwriteUsers,
   parseEventKey, removeVariant, representativeSound, candidateSound, hasOwnMaterials, shownEventKey, resolveEventName, cueRoutePositions, materialRoutePositions, pairedClips, setOverride, setRouteClips, setSfxSounds, setVariation, soundFirstNote, noSoundNote, trialEvent, trialsForEvent,
-  setStarred, isLastStar, removeMaterial, addMaterial, movePair, setOwnSfxVolume, setDistanceFalloff, undecidedReserves, materialPill, materialStatus,
+  setStarred, hasNoStar, removeMaterial, addMaterial, movePair, setOwnSfxVolume, setDistanceFalloff, undecidedReserves, materialPill, materialStatus,
 } from './cueEvents'
 import { validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
 import { cueVoices, tableTargets } from './sceneHaptics'
@@ -42,10 +42,10 @@ describe('cue table v2 validation', () => {
     t.cues.feed_loop.variants = { slow: { sfx: { sound: 'Click', volume: 1 } } }
     expect(validateCueTable(t, ctx())).toEqual(expect.arrayContaining([
       'button: variant name Bad-Name must match ^[a-z][a-z0-9_]*$',
-      'button:soft: a route needs exactly one of clip / clips',
+      'button:soft: a route needs one of clip / clips, not both',
       'button:soft: route clips must be a non-empty list',
       'button:soft: clip hum loop=true does not fit this cue',
-      'button:soft: sfx needs exactly one of sound / sounds',
+      'button:soft: sfx needs one of sound / sounds, not both',
       'button:plain: variation.gainJitterDb must be 0..12',
       'button:plain: variation.rateJitterPct must be 0..50',
       'button:plain: variation.pick must be random or roundRobin',
@@ -531,28 +531,73 @@ describe('starred and alternates (DEC-089)', () => {
     ]))
   })
 
-  it('★ moves a material between the starred list and the alternates; the last ★ cannot be taken off', () => {
+  it('★ moves a material between the starred list and the alternates; the last ★ comes off too (DEC-092)', () => {
     let t = setStarred(withAlts(), ref, 'sound', 0, 'Clack', true)!
     expect(t.cues.button.sfx).toEqual({ sounds: ['Click', 'Clack'], volume: 0.6 })
     t = setStarred(t, ref, 'sound', 0, 'Click', false)!
     expect(t.cues.button.sfx).toEqual({ sound: 'Clack', alternates: ['Click'], volume: 0.6 })
-    expect(setStarred(t, ref, 'sound', 0, 'Clack', false)).toBeNull()
-    expect(isLastStar(t, ref, 'sound', 0, 'Clack')).toBe(true)
     expect(setStarred(t, ref, 'sound', 0, 'Missing', true)).toBeNull()
+    expect(setStarred(t, ref, 'sound', 0, 'Click', false)).toBeNull()
     const h = setStarred(withAlts(), ref, 'haptic', 0, 'thump', true)!
     expect(h.cues.button.haptics).toEqual([{ clips: ['click', 'thump'], at: 'hand', gain: 1 }])
-    expect(setStarred(withAlts(), ref, 'haptic', 0, 'click', false)).toBeNull()
     // Changing what plays makes it tentative again.
     const approved = setReview(withAlts(), ref, 'sfx', 'approved')
     expect(setStarred(approved, ref, 'sound', 0, 'Clack', true)!.cues.button.review?.sfx).toBe('tentative')
   })
 
-  it('remove: an alternate goes; the last starred one stays while alternates remain', () => {
+  it('remove: any material goes (the last starred one leaves only alternates); a sound\'s last leaves no sound, a route keeps its last', () => {
     expect(removeMaterial(withAlts(), ref, 'sound', 0, 'Clack')!.cues.button.sfx).toEqual({ sound: 'Click', volume: 0.6 })
-    expect(removeMaterial(withAlts(), ref, 'sound', 0, 'Click')).toBeNull()
+    const unstarred = removeMaterial(withAlts(), ref, 'sound', 0, 'Click')!
+    expect(unstarred.cues.button.sfx).toEqual({ alternates: ['Clack'], volume: 0.6 })
+    expect(removeMaterial(unstarred, ref, 'sound', 0, 'Clack')!.cues.button.sfx).toBeNull()
     expect(removeMaterial(sampleTable(), ref, 'sound', 0, 'Click')!.cues.button.sfx).toBeNull()
-    expect(removeMaterial(withAlts(), ref, 'haptic', 0, 'click')).toBeNull()
+    const route = removeMaterial(withAlts(), ref, 'haptic', 0, 'click')!
+    expect(route.cues.button.haptics).toEqual([{ alternates: ['thump'], at: 'hand', gain: 1 }])
+    expect(removeMaterial(route, ref, 'haptic', 0, 'thump')).toBeNull()
     expect(removeMaterial(withAlts(), ref, 'haptic', 0, 'thump')!.cues.button.haptics).toEqual([{ clip: 'click', at: 'hand', gain: 1 }])
+  })
+
+  it('nothing starred (DEC-092): valid with alternates, plays nothing, marked in the list (not "none")', () => {
+    let t = setStarred(withAlts(), ref, 'sound', 0, 'Click', false)!
+    t = setStarred(t, ref, 'haptic', 0, 'click', false)!
+    expect(t.cues.button.sfx).toEqual({ alternates: ['Clack', 'Click'], volume: 0.6 })
+    expect(t.cues.button.haptics).toEqual([{ alternates: ['thump', 'click'], at: 'hand', gain: 1 }])
+    expect(t.cues.button.review).toEqual({ sfx: 'tentative', haptics: 'tentative' })
+    expect(validateCueTable(t, ctx())).toEqual([])
+    const e = effectiveEvent(t, ref)!
+    expect(hasNoStar(e)).toBe(true)
+    expect(materialStatus(e, 'sfx').state).toBe('set')
+    const shot = fireShot(e, false, new MaterialPicker(() => 0), () => 0.5)
+    expect([shot.sound, shot.routes]).toEqual([null, []])
+    const rows = listEvents(t, sampleLib())
+    expect(rows.find(r => r.key === 'button')!.noStar).toBe(true)
+    expect(rows.filter(r => r.noStar).map(r => r.key)).toEqual(['button'])
+    // "None" is a decision: no mark. Starring one again clears it.
+    expect(listEvents(setNone(setNone(t, ref, 'sfx'), ref, 'haptics'), sampleLib()).find(r => r.key === 'button')!.noStar).toBe(false)
+    expect(hasNoStar(effectiveEvent(setStarred(setStarred(t, ref, 'sound', 0, 'Click', true)!, ref, 'haptic', 0, 'click', true)!, ref)!)).toBe(false)
+    // One route without a ★ is enough for the mark (that route plays nothing).
+    const two = withAlts()
+    two.cues.button.haptics = [{ clip: 'click', at: 'hand', gain: 1 }, { alternates: ['thump'], at: 'hand', gain: 1 }]
+    expect(hasNoStar(effectiveEvent(two, ref)!)).toBe(true)
+  })
+
+  it('validation: nothing starred needs alternates; paired leaves out what has nothing starred', () => {
+    const t = withAlts()
+    t.cues.button.sfx = { volume: 0.6 }
+    t.cues.button.haptics = [{ at: 'hand', gain: 1 }, { alternates: [], at: 'hand', gain: 1 }]
+    expect(validateCueTable(t, ctx())).toEqual(expect.arrayContaining([
+      'button: sfx needs sound / sounds, or alternates when nothing is starred',
+      'button: a route needs clip / clips, or alternates when nothing is starred',
+    ]))
+    const p = withAlts()
+    p.cues.button.variation = { paired: true }
+    p.cues.button.sfx = { alternates: ['Click'], volume: 1 }
+    expect(validateCueTable(p, ctx()).filter(x => x.includes('paired'))).toEqual([])
+    p.cues.button.sfx = { sounds: ['Click', 'Clack'], volume: 1 }
+    p.cues.button.haptics = [{ clips: ['click', 'thump'], at: 'hand', gain: 1 }, { alternates: ['thump'], at: 'hand', gain: 1 }]
+    expect(validateCueTable(p, ctx()).filter(x => x.includes('paired'))).toEqual([])
+    p.cues.button.sfx = null
+    expect(validateCueTable(p, ctx()).filter(x => x.includes('paired'))).toEqual(['button: variation.paired: there is no sound to pair'])
   })
 
   it('add: to the alternates, starred when nothing is', () => {

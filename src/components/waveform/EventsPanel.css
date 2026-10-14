@@ -36,7 +36,9 @@
 .events-inherited { display: flex; align-items: center; gap: 8px; margin: 2px 0; color: var(--text-muted); }
 .events-row-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .events-row-name small { margin-left: 6px; font-weight: normal; color: var(--text-muted); }
-.events-row-badges { display: flex; gap: 4px; flex-shrink: 0; }
+.events-row-badges { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+/* ▲: nothing starred on a sound / route of its own (plays nothing). A fixed slot, hidden when not needed. */
+.events-row-warn { width: 1em; text-align: center; color: #e3a33a; font-size: 11px; }
 .events-row-desc { grid-column: 1 / -1; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Fixed width: the badge text changes between ✓ / 未 / — without moving the row. */
 .events-badge { display: inline-flex; align-items: center; justify-content: center; gap: 3px; white-space: nowrap; min-width: calc(7.6em + 17px); padding: 0 5px; border-radius: 4px; font-size: 11px; text-align: center; border: 1px solid var(--border-light); color: var(--text-secondary); }
@@ -54,7 +56,10 @@
 .events-badge.requested { border-color: #a78bfa; color: #c4b5fd; background: rgba(167,139,250,.15); }
 .events-sec-head { display: flex; align-items: center; gap: 8px; }
 .events-sec-head > .kind-icon { margin-right: -3px; }
-.events-review { display: inline-flex; align-items: center; gap: 4px; font-weight: normal; }
+/* The head line's pill and buttons are each an item of its wrapping flex line (no fixed groups): one moves to the next
+   line at a time when the panel narrows. */
+.events-review, .events-decision, .events-haptic-request { display: contents; font-weight: normal; }
+.events-sec-head .agent-icon-btn { flex: none; justify-content: center; white-space: nowrap; }
 .events-detail { display: flex; flex-direction: column; gap: 6px; }
 .events-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .events-detail-head strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -93,10 +98,7 @@
 .editor-event-badge.sound { border-color: var(--sound); color: var(--sound-strong); background: var(--sound-soft); }
 .editor-event-badge.haptic { border-color: var(--haptic); color: var(--haptic-strong); background: var(--haptic-soft); }
 
-.events-decision { display: inline-flex; gap: 4px; flex: none; font-weight: normal; }
-/* Fixed widths: the head line never shifts when a decision or review changes. */
-.events-review .agent-icon-btn, .events-decision .agent-icon-btn { width: 6.5em; justify-content: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.events-sec-head { flex-wrap: wrap; }
+.events-sec-head { flex-wrap: wrap; row-gap: 4px; }
 
 /* Material candidates (MaterialList): sound / haptic icon · ▶ · name (shrinks) · ★ · remove · extra — one grid row each. */
 .events-materials { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -117,7 +119,6 @@
 .events-add-material { align-self: flex-start; max-width: 100%; }
 .events-route { display: flex; flex-direction: column; gap: 2px; }
 .events-route-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
-.events-head-field { margin-left: auto; font-weight: normal; font-size: 12px; }
 /* Reserves (★3, not in the game): the material row grid, faint. */
 .events-reserves { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; opacity: .6; }
 .events-reserves:hover { opacity: .9; }
@@ -129,8 +130,6 @@
 .events-revise { grid-column: 1 / -1; display: flex; gap: 6px; align-items: center; min-width: 0; }
 .events-revise input { flex: 1; min-width: 0; }
 /* "Go to haptics" at the right end of the sound heading. */
-.events-haptic-request { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; flex: none; font-weight: normal; }
-.events-head-field + .events-haptic-request { margin-left: 8px; }
 .events-fold { flex: none; width: 18px; padding: 0; border: none; background: none; color: var(--text-secondary); cursor: pointer; }
 .events-request-send { flex: none; width: 6em; justify-content: center; }
 /* Paired cue: one line per pair — number, ▶, sound icon + sound (strength) ↔ haptic icon + clip (strength), ↑ ↓; wraps when narrow. */

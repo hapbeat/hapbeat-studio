@@ -17,10 +17,12 @@ import { RAMP_CURVES, type RampCurve } from './rampCurve'
  * per-cue `variants` (each overrides `sfx` / `haptics` / `variation` as a
  * whole, the rest is inherited from the cue), `variation` (jitter + how a
  * multi-material route / sound is picked), and multi-material `clips` on a
- * route / `sounds` on a sfx (exactly one of `clip` / `clips`, `sound` / `sounds`).
+ * route / `sounds` on a sfx (at most one of `clip` / `clips`, `sound` / `sounds`).
  * DEC-088 adds `emit` on a pulse cue (fired by the game while a loop cue runs).
  * DEC-089: only starred materials play — `sound` / `sounds` and a route's `clip` / `clips` (first = representative);
  * `alternates` on a sfx / route holds unstarred candidates (names) that are never played. Omitted when empty.
+ * DEC-092: a sfx / route may have nothing starred (only `alternates`): it plays nothing (the last ★ taken off; unlike
+ * "none", it is not a decision, and the Events list marks it).
  * DEC-090 adds `levelMap` on a loop cue's sfx / route: the input the game gives the loop (the recorded layer level) mapped to an output multiplier (see levelMap).
  */
 
@@ -243,9 +245,11 @@ function validateCueFields(err: string[], table: CueTable, ctx: CueTableContext,
   if (sfx) {
     const hasOne = sfx.sound !== undefined, hasMany = sfx.sounds !== undefined
     if (isLoopCue(lib, cue) && !lib.loop_cue_sounds) err.push(`${label}: continuous layers have no cue sound`)
-    else if (hasOne === hasMany) err.push(`${label}: sfx needs exactly one of sound / sounds`)
-    else if (hasMany && !(Array.isArray(sfx.sounds) && sfx.sounds.length > 0)) err.push(`${label}: sfx.sounds must be a non-empty list`)
-    else for (const sound of hasMany ? sfx.sounds! : [sfx.sound]) {
+    else if (hasOne && hasMany) err.push(`${label}: sfx needs one of sound / sounds, not both`)
+    // DEC-092: nothing starred is allowed while alternates remain (it plays nothing).
+    else if (!hasOne && !hasMany && !nonEmptyList(sfx.alternates)) err.push(`${label}: sfx needs sound / sounds, or alternates when nothing is starred`)
+    else if (hasMany && !nonEmptyList(sfx.sounds)) err.push(`${label}: sfx.sounds must be a non-empty list`)
+    else for (const sound of hasMany ? sfx.sounds! : hasOne ? [sfx.sound] : []) {
       if (typeof sound !== 'string' || !soundRe.test(sound) || lib.loop_sounds.includes(sound)) err.push(`${label}: bad sound ${String(sound)}`)
       else if (!ctx.soundFiles.has(sound)) err.push(`${label}: ${lib.paths.sounds}/${sound}.wav missing`)
     }
@@ -263,9 +267,10 @@ function validateCueFields(err: string[], table: CueTable, ctx: CueTableContext,
   }
   for (const r of entry.haptics ?? []) {
     const hasOne = r.clip !== undefined, hasMany = r.clips !== undefined
-    if (hasOne === hasMany) err.push(`${label}: a route needs exactly one of clip / clips`)
-    else if (hasMany && !(Array.isArray(r.clips) && r.clips.length > 0)) err.push(`${label}: route clips must be a non-empty list`)
-    else for (const clip of hasMany ? r.clips! : [r.clip]) {
+    if (hasOne && hasMany) err.push(`${label}: a route needs one of clip / clips, not both`)
+    else if (!hasOne && !hasMany && !nonEmptyList(r.alternates)) err.push(`${label}: a route needs clip / clips, or alternates when nothing is starred`)
+    else if (hasMany && !nonEmptyList(r.clips)) err.push(`${label}: route clips must be a non-empty list`)
+    else for (const clip of hasMany ? r.clips! : hasOne ? [r.clip] : []) {
       if (typeof clip !== 'string' || !Object.prototype.hasOwnProperty.call(clips, clip)) err.push(`${label}: unknown clip ${String(clip)}`)
       else if (clips[clip].loop !== isLoopCue(lib, cue)) err.push(`${label}: clip ${clip} loop=${clips[clip].loop} does not fit this cue`)
     }
@@ -317,6 +322,8 @@ function levelMapProblems(err: string[], lib: SceneLib, cue: string, label: stri
   else if (!isLevelMap(map)) err.push(`${label}: ${kind} levelMap must be ${LEVEL_MAP_RULE}`)
 }
 
+const nonEmptyList = (v: unknown): boolean => Array.isArray(v) && v.length > 0
+
 /** Studio's own checks on alternates (the demos accept them): no name twice, none that is also starred. */
 function alternatesProblems(err: string[], label: string, kind: 'sfx' | 'route', alts: readonly string[], starred: readonly string[]): void {
   const twice = alts.filter((x, i) => alts.indexOf(x) !== i), both = alts.filter(x => starred.includes(x))
@@ -324,11 +331,15 @@ function alternatesProblems(err: string[], label: string, kind: 'sfx' | 'route',
   if (both.length) err.push(`${label}: ${kind} alternates ${both.join(', ')} are also starred (${kind === 'sfx' ? 'sound / sounds' : 'clip / clips'})`)
 }
 
-/** Why sounds and clips cannot be paired (null when they line up): every route needs as many clips as there are sounds. */
+/**
+ * Why sounds and clips cannot be paired (null when they line up): every route needs as many clips as there are sounds.
+ * A sound or route with nothing starred (only alternates, DEC-092) plays nothing and pairs with nothing: it is left out
+ * (with no starred sound, each route picks on its own, as in playback).
+ */
 export function pairedProblem(sfx: CueSfx | null, routes: readonly CueRoute[]): string | null {
   const n = sfxSounds(sfx).length
-  if (!n) return 'there is no sound to pair'
-  const bad = routes.map((r, i) => ({ i, count: routeClips(r).length })).filter(r => r.count !== n)
+  if (!n) return sfxAlternates(sfx).length ? null : 'there is no sound to pair'
+  const bad = routes.map((r, i) => ({ i, count: routeClips(r).length })).filter(r => r.count !== n && r.count > 0)
   return bad.length ? bad.map(r => `route ${r.i + 1} has ${r.count} clip(s) for ${n} sound(s)`).join('; ') : null
 }
 
