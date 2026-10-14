@@ -7,13 +7,13 @@ import { useWaveformStore } from '@/stores/waveformStore'
 import { useEditorSettings } from '@/stores/editorSettings'
 import { lastSceneProject, sceneProjectNames } from '@/utils/sceneRegistry'
 import { useSceneVideoTarget } from '@/utils/editorSceneSync'
-import { clipsForCue, isLoopCue, soundAllowed, positionsForCue, routeAlternates, routeClips, sfxAlternates, sfxSounds, type CueTable } from '@/utils/sceneCueTable'
+import { clipsForCue, isLoopCue, positionsForCue, routeAlternates, routeClips, sfxAlternates, sfxSounds, type CueTable } from '@/utils/sceneCueTable'
 import type { SceneLib } from '@/utils/sceneData'
 import {
   addPositionRoute, assignEventsForTrial, effectiveEvent, eventKey, listEvents, parseEventKey, removeOwnRoute, shownEventKey,
   addMaterial, removeMaterial, setStarred, trialsForEvent, updateOwnRoute,
   resetAllReviews, setNone, setReview, setUndecided, undecidedReserves, restoreReserve, soundFirstNote, noSoundNote,
-  materialPill, materialStatus, fieldOwner, holdsField, type EffectiveEvent, type EventRow, type MaterialStatus, type SoundStatus,
+  materialPill, materialStatus, fieldOwner, holdsField, type EffectiveEvent, type EventRow, type MaterialStatus,
 } from '@/utils/cueEvents'
 import { GroupSwitch, HeldBy } from './HeldBy'
 import { useConfirm } from '@/components/common/useConfirm'
@@ -61,7 +61,7 @@ export function EventsPanel() {
   const busy = useSceneStore(s => s.busy)
   const selected = useEventStore(s => s.selected)
   const { ask, dialog } = useConfirm()
-  const rows = useMemo(() => table && lib ? listEvents(table, lib) : [], [table, lib])
+  const rows = useMemo(() => table ? listEvents(table) : [], [table])
   // 「同時」 groups with the user's edits (per project); an audition of a member plays the others as its context.
   const groups = useEventGroups()
   const groupEdits = useEditorSettings(s => lib ? s.eventGroupEdits[lib.project_name] : undefined)
@@ -90,7 +90,7 @@ export function EventsPanel() {
   // When each cue first plays (a loop: its layer's first run): the order inside a group and 「grab（3.2 秒）」 in the menu.
   const firsts = useMemo(() => table && lib && data ? firstTimes(table, lib, data) : {}, [table, lib, data])
   // A group is a header plus every event as its own row, in play order (never merged into one row).
-  const items = useMemo(() => lib ? eventListItems(rows.map(r => r.key), groups, firsts, cue => isLoopCue(lib, cue)) : [], [rows, groups, firsts, lib])
+  const items = useMemo(() => table ? eventListItems(rows.map(r => r.key), groups, firsts, cue => isLoopCue(table, cue)) : [], [rows, groups, firsts, table])
   /** The cues of each list item (a group, or one cue), in list order: the targets of 「グループに入れる」. */
   const itemCues = items.map(item => item.cues)
   const listItems: ReactNode[] = items.map(item => {
@@ -200,8 +200,7 @@ function EventRowButton({ row, selected, onSelect, requested }: { row: EventRow;
   // The side that does not hold a field (DEC-091) shows who does instead of a state: 「グループ」 / 「各強弱」, faint and
   // without the kind icon (its place kept, so nothing moves).
   const child = row.ref.variant !== null
-  const badge = (kind: 'sound' | 'haptic', label: string, status: SoundStatus, asked: boolean, held: boolean) => status === 'na' ? <span className="events-badge na"><KindIcon kind={kind} size={14} decorative />{label} —</span>
-    : !held ? <span className="events-badge held-elsewhere" title={t(child ? 'events.byGroup' : 'events.byEach')}><KindIcon kind={kind} size={14} decorative />{label} {t(child ? 'events.byGroup.short' : 'events.byEach.short')}</span>
+  const badge = (kind: 'sound' | 'haptic', label: string, status: MaterialStatus, asked: boolean, held: boolean) => !held ? <span className="events-badge held-elsewhere" title={t(child ? 'events.byGroup' : 'events.byEach')}><KindIcon kind={kind} size={14} decorative />{label} {t(child ? 'events.byGroup.short' : 'events.byEach.short')}</span>
     : asked ? <span className="events-badge requested" title={t('events.requested.hint')}><KindIcon kind={kind} size={14} decorative />{label} {t('events.requested')}</span>
     : <MaterialPillBadge kind={kind} status={status} label={label} />
   return <button type="button" role="option" aria-selected={selected} className={`events-row ${child ? 'variant' : ''} ${selected ? 'selected' : ''}`} onClick={() => onSelect(row.key)} title={row.description ?? ''}>
@@ -239,7 +238,7 @@ type Edit = (change: (tb: CueTable) => CueTable | null) => boolean
 function EventDetail({ table, lib, e }: { table: CueTable; lib: SceneLib; e: EffectiveEvent }) {
   const { t } = useI18n()
   const { openSceneVideo, stopPlayback, isPlaybackActive } = useEditor()
-  const key = eventKey(e.ref), loop = isLoopCue(lib, e.ref.cue)
+  const key = eventKey(e.ref), loop = isLoopCue(table, e.ref.cue)
   const clip = useWaveformStore(s => s.clip)
   const assign = (target: DecideTarget) => { if (clip) useEventStore.getState().requestDecide({ target, source: { kind: 'clip', clipId: clip.id }, event: key }) }
   const edit: Edit = change => useSceneStore.getState().edit(change)
@@ -254,7 +253,7 @@ function EventDetail({ table, lib, e }: { table: CueTable; lib: SceneLib; e: Eff
     {e.description && <p className="agent-muted">{e.description}</p>}
     <div className="events-assign">
       <span className="events-assign-clip" title={clip?.name ?? ''}>{t('events.selectedClip', { name: clip?.name ?? '—' })}</span>
-      <button type="button" className="toolbar-btn" disabled={!clip || !soundAllowed(lib, e.ref.cue)} title={t('events.addHint')} onClick={() => assign('sound')}>{t('events.assignSound')}</button>
+      <button type="button" className="toolbar-btn" disabled={!clip} title={t('events.addHint')} onClick={() => assign('sound')}>{t('events.assignSound')}</button>
       <button type="button" className="toolbar-btn" disabled={!clip} title={t('events.addHint')} onClick={() => assign('haptic')}>{t('events.assignHaptic')}</button>
     </div>
     <MaterialOrigin cue={e.ref.cue} />
@@ -273,7 +272,7 @@ function EventDetail({ table, lib, e }: { table: CueTable; lib: SceneLib; e: Eff
  */
 function SoundSection({ table, lib, e, loop, edit }: { table: CueTable; lib: SceneLib; e: EffectiveEvent; loop: boolean; edit: Edit }) {
   const { t } = useI18n()
-  const allowed = soundAllowed(lib, e.ref.cue), held = holdsField(table, e.ref, 'sfx')
+  const held = holdsField(table, e.ref, 'sfx')
   const soundFiles = useSceneStore(s => s.soundFiles)
   const previewId = useEventStore(s => s.preview?.id)
   const key = eventKey(e.ref), sounds = sfxSounds(e.sfx), alternates = sfxAlternates(e.sfx)
@@ -284,16 +283,16 @@ function SoundSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sce
   // The material lists fold together (editor setting, open by default; the heading line stays).
   const [open, setOpen] = useMaterialsOpen()
   return <section className="events-sec">
-    <h4 className={`events-sec-head ${allowed && !held ? 'held-elsewhere' : ''}`}><Fold open={open} set={setOpen} /><SoundIcon decorative />{t('events.sound')}
-      {allowed && e.ref.variant === null && <GroupSwitch table={table} cue={e.ref.cue} field="sfx" edit={edit} buttonClass="agent-icon-btn" />}
-      {allowed && (held ? <><ReviewToggle e={e} field="sfx" edit={edit} /><DecisionBar table={table} e={e} field="sfx" edit={edit} /></> : <HeldBy e={e} />)}
+    <h4 className={`events-sec-head ${!held ? 'held-elsewhere' : ''}`}><Fold open={open} set={setOpen} /><SoundIcon decorative />{t('events.sound')}
+      {e.ref.variant === null && <GroupSwitch table={table} cue={e.ref.cue} field="sfx" edit={edit} buttonClass="agent-icon-btn" />}
+      {held ? <><ReviewToggle e={e} field="sfx" edit={edit} /><DecisionBar table={table} e={e} field="sfx" edit={edit} /></> : <HeldBy e={e} />}
       {/* Ask for (more) sound candidates; after checking the sound (OK): on to the haptic — also for a cue without a sound. */}
-      {(held || !allowed) && <span className="events-haptic-request"><button type="button" className="agent-icon-btn" title={t('events.soundRequest.hint')}
+      {held && <span className="events-haptic-request"><button type="button" className="agent-icon-btn" title={t('events.soundRequest.hint')}
         onClick={() => { const k = `sound|${key}`; useReviseOpen.getState().set(useReviseOpen.getState().open === k ? null : k) }}>{t('events.soundRequest.button')}</button>
       <HapticRequestButton e={e} /></span>}</h4>
     <SoundRequestField cue={key} />
-    {allowed && held && <SharedWith table={table} e={e} field="sfx" />}
-    {!open || (allowed && !held) ? null : !allowed ? <p className="agent-muted">{t('scene.sound.loopCue')}</p> : <>
+    {held && <SharedWith table={table} e={e} field="sfx" />}
+    {!open || !held ? null : <>
       {loop && <p className="agent-muted">{t('events.loopSoundHint')}</p>}
       {!e.sfx && <p className="agent-muted">{t(noSoundNote(e))}</p>}
       {/* A paired cue's sounds are listed as pairs in the haptic section. */}
@@ -324,9 +323,9 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
   const atLabel = useAtLabel()
   const previewId = useEventStore(s => s.preview?.id)
   const key = eventKey(e.ref)
-  const fitting = clipsForCue(table, lib, e.ref.cue)
+  const fitting = clipsForCue(table, e.ref.cue)
   const missing = (name: string) => useWaveformStore.getState().setError(t('events.preview.missing', { name }))
-  const free = positionsForCue(lib, e.ref.cue).some(a => !e.haptics.some(r => r.at === a))
+  const free = positionsForCue(lib, table, e.ref.cue).some(a => !e.haptics.some(r => r.at === a))
   const describe = useDescribeMaterial()
   return <section className="events-sec">
     <h4 className={`events-sec-head ${held ? '' : 'held-elsewhere'}`}><Fold open={hOpen} set={setHOpen} /><HapticIcon decorative />{t('events.haptic')}
@@ -341,7 +340,7 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
       return <div key={i} className="events-route" title={t('events.hapticRowsHint')}>
         <div className="events-route-head">
           <select value={r.at} aria-label={t('scene.route.at')} onChange={ev => { const v = ev.target.value; ev.target.blur(); edit(tb => updateOwnRoute(tb, e.ref, i, { at: v })) }}>
-            {[...new Set([...positionsForCue(lib, e.ref.cue), r.at])].map(a => <option key={a} value={a}>{atLabel(a)}</option>)}
+            {[...new Set([...positionsForCue(lib, table, e.ref.cue), r.at])].map(a => <option key={a} value={a}>{atLabel(a)}</option>)}
           </select>
           <select className="events-add-material" value="" aria-label={t('events.addClipMulti')} onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) edit(tb => addMaterial(tb, e.ref, 'haptic', i, x)) }}>
             <option value="">{t('events.addClipMulti')}</option>
@@ -517,7 +516,7 @@ function Reserves({ cue, target }: { cue: string; target: 'sound' | 'haptic' }) 
   const adopt = async (row: typeof rows[number]) => {
     const scene = useSceneStore.getState()
     if (!scene.table || !scene.lib) { useWaveformStore.getState().setError(t('scene.save.noProject')); return }
-    const events = assignEventsForTrial(scene.table, scene.lib, [row.key], target)
+    const events = assignEventsForTrial(scene.table, [row.key], target)
     if (!events.length) { useWaveformStore.getState().setError(t('events.auto.noEvents', { cues: row.key })); return }
     setBusy(true)
     try {

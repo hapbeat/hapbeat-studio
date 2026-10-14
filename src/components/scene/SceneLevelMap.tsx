@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
-import { offsetOf, type SceneLayer } from '@/utils/sceneData'
+import type { SceneLayer } from '@/utils/sceneData'
 import type { CueTable } from '@/utils/sceneCueTable'
 import { setLevelMap } from '@/utils/cueEvents'
 import { loopSoundLevel } from '@/utils/sceneLoopSounds'
@@ -20,8 +20,8 @@ function usePlayheadLevel(layer: SceneLayer): number {
   const [level, setLevel] = useState(0)
   useEffect(() => {
     const read = () => {
-      const s = useSceneStore.getState(), it = s.items[s.cur], data = s.data
-      const x = it && data ? loopSoundLevel(data.full.levels, data.fps, layer, runtime.video.currentTime + offsetOf(it)).gain : 0
+      const s = useSceneStore.getState(), data = s.data
+      const x = s.items[s.cur] && data ? loopSoundLevel(data.full.levels, data.fps, layer, runtime.video.currentTime).gain : 0
       setLevel(Math.round(x * 1000) / 1000)
     }
     read()

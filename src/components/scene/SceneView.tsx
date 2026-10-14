@@ -13,7 +13,7 @@ import { useSceneOverrides } from '@/hooks/useSceneOverrides'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { resolvePlaybackTargets } from '@/utils/playbackDevices'
 import { matchesAddress, RETRY_MS, tableTargets, type HapticDevice, type StreamAck, type StreamDisplaced } from '@/utils/sceneHaptics'
-import { focusEvent } from '@/utils/sceneData'
+import { focusEvent, isTick } from '@/utils/sceneData'
 import { isTypingTarget } from '@/utils/playbackShortcut'
 import { openSceneSelectionInEditor } from '@/stores/eventStore'
 import { SceneRuntime } from './sceneRuntime'
@@ -119,7 +119,7 @@ export function SceneView({ active }: { active: boolean }) {
       else if (key === 'h') useSceneSettings.getState().update({ sendHaptics: !useSceneSettings.getState().sendHaptics })
       else if (key === 'o') { if (!openSceneSelectionInEditor(s.table, s.sel)) return }
       else if (key === ',' || key === '.') {
-        const ev = runtime.events().filter(x => !ticks.includes(x.name)), time = v.currentTime
+        const ev = runtime.events().filter(x => !isTick(ticks, x.name)), time = v.currentTime
         const next = key === '.' ? ev.find(x => x.t > time + 0.05) : [...ev].reverse().find(x => x.t < time - 0.3)
         if (next) { runtime.seek(next.t - 0.5); s.selectCue(next.name, next.t); if (runtime.part) runtime.setPart(true) }
       }

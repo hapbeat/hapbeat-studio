@@ -39,7 +39,7 @@ describe('cue table emit (DEC-088) validation', () => {
   })
 
   it('round-trips unchanged and edits keep the key in place', () => {
-    const text = '{\n  "kit": "mill-kit",\n  "clips": {},\n  "cues": {\n    "grab": {\n      "sfx": null,\n      "emit": {\n        "during": "feed_loop",\n        "intervalSec": 0.9,\n        "jitterPct": 70\n      },\n      "review": {\n        "sfx": "tentative"\n      }\n    }\n  }\n}\n'
+    const text = '{\n  "schema_version": 1,\n  "kit": "mill-kit",\n  "clips": {},\n  "cues": {\n    "grab": {\n      "sfx": null,\n      "emit": {\n        "during": "feed_loop",\n        "intervalSec": 0.9,\n        "jitterPct": 70\n      },\n      "review": {\n        "sfx": "tentative"\n      }\n    }\n  }\n}\n'
     const table = parseCueTable(text)
     expect(serializeCueTable(table)).toBe(text)
     const next = setEmit(table, 'grab', { intervalSec: 0.01, jitterPct: 150 })

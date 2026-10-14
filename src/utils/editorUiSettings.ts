@@ -12,7 +12,7 @@ export const UI_SETTINGS_FILE = 'ui-settings.json'
 export const UI_SETTINGS_STORAGE_KEY = 'hapbeat-editor-settings'
 
 export type ClipGroupBy = 'project' | 'source'
-/** Scene clip chosen for an AI trial in the Scene video panel: the Scene project and the clip's video file. */
+/** Scene moment chosen for an AI trial in the Scene video panel: the Scene project and the option's key (trialScene SceneClipOption.key). */
 export interface TrialSceneChoice { project: string; file: string }
 /** An editor clip / AI candidate decided as an event's sound or haptic (clip-list badge). */
 export interface EventMark { project: string; event: string; target: 'sound' | 'haptic' }

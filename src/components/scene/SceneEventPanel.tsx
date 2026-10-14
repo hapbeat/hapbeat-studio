@@ -2,10 +2,9 @@ import { useState } from 'react'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
-import { isLoopCue, pairedProblem, PICK_MODES, routeAlternates, routeClips, sfxAlternates, sfxSounds, soundAllowed, VARIANT_NAME, clipsForCue, type CueTable, type CueVariation, type VariationNumberKey, type DistanceFalloff } from '@/utils/sceneCueTable'
+import { isLoopCue, loopCuesOf, pairedProblem, PICK_MODES, routeAlternates, routeClips, sfxAlternates, sfxSounds, VARIANT_NAME, clipsForCue, type CueTable, type CueVariation, type VariationNumberKey, type DistanceFalloff } from '@/utils/sceneCueTable'
 import { curveAt, RAMP_CURVES, type RampCurve } from '@/utils/rampCurve'
 import { EMIT_INTERVAL_RANGE, EMIT_JITTER_RANGE } from '@/utils/sceneEmit'
-import type { SceneLib } from '@/utils/sceneData'
 import {
   addMaterial, addVariant, effectiveEvent, eventKey, pairedClips, removeMaterial, removeVariant, resolveEventName, setOverride, setOwnSfxVolume, setStarred, setVariation,
   setVariantScale, updateOwnRoute, rampValue, setDistanceFalloff, setEmit, holdsField,
@@ -47,7 +46,7 @@ export function SceneEventPanel() {
   const resolved = sel ? resolveEventName(table, sel.name) : null
   const e = resolved ? effectiveEvent(table, resolved.ref) : null
   if (!resolved || !e) return <div className="scene-cue-panel scene-event"><CuePicker /><div className="scene-panel-empty">{t('scene.selectCue')}</div></div>
-  const key = eventKey(e.ref), loop = isLoopCue(lib, e.ref.cue), layer = loop ? lib.layers.find(l => l.cue === e.ref.cue) : undefined
+  const key = eventKey(e.ref), loop = isLoopCue(table, e.ref.cue), layer = loop ? lib.layers.find(l => l.cue === e.ref.cue) : undefined
   const edit: Edit = change => useSceneStore.getState().edit(change)
   const select = (name: string) => useSceneStore.getState().selectCue(name, sel?.t ?? null)
   const sound = e.sfx ? sfxSounds(e.sfx)[0] : undefined
@@ -58,11 +57,11 @@ export function SceneEventPanel() {
       <Variants table={table} e={e} select={select} edit={edit} />
       {e.ref.variant !== null && <VariantScale e={e} edit={edit} />}
       <Falloff table={table} e={e} edit={edit} />
-      {e.ref.variant === null && <Emit table={table} lib={lib} cue={e.ref.cue} edit={edit} />}
+      {e.ref.variant === null && <Emit table={table} cue={e.ref.cue} edit={edit} />}
       {run?.repeating && <button type="button" className="scene-icon-btn scene-event-run" title={t('scene.event.runHint')}
         onClick={ev => { ev.currentTarget.blur(); runtime.audio(); runtime.playFull(Math.max(0, run.marks[0].t - useSceneSettings.getState().leadSec)) }}>{t('scene.event.run', { at: run.marks[0].t.toFixed(1), count: run.marks.filter(m => m.target).length })}</button>}
     </div>
-    {!loop || lib.loop_cue_sounds ? <Sounds table={table} e={e} edit={edit} allowed={soundAllowed(lib, e.ref.cue)} /> : null}
+    <Sounds table={table} e={e} edit={edit} />
     <Clips table={table} e={e} edit={edit} />
     {loop && e.ref.variant === null && layer && <LevelMaps table={table} layer={layer} cue={e.ref.cue} edit={edit} />}
     <div className="scene-sec">
@@ -163,19 +162,20 @@ function VariantScale({ e, edit }: { e: EffectiveEvent; edit: Edit }) {
  * ± jitter. The Scene tab plays firings made from the recorded layer by the same rule (not the recorded ones);
  * "draw again" makes another set (the same set otherwise, also after a seek).
  */
-function Emit({ table, lib, cue, edit }: { table: CueTable; lib: SceneLib; cue: string; edit: Edit }) {
+function Emit({ table, cue, edit }: { table: CueTable; cue: string; edit: Edit }) {
   const { t } = useI18n()
   const data = useSceneStore(s => s.data)
   const emit = table.cues[cue]?.emit
   if (!emit) return null
+  const loops = loopCuesOf(table)
   const count = data ? data.full.events.filter(x => x.name === cue).length : 0
   return <div className="scene-sec">
     <h3 title={`${t('scene.emit.hint')}\nemit`}>{t('scene.emit.heading')}</h3>
     <div className="scene-event-variation">
       <label title={`${t('scene.emit.during.hint')}\nduring`}><span>{t('scene.emit.during')}</span>
         <select value={emit.during} onChange={ev => { const d = ev.target.value; ev.target.blur(); edit(tb => setEmit(tb, cue, { during: d })) }}>
-          {!lib.loop_cues.includes(emit.during) && <option value={emit.during}>{emit.during}</option>}
-          {lib.loop_cues.map(c => <option key={c} value={c}>{c}</option>)}
+          {!loops.includes(emit.during) && <option value={emit.during}>{emit.during}</option>}
+          {loops.map(c => <option key={c} value={c}>{c}</option>)}
         </select></label>
       <label title={`${t('scene.emit.intervalSec.hint')}\nintervalSec`}><span>{t('scene.emit.intervalSec')}</span>
         <NumberField value={emit.intervalSec} min={EMIT_INTERVAL_RANGE[0]} max={EMIT_INTERVAL_RANGE[1]} step={0.05} label={t('scene.emit.intervalSec')}
@@ -268,12 +268,11 @@ function OverrideBar({ table, e, field, edit }: { table?: CueTable; e: Effective
  * Sounds: ★ = played (first = representative), the rest alternates; removal; ▶ plays one on the PC (alternates too).
  * The side that does not hold the sound (DEC-091) shows only who does and the switch.
  */
-function Sounds({ table, e, edit, allowed }: { table: CueTable; e: EffectiveEvent; edit: Edit; allowed: boolean }) {
+function Sounds({ table, e, edit }: { table: CueTable; e: EffectiveEvent; edit: Edit }) {
   const { t } = useI18n()
   const { runtime } = useScene()
   const soundFiles = useSceneStore(s => s.soundFiles)
   const sounds = sfxSounds(e.sfx), alternates = sfxAlternates(e.sfx), own = holdsField(table, e.ref, 'sfx')
-  if (!allowed) return null
   if (!own) return <div className="scene-sec">
     <h3 className="scene-kind-head held-elsewhere"><SoundIcon decorative />{t('events.repeat.sounds')}
       {e.ref.variant === null && <GroupSwitch table={table} cue={e.ref.cue} field="sfx" edit={edit} buttonClass="scene-icon-btn" />}<HeldBy e={e} /></h3>
@@ -304,7 +303,6 @@ function Clips({ table, e, edit }: { table: CueTable; e: EffectiveEvent; edit: E
   const { t } = useI18n()
   const { runtime } = useScene()
   const atLabel = useAtLabel()
-  const lib = useSceneStore(s => s.lib)!
   const own = holdsField(table, e.ref, 'haptics')
   if (!own) return <div className="scene-sec">
     <h3 className="scene-kind-head held-elsewhere"><HapticIcon decorative />{t('events.repeat.clips')}
@@ -332,7 +330,7 @@ function Clips({ table, e, edit }: { table: CueTable; e: EffectiveEvent; edit: E
             onPlay={c => runtime.testRoute({ clip: c, at: r.at, gain: r.gain })} />}
         {own && <select value="" aria-label={t('events.addClipMulti')} onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) edit(tb => addMaterial(tb, e.ref, 'haptic', i, x)) }}>
           <option value="">{t('events.addClipMulti')}</option>
-          {clipsForCue(table, lib, e.ref.cue).filter(c => !clips.includes(c) && !alternates.includes(c)).map(c => <option key={c} value={c}>{c}</option>)}
+          {clipsForCue(table, e.ref.cue).filter(c => !clips.includes(c) && !alternates.includes(c)).map(c => <option key={c} value={c}>{c}</option>)}
         </select>}
       </div>
     })}

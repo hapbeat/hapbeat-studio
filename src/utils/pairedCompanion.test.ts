@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { companionSoundName, representativeSound } from './cueEvents'
 import { groupFirings } from './groupPlayback'
-import { sampleLib } from './sceneTestFixtures'
 import type { CueTable } from './sceneCueTable'
 
 /** breath: paired — sound i goes with clip i. */
@@ -19,13 +18,13 @@ const buffers = { breath_snort_m4: { id: 'm4' }, breath_snort_m7: { id: 'm7' }, 
 describe('paired cue: the sound that goes with a haptic (breath)', () => {
   it('auditioning breath_t56_c plays breath_huff2_m4 (not the representative)', () => {
     const t = table()
-    const play = (wav: string) => representativeSound(t, sampleLib(), ['breath'], buffers, companionSoundName(t, { audition: null, material: { event: 'breath', target: 'haptic', wav } }))?.buffer
+    const play = (wav: string) => representativeSound(t, ['breath'], buffers, companionSoundName(t, { audition: null, material: { event: 'breath', target: 'haptic', wav } }))?.buffer
     expect(play('breath_t56_c')).toBe(buffers.breath_huff2_m4)
     expect(play('breath_t56_b')).toBe(buffers.breath_snort_m7)
     expect(play('breath_t56_a')).toBe(buffers.breath_snort_m4)
     // Not paired: the representative.
     const unpaired = table(); (unpaired.cues.breath as { variation?: object }).variation = {}
-    expect(representativeSound(unpaired, sampleLib(), ['breath'], buffers, companionSoundName(unpaired, { audition: null, material: { event: 'breath', target: 'haptic', wav: 'breath_t56_c' } }))?.buffer).toBe(buffers.breath_snort_m4)
+    expect(representativeSound(unpaired, ['breath'], buffers, companionSoundName(unpaired, { audition: null, material: { event: 'breath', target: 'haptic', wav: 'breath_t56_c' } }))?.buffer).toBe(buffers.breath_snort_m4)
   })
 
   it('a shown sound sends the haptic of the same index, also with the group off', () => {

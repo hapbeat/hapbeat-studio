@@ -1,5 +1,5 @@
 import type { SceneData, SceneEvent, SceneLayer, SceneLib } from './sceneData'
-import type { CueEmit, CueTable } from './sceneCueTable'
+import { isLoopCue, type CueEmit, type CueTable } from './sceneCueTable'
 import { mulberry32 } from './textureDsp'
 
 /**
@@ -56,7 +56,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> => !!value &
 export function emittingCues(table: CueTable, lib: SceneLib): { cue: string; emit: CueEmit; layer: SceneLayer }[] {
   return Object.entries(table.cues).flatMap(([cue, entry]) => {
     const emit = entry.emit as unknown
-    if (!isRecord(emit) || lib.loop_cues.includes(cue)) return []
+    if (!isRecord(emit) || isLoopCue(table, cue)) return []
     const interval = emit.intervalSec, jitter = emit.jitterPct ?? 0
     if (typeof interval !== 'number' || !(interval >= EMIT_INTERVAL_RANGE[0] && interval <= EMIT_INTERVAL_RANGE[1])) return []
     if (typeof jitter !== 'number' || !(jitter >= EMIT_JITTER_RANGE[0] && jitter <= EMIT_JITTER_RANGE[1])) return []

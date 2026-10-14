@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { positionsForCue, clipsForCue, encodePcm16Wav, parseCueTable, serializeCueTable, setClipIntensity, setSoundIntensity, soundIntensity, materialIntensity, validateCueTable, type CueTableContext } from './sceneCueTable'
+import { AT_VALUES, newCueTable, positionsForCue, clipsForCue, SceneFormatError, encodePcm16Wav, parseCueTable, serializeCueTable, setClipIntensity, setSoundIntensity, soundIntensity, materialIntensity, validateCueTable, type CueTableContext } from './sceneCueTable'
 import { sampleLib, sampleTable } from './sceneTestFixtures'
 
 const ctx = (patch: Partial<CueTableContext> = {}): CueTableContext => ({
@@ -12,9 +12,12 @@ describe('scene cue table validation (the demos\' validate())', () => {
     expect(validateCueTable(sampleTable(), ctx())).toEqual([])
   })
 
-  it('reports every rule the import scripts enforce', () => {
+  it('reports every rule of the specification (cue-table section 6)', () => {
     const t = sampleTable()
     t.kit = 'other'
+    t.schema_version = 2
+    t.cues.button.variants = { soft: { loop: true, emit: { during: 'feed_loop', intervalSec: 1 } } }
+    t.cues.button.loop = 'yes' as unknown as boolean
     t.clips['Bad Name'] = { intensity: 2, loop: 'yes' as unknown as boolean }
     t.cues.button.sfx = { sound: 'Motor', volume: 3 }
     t.cues.feed_loop.sfx = { sound: 'Click', volume: 1 }
@@ -22,29 +25,42 @@ describe('scene cue table validation (the demos\' validate())', () => {
     delete (t.cues as Record<string, unknown>).detent
     const err = validateCueTable(t, ctx())
     expect(err).toEqual(expect.arrayContaining([
+      'schema_version must be 1',
       'kit must be mill-kit',
       'clip name Bad Name must match ^[a-z][a-z0-9_-]*$',
       'clip Bad Name: intensity must be 0..1',
       'clip Bad Name: loop must be true/false',
       'clip Bad Name: Content/Kit/stream-clips/Bad Name.wav missing',
       'cues must be exactly button, grab, detent, feed_loop',
-      'button: bad sound Motor',
+      'button: Content/Audio/Motor.wav missing',
       'button: sfx volume must be 0..2',
-      'feed_loop: continuous layers have no cue sound',
+      'button: loop must be true/false',
+      'button:soft: a variant cannot have loop (it belongs to the cue)',
+      'button:soft: a variant cannot have emit (it belongs to the cue)',
       'grab: clip hum loop=true does not fit this cue',
-      'grab: at must be one of hand, both, pos_neck, pos_chest, pos_l_wrist, pos_r_wrist',
+      `grab: at must be one of ${AT_VALUES.join(', ')}`,
       'grab: gain must be 0..2',
       'grab: unknown clip missing',
     ]))
+    // A loop cue may have a sound (v1); a bad sound name is reported.
+    expect(err.some(e => e.startsWith('feed_loop'))).toBe(false)
+    t.cues.button.sfx = { sound: 'bad name', volume: 1 }
+    expect(validateCueTable(t, ctx())).toContain('button: bad sound bad name')
   })
 
-  it('limits loop-cue positions when the lib has loop_at', () => {
+  it('makes a new table from the recording (none decided, layer cues as loop cues)', () => {
+    expect(newCueTable({ project_name: 'mill', layers: sampleLib().layers }, [{ name: 'grab:hard' }, { name: 'button' }, { name: 'grab' }]))
+      .toEqual({ schema_version: 1, kit: 'mill-kit', clips: {}, sounds: {}, cues: { button: {}, feed_loop: { loop: true }, grab: {} } })
+  })
+
+  it('narrows the offered loop-cue positions with lib.loop_at (the table may use any position)', () => {
     const t = sampleTable(); t.cues.feed_loop.haptics![0].at = 'both'
-    expect(validateCueTable(t, ctx())).toEqual([])
     const lib = { ...sampleLib(), loop_at: ['hand'] }
-    expect(validateCueTable(t, ctx({ lib }))).toEqual(['feed_loop: continuous layers allow at = hand'])
-    expect(positionsForCue(lib, 'feed_loop')).toEqual(['hand'])
-    expect(positionsForCue(lib, 'button')).toEqual(lib.at)
+    expect(validateCueTable(t, ctx({ lib }))).toEqual([])
+    expect(positionsForCue(lib, t, 'feed_loop')).toEqual(['hand'])
+    expect(positionsForCue(lib, t, 'button')).toEqual(lib.at)
+    t.cues.feed_loop.haptics![0].at = 'pos_nose'
+    expect(validateCueTable(t, ctx({ lib }))[0]).toMatch(/^feed_loop: at must be one of hand, both, pos_neck/)
   })
 
   it('requires the WAV of every clip and cue sound', () => {
@@ -74,7 +90,7 @@ describe('scene cue table edits', () => {
     const t = sampleTable()
     expect(setClipIntensity(t, 'click', -1).clips.click.intensity).toBe(0)
     expect(t.clips.click.intensity).toBe(1)
-    expect(clipsForCue(sampleTable(), sampleLib(), 'button')).toEqual(['click', 'thump'])
+    expect(clipsForCue(sampleTable(), 'button')).toEqual(['click', 'thump'])
   })
 
   it('round-trips the table text like the standalone viewer writes it', () => {
@@ -82,9 +98,10 @@ describe('scene cue table edits', () => {
     expect(text.endsWith('}\n')).toBe(true)
     expect(text).toContain('\n  "kit": "mill-kit"')
     expect(parseCueTable(text)).toEqual(sampleTable())
-    expect(() => parseCueTable('{"clips":[]}')).toThrow(/clips and cues/)
+    expect(() => parseCueTable('{"schema_version":1,"clips":[]}')).toThrow(/clips and cues/)
+    expect(() => parseCueTable('{"clips":{},"cues":{}}')).toThrow(SceneFormatError)
     // Missing sfx / haptics stay missing (undecided), and serialize back as missing.
-    expect(parseCueTable('{"clips":{},"cues":{"a":{}}}').cues.a).toEqual({})
+    expect(parseCueTable('{"schema_version":1,"clips":{},"cues":{"a":{}}}').cues.a).toEqual({})
   })
 
   it('writes PCM16 WAV headers', () => {

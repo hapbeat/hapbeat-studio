@@ -2,7 +2,7 @@ import { useSceneStore, sceneVideoUrl } from '@/stores/sceneStore'
 import { usePcTiming } from '@/stores/pcTiming'
 import { perfTrack } from '@/utils/perfRegistry'
 import { useSceneSettings } from '@/stores/sceneSettings'
-import { clipEnd, focusEvent, itemEvents, levelAt, offsetOf, type SceneItem, type VisibleEvent } from '@/utils/sceneData'
+import { clipEnd, focusEvent, itemEvents, levelAt, momentStart, type SceneItem, type VisibleEvent } from '@/utils/sceneData'
 import { isLoopCue, routeClips, sfxSounds, type CueRoute, type CueSfx, soundIntensity } from '@/utils/sceneCueTable'
 import { effectiveEvent, fireShot, MaterialPicker, resolveEventName } from '@/utils/cueEvents'
 import { runPosition } from '@/utils/sceneSegments'
@@ -18,6 +18,8 @@ export const SPEEDS = [1, 0.5, 0.25]
  * scheduled against the video clock, loop-cue sounds following the recorded
  * layer levels (like the haptic loop layers), and the per-device haptic streams through
  * hapbeat-helper. A 10 ms tick fires the cues the video is about to reach.
+ * Every item plays the full replay video (video time = replay time); a moment is its stretch of it, played from
+ * the lead-in before its mark (momentStart) to its end, where it stops (or, looped, goes back to that start).
  * Ported from the standalone viewer's tick() / fire() / pumpHaptics().
  */
 /** One firing as played: video time, the event's short name (variant or cue) and its sound / clips. */
@@ -34,14 +36,14 @@ export class SceneRuntime {
   private actx: AudioContext | null = null
   private scheduledSfx: { src: AudioBufferSourceNode; at: number }[] = []
   private mixer: SceneHapticMixer
-  /** Loop cues' sounds (lib.loop_cue_sounds), looped at the recorded layer level. */
+  /** Loop cues' sounds, looped at the recorded layer level. */
   private loopSounds: LoopSound[] = []
   private loopPlayer = new LoopSoundPlayer()
   private helper: { send: HelperSend; connected: boolean; devices: HapticDevice[] } = { send: () => {}, connected: false, devices: [] }
   private cursor: number | null = null
   private lastVt = 0
   private lastItem = -1
-  /** Full replay time to start from once its video has loaded (playFull while another moment was shown). */
+  /** Time to start from once the item's video is ready (playMoment / playFull while another item was shown). */
   private pendingStart: number | null = null
   /** Whether the pending start also plays (a moment / span / ▶ does; 「全編に戻って続ける」 keeps a paused video paused). */
   private pendingPlay = true
@@ -110,7 +112,7 @@ export class SceneRuntime {
   item(): SceneItem | undefined { const s = useSceneStore.getState(); return s.items[s.cur] }
   events(): VisibleEvent[] {
     const s = useSceneStore.getState(), it = s.items[s.cur]
-    return it && s.data ? itemEvents(it, s.data.full.events, s.data.fps) : []
+    return it && s.data ? itemEvents(it, s.data.full.events) : []
   }
 
   /** Unlocks Web Audio (call from a user gesture). */
@@ -124,21 +126,43 @@ export class SceneRuntime {
     const s = useSceneStore.getState(), it = s.items[s.cur], root = s.root, cur = s.cur
     if (!it || !root) { this.video.removeAttribute('src'); this.video.load(); return }
     this.video.loop = this.loopOn()
-    this.video.onloadedmetadata = () => {
-      this.video.playbackRate = SPEEDS[this.speedIndex]
-      const start = this.pendingStart
-      this.pendingStart = null
-      // Only a user's ▶ (playFull) starts it; loading a moment (reload, opening a project, selecting) leaves it paused.
-      if (start !== null) { this.seek(start); if (this.pendingPlay) void this.video.play().catch(() => {}) }
-      else if (this.part) this.setPart(true, false)
-    }
-    sceneVideoUrl(root, it.file).then(url => { if (useSceneStore.getState().cur !== cur) return; if (this.video.src !== url) this.video.src = url; this.loadedCur = cur },
-      error => useSceneStore.getState().note({ id: 'scene.video.unreadable', params: { file: it.file, error: error instanceof Error ? error.message : String(error) }, error: true }))
+    this.video.onloadedmetadata = () => this.itemReady()
+    // Every item is the same full replay video: an item whose video is already in the element is ready at once.
+    sceneVideoUrl(root, it.file).then(url => {
+      if (useSceneStore.getState().cur !== cur) return
+      const same = this.video.src === url
+      if (!same) this.video.src = url
+      this.loadedCur = cur
+      if (same && this.video.readyState >= 1) this.itemReady()
+    }, error => useSceneStore.getState().note({ id: 'scene.video.unreadable', params: { file: it.file, error: error instanceof Error ? error.message : String(error) }, error: true }))
   }
-  private loopOn() { return useSceneSettings.getState().loop && !this.part }
+  /** The shown item's video is ready: its pending start (playing or not), else W's part, else a moment's start (paused) or the full replay's last position. */
+  private itemReady() {
+    this.video.playbackRate = SPEEDS[this.speedIndex]
+    const start = this.pendingStart
+    this.pendingStart = null
+    // Only a user's ▶ (playMoment / playFull) starts it; showing an item (reload, opening a project, selecting) leaves it paused.
+    if (start !== null) { this.seek(start); if (this.pendingPlay) void this.video.play().catch(() => {}); return }
+    if (this.part) { this.setPart(true, false); return }
+    const it = this.item()
+    this.seek(it?.kind === 'clip' ? momentStart(it, useSceneSettings.getState().leadSec) : this.fullTime)
+  }
+  /** The video element loops by itself only in the full replay (a moment's stretch and W's part loop in tick()). */
+  private loopOn() { return useSceneSettings.getState().loop && !this.part && this.item()?.kind !== 'clip' }
+  /** The stretch the shown item plays (W's part, else a moment's: from its lead-in to its end); null = the whole replay. */
+  private playRange(it: SceneItem): [number, number] | null {
+    if (this.part && this.partAB) return this.partAB
+    return it.kind === 'clip' ? [momentStart(it, useSceneSettings.getState().leadSec), clipEnd(it)] : null
+  }
   applyLoop() { this.video.loop = this.loopOn() }
 
-  togglePlay() { if (this.video.paused) void this.video.play().catch(() => {}); else this.video.pause() }
+  /** ▶ at (or past) the end of the play range starts it again. */
+  togglePlay() {
+    const it = this.item(), range = it && this.playRange(it)
+    if (!this.video.paused) { this.video.pause(); return }
+    if (range && this.video.currentTime >= range[1] - 0.01) this.seek(range[0])
+    void this.video.play().catch(() => {})
+  }
   seek(t: number) { this.video.currentTime = Math.max(0, Math.min(t, (this.video.duration || 0) - 0.001)) }
   step(frames: number) {
     const fps = useSceneStore.getState().data?.fps ?? 30
@@ -167,7 +191,7 @@ export class SceneRuntime {
     if (!it) return
     const wasSpan = this.span
     if (this.span) { this.endSpan(); this.part = false; this.partAB = null; this.applyLoop() }
-    const t = it.kind === 'clip' ? Math.max(0, it.event - leadSec) : this.fullTime
+    const t = it.kind === 'clip' ? momentStart(it, leadSec) : this.fullTime
     if (s.cur === index && this.video.readyState >= 1) { if (it.kind === 'clip' || wasSpan) this.seek(t); void this.video.play().catch(() => {}); return }
     this.pendingStart = t
     this.pendingPlay = true
@@ -186,14 +210,14 @@ export class SceneRuntime {
   }
   /**
    * 「全編に戻って続ける」 (F): the full replay without the moment's / span's play range (no span, no W loop), at the
-   * position shown now in replay time — a clip's time + its offset (offsetOf: at − event), a span's time as is; before
-   * anything played there, the moment's mark (a span: its start) − the lead-in. Playing stays playing, paused stays paused.
+   * position shown now (video time is replay time); before anything played there, the moment's mark (a span: its
+   * start) − the lead-in. Playing stays playing, paused stays paused.
    */
   returnToFull() {
     const s = useSceneStore.getState(), it = s.items[s.cur], v = this.video
     if (!it) return
     const lead = useSceneSettings.getState().leadSec, play = !v.paused
-    const t = it.kind === 'clip' ? (this.playedHere ? v.currentTime + offsetOf(it) : Math.max(0, it.at - lead))
+    const t = it.kind === 'clip' ? (this.playedHere ? v.currentTime : Math.max(0, it.at - lead))
       : this.span && this.partAB && !this.playedHere ? this.partAB[0] : v.currentTime
     this.endSpan(); this.part = false; this.partAB = null; this.applyLoop()
     this.fullTime = t
@@ -217,7 +241,7 @@ export class SceneRuntime {
     this.span = false
     useSceneStore.getState().setSpan(null)
   }
-  restart() { this.seek(this.part && this.partAB ? this.partAB[0] : 0); void this.video.play().catch(() => {}) }
+  restart() { const it = this.item(), range = it && this.playRange(it); this.seek(range ? range[0] : 0); void this.video.play().catch(() => {}) }
 
   /** Plays one cue sound now (▶ in the Sound panel; its first sound), regardless of the PC sound setting. */
   testSound(sfx: CueSfx) { const sound = sfxSounds(sfx)[0]; if (sound) this.playSfx(sound, sfx.volume, 0, true) }
@@ -251,7 +275,7 @@ export class SceneRuntime {
   private fire(ev: VisibleEvent | { name: string; hand: string; gain?: number }, delay: number) {
     const s = useSceneStore.getState(), resolved = s.table && resolveEventName(s.table, ev.name), e = resolved && s.table && effectiveEvent(s.table, resolved.ref)
     if (!e || !s.table || !s.lib) return
-    const loop = isLoopCue(s.lib, e.ref.cue)
+    const loop = isLoopCue(s.table, e.ref.cue)
     // A variant's ramp (rampTo / rampCurve / rampSteps) by which firing of its run this is in the recording.
     const shot = fireShot(e, loop, this.picker, Math.random, 't' in ev && s.data ? runPosition(s.data.full.events, ev) : undefined, 'dist' in ev ? ev.dist : undefined)
     if (shot.sound && !loop) this.playSfx(shot.sound, shot.soundGain, delay, false, 2 ** (shot.pitchSt / 12))
@@ -279,7 +303,12 @@ export class SceneRuntime {
   /** Fires the cues the video is about to reach (both outputs) and keeps the device streams fed. */
   private tick() {
     const s = useSceneStore.getState(), it = s.items[s.cur], now = performance.now(), v = this.video
-    if (this.part && this.partAB && (v.currentTime >= this.partAB[1] || v.ended)) { const ended = v.ended; this.seek(this.partAB[0]); if (ended) void v.play().catch(() => {}) }
+    // The end of the play range: W's part and a looped moment go back to its start, an unlooped moment stops there.
+    const range = it && this.loadedCur === s.cur ? this.playRange(it) : null
+    if (range && (v.currentTime >= range[1] || v.ended)) {
+      if (this.part || useSceneSettings.getState().loop) { const ended = v.ended; this.seek(range[0]); if (ended) void v.play().catch(() => {}) }
+      else if (!v.paused) v.pause()
+    }
     const playing = !!s.table && !!it && !v.paused && !v.seeking && v.readyState >= 2
     if (s.cur !== this.lastItem) this.playedHere = false
     // The full replay's playhead (its own video, loaded, outside a span): where it resumes after a moment or a span.
@@ -287,10 +316,10 @@ export class SceneRuntime {
     if (!v.paused && v.readyState >= 1 && this.loadedCur === s.cur) this.playedHere = true
     if (!playing || s.cur !== this.lastItem) { this.flush(); this.cursor = null; this.mixer.clock = null; this.lastItem = s.cur }
     if (playing && it && s.data) {
-      const vt = v.currentTime, rate = v.playbackRate, t = vt + offsetOf(it)
+      const vt = v.currentTime, rate = v.playbackRate, t = vt
       if (this.cursor !== null && (vt < this.lastVt - 0.02 || vt > this.lastVt + 1)) { this.flush(); this.cursor = null } // loop / seek
       if (this.cursor === null) this.cursor = t - 0.005
-      const end = Math.min(t + LOOKAHEAD * rate, offsetOf(it) + (this.part && this.partAB ? this.partAB[1] : clipEnd(it, s.data.fps)))
+      const end = Math.min(t + LOOKAHEAD * rate, range ? range[1] : clipEnd(it))
       for (const ev of s.data.full.events) if (ev.t > this.cursor && ev.t <= end) this.fire(ev, Math.max(0, (ev.t - t) / rate))
       this.cursor = Math.max(this.cursor, end)
       this.lastVt = vt
@@ -300,7 +329,7 @@ export class SceneRuntime {
     const settings = useSceneSettings.getState(), data = s.data, lib = s.lib
     // Loop-cue sounds at the level recorded for the replay time now (both hands' louder gain, its rate), with the PC sound on.
     if (playing && it && data && lib && settings.pcSound && this.loopSounds.length) {
-      const t = v.currentTime + offsetOf(it)
+      const t = v.currentTime
       this.loopPlayer.update(() => this.audio(), this.loopSounds, s.sfx, layer => loopSoundLevel(data.full.levels, data.fps, lib.layers[layer], t))
     } else if (this.actx) this.loopPlayer.stopAll(this.actx)
     this.mixer.pump(now, {

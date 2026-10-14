@@ -4,7 +4,7 @@ import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useEditorSettings } from '@/stores/editorSettings'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { sceneVideoUrl, useSceneStore } from '@/stores/sceneStore'
-import { resolveTrialScene, sceneEventTime, sceneProjectNeed, sceneVideoTime, stepSceneFrame, wantedSceneProject, type TrialSceneState } from '@/utils/trialScene'
+import { REPRESENTATIVE, resolveTrialScene, sceneEventTime, sceneProjectNeed, sceneVideoTime, stepSceneFrame, wantedSceneProject, type TrialSceneState } from '@/utils/trialScene'
 import { lastSceneProject } from '@/utils/sceneRegistry'
 import { FRAME_SEC, setScenePause, setScenePreRoll, useSceneVideoTarget, videoCorrection, type SceneVideoTarget } from '@/utils/editorSceneSync'
 import { eventSoundSec } from './eventAudio'
@@ -52,13 +52,14 @@ export function useSceneChoice(subject: SceneSubject) {
   // The targets: the trial's scene cues, or the event open in the Events panel (its variants are other cues of the scene).
   const targets = useMemo(() => subject.kind === 'event' && id ? [id] : undefined, [subject.kind, id])
   const state: TrialSceneState = useMemo(() => resolveTrialScene({ lib, data, scene, saved, project: wanted, soundSec: eventSoundSec, targets }), [lib, data, scene, saved, wanted, cues, sfx, targets])
-  const choose = (file: string) => {
+  /** Saves the pick: an option's `key` (in the choice's `file`), '' = none. */
+  const choose = (key: string) => {
     if (!lib || !id) return
-    if (subject.kind === 'event') { useEventStore.getState().pickScene(id, file ? { project: lib.project_name, file } : null); return }
-    const key = subject.kind === 'trial' ? 'trialScenes' : 'clipScenes'
-    const choices = { ...useEditorSettings.getState()[key] }
-    if (file) choices[id] = { project: lib.project_name, file }; else delete choices[id]
-    useEditorSettings.getState().update({ [key]: choices })
+    if (subject.kind === 'event') { useEventStore.getState().pickScene(id, key ? { project: lib.project_name, file: key } : null); return }
+    const setting = subject.kind === 'trial' ? 'trialScenes' : 'clipScenes'
+    const choices = { ...useEditorSettings.getState()[setting] }
+    if (key) choices[id] = { project: lib.project_name, file: key }; else delete choices[id]
+    useEditorSettings.getState().update({ [setting]: choices })
   }
   return { id, trial, scene, wanted, state, chosen: state.kind === 'ready' ? state.chosen : null, choose }
 }
@@ -92,7 +93,7 @@ export function useAuditionPlan(): AuditionPlan | null {
   const plain = useEventStore(s => !!s.preview?.plain)
   const plan = useMemo((): AuditionPlan | null => {
     if (!chosen?.segment || (!audition && !previewEvent && !adjustEvent) || (!audition && plain)) return null
-    if (lib && chosen.cue && isLoopCue(lib, parseEventKey(chosen.cue).cue)) return null
+    if (chosen.cue && isLoopCue(useSceneStore.getState().table, parseEventKey(chosen.cue).cue)) return null
     const own = trial?.scene?.project === lib?.project_name ? trial?.scene?.context ?? [] : []
     return {
       targets: chosen.marks.filter(m => m.target).map(m => m.t - chosen.mark),
@@ -130,7 +131,7 @@ export function useLoopAudition(): LoopStretch | null {
   return useMemo(() => {
     if (!auditioning || !lib || !data || !chosen?.segment || !chosen.cue || (!audition && plain)) return null
     const cue = parseEventKey(chosen.cue).cue
-    const layer = isLoopCue(lib, cue) ? lib.layers.find(l => l.cue === cue) : undefined
+    const layer = isLoopCue(useSceneStore.getState().table, cue) ? lib.layers.find(l => l.cue === cue) : undefined
     const stretch = layer ? loopStretch(data.full.levels, data.fps, layer, chosen.mark, chosen.segment.end - chosen.mark) : null
     const levelMap = JSON.parse(levelMapKey) as LevelMap | null
     return stretch && levelMap ? { ...stretch, levelMap } : stretch
@@ -147,11 +148,11 @@ export function SceneChoiceSelect({ choice, label }: { choice: ReturnType<typeof
   const { t } = useI18n()
   const { state, chosen, scene, choose } = choice
   if (state.kind !== 'ready') return <select aria-label={label} disabled><option>{t(state.kind === 'noProject' ? 'editor.scene.noProjectShort' : 'editor.scene.unavailable')}</option></select>
-  const segment = state.options[0]?.segment
-  return <select aria-label={label} value={chosen?.file ?? ''} title={segment ? t('editor.scene.segmentHint') : undefined}
+  const segment = state.options.find(o => o.key === REPRESENTATIVE)?.segment
+  return <select aria-label={label} value={chosen?.key ?? ''} title={segment ? t('editor.scene.segmentHint') : undefined}
     onChange={e => { if (e.target.value === OTHER_SCENES) { if (segment) useEventStore.getState().openInScene(segment.names[0]) } else choose(e.target.value) }}>
     {!scene && <option value="">{t('editor.scene.pick')}</option>}
-    {state.options.map(o => <option key={o.file} value={o.file}>{o.segment
+    {state.options.map(o => <option key={o.key} value={o.key}>{o.key === REPRESENTATIVE
       ? t(o.segment.repeating ? 'editor.scene.segmentRun' : 'editor.scene.segmentOne', { name: o.segment.names[0], at: o.segment.marks[0].t.toFixed(1), count: o.segment.marks.filter(m => m.target).length })
       : o.label}</option>)}
     {segment && <option value={OTHER_SCENES}>{t('editor.scene.otherScenes', { name: segment.names[0], count: segment.total })}</option>}

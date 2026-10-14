@@ -7,10 +7,10 @@ import { SYNC_MAX_MS } from './syncPoint'
  * The project's cue table (`lib.paths.cues`, e.g. Safety Mill
  * `Content/Hapbeat/safety-mill-cues.json`, T-Rex `Content/Hapbeat/trex-cues.json`):
  * per cue one optional sound effect and any number of haptic routes
- * (Kit clip × body position × gain). The schema and its checks belong to the
- * demos (`Scripts/haptic_cues.py` / `Scripts/trex_haptic_cues.py` `validate`);
- * `validateCueTable` runs the same checks with what the lib provides, so a
- * table saved here passes the project's import step.
+ * (Kit clip × body position × gain). The format is hapbeat-contracts
+ * `specs/cue-table.md` (`schema_version` 1, DEC-095); `validateCueTable` runs its
+ * section 6 checks (the same as `hapbeat-helper cues validate`), so a table saved
+ * here passes the project's import step.
  *
  * Edits are immutable (each returns a new table); unknown fields are kept.
  *
@@ -72,6 +72,8 @@ export interface CueEmit { during: string; intervalSec: number; jitterPct?: numb
  * `sfx: null` = no sound and `haptics: []` = no haptic (both decided). The game plays neither.
  */
 export interface CueEntry {
+  /** A loop cue: started and stopped by the game, which keeps giving it an input level (cue-table section 5.6). */
+  loop?: boolean
   description?: string; sfx?: CueSfx | null; haptics?: CueRoute[]
   /** Scene multiplier by distance (null / absent = none). */
   distanceFalloff?: DistanceFalloff | null
@@ -82,8 +84,27 @@ export interface CueEntry {
   [key: string]: unknown
 }
 
+/** The cue table format this Studio reads and writes (cue-table `schema_version`). */
+export const CUE_TABLE_VERSION = 1
+/** Names (cue-table section 3). */
+export const CUE_NAME = /^[a-z][a-z0-9_]*$/
 /** Variant names (`<cue>:<variant>` in the game and in viewer-data events). */
 export const VARIANT_NAME = /^[a-z][a-z0-9_]*$/
+export const CLIP_NAME = /^[a-z][a-z0-9_-]*$/
+export const SOUND_NAME = /^[A-Za-z][A-Za-z0-9_]*$/
+export const KIT_NAME = /^[a-z][a-z0-9-]*$/
+/** Every route position (cue-table section 4.5): the default of the lib's `at` / `loop_at`. */
+export const AT_VALUES: readonly string[] = [
+  'hand', 'both', 'pos_neck', 'pos_chest', 'pos_abd', 'pos_l_arm', 'pos_r_arm', 'pos_l_wrist', 'pos_r_wrist',
+  'pos_hip', 'pos_l_thigh', 'pos_r_thigh', 'pos_l_ankle', 'pos_r_ankle',
+]
+
+/** A Scene file of another format version (not `schema_version` 1): it is migrated, never read as it is. */
+export class SceneFormatError extends Error {
+  constructor(readonly file: string) {
+    super(`${file}: schema_version must be ${CUE_TABLE_VERSION} (an older format): migrate it with hapbeat-haptic-authoring tools/migrate_scene_v1.py`)
+  }
+}
 /** Ranges of the numeric `variation` fields. */
 export const VARIATION_RANGES = { gainJitterDb: [0, 12], pitchJitterSt: [0, 12], rateJitterPct: [0, 50] } as const
 export type VariationNumberKey = keyof typeof VARIATION_RANGES
@@ -100,7 +121,7 @@ export const sfxAlternates = (sfx: CueSfx | null | undefined): string[] => Array
 export interface ClipEntry { intensity: number; loop: boolean; description?: string; syncMs?: number; [key: string]: unknown }
 /** A sound's base level (DEC-086): the WAV holds the shape at full scale, `intensity` how strong it is (0..1; absent = 1). */
 export interface SoundEntry { intensity: number; syncMs?: number; [key: string]: unknown }
-export interface CueTable { kit?: string; clips: Record<string, ClipEntry>; sounds?: Record<string, SoundEntry>; cues: Record<string, CueEntry>; [key: string]: unknown }
+export interface CueTable { schema_version?: number; kit?: string; clips: Record<string, ClipEntry>; sounds?: Record<string, SoundEntry>; cues: Record<string, CueEntry>; [key: string]: unknown }
 
 /** WAV peak the materials are written at (−0.5 dBFS, DEC-086). */
 export const MATERIAL_PEAK = 10 ** (-0.5 / 20)
@@ -111,10 +132,11 @@ export const materialIntensity = (table: CueTable, target: 'sound' | 'haptic', n
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 
-/** Structural parse; value ranges are checked by `validateCueTable`. */
+/** Structural parse; value ranges are checked by `validateCueTable`. Another `schema_version` throws SceneFormatError. */
 export function parseCueTable(text: string): CueTable {
   let v: unknown
   try { v = JSON.parse(text) } catch (error) { throw new Error(`cue table: ${error instanceof Error ? error.message : String(error)}`) }
+  if (isRecord(v) && v.schema_version !== CUE_TABLE_VERSION) throw new SceneFormatError('cue table')
   if (!isRecord(v) || !isRecord(v.clips) || !isRecord(v.cues)) throw new Error('cue table: clips and cues must be objects')
   for (const [name, clip] of Object.entries(v.clips)) if (!isRecord(clip)) throw new Error(`cue table: clip ${name} must be an object`)
   for (const [name, cue] of Object.entries(v.cues)) {
@@ -146,17 +168,29 @@ export function parseCueTable(text: string): CueTable {
 /** Written exactly like the standalone viewer: 2-space JSON plus a trailing newline. */
 export const serializeCueTable = (table: CueTable) => JSON.stringify(table, null, 2) + '\n'
 
-export const isLoopCue = (lib: SceneLib, name: string) => lib.loop_cues.includes(name)
-/** A cue may have a sound: one-shot cues always; loop cues only where the project allows looping cue sounds (lib.loop_cue_sounds, T-Rex). */
-export const soundAllowed = (lib: SceneLib, name: string) => !isLoopCue(lib, name) || lib.loop_cue_sounds === true
+/** A loop cue: `loop: true` in the cue table (cue-table section 5.6). */
+export const isLoopCue = (table: Pick<CueTable, 'cues'> | null | undefined, name: string) => table?.cues[name]?.loop === true
+/** The loop cues of a table (the lib's `loop_cues` once the table is read). */
+export const loopCuesOf = (table: Pick<CueTable, 'cues'>) => Object.keys(table.cues).filter(name => isLoopCue(table, name))
 
-/** Positions a cue's routes may use: lib.at, narrowed by lib.loop_at for loop cues. */
-export const positionsForCue = (lib: SceneLib, name: string) =>
-  isLoopCue(lib, name) && lib.loop_at ? lib.at.filter(a => lib.loop_at!.includes(a)) : lib.at
+/** Positions the screen offers for a cue's routes: lib.at, narrowed by lib.loop_at for loop cues. */
+export const positionsForCue = (lib: SceneLib, table: Pick<CueTable, 'cues'> | null | undefined, name: string) =>
+  isLoopCue(table, name) ? lib.at.filter(a => lib.loop_at.includes(a)) : lib.at
 
 /** Clips a cue may use: loop clips for loop cues, one-shots otherwise. */
-export const clipsForCue = (table: CueTable, lib: SceneLib, name: string) =>
-  Object.keys(table.clips).filter(c => table.clips[c].loop === isLoopCue(lib, name)).sort()
+export const clipsForCue = (table: CueTable, name: string) =>
+  Object.keys(table.clips).filter(c => table.clips[c].loop === isLoopCue(table, name)).sort()
+
+/**
+ * A new cue table for a project that has none ("Create the cue table"): every cue the recording fires (`:variant`
+ * left out), not decided yet, and the recording's layer cues as loop cues; no clips or sounds yet.
+ */
+export function newCueTable(lib: Pick<SceneLib, 'project_name' | 'layers'>, events: readonly { name: string }[]): CueTable {
+  const loops = new Set(lib.layers.map(l => l.cue))
+  const names = [...new Set([...events.map(e => e.name.split(':')[0]), ...loops])].filter(n => CUE_NAME.test(n)).sort()
+  const cues: Record<string, CueEntry> = Object.fromEntries(names.map(n => [n, loops.has(n) ? { loop: true } : {}]))
+  return { schema_version: CUE_TABLE_VERSION, kit: `${lib.project_name}-kit`, clips: {}, sounds: {}, cues }
+}
 
 export interface CueTableContext {
   lib: SceneLib
@@ -172,19 +206,19 @@ const EMIT_KEYS = ['during', 'intervalSec', 'jitterPct']
 const inRange = (value: unknown, lo: number, hi: number) => typeof value === 'number' && Number.isFinite(value) && value >= lo && value <= hi
 
 /**
- * The demos' `validate(table)` with the lib's vocabulary: kit, clip names /
- * intensity / loop / WAV, the cue set, sound name / WAV / volume, route clip /
- * loop fit / position / gain, and the v2 variants / variation / multi-material
- * fields. Returns every problem (empty = savable). Shared by the Scene tab save and the editor's "decide".
+ * cue-table section 6 (the checks of `hapbeat-helper cues validate`) with the WAVs of the lib's folders, plus Studio's
+ * own: the kit and the cue set stay as loaded. Returns every problem (empty = savable). Shared by the Scene tab save
+ * and the editor's "decide".
  */
 export function validateCueTable(table: CueTable, ctx: CueTableContext): string[] {
   const err: string[] = []
   const { lib } = ctx
-  const clipRe = new RegExp(lib.clip_name)
-  if (table.kit !== ctx.kit) err.push(`kit must be ${ctx.kit}`)
+  if (table.schema_version !== CUE_TABLE_VERSION) err.push(`schema_version must be ${CUE_TABLE_VERSION}`)
+  if (typeof table.kit !== 'string' || !KIT_NAME.test(table.kit)) err.push(`kit must be a Kit name matching ${KIT_NAME.source}`)
+  else if (table.kit !== ctx.kit) err.push(`kit must be ${ctx.kit}`)
   const clips = table.clips
   for (const [name, c] of Object.entries(clips)) {
-    if (!clipRe.test(name)) err.push(`clip name ${name} must match ${lib.clip_name}`)
+    if (!CLIP_NAME.test(name)) err.push(`clip name ${name} must match ${CLIP_NAME.source}`)
     if (!inRange(c.intensity, 0, 1)) err.push(`clip ${name}: intensity must be 0..1`)
     if (typeof c.loop !== 'boolean') err.push(`clip ${name}: loop must be true/false`)
     if (c.syncMs !== undefined && !inRange(c.syncMs, 0, SYNC_MAX_MS)) err.push(`clip ${name}: syncMs must be a number of ms ≥ 0`)
@@ -194,9 +228,8 @@ export function validateCueTable(table: CueTable, ctx: CueTableContext): string[
   if (sounds !== undefined) {
     if (!isRecord(sounds)) err.push('sounds must be an object')
     else {
-      const soundRe = new RegExp(lib.sound_name)
       for (const [name, entry] of Object.entries(sounds)) {
-        if (!soundRe.test(name)) err.push(`sound name ${name} must match ${lib.sound_name}`)
+        if (!SOUND_NAME.test(name)) err.push(`sound name ${name} must match ${SOUND_NAME.source}`)
         if (!isRecord(entry) || !inRange(entry.intensity, 0, 1)) err.push(`sound ${name}: intensity must be 0..1`)
         else if (entry.syncMs !== undefined && !inRange(entry.syncMs, 0, SYNC_MAX_MS)) err.push(`sound ${name}: syncMs must be a number of ms ≥ 0`)
         if (!ctx.soundFiles.has(name)) err.push(`sound ${name}: ${lib.paths.sounds}/${name}.wav missing`)
@@ -206,14 +239,17 @@ export function validateCueTable(table: CueTable, ctx: CueTableContext): string[
   const names = Object.keys(table.cues)
   if (names.length !== ctx.cueNames.length || names.some(n => !ctx.cueNames.includes(n))) err.push(`cues must be exactly ${ctx.cueNames.join(', ')}`)
   for (const [name, cue] of Object.entries(table.cues)) {
+    if (!CUE_NAME.test(name)) err.push(`cue name ${name} must match ${CUE_NAME.source}`)
+    if (cue.loop !== undefined && typeof cue.loop !== 'boolean') err.push(`${name}: loop must be true/false`)
     validateCueFields(err, table, ctx, name, name, cue)
     // emit (DEC-088): a pulse cue the game fires by itself while a continuous cue runs.
     const emit = cue.emit as unknown
-    if (emit !== undefined && (isLoopCue(lib, name) || !isRecord(emit) || Object.keys(emit).some(k => !EMIT_KEYS.includes(k))
-      || typeof emit.during !== 'string' || !isLoopCue(lib, emit.during) || !inRange(emit.intervalSec, 0.05, 30) || !inRange(emit.jitterPct ?? 0, 0, 100)))
+    if (emit !== undefined && (isLoopCue(table, name) || !isRecord(emit) || Object.keys(emit).some(k => !EMIT_KEYS.includes(k))
+      || typeof emit.during !== 'string' || !isLoopCue(table, emit.during) || !inRange(emit.intervalSec, 0.05, 30) || !inRange(emit.jitterPct ?? 0, 0, 100)))
       err.push(`${name}: emit must be {during: <loop cue>, intervalSec: 0.05..30, jitterPct?: 0..100} on a pulse cue`)
     for (const [vn, variant] of Object.entries(cue.variants ?? {})) {
       if (!VARIANT_NAME.test(vn)) err.push(`${name}: variant name ${vn} must match ${VARIANT_NAME.source}`)
+      for (const key of ['loop', 'emit', 'variants']) if (variant[key] !== undefined) err.push(`${name}:${vn}: a variant cannot have ${key} (it belongs to the cue)`)
       validateCueFields(err, table, ctx, name, `${name}:${vn}`, variant)
       validateVariantScale(err, `${name}:${vn}`, variant)
     }
@@ -244,30 +280,29 @@ function validateVariantScale(err: string[], label: string, v: CueVariant): void
  * In a loop cue only `variation.gainJitterDb` takes effect; the other variation fields are allowed but ignored.
  */
 function validateCueFields(err: string[], table: CueTable, ctx: CueTableContext, cue: string, label: string, entry: CueVariant): void {
-  const { lib } = ctx, clips = table.clips, soundRe = new RegExp(lib.sound_name)
+  const { lib } = ctx, clips = table.clips, loop = isLoopCue(table, cue)
   const sfx = entry.sfx
   if (sfx) {
     const hasOne = sfx.sound !== undefined, hasMany = sfx.sounds !== undefined
-    if (isLoopCue(lib, cue) && !lib.loop_cue_sounds) err.push(`${label}: continuous layers have no cue sound`)
-    else if (hasOne && hasMany) err.push(`${label}: sfx needs one of sound / sounds, not both`)
+    if (hasOne && hasMany) err.push(`${label}: sfx needs one of sound / sounds, not both`)
     // DEC-092: nothing starred is allowed while alternates remain (it plays nothing).
     else if (!hasOne && !hasMany && !nonEmptyList(sfx.alternates)) err.push(`${label}: sfx needs sound / sounds, or alternates when nothing is starred`)
     else if (hasMany && !nonEmptyList(sfx.sounds)) err.push(`${label}: sfx.sounds must be a non-empty list`)
     else for (const sound of hasMany ? sfx.sounds! : hasOne ? [sfx.sound] : []) {
-      if (typeof sound !== 'string' || !soundRe.test(sound) || lib.loop_sounds.includes(sound)) err.push(`${label}: bad sound ${String(sound)}`)
+      if (typeof sound !== 'string' || !SOUND_NAME.test(sound)) err.push(`${label}: bad sound ${String(sound)}`)
       else if (!ctx.soundFiles.has(sound)) err.push(`${label}: ${lib.paths.sounds}/${sound}.wav missing`)
     }
     // DEC-089: alternates = unstarred candidates (kept for quick swaps, never played).
     const alts = sfx.alternates as unknown
     if (alts !== undefined) {
-      if (!Array.isArray(alts) || alts.some(x => typeof x !== 'string' || !soundRe.test(x))) err.push(`${label}: sfx alternates must be a list of sound names`)
+      if (!Array.isArray(alts) || alts.some(x => typeof x !== 'string' || !SOUND_NAME.test(x))) err.push(`${label}: sfx alternates must be a list of sound names`)
       else {
         for (const x of alts as string[]) if (!ctx.soundFiles.has(x)) err.push(`${label}: ${lib.paths.sounds}/${x}.wav missing`)
         alternatesProblems(err, label, 'sfx', alts as string[], sfxSounds(sfx))
       }
     }
     if (!inRange(sfx.volume, 0, 2)) err.push(`${label}: sfx volume must be 0..2`)
-    levelMapProblems(err, lib, cue, label, 'sfx', sfx.levelMap)
+    levelMapProblems(err, loop, label, 'sfx', sfx.levelMap)
   }
   for (const r of entry.haptics ?? []) {
     const hasOne = r.clip !== undefined, hasMany = r.clips !== undefined
@@ -276,17 +311,16 @@ function validateCueFields(err: string[], table: CueTable, ctx: CueTableContext,
     else if (hasMany && !nonEmptyList(r.clips)) err.push(`${label}: route clips must be a non-empty list`)
     else for (const clip of hasMany ? r.clips! : hasOne ? [r.clip] : []) {
       if (typeof clip !== 'string' || !Object.prototype.hasOwnProperty.call(clips, clip)) err.push(`${label}: unknown clip ${String(clip)}`)
-      else if (clips[clip].loop !== isLoopCue(lib, cue)) err.push(`${label}: clip ${clip} loop=${clips[clip].loop} does not fit this cue`)
+      else if (clips[clip].loop !== loop) err.push(`${label}: clip ${clip} loop=${clips[clip].loop} does not fit this cue`)
     }
     const alts = r.alternates as unknown
     if (alts !== undefined) {
       if (!Array.isArray(alts) || alts.some(x => typeof x !== 'string' || !Object.prototype.hasOwnProperty.call(clips, x))) err.push(`${label}: route alternates must be clip names of this table`)
       else alternatesProblems(err, label, 'route', alts as string[], routeClips(r))
     }
-    if (!lib.at.includes(r.at)) err.push(`${label}: at must be one of ${lib.at.join(', ')}`)
-    else if (!positionsForCue(lib, cue).includes(r.at)) err.push(`${label}: continuous layers allow at = ${positionsForCue(lib, cue).join(', ')}`)
+    if (!AT_VALUES.includes(r.at)) err.push(`${label}: at must be one of ${AT_VALUES.join(', ')}`)
     if (!inRange(r.gain, 0, 2)) err.push(`${label}: gain must be 0..2`)
-    levelMapProblems(err, lib, cue, label, 'route', r.levelMap)
+    levelMapProblems(err, loop, label, 'route', r.levelMap)
   }
   const df = entry.distanceFalloff
   if (df) {
@@ -319,9 +353,9 @@ function validateCueFields(err: string[], table: CueTable, ctx: CueTableContext,
 }
 
 /** levelMap (DEC-090): only on a loop cue's sfx / route, in shape (see levelMap). */
-function levelMapProblems(err: string[], lib: SceneLib, cue: string, label: string, kind: 'sfx' | 'route', map: unknown): void {
+function levelMapProblems(err: string[], loop: boolean, label: string, kind: 'sfx' | 'route', map: unknown): void {
   if (map === undefined) return
-  if (!isLoopCue(lib, cue)) err.push(`${label}: ${kind} levelMap is for loop cues`)
+  if (!loop) err.push(`${label}: ${kind} levelMap is for loop cues`)
   else if (isRecord(map) && map.curve === 'smooth') err.push(`${label}: ${kind} levelMap curve "smooth" was removed (DEC-090 revision): use easeInOut`)
   else if (!isLevelMap(map)) err.push(`${label}: ${kind} levelMap must be ${LEVEL_MAP_RULE}`)
 }

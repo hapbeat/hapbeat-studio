@@ -74,7 +74,7 @@ describe('group order and list rows', () => {
     const layer = lib.layers.find(l => table.cues[l.cue])!
     const width = Math.max(...layer.gain) + 1
     const row = (on: boolean) => Array.from({ length: width }, (_, i) => on && layer.gain.includes(i) ? 1 : 0)
-    const data = { fps: 10, clips: [], full: { file: '', levels: [row(false), row(false), row(true), row(true)], events: [{ t: 1, name: 'button', hand: 'r' }] } } as SceneData
+    const data = { fps: 10, clips: [], full: { file: '', columns: [], levels: [row(false), row(false), row(true), row(true)], events: [{ t: 1, name: 'button', hand: 'r' }] } } as SceneData
     expect(firstTimes(table, lib, data)).toMatchObject({ button: 1, [layer.cue]: 0.2 })
   })
 })

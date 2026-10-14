@@ -6,7 +6,10 @@ import { useScene } from './sceneContext'
 import { useAtLabel } from './SceneCuePanels'
 import { PcOffsetField } from '@/components/common/PcTiming'
 
-/** Applying the saved table to the game (step ③), the cue table on disk, haptic timing, device coverage and the stream log. */
+/**
+ * Applying the saved table to the game (step ③; only when the lib names a command), the cue table on disk, haptic
+ * timing, device coverage and the stream log. A project without a cue table offers "Create the cue table" instead.
+ */
 export function SceneProjectPanel() {
   const { t } = useI18n()
   const { devices, helperConnected } = useScene()
@@ -16,9 +19,19 @@ export function SceneProjectPanel() {
   const table = useSceneStore(s => s.table)
   const soundFiles = useSceneStore(s => s.soundFiles)
   const dirty = useSceneStore(s => s.dirty)
+  const noTable = useSceneStore(s => s.noTable)
+  const busy = useSceneStore(s => s.busy)
   const log = useSceneStore(s => s.log)
   const logBox = useRef<HTMLPreElement>(null)
   useEffect(() => { const el = logBox.current; if (el) el.scrollTop = el.scrollHeight }, [log])
+  if (lib && root && noTable) return <div className="scene-project">
+    <div className="scene-sec">
+      <h3>{t('scene.data.heading')}</h3>
+      <div className="scene-dim">{t('scene.table.missing', { file: lib.paths.cues })}</div>
+      <button type="button" className="toolbar-btn" disabled={busy} title={t('scene.table.createHint', { file: lib.paths.cues })}
+        onClick={() => void useSceneStore.getState().createTable()}>{t('scene.table.create')}</button>
+    </div>
+  </div>
   if (!lib || !table || !root) return <div className="scene-panel-empty">{t('scene.noProject')}</div>
   const copy = async () => {
     try { await navigator.clipboard.writeText(lib.import_command); useSceneStore.getState().note({ id: 'scene.import.copied' }) }
@@ -26,12 +39,12 @@ export function SceneProjectPanel() {
   }
   const targets = tableTargets(table)
   return <div className="scene-project">
-    <div className="scene-sec">
+    {lib.import_command && <div className="scene-sec">
       <h3>{t('scene.import.heading')}</h3>
       <div className="scene-dim">{t('scene.import.hint')}</div>
       <code className="scene-cmd">{lib.import_command}</code>
       <button type="button" className="toolbar-btn" onClick={() => void copy()}>{t('scene.import.copy')}</button>
-    </div>
+    </div>}
     <div className="scene-sec">
       <h3>{t('scene.data.heading')}</h3>
       <div>{t('scene.data.table', { folder: root.name, file: lib.paths.cues })}</div>

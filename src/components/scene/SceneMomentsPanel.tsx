@@ -4,7 +4,7 @@ import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useWaveformStore } from '@/stores/waveformStore'
-import { familyColor, offsetOf } from '@/utils/sceneData'
+import { familyColor } from '@/utils/sceneData'
 import { addVariant, allEventKeys, effectiveEvent, parseEventKey, resolveEventName } from '@/utils/cueEvents'
 import { VARIANT_NAME, type CueTable } from '@/utils/sceneCueTable'
 import { HapticIcon, SoundIcon } from '@/components/common/KindIcon'
@@ -17,7 +17,7 @@ import { MenuPopup } from '@/components/waveform/EditorMenu'
 import { loopCueRunAt, loopCueRuns, nearestFiring } from '@/utils/loopStretch'
 
 /**
- * "Moments and events": the full replay, then one clip per cue moment, with which outputs its cues use. A click on
+ * "Moments and events": the full replay, then one stretch of it per cue moment, with which outputs its cues use. A click on
  * a row jumps to that moment (from the lead-in setting before its mark) and plays it. "Change" opens a one-line
  * request over the rows (nothing moves): an existing event or a new `cue:variant`, a comment, "Request" — a new
  * variant is made in the cue table at once (multipliers only, 1 / 1) so it can be tuned here, and the agent gets a
@@ -62,10 +62,8 @@ export function SceneMomentsPanel() {
     if (it?.kind === 'clip') useSceneStore.getState().selectCue(name, it.event)
   }
   const picked = useMemo(() => {
-    const it = items[cur]
-    if (!sel || sel.t == null || !it) return -1
-    const replay = sel.t + offsetOf(it)
-    return items.findIndex(x => x.kind === 'clip' && x.names.includes(sel.name) && Math.abs(x.at - replay) < 0.05)
+    if (!sel || sel.t == null || !items[cur]) return -1
+    return items.findIndex(x => x.kind === 'clip' && x.names.includes(sel.name) && Math.abs(x.at - sel.t!) < 0.05)
   }, [sel, items, cur])
   useEffect(() => { list.current?.querySelector('.scene-item.picked, .scene-item.sel')?.scrollIntoView({ block: 'nearest' }) }, [cur, picked])
   if (!lib) return <div className="scene-panel-empty">{t('scene.noProject')}</div>

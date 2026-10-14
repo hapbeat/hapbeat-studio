@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { decidedSoundEvents } from './decidedSound'
 import { representativeSound } from './cueEvents'
 import { CompanionSound } from './companionSound'
-import { sampleLib, sampleTable } from './sceneTestFixtures'
+import { sampleTable } from './sceneTestFixtures'
 
 describe('decided sound with what the editor shows', () => {
   const base = { auditioning: false, audition: null, preview: null, adjusting: null, openProject: 'mill' }
@@ -11,7 +11,7 @@ describe('decided sound with what the editor shows', () => {
     const names = decidedSoundEvents({ ...base, adjusting: { project: 'mill', event: 'button', target: 'haptic' } })
     expect(names).toEqual(['button'])
     const buffers = { Click: { duration: 0.2 } as AudioBuffer }
-    const picked = representativeSound(sampleTable(), sampleLib(), names, buffers)
+    const picked = representativeSound(sampleTable(), names, buffers)
     expect(picked?.buffer).toBe(buffers.Click)
     const start = vi.fn(() => ({ stop: vi.fn() }))
     const companion = new CompanionSound(start)

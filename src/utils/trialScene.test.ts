@@ -2,15 +2,16 @@ import { describe, expect, it } from 'vitest'
 import { resolveTrialScene, sceneEventTime, sceneProjectNeed, sceneVideoTime, stepSceneFrame, trialSceneOptions } from './trialScene'
 import { sampleData, sampleLib } from './sceneTestFixtures'
 
-describe('trial scene clips', () => {
+describe('trial scene moments', () => {
   const data = sampleData()
-  data.clips.push({ ...data.clips[0], file: '02_grab.mp4', name: 'grab', names: ['grab'], at: 3.1 })
+  data.clips.push({ ...data.clips[0], name: 'grab', names: ['grab'], at: 6.1, event: 6.1, start: 4.1, end: 9.1 })
 
-  it('offers the clips containing the trial cues, marked at that cue', () => {
+  it('offers the moments containing the trial cues as stretches of the full replay, marked at that cue', () => {
     const options = trialSceneOptions(data, ['grab'])
-    expect(options.map(o => o.file)).toEqual(['01_button.mp4', '02_grab.mp4'])
-    expect(options[0].mark).toBeCloseTo(2.1) // grab plays 0.1 s after the button the first clip was cut for
-    expect(options[1].mark).toBeCloseTo(2.0)
+    expect(options.map(o => [o.key, o.file, o.end])).toEqual([['@3.000', 'full_replay.mp4', 5], ['@6.100', 'full_replay.mp4', 9.1]])
+    expect(options[0].mark).toBeCloseTo(3.1) // grab plays 0.1 s after the button the first moment is for
+    expect(options[0].segment).toEqual({ names: ['grab'], start: 1, end: 5, marks: [{ t: 3.1, name: 'grab', target: true }], repeating: false, total: 1 })
+    expect(options[1].mark).toBeCloseTo(6.1)
     expect(trialSceneOptions(data, null)).toHaveLength(2)
     expect(trialSceneOptions(data, ['nope'])).toEqual([])
   })
@@ -24,13 +25,13 @@ describe('trial scene clips', () => {
     expect(resolveTrialScene({ lib, data, scene: { project: 'mill', cues: ['nope'] } })).toEqual({ kind: 'noClips', cues: ['nope'] })
     // DEC-085: the representative stretch of the full replay (grab fires once at 3.1 s), no list of recorded clips.
     const auto = resolveTrialScene({ lib, data, scene: { project: 'mill', cues: ['grab'] }, soundSec: () => 0.4 })
-    expect(auto.kind === 'ready' && auto.options.map(o => o.file)).toEqual(['full_replay.mp4'])
-    expect(auto.kind === 'ready' && auto.chosen).toMatchObject({ file: 'full_replay.mp4', mark: 3.1, marks: [{ t: 3.1, name: 'grab', target: true }], segment: { repeating: false } })
+    expect(auto.kind === 'ready' && auto.options.map(o => o.key)).toEqual(['segment'])
+    expect(auto.kind === 'ready' && auto.chosen).toMatchObject({ key: 'segment', file: 'full_replay.mp4', mark: 3.1, marks: [{ t: 3.1, name: 'grab', target: true }], segment: { repeating: false } })
     expect(auto.kind === 'ready' && auto.chosen!.end).toBeCloseTo(3.1 + 0.4 + 0.5)
-    // The user's pick of a recorded clip still wins (listed after the representative).
-    const saved = resolveTrialScene({ lib, data, scene: { project: 'mill', cues: ['grab'] }, saved: { project: 'mill', file: '02_grab.mp4' } })
-    expect(saved.kind === 'ready' && saved.chosen?.file).toBe('02_grab.mp4')
-    expect(saved.kind === 'ready' && saved.options.map(o => o.file)).toEqual(['full_replay.mp4', '02_grab.mp4'])
+    // The user's pick of a moment still wins (listed after the representative).
+    const saved = resolveTrialScene({ lib, data, scene: { project: 'mill', cues: ['grab'] }, saved: { project: 'mill', file: '@6.100' } })
+    expect(saved.kind === 'ready' && saved.chosen?.key).toBe('@6.100')
+    expect(saved.kind === 'ready' && saved.options.map(o => o.key)).toEqual(['segment', '@6.100'])
     const old = resolveTrialScene({ lib, data })
     expect(old.kind === 'ready' && old.options.length === 2 && old.chosen).toBeNull()
     expect(resolveTrialScene({ lib, data, saved: { project: 'other', file: '01_button.mp4' } })).toEqual({ kind: 'otherProject', project: 'other' })
@@ -67,29 +68,29 @@ describe('trial scene clips', () => {
 })
 
 describe('event moments (cue table v2)', () => {
-  it('without the cues in the recording: the earliest recorded clip; scene.clip names one; the user pick wins', () => {
+  it('without the cues in the recording: the earliest moment; the user pick wins', () => {
     const data = sampleData()
     data.full.events = []
     data.clips = [
-      { ...data.clips[0], file: '01_button-soft.mp4', name: 'button:soft', names: ['button:soft'], at: 1.3 },
-      { ...data.clips[0], file: '02_button.mp4', name: 'button', names: ['button'], at: 17.4 },
+      { ...data.clips[0], name: 'button:soft', names: ['button:soft'], at: 1.3, event: 1.3, start: 0, end: 4.3 },
+      { ...data.clips[0], name: 'button', names: ['button'], at: 17.4, event: 17.4, start: 15.4, end: 20.4 },
     ]
     const scene = { project: 'mill', cues: ['button', 'button:soft'] }
     const state = resolveTrialScene({ lib: sampleLib(), data, scene })
-    expect(state.kind === 'ready' && state.chosen?.file).toBe('01_button-soft.mp4')
+    expect(state.kind === 'ready' && state.chosen?.key).toBe('@1.300')
     expect(state.kind === 'ready' && state.options.map(o => o.label)).toEqual(['01 button:soft (1.3 s)', '02 button (17.4 s)'])
-    const named = resolveTrialScene({ lib: sampleLib(), data, scene: { ...scene, clip: '02_button.mp4' } })
-    expect(named.kind === 'ready' && named.chosen?.file).toBe('02_button.mp4')
-    const picked = resolveTrialScene({ lib: sampleLib(), data, scene: { ...scene, clip: '02_button.mp4' }, saved: { project: 'mill', file: '01_button-soft.mp4' } })
-    expect(picked.kind === 'ready' && picked.chosen?.file).toBe('01_button-soft.mp4')
+    const picked = resolveTrialScene({ lib: sampleLib(), data, scene, saved: { project: 'mill', file: '@17.400' } })
+    expect(picked.kind === 'ready' && picked.chosen?.key).toBe('@17.400')
   })
 
-  it('with the cues in the recording: scene.clip (a recorded clip) wins over the representative stretch', () => {
+  it('with the cues in the recording: the representative stretch; a picked moment wins, and back again', () => {
     const data = sampleData()
-    const state = resolveTrialScene({ lib: sampleLib(), data, scene: { project: 'mill', cues: ['button'], clip: '01_button.mp4' } })
-    expect(state.kind === 'ready' && state.chosen?.file).toBe('01_button.mp4')
-    expect(state.kind === 'ready' && state.options.map(o => o.file)).toEqual(['full_replay.mp4', '01_button.mp4'])
-    const back = resolveTrialScene({ lib: sampleLib(), data, scene: { project: 'mill', cues: ['button'], clip: '01_button.mp4' }, saved: { project: 'mill', file: 'full_replay.mp4' } })
-    expect(back.kind === 'ready' && back.chosen?.file).toBe('full_replay.mp4')
+    const state = resolveTrialScene({ lib: sampleLib(), data, scene: { project: 'mill', cues: ['button'] } })
+    expect(state.kind === 'ready' && state.chosen?.key).toBe('segment')
+    const picked = resolveTrialScene({ lib: sampleLib(), data, scene: { project: 'mill', cues: ['button'] }, saved: { project: 'mill', file: '@3.000' } })
+    expect(picked.kind === 'ready' && picked.chosen?.key).toBe('@3.000')
+    expect(picked.kind === 'ready' && picked.options.map(o => o.key)).toEqual(['segment', '@3.000'])
+    const back = resolveTrialScene({ lib: sampleLib(), data, scene: { project: 'mill', cues: ['button'] }, saved: { project: 'mill', file: 'segment' } })
+    expect(back.kind === 'ready' && back.chosen?.key).toBe('segment')
   })
 })

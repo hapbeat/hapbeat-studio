@@ -1,5 +1,5 @@
 import { levelAt, type SceneData, type SceneLib } from './sceneData'
-import { isLoopCue, routeClips, soundIntensity, type CueTable } from './sceneCueTable'
+import { routeClips, soundIntensity, type CueTable } from './sceneCueTable'
 import { effectiveEvent, parseEventKey, resolveEventName } from './cueEvents'
 import { groupContext } from './eventGroups'
 import { groupFirings, type SoundFiring } from './groupPlayback'
@@ -39,7 +39,8 @@ export function unknownContextCues(table: CueTable, names: readonly string[]): s
  * firings, if any, are not played as one-shots).
  */
 export function contextPlan(data: Pick<SceneData, 'full'>, lib: Pick<SceneLib, 'layers' | 'loop_cues'>, context: readonly string[], mark: number, end: number): ContextPlan {
-  const loops = context.filter(c => isLoopCue(lib as SceneLib, cueOf(c)))
+  // lib.loop_cues: the cue table's loop cues (sceneStore reads them from the table).
+  const loops = context.filter(c => lib.loop_cues.includes(cueOf(c)))
   const pulses = context.filter(c => !loops.includes(c))
   const firings = data.full.events
     .filter(e => e.t >= mark - 1e-6 && e.t <= end + 1e-6 && pulses.some(c => isOf(e.name, c)))
@@ -100,7 +101,7 @@ export function contextHapticParts(table: CueTable, plan: Pick<ContextPlan, 'fir
   })
 }
 
-/** The context loop cues' sounds (lib.loop_cue_sounds; those layers' loop sounds, levelMap kept) at the sound's intensity only (no sfx.volume), like the context's one-shots. */
+/** The context loop cues' sounds (those layers' loop sounds, levelMap kept) at the sound's intensity only (no sfx.volume), like the context's one-shots. */
 export function contextLoopSounds(table: CueTable, lib: SceneLib, plan: Pick<ContextPlan, 'layers'>): LoopSound[] {
   return buildLoopSounds(table, lib).filter(x => plan.layers.includes(x.layer)).map(x => ({ ...x, gain: soundIntensity(table, x.sound) }))
 }

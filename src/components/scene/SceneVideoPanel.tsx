@@ -7,9 +7,9 @@ import { useScene } from './sceneContext'
 import { useSceneProjectActions } from './useSceneProjectActions'
 import { VideoOverlay } from './VideoOverlay'
 import type { FiredShot } from './sceneRuntime'
-import { itemEvents } from '@/utils/sceneData'
+import { isTick, itemEvents } from '@/utils/sceneData'
 
-/** The clip / replay video (the runtime's element, moved in here) with the time-to-cue badge, or the "open a project" start screen. */
+/** The replay video (the runtime's element, moved in here) with the time-to-cue badge, or the "open a project" start screen. */
 export function SceneVideoPanel() {
   const { t } = useI18n()
   const { runtime } = useScene()
@@ -18,7 +18,7 @@ export function SceneVideoPanel() {
   const hasItems = useSceneStore(s => s.items.length > 0)
   const empty = useSceneStore(s => s.empty)
   const { open, reopen, rememberedName, busy } = useSceneProjectActions()
-  // Overlay: ⏸/▶ follows the runtime's video; the bar's mark is the clip's cue (the full recording has none).
+  // Overlay: ⏸/▶ follows the runtime's video; the bar spans a moment's stretch with its cue as the mark (the full recording: all, no mark).
   const [playing, setPlaying] = useState(false)
   useEffect(() => {
     const v = runtime.video, sync = () => setPlaying(!v.paused)
@@ -26,6 +26,9 @@ export function SceneVideoPanel() {
     return () => { v.removeEventListener('play', sync); v.removeEventListener('pause', sync) }
   }, [runtime])
   const mark = useSceneStore(s => { const it = s.items[s.cur]; return it?.kind === 'clip' ? it.event : null })
+  const rangeStart = useSceneStore(s => { const it = s.items[s.cur]; return it?.kind === 'clip' ? it.start : null })
+  const rangeEnd = useSceneStore(s => { const it = s.items[s.cur]; return it?.kind === 'clip' ? it.end : null })
+  const range = useMemo((): [number, number] | null => rangeStart !== null && rangeEnd !== null ? [rangeStart, rangeEnd] : null, [rangeStart, rangeEnd])
   // What each firing plays, shown over the video while it sounds (the latest few; a seek back drops the later ones).
   const [fired, setFired] = useState<FiredShot[]>([])
   useEffect(() => runtime.onFired(f => setFired(list => [...list.filter(x => x.at <= f.at && f.at - x.at < 10), f].slice(-12))), [runtime])
@@ -33,7 +36,7 @@ export function SceneVideoPanel() {
   // Every firing of the shown moment / full replay is a pin from the start (the recording's plan, not what has played);
   // what a firing played is added to its pin once it fires (the overlay's "name: material").
   const items = useSceneStore(s => s.items), cur = useSceneStore(s => s.cur), data = useSceneStore(s => s.data), ticks = useSceneStore(s => s.lib?.ticks)
-  const planned = useMemo(() => { const it = items[cur]; return it && data ? itemEvents(it, data.full.events, data.fps).filter(e => !ticks?.includes(e.name)) : [] }, [items, cur, data, ticks])
+  const planned = useMemo(() => { const it = items[cur]; return it && data ? itemEvents(it, data.full.events).filter(e => !isTick(ticks ?? [], e.name)) : [] }, [items, cur, data, ticks])
   const marks = planned.map(e => {
     const f = fired.find(x => Math.abs(x.at - e.t) < 0.05 && x.name === (e.name.split(':')[1] ?? e.name))
     return { t: e.t, target: mark !== null && Math.abs(e.t - mark) < 0.05, name: e.name, ...(f ? { material: f.materials.join(' + '), durSec: Math.max(0.3, f.durSec) } : {}) }
@@ -62,7 +65,7 @@ export function SceneVideoPanel() {
           el.classList.toggle('scene-badge-hit', Math.abs(d) < 0.07)
         } else {
           const ticks = s.lib?.ticks ?? []
-          const prev = s.data?.full.events.filter(x => !ticks.includes(x.name) && x.t <= time).pop()
+          const prev = s.data?.full.events.filter(x => !isTick(ticks, x.name) && x.t <= time).pop()
           el.textContent = prev ? `${prev.name} +${(time - prev.t).toFixed(2)} s` : `${time.toFixed(2)} s`
           el.classList.remove('scene-badge-hit')
         }
@@ -76,7 +79,7 @@ export function SceneVideoPanel() {
 
   return <div className="scene-stage" ref={stage} onClick={() => { if (!hasItems) return; runtime.audio(); runtime.togglePlay() }}>
     <div className="scene-badge" ref={badge} hidden={!hasItems} />
-    {hasItems && <VideoOverlay video={runtime.video} mark={mark} marks={marks} playing={playing} info={t('scene.keys')}
+    {hasItems && <VideoOverlay video={runtime.video} mark={mark} marks={marks} range={range} playing={playing} info={t('scene.keys')}
       onToggle={() => { runtime.audio(); runtime.togglePlay() }} onSeek={time => runtime.seek(time)} />}
     {!hasItems && <div className="scene-empty" onClick={e => e.stopPropagation()}>
       <div className="scene-empty-message">{empty ? t(empty.id, empty.params) : t('scene.empty.intro')}</div>

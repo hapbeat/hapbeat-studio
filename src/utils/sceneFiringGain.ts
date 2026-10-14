@@ -1,6 +1,6 @@
 import { effectiveEvent, fireShot, MaterialPicker, resolveEventName } from './cueEvents'
 import { isLoopCue, soundIntensity, type CueTable } from './sceneCueTable'
-import type { SceneEvent, SceneLib } from './sceneData'
+import type { SceneEvent } from './sceneData'
 import { runPosition } from './sceneSegments'
 
 /**
@@ -19,9 +19,9 @@ class FirstPicker extends MaterialPicker {
 /** random() = 0.5 makes every jitter of fireShot 0. */
 const NO_JITTER = () => 0.5
 
-export function firingGains(table: CueTable, lib: SceneLib, events: readonly SceneEvent[], ev: SceneEvent): FiringGains {
+export function firingGains(table: CueTable, events: readonly SceneEvent[], ev: SceneEvent): FiringGains {
   const r = resolveEventName(table, ev.name), e = r && effectiveEvent(table, r.ref)
-  if (!e || isLoopCue(lib, e.ref.cue)) return { sound: null, haptics: null }
+  if (!e || isLoopCue(table, e.ref.cue)) return { sound: null, haptics: null }
   const shot = fireShot(e, false, new FirstPicker(), NO_JITTER, runPosition(events, ev), ev.dist)
   const sound = e.sfx && shot.sound ? shot.soundGain * soundIntensity(table, shot.sound) : e.sfx ? 0 : null
   const routes = shot.routes.flatMap(x => { const clip = table.clips[x.clip]; return clip && !clip.loop ? [clip.intensity * x.gain * (ev.gain ?? 1)] : [] })
@@ -29,10 +29,10 @@ export function firingGains(table: CueTable, lib: SceneLib, events: readonly Sce
 }
 
 /** Gains of every firing of the recording, keyed by firingKey (replay time). */
-export function recordingFiringGains(table: CueTable, lib: SceneLib, events: readonly SceneEvent[]): Map<string, FiringGains> {
-  return new Map(events.map(ev => [firingKey(ev.name, ev.t), firingGains(table, lib, events, ev)]))
+export function recordingFiringGains(table: CueTable, events: readonly SceneEvent[]): Map<string, FiringGains> {
+  return new Map(events.map(ev => [firingKey(ev.name, ev.t), firingGains(table, events, ev)]))
 }
-/** A firing's key: its name and replay time (ms, so an item's offset added back still matches). */
+/** A firing's key: its name and replay time (ms). */
 export const firingKey = (name: string, replaySec: number) => `${name}@${Math.round(replaySec * 1000)}`
 
 /** Shortest bar drawn for a gain above 0 (CSS px). */

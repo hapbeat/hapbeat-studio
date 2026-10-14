@@ -6,7 +6,7 @@ import { useSceneStore } from '@/stores/sceneStore'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { useEditorSettings } from '@/stores/editorSettings'
-import { isLoopCue, positionsForCue, soundAllowed } from '@/utils/sceneCueTable'
+import { CLIP_NAME, isLoopCue, positionsForCue, SOUND_NAME } from '@/utils/sceneCueTable'
 import { allEventKeys, defaultAt, effectiveEvent, matchesName, needsRouteForm, overwriteUsers, parseEventKey, sameBytes, soundFirstNote, trialEvent } from '@/utils/cueEvents'
 import { useAtLabel } from '@/components/scene/SceneCuePanels'
 import { autoWavName, decideSourceBuffer, encodeMaterial, existingWav, ratedIntensity, runDecision } from './eventDecide'
@@ -42,7 +42,7 @@ function DecideForm({ request }: { request: DecideRequest }) {
   const record = source.kind === 'candidate' ? trials.find(r => r.trial.id === source.trialId) : undefined
   const sourceLabel = source.kind === 'clip' ? documents.find(d => d.clip.id === source.clipId)?.clip.name ?? source.clipId
     : `${source.trialId} / ${source.candidateId} ${record?.trial.candidates.find(c => c.id === source.candidateId)?.label ?? ''}`
-  const events = useMemo(() => table && lib ? allEventKeys(table).filter(k => target === 'haptic' || soundAllowed(lib, parseEventKey(k).cue)) : [], [table, lib, target])
+  const events = useMemo(() => table && lib ? allEventKeys(table) : [], [table, lib])
   const [event, setEvent] = useState(() => {
     // A clip opened from an event ("edit as clip") or decided before goes back to that event by default.
     const subject = source.kind === 'clip' ? source.clipId : `${source.trialId}/${source.candidateId}`
@@ -77,8 +77,8 @@ function DecideForm({ request }: { request: DecideRequest }) {
     void existingWav(target, name).then(b => { if (!cancelled) setOnDisk(!b ? 'none' : sameBytes(b, wav) ? 'same' : 'different') })
     return () => { cancelled = true }
   }, [wav, name, target])
-  const [at, setAt] = useState(() => valid ? defaultAt(lib!, ref.cue) : 'hand')
-  useEffect(() => { if (valid) setAt(defaultAt(lib!, ref.cue)) }, [event])
+  const [at, setAt] = useState(() => valid ? defaultAt(lib!, table, ref.cue) : 'hand')
+  useEffect(() => { if (valid) setAt(defaultAt(lib!, table, ref.cue)) }, [event])
   /** The new material's intensity (its size before normalizing × the rated strength; DEC-086). */
   const [intensity, setIntensity] = useState(1)
   useEffect(() => {
@@ -93,13 +93,13 @@ function DecideForm({ request }: { request: DecideRequest }) {
   if (!table || !lib) body = <p className="recipe-dialog-note">{t('events.decide.noProject')}</p>
   else if (!events.length) body = <p className="recipe-dialog-note">{t('events.decide.noEvents')}</p>
   else {
-    const pattern = target === 'haptic' ? lib.clip_name : lib.sound_name
+    const pattern = (target === 'haptic' ? CLIP_NAME : SOUND_NAME).source
     const dir = target === 'haptic' ? lib.paths.clips : lib.paths.sounds
-    const nameOk = matchesName(name, pattern) && !(target === 'sound' && lib.loop_sounds.includes(name))
+    const nameOk = matchesName(name, pattern)
     const users = valid ? overwriteUsers(table, target === 'haptic' ? 'clip' : 'sound', name, [event]) : []
     const routeForm = target === 'haptic' && valid && needsRouteForm(table, ref)
-    const soundNote = target === 'haptic' && valid ? soundFirstNote(effectiveEvent(table, ref), isLoopCue(lib, ref.cue)) : null
-    const loopMismatch = target === 'haptic' && !!table.clips[name] && table.clips[name].loop !== isLoopCue(lib, ref.cue)
+    const soundNote = target === 'haptic' && valid ? soundFirstNote(effectiveEvent(table, ref), isLoopCue(table, ref.cue)) : null
+    const loopMismatch = target === 'haptic' && !!table.clips[name] && table.clips[name].loop !== isLoopCue(table, ref.cue)
     canSubmit = valid && !!wav && nameOk && !loopMismatch && !dirty && !busy
     body = <>
       <p className="recipe-dialog-note">{t('events.decide.source', { source: sourceLabel })}</p>
@@ -119,7 +119,7 @@ function DecideForm({ request }: { request: DecideRequest }) {
         : t('events.decide.overwrite', { file: `${dir}/${name}.wav` })}</p>}
       {routeForm && <div className="events-decide-route">
         <label className="recipe-dialog-field">{t('scene.route.at')}
-          <select value={at} onChange={e => setAt(e.target.value)}>{positionsForCue(lib, ref.cue).map(a => <option key={a} value={a}>{atLabel(a)}</option>)}</select>
+          <select value={at} onChange={e => setAt(e.target.value)}>{positionsForCue(lib, table, ref.cue).map(a => <option key={a} value={a}>{atLabel(a)}</option>)}</select>
         </label>
       </div>}
       {!routeForm && target === 'haptic' && <p className="recipe-dialog-note">{t('events.decide.keepsRoute')}</p>}

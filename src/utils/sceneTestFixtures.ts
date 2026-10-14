@@ -7,11 +7,12 @@ export function sampleLib(): SceneLib {
     title: 'Mill', project_name: 'mill',
     paths: { cues: 'Content/Hapbeat/cues.json', clips: 'Content/Kit/stream-clips', sounds: 'Content/Audio' },
     at: ['hand', 'both', 'pos_neck', 'pos_chest', 'pos_l_wrist', 'pos_r_wrist'],
-    loop_cues: ['feed_loop'], loop_sounds: ['Motor'],
-    clip_name: '^[a-z][a-z0-9_-]*$', sound_name: '^[A-Za-z][A-Za-z0-9_]*$',
+    loop_at: ['hand', 'both', 'pos_neck', 'pos_chest', 'pos_l_wrist', 'pos_r_wrist'],
+    loop_cues: ['feed_loop'],
     layers: [{ cue: 'feed_loop', gain: [0, 1], rate: [2, 3], colors: ['#f5d547', '#ffb020'] }],
     families: [{ label: 'hand', color: '#4ea1ff', cues: ['button', 'grab'] }],
     ticks: ['detent'],
+    moment_rules: { max: {}, min_gap_s: {}, default_max: null },
     import_command: 'import.ps1', record_command: 'record.ps1',
   }
 }
@@ -21,10 +22,10 @@ export function sampleData(): SceneData {
   return {
     fps: 30,
     clips: [
-      { file: '01_button.mp4', name: 'button', names: ['button', 'grab'], hand: 'right', at: 3.0, note: '', event: 2.0, levels: levels.slice(0, 150) },
+      { file: 'full_replay.mp4', name: 'button', names: ['button', 'grab'], hand: 'right', at: 3.0, note: '', event: 3.0, start: 1.0, end: 5.0, levels },
     ],
     full: {
-      file: 'full_replay.mp4', levels,
+      file: 'full_replay.mp4', levels, columns: ['feed_loop:level:left', 'feed_loop:level:right', 'feed_loop:rate:left', 'feed_loop:rate:right'],
       events: [
         { t: 1.0, name: 'detent', hand: 'right', gain: 1 },
         { t: 3.0, name: 'button', hand: 'right', gain: 1 },
@@ -36,8 +37,25 @@ export function sampleData(): SceneData {
   }
 }
 
+/** sampleLib as its viewer-lib.json (scene-recording v1): parseViewerLib gives sampleLib(). */
+export function sampleViewerLibFile(): Record<string, unknown> {
+  const lib = sampleLib()
+  return {
+    schema_version: 1, title: lib.title, project_name: lib.project_name, paths: lib.paths, at: lib.at,
+    layers: lib.layers.map(l => ({ cue: l.cue, level: l.gain, rate: l.rate, colors: l.colors })),
+    families: lib.families, ticks: lib.ticks, import_command: lib.import_command, record_command: lib.record_command,
+  }
+}
+
+/** sampleData's recording as its viewer-data.json (scene-recording v1; its moments are derived when read). */
+export function sampleViewerDataFile(): Record<string, unknown> {
+  const data = sampleData()
+  return { schema_version: 1, fps: data.fps, frames: data.full.levels.length, video: data.full.file, events: data.full.events, levels: { columns: data.full.columns, rows: data.full.levels } }
+}
+
 export function sampleTable(): CueTable {
   return {
+    schema_version: 1,
     kit: 'mill-kit',
     clips: {
       click: { intensity: 1.0, loop: false, description: 'click' },
@@ -48,7 +66,7 @@ export function sampleTable(): CueTable {
       button: { description: 'press', sfx: { sound: 'Click', volume: 0.6 }, haptics: [{ clip: 'click', at: 'hand', gain: 1.0 }] },
       grab: { sfx: null, haptics: [] },
       detent: { sfx: null, haptics: [{ clip: 'thump', at: 'pos_chest', gain: 0.5 }] },
-      feed_loop: { sfx: null, haptics: [{ clip: 'hum', at: 'hand', gain: 0.8 }] },
+      feed_loop: { loop: true, sfx: null, haptics: [{ clip: 'hum', at: 'hand', gain: 0.8 }] },
     },
   }
 }

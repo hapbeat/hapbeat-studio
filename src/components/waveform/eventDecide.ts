@@ -4,7 +4,7 @@ import { useSceneStore, type SceneNotice } from '@/stores/sceneStore'
 import { useEditorSettings } from '@/stores/editorSettings'
 import { levelKey, useEventStore, type DecideResult, type DecideSource, type DecideTarget } from '@/stores/eventStore'
 import { resample } from '@/utils/audioDsp'
-import { encodePcm16Wav, isLoopCue } from '@/utils/sceneCueTable'
+import { CLIP_NAME, encodePcm16Wav, isLoopCue, SOUND_NAME } from '@/utils/sceneCueTable'
 import { readProjectFile, writeProjectFile } from '@/utils/sceneProject'
 import { RATE } from '@/utils/sceneHaptics'
 import { addEventMark, applyHapticDecision, applySoundDecision, defaultAt, effectiveEvent, nextWavName, ownerKeys, parseEventKey, safeWavName, sameBytes, wavBaseName } from '@/utils/cueEvents'
@@ -98,13 +98,13 @@ export async function existingWav(target: DecideTarget, name: string): Promise<A
  * lower case), never after its label; an editor clip after its name / source file.
  */
 export function autoWavName(target: DecideTarget, source: DecideSource, wav: ArrayBuffer, events: string[]) {
-  const s = useSceneStore.getState(), lib = s.lib!, ref = parseEventKey(events[0])
-  const kind = target === 'haptic' ? 'clip' : 'sound', pattern = target === 'haptic' ? lib.clip_name : lib.sound_name
+  const s = useSceneStore.getState(), ref = parseEventKey(events[0])
+  const kind = target === 'haptic' ? 'clip' : 'sound', pattern = (target === 'haptic' ? CLIP_NAME : SOUND_NAME).source
   const short = source.kind === 'candidate' ? useAgentTrialStore.getState().trials.find(r => r.trial.id === source.trialId)?.shortId : undefined
   const candidateName = source.kind === 'candidate' && short ? safeWavName(`${events[0].replace(/:/g, '_')}_${short}_${source.candidateId}`, kind, pattern) : ''
   const base = candidateName || wavBaseName(sourceNames(source), kind, pattern, ref)
-  const loop = isLoopCue(lib, ref.cue)
-  const taken = (name: string) => target === 'haptic' ? (!!s.table?.clips[name] && s.table.clips[name].loop !== loop) : lib.loop_sounds.includes(name)
+  const loop = isLoopCue(s.table, ref.cue)
+  const taken = (name: string) => target === 'haptic' && !!s.table?.clips[name] && s.table.clips[name].loop !== loop
   return nextWavName(base, wav, name => existingWav(target, name), taken)
 }
 
@@ -170,7 +170,7 @@ export async function runDecision(input: DecisionInput): Promise<{ ok: true; res
   for (const key of events) {
     const ref = parseEventKey(key)
     next = input.target === 'haptic'
-      ? applyHapticDecision(next, lib, { ref, clip: picked.name, at: input.at ?? defaultAt(lib, ref.cue), gain: 1, intensity: encoded.intensity })
+      ? applyHapticDecision(next, { ref, clip: picked.name, at: input.at ?? defaultAt(lib, next, ref.cue), gain: 1, intensity: encoded.intensity })
       : applySoundDecision(next, ref, picked.name)
   }
   // A new sound gets its base level; one already in the table keeps its own.

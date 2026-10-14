@@ -4,7 +4,7 @@ import { perfTrack } from '@/utils/perfRegistry'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
-import { familyColor, frameAt, offsetOf } from '@/utils/sceneData'
+import { familyColor, frameAt, isTick } from '@/utils/sceneData'
 import { WHEEL_ZOOM_RATE, wheelPixels, zoomAtTime } from '@/utils/waveformView'
 import { effectiveEvent, resolveEventName } from '@/utils/cueEvents'
 import { useScene } from './sceneContext'
@@ -34,7 +34,8 @@ const INPUT_DASH = [5, 3]
  * as the gain it plays at in that lane (sceneFiringGain; lane top = 1, the value in its tooltip). A click seeks (timelineClick);
  * Ctrl (Cmd) + click a marker to edit that cue (the moments list marks it too), a band to play that span in the full
  * replay (SceneRuntime.playSpan; within the span already playing: seek). A firing is reassigned from the moments list.
- * While a loop cue's span plays, the timeline shows only that span with its lead-in / post-roll (sceneTimelineView).
+ * While a loop cue's span plays, the timeline shows only that span with its lead-in / post-roll, and a moment shows its
+ * stretch of the full replay (sceneTimelineView).
  * Ctrl + wheel zooms around the pointer, wheel / Shift + wheel pans (like the editor's waveform), also while playing.
  * Read-outs and output toggles above it.
  */
@@ -81,8 +82,8 @@ export function SceneTimelinePanel() {
       if (!it || !lib || !data) { hits.current = []; bands.current = []; return }
       const fps = data.fps, layers = lib.layers, ticks = lib.ticks, sel = s.sel, table = s.table
       const dur = v.duration || it.levels.length / fps || 1
-      // The visible stretch: a playing loop cue span's window (in the full replay), else the whole moment until zoomed.
-      const shownSpan = it.kind === 'full' && s.span ? spanWindow(runtime.partAB, dur) : null
+      // The visible stretch: a moment's stretch, a playing loop cue span's window (in the full replay), else the whole replay until zoomed.
+      const shownSpan = it.kind === 'clip' ? spanWindow([it.start, it.end], dur) : s.span ? spanWindow(runtime.partAB, dur) : null
       const vw = view.current, key = `${s.cur}:${it.file}${shownSpan ? `:${shownSpan[0]}-${shownSpan[1]}` : ''}`
       stepView(vw, key, shownSpan, w, dur, MAX_ZOOM, !v.paused, v.currentTime)
       const span = w / vw.zoom
@@ -127,8 +128,7 @@ export function SceneTimelinePanel() {
         [mid + 1, base, name => { const e = effective(name); return !!e && (e.haptics.length > 0 || lib.loop_cues.includes(e.ref.cue)) }, name => familyColor(lib, name), 'haptics'],
       ]
       const gc = gains.current
-      if (gc.table !== table || gc.events !== data.full.events) { gc.table = table; gc.events = data.full.events; gc.map = table ? recordingFiringGains(table, lib, data.full.events) : new Map() }
-      const offset = offsetOf(it)
+      if (gc.table !== table || gc.events !== data.full.events) { gc.table = table; gc.events = data.full.events; gc.map = table ? recordingFiringGains(table, data.full.events) : new Map() }
       // A selected loop cue: bands over its layer's active runs (the recorded firings are only the layer's starts).
       const rc = runs.current
       if (rc.levels !== L || rc.name !== (sel?.name ?? '')) { rc.levels = L; rc.name = sel?.name ?? ''; rc.runs = sel ? loopCueRuns(L, fps, lib, sel.name) : [] }
@@ -153,7 +153,7 @@ export function SceneTimelinePanel() {
           if (!has(ev.name)) continue
           const x = X(ev.t), picked = !!sel && sel.name === ev.name && sel.t != null && Math.abs(ev.t - sel.t) < 0.02
           if (x < -10 || x > w + 10) continue
-          const tick = ticks.includes(ev.name) && !picked, gain = tick ? null : gc.map.get(firingKey(ev.name, ev.t + offset))?.[lane] ?? null
+          const tick = isTick(ticks, ev.name) && !picked, gain = tick ? null : gc.map.get(firingKey(ev.name, ev.t))?.[lane] ?? null
           found.push({ x, y0, y1, name: ev.name, t: ev.t, lane, gain })
           ctx.fillStyle = color(ev.name)
           ctx.globalAlpha = picked ? 1 : sel && sel.t != null ? 0.35 : it.kind === 'clip' && !ev.own ? 0.5 : 1
@@ -256,10 +256,9 @@ export function SceneTimelinePanel() {
   const bandRunAt = (event: React.MouseEvent<HTMLCanvasElement>, time: number): [number, number] | null => {
     const r = event.currentTarget.getBoundingClientRect(), x = event.clientX - r.left, y = event.clientY - r.top
     if (!bands.current.some(b => x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1)) return null
-    const s = useSceneStore.getState(), it = s.items[s.cur]
-    if (!it || !s.data || !s.lib || !s.sel) return null
-    const replay = time + offsetOf(it)
-    const run = loopCueRuns(s.data.full.levels, s.data.fps, s.lib, s.sel.name).find(([a, b]) => replay >= a && replay <= b)
+    const s = useSceneStore.getState()
+    if (!s.items[s.cur] || !s.data || !s.lib || !s.sel) return null
+    const run = loopCueRuns(s.data.full.levels, s.data.fps, s.lib, s.sel.name).find(([a, b]) => time >= a && time <= b)
     return run && !(s.span && s.span[0] === run[0] && s.span[1] === run[1]) ? run : null
   }
   // Ctrl + wheel zooms around the pointer; wheel / Shift + wheel pans (the editor waveform's handling).

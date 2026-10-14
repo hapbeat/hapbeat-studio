@@ -2,8 +2,8 @@ import { create } from 'zustand'
 import type { MessageId, MessageParams } from '@/i18n/messages'
 import { loadDirectoryHandle, saveDirectoryHandle } from '@/utils/localDirectory'
 import { buildItems, VIEWER_DIR, type SceneData, type SceneItem, type SceneLib } from '@/utils/sceneData'
-import { serializeCueTable, validateCueTable, type CueTable } from '@/utils/sceneCueTable'
-import { listWavs, openSceneProject, readProjectFile, readSceneTable, writeProjectFile, writeSceneSave, type PendingWavs } from '@/utils/sceneProject'
+import { loopCuesOf, SceneFormatError, serializeCueTable, validateCueTable, type CueTable } from '@/utils/sceneCueTable'
+import { createSceneTable, listWavs, openSceneProject, readProjectFile, readSceneTable, writeProjectFile, writeSceneSave, type PendingWavs } from '@/utils/sceneProject'
 import { CueTableSync } from '@/utils/cueTableSync'
 import { clearJournal, journalKey, readJournal, restoreFromJournal, writeJournal } from '@/utils/sceneJournal'
 import { applyOverrides, type SceneOverride } from '@/utils/sceneOverrides'
@@ -53,6 +53,10 @@ interface SceneState {
   reseedEmit: () => void
   items: SceneItem[]
   table: CueTable | null
+  /** The open project has no cue table yet (lib.paths.cues): "Create the cue table" is offered (createTable). */
+  noTable: boolean
+  /** Writes a new cue table for the open project (only when it has none) and reads it. */
+  createTable: () => Promise<void>
   /** kit and cue names as loaded (the tab never changes them; save checks it). */
   loaded: { kit: string | undefined; cueNames: string[] } | null
   clipFiles: string[]
@@ -143,19 +147,30 @@ export const useSceneStore = create<SceneState>((set, get) => {
     return { data: table && lib ? applyEmits(data, table, lib, emitSeed) : data }
   }
 
-  /** Reads the cue table and decodes every clip / cue sound of the open project. */
+  /**
+   * Reads the cue table and decodes every clip / cue sound of the open project; the lib's loop cues are the table's.
+   * A project without a cue table opens without one (noTable).
+   */
   const loadTable = async () => {
     const { root, lib } = get()
     if (!root || !lib) return
+    const files = await readSceneTable(root, lib)
+    if (!files) {
+      set({ table: null, noTable: true, ...derivedData(null), loaded: null, clipFiles: [], soundFiles: [], pcm: {}, sfx: {}, pending: { clips: {}, sounds: {} }, dirty: false, saveError: null })
+      note({ id: 'scene.table.missing', params: { file: lib.paths.cues } })
+      addLog(`${lib.paths.cues}: no cue table yet`)
+      return
+    }
     const file = await readProjectFile(root, lib.paths.cues)
     sync.reset(await file.text(), file.lastModified)
-    const files = await readSceneTable(root, lib)
+    const loops = loopCuesOf(files.table)
+    if (loops.join('\n') !== lib.loop_cues.join('\n')) set({ lib: { ...lib, loop_cues: loops } })
     const pcm: Record<string, Float32Array> = {}, sfx: Record<string, AudioBuffer> = {}
     await Promise.all([
       ...Object.keys(files.table.clips).map(async n => { pcm[n] = mono(await decode(await (await readProjectFile(root, `${lib.paths.clips}/${n}.wav`)).arrayBuffer(), RATE)) }),
       ...files.soundFiles.map(async n => { sfx[n] = await decode(await (await readProjectFile(root, `${lib.paths.sounds}/${n}.wav`)).arrayBuffer(), 48000) }),
     ])
-    set({ table: files.table, ...derivedData(files.table), loaded: { kit: files.table.kit, cueNames: Object.keys(files.table.cues) }, clipFiles: files.clipFiles, soundFiles: files.soundFiles,
+    set({ table: files.table, noTable: false, ...derivedData(files.table), loaded: { kit: files.table.kit, cueNames: Object.keys(files.table.cues) }, clipFiles: files.clipFiles, soundFiles: files.soundFiles,
       pcm, sfx, pending: { clips: {}, sounds: {} }, dirty: false, saveError: null })
   }
 
@@ -263,7 +278,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
     restoredNotice = null
     const opened = await openSceneProject(handle)
     if (!opened.ok && opened.reason === 'noLib') {
-      const notice = { id: 'scene.open.noLib' as const, params: { folder: handle.name, dir: VIEWER_DIR }, error: true }
+      const notice = opened.oldFormat ? oldFormatNotice(handle.name) : { id: 'scene.open.noLib' as const, params: { folder: handle.name, dir: VIEWER_DIR }, error: true }
       set({ notice, empty: get().items.length ? get().empty : notice })
       addLog(opened.error)
       return false
@@ -272,14 +287,16 @@ export const useSceneStore = create<SceneState>((set, get) => {
     await saveDirectoryHandle(handle, 'scenedir').catch(() => {})
     await registerSceneProject(opened.lib.project_name, handle).catch(() => {})
     if (!opened.ok) {
-      const notice = { id: 'scene.open.noData' as const, params: { title: opened.lib.title, dir: VIEWER_DIR, command: opened.lib.record_command ?? 'Scripts/record-haptic-clips.ps1' }, error: true }
+      const notice = opened.oldFormat ? oldFormatNotice(handle.name)
+        : opened.lib.record_command ? { id: 'scene.open.noData' as const, params: { title: opened.lib.title, dir: VIEWER_DIR, command: opened.lib.record_command }, error: true }
+          : { id: 'scene.open.noDataBuild' as const, params: { title: opened.lib.title, dir: VIEWER_DIR }, error: true }
       set({ notice, empty: get().items.length ? get().empty : notice })
       addLog(opened.error)
       return false
     }
     clearVideoUrls()
     rememberSceneProject(opened.lib.project_name)
-    set({ root: handle, lib: opened.lib, recorded: opened.data, overrides: [], data: opened.data, items: buildItems(opened.data), sel: null, cur: 0, empty: null, table: null })
+    set({ root: handle, lib: opened.lib, recorded: opened.data, overrides: [], data: opened.data, items: buildItems(opened.data), sel: null, cur: 0, empty: null, table: null, noTable: false })
     await loadTable()
     restoreJournal()
     let start = 1
@@ -288,17 +305,21 @@ export const useSceneStore = create<SceneState>((set, get) => {
     return true
   }
 
+  /** A Scene file of an older format (SceneFormatError): migrated with hapbeat-haptic-authoring, never read. */
+  const oldFormatNotice = (folder: string): SceneNotice => ({ id: 'scene.open.oldFormat', params: { folder }, error: true })
   let restoring: Promise<void> | null = null
   const guarded = async (work: () => Promise<void>) => {
     if (get().busy) return
     set({ busy: true })
-    try { await work() } catch (error) { note({ id: 'scene.open.failed', params: { error: message(error) }, error: true }); addLog(message(error)) }
-    finally { set({ busy: false }) }
+    try { await work() } catch (error) {
+      note(error instanceof SceneFormatError ? oldFormatNotice(get().root?.name ?? '') : { id: 'scene.open.failed', params: { error: message(error) }, error: true })
+      addLog(message(error))
+    } finally { set({ busy: false }) }
   }
 
   return {
     root: null, remembered: null, restored: false, busy: false,
-    lib: null, data: null, recorded: null, overrides: [], items: [], table: null, loaded: null, clipFiles: [], soundFiles: [],
+    lib: null, data: null, recorded: null, overrides: [], items: [], table: null, noTable: false, loaded: null, clipFiles: [], soundFiles: [],
     pending: { clips: {}, sounds: {} }, pcm: {}, sfx: {}, dirty: false, saveError: null, cur: 0, sel: null, span: null, emitSeed: newEmitSeed(),
     notice: null, empty: null, log: [],
     note, addLog,
@@ -428,6 +449,16 @@ export const useSceneStore = create<SceneState>((set, get) => {
       else { const b = await decode(wav.slice(0), 48000); set(st => ({ sfx: { ...st.sfx, [name]: b } })) }
       addLog(`edited ${dir}/${name}.wav (previous → ${archived})`)
       return { archived }
+    },
+    createTable: async () => {
+      const { root, lib, recorded, noTable } = get()
+      if (!root || !lib || !recorded || !noTable) return
+      await guarded(async () => {
+        await createSceneTable(root, lib, recorded)
+        addLog(`created ${lib.paths.cues}`)
+        await loadTable()
+        note({ id: 'scene.table.created', params: { file: lib.paths.cues } })
+      })
     },
     revert: async () => {
       if (!get().root) return

@@ -6,8 +6,8 @@ import { writeEditorFile } from './editorFolder'
 
 const data = (): SceneData => ({
   fps: 30,
-  full: { file: 'full.mp4', levels: [], events: [{ t: 17.367, name: 'footstep', hand: 'both' }, { t: 22.533, name: 'footstep', hand: 'both' }, { t: 48.4, name: 'footstep', hand: 'both' }] },
-  clips: [{ file: '07.mp4', name: 'footstep', names: ['footstep'], hand: 'both', at: 22.533, note: '', event: 1, levels: [] }],
+  full: { file: 'full.mp4', levels: [], columns: [], events: [{ t: 17.367, name: 'footstep', hand: 'both' }, { t: 22.533, name: 'footstep', hand: 'both' }, { t: 48.4, name: 'footstep', hand: 'both' }] },
+  clips: [{ file: 'full.mp4', name: 'footstep', names: ['footstep'], hand: 'both', at: 22.533, note: '', event: 22.533, start: 20.533, end: 25.533, levels: [] }],
 })
 const subtle = (atSec: number): SceneOverride => ({ from: 'footstep', atSec, to: 'footstep:subtle', requestedAt: '2026-10-06T12:00:00+09:00' })
 

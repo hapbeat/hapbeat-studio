@@ -5,7 +5,7 @@ import {
   parseEventKey, removeVariant, representativeSound, candidateSound, shownEventKey, fieldOwner, holdsField, ownerKeys, splitField, shareField, splitAll, splitReserves, restoreReserve as restoreInto, resolveEventName, cueRoutePositions, materialRoutePositions, pairedClips, setOverride, setRouteClips, setSfxSounds, setVariation, soundFirstNote, noSoundNote, trialEvent, trialsForEvent,
   setStarred, hasNoStar, otherStarred, removeMaterial, addMaterial, movePair, setOwnSfxVolume, setDistanceFalloff, undecidedReserves, materialPill, materialStatus,
 } from './cueEvents'
-import { matchIntensity, materialIntensity, validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
+import { CLIP_NAME, matchIntensity, SOUND_NAME, materialIntensity, validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
 import { cueVoices, tableTargets } from './sceneHaptics'
 import { sampleLib, sampleTable } from './sceneTestFixtures'
 
@@ -50,7 +50,6 @@ describe('cue table v2 validation', () => {
       'button:plain: variation.rateJitterPct must be 0..50',
       'button:plain: variation.pick must be random or roundRobin',
       'grab: Content/Audio/Missing.wav missing',
-      'feed_loop:slow: continuous layers have no cue sound',
     ]))
   })
 
@@ -105,9 +104,9 @@ describe('events and effective resolution', () => {
   })
 
   it('lists cues with nested variants and their status', () => {
-    const rows = listEvents(v2Table(), sampleLib())
+    const rows = listEvents(v2Table())
     const st = (x: unknown) => typeof x === 'string' ? x : `${(x as { state: string }).state}/${(x as { review: string }).review}`
-    expect(rows.map(r => [r.key, st(r.sound), st(r.haptic)])).toEqual([['button', 'set/tentative', 'set/tentative'], ['grab', 'none/tentative', 'none/tentative'], ['detent', 'none/tentative', 'set/tentative'], ['feed_loop', 'na', 'set/tentative']])
+    expect(rows.map(r => [r.key, st(r.sound), st(r.haptic)])).toEqual([['button', 'set/tentative', 'set/tentative'], ['grab', 'none/tentative', 'none/tentative'], ['detent', 'none/tentative', 'set/tentative'], ['feed_loop', 'none/tentative', 'set/tentative']])
     expect(rows[0].variants.map(v => v.key)).toEqual(['button:soft', 'button:plain'])
     expect(allEventKeys(v2Table())).toEqual(['button', 'button:soft', 'button:plain', 'grab', 'detent', 'feed_loop'])
     expect(eventSceneCues(v2Table(), 'button')).toEqual(['button', 'button:soft', 'button:plain'])
@@ -128,7 +127,7 @@ describe('events and effective resolution', () => {
 
 describe('decide', () => {
   it('names a WAV after its source, safely, else after the event', () => {
-    const pat = sampleLib().clip_name, snd = sampleLib().sound_name
+    const pat = CLIP_NAME.source, snd = SOUND_NAME.source
     expect(safeWavName('Hit Low (v2).wav', 'clip', pat)).toBe('hit_low_v2')
     expect(safeWavName('sources/rain.wav', 'clip', pat)).toBe('rain')
     expect(safeWavName('どしん', 'clip', pat)).toBe('')
@@ -151,13 +150,11 @@ describe('decide', () => {
   })
 
   it('assigns a rated trial to the cue, or to each listed variant when the cue is not listed (a shared one: its cue)', () => {
-    const t = v2Table(), lib = sampleLib()
-    expect(assignEventsForTrial(t, lib, ['button', 'button:soft', 'grab'], 'haptic')).toEqual(['button', 'grab'])
-    expect(assignEventsForTrial(t, lib, ['button:soft', 'button:plain', 'nope', 'button:loud'], 'haptic')).toEqual(['button:soft', 'button'])
-    expect(assignEventsForTrial(t, lib, ['feed_loop', 'grab'], 'sound')).toEqual(['grab'])
-    // A loop cue's sound (rub in the T-Rex project) is assigned where the project plays loop-cue sounds.
-    const loopSounds = { ...lib, loop_cue_sounds: true }
-    expect(assignEventsForTrial(t, loopSounds, ['feed_loop'], 'sound')).toEqual(['feed_loop'])
+    const t = v2Table()
+    expect(assignEventsForTrial(t, ['button', 'button:soft', 'grab'], 'haptic')).toEqual(['button', 'grab'])
+    expect(assignEventsForTrial(t, ['button:soft', 'button:plain', 'nope', 'button:loud'], 'haptic')).toEqual(['button:soft', 'button'])
+    // A loop cue may have a sound too (cue-table v1).
+    expect(assignEventsForTrial(t, ['feed_loop', 'grab'], 'sound')).toEqual(['feed_loop', 'grab'])
     const saved = applySoundDecision(t, { cue: 'feed_loop', variant: null }, 'Motor_rub')
     expect(saved.cues.feed_loop.sfx).toEqual({ sound: 'Motor_rub', volume: 1 })
   })
@@ -171,23 +168,22 @@ describe('decide', () => {
   })
 
   it('haptic: adds to the first route\'s alternates keeping at / gain (no duplicates), or adds a starred route; adds the clip entry', () => {
-    const lib = sampleLib()
-    const kept = applyHapticDecision(v2Table(), lib, { ref: { cue: 'button', variant: 'soft' }, clip: 'press2', at: 'hand', gain: 1 })
+    const kept = applyHapticDecision(v2Table(), { ref: { cue: 'button', variant: 'soft' }, clip: 'press2', at: 'hand', gain: 1 })
     expect(kept.cues.button.variants!.soft.haptics).toEqual([{ clips: ['click', 'thump'], alternates: ['press2'], at: 'pos_neck', gain: 0.4 }])
-    const again = applyHapticDecision(kept, lib, { ref: { cue: 'button', variant: 'soft' }, clip: 'thump', at: 'hand', gain: 1 })
+    const again = applyHapticDecision(kept, { ref: { cue: 'button', variant: 'soft' }, clip: 'thump', at: 'hand', gain: 1 })
     expect(again.cues.button.variants!.soft.haptics).toEqual(kept.cues.button.variants!.soft.haptics)
-    expect(applyHapticDecision(kept, lib, { ref: { cue: 'button', variant: 'soft' }, clip: 'press2', at: 'hand', gain: 1 }).cues.button.variants!.soft.haptics).toEqual(kept.cues.button.variants!.soft.haptics)
+    expect(applyHapticDecision(kept, { ref: { cue: 'button', variant: 'soft' }, clip: 'press2', at: 'hand', gain: 1 }).cues.button.variants!.soft.haptics).toEqual(kept.cues.button.variants!.soft.haptics)
     expect(kept.clips.press2).toMatchObject({ intensity: 1, loop: false })
-    const added = applyHapticDecision(v2Table(), lib, { ref: { cue: 'grab', variant: null }, clip: 'thump', at: 'pos_chest', gain: 0.7 })
+    const added = applyHapticDecision(v2Table(), { ref: { cue: 'grab', variant: null }, clip: 'thump', at: 'pos_chest', gain: 0.7 })
     expect(added.cues.grab.haptics).toEqual([{ clip: 'thump', at: 'pos_chest', gain: 0.7 }])
     expect(added.clips.thump.intensity).toBe(0.5) // an existing entry keeps its intensity
     // An inheriting variant gets its own copy; the cue is untouched.
-    const own = applyHapticDecision(v2Table(), lib, { ref: { cue: 'button', variant: 'plain' }, clip: 'thump', at: 'hand', gain: 1 })
+    const own = applyHapticDecision(v2Table(), { ref: { cue: 'button', variant: 'plain' }, clip: 'thump', at: 'hand', gain: 1 })
     expect(own.cues.button.variants!.plain.haptics).toEqual([{ clip: 'click', alternates: ['thump'], at: 'hand', gain: 1 }])
     expect(own.cues.button.haptics![0].clip).toBe('click')
     expect(needsRouteForm(v2Table(), { cue: 'grab', variant: null })).toBe(true)
     expect(needsRouteForm(v2Table(), { cue: 'button', variant: 'plain' })).toBe(false)
-    const table = applyHapticDecision(v2Table(), lib, { ref: { cue: 'grab', variant: null }, clip: 'grab', at: 'hand', gain: 1 })
+    const table = applyHapticDecision(v2Table(), { ref: { cue: 'grab', variant: null }, clip: 'grab', at: 'hand', gain: 1 })
     expect(validateCueTable(table, ctx({ clipFiles: new Set(['click', 'thump', 'hum', 'grab']) }))).toEqual([])
   })
 
@@ -203,8 +199,8 @@ describe('decide', () => {
   })
 
   it('default position: the acting hand where the project has it', () => {
-    expect(defaultAt(sampleLib(), 'button')).toBe('hand')
-    expect(defaultAt({ ...sampleLib(), at: ['pos_neck', 'pos_chest'] }, 'button')).toBe('pos_neck')
+    expect(defaultAt(sampleLib(), sampleTable(), 'button')).toBe('hand')
+    expect(defaultAt({ ...sampleLib(), at: ['pos_neck', 'pos_chest'] }, sampleTable(), 'button')).toBe('pos_neck')
   })
 })
 
@@ -293,12 +289,11 @@ describe('recording: simultaneous groups', () => {
 
 describe('review (tentative / approved)', () => {
   it('decisions are tentative; approve / back per field; variants inheriting write to the cue; reset all', () => {
-    const lib = sampleLib()
     let t = applySoundDecision(v2Table(), { cue: 'grab', variant: null }, 'Clack')
-    t = applyHapticDecision(t, lib, { ref: { cue: 'grab', variant: null }, clip: 'thump', at: 'hand', gain: 1 })
+    t = applyHapticDecision(t, { ref: { cue: 'grab', variant: null }, clip: 'thump', at: 'hand', gain: 1 })
     expect(t.cues.grab.review).toEqual({ sfx: 'tentative', haptics: 'tentative' })
     t = setReview(t, { cue: 'button', variant: null }, 'haptics', 'approved')
-    expect(listEvents(t, lib).find(r => r.key === 'button')).toMatchObject({ sound: { state: 'set', review: 'tentative' }, haptic: { state: 'set', review: 'approved' } })
+    expect(listEvents(t).find(r => r.key === 'button')).toMatchObject({ sound: { state: 'set', review: 'tentative' }, haptic: { state: 'set', review: 'approved' } })
     // plain inherits button's haptics: its review follows the cue, and approving it writes to the cue.
     expect(effectiveEvent(t, { cue: 'button', variant: 'plain' })!.review.haptics).toBe('approved')
     t = setReview(t, { cue: 'button', variant: 'plain' }, 'sfx', 'approved')
@@ -325,8 +320,7 @@ describe('undecided vs none, loop cue sounds, preview sequences', () => {
   it('a missing key is undecided, null / [] is none; none and undecided are set per field', () => {
     const t = v2Table()
     delete t.cues.grab.sfx; delete t.cues.grab.haptics
-    const lib = sampleLib()
-    const row = (tb: CueTable) => listEvents(tb, lib).find(r => r.key === 'grab')!
+    const row = (tb: CueTable) => listEvents(tb).find(r => r.key === 'grab')!
     expect(row(t)).toMatchObject({ sound: { state: 'undecided' }, haptic: { state: 'undecided' } })
     expect(validateCueTable(t, ctx())).toEqual([])
     let n = setNone(t, { cue: 'grab', variant: null }, 'sfx')
@@ -343,12 +337,11 @@ describe('undecided vs none, loop cue sounds, preview sequences', () => {
     expect(effectiveEvent(v2Table(), { cue: 'button', variant: 'plain' })!.decided).toEqual({ sfx: true, haptics: true })
   })
 
-  it('loop cue sounds only where the project allows them', () => {
+  it('loop cues may have a sound (cue-table v1)', () => {
     const t = sampleTable()
     t.cues.feed_loop.sfx = { sound: 'Click', volume: 1 }
-    expect(validateCueTable(t, ctx())).toContain('feed_loop: continuous layers have no cue sound')
-    expect(validateCueTable(t, ctx({ lib: { ...sampleLib(), loop_cue_sounds: true } }))).toEqual([])
-    expect(listEvents(sampleTable(), { ...sampleLib(), loop_cue_sounds: true }).find(r => r.key === 'feed_loop')!.sound).toMatchObject({ state: 'none' })
+    expect(validateCueTable(t, ctx())).toEqual([])
+    expect(listEvents(sampleTable()).find(r => r.key === 'feed_loop')!.sound).toMatchObject({ state: 'none' })
   })
 
   it('preview was removed (DEC-085): rejected by the validator; fireShot draws one firing\'s variation', () => {
@@ -413,7 +406,7 @@ describe('the group or each variant (DEC-091)', () => {
     expect(fieldOwner(both, 'button', 'sfx')).toBe('both')
     expect([holdsField(both, cue, 'sfx'), holdsField(both, soft, 'sfx'), holdsField(both, hard, 'sfx')]).toEqual([true, true, false])
     for (const t of [group(), each(), both, v2Table()]) expect(validateCueTable(t, ctx())).toEqual([])
-    const rows = listEvents(each(), sampleLib()).find(r => r.key === 'button')!
+    const rows = listEvents(each()).find(r => r.key === 'button')!
     expect([rows.held, rows.variants.map(v => [v.key, v.held])]).toEqual([{ sound: false, haptic: true },
       [['button:soft', { sound: true, haptic: false }], ['button:hard', { sound: true, haptic: false }]]])
     expect(shownEventKey(group(), 'button:soft')).toBe('button:soft')
@@ -472,15 +465,14 @@ describe('the group or each variant (DEC-091)', () => {
   })
 
   it('decisions and put-backs go to whoever holds the field', () => {
-    const lib = sampleLib()
     expect(ownerKeys(group(), 'button:soft', 'sfx')).toEqual(['button'])
-    expect(assignEventsForTrial(group(), lib, ['button:soft'], 'sound')).toEqual(['button'])
+    expect(assignEventsForTrial(group(), ['button:soft'], 'sound')).toEqual(['button'])
     const both = splitField(group(), soft, 'sfx')!
     expect([ownerKeys(both, 'button:soft', 'sfx'), ownerKeys(both, 'button:hard', 'sfx'), ownerKeys(both, 'button', 'sfx')]).toEqual([['button:soft'], ['button'], ['button']])
     expect(ownerKeys(each(), 'button:soft', 'sfx')).toEqual(['button:soft'])
     expect(ownerKeys(each(), 'button', 'sfx')).toEqual(['button:soft', 'button:hard'])
-    expect(assignEventsForTrial(each(), lib, ['button:hard'], 'sound')).toEqual(['button:hard'])
-    expect(assignEventsForTrial(each(), lib, ['button'], 'sound')).toEqual(['button:soft', 'button:hard'])
+    expect(assignEventsForTrial(each(), ['button:hard'], 'sound')).toEqual(['button:hard'])
+    expect(assignEventsForTrial(each(), ['button'], 'sound')).toEqual(['button:soft', 'button:hard'])
     // A variant's "back to undecided" leaves it undecided while the other still holds it; the last one gives it back to the group.
     const one = setUndecided(each(), 'button:soft', 'sfx')
     expect([fieldOwner(one, 'button', 'sfx'), holdsField(one, soft, 'sfx'), one.cues.button.variants!.soft.sfx]).toEqual(['each', true, undefined])
@@ -500,9 +492,9 @@ describe('the sound played with a haptic audition', () => {
     t.cues.grab.sfx = { sounds: ['GrowlA', 'GrowlB', 'GrowlC', 'GrowlD'], volume: 0.7 }
     t.sounds = { GrowlA: { intensity: 0.6 } } // the editor plays the base level, not sfx.volume (DEC-086)
     const buffers = { GrowlA: { id: 'A' }, GrowlB: { id: 'B' }, GrowlC: { id: 'C' }, GrowlD: { id: 'D' } }
-    const picks = ['candidate A', 'candidate B', 'candidate A'].map(() => representativeSound(t, sampleLib(), ['grab'], buffers))
+    const picks = ['candidate A', 'candidate B', 'candidate A'].map(() => representativeSound(t, ['grab'], buffers))
     expect(picks.every(p => p?.buffer === buffers.GrowlA && p.volume === 0.6)).toBe(true)
-    expect(representativeSound(t, sampleLib(), ['nope'], buffers)).toBeNull()
+    expect(representativeSound(t, ['nope'], buffers)).toBeNull()
   })
 
   it('plays the sound a candidate was made for (its sound, else the user pick), the representative when not in the pool', () => {
@@ -511,11 +503,11 @@ describe('the sound played with a haptic audition', () => {
     t.sounds = { GrowlC: { intensity: 0.5 } }
     const buffers = { GrowlA: { id: 'A' }, GrowlB: { id: 'B' }, GrowlC: { id: 'C' } }
     const trial = { id: 't1', candidates: [{ id: 'A', sound: 'GrowlA' }, { id: 'B', sound: 'GrowlB' }, { id: 'C', sound: 'GrowlC' }, { id: 'D' }] }
-    expect(['A', 'B', 'C'].map(cid => representativeSound(t, sampleLib(), ['grab'], buffers, candidateSound(trial, cid, {}))?.buffer)).toEqual([buffers.GrowlA, buffers.GrowlB, buffers.GrowlC])
-    expect(representativeSound(t, sampleLib(), ['grab'], buffers, 'GrowlC')?.volume).toBe(0.5)
+    expect(['A', 'B', 'C'].map(cid => representativeSound(t, ['grab'], buffers, candidateSound(trial, cid, {}))?.buffer)).toEqual([buffers.GrowlA, buffers.GrowlB, buffers.GrowlC])
+    expect(representativeSound(t, ['grab'], buffers, 'GrowlC')?.volume).toBe(0.5)
     expect(candidateSound(trial, 'D', {})).toBeNull()
     expect(candidateSound(trial, 'B', { 't1/B': 'GrowlC' })).toBe('GrowlC')
-    expect(representativeSound(t, sampleLib(), ['grab'], buffers, 'Other')?.buffer).toBe(buffers.GrowlA)
+    expect(representativeSound(t, ['grab'], buffers, 'Other')?.buffer).toBe(buffers.GrowlA)
   })
 })
 
@@ -565,7 +557,7 @@ describe('paired sounds and haptics (variation.paired)', () => {
     expect(validateCueTable(t, okCtx)).toEqual(expect.arrayContaining(['grab: variation.paired: route 1 has 3 clip(s) for 2 sound(s)']))
     // An adopted clip of a paired cue goes to the alternates (DEC-089): the starred pairs stay as they are.
     t.cues.grab.haptics = [{ clips: ['click', 'thump'], at: 'hand', gain: 1 }]
-    const adopted = applyHapticDecision(t, sampleLib(), { ref: { cue: 'grab', variant: null }, clip: 'hum', at: 'hand', gain: 1 })
+    const adopted = applyHapticDecision(t, { ref: { cue: 'grab', variant: null }, clip: 'hum', at: 'hand', gain: 1 })
     expect(adopted.cues.grab.haptics).toEqual([{ clips: ['click', 'thump'], alternates: ['hum'], at: 'hand', gain: 1 }])
     expect(validateCueTable(adopted, okCtx).filter(p => p.includes('paired'))).toEqual([])
     t.cues.grab.variation = { paired: 'yes' as never }
@@ -673,11 +665,11 @@ describe('starred and alternates (DEC-089)', () => {
     expect(materialStatus(e, 'sfx').state).toBe('set')
     const shot = fireShot(e, false, new MaterialPicker(() => 0), () => 0.5)
     expect([shot.sound, shot.routes]).toEqual([null, []])
-    const rows = listEvents(t, sampleLib())
+    const rows = listEvents(t)
     expect(rows.find(r => r.key === 'button')!.noStar).toBe(true)
     expect(rows.filter(r => r.noStar).map(r => r.key)).toEqual(['button'])
     // "None" is a decision: no mark. Starring one again clears it.
-    expect(listEvents(setNone(setNone(t, ref, 'sfx'), ref, 'haptics'), sampleLib()).find(r => r.key === 'button')!.noStar).toBe(false)
+    expect(listEvents(setNone(setNone(t, ref, 'sfx'), ref, 'haptics')).find(r => r.key === 'button')!.noStar).toBe(false)
     expect(hasNoStar(effectiveEvent(setStarred(setStarred(t, ref, 'sound', 0, 'Click', true)!, ref, 'haptic', 0, 'click', true)!, ref)!)).toBe(false)
     // One route without a ★ is enough for the mark (that route plays nothing).
     const two = withAlts()
@@ -753,7 +745,7 @@ describe('starred and alternates (DEC-089)', () => {
     const shots = Array.from({ length: 10 }, () => fireShot(e, false, picker, Math.random))
     expect(new Set(shots.map(s => s.sound))).toEqual(new Set(['Click']))
     expect(new Set(shots.flatMap(s => s.routes.map(r => r.clip)))).toEqual(new Set(['click']))
-    expect(representativeSound(t, sampleLib(), ['button'], { Click: 'c', Clack: 'k' }, 'Clack')).toMatchObject({ buffer: 'c' })
+    expect(representativeSound(t, ['button'], { Click: 'c', Clack: 'k' }, 'Clack')).toMatchObject({ buffer: 'c' })
     expect(pairedClips(e, 0)).toEqual([{ clip: 'click', at: 'hand' }])
   })
 })

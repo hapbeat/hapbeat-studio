@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { keepSceneUiSettingsCopy, openSceneProject, readSceneTable, readSceneUiSettings, writeSceneSave, writeSceneUiSettings } from './sceneProject'
+import { createSceneTable, keepSceneUiSettingsCopy, openSceneProject, readSceneTable, readSceneUiSettings, writeSceneSave, writeSceneUiSettings } from './sceneProject'
 import { parseCueTable, serializeCueTable } from './sceneCueTable'
-import { memoryFolder, sampleData, sampleLib, sampleTable } from './sceneTestFixtures'
+import { memoryFolder, sampleLib, sampleTable, sampleViewerDataFile, sampleViewerLibFile } from './sceneTestFixtures'
 
 const project = () => {
   const lib = sampleLib()
   return memoryFolder({
-    'Saved/HapticViewer/viewer-lib.json': JSON.stringify(lib),
-    'Saved/HapticViewer/viewer-data.json': JSON.stringify(sampleData()),
+    'Saved/HapticViewer/viewer-lib.json': JSON.stringify(sampleViewerLibFile()),
+    'Saved/HapticViewer/viewer-data.json': JSON.stringify(sampleViewerDataFile()),
     [lib.paths.cues]: serializeCueTable(sampleTable()),
     [`${lib.paths.clips}/click.wav`]: 'x', [`${lib.paths.clips}/thump.wav`]: 'x', [`${lib.paths.clips}/hum.wav`]: 'x',
     [`${lib.paths.sounds}/Click.wav`]: 'x', [`${lib.paths.sounds}/Motor.wav`]: 'x', [`${lib.paths.sounds}/readme.txt`]: 'x',
@@ -20,16 +20,46 @@ describe('scene project folder', () => {
     const opened = await openSceneProject(folder.handle)
     expect(opened.ok).toBe(true)
     if (!opened.ok) return
-    expect(opened.data.clips).toHaveLength(1)
-    const files = await readSceneTable(folder.handle, opened.lib)
+    expect(opened.lib).toEqual(sampleLib())
+    // detent (tick) · button + grab · detent (tick) · feed_loop
+    expect(opened.data.clips.map(c => c.names)).toEqual([['detent'], ['button', 'grab'], ['detent'], ['feed_loop']])
+    const files = (await readSceneTable(folder.handle, opened.lib))!
     expect(files.table).toEqual(sampleTable())
     expect(files.clipFiles).toEqual(['click', 'hum', 'thump'])
-    expect(files.soundFiles).toEqual(['Click']) // loop sounds and non-WAVs are not cue sounds
+    expect(files.soundFiles).toEqual(['Click', 'Motor']) // every WAV is a sound candidate (no loop_sounds in v1); non-WAVs are not
+  })
+
+  it('makes the layers from the column names when the lib names none', async () => {
+    const { layers: _omitted, ...lib } = sampleViewerLibFile()
+    const folder = memoryFolder({ 'Saved/HapticViewer/viewer-lib.json': JSON.stringify(lib), 'Saved/HapticViewer/viewer-data.json': JSON.stringify(sampleViewerDataFile()) })
+    const opened = await openSceneProject(folder.handle)
+    expect(opened).toMatchObject({ ok: true, lib: { layers: [{ cue: 'feed_loop', gain: [0, 1], rate: [2, 3] }], loop_cues: ['feed_loop'] } })
+  })
+
+  it('reports an older format (another schema_version) as such', async () => {
+    const old = memoryFolder({ 'Saved/HapticViewer/viewer-lib.json': JSON.stringify({ ...sampleViewerLibFile(), schema_version: undefined }) })
+    expect(await openSceneProject(old.handle)).toMatchObject({ ok: false, reason: 'noLib', oldFormat: true })
+    const oldData = memoryFolder({ 'Saved/HapticViewer/viewer-lib.json': JSON.stringify(sampleViewerLibFile()), 'Saved/HapticViewer/viewer-data.json': JSON.stringify({ fps: 30, clips: [], full: {} }) })
+    expect(await openSceneProject(oldData.handle)).toMatchObject({ ok: false, reason: 'noData', oldFormat: true })
+  })
+
+  it('opens a project without a cue table, and creates one only when asked (never over an existing one)', async () => {
+    const lib = sampleLib()
+    const folder = memoryFolder({ 'Saved/HapticViewer/viewer-lib.json': JSON.stringify(sampleViewerLibFile()), 'Saved/HapticViewer/viewer-data.json': JSON.stringify(sampleViewerDataFile()) })
+    const opened = await openSceneProject(folder.handle)
+    if (!opened.ok) throw new Error('not opened')
+    expect(await readSceneTable(folder.handle, lib)).toBeNull()
+    expect(folder.exists(lib.paths.cues)).toBe(false)
+    const made = await createSceneTable(folder.handle, opened.lib, opened.data)
+    expect(made).toEqual({ schema_version: 1, kit: 'mill-kit', clips: {}, sounds: {}, cues: { button: {}, detent: {}, feed_loop: { loop: true }, grab: {} } })
+    expect(parseCueTable(folder.read(lib.paths.cues)!)).toEqual(made)
+    await expect(createSceneTable(folder.handle, opened.lib, opened.data)).rejects.toThrow(/exists already/)
+    expect(await readSceneTable(folder.handle, lib)).toMatchObject({ table: made, clipFiles: [], soundFiles: [] })
   })
 
   it('tells a folder without a lib from a project without a recording', async () => {
     expect(await openSceneProject(memoryFolder({}).handle)).toMatchObject({ ok: false, reason: 'noLib' })
-    const unrecorded = memoryFolder({ 'Saved/HapticViewer/viewer-lib.json': JSON.stringify(sampleLib()) })
+    const unrecorded = memoryFolder({ 'Saved/HapticViewer/viewer-lib.json': JSON.stringify(sampleViewerLibFile()) })
     expect(await openSceneProject(unrecorded.handle)).toMatchObject({ ok: false, reason: 'noData', lib: { record_command: 'record.ps1' } })
   })
 

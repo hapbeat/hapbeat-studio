@@ -4,14 +4,16 @@ import type { TrialSceneChoice } from './editorUiSettings'
 import { sceneSegment, type SceneMark, type SceneSegment } from './sceneSegments'
 
 /**
- * Editor Scene video panel: which recorded clip of the Scene tab project shows
- * an AI trial's game moment. A trial names its moment with `scene`
- * (hapbeat-trial@1); older trials get a clip picked in the panel, saved per
- * trial id in the editor settings.
+ * Editor Scene video panel: which stretch of the Scene tab project's full replay
+ * shows an AI trial's game moment. A trial names its moment with `scene`
+ * (hapbeat-trial@1); older trials get a moment picked in the panel, saved per
+ * trial id in the editor settings (by the option's `key`).
  */
 
 export interface SceneClipOption {
-  /** The clip's video file (Saved/HapticViewer/<file>); also the saved choice key. */
+  /** The saved choice key: `segment` for the representative stretch, else the moment's replay time (`@<s>`). */
+  key: string
+  /** The video file (Saved/HapticViewer/<file>): the full replay. */
   file: string
   label: string
   /** Time of the cue mark in the clip video (seconds). */
@@ -24,21 +26,23 @@ export interface SceneClipOption {
   marks: SceneMark[]
   /** Video time the moment ends (the video pauses there); null = the video's end. */
   end: number | null
-  /** The representative stretch of the full replay (DEC-085); null for a recorded clip. */
-  segment: SceneSegment | null
+  /** The stretch of the full replay: the representative one (DEC-085) or a moment's. */
+  segment: SceneSegment
 }
 
-/** Clips of the recording that contain one of `cues` (every clip when `cues` is null), with the mark of the first matching cue. */
+/** The moments of the recording that contain one of `cues` (every moment when `cues` is null), as their stretches of the full replay, marked at the first matching cue. */
 export function trialSceneOptions(data: SceneData, cues: string[] | null): SceneClipOption[] {
   const items = buildItems(data)
   const out: SceneClipOption[] = []
   items.forEach((it, index) => {
     if (it.kind !== 'clip' || (cues && !it.names.some(n => cues.includes(n)))) return
-    const own = itemEvents(it, data.full.events, data.fps).find(e => e.own && (!cues || cues.includes(e.name)))
+    const own = itemEvents(it, data.full.events).find(e => e.own && (!cues || cues.includes(e.name)))
     const cue = cues ? cues.find(c => it.names.includes(c)) ?? null : null
     // Event names and time only ("03 roar (7.9 s)"); the haptic route (both / right) is not part of the moment's name.
     const mark = own ? own.t : it.event
-    out.push({ file: it.file, label: `${String(index).padStart(2, '0')} ${it.names.join(' + ')} (${it.at.toFixed(1)} s)`, at: it.at, mark, cue, marks: [{ t: mark, name: cue ?? it.name, target: true }], end: null, segment: null })
+    const marks: SceneMark[] = [{ t: mark, name: cue ?? it.name, target: true }]
+    out.push({ key: `@${it.at.toFixed(3)}`, file: it.file, label: `${String(index).padStart(2, '0')} ${it.names.join(' + ')} (${it.at.toFixed(1)} s)`, at: it.at, mark, cue, marks, end: it.end,
+      segment: { names: [cue ?? it.name], start: it.start, end: it.end, marks, repeating: false, total: 1 } })
   })
   return out
 }
@@ -81,8 +85,11 @@ export function representativeOption(data: SceneData, targets: readonly string[]
   const segment = sceneSegment(data.full.events, named, soundSec(named[0]))
   if (!segment) return null
   const first = segment.marks[0].t
-  return { file: data.full.file, label: `${named[0]} (${first.toFixed(1)} s)`, at: first, mark: first, cue: named[0], marks: segment.marks, end: segment.end, segment }
+  return { key: REPRESENTATIVE, file: data.full.file, label: `${named[0]} (${first.toFixed(1)} s)`, at: first, mark: first, cue: named[0], marks: segment.marks, end: segment.end, segment }
 }
+
+/** The saved choice key of the representative stretch. */
+export const REPRESENTATIVE = 'segment'
 
 /**
  * A trial / event with `scene` (DEC-085): the representative stretch of its first firing cue, cut from the
@@ -98,17 +105,17 @@ export function resolveTrialScene(o: { lib: SceneLib | null; data: SceneData | n
   const options = trialSceneOptions(o.data, o.scene?.cues ?? null)
   const rep = o.scene ? representativeOption(o.data, o.targets ?? o.scene.cues, o.soundSec ?? (() => 1)) : null
   if (o.scene && !options.length && !rep) return { kind: 'noClips', cues: o.scene.cues }
-  const savedFile = o.saved && o.saved.project === o.lib.project_name ? o.saved.file : undefined
+  const savedKey = o.saved && o.saved.project === o.lib.project_name ? o.saved.file : undefined
   if (rep) {
-    const named = o.scene?.clip ? options.find(x => x.file === o.scene!.clip) : undefined
-    const savedOption = savedFile === rep.file ? rep : options.find(x => x.file === savedFile)
+    const named = o.scene?.clip ? options.find(x => x.key === o.scene!.clip) : undefined
+    const savedOption = savedKey === rep.key ? rep : options.find(x => x.key === savedKey)
     const extra = [...new Set([savedOption, named].filter((x): x is SceneClipOption => !!x && x !== rep))]
     return { kind: 'ready', options: [rep, ...extra], chosen: savedOption ?? named ?? rep }
   }
-  const saved = savedFile ? options.find(x => x.file === savedFile) : undefined
+  const saved = savedKey ? options.find(x => x.key === savedKey) : undefined
   // The user's pick for this trial, else the trial's own `scene.clip`, else the earliest moment of any of its
   // cues (footstep → the T-Rex walking in, not a later footstep hidden behind the meat).
-  const named = o.scene?.clip ? options.find(x => x.file === o.scene!.clip) : undefined
+  const named = o.scene?.clip ? options.find(x => x.key === o.scene!.clip) : undefined
   const earliest = o.scene ? options.reduce<SceneClipOption | null>((best, x) => !best || x.at < best.at ? x : best, null) : null
   return { kind: 'ready', options, chosen: saved ?? named ?? earliest }
 }

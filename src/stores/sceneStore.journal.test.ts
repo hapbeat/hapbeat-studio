@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseCueTable, serializeCueTable, type CueTable } from '@/utils/sceneCueTable'
-import { memoryFolder, sampleData, sampleLib, sampleTable } from '@/utils/sceneTestFixtures'
+import { memoryFolder, sampleLib, sampleTable, sampleViewerDataFile, sampleViewerLibFile } from '@/utils/sceneTestFixtures'
 import { journalKey, readJournal, restoreFromJournal } from '@/utils/sceneJournal'
 import { CueTableSync } from '@/utils/cueTableSync'
 import { setEmit, setLevelMap } from '@/utils/cueEvents'
@@ -15,8 +15,8 @@ vi.stubGlobal('OfflineAudioContext', class { decodeAudioData() { return Promise.
 
 const lib = sampleLib()
 const project = () => memoryFolder({
-  'Saved/HapticViewer/viewer-lib.json': JSON.stringify(lib),
-  'Saved/HapticViewer/viewer-data.json': JSON.stringify(sampleData()),
+  'Saved/HapticViewer/viewer-lib.json': JSON.stringify(sampleViewerLibFile()),
+  'Saved/HapticViewer/viewer-data.json': JSON.stringify(sampleViewerDataFile()),
   [lib.paths.cues]: serializeCueTable(sampleTable()),
   [`${lib.paths.clips}/click.wav`]: 'x', [`${lib.paths.clips}/thump.wav`]: 'x', [`${lib.paths.clips}/hum.wav`]: 'x',
   [`${lib.paths.sounds}/Click.wav`]: 'x', [`${lib.paths.sounds}/Motor.wav`]: 'x',

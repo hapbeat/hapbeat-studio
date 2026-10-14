@@ -2,7 +2,7 @@ import type { SceneLib } from './sceneData'
 import type { MaterialReserve } from './editorUiSettings'
 import {
   type CueReview, type ReviewState,
-  clampNumber, isLoopCue, soundAllowed, soundIntensity, positionsForCue, routeAlternates, routeClips, sfxAlternates, sfxSounds, VARIANT_NAME,
+  clampNumber, isLoopCue, soundIntensity, positionsForCue, routeAlternates, routeClips, sfxAlternates, sfxSounds, VARIANT_NAME,
   type CueEntry, type CueRoute, type CueSfx, type CueTable, type CueVariant, type CueVariation, type PickMode, type DistanceFalloff, type CueEmit,
 } from './sceneCueTable'
 import type { LevelMap } from './levelMap'
@@ -101,8 +101,7 @@ export function materialStatus(e: Pick<EffectiveEvent, 'sfx' | 'haptics' | 'deci
   const has = field === 'sfx' ? !!e.sfx : e.haptics.length > 0
   return { state: !e.decided[field] ? 'undecided' : has ? 'set' : 'none', review: e.review[field] }
 }
-/** 'na': a loop cue's sound where the project has no looping cue sounds. */
-export type SoundStatus = MaterialStatus | 'na'
+
 /**
  * How an Events status pill shows a material state: 未定 / なし 仮 (grey outline, slashed icon) / なし OK (green outline,
  * slashed icon, ✓: "approved: no material") / 仮 / OK (solid green).
@@ -118,7 +117,7 @@ export interface EventRow {
   ref: EventRef
   description?: string
   loop: boolean
-  sound: SoundStatus
+  sound: MaterialStatus
   haptic: MaterialStatus
   /** A sound or route of its own has nothing starred (hasNoStar): ▲ in the list. */
   noStar: boolean
@@ -262,10 +261,10 @@ export function shareField(table: CueTable, cue: string, field: 'sfx' | 'haptics
   return next
 }
 
-function row(table: CueTable, lib: SceneLib, ref: EventRef, variants: EventRow[]): EventRow {
-  const e = effectiveEvent(table, ref)!, loop = isLoopCue(lib, ref.cue)
+function row(table: CueTable, ref: EventRef, variants: EventRow[]): EventRow {
+  const e = effectiveEvent(table, ref)!, loop = isLoopCue(table, ref.cue)
   return { key: eventKey(ref), ref, description: e.description, loop,
-    sound: soundAllowed(lib, ref.cue) ? materialStatus(e, 'sfx') : 'na',
+    sound: materialStatus(e, 'sfx'),
     haptic: materialStatus(e, 'haptics'), noStar: hasNoStar(e),
     held: { sound: holdsField(table, ref, 'sfx'), haptic: holdsField(table, ref, 'haptics') }, variants }
 }
@@ -281,9 +280,9 @@ export function shownEventKey(table: CueTable | null, selected: string | null): 
 }
 
 /** Every cue in table order, each with its variants nested. */
-export function listEvents(table: CueTable, lib: SceneLib): EventRow[] {
-  return Object.keys(table.cues).map(cue => row(table, lib, { cue, variant: null },
-    Object.keys(table.cues[cue].variants ?? {}).map(variant => row(table, lib, { cue, variant }, []))))
+export function listEvents(table: CueTable): EventRow[] {
+  return Object.keys(table.cues).map(cue => row(table, { cue, variant: null },
+    Object.keys(table.cues[cue].variants ?? {}).map(variant => row(table, { cue, variant }, []))))
 }
 
 /** Every event key of the table (cues, then `cue:variant`). */
@@ -340,15 +339,13 @@ export function sameBytes(a: ArrayBuffer, b: ArrayBuffer): boolean {
  * Events a rated trial's best candidate is assigned to, per name in `scene.cues` (ownerKeys, DEC-091): the cue while
  * its variants share the field (a `cue:variant` too), the named variant while each variant holds it (the cue: every
  * variant). In an older table (cue and variant both hold it) the cue when it is listed, else each listed variant.
- * Unknown names are skipped, and loop cues for sounds unless the project plays loop-cue sounds.
+ * Unknown names are skipped.
  */
-export function assignEventsForTrial(table: CueTable, lib: SceneLib, cues: readonly string[], target: 'sound' | 'haptic'): string[] {
+export function assignEventsForTrial(table: CueTable, cues: readonly string[], target: 'sound' | 'haptic'): string[] {
   const refs = cues.map(name => resolveEventName(table, name)).filter((r): r is NonNullable<typeof r> => !!r && !r.unknownVariant).map(r => r.ref)
   const field = target === 'sound' ? 'sfx' : 'haptics'
   const out: string[] = []
   for (const ref of refs) {
-    // A loop cue takes a sound only where the project plays loop-cue sounds (lib.loop_cue_sounds).
-    if (target === 'sound' && !soundAllowed(lib, ref.cue)) continue
     const key = fieldOwner(table, ref.cue, field) === 'both' && refs.some(r => r.cue === ref.cue && r.variant === null) ? ref.cue : eventKey(ref)
     for (const k of ownerKeys(table, key, field)) if (!out.includes(k)) out.push(k)
   }
@@ -370,8 +367,8 @@ export function materialUsers(table: CueTable, kind: 'clip' | 'sound', name: str
 export const overwriteUsers = (table: CueTable, kind: 'clip' | 'sound', name: string, keys: readonly string[]) => materialUsers(table, kind, name).filter(k => !keys.includes(k))
 
 /** Body position offered for a new route: the acting hand where the project has it (wrist demos), else the first allowed one. */
-export function defaultAt(lib: SceneLib, cue: string): string {
-  const positions = positionsForCue(lib, cue)
+export function defaultAt(lib: SceneLib, table: CueTable | null, cue: string): string {
+  const positions = positionsForCue(lib, table, cue)
   return positions.includes('hand') ? 'hand' : positions[0] ?? 'hand'
 }
 /** True when a haptic decision for `ref` must ask for at / gain (the event has no route to keep them from). */
@@ -434,7 +431,7 @@ function adoptInto(starred: readonly string[], alternates: readonly string[], na
  * clip when the route has none; a new route when there is none. Never twice. A variant that inherited its haptics
  * gets its own copy first. The review goes back to tentative only when what plays changed.
  */
-export function applyHapticDecision(table: CueTable, lib: SceneLib, d: HapticDecision): CueTable {
+export function applyHapticDecision(table: CueTable, d: HapticDecision): CueTable {
   const next = edited(table, d.ref, (entry, effective) => {
     const routes = effective.haptics
     let plays = true
@@ -447,7 +444,7 @@ export function applyHapticDecision(table: CueTable, lib: SceneLib, d: HapticDec
     // A decision that changes what plays is tentative until the user approves it.
     if (plays) entry.review = { ...(entry.review ?? {}), haptics: 'tentative' }
   })
-  if (!next.clips[d.clip]) next.clips[d.clip] = { intensity: clampNumber(d.intensity ?? 1, 0, 1), loop: isLoopCue(lib, d.ref.cue), description: `Decided in Studio for ${eventKey(d.ref)}` }
+  if (!next.clips[d.clip]) next.clips[d.clip] = { intensity: clampNumber(d.intensity ?? 1, 0, 1), loop: isLoopCue(table, d.ref.cue), description: `Decided in Studio for ${eventKey(d.ref)}` }
   return next
 }
 /**
@@ -709,8 +706,8 @@ export function addPositionRoute(table: CueTable, lib: SceneLib, ref: EventRef):
   const e = effectiveEvent(table, ref)
   if (!e) return null
   const used = new Set(e.haptics.map(r => r.at))
-  const at = positionsForCue(lib, ref.cue).find(a => !used.has(a))
-  const clip = e.haptics.length ? routeClips(e.haptics[0])[0] : Object.keys(table.clips).find(c => table.clips[c].loop === isLoopCue(lib, ref.cue))
+  const at = positionsForCue(lib, table, ref.cue).find(a => !used.has(a))
+  const clip = e.haptics.length ? routeClips(e.haptics[0])[0] : Object.keys(table.clips).find(c => table.clips[c].loop === isLoopCue(table, ref.cue))
   if (!at || !clip) return null
   return edited(table, ref, (entry, effective) => { entry.haptics = [...effective.haptics, { clip, at, gain: e.haptics[0]?.gain ?? 1.0 }] })
 }
@@ -879,13 +876,13 @@ export interface PlannedShot extends Shot { index: number; atSec: number }
  * candidates) or the one picked for an AI candidate (`prefer`), always the same, without jitter — picking among
  * the pool and the variation are for the Scene tab's playback only.
  */
-export function representativeSound<B>(table: CueTable, lib: SceneLib, names: readonly string[], buffers: Record<string, B>, prefer: string | null = null): { buffer: B; volume: number; loop: boolean; name: string } | null {
+export function representativeSound<B>(table: CueTable, names: readonly string[], buffers: Record<string, B>, prefer: string | null = null): { buffer: B; volume: number; loop: boolean; name: string } | null {
   for (const name of names) {
     const r = resolveEventName(table, name), e = r && effectiveEvent(table, r.ref)
     // `prefer`: a sound of the event's pool picked for what is shown (an AI candidate's `sound`), else the representative.
     const sounds = sfxSounds(e?.sfx), first = prefer && sounds.includes(prefer) && buffers[prefer] ? prefer : sounds[0]
     // The editor plays a material at its base level only (DEC-086: sfx.volume is the scene multiplier).
-    if (e?.sfx && first && buffers[first]) return { buffer: buffers[first], volume: soundIntensity(table, first), loop: isLoopCue(lib, e.ref.cue), name: first }
+    if (e?.sfx && first && buffers[first]) return { buffer: buffers[first], volume: soundIntensity(table, first), loop: isLoopCue(table, e.ref.cue), name: first }
   }
   return null
 }
@@ -930,7 +927,7 @@ export function candidateSound(trial: { id: string; candidates: readonly { id: s
 export function cueRoutePositions(table: CueTable, lib: SceneLib, name: string): string[] | null {
   const r = resolveEventName(table, name), e = r && effectiveEvent(table, r.ref)
   if (!r || !e) return null
-  return e.haptics.length ? [...new Set(e.haptics.map(route => route.at))] : [defaultAt(lib, r.ref.cue)]
+  return e.haptics.length ? [...new Set(e.haptics.map(route => route.at))] : [defaultAt(lib, table, r.ref.cue)]
 }
 
 /** Route positions of every event using a material (a clip of the routes / a sound of the sfx), plus `fallbackEvent`'s; null when none resolves. */

@@ -158,7 +158,7 @@ export function useSceneSounds(): SceneSounds {
     const [project, ...cues] = auditionCues ? auditionCues.split('\n') : ['']
     const names = decidedSoundEvents({ auditioning: !!audition, audition: auditionCues ? { project, cues } : null, preview: preview ? { event: preview.event, target: preview.target } : null,
       adjusting, openProject: lib.project_name })
-    return representativeSound(table, lib, names, buffers, preferred)
+    return representativeSound(table, names, buffers, preferred)
   }, [audition, auditionCues, preview, adjusting, table, lib, buffers, preferred])
   // A scene (DEC-085): each firing is its own source on the AudioContext clock — the event's sound on the rated
   // cue's firings (with a haptic audition) and the decided sound of the scene's other cues on theirs (no jitter).

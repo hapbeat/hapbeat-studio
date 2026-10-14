@@ -28,7 +28,7 @@ class FakeCtx {
 const audioOf = (ctx: FakeCtx) => () => ctx as unknown as LoopAudio
 const buf = (name: string) => ({ name }) as unknown as AudioBuffer
 
-const lib = (layers: SceneLayer[], loopCueSounds = true) => ({ layers, loop_cues: layers.map(l => l.cue), loop_cue_sounds: loopCueSounds }) as unknown as SceneLib
+const lib = (layers: SceneLayer[]) => ({ layers, loop_cues: layers.map(l => l.cue) }) as unknown as SceneLib
 const layer = (cue: string, gain: number[], rate: number[] | null = null): SceneLayer => ({ cue, gain, rate, colors: [] })
 // Safety Mill's shape: a haptic-only layer, a hand layer with a sound, one sound-only layer and one with a rate column.
 const MILL = lib([layer('feed_loop', [0, 1], [2, 3]), layer('brush_loop', [4, 5]), layer('cut_loop', [6, 6]), layer('spindle_loop', [7, 7], [8, 8])])
@@ -42,14 +42,13 @@ const TABLE = {
   },
 } as unknown as CueTable
 
-describe('loop-cue sounds (lib.loop_cue_sounds)', () => {
-  it('takes each layer cue with a sound: its first sound, sfx.volume × the sound intensity; none without loop_cue_sounds', () => {
+describe('loop-cue sounds', () => {
+  it('takes each layer cue with a sound: its first sound, sfx.volume × the sound intensity', () => {
     expect(buildLoopSounds(TABLE, MILL)).toEqual([
       { layer: 1, sound: 'BrushLoop', gain: 0.5 },
       { layer: 2, sound: 'Cutting', gain: 0.8 * 0.1 },
       { layer: 3, sound: 'Motor', gain: 1 }, // no re-pick: the first of `sounds`; no `sounds` entry = intensity 1
     ])
-    expect(buildLoopSounds(TABLE, lib(MILL.layers, false))).toEqual([])
     // A layer cue missing from the table, or with no sfx key, stays silent.
     expect(buildLoopSounds({ clips: {}, cues: { hold: {} } } as unknown as CueTable, lib([layer('hold', [0, 1]), layer('gone', [2, 3])]))).toEqual([])
   })

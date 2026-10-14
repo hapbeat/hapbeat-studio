@@ -337,7 +337,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
   /** A haptic trial's cue sounds (the pool, representative first): the sound played with each candidate is picked from them. */
   const soundPool = useMemo(() => target === 'haptic' && event && sceneTable ? sfxSounds(effectiveEvent(sceneTable, parseEventKey(event))?.sfx) : [], [target, event, sceneTable])
   const soundPicks = useEditorSettings(s => s.candidateSounds)
-  const soundNote = target === 'haptic' && event && sceneLib && sceneTable ? soundFirstNote(effectiveEvent(sceneTable, parseEventKey(event)), isLoopCue(sceneLib, parseEventKey(event).cue)) : null
+  const soundNote = target === 'haptic' && event && sceneLib && sceneTable ? soundFirstNote(effectiveEvent(sceneTable, parseEventKey(event)), isLoopCue(sceneTable, parseEventKey(event).cue)) : null
   const marks = useEditorSettings(s => s.eventMarks)
   /** The waveform selection while a candidate is auditioned: recorded as its "use only this part" range. */
   const region = useWaveformStore(s => s.selectedRegion)
@@ -362,7 +362,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
   const addToPool = async (ids: string[]): Promise<{ added: string[]; excluded: { candidate: string; reason: string }[]; failures: string[] }> => {
     const scene = useSceneStore.getState()
     if (!scene.table || !scene.lib || scene.lib.project_name !== trial.scene!.project) return { added: [], excluded: [], failures: [t('events.auto.noProject', { project: trial.scene!.project })] }
-    const events = assignEventsForTrial(scene.table, scene.lib, trial.scene!.cues.slice(0, 1), target)
+    const events = assignEventsForTrial(scene.table, trial.scene!.cues.slice(0, 1), target)
     if (!events.length) return { added: [], excluded: [], failures: [t('events.auto.noEvents', { cues: trial.scene!.cues[0] })] }
     const added: string[] = [], excluded: { candidate: string; reason: string }[] = [], failures: string[] = []
     for (const id of ids) {
