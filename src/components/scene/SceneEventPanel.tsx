@@ -11,7 +11,7 @@ import {
   setVariantScale, updateOwnRoute, rampValue, setDistanceFalloff, setEmit, holdsField,
   type EffectiveEvent, type OverridableField,
 } from '@/utils/cueEvents'
-import { HeldBy } from '@/components/waveform/HeldBy'
+import { GroupSwitch, HeldBy } from '@/components/waveform/HeldBy'
 import { longestRun, sceneSegment } from '@/utils/sceneSegments'
 import { MaterialList } from '@/components/waveform/MaterialList'
 import { PairedList } from '@/components/waveform/PairedList'
@@ -275,10 +275,12 @@ function Sounds({ table, e, edit, allowed }: { table: CueTable; e: EffectiveEven
   const sounds = sfxSounds(e.sfx), alternates = sfxAlternates(e.sfx), own = holdsField(table, e.ref, 'sfx')
   if (!allowed) return null
   if (!own) return <div className="scene-sec">
-    <h3 className="scene-kind-head held-elsewhere"><SoundIcon decorative />{t('events.repeat.sounds')}<HeldBy table={table} e={e} field="sfx" edit={edit} buttonClass="scene-icon-btn" /></h3>
+    <h3 className="scene-kind-head held-elsewhere"><SoundIcon decorative />{t('events.repeat.sounds')}
+      {e.ref.variant === null && <GroupSwitch table={table} cue={e.ref.cue} field="sfx" edit={edit} buttonClass="scene-icon-btn" />}<HeldBy e={e} /></h3>
   </div>
   return <div className="scene-sec">
-    <h3 className="scene-kind-head"><SoundIcon decorative />{t('events.repeat.sounds')}</h3>
+    <h3 className="scene-kind-head"><SoundIcon decorative />{t('events.repeat.sounds')}
+      {e.ref.variant === null && <GroupSwitch table={table} cue={e.ref.cue} field="sfx" edit={edit} buttonClass="scene-icon-btn" />}</h3>
     <OverrideBar table={table} e={e} field="sfx" edit={edit} />
     {own && e.sfx && <label className="scene-row" title={t('scene.event.volumeHint')}><span className="scene-dim scene-grow">{t('scene.sound.volume')}</span>
       <NumberField value={e.sfx.volume} min={0} max={2} step={0.05} label={t('scene.sound.volume')} onCommit={x => edit(tb => setOwnSfxVolume(tb, e.ref, x))} /></label>}
@@ -305,10 +307,12 @@ function Clips({ table, e, edit }: { table: CueTable; e: EffectiveEvent; edit: E
   const lib = useSceneStore(s => s.lib)!
   const own = holdsField(table, e.ref, 'haptics')
   if (!own) return <div className="scene-sec">
-    <h3 className="scene-kind-head held-elsewhere"><HapticIcon decorative />{t('events.repeat.clips')}<HeldBy table={table} e={e} field="haptics" edit={edit} buttonClass="scene-icon-btn" /></h3>
+    <h3 className="scene-kind-head held-elsewhere"><HapticIcon decorative />{t('events.repeat.clips')}
+      {e.ref.variant === null && <GroupSwitch table={table} cue={e.ref.cue} field="haptics" edit={edit} buttonClass="scene-icon-btn" />}<HeldBy e={e} /></h3>
   </div>
   return <div className="scene-sec">
-    <h3 className="scene-kind-head"><HapticIcon decorative />{t('events.repeat.clips')}</h3>
+    <h3 className="scene-kind-head"><HapticIcon decorative />{t('events.repeat.clips')}
+      {e.ref.variant === null && <GroupSwitch table={table} cue={e.ref.cue} field="haptics" edit={edit} buttonClass="scene-icon-btn" />}</h3>
     <OverrideBar table={table} e={e} field="haptics" edit={edit} />
     {!e.haptics.length && <div className="scene-dim">{t('events.hapticNone')}</div>}
     {e.haptics.map((r, i) => {

@@ -202,16 +202,40 @@ export function splitField(table: CueTable, ref: EventRef, field: 'sfx' | 'hapti
   })
 }
 /**
- * "Share in the group" on a cue whose variants only hold the field (DEC-091): the cue gets one sound / haptics from
- * theirs — the first variant's (table order) that has one, every other variant's materials added as alternates so
- * nothing is lost (a position only another variant uses becomes a route with alternates only, DEC-092) — tentative,
- * and the variants' own go. Each variant keeps its loudness against the group's as its multiplier (sfxVolume /
- * hapticsGain). Null unless only the variants hold it.
+ * "Separate" with the switch on the cue (DEC-091): every variant without its own gets a copy of the cue's starred
+ * materials (splitField), then the cue's own goes — each variant holds it. Null unless the cue holds a decided field
+ * and has variants. The cue's unstarred alternates are not copied: splitReserves lists them for the cue's reserves.
+ */
+export function splitAll(table: CueTable, cue: string, field: 'sfx' | 'haptics'): CueTable | null {
+  const entry = table.cues[cue], names = Object.keys(entry?.variants ?? {})
+  if (!entry || !names.length || entry[field] === undefined) return null
+  const next = names.reduce((t, variant) => splitField(t, { cue, variant }, field) ?? t, table)
+  return edited(next, { cue, variant: null }, e => { delete e[field]; dropReview(e, field) })
+}
+/** The cue's unstarred alternates that splitAll does not copy (a sound / route with nothing starred is copied whole), as reserves. */
+export function splitReserves(table: CueTable, cue: string, field: 'sfx' | 'haptics'): MaterialReserve[] {
+  const entry = table.cues[cue]
+  if (!entry) return []
+  if (field === 'sfx') return (sfxSounds(entry.sfx).length ? sfxAlternates(entry.sfx) : []).map(material => ({ material, target: 'sound' as const }))
+  return (entry.haptics ?? []).flatMap(r => (routeClips(r).length ? routeAlternates(r) : []).map(material => ({ material, target: 'haptic' as const, at: r.at, gain: r.gain })))
+}
+/**
+ * "Shared" with the switch on the cue (DEC-091). When only the variants hold the field, the cue gets one sound /
+ * haptics from theirs — the first variant's (table order) that has one, every other variant's materials added as
+ * alternates so nothing is lost (a position only another variant uses becomes a route with alternates only, DEC-092)
+ * — tentative, and the variants' own go; each variant keeps its loudness against the group's as its multiplier
+ * (sfxVolume / hapticsGain). When the cue and some variants both hold it, the variants' own go (the editor keeps them
+ * as their reserves) and the cue's stays. Null when the cue alone holds it already.
  */
 export function shareField(table: CueTable, cue: string, field: 'sfx' | 'haptics'): CueTable | null {
-  if (!table.cues[cue] || fieldOwner(table, cue, field) !== 'each') return null
+  const owner = table.cues[cue] ? fieldOwner(table, cue, field) : 'group'
+  if (owner === 'group') return null
   const next = structuredClone(table), group = next.cues[cue], variants = Object.values(group.variants ?? {})
   const owning = variants.filter(v => v[field] !== undefined)
+  if (owner === 'both') {
+    for (const v of owning) { delete v[field]; dropReview(v, field) }
+    return next
+  }
   if (field === 'sfx') {
     const sounding = owning.map(v => v.sfx).filter((s): s is CueSfx => !!s)
     group.sfx = !sounding.length ? null

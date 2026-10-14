@@ -15,7 +15,7 @@ import {
   resetAllReviews, setNone, setReview, setUndecided, undecidedReserves, restoreReserve, soundFirstNote, noSoundNote,
   materialPill, materialStatus, fieldOwner, holdsField, type EffectiveEvent, type EventRow, type MaterialStatus, type SoundStatus,
 } from '@/utils/cueEvents'
-import { HeldBy } from './HeldBy'
+import { GroupSwitch, HeldBy } from './HeldBy'
 import { useConfirm } from '@/components/common/useConfirm'
 import { useAtLabel } from '@/components/scene/SceneCuePanels'
 import { useEditor } from './editorContext'
@@ -268,7 +268,8 @@ function EventDetail({ table, lib, e }: { table: CueTable; lib: SceneLib; e: Eff
 
 /**
  * The event's sounds (★ = `sfx.sounds`, played; the rest = `sfx.alternates`): a row click shows one in the waveform panel,
- * ▶ plays it (PC only). On the side that does not hold the sound (DEC-091) only who holds it and the switch (HeldBy).
+ * ▶ plays it (PC only). On the side that does not hold the sound (DEC-091) only who holds it (HeldBy); a cue with
+ * variants has the "shared / separate" switch (GroupSwitch).
  */
 function SoundSection({ table, lib, e, loop, edit }: { table: CueTable; lib: SceneLib; e: EffectiveEvent; loop: boolean; edit: Edit }) {
   const { t } = useI18n()
@@ -283,8 +284,9 @@ function SoundSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sce
   // The material lists fold together (editor setting, open by default; the heading line stays).
   const [open, setOpen] = useMaterialsOpen()
   return <section className="events-sec">
-    <h4 className={`events-sec-head ${allowed && !held ? 'held-elsewhere' : ''}`}><Fold open={open} set={setOpen} /><SoundIcon decorative />{t('events.sound')}{allowed && (held ? <><ReviewToggle e={e} field="sfx" edit={edit} /><DecisionBar table={table} e={e} field="sfx" edit={edit} /></>
-        : <HeldBy table={table} e={e} field="sfx" edit={edit} buttonClass="agent-icon-btn" />)}
+    <h4 className={`events-sec-head ${allowed && !held ? 'held-elsewhere' : ''}`}><Fold open={open} set={setOpen} /><SoundIcon decorative />{t('events.sound')}
+      {allowed && e.ref.variant === null && <GroupSwitch table={table} cue={e.ref.cue} field="sfx" edit={edit} buttonClass="agent-icon-btn" />}
+      {allowed && (held ? <><ReviewToggle e={e} field="sfx" edit={edit} /><DecisionBar table={table} e={e} field="sfx" edit={edit} /></> : <HeldBy e={e} />)}
       {/* Ask for (more) sound candidates; after checking the sound (OK): on to the haptic — also for a cue without a sound. */}
       {(held || !allowed) && <span className="events-haptic-request"><button type="button" className="agent-icon-btn" title={t('events.soundRequest.hint')}
         onClick={() => { const k = `sound|${key}`; useReviseOpen.getState().set(useReviseOpen.getState().open === k ? null : k) }}>{t('events.soundRequest.button')}</button>
@@ -313,7 +315,7 @@ function SoundSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sce
 /**
  * Haptic output: one block per route (body position × gain) with its clips (★ = `clips`, played; the rest = `alternates`);
  * "＋ add position" plays the event on another position at the same time. On the side that does not hold the haptics
- * (DEC-091) only who holds it and the switch (HeldBy).
+ * (DEC-091) only who holds it (HeldBy); a cue with variants has the "shared / separate" switch (GroupSwitch).
  */
 function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: SceneLib; e: EffectiveEvent; loop: boolean; edit: Edit }) {
   const { t } = useI18n()
@@ -327,8 +329,9 @@ function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sc
   const free = positionsForCue(lib, e.ref.cue).some(a => !e.haptics.some(r => r.at === a))
   const describe = useDescribeMaterial()
   return <section className="events-sec">
-    <h4 className={`events-sec-head ${held ? '' : 'held-elsewhere'}`}><Fold open={hOpen} set={setHOpen} /><HapticIcon decorative />{t('events.haptic')}{held ? <><ReviewToggle e={e} field="haptics" edit={edit} /><DecisionBar table={table} e={e} field="haptics" edit={edit} /></>
-      : <HeldBy table={table} e={e} field="haptics" edit={edit} buttonClass="agent-icon-btn" />}</h4>
+    <h4 className={`events-sec-head ${held ? '' : 'held-elsewhere'}`}><Fold open={hOpen} set={setHOpen} /><HapticIcon decorative />{t('events.haptic')}
+      {e.ref.variant === null && <GroupSwitch table={table} cue={e.ref.cue} field="haptics" edit={edit} buttonClass="agent-icon-btn" />}
+      {held ? <><ReviewToggle e={e} field="haptics" edit={edit} /><DecisionBar table={table} e={e} field="haptics" edit={edit} /></> : <HeldBy e={e} />}</h4>
     {held && <SharedWith table={table} e={e} field="haptics" />}
     {hOpen && held && <>
     <SoundFirstNote note={soundFirstNote(e, loop)} />

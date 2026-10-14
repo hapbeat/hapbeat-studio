@@ -48,7 +48,8 @@
    icon slashed in the pill's colour; grey while tentative, saturated green with ✓ once approved (the solid OK stays softer). */
 .events-badge.none-tentative { border-color: #8b93a1; color: #b4bac4; background: rgba(139,147,161,.08); box-shadow: inset 0 0 0 1px #8b93a1; }
 .events-badge.none-approved { border-color: #22c06e; color: #5be39b; background: rgba(34,192,110,.12); box-shadow: inset 0 0 0 1px #22c06e; }
-.events-badge.none-tentative > .kind-icon, .events-badge.none-approved > .kind-icon { color: inherit; }
+/* Kind icons in the event panels are monochrome (the kind colours stay with the waveforms). */
+:is(.events-panel, .scene-event) .kind-icon:is(.sound, .haptic) { color: var(--text-secondary); }
 .events-badge-check { color: #4fd18f; font-weight: 700; }
 .events-badge.unset { border-color: #c9a34a; color: #e3c27a; }
 /* A request to the agent is open (remake / go to haptics). */
@@ -60,6 +61,13 @@
 /* The head line's pill and buttons are each an item of its wrapping flex line (no fixed groups): one moves to the next
    line at a time when the panel narrows. */
 .events-review, .events-decision, .events-haptic-request, .events-held { display: contents; font-weight: normal; }
+/* DEC-091: 「まとめる / 分ける」 on a cue with variants — one segmented pair, the current one pressed. */
+.events-switch { display: inline-flex; flex: none; font-weight: normal; }
+.events-switch > button { border-radius: 0; margin-left: -1px; }
+.events-switch > button:first-child { border-radius: 4px 0 0 4px; margin-left: 0; }
+.events-switch > button:last-child { border-radius: 0 4px 4px 0; }
+.events-switch > button[aria-pressed="true"] { background: rgba(255, 255, 255, .14); color: var(--text-primary); font-weight: 600; cursor: default; }
+.events-switch > button[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
 .events-held-by { padding: 0 2px; color: var(--text-muted); opacity: .6; font-size: 12px; font-weight: normal; white-space: nowrap; }
 /* The side that does not hold the field: no kind icon (its place kept, nothing moves) and a faint heading; the switch stays usable. */
 .held-elsewhere > .kind-icon { visibility: hidden; }
