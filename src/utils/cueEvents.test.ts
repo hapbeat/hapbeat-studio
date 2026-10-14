@@ -3,9 +3,9 @@ import {
   addEventMark, addPositionRoute, fireShot, resetAllReviews, setNone, setReview, setUndecided, addVariant, simultaneousGroups, firstFirings, allEventKeys, applyHapticDecision, applySoundDecision, defaultAt, wavBaseName, safeWavName, nextWavName, assignEventsForTrial,
   effectiveEvent, eventSceneCues, jitterGain, listEvents, MaterialPicker, matchesName, materialUsers, needsRouteForm, overwriteUsers,
   parseEventKey, removeVariant, representativeSound, candidateSound, shownEventKey, fieldOwner, holdsField, ownerKeys, splitField, shareField, restoreReserve as restoreInto, resolveEventName, cueRoutePositions, materialRoutePositions, pairedClips, setOverride, setRouteClips, setSfxSounds, setVariation, soundFirstNote, noSoundNote, trialEvent, trialsForEvent,
-  setStarred, hasNoStar, removeMaterial, addMaterial, movePair, setOwnSfxVolume, setDistanceFalloff, undecidedReserves, materialPill, materialStatus,
+  setStarred, hasNoStar, otherStarred, removeMaterial, addMaterial, movePair, setOwnSfxVolume, setDistanceFalloff, undecidedReserves, materialPill, materialStatus,
 } from './cueEvents'
-import { validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
+import { matchIntensity, materialIntensity, validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
 import { cueVoices, tableTargets } from './sceneHaptics'
 import { sampleLib, sampleTable } from './sceneTestFixtures'
 
@@ -367,6 +367,23 @@ describe('undecided vs none, loop cue sounds, preview sequences', () => {
     expect(fireShot(e, false, new MaterialPicker(() => 0), () => 0.5)).toMatchObject({ jitterDb: 0, pitchSt: 0, rate: 1 })
   })
 
+})
+
+describe('match the other ★ (strength)', () => {
+  it('lists the other starred materials of the same sound / haptics only when the shown one is starred; sets them once', () => {
+    const t = sampleTable()
+    t.cues.button.sfx = { sounds: ['Click', 'Clack', 'Other'], alternates: ['Spare'], volume: 1 }
+    t.cues.button.haptics = [{ clips: ['click', 'thump'], at: 'hand', gain: 1 }, { clip: 'click', alternates: ['hum'], at: 'pos_neck', gain: 1 }]
+    t.sounds = { Click: { intensity: 0.4 }, Spare: { intensity: 0.9 } }
+    const e = effectiveEvent(t, { cue: 'button', variant: null })!
+    expect(otherStarred(e, 'sound', 'Click')).toEqual(['Clack', 'Other'])
+    expect(otherStarred(e, 'sound', 'Spare')).toEqual([])
+    expect(otherStarred(e, 'haptic', 'thump')).toEqual(['click'])
+    expect(otherStarred(e, 'haptic', 'hum')).toEqual([])
+    const m = matchIntensity(t, 'sound', otherStarred(e, 'sound', 'Click'), 0.4)
+    expect(['Click', 'Clack', 'Other', 'Spare'].map(n => materialIntensity(m, 'sound', n))).toEqual([0.4, 0.4, 0.4, 0.9])
+    expect(matchIntensity(t, 'haptic', ['ghost'], 0.2)).toBe(t)
+  })
 })
 
 describe('the group or each variant (DEC-091)', () => {

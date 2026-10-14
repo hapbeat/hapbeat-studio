@@ -1,9 +1,10 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useEditorSettings } from '@/stores/editorSettings'
 import { useSceneStore } from '@/stores/sceneStore'
-import { materialIntensity, setClipIntensity, setSoundIntensity } from '@/utils/sceneCueTable'
+import { matchIntensity, materialIntensity, setClipIntensity, setSoundIntensity } from '@/utils/sceneCueTable'
+import { effectiveEvent, otherStarred, parseEventKey } from '@/utils/cueEvents'
 import { levelKey, useEventStore } from '@/stores/eventStore'
 import { LevelSlider } from './LevelSlider'
 import { useI18n } from '@/i18n/I18nProvider'
@@ -53,8 +54,10 @@ export function WaveformPanel() {
       <span className={`editor-shown-layout ${shownLayout?.loop ? 'loop' : shownLayout?.starts ? 'sequence' : ''}`} role="status" title={shownLayout?.starts ? t('editor.shown.sequenceHint') : undefined}>
         {layoutLine ? t(layoutLine.id, layoutLine.params) : ''}</span>
       <PlaceAtFiringsToggle />
-      {eventPreview ? <IntensitySlider key={eventPreview.material} target={eventPreview.target} wav={eventPreview.material} />
-        : adjusting && !audition && <IntensitySlider key={adjusting.wav} target={adjusting.target} wav={adjusting.wav} project={adjusting.project} />}
+      {eventPreview ? <><IntensitySlider key={eventPreview.material} target={eventPreview.target} wav={eventPreview.material} />
+        <MatchStarred key={`${eventPreview.event}|${eventPreview.material}`} event={eventPreview.event} target={eventPreview.target} wav={eventPreview.material} /></>
+        : adjusting && !audition && <><IntensitySlider key={adjusting.wav} target={adjusting.target} wav={adjusting.wav} project={adjusting.project} />
+        <MatchStarred key={`${adjusting.event}|${adjusting.wav}`} event={adjusting.event} target={adjusting.target} wav={adjusting.wav} project={adjusting.project} /></>}
       <div className="editor-segmented" role="group" aria-label={t('editor.showing')}>
         <button className={`toolbar-btn ${!original ? 'selected' : ''}`} disabled={!canCompare} aria-pressed={!original} title={t('editor.committedHint')} onClick={() => { if (original) s.setSelectedRegion(null); setOriginal(false) }}>∿ {t('editor.edited')}</button>
         <button className={`toolbar-btn ${original ? 'selected' : ''}`} disabled={!canCompare} aria-pressed={original} title={eventPreview ? t('editor.originalMaterialHint') : undefined} onClick={() => { s.setSelectedRegion(null); setOriginal(true) }}>↩ {t('editor.original')}</button>
@@ -97,6 +100,50 @@ function IntensitySlider({ target, wav, project }: { target: 'sound' | 'haptic';
   if (saved === null) return null
   return <LevelSlider levelKey={levelKey.material(target, wav)} saved={saved} label={t('editor.intensity')} title={t('editor.intensityHint')}
     onSave={v => useSceneStore.getState().edit(tb => target === 'haptic' ? (tb.clips[wav] ? setClipIntensity(tb, wav, v) : null) : setSoundIntensity(tb, wav, v))} />
+}
+
+/**
+ * "Match the other ★" beside the strength of a shown event material that is starred together with others in its
+ * event's sound / haptics: sets their strength (intensity) to this one's once — nothing follows later, each can still be
+ * set on its own. Right after, the same slot reads "undo the match" (their previous strengths back) until another
+ * material is shown. Both labels stacked (fixed width); hidden, not removed, when it does not apply; out of the Tab
+ * order (cards and their strength slider only). Each press is written to the Scene log.
+ */
+function MatchStarred({ event, target, wav, project }: { event: string; target: 'sound' | 'haptic'; wav: string; project?: string }) {
+  const { t } = useI18n()
+  const others = useSceneStore(state => {
+    if (!state.table || (project && state.lib?.project_name !== project)) return ''
+    const e = effectiveEvent(state.table, parseEventKey(event))
+    return e ? otherStarred(e, target, wav).join('\n') : ''
+  })
+  const names = others ? others.split('\n') : []
+  const [undo, setUndo] = useState<Record<string, number> | null>(null)
+  const kind = t(target === 'sound' ? 'events.sound' : 'events.haptic')
+  const apply = () => {
+    const scene = useSceneStore.getState()
+    if (!scene.table || !names.length) return
+    const live = useEventStore.getState().liveLevel
+    const value = live?.key === levelKey.material(target, wav) ? live.value : materialIntensity(scene.table, target, wav)
+    const before = Object.fromEntries(names.map(name => [name, materialIntensity(scene.table!, target, name)]))
+    if (!scene.edit(tb => matchIntensity(tb, target, names, value))) return
+    setUndo(before)
+    scene.addLog(`${event}: intensity of ${names.join(', ')} matched to ${wav} (${value}); before ${names.map(n => `${n} ${before[n]}`).join(', ')}`)
+  }
+  const revert = () => {
+    const scene = useSceneStore.getState()
+    if (!undo) return
+    if (scene.edit(tb => Object.entries(undo).reduce((next, [name, value]) => matchIntensity(next, target, [name], value), tb)))
+      scene.addLog(`${event}: intensity match undone (${Object.entries(undo).map(([n, v]) => `${n} ${v}`).join(', ')})`)
+    setUndo(null)
+  }
+  const shown = names.length > 0 || !!undo
+  return <button type="button" tabIndex={-1} className="toolbar-btn editor-match-starred" style={{ visibility: shown ? 'visible' : 'hidden' }}
+    aria-label={t(undo ? 'editor.matchStarred.undo' : 'editor.matchStarred')}
+    title={undo ? t('editor.matchStarred.undoHint', { names: Object.keys(undo).join('・') }) : t('editor.matchStarred.hint', { kind, names: names.join('・') })}
+    onClick={undo ? revert : apply}>
+    <span className="transport-label-stack" aria-hidden="true"><span style={{ visibility: undo ? 'hidden' : 'visible' }}>{t('editor.matchStarred')}</span>
+      <span style={{ visibility: undo ? 'visible' : 'hidden' }}>{t('editor.matchStarred.undo')}</span></span>
+  </button>
 }
 
 /** 「発生に合わせて並べる」 (editor setting, default off): draw an audition at the scene timing instead of the material file once. Fixed width. */

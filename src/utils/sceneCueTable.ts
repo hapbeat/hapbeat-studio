@@ -352,6 +352,10 @@ export const clampNumber = (value: number, lo: number, hi: number) => Number.isF
 export function setSoundIntensity(table: CueTable, sound: string, intensity: number): CueTable {
   return { ...table, sounds: { ...(table.sounds ?? {}), [sound]: { ...(table.sounds?.[sound] ?? {}), intensity: clampNumber(intensity, 0, 1) } } }
 }
+/** Sets every material of `names` to `intensity` ("match the other ★"); clips the table does not have are skipped. */
+export function matchIntensity(table: CueTable, target: 'sound' | 'haptic', names: readonly string[], intensity: number): CueTable {
+  return names.reduce((t, name) => target === 'sound' ? setSoundIntensity(t, name, intensity) : t.clips[name] ? setClipIntensity(t, name, intensity) : t, table)
+}
 export function setClipIntensity(table: CueTable, clip: string, intensity: number): CueTable {
   return { ...table, clips: { ...table.clips, [clip]: { ...table.clips[clip], intensity: clampNumber(intensity, 0, 1) } } }
 }

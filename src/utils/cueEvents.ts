@@ -136,6 +136,15 @@ export function hasNoStar(e: Pick<EffectiveEvent, 'sfx' | 'haptics' | 'own'>): b
   return (e.own.sfx && !!e.sfx && !sfxSounds(e.sfx).length) || (e.own.haptics && e.haptics.some(r => !routeClips(r).length))
 }
 
+/**
+ * The other starred materials (DEC-089) of the event's sound — or of its haptics, all routes — besides `name`: what
+ * "match the other ★" sets to `name`'s strength. Empty unless `name` itself is starred there (alternates never change).
+ */
+export function otherStarred(e: Pick<EffectiveEvent, 'sfx' | 'haptics'>, target: 'sound' | 'haptic', name: string): string[] {
+  const starred = target === 'sound' ? sfxSounds(e.sfx) : [...new Set(e.haptics.flatMap(routeClips))]
+  return starred.includes(name) ? starred.filter(x => x !== name) : []
+}
+
 // ── The group or each variant (DEC-091) ──
 
 /**
