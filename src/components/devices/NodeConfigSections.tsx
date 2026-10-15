@@ -5621,7 +5621,7 @@ const PWM_PLAYBACK_GAIN_MAX_DB = 24
 const PWM_POST_PLAY_HOLD_MAX_MS = 2000
 /** BandWL v5 firmware tone limits (HAPTIC_PWM_TONE_MAX_* in haptic_pwm.h);
  *  pwm_status reports the permille ceiling, this is only the fallback. */
-const DRV8850_TONE_MAX_PERMILLE = 300
+const DRV8850_TONE_MAX_PERMILLE = 1000
 const DRV8850_TONE_MAX_MS = 10000
 
 /**
@@ -5635,7 +5635,7 @@ const DRV8850_TONE_MAX_MS = 10000
  *
  * `driver="drv8850"` (BandWL v5): the MCU drives a DRV8850 H-bridge on every
  * unit, so the output-path switch and the gate probe are hidden, the tone
- * amplitude is a fraction of the duty cap (firmware ceiling 0.3), and the
+ * amplitude is capped by the firmware (pwm_status tone_max_permille), and the
  * status adds the bridge state, limiter and VSYS / current readouts.
  */
 export function BandWlV4PwmSection({
@@ -6244,7 +6244,7 @@ export function BandWlV4PwmSection({
         </div>
         {isDrv && (
           <div className="form-status muted" style={{ fontSize: 12 }}>
-            {t('node.pwm.v5ToneHint', { cap: status?.duty_cap_permille ?? '—' })}
+            {t('node.pwm.v5ToneHint')}
           </div>
         )}
       </div>
