@@ -38,6 +38,8 @@ import type { UiSettings } from '@/types/display'
 import { UiSettingsModal } from './UiSettingsModal'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore } from '@/stores/deviceStore'
+import { useSerialMaster } from '@/stores/serialMaster'
+import { connectedHapbeats, lanIpForSerialId } from '@/utils/deviceSelection'
 import { useToast } from '@/components/common/Toast'
 import { useConfirm } from '@/components/common/useConfirm'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
@@ -905,12 +907,18 @@ export function DisplayEditor() {
     total: number
     targets: Record<string, DeployTargetState>
   } | null>(null)
-  // Serial-only selection → deploy button disabled (write_ui_config is
-  // TCP-only; Serial path is not implemented in firmware serial_config.cpp)
+  // write_ui_config exists only on the firmware's TCP command path (not in
+  // serial_config.cpp, whose line buffer is also 512 B). A USB-connected
+  // device is written over Wi-Fi when it is on the LAN too; the button is
+  // disabled only for a USB-only selection with no Wi-Fi counterpart.
   const selectedIps = useDeviceStore((s) => s.displaySelectedIps)
-  const effectiveTargets = selectedIps
-  const isSerialOnlySelected =
-    effectiveTargets.length > 0 && effectiveTargets.every((ip) => ip.startsWith('serial:'))
+  const usbPorts = useSerialMaster((s) => s.knownPorts)
+  const infoCacheForTargets = useDeviceStore((s) => s.infoCache)
+  const isSerialOnlySelected = useMemo(() => {
+    const lanIps = new Set(devices.map((d) => d.ipAddress))
+    return selectedIps.length > 0 && selectedIps.every((ip) =>
+      ip.startsWith('serial:') && !lanIpForSerialId(ip, usbPorts, lanIps, infoCacheForTargets))
+  }, [selectedIps, devices, usbPorts, infoCacheForTargets])
   const deployBtnRef = useCallback((el: HTMLButtonElement | null) => {
     setToastAnchor(el)
   }, [setToastAnchor])
@@ -970,15 +978,22 @@ export function DisplayEditor() {
     // device studios dangerous to edit. Empty selection → toast +
     // abort rather than fall back to broadcast.
     const { displaySelectedIps, infoCache } = useDeviceStore.getState()
+    const { knownPorts } = useSerialMaster.getState()
     const rawTargets = displaySelectedIps
     if (rawTargets.length === 0) {
-      toast(t('display.selectDevice'), 'error')
+      // Nothing selected while a Hapbeat is connected over USB only: say why
+      // it cannot be picked here instead of the generic "select a device".
+      const usbOnly = connectedHapbeats(devices, infoCache, knownPorts).some((d) => !d.lanIp)
+      toast(t(usbOnly ? 'display.serialUnsupported' : 'display.selectDevice'), 'error')
       return
     }
-    // Drop serial: IPs silently (Display deploy は TCP 7701 専用、
-    // Serial 経路は firmware の serial_config.cpp に write_ui_config が
-    // 未実装)。Serial-only 選択時だけ案内 toast。
-    const lanTargets = rawTargets.filter((ip) => !ip.startsWith('serial:'))
+    // Display deploy runs over Wi-Fi (TCP 7701): firmware has no
+    // write_ui_config on USB serial. A `serial:` entry is written through the
+    // same device's Wi-Fi IP when it has one; a USB-only one is dropped.
+    const listedIps = new Set(devices.map((d) => d.ipAddress))
+    const lanTargets = [...new Set(rawTargets
+      .map((ip) => ip.startsWith('serial:') ? lanIpForSerialId(ip, knownPorts, listedIps, infoCache) : ip)
+      .filter((ip): ip is string => !!ip))]
     if (lanTargets.length === 0) {
       toast(t('display.serialUnsupported'), 'error')
       return

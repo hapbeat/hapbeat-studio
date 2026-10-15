@@ -15,6 +15,7 @@ import { useToast } from '@/components/common/Toast'
 import { HelperFailureToastListener } from '@/components/common/HelperFailureToastListener'
 import { VersionSwitcher } from '@/components/common/VersionSwitcher'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
+import { useDeviceSelectionSync } from '@/hooks/useDeviceSelectionSync'
 import { useHelperUpdate, useStudioFrozenNotice } from '@/hooks/useReleaseNotices'
 import { MIN_HELPER_VERSION } from '@/config/helperCompat'
 import { IS_DESKTOP_SHELL, useSimpleUi, visibleTabs } from '@/config/desktopShell'
@@ -131,6 +132,9 @@ export function App() {
     window.addEventListener('keydown', handleSpace, true)
     return () => window.removeEventListener('keydown', handleSpace, true)
   }, [activeTab])
+  // Device selection follows the user across tabs (Editor / Scene / Kit share
+  // the Kit target selection).
+  useDeviceSelectionSync(activeTab === 'devices' ? 'manage' : activeTab === 'display' ? 'display' : 'kit')
   // Cross-tab jumps (Scene tab "open in editor").
   useEffect(() => {
     const open = (event: Event) => { const tab = (event as CustomEvent<string>).detail; if ((tabsRef.current as string[]).includes(tab)) setActiveTab(tab as Tab) }
