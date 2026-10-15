@@ -1248,6 +1248,7 @@ export function FirmwareSubTab({
                         >
                           {libraryVersionLabel(v.fwVersion)}
                            {i === 0 && <span className="firmware-version-chip-latest"> {v.local ? t('firmware.localBuild') : t('firmware.latest')}</span>}
+                           {i > 0 && v.archived && <span className="firmware-version-chip-latest"> {t('firmware.localArchive')}</span>}
                         </button>
                       )
                     })}
@@ -1263,7 +1264,7 @@ export function FirmwareSubTab({
                     style={{ marginTop: 4 }}
                   >
                     {selectedVersionFw
-                      ? `アーカイブ版 v${normalizeVersion(selectedVersionFw)} を選択中 — 最新版より古いファームを書き込みます。`
+                      ? `アーカイブ版 ${libraryVersionLabel(selectedVersionFw)} を選択中 — 最新版より古いファームを書き込みます。`
                       : '最新版を選択中。'}
                   </div>
                 )}

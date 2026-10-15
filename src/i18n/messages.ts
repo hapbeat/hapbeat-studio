@@ -815,6 +815,7 @@ export const messages = defineMessages({
   'firmware.library': { ja: 'ファームウェア ライブラリ', en: 'Firmware library' },
   'firmware.refreshing': { ja: '更新中…', en: 'Refreshing…' },
   'firmware.none': { ja: 'ファームウェアが見つかりません。', en: 'No firmware found.' },
+  'firmware.localArchive': { ja: '以前のローカルビルド', en: 'earlier local build' },
   'firmware.familyAria': { ja: 'ファームウェア種別', en: 'Firmware family' },
   'firmware.hardware': { ja: 'Hardware Version', en: 'Hardware Version' },
   'firmware.aria': { ja: 'ファームウェア', en: 'Firmware' },
