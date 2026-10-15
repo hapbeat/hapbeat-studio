@@ -6,6 +6,10 @@
  * serves that copy when studio.hapbeat.com cannot be reached. The installer
  * ships the copy current at its build.
  *
+ * HTML files are also written into the list itself (`inline`, base64): the CDN adds
+ * a script that differs on every response to HTML it serves, so the app could never
+ * match a downloaded page to its sha256 (the list is JSON and is served as is).
+ *
  * `id` is a hash over the file list, so it changes only when a file changes.
  * Left out: source maps (not needed to run) and firmware/ (CI puts every
  * firmware binary there before the build, 100 MB and more). Frozen /vX.Y/
@@ -33,7 +37,9 @@ for (const full of (await walk(distDir)).sort()) {
   const path = relative(distDir, full).split(sep).join('/')
   if (path === OUTPUT || path.endsWith('.map') || path.startsWith('firmware/')) continue
   const data = await readFile(full)
-  files.push({ path, size: data.length, sha256: createHash('sha256').update(data).digest('hex') })
+  const entry = { path, size: data.length, sha256: createHash('sha256').update(data).digest('hex') }
+  if (path.endsWith('.html')) entry.inline = data.toString('base64')
+  files.push(entry)
 }
 
 const id = createHash('sha256')
