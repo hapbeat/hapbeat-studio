@@ -39,7 +39,8 @@ import { UiSettingsModal } from './UiSettingsModal'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useSerialMaster } from '@/stores/serialMaster'
-import { connectedHapbeats, lanIpForSerialId } from '@/utils/deviceSelection'
+import { connectedHapbeats, lanIpForSerialId, usbUiTarget, type UsbUiTarget } from '@/utils/deviceSelection'
+import { writeUiConfigOverSerial } from '@/utils/uiConfigSerial'
 import { useToast } from '@/components/common/Toast'
 import { useConfirm } from '@/components/common/useConfirm'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
@@ -896,7 +897,7 @@ export function DisplayEditor() {
   }, [layout.pages.length, activePresets])
 
   // --- Helper 接続 ---
-  const { isConnected: managerConnected, lastMessage, send: managerSend, devices } = useHelperConnection()
+  const { isConnected: managerConnected, lastMessage, send: managerSend, devices, injectMessage } = useHelperConnection()
   const { toast, setAnchor: setToastAnchor } = useToast()
   const [isDeploying, setIsDeploying] = useState(false)
   // Per-target deploy progress sourced from Helper's `write_progress` push.
@@ -907,18 +908,20 @@ export function DisplayEditor() {
     total: number
     targets: Record<string, DeployTargetState>
   } | null>(null)
-  // write_ui_config exists only on the firmware's TCP command path (not in
-  // serial_config.cpp, whose line buffer is also 512 B). A USB-connected
-  // device is written over Wi-Fi when it is on the LAN too; the button is
-  // disabled only for a USB-only selection with no Wi-Fi counterpart.
+  // USB target: with no online Wi-Fi device in the UI selection, the write
+  // goes to the Hapbeat on the USB config connection — over Wi-Fi when that
+  // device is on the LAN too, else over USB serial when its firmware has the
+  // chunked upload (`serial_ui_config: 1`). Older firmware: Wi-Fi only.
   const selectedIps = useDeviceStore((s) => s.displaySelectedIps)
   const usbPorts = useSerialMaster((s) => s.knownPorts)
+  const serialMode = useSerialMaster((s) => s.mode)
+  const serialInfo = useSerialMaster((s) => s.info)
   const infoCacheForTargets = useDeviceStore((s) => s.infoCache)
-  const isSerialOnlySelected = useMemo(() => {
-    const lanIps = new Set(devices.map((d) => d.ipAddress))
-    return selectedIps.length > 0 && selectedIps.every((ip) =>
-      ip.startsWith('serial:') && !lanIpForSerialId(ip, usbPorts, lanIps, infoCacheForTargets))
-  }, [selectedIps, devices, usbPorts, infoCacheForTargets])
+  const usbTarget = useMemo(() => usbUiTarget({
+    selectedIps, lanDevices: devices, lanInfo: infoCacheForTargets, usbPorts, serialMode, serialInfo,
+  }), [selectedIps, devices, infoCacheForTargets, usbPorts, serialMode, serialInfo])
+  const usbSerialWritable = !!usbTarget && !usbTarget.lanIp && usbTarget.serialWrite
+  const usbWriteUnsupported = !!usbTarget && !usbTarget.lanIp && !usbTarget.serialWrite
   const deployBtnRef = useCallback((el: HTMLButtonElement | null) => {
     setToastAnchor(el)
   }, [setToastAnchor])
@@ -966,7 +969,48 @@ export function DisplayEditor() {
     layoutByModel, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig, uiSettings,
   }), [layoutByModel, deviceModel, orientationByModel, perButtonActions, simState, ledConfig, volumeConfig, uiSettings])
 
+  const deployOverSerial = useCallback(async (target: UsbUiTarget) => {
+    setIsDeploying(true)
+    setDeployProgress({ total: 1, targets: { [target.serialId]: { phase: 'sending' } } })
+    let success = false
+    let detail: string
+    try {
+      detail = await writeUiConfigOverSerial(
+        toFirmwareFormat(buildSavedState()),
+        useSerialMaster.getState().sendConfigCmd,
+      )
+      success = true
+    } catch (err) {
+      detail = err instanceof Error ? err.message : String(err)
+    }
+    const message = `${success ? '✓' : '✗'} ${target.name} (USB): ${detail}`
+    // Same result events as the Wi-Fi path, so the progress bar and the
+    // shared result toast (HelperFailureToastListener) behave identically.
+    injectMessage({
+      type: 'write_progress',
+      payload: { cmd: 'write_ui_config', ip: target.serialId, total: 1, phase: success ? 'done' : 'failed', message },
+    })
+    injectMessage({
+      type: 'write_result',
+      payload: { cmd: 'write_ui_config', success, device: target.serialId, message },
+    })
+  }, [buildSavedState, injectMessage])
+
   const handleDeploy = useCallback(() => {
+    const { displaySelectedIps: selectionNow, infoCache: infoNow } = useDeviceStore.getState()
+    const serialNow = useSerialMaster.getState()
+    const usb = usbUiTarget({
+      selectedIps: selectionNow, lanDevices: devices, lanInfo: infoNow,
+      usbPorts: serialNow.knownPorts, serialMode: serialNow.mode, serialInfo: serialNow.info,
+    })
+    if (usb && !usb.lanIp) {
+      if (!usb.serialWrite) {
+        toast(t('display.serialUnsupported'), 'error')
+        return
+      }
+      void deployOverSerial(usb)
+      return
+    }
     if (!managerConnected) {
       toast(t('display.helperRequired'), 'error')
       return
@@ -979,17 +1023,20 @@ export function DisplayEditor() {
     // abort rather than fall back to broadcast.
     const { displaySelectedIps, infoCache } = useDeviceStore.getState()
     const { knownPorts } = useSerialMaster.getState()
-    const rawTargets = displaySelectedIps
+    // The USB-connected device's own Wi-Fi IP when the UI selection has no
+    // online device (see usbUiTarget).
+    const rawTargets = usb?.lanIp ? [usb.lanIp] : displaySelectedIps
     if (rawTargets.length === 0) {
-      // Nothing selected while a Hapbeat is connected over USB only: say why
-      // it cannot be picked here instead of the generic "select a device".
-      const usbOnly = connectedHapbeats(devices, infoCache, knownPorts).some((d) => !d.lanIp)
-      toast(t(usbOnly ? 'display.serialUnsupported' : 'display.selectDevice'), 'error')
+      // Nothing selected while a Hapbeat is on USB only (no config connection
+      // yet): say how to reach it instead of the generic "select a device".
+      const usbOnly = connectedHapbeats(devices, infoCache, knownPorts).find((d) => !d.lanIp)
+      const usbOnlyInfo = usbOnly && knownPorts.find((p) => p.id === usbOnly.usbPortId)?.info
+      toast(t(!usbOnly ? 'display.selectDevice'
+        : usbOnlyInfo?.serial_ui_config === 1 ? 'display.usbConnectFirst' : 'display.serialUnsupported'), 'error')
       return
     }
-    // Display deploy runs over Wi-Fi (TCP 7701): firmware has no
-    // write_ui_config on USB serial. A `serial:` entry is written through the
-    // same device's Wi-Fi IP when it has one; a USB-only one is dropped.
+    // Wi-Fi path (Helper -> TCP 7701 write_ui_config). A `serial:` entry is
+    // written through the same device's Wi-Fi IP when it has one.
     const listedIps = new Set(devices.map((d) => d.ipAddress))
     const lanTargets = [...new Set(rawTargets
       .map((ip) => ip.startsWith('serial:') ? lanIpForSerialId(ip, knownPorts, listedIps, infoCache) : ip)
@@ -1049,7 +1096,7 @@ export function DisplayEditor() {
       type: 'write_ui_config',
       payload: { config: uiConfig, targets: hapbeatTargets },
     })
-  }, [managerConnected, managerSend, buildSavedState, toast, devices, t])
+  }, [managerConnected, managerSend, buildSavedState, toast, devices, t, deployOverSerial])
 
   const handleExport = useCallback(() => {
     exportDisplayLayout(buildSavedState())
@@ -1254,7 +1301,9 @@ export function DisplayEditor() {
           onDeploy={handleDeploy}
           managerConnected={managerConnected}
           isDeploying={isDeploying}
-          isSerialOnlySelected={isSerialOnlySelected}
+          usbSerialWritable={usbSerialWritable}
+          usbWriteUnsupported={usbWriteUnsupported}
+          usbTargetName={usbTarget && !usbTarget.lanIp ? usbTarget.name : null}
           deployBtnRef={deployBtnRef}
         />
         <input
@@ -1632,7 +1681,12 @@ interface ControlBarProps {
   onDeploy: () => void
   managerConnected: boolean
   isDeploying: boolean
-  isSerialOnlySelected: boolean
+  /** The write goes to a USB-only device whose firmware takes the USB upload. */
+  usbSerialWritable: boolean
+  /** The write would go to a USB-only device whose firmware is Wi-Fi-only. */
+  usbWriteUnsupported: boolean
+  /** Name of the USB-only device the write goes to (shown in the pill). */
+  usbTargetName: string | null
   deployBtnRef?: (el: HTMLButtonElement | null) => void
 }
 
@@ -1640,7 +1694,7 @@ function ControlBar({
   pages, activePageIndex, deviceModel, isFlipped,
   onPageChange, onAddPage, onDeletePage, onRenamePage, onInsertPagePreset,
   onDeviceModelChange, onResetToDefault, onToggleOrientation,
-  onExport, onImport, onDeploy, managerConnected, isDeploying, isSerialOnlySelected, deployBtnRef,
+  onExport, onImport, onDeploy, managerConnected, isDeploying, usbSerialWritable, usbWriteUnsupported, usbTargetName, deployBtnRef,
 }: ControlBarProps) {
   const { t } = useI18n()
   // ページ名のインライン編集状態。null = 編集中なし、{idx, draft} = idx 番目を
@@ -1761,21 +1815,21 @@ function ControlBar({
           pill 自体クリックで Devices モーダルを開く。
           以前あった "Devices ▸" 補助ボタンは header の Devices タブと
           冗長なため削除済み。 */}
-      <DevicePill hapbeatOnly selectionScope="display" />
+      <DevicePill hapbeatOnly selectionScope="display" usbTargetName={usbTargetName} />
       <div className="control-separator" />
       <span className="tooltip-wrap">
         <button
           ref={deployBtnRef}
           className="btn btn-sm btn-deploy"
           onClick={onDeploy}
-          disabled={!managerConnected || isDeploying || isSerialOnlySelected}
+          disabled={(!managerConnected && !usbSerialWritable) || isDeploying || usbWriteUnsupported}
         >
           {isDeploying ? t('display.writing') : t('display.write')}
         </button>
-        {!managerConnected && (
+        {!managerConnected && !usbSerialWritable && !usbWriteUnsupported && (
           <span className="tooltip-text">{t('display.helperRequired')}</span>
         )}
-        {managerConnected && isSerialOnlySelected && (
+        {usbWriteUnsupported && (
           <span className="tooltip-text">{t('display.lanOnly')}</span>
         )}
       </span>

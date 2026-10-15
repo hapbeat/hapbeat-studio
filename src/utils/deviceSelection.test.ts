@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { connectedHapbeats, lanIpForSerialId, lanIpForUsbEntry } from './deviceSelection'
+import { connectedHapbeats, lanIpForSerialId, lanIpForUsbEntry, usbUiTarget } from './deviceSelection'
 
 const lan = (ipAddress: string, online = true, role?: 'receiver' | 'sensor') => ({ ipAddress, online, role })
 
@@ -45,5 +45,35 @@ describe('connectedHapbeats', () => {
       ],
     )
     expect(out).toEqual([{ lanIp: null, usbPortId: 'usb-1' }])
+  })
+})
+
+describe('usbUiTarget', () => {
+  const base = {
+    selectedIps: [] as string[],
+    lanDevices: [lan('192.168.0.10')],
+    lanInfo: {},
+    usbPorts: [],
+    serialMode: 'config',
+  }
+
+  it('targets the USB config device when no selected Wi-Fi device is online', () => {
+    const t = usbUiTarget({ ...base, serialInfo: { name: 'band5', mac: 'AA:01', wifi_ip: '0.0.0.0', board: 'band_wl_v5', serial_ui_config: 1 } })
+    expect(t).toEqual({ serialId: 'serial:AA:01', name: 'band5', lanIp: null, serialWrite: true })
+    const old = usbUiTarget({ ...base, serialInfo: { name: 'band5', mac: 'AA:01', board: 'band_wl_v5' } })
+    expect(old?.serialWrite).toBe(false)
+  })
+
+  it('routes over Wi-Fi when the USB device is also online on the LAN', () => {
+    const t = usbUiTarget({ ...base, serialInfo: { mac: 'AA:01', wifi_ip: '192.168.0.10', serial_ui_config: 1 } })
+    expect(t?.lanIp).toBe('192.168.0.10')
+  })
+
+  it('yields to an online Wi-Fi selection, and needs an open USB config connection', () => {
+    const info = { mac: 'AA:01', serial_ui_config: 1 }
+    expect(usbUiTarget({ ...base, selectedIps: ['192.168.0.10'], serialInfo: info })).toBeNull()
+    expect(usbUiTarget({ ...base, selectedIps: ['192.168.0.99'], serialInfo: info })).not.toBeNull()
+    expect(usbUiTarget({ ...base, serialMode: 'idle', serialInfo: info })).toBeNull()
+    expect(usbUiTarget({ ...base, serialInfo: { ...info, role: 'sensor' } })).toBeNull()
   })
 })

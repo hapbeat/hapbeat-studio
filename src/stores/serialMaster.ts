@@ -190,6 +190,9 @@ export interface SerialDeviceInfo {
   wifi_connected?: boolean
   wifi_ssid?: string
   wifi_ip?: string
+  /** 1 = accepts the chunked ui_config_begin/chunk/commit upload over USB
+   *  serial (firmware feat/band-v5 fb5e337+). Absent = Wi-Fi-only UI writes. */
+  serial_ui_config?: number
   // --- node-roles (DEC-034) ---
   role?: NodeRole
   transport?: NodeTransport

@@ -26,9 +26,12 @@ interface DevicePillProps {
   modalExtra?: ReactNode
   /** Keep the pill visible while Helper is disconnected (needed when `modalExtra` must stay reachable). */
   showWhenDisconnected?: boolean
+  /** UI tab: a USB-only device the write goes to while no selected Wi-Fi
+   *  device is online (see usbUiTarget). Shown in place of "no device". */
+  usbTargetName?: string | null
 }
 
-export function DevicePill({ hapbeatOnly, selectionScope, modalExtra, showWhenDisconnected }: DevicePillProps) {
+export function DevicePill({ hapbeatOnly, selectionScope, modalExtra, showWhenDisconnected, usbTargetName }: DevicePillProps) {
   const { t } = useI18n()
   const { isConnected: helperConnected, devices } = useHelperConnection()
   const selectedIps = useDeviceStore((s) => selectionScope === 'kit' ? s.kitSelectedIps : s.displaySelectedIps)
@@ -41,7 +44,9 @@ export function DevicePill({ hapbeatOnly, selectionScope, modalExtra, showWhenDi
   const selectedDevices = selectedIps
     .map((ip) => devices.find((d) => d.ipAddress === ip))
     .filter((d): d is NonNullable<typeof d> => !!d)
-  const head = selectedDevices[0] ?? null
+  // A USB target only exists while no selected device is online, so it
+  // replaces the (offline) Wi-Fi pill: the pill names what a write reaches.
+  const head = usbTargetName ? null : selectedDevices[0] ?? null
   const moreCount = Math.max(0, selectedDevices.length - 1)
 
   return (
@@ -67,6 +72,17 @@ export function DevicePill({ hapbeatOnly, selectionScope, modalExtra, showWhenDi
           {moreCount > 0 && (
             <span className="device-pill-more">+{moreCount}</span>
           )}
+        </button>
+      ) : usbTargetName ? (
+        <button
+          type="button"
+          className="device-pill"
+          onClick={() => setOpen(true)}
+          title={`${usbTargetName} (USB)\n\n${t('device.pill.open')}`}
+        >
+          <span className="device-pill-dot online" aria-hidden="true" />
+          <span className="device-pill-name">{usbTargetName}</span>
+          <span className="device-pill-more">USB</span>
         </button>
       ) : helperConnected || showWhenDisconnected ? (
         <button

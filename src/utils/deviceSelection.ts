@@ -1,5 +1,5 @@
 import type { DeviceInfo } from '@/types/manager'
-import type { SerialPortEntry } from '@/stores/serialMaster'
+import type { SerialDeviceInfo, SerialPortEntry } from '@/stores/serialMaster'
 import { isKnownNonHapbeatBoard } from './hapbeatBoard'
 
 /**
@@ -104,4 +104,44 @@ export function connectedHapbeats(
     else if (!lanIp) out.push({ lanIp: null, usbPortId: p.id })
   }
   return out
+}
+
+/** The device the UI tab writes to over USB: the active USB config connection. */
+export interface UsbUiTarget {
+  /** `serial:<mac>` — the id the Manage detail pane uses for it. */
+  serialId: string
+  name: string
+  /** Same device's online Wi-Fi IP (then the write goes over Wi-Fi). */
+  lanIp: string | null
+  /** Firmware accepts the chunked USB upload (`serial_ui_config: 1`). */
+  serialWrite: boolean
+}
+
+/**
+ * UI-tab write target when the UI selection has no online Wi-Fi device: the
+ * Hapbeat on the USB config connection (Manage 設定, opened automatically when
+ * it is the only device). Null while a selected Wi-Fi device is online, so an
+ * explicit Wi-Fi choice always wins. The UI-tab pill shows this same target.
+ */
+export function usbUiTarget(args: {
+  selectedIps: readonly string[]
+  lanDevices: ReadonlyArray<Pick<DeviceInfo, 'ipAddress' | 'online'>>
+  lanInfo: LanInfo
+  usbPorts: ReadonlyArray<Pick<SerialPortEntry, 'info'>>
+  serialMode: string
+  serialInfo: SerialDeviceInfo | null
+}): UsbUiTarget | null {
+  const { selectedIps, lanDevices, lanInfo, usbPorts, serialMode, serialInfo: info } = args
+  const onlineIps = new Set(lanDevices.filter((d) => d.online && !!d.ipAddress).map((d) => d.ipAddress))
+  const selectedOnline = selectedIps.some((ip) => onlineIps.has(
+    ip.startsWith('serial:') ? lanIpForSerialId(ip, usbPorts, onlineIps, lanInfo) ?? '' : ip))
+  if (selectedOnline) return null
+  if (serialMode !== 'config' || !info) return null
+  if (!isWearableRole(info.role) || isKnownNonHapbeatBoard(info.board)) return null
+  return {
+    serialId: `serial:${info.mac ?? 'active'}`,
+    name: info.name || '(unnamed)',
+    lanIp: lanIpForUsbEntry({ info }, onlineIps, lanInfo),
+    serialWrite: info.serial_ui_config === 1,
+  }
 }
