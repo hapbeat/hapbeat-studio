@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import type { EqBandReadout, MqttClientEntry, NodeRole, NodeTransport, SensorMapping, SensorReading } from '@/types/manager'
 import { useSerialMaster } from './serialMaster'
 import { isDemoMode } from '@/demo/isDemoMode'
+import { isKnownNonHapbeatBoard } from '@/utils/hapbeatBoard'
+import { lanIpForSerialId, lanIpForUsbEntry } from '@/utils/deviceSelection'
 
 const STORAGE_KEY_SELECTED = 'hapbeat-studio-selected-device'
 const STORAGE_KEY_SELECTED_SET = 'hapbeat-studio-selected-devices'
@@ -21,9 +23,10 @@ export interface WifiProfile {
   active?: boolean
 }
 
-/** Selection is deliberately local to each authoring surface. Manage's
- * selection controls the detail pane; Kit and UI selections control only
- * their own deploy / preview targets. */
+/** Each surface keeps its own selection (Manage's drives the detail pane;
+ * Kit and UI selections are their deploy / preview targets), but switching
+ * tabs carries the previous tab's selection over (`carrySelection`, owner
+ * 2026-10-15) so the user does not pick the same device again per tab. */
 export type DeviceSelectionScope = 'manage' | 'kit' | 'display'
 
 interface DeviceState {
@@ -37,11 +40,12 @@ interface DeviceState {
    *  batch operations (broadcast PLAY ALL, etc.) target all of them. */
   selectedIps: string[]
 
-  /** Dedicated Kit target selection. It must never be changed by Manage. */
+  /** Kit (and Editor / Scene playback) target selection. Manage clicks never
+   *  write it; only a tab switch carries a selection in (`carrySelection`). */
   kitSelectedIp: string | null
   kitSelectedIps: string[]
 
-  /** Dedicated UI/Display target selection. It must never be changed by Manage. */
+  /** UI/Display target selection. Same rule as the Kit selection above. */
   displaySelectedIp: string | null
   displaySelectedIps: string[]
 
@@ -293,6 +297,16 @@ interface DeviceState {
    *  Wi-Fi selections mutually exclusive: serialMaster calls this when the
    *  user selects a USB card. Idempotent. */
   clearSelectedIps: () => void
+  /**
+   * Tab switch: make `to`'s selection the device(s) `from` had selected, in
+   * Wi-Fi terms. A Manage USB card / `serial:` entry becomes the same device's
+   * LAN IP when it is also on Wi-Fi (`lanIps` = Helper's current list). Kit and
+   * UI targets are LAN-only, and UI drops known non-Hapbeat boards. When
+   * nothing carries over (empty source, USB-only device) `to` keeps its own
+   * selection. No-op when `to` already targets the same set, so a Manage USB
+   * config session is not swapped for its own LAN card.
+   */
+  carrySelection: (from: DeviceSelectionScope, to: DeviceSelectionScope, lanIps: string[]) => void
   dismissDevice: (ip: string) => void
   /** Helper-driven housekeeping: every push of the device list calls
    *  this so dismissed-but-now-online IPs un-dismiss themselves. Idempotent. */
@@ -491,7 +505,38 @@ function clearUsbSelectionIfAny() {
   if (sm.selectedPortIds.length > 0) sm.clearSelectedPorts()
 }
 
-export const useDeviceStore = create<DeviceState>((set) => ({
+const SCOPED_KEYS = {
+  kit: { single: STORAGE_KEY_KIT_SELECTED, set: STORAGE_KEY_KIT_SELECTED_SET },
+  display: { single: STORAGE_KEY_DISPLAY_SELECTED, set: STORAGE_KEY_DISPLAY_SELECTED_SET },
+} as const
+
+const unique = (ips: Array<string | null>): string[] =>
+  [...new Set(ips.filter((ip): ip is string => !!ip))]
+
+/** A scope's selection in LAN terms (serial / USB entries resolved to the same
+ * device's Wi-Fi IP; ones not on Wi-Fi dropped). */
+function lanSelectionOf(
+  scope: DeviceSelectionScope,
+  s: Pick<DeviceState, 'selectedIp' | 'selectedIps' | 'kitSelectedIp' | 'kitSelectedIps' | 'displaySelectedIp' | 'displaySelectedIps' | 'infoCache'>,
+  lanIps: ReadonlySet<string>,
+): { ips: string[]; primary: string | null } {
+  const sm = useSerialMaster.getState()
+  const toLan = (ip: string | null): string | null =>
+    !ip ? null : isSerialId(ip) ? lanIpForSerialId(ip, sm.knownPorts, lanIps, s.infoCache) : ip
+  if (scope === 'kit') return { ips: unique(s.kitSelectedIps.map(toLan)), primary: toLan(s.kitSelectedIp) }
+  if (scope === 'display') return { ips: unique(s.displaySelectedIps.map(toLan)), primary: toLan(s.displaySelectedIp) }
+  // Manage: the Wi-Fi set and the USB card set are mutually exclusive.
+  if (s.selectedIps.length > 0) return { ips: unique(s.selectedIps.map(toLan)), primary: toLan(s.selectedIp) }
+  const portLan = (id: string | null) => {
+    const entry = id ? sm.knownPorts.find((e) => e.id === id) : undefined
+    return entry ? lanIpForUsbEntry(entry, lanIps, s.infoCache) : null
+  }
+  return { ips: unique(sm.selectedPortIds.map(portLan)), primary: portLan(sm.selectedPortId) }
+}
+
+const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((ip) => b.includes(ip))
+
+export const useDeviceStore = create<DeviceState>((set, get) => ({
   selectedIp: initialSelected,
   selectedIps: initialSelectedIps,
   kitSelectedIp: initialKitSelection.selectedIp,
@@ -666,6 +711,30 @@ export const useDeviceStore = create<DeviceState>((set) => ({
       // the USB selection; the detail pane stays on whatever was shown.
       return { selectedIps: [] }
     }),
+
+  carrySelection: (from, to, lanIpList) => {
+    if (from === to) return
+    const s = get()
+    const lanIps = new Set(lanIpList)
+    const src = lanSelectionOf(from, s, lanIps)
+    let ips = src.ips
+    if (to === 'display') ips = ips.filter((ip) => !isKnownNonHapbeatBoard(s.infoCache[ip]?.board))
+    if (ips.length === 0) return
+    if (sameSet(lanSelectionOf(to, s, lanIps).ips, ips)) return
+    const primary = src.primary && ips.includes(src.primary) ? src.primary : ips[0]
+    if (to === 'manage') {
+      clearUsbSelectionIfAny()
+      persist(STORAGE_KEY_SELECTED_SET, ips)
+      persist(STORAGE_KEY_SELECTED, primary)
+      set({ selectedIps: ips, selectedIp: primary })
+      return
+    }
+    persist(SCOPED_KEYS[to].single, primary)
+    persist(SCOPED_KEYS[to].set, ips)
+    set(to === 'kit'
+      ? { kitSelectedIp: primary, kitSelectedIps: ips }
+      : { displaySelectedIp: primary, displaySelectedIps: ips })
+  },
 
   /** Hide an offline card. Persisted; cleared when the IP comes back online. */
   dismissDevice: (ip) =>

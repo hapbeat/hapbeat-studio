@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react'
 import { WaveformEditor } from '@/components/waveform/WaveformEditor'
 import { EditorFolderConfirm } from '@/components/waveform/EditorFolderConfirm'
 import { DisplayEditor } from '@/components/display/DisplayEditor'
@@ -9,13 +9,16 @@ import { Devices } from '@/components/devices/Devices'
 import { LogDrawer } from '@/components/log/LogDrawer'
 import { HelperOnboardingModal } from '@/components/common/HelperOnboardingModal'
 import { HelperManageModal } from '@/components/common/HelperManageModal'
+import { DesktopAppModal, formatSavedAt, useDesktopHelperStatus, useDesktopStudioStatus } from '@/components/common/DesktopAppModal'
 import { ExternalLinkIcon } from '@/components/common/ExternalLinkIcon'
 import { useToast } from '@/components/common/Toast'
 import { HelperFailureToastListener } from '@/components/common/HelperFailureToastListener'
 import { VersionSwitcher } from '@/components/common/VersionSwitcher'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
+import { useDeviceSelectionSync } from '@/hooks/useDeviceSelectionSync'
 import { useHelperUpdate, useStudioFrozenNotice } from '@/hooks/useReleaseNotices'
 import { MIN_HELPER_VERSION } from '@/config/helperCompat'
+import { IS_DESKTOP_SHELL, useSimpleUi, visibleTabs } from '@/config/desktopShell'
 import { useI18n } from '@/i18n/I18nProvider'
 import './App.css'
 import { handlePlaybackShortcut } from '@/utils/playbackShortcut'
@@ -32,15 +35,16 @@ const BETA_TABS: Tab[] = ['editor', 'scene']
 /**
  * Tab shown on load: the URL hash (`#editor`, `#scene`, `#kit`, `#display`, `#devices`; kept in sync, so a
  * reload stays on the tab), then `?tab=<id>` (the haptic authoring launcher), then the last tab used, then Kit.
+ * Only tabs the layout shows count (the desktop app's simple layout has Kit / UI / Manage).
  */
-function initialTab(): Tab {
+function initialTab(tabs: readonly Tab[]): Tab {
   const hash = window.location.hash.replace(/^#/, '')
-  if ((TABS as string[]).includes(hash)) return hash as Tab
+  if ((tabs as string[]).includes(hash)) return hash as Tab
   let wanted: string | null = null
   try { wanted = new URLSearchParams(window.location.search).get('tab') } catch { /* no URL params */ }
-  if (wanted && (TABS as string[]).includes(wanted)) return wanted as Tab
+  if (wanted && (tabs as string[]).includes(wanted)) return wanted as Tab
   const saved = localStorage.getItem('hapbeat-studio-tab')
-  return (TABS as string[]).includes(saved ?? '') ? (saved as Tab) : DEFAULT_TAB
+  return (tabs as string[]).includes(saved ?? '') ? (saved as Tab) : DEFAULT_TAB
 }
 
 const DOCS_URL = 'https://devtools.hapbeat.com/docs/tools/studio/initial-setup/'
@@ -78,11 +82,20 @@ export function App() {
     display: { main: t('tabs.ui.main'), sub: t('tabs.ui.sub') },
     devices: { main: t('tabs.manage.main'), sub: t('tabs.manage.sub') },
   }
-  const [activeTab, setActiveTab] = useState<Tab>(initialTab)
+  const simpleUi = useSimpleUi()
+  const tabs = useMemo(() => visibleTabs(TABS, simpleUi), [simpleUi])
+  const tabsRef = useRef(tabs)
+  tabsRef.current = tabs
+  const [activeTab, setActiveTab] = useState<Tab>(() => initialTab(tabs))
 
   // Track which tabs the user has visited at least once. We mount each
   // tab on first visit and keep it mounted after — see PersistentTab.
-  const [visitedTabs, setVisitedTabs] = useState<Set<Tab>>(() => new Set([initialTab()]))
+  const [visitedTabs, setVisitedTabs] = useState<Set<Tab>>(() => new Set([initialTab(tabs)]))
+
+  // "Show all features" turned off while on a tab the simple layout hides → back to Kit.
+  useEffect(() => {
+    if (!tabs.includes(activeTab)) setActiveTab(DEFAULT_TAB)
+  }, [tabs, activeTab])
 
   // The app header can be folded away to give tabs (notably the editor) more height.
   // A slim bar with the expand button stays visible while folded.
@@ -101,7 +114,7 @@ export function App() {
     if (url.href !== window.location.href) window.history.replaceState(window.history.state, '', url)
   }, [activeTab])
   useEffect(() => {
-    const onHash = () => { const hash = window.location.hash.replace(/^#/, ''); if ((TABS as string[]).includes(hash)) setActiveTab(hash as Tab) }
+    const onHash = () => { const hash = window.location.hash.replace(/^#/, ''); if ((tabsRef.current as string[]).includes(hash)) setActiveTab(hash as Tab) }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
@@ -119,9 +132,12 @@ export function App() {
     window.addEventListener('keydown', handleSpace, true)
     return () => window.removeEventListener('keydown', handleSpace, true)
   }, [activeTab])
+  // Device selection follows the user across tabs (Editor / Scene / Kit share
+  // the Kit target selection).
+  useDeviceSelectionSync(activeTab === 'devices' ? 'manage' : activeTab === 'display' ? 'display' : 'kit')
   // Cross-tab jumps (Scene tab "open in editor").
   useEffect(() => {
-    const open = (event: Event) => { const tab = (event as CustomEvent<string>).detail; if ((TABS as string[]).includes(tab)) setActiveTab(tab as Tab) }
+    const open = (event: Event) => { const tab = (event as CustomEvent<string>).detail; if ((tabsRef.current as string[]).includes(tab)) setActiveTab(tab as Tab) }
     window.addEventListener(OPEN_TAB_EVENT, open)
     return () => window.removeEventListener(OPEN_TAB_EVENT, open)
   }, [])
@@ -129,6 +145,23 @@ export function App() {
   const { toast } = useToast()
   const [helperModalOpen, setHelperModalOpen] = useState(false)
   const [helperManageOpen, setHelperManageOpen] = useState(false)
+  // Desktop app: one panel (bundled helper, app updates, layout) replaces the pipx
+  // setup / management modals. It also opens by itself if the bundled helper cannot run.
+  const [desktopPanelOpen, setDesktopPanelOpen] = useState(false)
+  const openDesktopPanel = useCallback(() => setDesktopPanelOpen(true), [])
+  const desktopHelper = useDesktopHelperStatus(IS_DESKTOP_SHELL ? openDesktopPanel : undefined)
+  const openHelperSetup = IS_DESKTOP_SHELL ? openDesktopPanel : () => setHelperModalOpen(true)
+  const openHelperManage = IS_DESKTOP_SHELL ? openDesktopPanel : () => setHelperManageOpen(true)
+  // App users never install a Helper, so the header names what it shows: the link to the devices.
+  const helperLabel = IS_DESKTOP_SHELL ? t('desktop.header.label') : t('common.helper')
+  // Offline, the app shows its saved copy of Studio: say so once.
+  const studioStatus = useDesktopStudioStatus()
+  const offlineAnnounced = useRef(false)
+  useEffect(() => {
+    if (studioStatus?.mode !== 'offline' || offlineAnnounced.current) return
+    offlineAnnounced.current = true
+    toast(t('desktop.offline.toast', { date: formatSavedAt(studioStatus.copy?.savedAt, locale) }), 'info')
+  }, [studioStatus, t, toast, locale])
   // Top-of-app banner suppressing — opt-in per session only. We deliberately
   // do NOT persist this to localStorage: an outdated Helper is a fix-it-now
   // problem that should remind the user every fresh Studio load.
@@ -142,8 +175,10 @@ export function App() {
 
   // Informational release notices are transient: keeping them in the header
   // would move the centered primary navigation whenever one becomes visible.
+  // (Not in the desktop app: its helper is built in and updates with the app.)
   useEffect(() => {
     const version = helperUpdate.product?.latest
+    if (IS_DESKTOP_SHELL) return
     if (!helperUpdate.visible || helperCompat === 'outdated' || !version) return
     const key = `helper:${version}`
     if (announcedUpdates.current.has(key)) return
@@ -178,14 +213,14 @@ export function App() {
       <header className={`app-header ${headerCollapsed ? 'app-header-folded' : ''}`}>
         <div className="header-title">
           <span className="header-brand"><span className="header-brand-full">Hapbeat </span>Studio</span>
-          <VersionSwitcher compact />
+          {!IS_DESKTOP_SHELL && <VersionSwitcher compact />}
         </div>
         <div className="header-tabs-box">
           <button type="button" className="header-collapse-toggle" onClick={() => setHeaderCollapsed(!headerCollapsed)}
             aria-label={t(headerCollapsed ? 'header.expand' : 'header.collapse')} title={t(headerCollapsed ? 'header.expand' : 'header.collapse')}>{headerCollapsed ? '▾' : '▴'}</button>
           {headerCollapsed && <span className="header-collapsed-label">Hapbeat Studio · {tabLabels[activeTab].main}</span>}
         <div className="header-toggle header-toggle-tabs" aria-hidden={headerCollapsed || undefined}>
-          {TABS.map((tab) => (
+          {tabs.map((tab) => (
             <button
               key={tab}
               className={`toggle-btn tab-btn-stacked ${activeTab === tab ? 'active' : ''}`}
@@ -225,7 +260,7 @@ export function App() {
             <button
               type="button"
               className={`connection-status connection-status--icon connection-status--clickable connection-status--with-tip ${helperCompat === 'outdated' ? 'connection-status--outdated' : ''}`}
-              onClick={() => setHelperManageOpen(true)}
+              onClick={openHelperManage}
               aria-label={helperCompat === 'outdated' ? t('header.helper.outdated') : t('header.helper.manage')}
               data-tip={
                 helperCompat === 'outdated'
@@ -234,18 +269,18 @@ export function App() {
               }
               >
               <span className={`status-dot ${helperCompat === 'outdated' ? 'outdated' : 'connected'}`} />
-              <span className="connection-status-label">{t('common.helper')}</span>
+              <span className="connection-status-label">{helperLabel}</span>
             </button>
           ) : (
             <button
               type="button"
               className="connection-status connection-status--icon connection-status--clickable"
-              onClick={() => setHelperModalOpen(true)}
-              aria-label={t('header.helper.setup')}
-              title={t('header.helper.setup')}
+              onClick={openHelperSetup}
+              aria-label={IS_DESKTOP_SHELL ? t('desktop.header.tooltip') : t('header.helper.setup')}
+              title={IS_DESKTOP_SHELL ? t('desktop.header.tooltip') : t('header.helper.setup')}
             >
               <span className="status-dot disconnected" />
-              <span className="connection-status-label">{t('common.helper')}</span>
+              <span className="connection-status-label">{helperLabel}</span>
             </button>
           )}
         </div>
@@ -268,7 +303,7 @@ export function App() {
           <button
             type="button"
             className="helper-outdated-banner-action"
-            onClick={() => setHelperManageOpen(true)}
+            onClick={openHelperManage}
           >
             {t('header.showUpdate')}
           </button>
@@ -281,17 +316,28 @@ export function App() {
           >×</button>
         </div>
       )}
-      <HelperOnboardingModal
-        open={helperModalOpen}
-        onClose={() => setHelperModalOpen(false)}
-        onRetry={handleRetry}
-      />
-      <HelperManageModal
-        open={helperManageOpen}
-        onClose={() => setHelperManageOpen(false)}
-        helperVersion={helperVersion}
-        helperCompat={helperCompat}
-      />
+      {IS_DESKTOP_SHELL ? (
+        <DesktopAppModal
+          open={desktopPanelOpen}
+          onClose={() => setDesktopPanelOpen(false)}
+          helperStatus={desktopHelper}
+          helperCompat={helperCompat}
+        />
+      ) : (
+        <>
+          <HelperOnboardingModal
+            open={helperModalOpen}
+            onClose={() => setHelperModalOpen(false)}
+            onRetry={handleRetry}
+          />
+          <HelperManageModal
+            open={helperManageOpen}
+            onClose={() => setHelperManageOpen(false)}
+            helperVersion={helperVersion}
+            helperCompat={helperCompat}
+          />
+        </>
+      )}
       <main className={`tab-content ${activeTab === 'editor' || activeTab === 'scene' ? 'tab-content-editor' : ''}`}>
         <PersistentTab active={activeTab === 'editor'} visited={visitedTabs.has('editor')}>
           <WaveformEditor active={activeTab === 'editor'} />

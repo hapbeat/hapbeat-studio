@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { MIN_HELPER_VERSION, compareVersion, type HelperCompat } from '@/config/helperCompat'
-import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useReleaseProduct } from '@/hooks/useReleaseNotices'
+import { DiscoveryRecoverySection } from './DiscoveryRecoverySection'
 import { VersionSwitcher } from './VersionSwitcher'
 import { useI18n } from '@/i18n/I18nProvider'
 import './HelperOnboardingModal.css'
@@ -56,31 +56,6 @@ export function HelperManageModal({ open, onClose, helperVersion, helperCompat }
     !!helperRelease?.latest &&
     compareVersion(helperVersion, helperRelease.latest) < 0
   const closeRef = useRef<HTMLButtonElement>(null)
-  const { send, isConnected, lastMessage } = useHelperConnection()
-  // Recovery feedback is driven by helper's actual `reset_discovery_result`
-  // (NOT optimistic): a re-bind failure must NOT read as success, or the user
-  // is told they recovered while still stuck. idle → pending → ok | fail.
-  const [resetState, setResetState] =
-    useState<'idle' | 'pending' | 'ok' | 'fail'>('idle')
-  const handleResetDiscovery = () => {
-    setResetState('pending')
-    send({ type: 'reset_discovery', payload: {} })
-  }
-  // Resolve on the helper's result.
-  useEffect(() => {
-    if (!lastMessage || lastMessage.type !== 'reset_discovery_result') return
-    const ok = (lastMessage.payload as { ok?: boolean }).ok !== false
-    setResetState(ok ? 'ok' : 'fail')
-    const t = setTimeout(() => setResetState('idle'), ok ? 2500 : 6000)
-    return () => clearTimeout(t)
-  }, [lastMessage])
-  // Safety: if no result ever comes back (helper wedged / WS dropped mid-call),
-  // don't leave the button stuck on "再初期化中…".
-  useEffect(() => {
-    if (resetState !== 'pending') return
-    const t = setTimeout(() => setResetState('idle'), 8000)
-    return () => clearTimeout(t)
-  }, [resetState])
 
   useEffect(() => {
     if (!open) return
@@ -167,29 +142,7 @@ export function HelperManageModal({ open, onClose, helperVersion, helperCompat }
             </section>
           )}
 
-          {/* デバイスを見失ったときの軽量リカバリ。ターミナルでの stop/start に
-              頼らず、Helper の検出層 (UDP + mDNS) だけをその場で作り直す。 */}
-          <section className="helper-modal-section helper-modal-section--alt">
-            <h3 className="helper-modal-section-title">{t('helper.modal.recovery.title')}</h3>
-            <p className="helper-modal-section-desc">
-              {t('helper.modal.recovery.desc')}
-            </p>
-            <button
-              type="button"
-              className="helper-modal-copy-btn"
-              onClick={handleResetDiscovery}
-              disabled={!isConnected || resetState === 'pending'}
-              title={isConnected ? undefined : t('helper.modal.recovery.unavailable')}
-            >
-              {resetState === 'pending'
-                ? t('helper.modal.recovery.pending')
-                : resetState === 'ok'
-                  ? t('helper.modal.recovery.ok')
-                  : resetState === 'fail'
-                    ? t('helper.modal.recovery.fail')
-                    : t('helper.modal.recovery.action')}
-            </button>
-          </section>
+          <DiscoveryRecoverySection />
 
           <p className="helper-modal-desc">
             {t('helper.modal.manage.desc')}

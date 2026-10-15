@@ -36,6 +36,7 @@ import { useDeviceTransport } from '@/hooks/useDeviceTransport'
 import { useSerialMaster } from '@/stores/serialMaster'
 import { roleBadge } from '@/utils/roleLabels'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
+import { useSimpleUi, visibleSubTabs } from '@/config/desktopShell'
 
 type SubTab =
   | 'wifi' | 'config' | 'kit' | 'test' | 'firmware' | 'espnow'
@@ -110,6 +111,16 @@ function FirmwareUpdateChip({
  * tab — DSP (aic3204-full-dsp-registers.md) is DRC/3D/Beep/AGC, split from
  * EQ (biquad bands + 1st-order IIR + profile selector) purely for tab width.
  */
+/** BandWL v5 drives its DRV8850 from MCU PWM on every unit (no experiment
+ *  flag), so the board id alone enables the bench tab. */
+const BAND_WL_V5_BOARD = 'band_wl_v5'
+
+/** Whether the node gets the PWM bench sub-tab: the band_v4_pwm build
+ *  (get_info `haptic_pwm`) or any BandWL v5. */
+function hasPwmBench(info: { board?: string; haptic_pwm?: unknown } | undefined): boolean {
+  return !!info?.haptic_pwm || info?.board === BAND_WL_V5_BOARD
+}
+
 function computeSubTabs(
   role: NodeRole,
   transport: NodeTransport,
@@ -119,7 +130,8 @@ function computeSubTabs(
 ): SubTab[] {
   const tabs = computeRoleSubTabs(role, transport, transports, board)
   // The band_v4_pwm experimental build reports the stock band_wl_v4 board id,
-  // so the PWM tab is keyed off get_info's `haptic_pwm` — no other build has it.
+  // so its PWM tab is keyed off get_info's `haptic_pwm`; BandWL v5 (DRV8850,
+  // MCU-PWM on every unit) is keyed off its own board id — see hasPwmBench.
   return hasPwm ? [...tabs, 'pwm'] : tabs
 }
 
@@ -168,6 +180,8 @@ const SUBTAB_KEY = 'hapbeat-studio-devices-subtab'
  */
 export function DeviceDetail() {
   const { t } = useI18n()
+  // Desktop app's simple layout: no playback / command test, PWM bench or debug dump.
+  const simpleUi = useSimpleUi()
   const { devices, lastMessage, send, injectMessage } = useHelperConnection()
   const pushLog = useLogStore((s) => s.push)
   const selectedIp = useDeviceStore((s) => s.selectedIp)
@@ -461,7 +475,7 @@ export function DeviceDetail() {
       if (typeof p.state === 'string') {
         setPwmStatus({
           state: p.state,
-          output_mode: p.output_mode as 'pwm' | 'pam' | undefined,
+          output_mode: p.output_mode as 'pwm' | 'pam' | 'drv8850' | undefined,
           bias_available: p.bias_available as boolean | undefined,
           carrier_hz: p.carrier_hz as number | undefined,
           gpio_a: p.gpio_a as number | undefined,
@@ -490,6 +504,17 @@ export function DeviceDetail() {
           manual_bias_active: p.manual_bias_active as boolean | undefined,
           manual_bias_hold: p.manual_bias_hold as boolean | undefined,
           manual_bias_profile: p.manual_bias_profile as 'idle' | 'play' | undefined,
+          // BandWL v5 (DRV8850) extras — absent on band_v4_pwm.
+          override: p.override as string | undefined,
+          duty_cap_permille: p.duty_cap_permille as number | undefined,
+          tone_max_permille: p.tone_max_permille as number | undefined,
+          limit_q15: p.limit_q15 as number | undefined,
+          vsys_limit_q15: p.vsys_limit_q15 as number | undefined,
+          overcurrent: p.overcurrent as boolean | undefined,
+          overcurrent_events: p.overcurrent_events as number | undefined,
+          vsys_mv: p.vsys_mv as number | undefined,
+          vbus_mv: p.vbus_mv as number | undefined,
+          motor_ma: p.motor_ma as number | undefined,
         })
       }
     } else if (t === 'pwm_probe_result') {
@@ -811,9 +836,9 @@ export function DeviceDetail() {
   const nodeTransport: NodeTransport =
     cachedInfo?.transport ?? device.transport ?? nodeTransports[0] ?? 'wifi_udp'
 
-  const subTabs = computeSubTabs(
-    nodeRole, nodeTransport, nodeTransports, cachedInfo?.board, !!cachedInfo?.haptic_pwm,
-  )
+  const subTabs = visibleSubTabs(computeSubTabs(
+    nodeRole, nodeTransport, nodeTransports, cachedInfo?.board, hasPwmBench(cachedInfo),
+  ), simpleUi)
   const activeSubTab: SubTab = subTabs.includes(subTab) ? subTab : (subTabs[0] ?? 'firmware')
 
   return (
@@ -927,11 +952,13 @@ export function DeviceDetail() {
                 sendTo={sendTo}
               />
             )}
-            <DebugDumpSection
-              device={device}
-              dump={debugDump}
-              sendTo={sendTo}
-            />
+            {!simpleUi && (
+              <DebugDumpSection
+                device={device}
+                dump={debugDump}
+                sendTo={sendTo}
+              />
+            )}
             {/* Non-DuoWL-v4 (v3-family) haptic-only Wi-Fi/UDP receivers
                 (necklace_v3 / band_v2/v3/v4): software haptic EQ, gated
                 purely on eq_engine === "sw" (presence-driven — see
@@ -1064,6 +1091,7 @@ export function DeviceDetail() {
           <BandWlV4PwmSection
             device={device}
             cachedInfo={cachedInfo}
+            driver={cachedInfo?.board === BAND_WL_V5_BOARD ? 'drv8850' : undefined}
             sendTo={sendTo}
             status={pwmStatus}
             probeTick={pwmProbeTick}

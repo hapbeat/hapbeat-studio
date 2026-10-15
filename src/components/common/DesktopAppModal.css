@@ -1,0 +1,52 @@
+/* DesktopAppModal — the desktop app's helper / update / display panel.
+   Shares the helper-modal frame (HelperOnboardingModal.css). */
+
+/* One line each, always present (empty when there is nothing to say), so state
+   changes never move the buttons below. */
+.desktop-app-status-line {
+  margin: 0 0 4px;
+  min-height: 1.5em;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.desktop-app-status-line--muted {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.desktop-app-warning {
+  color: var(--warning, #f0b429);
+}
+
+.desktop-app-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+
+/* "Restart Helper" / "Restarting…" keep one width. */
+.desktop-app-fixed-btn {
+  min-width: 10em;
+}
+
+.desktop-app-version {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-right: 4px;
+}
+
+.desktop-app-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.desktop-app-check input {
+  margin-top: 3px;
+}
