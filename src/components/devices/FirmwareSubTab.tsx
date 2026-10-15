@@ -146,6 +146,13 @@ interface Props {
  *
  * Wi-Fi OTA and USB Serial both consume whichever source is selected.
  */
+/** Library version label. A local dev build keeps its dev counter
+ *  (`0.1.0d321` → `v0.1.0d321`) so two builds of the same release line are
+ *  told apart; a published release has none, so it reads `v0.1.0`. */
+function libraryVersionLabel(fwVersion: string): string {
+  return `v${fwVersion.replace(/^v/i, '')}`
+}
+
 export function FirmwareSubTab({
   device,
   sendTo,
@@ -1159,7 +1166,7 @@ export function FirmwareSubTab({
                         setSource('library')
                         setLibSelected(e.env)
                       }}
-                      title={`${entryLabel(e)} — ${e.env}${e.fwVersion ? ` · v${normalizeVersion(e.fwVersion)}` : ''}`}
+                      title={`${entryLabel(e)} — ${e.env}${e.fwVersion ? ` · ${libraryVersionLabel(e.fwVersion)}` : ''}`}
                     >
                       <span className="firmware-variant-cell-label">{entryLabel(e)}</span>
                       {isPwmEntry(e) && (
@@ -1191,7 +1198,7 @@ export function FirmwareSubTab({
                       }}
                       title={t('firmware.versionTitle')}
                     >
-                      v{normalizeVersion(selectedEntry.fwVersion)}
+                      {libraryVersionLabel(selectedEntry.fwVersion)}
                     </span>
                   )}
                   {/* Dev lists local builds and published releases together. */}
@@ -1239,7 +1246,7 @@ export function FirmwareSubTab({
                           onClick={() => setSelectedVersionFw(i === 0 ? null : v.fwVersion)}
                           title={`${v.tag ?? `v${normalizeVersion(v.fwVersion)}`}${v.publishedAt ? ` · ${formatDate(v.publishedAt)} リリース` : ''}`}
                         >
-                          v{normalizeVersion(v.fwVersion)}
+                          {libraryVersionLabel(v.fwVersion)}
                            {i === 0 && <span className="firmware-version-chip-latest"> {v.local ? t('firmware.localBuild') : t('firmware.latest')}</span>}
                         </button>
                       )
