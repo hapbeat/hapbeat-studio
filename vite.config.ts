@@ -276,6 +276,9 @@ function firmwareDevPlugin(buildRepos: FirmwareBuildRepo[], repoRoots: FirmwareR
               source?: 'live' | 'cache'
               /** Epoch ms when a cache entry was snapshotted (cache only). */
               cachedAt?: number
+              /** The current build plus earlier dev builds kept by the
+               *  firmware's merge_firmware.py under dist/<env>/archive/. */
+              versions?: ArchivedBuild[]
             }
             // 1) Live envs from every root (dist/ + .pio/build per repo).
             //    The same env can exist in both — keep the NEWEST artifacts
@@ -302,8 +305,12 @@ function firmwareDevPlugin(buildRepos: FirmwareBuildRepo[], repoRoots: FirmwareR
                 // actually carry). Falls back to the repo-global build_version.h.
                 const fwVersion = variant.fwVersion
                   ?? await readFirmwareVersion(srcDir)
+                const archived = await readArchivedBuilds(root, env)
                 const item: ListItem = {
                   env, repo, fwVersion, appOta, fullSerial, ...variant, source: 'live',
+                  ...(archived.length > 0
+                    ? { versions: [{ fwVersion: fwVersion ?? '', appOta, fullSerial, local: true }, ...archived] }
+                    : {}),
                 }
                 const prev = live.get(env)
                 if (!prev || itemMtime(item) > itemMtime(prev)) {
@@ -359,6 +366,40 @@ function firmwareDevPlugin(buildRepos: FirmwareBuildRepo[], repoRoots: FirmwareR
             return
           }
 
+          // /firmware-builds/<env>/archive/<fwVersion>/<stem>.bin — an earlier
+          // dev build kept by merge_firmware.py (see readArchivedBuilds).
+          const am = url.match(/^\/([^/]+)\/archive\/([^/]+)\/(firmware_app_ota|firmware_full_serial|firmware)\.bin$/)
+          if (am) {
+            const env = decodeURIComponent(am[1])
+            const ver = decodeURIComponent(am[2])
+            const stem = am[3]
+            if ([env, ver].some((s) => s.includes('..') || s.includes('/') || s.includes('\\'))) {
+              res.statusCode = 400
+              res.end('bad env / version')
+              return
+            }
+            for (const { root } of buildRepos) {
+              const binPath = join(root, env, 'archive', ver, `${stem}.bin`)
+              try {
+                const st = await fs.stat(binPath)
+                if (st.size === 0) continue
+                const data = await fs.readFile(binPath)
+                res.setHeader('content-type', 'application/octet-stream')
+                res.setHeader('cache-control', 'no-store, max-age=0')
+                res.setHeader('x-firmware-mtime', String(st.mtimeMs))
+                res.setHeader('x-firmware-size', String(st.size))
+                res.setHeader('x-firmware-path', binPath)
+                res.end(data)
+                return
+              } catch {
+                /* try next root */
+              }
+            }
+            res.statusCode = 404
+            res.end(`${stem}.bin not found for env="${env}" archive "${ver}"`)
+            return
+          }
+
           // /firmware-builds/<env>/<stem>.bin — search every repo root.
           const m = url.match(/^\/([^/]+)\/(firmware_app_ota|firmware_full_serial|firmware)\.bin$/)
           if (m) {
@@ -406,6 +447,41 @@ function firmwareDevPlugin(buildRepos: FirmwareBuildRepo[], repoRoots: FirmwareR
       })
     },
   }
+}
+
+/** One version entry of a dev-list env (mirrors FirmwareVersionInfo). */
+interface ArchivedBuild {
+  fwVersion: string
+  appOta?: { size: number; mtime: number; path: string }
+  fullSerial?: { size: number; mtime: number; path: string }
+  local: true
+  /** An earlier build from dist/<env>/archive/ (absent on the current one). */
+  archived?: true
+}
+
+/** Earlier dev builds of `env` kept under `<root>/<env>/archive/<fwVersion>/`,
+ *  newest first. Their artifact `path` is the dev-plugin URL that serves them,
+ *  so the client fetches exactly that build. */
+async function readArchivedBuilds(root: string, env: string): Promise<ArchivedBuild[]> {
+  const out: ArchivedBuild[] = []
+  const archiveRoot = join(root, env, 'archive')
+  for (const ver of await safeReaddir(archiveRoot)) {
+    const url = (stem: string) =>
+      `/firmware-builds/${encodeURIComponent(env)}/archive/${encodeURIComponent(ver)}/${stem}.bin`
+    const appOta = await statArtifact(archiveRoot, ver, 'firmware_app_ota.bin')
+    const fullSerial = await statArtifact(archiveRoot, ver, 'firmware_full_serial.bin')
+    if (!appOta && !fullSerial) continue
+    const meta = await readVariantMeta(archiveRoot, ver)
+    out.push({
+      fwVersion: meta.fwVersion ?? ver,
+      appOta: appOta ? { ...appOta, path: url('firmware_app_ota') } : undefined,
+      fullSerial: fullSerial ? { ...fullSerial, path: url('firmware_full_serial') } : undefined,
+      local: true,
+      archived: true,
+    })
+  }
+  const mtime = (b: ArchivedBuild) => Math.max(b.appOta?.mtime ?? 0, b.fullSerial?.mtime ?? 0)
+  return out.sort((a, b) => mtime(b) - mtime(a))
 }
 
 async function safeReaddir(p: string): Promise<string[]> {

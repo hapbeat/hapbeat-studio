@@ -108,6 +108,8 @@ export interface FirmwareVersionInfo {
   /** Dev only: true = the local build (dist / .pio / cache) prepended ahead
    *  of the published releases; absent = a published release. */
   local?: boolean
+  /** Dev only: an earlier local build kept under dist/<env>/archive/. */
+  archived?: boolean
 }
 
 export interface FirmwareLibraryEntry {
@@ -346,7 +348,8 @@ export function mergeLocalWithReleases(
     return {
       ...e,
       versions: [
-        { fwVersion: e.fwVersion ?? '', appOta: e.appOta, fullSerial: e.fullSerial, local: true },
+        // The dev list already carries the current build + archived builds.
+        ...(e.versions ?? [{ fwVersion: e.fwVersion ?? '', appOta: e.appOta, fullSerial: e.fullSerial, local: true }]),
         ...rel.versions,
       ],
     }
@@ -540,7 +543,27 @@ async function fetchArtifact(
   if (isProdMode() || artifact?.path.startsWith(`${DEV_RELEASE_BASE}/`)) {
     return fetchArtifactFromManifest(entry, stem)
   }
+  // An archived dev build carries the exact dev-plugin URL that serves it.
+  if (artifact?.path.startsWith('/firmware-builds/')) {
+    return fetchArtifactFromDevUrl(artifact.path, entry.env)
+  }
   return fetchArtifactFromDevPlugin(entry.env, stem)
+}
+
+async function fetchArtifactFromDevUrl(
+  url: string,
+  env: string,
+): Promise<{ bytes: Uint8Array; mtime: number; size: number; path: string }> {
+  const r = await fetch(url, { cache: 'no-store' })
+  if (!r.ok) throw new Error(`${url} fetch failed (${r.status} ${r.statusText}) for env="${env}"`)
+  const bytes = new Uint8Array(await r.arrayBuffer())
+  if (bytes.length === 0) throw new Error(`${url} is empty for env="${env}"`)
+  return {
+    bytes,
+    mtime: Number(r.headers.get('x-firmware-mtime') ?? '0'),
+    size: Number(r.headers.get('x-firmware-size') ?? bytes.length),
+    path: r.headers.get('x-firmware-path') ?? url,
+  }
 }
 
 async function fetchArtifactFromDevPlugin(
