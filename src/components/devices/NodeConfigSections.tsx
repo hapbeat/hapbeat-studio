@@ -5598,6 +5598,8 @@ export interface PwmStatusReadout {
   overcurrent?: boolean
   overcurrent_events?: number
   vsys_mv?: number
+  /** Lowest VSYS since the previous pwm_status (2 ms sag tracker). */
+  vsys_min_mv?: number
   vbus_mv?: number
   /** Motor current estimate from DRV8850 VPROPI (high side only — under-reads). */
   motor_ma?: number
@@ -6338,7 +6340,7 @@ export function BandWlV4PwmSection({
             <Row
               label={t('node.pwm.v5Supply')}
               value={status?.vsys_mv != null
-                ? `VSYS ${status.vsys_mv} mV / VBUS ${status.vbus_mv ?? '—'} mV`
+                ? `VSYS ${status.vsys_mv} mV（${t('node.pwm.v5VsysMin')} ${status.vsys_min_mv ?? '—'}）/ VBUS ${status.vbus_mv ?? '—'} mV`
                 : undefined}
             />
             <Row
