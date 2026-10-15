@@ -513,6 +513,7 @@ export function DeviceDetail() {
           overcurrent: p.overcurrent as boolean | undefined,
           overcurrent_events: p.overcurrent_events as number | undefined,
           vsys_mv: p.vsys_mv as number | undefined,
+          vsys_min_mv: p.vsys_min_mv as number | undefined,
           vbus_mv: p.vbus_mv as number | undefined,
           motor_ma: p.motor_ma as number | undefined,
         })
