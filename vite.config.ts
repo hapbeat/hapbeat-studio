@@ -509,8 +509,13 @@ const FIRMWARE_REPO_DIRS: Array<{ repo: string; dir: string }> = [
 // If an env ever shows a stale version, rebuild that env → merge_firmware.py
 // refreshes dist/<env>/variant.json. (Removing dist/ entirely was tried but it
 // broke persistence: building one env then made the others vanish.)
+// A Studio git worktree (repos-tools/.claude/worktrees/<name>) sits two
+// levels deeper, so its workspace root is ../../../../ — without this
+// base a dev server started from a worktree listed no local builds at all.
+const FIRMWARE_BASES = ['../../repos-firmware', '../../../../repos-firmware', '..']
+
 const FIRMWARE_BUILD_REPOS = FIRMWARE_REPO_DIRS.flatMap(({ repo, dir }) =>
-  ['../../repos-firmware', '..'].flatMap((base) => {
+  FIRMWARE_BASES.flatMap((base) => {
     const srcDir = resolve(__dirname, `${base}/${dir}/src`)
     return [
       { repo, root: resolve(__dirname, `${base}/${dir}/dist`), srcDir },
@@ -523,7 +528,7 @@ const FIRMWARE_BUILD_REPOS = FIRMWARE_REPO_DIRS.flatMap(({ repo, dir }) =>
 // for the snapshot-cache pruning pass (see readValidEnvNames).
 const FIRMWARE_REPO_ROOTS: FirmwareRepoRoot[] = FIRMWARE_REPO_DIRS.map(({ repo, dir }) => ({
   repo,
-  dirs: ['../../repos-firmware', '..'].map((base) => resolve(__dirname, `${base}/${dir}`)),
+  dirs: FIRMWARE_BASES.map((base) => resolve(__dirname, `${base}/${dir}`)),
 }))
 
 export default defineConfig(() => {
