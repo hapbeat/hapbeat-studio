@@ -5539,11 +5539,12 @@ export function EspNowStreamReadout({
 // BandWL v4 PWM experimental firmware (band_v4_pwm build)
 // ---------------------------------------------------------------------
 
-/** `pwm_status` response (band_v4_pwm build only). */
+/** `pwm_status` response (band_v4_pwm build and BandWL v5). */
 export interface PwmStatusReadout {
+  /** v4: active / brake / disabled. v5: sleep / brake / z / active / dc. */
   state?: string
-  /** Active haptic audio path in the hybrid experimental firmware. */
-  output_mode?: 'pwm' | 'pam'
+  /** Active haptic audio path: v4 hybrid build pwm / pam, v5 always drv8850. */
+  output_mode?: 'pwm' | 'pam' | 'drv8850'
   /** False in PAM mode because the AC-coupled amplifier path cannot apply DC. */
   bias_available?: boolean
   carrier_hz?: number
@@ -5584,6 +5585,22 @@ export interface PwmStatusReadout {
   manual_bias_hold?: boolean
   /** Saved-profile selector used by the active manual bench test. */
   manual_bias_profile?: 'idle' | 'play'
+  // ---- BandWL v5 (DRV8850) only ----
+  /** Bring-up state override (drv_state), or "auto". */
+  override?: string
+  /** Max |deviation| as permille of full drive; audio full scale maps onto it. */
+  duty_cap_permille?: number
+  /** Tone amplitude ceiling, permille of the capped drive. */
+  tone_max_permille?: number
+  /** Applied supply limiter (VSYS x overcurrent), Q15. */
+  limit_q15?: number
+  vsys_limit_q15?: number
+  overcurrent?: boolean
+  overcurrent_events?: number
+  vsys_mv?: number
+  vbus_mv?: number
+  /** Motor current estimate from DRV8850 VPROPI (high side only — under-reads). */
+  motor_ma?: number
 }
 
 /** Magnitude used by 逆転/正転 when the slider currently sits at 0. */
@@ -5602,6 +5619,10 @@ const PWM_BIAS_HOLD_HEARTBEAT_MS = 250
 const PWM_PLAYBACK_GAIN_MAX_DB = 24
 /** Device config bounds for the playback-bias tail. */
 const PWM_POST_PLAY_HOLD_MAX_MS = 2000
+/** BandWL v5 firmware tone limits (HAPTIC_PWM_TONE_MAX_* in haptic_pwm.h);
+ *  pwm_status reports the permille ceiling, this is only the fallback. */
+const DRV8850_TONE_MAX_PERMILLE = 300
+const DRV8850_TONE_MAX_MS = 10000
 
 /**
  * Experimental bench panel for the `band_v4_pwm` build: DC bias (string
@@ -5611,10 +5632,16 @@ const PWM_POST_PLAY_HOLD_MAX_MS = 2000
  *
  * Status is fetched on open and on demand only: polling would hold the
  * device's single TCP client slot away from everything else.
+ *
+ * `driver="drv8850"` (BandWL v5): the MCU drives a DRV8850 H-bridge on every
+ * unit, so the output-path switch and the gate probe are hidden, the tone
+ * amplitude is a fraction of the duty cap (firmware ceiling 0.3), and the
+ * status adds the bridge state, limiter and VSYS / current readouts.
  */
 export function BandWlV4PwmSection({
   device,
   cachedInfo,
+  driver,
   sendTo,
   status,
   probeTick,
@@ -5623,6 +5650,8 @@ export function BandWlV4PwmSection({
 }: {
   device: DeviceInfo
   cachedInfo?: NodeConfigInfo
+  /** Output stage when it is not the band_v4_pwm gate drive. */
+  driver?: 'drv8850'
   sendTo: (msg: ManagerMessage) => void
   /** Latest `pwm_status_result` payload for this device, if any. */
   status?: PwmStatusReadout
@@ -5674,6 +5703,12 @@ export function BandWlV4PwmSection({
     : `${Math.round((appliedBiasQ15 * 100) / 32767)}%`
   const outputMode = status?.output_mode ?? cachedInfo?.haptic_pwm?.output_mode
   const pwmRuntimeEnabled = outputMode !== 'pam'
+  const isDrv = driver === 'drv8850'
+  // v5 tone amplitude is a fraction of the duty cap, clamped by firmware.
+  const toneAmpMax = isDrv ? (status?.tone_max_permille ?? DRV8850_TONE_MAX_PERMILLE) / 1000 : 1
+  const toneAmpApplied = Math.min(toneAmp, toneAmpMax)
+  const toneMsMax = isDrv ? DRV8850_TONE_MAX_MS : 60000
+  const pct = (q15?: number) => (q15 == null ? undefined : `${Math.round((q15 * 100) / 32767)} %`)
 
   // Fetch status once when the panel mounts / the device changes. Also drop a
   // pending probe flag: its reply belongs to the previous device and would
@@ -5866,7 +5901,8 @@ export function BandWlV4PwmSection({
 
   const playTone = (e: React.MouseEvent<HTMLButtonElement>) => {
     setAnchor(e.currentTarget)
-    sendTo({ type: 'pwm_tone', payload: { hz: toneHz, amp: toneAmp, ms: toneMs, wave: toneWave } })
+    const ms = Math.max(0, Math.min(toneMsMax, Math.round(toneMs)))
+    sendTo({ type: 'pwm_tone', payload: { hz: toneHz, amp: toneAmpApplied, ms, wave: toneWave } })
   }
   const stopTone = (e: React.MouseEvent<HTMLButtonElement>) => {
     setAnchor(e.currentTarget)
@@ -5914,6 +5950,7 @@ export function BandWlV4PwmSection({
 
   return (
     <>
+      {!isDrv && (
       <div className="form-section">
         <div className="form-section-title">
           {t('node.pwm.outputPath')}
@@ -5943,6 +5980,7 @@ export function BandWlV4PwmSection({
             : t('node.pwm.outputPwmHint')}
         </div>
       </div>
+      )}
 
       <div className="form-section">
         <div className="form-section-title">
@@ -6052,6 +6090,11 @@ export function BandWlV4PwmSection({
           {t('node.pwm.savedConfig')}: {savedBiasText}
           {' · '}{t('node.pwm.effectiveBias')}: {effectiveBiasText}
         </div>
+        {isDrv && (
+          <div className="form-status muted" style={{ fontSize: 12 }}>
+            {t('node.pwm.v5IdleBiasHint')}
+          </div>
+        )}
 
         <div className="form-section-title" style={{ marginTop: 14 }}>
           {t('node.pwm.fixedBias')}
@@ -6161,15 +6204,15 @@ export function BandWlV4PwmSection({
             <input
               type="range"
               min={0}
-              max={1}
-              step={0.05}
-              value={toneAmp}
+              max={toneAmpMax}
+              step={isDrv ? 0.01 : 0.05}
+              value={toneAmpApplied}
               onChange={(e) => setToneAmp(Number(e.target.value))}
               disabled={offline || !pwmRuntimeEnabled}
               style={{ flex: 1 }}
             />
             <span className="mono" style={{ width: 48, textAlign: 'right' }}>
-              {toneAmp.toFixed(2)}
+              {toneAmpApplied.toFixed(2)}
             </span>
           </div>
           <span />
@@ -6181,7 +6224,7 @@ export function BandWlV4PwmSection({
               className="form-input short mono"
               type="number"
               min={0}
-              max={60000}
+              max={toneMsMax}
               step={100}
               value={toneMs}
               onChange={(e) => setToneMs(Number(e.target.value))}
@@ -6199,6 +6242,11 @@ export function BandWlV4PwmSection({
             {t('node.pwm.stopped')}
           </button>
         </div>
+        {isDrv && (
+          <div className="form-status muted" style={{ fontSize: 12 }}>
+            {t('node.pwm.v5ToneHint', { cap: status?.duty_cap_permille ?? '—' })}
+          </div>
+        )}
       </div>
 
       <div className="form-section">
@@ -6228,7 +6276,7 @@ export function BandWlV4PwmSection({
           <span />
         </div>
         <div className="form-status muted" style={{ fontSize: 12 }}>
-          {t('node.pwm.playbackGainHint')}
+          {t(isDrv ? 'node.pwm.v5PlaybackGainHint' : 'node.pwm.playbackGainHint')}
         </div>
       </div>
 
@@ -6279,7 +6327,44 @@ export function BandWlV4PwmSection({
             ? t('node.pwm.refreshActive')
             : t('node.pwm.refreshIdle')}
         </div>
-        <Row label={t('node.pwm.status')} value={status?.state} />
+        <Row
+          label={t('node.pwm.status')}
+          value={isDrv && status?.state != null && status.override && status.override !== 'auto'
+            ? `${status.state}（${t('node.pwm.v5Override')}: ${status.override}）`
+            : status?.state}
+        />
+        {isDrv && (
+          <>
+            <Row
+              label={t('node.pwm.v5Supply')}
+              value={status?.vsys_mv != null
+                ? `VSYS ${status.vsys_mv} mV / VBUS ${status.vbus_mv ?? '—'} mV`
+                : undefined}
+            />
+            <Row
+              label={t('node.pwm.v5MotorCurrent')}
+              value={status?.motor_ma != null ? `${status.motor_ma} mA` : undefined}
+            />
+            <Row
+              label={t('node.pwm.v5DutyCap')}
+              value={status?.duty_cap_permille != null ? `${status.duty_cap_permille} ‰` : undefined}
+            />
+            <Row
+              label={t('node.pwm.v5Limiter')}
+              value={status?.limit_q15 != null
+                ? `${pct(status.limit_q15)}（VSYS ${pct(status.vsys_limit_q15) ?? '—'}）`
+                : undefined}
+            />
+            <Row
+              label={t('node.pwm.v5Overcurrent')}
+              value={status?.overcurrent != null
+                ? `${status.overcurrent ? t('node.pwm.running') : t('node.pwm.stopped')} / ${status.overcurrent_events ?? 0}`
+                : undefined}
+            />
+          </>
+        )}
+        {!isDrv && (
+        <>
         <Row
           label={t('node.pwm.outputPath')}
           value={outputMode === 'pam'
@@ -6294,6 +6379,8 @@ export function BandWlV4PwmSection({
             ? (status.bias_available ? t('common.yes') : t('common.no'))
             : undefined}
         />
+        </>
+        )}
         <Row
           label={t('node.pwm.carrier')}
           value={status?.carrier_hz != null ? `${status.carrier_hz} Hz` : undefined}
@@ -6367,6 +6454,7 @@ export function BandWlV4PwmSection({
         />
         {/* get_info carries the gate config too, so this row has a value even
             before the first pwm_status. */}
+        {!isDrv && (
         <Row
           label={t('node.pwm.infoState')}
           value={
@@ -6375,8 +6463,10 @@ export function BandWlV4PwmSection({
               : undefined
           }
         />
+        )}
       </div>
 
+      {!isDrv && (
       <div className="form-section">
         <div className="form-section-title">
           {t('node.pwm.probe')}
@@ -6429,6 +6519,7 @@ export function BandWlV4PwmSection({
           </button>
         </div>
       </div>
+      )}
     </>
   )
 }
