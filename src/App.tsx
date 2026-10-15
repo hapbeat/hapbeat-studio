@@ -14,6 +14,8 @@ import { ExternalLinkIcon } from '@/components/common/ExternalLinkIcon'
 import { useToast } from '@/components/common/Toast'
 import { HelperFailureToastListener } from '@/components/common/HelperFailureToastListener'
 import { VersionSwitcher } from '@/components/common/VersionSwitcher'
+import { WorkFolderPrompt } from '@/components/common/WorkFolderPrompt'
+import { useLibraryStore } from '@/stores/libraryStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceSelectionSync } from '@/hooks/useDeviceSelectionSync'
 import { useHelperUpdate, useStudioFrozenNotice } from '@/hooks/useReleaseNotices'
@@ -48,6 +50,9 @@ function initialTab(tabs: readonly Tab[]): Tab {
 }
 
 const DOCS_URL = 'https://devtools.hapbeat.com/docs/tools/studio/initial-setup/'
+
+/** Show the tabs anyway if the startup work folder lookup hangs (e.g. IndexedDB blocked by another Studio tab). */
+const FOLDER_LOOKUP_TIMEOUT_MS = 1500
 
 /**
  * Render a tab pane that mounts on first visit and stays mounted on
@@ -87,6 +92,20 @@ export function App() {
   const tabsRef = useRef(tabs)
   tabsRef.current = tabs
   const [activeTab, setActiveTab] = useState<Tab>(() => initialTab(tabs))
+
+  // The work folder is restored here, not in the Kit tab, so the first-run
+  // guide under the header knows the folder state whichever tab opens first.
+  const loadLibrary = useLibraryStore((s) => s.loadLibrary)
+  const workDirStatus = useLibraryStore((s) => s.workDirStatus)
+  const demoMode = useLibraryStore((s) => s.demoMode)
+  useEffect(() => { void loadLibrary() }, [loadLibrary])
+  const [folderLookupTimedOut, setFolderLookupTimedOut] = useState(false)
+  useEffect(() => {
+    const timer = window.setTimeout(() => setFolderLookupTimedOut(true), FOLDER_LOOKUP_TIMEOUT_MS)
+    return () => window.clearTimeout(timer)
+  }, [])
+  // Tabs mount once the lookup is done, so the guide never pops in above them.
+  const tabsReady = workDirStatus !== 'checking' || demoMode || folderLookupTimedOut
 
   // Track which tabs the user has visited at least once. We mount each
   // tab on first visit and keep it mounted after — see PersistentTab.
@@ -316,6 +335,7 @@ export function App() {
           >×</button>
         </div>
       )}
+      <WorkFolderPrompt variant="banner" onConnected={() => setActiveTab('kit')} />
       {IS_DESKTOP_SHELL ? (
         <DesktopAppModal
           open={desktopPanelOpen}
@@ -339,6 +359,7 @@ export function App() {
         </>
       )}
       <main className={`tab-content ${activeTab === 'editor' || activeTab === 'scene' ? 'tab-content-editor' : ''}`}>
+        {tabsReady && <>
         <PersistentTab active={activeTab === 'editor'} visited={visitedTabs.has('editor')}>
           <WaveformEditor active={activeTab === 'editor'} />
         </PersistentTab>
@@ -354,6 +375,7 @@ export function App() {
         <PersistentTab active={activeTab === 'devices'} visited={visitedTabs.has('devices')}>
           <Devices />
         </PersistentTab>
+        </>}
       </main>
       <LogDrawer />
       <HelperFailureToastListener />

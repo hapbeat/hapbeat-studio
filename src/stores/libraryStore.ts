@@ -183,6 +183,12 @@ async function persistKitSourceAudio(
 /** Source tab for the library view */
 export type LibraryTab = 'builtin' | 'user'
 
+/** See `LibraryState.workDirStatus`. */
+export type WorkDirStatus = 'checking' | 'unsupported' | 'none' | 'needs-permission' | 'connected'
+
+/** What the Clips panel progress banner is doing (the UI picks the wording). */
+export type ImportProgressKind = 'samples' | 'folder' | 'import'
+
 interface LibraryState {
   // Clip library
   clips: LibraryClip[]
@@ -199,6 +205,15 @@ interface LibraryState {
   workDirHandle: FileSystemDirectoryHandle | null
   workDirName: string | null
   workDirSupported: boolean
+  /**
+   * What the app knows about the work folder, for the first-run guide shown
+   * on every tab. `checking` until the stored handle has been looked up at
+   * startup; `needs-permission` when a folder was used before but the browser
+   * wants a click to grant access again (the request needs a user gesture, so
+   * startup must not ask by itself); `workDirPendingName` names that folder.
+   */
+  workDirStatus: WorkDirStatus
+  workDirPendingName: string | null
   /** Optional: separate output folder for exported Kits (e.g. Unity's
    *  Assets/HapbeatKits). When null, kits are saved under workDir/kits/. */
   kitDirHandle: FileSystemDirectoryHandle | null
@@ -247,11 +262,11 @@ interface LibraryState {
   /**
    * Progress of a long-running clip import / folder scan (built-in
    * template seed, folder load, multi-file drop). Drives the inline
-   * "Loading template… X/Y" banner + progress bar in the Clips panel so
+   * "Copying sample clips… X/Y" banner + progress bar in the Clips panel so
    * the user isn't left staring at the easy-to-miss footer pill while a
    * folder of clips decodes. null when nothing is in flight.
    */
-  importProgress: { current: number; total: number; label: string } | null
+  importProgress: { current: number; total: number; kind: ImportProgressKind } | null
   setImportProgress: (p: LibraryState['importProgress']) => void
 
   /**
@@ -362,6 +377,9 @@ interface LibraryState {
   // Work directory actions
   pickWorkDir: () => Promise<boolean>
   restoreWorkDir: () => Promise<boolean>
+  /** Ask for access to the stored work folder again (must run from a click),
+   *  then load it like a startup restore. */
+  reconnectWorkDir: () => Promise<boolean>
   disconnectWorkDir: () => Promise<void>
   // Kit output directory (separate folder for kit exports)
   pickKitDir: () => Promise<boolean>
@@ -934,6 +952,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   workDirHandle: null,
   workDirName: null,
   workDirSupported: isFileSystemAccessSupported(),
+  workDirStatus: isFileSystemAccessSupported() ? 'checking' : 'unsupported',
+  workDirPendingName: null,
   kitDirHandle: null,
   kitDirName: null,
   demoMode: false,
@@ -1549,9 +1569,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // Load the built-in index so subsequent auto-import can consult it.
       await get().loadBuiltinIndex()
       // Fill any missing built-ins (first run after upgrade, or user removed
-      // template/ but wants the default library back).
+      // template/ but wants the default library back). Without a folder there
+      // is nowhere to copy them: pickWorkDir seeds the chosen folder instead.
       const { builtinIndex, clips } = get()
-      if (builtinIndex && builtinIndex.length > 0) {
+      if (restored && builtinIndex && builtinIndex.length > 0) {
         const have = new Set(clips.map((c) => c.builtinId).filter((x): x is string => !!x))
         const missing = builtinIndex.some((b) => !have.has(b.id))
         if (missing) await get().importAllBuiltinClips()
@@ -1560,6 +1581,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     } catch (err) {
       console.error('ライブラリの読み込みに失敗:', err)
       set({ isLoading: false })
+    } finally {
+      // A failed restore must not leave the first-run guide undecided.
+      if (get().workDirStatus === 'checking') set({ workDirStatus: 'none' })
     }
   },
 
@@ -1673,7 +1697,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const myRun = ++importRunSeq
     const tick = (current: number) => {
       if (showProgress && importRunSeq === myRun) {
-        get().setImportProgress({ current, total: pending.length, label: 'Loading template…' })
+        get().setImportProgress({ current, total: pending.length, kind: 'samples' })
       }
     }
     tick(0)
@@ -1740,17 +1764,17 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // Without a dedicated kitDir, the work folder is also the Kit source of
     // truth. Drop the previous folder's Kit state and pending writes before
     // adopting the new handle. A dedicated kitDir intentionally stays active.
+    const connected = { workDirHandle: handle, workDirName: handle.name, workDirStatus: 'connected' as const, workDirPendingName: null }
     if (get().kitDirHandle) {
       outRootEpoch++
-      set({ clips: [], workDirHandle: handle, workDirName: handle.name })
+      set({ clips: [], ...connected })
     } else {
       resetKitMemory()
       set({
         clips: [],
         kits: [],
         activeKitId: null,
-        workDirHandle: handle,
-        workDirName: handle.name,
+        ...connected,
       })
     }
 
@@ -1777,10 +1801,17 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   restoreWorkDir: async () => {
     if (!isFileSystemAccessSupported()) return false
     const handle = await loadDirectoryHandle()
-    if (!handle) return false
-    const granted = await verifyPermission(handle, true)
-    if (!granted) return false
-    set({ workDirHandle: handle, workDirName: handle.name })
+    if (!handle) {
+      set({ workDirStatus: 'none', workDirPendingName: null })
+      return false
+    }
+    // Only query here: asking needs a click, and startup has none. The
+    // first-run guide offers the click (reconnectWorkDir).
+    if ((await handle.queryPermission({ mode: 'readwrite' })) !== 'granted') {
+      set({ workDirStatus: 'needs-permission', workDirPendingName: handle.name })
+      return false
+    }
+    set({ workDirHandle: handle, workDirName: handle.name, workDirStatus: 'connected', workDirPendingName: null })
     // Run the legacy → tilde-suffixed rename before syncClipsFromDir
     // / importKitsFromOutputDir kick in; they read the new folder
     // names directly and would otherwise expose stale legacy state.
@@ -1790,8 +1821,21 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     return true
   },
 
+  reconnectWorkDir: async () => {
+    if (!isFileSystemAccessSupported()) return false
+    const handle = await loadDirectoryHandle()
+    if (!handle) {
+      set({ workDirStatus: 'none', workDirPendingName: null })
+      return false
+    }
+    if (!(await verifyPermission(handle, true))) return false
+    await get().loadLibrary()
+    return get().workDirHandle !== null
+  },
+
   disconnectWorkDir: async () => {
     await clearDirectoryHandle()
+    set({ workDirStatus: 'none', workDirPendingName: null })
     if (get().kitDirHandle) {
       set({ clips: [], workDirHandle: null, workDirName: null, ampPresets: [] })
     } else {
@@ -2339,7 +2383,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const myRun = ++importRunSeq
     const tick = (current: number) => {
       if (importRunSeq === myRun) {
-        get().setImportProgress({ current, total: fileList.length, label: 'Loading clips…' })
+        get().setImportProgress({ current, total: fileList.length, kind: 'folder' })
       }
     }
     tick(0)
