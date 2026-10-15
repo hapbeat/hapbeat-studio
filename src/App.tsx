@@ -9,7 +9,7 @@ import { Devices } from '@/components/devices/Devices'
 import { LogDrawer } from '@/components/log/LogDrawer'
 import { HelperOnboardingModal } from '@/components/common/HelperOnboardingModal'
 import { HelperManageModal } from '@/components/common/HelperManageModal'
-import { DesktopAppModal, useDesktopHelperStatus } from '@/components/common/DesktopAppModal'
+import { DesktopAppModal, formatSavedAt, useDesktopHelperStatus, useDesktopStudioStatus } from '@/components/common/DesktopAppModal'
 import { ExternalLinkIcon } from '@/components/common/ExternalLinkIcon'
 import { useToast } from '@/components/common/Toast'
 import { HelperFailureToastListener } from '@/components/common/HelperFailureToastListener'
@@ -148,6 +148,16 @@ export function App() {
   const desktopHelper = useDesktopHelperStatus(IS_DESKTOP_SHELL ? openDesktopPanel : undefined)
   const openHelperSetup = IS_DESKTOP_SHELL ? openDesktopPanel : () => setHelperModalOpen(true)
   const openHelperManage = IS_DESKTOP_SHELL ? openDesktopPanel : () => setHelperManageOpen(true)
+  // App users never install a Helper, so the header names what it shows: the link to the devices.
+  const helperLabel = IS_DESKTOP_SHELL ? t('desktop.header.label') : t('common.helper')
+  // Offline, the app shows its saved copy of Studio: say so once.
+  const studioStatus = useDesktopStudioStatus()
+  const offlineAnnounced = useRef(false)
+  useEffect(() => {
+    if (studioStatus?.mode !== 'offline' || offlineAnnounced.current) return
+    offlineAnnounced.current = true
+    toast(t('desktop.offline.toast', { date: formatSavedAt(studioStatus.copy?.savedAt, locale) }), 'info')
+  }, [studioStatus, t, toast, locale])
   // Top-of-app banner suppressing — opt-in per session only. We deliberately
   // do NOT persist this to localStorage: an outdated Helper is a fix-it-now
   // problem that should remind the user every fresh Studio load.
@@ -255,7 +265,7 @@ export function App() {
               }
               >
               <span className={`status-dot ${helperCompat === 'outdated' ? 'outdated' : 'connected'}`} />
-              <span className="connection-status-label">{t('common.helper')}</span>
+              <span className="connection-status-label">{helperLabel}</span>
             </button>
           ) : (
             <button
@@ -266,7 +276,7 @@ export function App() {
               title={IS_DESKTOP_SHELL ? t('desktop.header.tooltip') : t('header.helper.setup')}
             >
               <span className="status-dot disconnected" />
-              <span className="connection-status-label">{t('common.helper')}</span>
+              <span className="connection-status-label">{helperLabel}</span>
             </button>
           )}
         </div>

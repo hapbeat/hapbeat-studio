@@ -4,6 +4,7 @@ import {
   desktopApi,
   useDesktopUi,
   type DesktopHelperStatus,
+  type DesktopStudioStatus,
   type DesktopUpdateResult,
 } from '@/config/desktopShell'
 import type { HelperCompat } from '@/config/helperCompat'
@@ -41,15 +42,41 @@ export function useDesktopHelperStatus(onUnrecoverable?: () => void): DesktopHel
   return status
 }
 
+/** Online page or the app's saved copy (null in a browser or an app without it). */
+export function useDesktopStudioStatus(): DesktopStudioStatus | null {
+  const [status, setStatus] = useState<DesktopStudioStatus | null>(null)
+  useEffect(() => {
+    const studio = desktopApi()?.studio
+    if (!studio) return
+    let alive = true
+    const apply = (next: DesktopStudioStatus) => { if (alive) setStatus(next) }
+    void studio.status().then(apply).catch(() => { /* app without the API */ })
+    const unsubscribe = studio.onStatus(apply)
+    return () => {
+      alive = false
+      unsubscribe()
+    }
+  }, [])
+  return status
+}
+
+export function formatSavedAt(savedAt: string | null | undefined, locale: string): string {
+  if (!savedAt) return '-'
+  const date = new Date(savedAt)
+  return Number.isNaN(date.getTime())
+    ? '-'
+    : date.toLocaleString(locale === 'ja' ? 'ja-JP' : 'en-US', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
 type Translate = ReturnType<typeof useI18n>['t']
 
-function helperStateText(status: DesktopHelperStatus | null, t: Translate): string {
+function helperStateText(status: DesktopHelperStatus | null, t: Translate, externalVersion: string | null): string {
   if (!status) return desktopApi() ? t('desktop.helper.state.checking') : t('desktop.helper.state.browser')
   switch (status.state) {
     case 'running':
       return t('desktop.helper.state.running', { version: status.version ?? '?' })
     case 'external':
-      return t('desktop.helper.state.external')
+      return t('desktop.helper.state.external', { version: externalVersion ?? '?' })
     case 'starting':
       return t('desktop.helper.state.starting')
     case 'crashed':
@@ -90,8 +117,9 @@ interface DesktopAppModalProps {
  * inside the app (the helper is built in, so there is nothing to install).
  */
 export function DesktopAppModal({ open, onClose, helperStatus, helperCompat }: DesktopAppModalProps) {
-  const { t } = useI18n()
-  const { isConnected } = useHelperConnection()
+  const { t, locale } = useI18n()
+  const { isConnected, helperVersion } = useHelperConnection()
+  const studioStatus = useDesktopStudioStatus()
   const fullUi = useDesktopUi((s) => s.fullUi)
   const setFullUi = useDesktopUi((s) => s.setFullUi)
   const [appVersion, setAppVersion] = useState<string | null>(null)
@@ -166,7 +194,7 @@ export function DesktopAppModal({ open, onClose, helperStatus, helperCompat }: D
         <div className="helper-modal-body">
           <section className="helper-modal-section">
             <h3 className="helper-modal-section-title">{t('desktop.helper.title')}</h3>
-            <p className="desktop-app-status-line">{helperStateText(helperStatus, t)}</p>
+            <p className="desktop-app-status-line">{helperStateText(helperStatus, t, helperVersion)}</p>
             <p className="desktop-app-status-line desktop-app-status-line--muted">
               {isConnected ? t('desktop.helper.connected') : t('desktop.helper.disconnected')}
             </p>
@@ -193,8 +221,38 @@ export function DesktopAppModal({ open, onClose, helperStatus, helperCompat }: D
                 {t('desktop.helper.logs')}
               </button>
             </div>
+            {/* Both installed: the app uses the one already running (see hapbeat-studio-desktop helper.js). */}
+            {helperStatus?.state === 'external' && (
+              <p className="helper-modal-section-desc">{t('desktop.helper.externalHint')}</p>
+            )}
             <p className="helper-modal-section-desc">{t('desktop.helper.firewall')}</p>
           </section>
+
+          {studioStatus && (
+            <section className="helper-modal-section">
+              <h3 className="helper-modal-section-title">{t('desktop.studio.title')}</h3>
+              <p className="desktop-app-status-line">
+                {studioStatus.mode === 'offline'
+                  ? t('desktop.studio.offline', { date: formatSavedAt(studioStatus.copy?.savedAt, locale) })
+                  : t('desktop.studio.online')}
+              </p>
+              <p className="desktop-app-status-line desktop-app-status-line--muted">
+                {studioStatus.copy
+                  ? t('desktop.studio.saved', { date: formatSavedAt(studioStatus.copy.savedAt, locale) })
+                  : t('desktop.studio.notSaved')}
+              </p>
+              {studioStatus.mode === 'offline' && (
+                <>
+                  <p className="helper-modal-section-desc">{t('desktop.studio.offlineDesc')}</p>
+                  <div className="desktop-app-actions">
+                    <button type="button" className="form-button-secondary" onClick={() => window.location.reload()}>
+                      {t('desktop.studio.reload')}
+                    </button>
+                  </div>
+                </>
+              )}
+            </section>
+          )}
 
           <DiscoveryRecoverySection />
 

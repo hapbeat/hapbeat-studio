@@ -27,6 +27,14 @@ export interface DesktopUpdateResult {
   error?: string
 }
 
+/** Where the app's Studio page came from (apiVersion 3). */
+export interface DesktopStudioStatus {
+  /** 'offline': no network answered, so the page is the app's saved copy of Studio. */
+  mode: 'online' | 'offline'
+  /** The copy kept for offline use: saved after an online launch, or shipped in the installer. */
+  copy: { id: string; savedAt: string | null; source: 'saved' | 'bundled' } | null
+}
+
 export interface HapbeatDesktopApi {
   shell: 'electron'
   /** Raised by the app when this API changes; check it before using calls added later. */
@@ -36,12 +44,17 @@ export interface HapbeatDesktopApi {
    * without a picker: PC sound → Hapbeat (`systemAudioCapture`).
    */
   systemAudio?: boolean
-  getInfo(): Promise<{ appVersion: string; platform: string; helper: DesktopHelperStatus }>
+  getInfo(): Promise<{ appVersion: string; platform: string; helper: DesktopHelperStatus; studio?: DesktopStudioStatus }>
   helper: {
     status(): Promise<DesktopHelperStatus>
     restart(): Promise<DesktopHelperStatus>
     openLogFolder(): Promise<string>
     onStatus(callback: (status: DesktopHelperStatus) => void): () => void
+  }
+  /** (apiVersion 3) Online page or the saved copy; absent in older apps. */
+  studio?: {
+    status(): Promise<DesktopStudioStatus>
+    onStatus(callback: (status: DesktopStudioStatus) => void): () => void
   }
   checkForUpdates(): Promise<DesktopUpdateResult>
 }
