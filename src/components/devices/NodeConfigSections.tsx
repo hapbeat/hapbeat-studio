@@ -5603,6 +5603,8 @@ export interface PwmStatusReadout {
   vbus_mv?: number
   /** Motor current estimate from DRV8850 VPROPI (high side only — under-reads). */
   motor_ma?: number
+  /** Highest VPROPI reading since the previous pwm_status (2 ms samples). */
+  motor_ma_peak?: number
 }
 
 /** Magnitude used by 逆転/正転 when the slider currently sits at 0. */
@@ -6345,7 +6347,9 @@ export function BandWlV4PwmSection({
             />
             <Row
               label={t('node.pwm.v5MotorCurrent')}
-              value={status?.motor_ma != null ? `${status.motor_ma} mA` : undefined}
+              value={status?.motor_ma != null
+                ? `${status.motor_ma} mA（${t('node.pwm.v5PeakSince')} ${status.motor_ma_peak ?? '—'} mA）`
+                : undefined}
             />
             <Row
               label={t('node.pwm.v5DutyCap')}

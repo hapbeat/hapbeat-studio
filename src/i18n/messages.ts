@@ -1044,6 +1044,7 @@ export const messages = defineMessages({
   'node.pwm.v5Override': { ja: '固定', en: 'override' },
   'node.pwm.v5Supply': { ja: '電源', en: 'Supply' },
   'node.pwm.v5VsysMin': { ja: '前回の更新以降の最低', en: 'min since last refresh' },
+  'node.pwm.v5PeakSince': { ja: '前回の更新以降のピーク', en: 'peak since last refresh' },
   'node.pwm.v5MotorCurrent': { ja: 'モーター電流（推定）', en: 'Motor current (est.)' },
   'node.pwm.v5DutyCap': { ja: 'duty 上限', en: 'Duty cap' },
   'node.pwm.v5Limiter': { ja: '電源リミッタ', en: 'Supply limiter' },

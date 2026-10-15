@@ -516,6 +516,7 @@ export function DeviceDetail() {
           vsys_min_mv: p.vsys_min_mv as number | undefined,
           vbus_mv: p.vbus_mv as number | undefined,
           motor_ma: p.motor_ma as number | undefined,
+          motor_ma_peak: p.motor_ma_peak as number | undefined,
         })
       }
     } else if (t === 'pwm_probe_result') {
