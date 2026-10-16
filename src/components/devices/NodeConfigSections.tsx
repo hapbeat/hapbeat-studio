@@ -5597,6 +5597,8 @@ export interface PwmStatusReadout {
   vsys_limit_q15?: number
   overcurrent?: boolean
   overcurrent_events?: number
+  /** Fast (2 ms) current-limit reductions (10 ms VPROPI average > 3 A). */
+  current_limit_events?: number
   vsys_mv?: number
   /** Lowest VSYS since the previous pwm_status (2 ms sag tracker). */
   vsys_min_mv?: number
@@ -6364,7 +6366,7 @@ export function BandWlV4PwmSection({
             <Row
               label={t('node.pwm.v5Overcurrent')}
               value={status?.overcurrent != null
-                ? `${status.overcurrent ? t('node.pwm.running') : t('node.pwm.stopped')} / ${status.overcurrent_events ?? 0}`
+                ? `${status.overcurrent ? t('node.pwm.running') : t('node.pwm.stopped')} / ${status.overcurrent_events ?? 0}（${t('node.pwm.v5CurrentLimit')} ${status.current_limit_events ?? 0}）`
                 : undefined}
             />
           </>

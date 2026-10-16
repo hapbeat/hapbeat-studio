@@ -1049,6 +1049,7 @@ export const messages = defineMessages({
   'node.pwm.v5DutyCap': { ja: 'duty 上限', en: 'Duty cap' },
   'node.pwm.v5Limiter': { ja: '電源リミッタ', en: 'Supply limiter' },
   'node.pwm.v5Overcurrent': { ja: '過電流 / 回数', en: 'Overcurrent / events' },
+  'node.pwm.v5CurrentLimit': { ja: '電流制限', en: 'current limit' },
   'node.pwm.duration': { ja: '長さ', en: 'Duration' },
   'node.pwm.volume': { ja: '音量', en: 'Volume' },
   'node.pwm.level': { ja: 'レベル', en: 'Level' },
