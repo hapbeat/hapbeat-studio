@@ -45,13 +45,6 @@ import {
   type HierarchySelection,
 } from '@/utils/firmwareHierarchy'
 import { chipIdForBoard, validateOtaImage, type OtaValidationResult } from '@/utils/otaImageValidation'
-import {
-  needsStreamV2Warning,
-  STREAM_V2_FIRMWARE_MIN,
-  STREAM_V2_UNSUPPORTED_SDKS,
-  streamV2MinimumLines,
-} from '@/utils/streamV2Compat'
-import { readAppDescVersion } from '@/utils/espAppDesc'
 import { DriverHelpLinks } from './DriverHelpLinks'
 
 const ROLE_ORDER: NodeRole[] = ['receiver', 'sensor', 'broker', 'transmitter']
@@ -609,46 +602,27 @@ export function FirmwareSubTab({
   }, [localHandle])
 
   /**
-   * Pre-flight: a stream-v2 image (firmware ≥ 0.5.0) silences streamed haptics
-   * from apps on pre-v2 SDKs. Confirm before writing it onto a target that
-   * runs pre-v2 or unknown firmware. A local .bin is judged by the version in
-   * its app descriptor; images without one (older builds) are not judged.
+   * Pre-flight: confirm only when the user deliberately picked an archive
+   * (older) library version. The latest version is what we recommend, so
+   * writing it never asks — a confirm on the recommended choice reads as
+   * "this is wrong" (user 2026-10-16).
    */
-  const checkStreamV2Compat = useCallback(async (
-    currentFws: Array<string | null | undefined>,
-  ): Promise<boolean> => {
-    let targetFw: string | null | undefined
-    if (source === 'library') {
-      if (!selectedEntry) return true
-      targetFw = selectedEntry.fwVersion
-    } else {
-      // A read failure here is reported by the flash path's own read below.
-      targetFw = await readLocalRaw()
-        .then((raw) => readAppDescVersion(raw.bytes))
-        .catch(() => null)
-    }
-    if (!needsStreamV2Warning(targetFw, currentFws)) return true
+  const checkArchiveSelection = useCallback(async (): Promise<boolean> => {
+    if (source !== 'library' || !selectedEntry || !selectedVersionFw) return true
+    const latestFw = baseEntry?.versions?.[0]?.fwVersion
     const ok = await ask({
-      title: t('firmware.streamV2Title'),
-      message: t('firmware.streamV2Message', {
-        version: normalizeVersion(targetFw),
-        min: STREAM_V2_FIRMWARE_MIN,
-        minimums: streamV2MinimumLines(),
-        unsupported: STREAM_V2_UNSUPPORTED_SDKS.join(', '),
+      title: t('firmware.archiveTitle'),
+      message: t('firmware.archiveMessage', {
+        version: libraryVersionLabel(selectedVersionFw),
+        latest: latestFw ? libraryVersionLabel(latestFw) : '—',
       }),
-      confirmLabel: t('firmware.streamV2Confirm'),
+      confirmLabel: t('firmware.archiveConfirm'),
       cancelLabel: t('common.cancel'),
       danger: true,
     })
-    if (!ok) {
-      pushLog(
-        'firmware',
-        `flash aborted — stream v2 compatibility (fw=${targetFw}, `
-        + `targets=[${currentFws.map((fw) => fw ?? '?').join(', ')}])`,
-      )
-    }
+    if (!ok) pushLog('firmware', `flash aborted — archive version ${selectedVersionFw} (env=${selectedEntry.env})`)
     return ok
-  }, [source, selectedEntry, readLocalRaw, ask, pushLog, t])
+  }, [source, selectedEntry, selectedVersionFw, baseEntry, ask, pushLog, t])
 
   const readSelectedBin = useCallback(async (): Promise<{
     bytes: Uint8Array
@@ -870,9 +844,7 @@ export function FirmwareSubTab({
     const pwmForIp = (ip: string): boolean =>
       ip === device.ipAddress ? knownPwm : !!infoCache[ip]?.haptic_pwm
     if (!(await checkHapticOutputMatch(targets.map(pwmForIp)))) return
-    const fwForIp = (ip: string): string | undefined =>
-      infoCache[ip]?.fw ?? devices.find((d) => d.ipAddress === ip)?.firmwareVersion
-    if (!(await checkStreamV2Compat(targets.map(fwForIp)))) return
+    if (!(await checkArchiveSelection())) return
 
     otaClearResult(device.ipAddress)
     let bin: Awaited<ReturnType<typeof readSelectedBin>>
@@ -1009,7 +981,7 @@ export function FirmwareSubTab({
       }
     }
     if (!(await checkHapticOutputMatch(serialTargets.map((e) => !!e.info?.haptic_pwm)))) return
-    if (!(await checkStreamV2Compat(serialTargets.map((e) => e.info?.fw)))) return
+    if (!(await checkArchiveSelection())) return
     let plan: Awaited<ReturnType<typeof readSelectedRegions>>
     try {
       plan = await readSelectedRegions()
