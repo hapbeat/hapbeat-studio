@@ -127,7 +127,7 @@ export function useSimpleUi(): boolean {
 }
 
 /** Top tabs of the simple layout: Kit, UI (display) and Manage (devices). */
-export const SIMPLE_TABS: readonly string[] = ['kit', 'devices'] // TEMP update test (2026-10-18): UI tab hidden in the app; revert
+export const SIMPLE_TABS: readonly string[] = ['kit', 'display', 'devices']
 
 export function visibleTabs<T extends string>(all: readonly T[], simple: boolean): T[] {
   return simple ? all.filter((tab) => SIMPLE_TABS.includes(tab)) : [...all]
