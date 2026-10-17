@@ -7,6 +7,7 @@ import {
   openConfigConnection,
   pickConfigPort,
   releaseSerialPort,
+  resetNativeUsbIntoApp,
   type SerialConfigConn,
 } from '@/utils/serialConfig'
 import { eraseFlash as eraseFlashImpl, flashRegions, type FlashProgress } from '@/utils/serialFlasher'
@@ -627,13 +628,25 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       // needs ~1 s to reach its loop, so a single 1 s shot is too eager
       // and mislabels a flashed device as "未書込". 3 × 1.2 s (~3.6 s)
       // still fails fast enough for a genuinely blank chip → Step 2.
-      let info: Record<string, unknown> | null = null
-      for (let attempt = 0; attempt < 3 && info === null; attempt++) {
-        try {
-          info = await c.send({ cmd: 'get_info' }, { timeoutMs: 1200 })
-        } catch {
-          if (attempt < 2) await new Promise((r) => setTimeout(r, 200))
+      const askInfo = async (): Promise<Record<string, unknown> | null> => {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            return await c.send({ cmd: 'get_info' }, { timeoutMs: 1200 })
+          } catch {
+            if (attempt < 2) await new Promise((r) => setTimeout(r, 200))
+          }
         }
+        return null
+      }
+      let info = await askInfo()
+      // A native-USB board (S3) can sit in the ROM bootloader, e.g. right
+      // after a flash whose reset did not take — it then shows as "未書込?"
+      // although the firmware is fine. Reboot it into the app once and ask
+      // again (the firmware answers ~1.2 s after a reset).
+      if (info === null && await resetNativeUsbIntoApp(port, log)) {
+        setProbe('connecting', 'デバイスを再起動して確認中…')
+        await new Promise((r) => setTimeout(r, 1500))
+        info = await askInfo()
       }
       if (info === null) throw new Error('get_info no response after retries')
       // get_info answered → publish conn + mode atomically.
