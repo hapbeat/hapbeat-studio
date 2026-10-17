@@ -684,6 +684,21 @@ const FIRMWARE_REPO_ROOTS: FirmwareRepoRoot[] = FIRMWARE_REPO_DIRS.map(({ repo, 
   dirs: FIRMWARE_BASES.map((base) => resolve(__dirname, `${base}/${dir}`)),
 }))
 
+/**
+ * `build.json` next to index.html: the build id a page compares with the one it runs,
+ * to offer a reload when a newer Studio is deployed (src/hooks/useStudioUpdate.ts).
+ */
+function buildInfoPlugin(meta: { sha: string; date: string }, version: string): Plugin {
+  return {
+    name: 'hapbeat-build-info',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'build.json', source: `${JSON.stringify({ sha: meta.sha, date: meta.date, version })}
+` })
+    },
+  }
+}
+
 export default defineConfig(() => {
   const meta = buildMeta()
   // Expose as VITE_-prefixed env so `import.meta.env.VITE_BUILD_*`
@@ -700,7 +715,7 @@ export default defineConfig(() => {
   const base = process.env.STUDIO_BASE || '/'
   return {
     base,
-    plugins: [react(), firmwareDevPlugin(FIRMWARE_BUILD_REPOS, FIRMWARE_REPO_ROOTS)],
+    plugins: [react(), firmwareDevPlugin(FIRMWARE_BUILD_REPOS, FIRMWARE_REPO_ROOTS), buildInfoPlugin(meta, appVersion())],
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src'),

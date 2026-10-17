@@ -520,6 +520,8 @@ export const messages = defineMessages({
   'helper.modal.uninstall.title': { ja: '完全アンインストール', en: 'Uninstall' },
   'helper.modal.uninstall.desc': { ja: 'pipx 経由で導入している場合に Helper パッケージごと削除します。', en: 'Removes the Helper package when installed with pipx.' },
   'helper.modal.version.desc': { ja: '新しい版で不具合が出た場合は、旧バージョンに切り替えて作業を続けられます（各版はマイナー単位で固定 URL に残ります）。', en: 'If a new release causes a problem, switch to an earlier version and continue working. Each minor version remains available at a fixed URL.' },
+  'update.studio.available': { ja: 'Studio の新しい版があります', en: 'A new version of Studio is available' },
+  'update.studio.reload': { ja: '再読み込みして更新', en: 'Reload to update' },
   'desktop.modal.aria': { ja: 'Hapbeat Studio アプリの設定', en: 'Hapbeat Studio app settings' },
   'desktop.modal.title': { ja: 'Hapbeat Studio アプリ', en: 'Hapbeat Studio app' },
   'desktop.header.label': { ja: '接続', en: 'Connection' },
