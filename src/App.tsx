@@ -95,9 +95,9 @@ export function App() {
   const loadLibrary = useLibraryStore((s) => s.loadLibrary)
   useEffect(() => { void loadLibrary() }, [loadLibrary])
   // Only the Kit tab needs the work folder (Editor and Scene open their own
-  // folders; UI and Manage need none), so its modal shows there. "Later"
-  // hides it for this page load; the Clips list keeps its own prompt.
-  const [workFolderModalDismissed, setWorkFolderModalDismissed] = useState(false)
+  // folders; UI and Manage need none), so its modal covers the tab area below
+  // the header. The header stays usable for switching to another tab.
+  const tabContentRef = useRef<HTMLElement>(null)
 
   // Track which tabs the user has visited at least once. We mount each
   // tab on first visit and keep it mounted after — see PersistentTab.
@@ -327,9 +327,7 @@ export function App() {
           >×</button>
         </div>
       )}
-      {activeTab === 'kit' && !workFolderModalDismissed && (
-        <WorkFolderPrompt variant="modal" onDismiss={() => setWorkFolderModalDismissed(true)} />
-      )}
+      {activeTab === 'kit' && <WorkFolderPrompt areaRef={tabContentRef} />}
       {IS_DESKTOP_SHELL ? (
         <DesktopAppModal
           open={desktopPanelOpen}
@@ -352,7 +350,7 @@ export function App() {
           />
         </>
       )}
-      <main className={`tab-content ${activeTab === 'editor' || activeTab === 'scene' ? 'tab-content-editor' : ''}`}>
+      <main ref={tabContentRef} className={`tab-content ${activeTab === 'editor' || activeTab === 'scene' ? 'tab-content-editor' : ''}`}>
         <PersistentTab active={activeTab === 'editor'} visited={visitedTabs.has('editor')}>
           <WaveformEditor active={activeTab === 'editor'} />
         </PersistentTab>

@@ -21,7 +21,6 @@ import { ClipCard } from './shared/ClipCard'
 import { ClipEditModal } from './shared/ClipEditModal'
 import { DevicePill } from '@/components/devices/DevicePill'
 import { arrowKeyOwner, stepIndex } from '@/utils/cardListKeys'
-import { WorkFolderPrompt } from '@/components/common/WorkFolderPrompt'
 import type { ImportProgressKind } from '@/stores/libraryStore'
 import type { MessageId } from '@/i18n/messages'
 import './KitManager.css'
@@ -1036,7 +1035,7 @@ function ClipsPanel() {
           <h3>Clips</h3>
         </div>
         <div className="library-list">
-          <WorkFolderPrompt variant="panel" />
+          <div className="library-empty">{t('workFolder.panelHint')}</div>
         </div>
       </div>
     )

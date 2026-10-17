@@ -1,17 +1,11 @@
-/* Work folder guide (WorkFolderPrompt.tsx).
-   `modal`: centred over the Kit tab, so it never pushes page content.
-   `panel`: in place in the Clips list. */
-
-.work-folder-prompt {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  color: var(--text-primary);
-}
+/* Work folder modal (WorkFolderPrompt.tsx). The backdrop starts at the tab
+   area's top edge (inline `top`), so the header stays bright and clickable. */
 
 .work-folder-backdrop {
   position: fixed;
-  inset: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: 190; /* below ConfirmDialog (200) and toasts */
   background: rgba(0, 0, 0, 0.6);
   display: flex;
@@ -20,28 +14,28 @@
   padding: 16px;
 }
 
-.work-folder-prompt--modal {
+.work-folder-prompt {
   width: 100%;
   max-width: 560px;
+  display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 18px;
-  padding: 32px 32px 20px;
+  padding: 32px;
   text-align: center;
+  color: var(--text-primary);
   background: var(--bg-secondary);
   border: 1px solid var(--accent);
   border-radius: var(--radius-lg);
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
 }
 
-.work-folder-prompt--modal.work-folder-prompt--unsupported { border-color: var(--error); }
+.work-folder-prompt--unsupported { border-color: var(--error); }
 
 .work-folder-icon {
-  flex-shrink: 0;
-  font-size: 32px;
+  font-size: 56px;
   line-height: 1;
 }
-
-.work-folder-prompt--modal .work-folder-icon { font-size: 56px; }
 
 .work-folder-text {
   display: flex;
@@ -50,19 +44,16 @@
 }
 
 .work-folder-title {
-  font-size: 18px;
+  font-size: 22px;
   line-height: 1.35;
 }
 
-.work-folder-prompt--modal .work-folder-title { font-size: 22px; }
-
 .work-folder-body {
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.6;
+  text-align: left;
   color: var(--text-secondary);
 }
-
-.work-folder-prompt--modal .work-folder-body { font-size: 15px; text-align: left; }
 
 .work-folder-actions {
   display: flex;
@@ -86,11 +77,11 @@
   text-overflow: ellipsis;
 }
 
-/* Fixed width so the busy label ("…準備しています") does not resize the button. */
-.work-folder-btn.primary { min-width: 280px; }
-.work-folder-prompt--modal .work-folder-btn.primary { min-height: 52px; font-size: 18px; }
-
+/* Fixed width so the busy label does not resize the button. */
 .work-folder-btn.primary {
+  min-width: 280px;
+  min-height: 52px;
+  font-size: 18px;
   background: var(--accent);
   border: 1px solid var(--accent-light);
   color: #fff;
@@ -109,40 +100,10 @@
 
 .work-folder-btn:disabled { opacity: 0.6; cursor: progress; }
 
-.work-folder-btn:focus-visible,
-.work-folder-later:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
-
-.work-folder-later {
-  align-self: center;
-  padding: 6px 12px;
-  font-family: inherit;
-  font-size: 13px;
-  color: var(--text-secondary);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-}
-
-.work-folder-later:hover:not(:disabled) { color: var(--text-primary); text-decoration: underline; }
-.work-folder-later:disabled { opacity: 0.5; cursor: progress; }
-
-/* In the Clips list: centred where the clips will appear. */
-.work-folder-prompt--panel {
-  flex-direction: column;
-  justify-content: center;
-  gap: 12px;
-  height: 100%;
-  min-height: 220px;
-  padding: 24px 16px;
-  text-align: center;
-}
-
-.work-folder-prompt--panel .work-folder-icon { font-size: 40px; opacity: 0.85; }
-.work-folder-prompt--panel .work-folder-text { max-width: 340px; }
-.work-folder-prompt--panel .work-folder-body { font-size: 15px; }
+.work-folder-btn:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
 
 @media (max-width: 760px) {
-  .work-folder-prompt--modal { padding: 24px 18px 16px; }
-  .work-folder-prompt--modal .work-folder-title { font-size: 18px; }
+  .work-folder-prompt { padding: 24px 18px; }
+  .work-folder-title { font-size: 18px; }
   .work-folder-btn.primary { min-width: 0; width: 100%; white-space: normal; }
 }

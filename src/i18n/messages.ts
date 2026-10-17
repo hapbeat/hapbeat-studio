@@ -1541,7 +1541,6 @@ export const messages = defineMessages({
   'workFolder.none.body': { ja: 'パソコン上のフォルダを 1 つ選ぶと、サンプルの振動クリップがそこにコピーされ、Kit タブの一覧から選んで試せるようになります。新しい空のフォルダ（例: ドキュメント内に「Hapbeat」）を作って選ぶのがおすすめです。ブラウザから許可を求められたら許可してください。', en: 'Choose one folder on this computer. Studio copies the sample vibration clips into it, and you can pick and try them from the list in the Kit tab. We recommend making a new empty folder (for example “Hapbeat” in Documents). Allow access if the browser asks.' },
   'workFolder.choose': { ja: '作業フォルダを選ぶ', en: 'Choose work folder' },
   'workFolder.busy': { ja: 'フォルダを準備しています…', en: 'Preparing the folder…' },
-  'workFolder.later': { ja: 'あとで選ぶ', en: 'Later' },
   'workFolder.reconnect.title': { ja: '前回の作業フォルダを開いてください', en: 'Open your work folder again' },
   'workFolder.reconnect.body': { ja: '前回使ったフォルダ「{name}」を開くには、ブラウザの許可が必要です。ボタンを押して許可してください。', en: 'The browser needs your permission to open “{name}”, the folder you used last time. Press the button and allow access.' },
   'workFolder.reconnect.button': { ja: '「{name}」を開く', en: 'Open “{name}”' },
