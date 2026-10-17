@@ -561,7 +561,7 @@ export const messages = defineMessages({
   'desktop.update.dev': { ja: '開発用の起動のため、更新は確認しません。', en: 'Development run: updates are not checked.' },
   'desktop.update.error': { ja: '更新を確認できませんでした。', en: 'Could not check for updates.' },
   'desktop.view.title': { ja: '表示', en: 'Display' },
-  'desktop.view.fullUi': { ja: 'すべての機能を表示する（エディタ・シーンなど）', en: 'Show all features (editor, scene and more)' },
+  'desktop.view.fullUi': { ja: 'すべての機能を表示する（エディタ・シーンのタブ）', en: 'Show all features (the editor and scene tabs)' },
   'desktop.view.fullUiDesc': { ja: '上級者向けの機能です。オフにすると Kit・UI・Manage だけの表示に戻ります。', en: 'For advanced use. Turn it off to show only Kit, UI and Manage.' },
   'manage.systemAudio.start': { ja: 'PC の音を流す', en: 'Send PC sound' },
   'manage.systemAudio.stop': { ja: '止める', en: 'Stop' },

@@ -4,9 +4,9 @@
  * The app shows this same online Studio in its window, so a Studio deploy reaches
  * it without reinstalling. It marks the URL with `?shell=desktop` and its preload
  * adds `window.hapbeatDesktop` (the bundled helper, app updates). Studio then shows
- * the desktop layout: Kit / UI / Manage only, Manage without the bench-only
- * tabs, and the app panel instead of the pipx instructions. "Show all features" in
- * that panel brings back the full Studio.
+ * the desktop layout: the Kit / UI / Manage tabs (each the same as in the browser;
+ * only whole tabs are hidden), and the app panel instead of the pipx instructions.
+ * "Show all features" in that panel brings back the editor and scene tabs.
  */
 import { create } from 'zustand'
 
@@ -129,13 +129,6 @@ export function useSimpleUi(): boolean {
 /** Top tabs of the simple layout: Kit, UI (display) and Manage (devices). */
 export const SIMPLE_TABS: readonly string[] = ['kit', 'display', 'devices']
 
-/** Manage sub-tabs the simple layout leaves out: the bench-only PWM tab. */
-export const SIMPLE_HIDDEN_SUBTABS: ReadonlySet<string> = new Set(['pwm'])
-
 export function visibleTabs<T extends string>(all: readonly T[], simple: boolean): T[] {
   return simple ? all.filter((tab) => SIMPLE_TABS.includes(tab)) : [...all]
-}
-
-export function visibleSubTabs<T extends string>(all: readonly T[], simple: boolean): T[] {
-  return simple ? all.filter((tab) => !SIMPLE_HIDDEN_SUBTABS.has(tab)) : [...all]
 }
