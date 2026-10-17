@@ -167,6 +167,33 @@ async function resetClassicEsp32IntoApp(
 }
 
 /**
+ * Last resort for a native USB-CDC board (S3 / C3) that does not answer
+ * get_info: pulse EN through the USB-Serial-JTAG's RTS with DTR low (= run
+ * the app), e.g. a board left in the ROM bootloader after a flash whose
+ * post-flash reset did not take. The open itself stays untouched (see
+ * resetClassicEsp32IntoApp), so the working path does not change. Returns
+ * false when nothing was done (other bridges, or setSignals unsupported).
+ */
+export async function resetNativeUsbIntoApp(
+  port: SerialPort,
+  onLog?: (line: string) => void,
+): Promise<boolean> {
+  let vid: number | undefined
+  try { vid = port.getInfo().usbVendorId } catch { /* getInfo unavailable */ }
+  if (vid !== NATIVE_USB_VID) return false
+  try {
+    onLog?.('native USB: no get_info reply — resetting into app firmware')
+    await port.setSignals({ dataTerminalReady: false, requestToSend: true })   // EN low (reset)
+    await new Promise((r) => setTimeout(r, 120))
+    await port.setSignals({ dataTerminalReady: false, requestToSend: false })  // EN high → boot app
+    return true
+  } catch (e) {
+    onLog?.(`native USB reset skipped (${(e as Error).message})`)
+    return false
+  }
+}
+
+/**
  * Config baud must match the firmware's `Serial.begin()`, keyed on the USB
  * bridge (not the MCU — the ESP32 UART itself is fine at 921600):
  *   - native USB-CDC (S3 / C3, VID 0x303A): 921600 (baud ignored anyway)

@@ -14,6 +14,8 @@ import { ExternalLinkIcon } from '@/components/common/ExternalLinkIcon'
 import { useToast } from '@/components/common/Toast'
 import { HelperFailureToastListener } from '@/components/common/HelperFailureToastListener'
 import { VersionSwitcher } from '@/components/common/VersionSwitcher'
+import { WorkFolderPrompt } from '@/components/common/WorkFolderPrompt'
+import { useLibraryStore } from '@/stores/libraryStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceSelectionSync } from '@/hooks/useDeviceSelectionSync'
 import { useHelperUpdate, useStudioFrozenNotice } from '@/hooks/useReleaseNotices'
@@ -88,6 +90,15 @@ export function App() {
   const tabsRef = useRef(tabs)
   tabsRef.current = tabs
   const [activeTab, setActiveTab] = useState<Tab>(() => initialTab(tabs))
+
+  // The work folder is restored here, not in the Kit tab, so the work folder
+  // modal knows the folder state as soon as the Kit tab is shown.
+  const loadLibrary = useLibraryStore((s) => s.loadLibrary)
+  useEffect(() => { void loadLibrary() }, [loadLibrary])
+  // Only the Kit tab needs the work folder (Editor and Scene open their own
+  // folders; UI and Manage need none), so its modal covers the tab area below
+  // the header. The header stays usable for switching to another tab.
+  const tabContentRef = useRef<HTMLElement>(null)
 
   // Track which tabs the user has visited at least once. We mount each
   // tab on first visit and keep it mounted after — see PersistentTab.
@@ -319,6 +330,7 @@ export function App() {
           >×</button>
         </div>
       )}
+      {activeTab === 'kit' && <WorkFolderPrompt areaRef={tabContentRef} />}
       {IS_DESKTOP_SHELL ? (
         <DesktopAppModal
           open={desktopPanelOpen}
@@ -341,7 +353,7 @@ export function App() {
           />
         </>
       )}
-      <main className={`tab-content ${activeTab === 'editor' || activeTab === 'scene' ? 'tab-content-editor' : ''}`}>
+      <main ref={tabContentRef} className={`tab-content ${activeTab === 'editor' || activeTab === 'scene' ? 'tab-content-editor' : ''}`}>
         <PersistentTab active={activeTab === 'editor'} visited={visitedTabs.has('editor')}>
           <WaveformEditor active={activeTab === 'editor'} />
         </PersistentTab>

@@ -20,13 +20,20 @@ import {
 import type { NodeTransport } from '@/types/manager'
 
 // デバイスを切り替えるたびに manifest を取り直さないようモジュール単位で
-// キャッシュする。Firmware タブの「⟳ 更新」は従来どおり自前で読み直すので、
-// 明示的な再取得の導線はそちらが持つ。
+// キャッシュする。Firmware タブの「⟳ 更新」が読み直した一覧を
+// setFirmwareLibraryCache で渡し、表示中の useFirmwareUpdate も更新する。
 let cache: Promise<FirmwareLibraryEntry[]> | null = null
+const cacheListeners = new Set<() => void>()
 
 function loadLibraryCached(): Promise<FirmwareLibraryEntry[]> {
   if (!cache) cache = listFirmwareBuilds().catch(() => [] as FirmwareLibraryEntry[])
   return cache
+}
+
+/** 読み直した一覧でキャッシュを差し替え、表示中の判定にも反映する。 */
+export function setFirmwareLibraryCache(entries: FirmwareLibraryEntry[]): void {
+  cache = Promise.resolve(entries)
+  for (const listener of cacheListeners) listener()
 }
 
 /**
@@ -79,8 +86,13 @@ export function useFirmwareUpdate(
 
   useEffect(() => {
     let cancelled = false
-    loadLibraryCached().then((e) => { if (!cancelled) setEntries(e) })
-    return () => { cancelled = true }
+    const load = () => { loadLibraryCached().then((e) => { if (!cancelled) setEntries(e) }) }
+    load()
+    cacheListeners.add(load)
+    return () => {
+      cancelled = true
+      cacheListeners.delete(load)
+    }
   }, [])
 
   if (!entries || !currentFw) return null

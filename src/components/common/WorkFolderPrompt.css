@@ -1,0 +1,109 @@
+/* Work folder modal (WorkFolderPrompt.tsx). The backdrop starts at the tab
+   area's top edge (inline `top`), so the header stays bright and clickable. */
+
+.work-folder-backdrop {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 190; /* below ConfirmDialog (200) and toasts */
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.work-folder-prompt {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 32px;
+  text-align: center;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+}
+
+.work-folder-prompt--unsupported { border-color: var(--error); }
+
+.work-folder-icon {
+  font-size: 56px;
+  line-height: 1;
+}
+
+.work-folder-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.work-folder-title {
+  font-size: 22px;
+  line-height: 1.35;
+}
+
+.work-folder-body {
+  font-size: 15px;
+  line-height: 1.6;
+  text-align: left;
+  color: var(--text-secondary);
+}
+
+.work-folder-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.work-folder-btn {
+  min-height: 44px;
+  padding: 10px 22px;
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Fixed width so the busy label does not resize the button. */
+.work-folder-btn.primary {
+  min-width: 280px;
+  min-height: 52px;
+  font-size: 18px;
+  background: var(--accent);
+  border: 1px solid var(--accent-light);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(124, 92, 191, 0.45);
+}
+
+.work-folder-btn.primary:hover:not(:disabled) { background: var(--accent-light); color: #111; }
+
+.work-folder-btn.secondary {
+  background: transparent;
+  border: 1px solid var(--border-light);
+  color: var(--text-primary);
+}
+
+.work-folder-btn.secondary:hover:not(:disabled) { background: var(--bg-hover); }
+
+.work-folder-btn:disabled { opacity: 0.6; cursor: progress; }
+
+.work-folder-btn:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
+
+@media (max-width: 760px) {
+  .work-folder-prompt { padding: 24px 18px; }
+  .work-folder-title { font-size: 18px; }
+  .work-folder-btn.primary { min-width: 0; width: 100%; white-space: normal; }
+}

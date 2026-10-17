@@ -21,6 +21,8 @@ import { ClipCard } from './shared/ClipCard'
 import { ClipEditModal } from './shared/ClipEditModal'
 import { DevicePill } from '@/components/devices/DevicePill'
 import { arrowKeyOwner, stepIndex } from '@/utils/cardListKeys'
+import type { ImportProgressKind } from '@/stores/libraryStore'
+import type { MessageId } from '@/i18n/messages'
 import './KitManager.css'
 
 const DND_TYPE_CLIP = 'application/x-hapbeat-clip'
@@ -72,16 +74,14 @@ function useResizeHandle(dir: 'horizontal' | 'vertical', initialPct: number) {
 export function KitManager() {
   const { t } = useI18n()
   const isLoading = useLibraryStore((s) => s.isLoading)
-  const loadLibrary = useLibraryStore((s) => s.loadLibrary)
   const viewMode = useLibraryStore((s) => s.viewMode)
-  const workDirSupported = useLibraryStore((s) => s.workDirSupported)
 
   // Stacked mode keeps a vertical resize handle so the user can trade library
   // vs kit height. Side mode uses fixed widths — the draggable range was too
   // small to be useful, and fixing removes a whole class of layout bugs.
   const stackedResize = useResizeHandle('vertical', 50)
 
-  useEffect(() => { loadLibrary() }, [loadLibrary])
+  // The library itself is loaded by App at startup (see App.tsx).
 
   // キーボード操作中はマウスカーソル / hover 状態を抑制する。
   // キーボードでカードを選択移動している最中に、別のカードの hover が
@@ -117,11 +117,6 @@ export function KitManager() {
       {isLoading && (
         <div className="kit-loading-badge">
           <span className="kit-loading-spinner" /> {t('kit.loadingLibrary')}
-        </div>
-      )}
-      {!workDirSupported && (
-        <div className="browser-warning">
-          Your browser does not support local folder access. Use <strong>Chrome</strong> or <strong>Edge</strong>.
         </div>
       )}
       <WorkDirBar />
@@ -372,11 +367,15 @@ interface FolderChipProps {
   changeTitle?: string
   clearTitle?: string
   clearLabel?: string    // "×" or custom
+  setToast: string
+  changedToast: string
+  clearedToast: string
 }
 function FolderChip({
   icon, name, onPick, onClear, label,
   setTitle, emptyTitle,
   setLabel, changeTitle, clearTitle, clearLabel = '×',
+  setToast, changedToast, clearedToast,
 }: FolderChipProps) {
   const { toast } = useToast()
   return (
@@ -385,13 +384,13 @@ function FolderChip({
       {name ? (
         <>
           <span className="workdir-path" title={name}>{name}</span>
-          <button className="workdir-icon-btn" onClick={async () => { if (await onPick()) toast(`${label} folder changed`, 'success') }}
+          <button className="workdir-icon-btn" onClick={async () => { if (await onPick()) toast(changedToast, 'success') }}
             title={changeTitle ?? `Change ${label} folder`}>⇄</button>
-          <button className="workdir-icon-btn danger" onClick={async () => { await onClear(); toast(`${label} folder cleared`, 'success') }}
+          <button className="workdir-icon-btn danger" onClick={async () => { await onClear(); toast(clearedToast, 'success') }}
             title={clearTitle ?? `Clear ${label} folder`}>{clearLabel}</button>
         </>
       ) : (
-        <button className="workdir-icon-btn primary" onClick={async () => { if (await onPick()) toast(`${label} folder set`, 'success') }}
+        <button className="workdir-icon-btn primary" onClick={async () => { if (await onPick()) toast(setToast, 'success') }}
           title={emptyTitle ?? `Choose ${label} folder`}>{setLabel ?? `+ ${label}`}</button>
       )}
     </span>
@@ -661,7 +660,14 @@ function flattenTreeInRenderOrder(node: ClipTreeNode): LibraryClip[] {
 // puts "Loading template… 23/43" right where the user is looking.
 // ============================================================
 
-function ImportProgressBanner({ progress }: { progress: { current: number; total: number; label: string } }) {
+const IMPORT_PROGRESS_MESSAGE: Record<ImportProgressKind, MessageId> = {
+  samples: 'kit.progress.samples',
+  folder: 'kit.progress.folder',
+  import: 'kit.progress.import',
+}
+
+function ImportProgressBanner({ progress }: { progress: { current: number; total: number; kind: ImportProgressKind } }) {
+  const { t } = useI18n()
   const pct = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0
   return (
     <div className="library-importing" role="status" aria-live="polite">
@@ -670,7 +676,7 @@ function ImportProgressBanner({ progress }: { progress: { current: number; total
         <span className="import-spinner" aria-hidden="true" />
         {/* Only the (static) label is announced; the per-tick count and bar
             are aria-hidden so a screen reader isn't spammed every file. */}
-        <span className="import-msg">{progress.label} please wait…</span>
+        <span className="import-msg">{t(IMPORT_PROGRESS_MESSAGE[progress.kind])}</span>
         <span className="import-count" aria-hidden="true">{progress.current}/{progress.total}</span>
       </div>
       <div className="import-progress-bar" aria-hidden="true">
@@ -731,6 +737,20 @@ function ClipsPanel() {
   // 別フォルダに移ったときに自動で祖先フォルダを開いて、選択カードが
   // 画面からも見えるようにするため、parent 管理にする。
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set())
+  // A fresh work folder holds only template/ — keep it (and its subfolders)
+  // open so the sample clips are listed right away, not one collapsed folder
+  // row. Clips arrive in steps while a folder loads, so this follows them
+  // until the user opens or closes a folder themselves.
+  const userToggledFolderRef = useRef(false)
+  useEffect(() => {
+    if (userToggledFolderRef.current || clips.length === 0) return
+    const tree = buildClipTree(clips)
+    if (tree.clips.length > 0 || tree.children.size !== 1) return
+    const paths: string[] = []
+    const walk = (node: ClipTreeNode) => node.children.forEach((child) => { paths.push(child.path); walk(child) })
+    walk(tree)
+    setOpenFolders((prev) => paths.every((p) => prev.has(p)) ? prev : new Set([...prev, ...paths]))
+  }, [clips])
   const { playingId, toggle, stop: stopPreview } = useAudioPreview()
   const displayed = filteredClips()
   const editingClip = editingClipId ? clips.find((c) => c.id === editingClipId) ?? null : null
@@ -915,13 +935,13 @@ function ClipsPanel() {
     // Single-file drops are instant — only show the count banner for
     // multi-file batches so the user can track a long paste of N clips.
     const track = arr.length > 1
-    if (track) setImportProgress({ current: 0, total: arr.length, label: 'Importing…' })
+    if (track) setImportProgress({ current: 0, total: arr.length, kind: 'import' })
     let done = 0
     try {
       for (const f of arr) {
         try { await addClipFromFile(f) } catch (e) { console.error(e) }
         done += 1
-        if (track) setImportProgress({ current: done, total: arr.length, label: 'Importing…' })
+        if (track) setImportProgress({ current: done, total: arr.length, kind: 'import' })
       }
     } finally {
       if (track) setImportProgress(null)
@@ -991,11 +1011,11 @@ function ClipsPanel() {
         {childFolders.map((child) => (
           <TreeFolder key={child.path} node={child}
             isOpen={(p) => openFolders.has(p)}
-            toggle={(p) => setOpenFolders((prev) => {
+            toggle={(p) => { userToggledFolderRef.current = true; setOpenFolders((prev) => {
               const next = new Set(prev)
               if (next.has(p)) next.delete(p); else next.add(p)
               return next
-            })}>
+            }) }}>
             {renderTreeNode(child, false)}
           </TreeFolder>
         ))}
@@ -1013,30 +1033,9 @@ function ClipsPanel() {
       <div className="clip-panel">
         <div className="panel-header">
           <h3>Clips</h3>
-          {workDirSupported && (
-            <FolderChip
-              icon="&#x1F4C2;"
-              name={null}
-              onPick={pickWorkDir}
-              onClear={disconnectWorkDir}
-              label="Library"
-              emptyTitle="クリップ本体 (wav) を置くフォルダ。ここから Studio が clips / kits-meta を読み書きする。"
-              setLabel="+ Library"
-            />
-          )}
         </div>
         <div className="library-list">
-          <div className="library-empty workdir-prompt">
-            <div className="workdir-prompt-content">
-              <div className="workdir-prompt-icon">&#x1F4C2;</div>
-              <div className="workdir-prompt-text">
-                {workDirSupported
-                  ? 'Pick a work folder to start. We\'ll copy the built-in clips into it so you can edit anything freely.'
-                  : 'Use Chrome or Edge.'}
-              </div>
-              {workDirSupported && <button className="library-btn primary" onClick={pickWorkDir}>Choose Folder</button>}
-            </div>
-          </div>
+          <div className="library-empty">{t('workFolder.panelHint')}</div>
         </div>
       </div>
     )
@@ -1057,9 +1056,15 @@ function ClipsPanel() {
             name={workDirName}
             onPick={pickWorkDir}
             onClear={disconnectWorkDir}
-            label="Library"
-            emptyTitle="クリップ本体 (wav) を置くフォルダ。ここから Studio が clips / kits-meta を読み書きする。"
-            setLabel="+ Library"
+            label={t('workFolder.chip.label')}
+            setTitle={workDirName ? t('workFolder.chip.title', { name: workDirName }) : undefined}
+            emptyTitle={t('workFolder.choose')}
+            setLabel={`+ ${t('workFolder.chip.label')}`}
+            changeTitle={t('workFolder.chip.change')}
+            clearTitle={t('workFolder.chip.clear')}
+            setToast={t('workFolder.chip.set')}
+            changedToast={t('workFolder.chip.changed')}
+            clearedToast={t('workFolder.chip.cleared')}
           />
         )}
         <div className="panel-header-actions">
@@ -1103,7 +1108,7 @@ function ClipsPanel() {
       <div className="library-list">
         {importProgress && <ImportProgressBanner progress={importProgress} />}
         {displayed.length === 0
-          ? (!importProgress && <div className="library-empty">{clips.length === 0 ? 'Drop files or + Import.' : 'No match.'}</div>)
+          ? (!importProgress && <div className="library-empty">{clips.length === 0 ? t('kit.clipsEmpty') : t('kit.clipsNoMatch')}</div>)
           : listMode === 'flat'
             ? displayed.map((c) => renderClipRow(c))
             : renderTreeNode(buildClipTree(displayed), true)
@@ -1576,8 +1581,14 @@ function KitEditor() {
             onPick={pickKitDir}
             onClear={disconnectKitDir}
             label="Kit"
-            emptyTitle="Kit の書き出し先フォルダ。未指定なら Library フォルダ直下に <kitId>/ を作る。Unity Assets 等を選ぶと直接そこに書き出せる。"
+            setTitle={kitDirName ? t('kitFolder.chip.title', { name: kitDirName }) : undefined}
+            emptyTitle={t('kitFolder.chip.empty')}
             setLabel="+ Kit"
+            changeTitle={t('kitFolder.chip.change')}
+            clearTitle={t('kitFolder.chip.clear')}
+            setToast={t('kitFolder.chip.set')}
+            changedToast={t('kitFolder.chip.changed')}
+            clearedToast={t('kitFolder.chip.cleared')}
           />
         )}
         <input type="text" className="kit-create-input" placeholder={placeholderName.current}
@@ -1601,7 +1612,7 @@ function KitEditor() {
         onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = editLocked ? 'none' : 'copy'; if (!editLocked) setDropActive(true) }}
         onDragLeave={() => { setDropActive(false); setDragOverIdx(null) }}>
         {kits.length === 0 ? (
-          <div className="kit-empty">Type a name above and press Enter.</div>
+          <div className="kit-empty">{t('kit.kitsEmpty')}</div>
         ) : kits.map((k) => {
           const isActive = activeKitId === k.id
           const isThisKit = isActive && activeKit
@@ -1856,7 +1867,7 @@ function KitEditor() {
 
                   <div className="kit-events-list">
                     {sortedEvents.length === 0
-                      ? <div className="kit-events-empty kit-drop-zone">Drag clips here.</div>
+                      ? <div className="kit-events-empty kit-drop-zone">{t('kit.eventsEmpty')}</div>
                       // sortedEvents は keyboard navigation と同じ参照を使い、
                       // 視覚順と keyboard 順を必ず一致させる。
                       : sortedEvents.map((ev, i) => (

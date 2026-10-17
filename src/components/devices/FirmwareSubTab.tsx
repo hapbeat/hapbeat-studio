@@ -32,6 +32,7 @@ import {
   type FirmwareLibraryEntry,
   type FirmwareRegion,
 } from '@/utils/firmwareLibrary'
+import { setFirmwareLibraryCache } from '@/utils/firmwareUpdate'
 import {
   entriesForSelection,
   entryBoard,
@@ -323,6 +324,7 @@ export function FirmwareSubTab({
       ...baseEntry,
       // Dev: a release chosen under a local build is flagged as a release.
       source: v.local || !baseEntry.source ? baseEntry.source : 'release' as const,
+      origin: v.origin,
       fwVersion: v.fwVersion,
       publishedAt: v.publishedAt,
       appOta: v.appOta,
@@ -405,6 +407,8 @@ export function FirmwareSubTab({
     setLibError(null)
     try {
       const raw = await listFirmwareBuilds()
+      // Device cards' "update available" check reads the same list.
+      setFirmwareLibraryCache(raw)
       // Stable display order: by role, then env name.
       const entries = [...raw].sort((a, b) => {
         const ra = ROLE_ORDER.indexOf(entryRole(a))
@@ -1203,6 +1207,7 @@ export function FirmwareSubTab({
                   {selectedEntry.source && (
                     <span className="form-section-sub-inline" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
                       {selectedEntry.source === 'release' ? t('firmware.releaseBuild') : t('firmware.localBuild')}
+                      {selectedEntry.origin && ` · ${selectedEntry.origin}`}
                     </span>
                   )}
                   <span className="form-section-sub-inline" style={{ fontSize: 12 }}>
@@ -1247,6 +1252,7 @@ export function FirmwareSubTab({
                           {libraryVersionLabel(v.fwVersion)}
                            {i === 0 && <span className="firmware-version-chip-latest"> {v.local ? t('firmware.localBuild') : t('firmware.latest')}</span>}
                            {i > 0 && v.archived && <span className="firmware-version-chip-latest"> {t('firmware.localArchive')}</span>}
+                           {v.origin && <span className="firmware-version-chip-latest"> · {v.origin}</span>}
                         </button>
                       )
                     })}

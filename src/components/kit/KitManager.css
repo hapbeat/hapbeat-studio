@@ -68,13 +68,6 @@
 .kit-manager-bottom { min-height: 200px; overflow: hidden; }
 
 /* ---- Browser Warning ---- */
-.browser-warning {
-  padding: 8px 14px; margin-bottom: 6px;
-  background: rgba(244,67,54,0.15); color: #ef9a9a;
-  border: 1px solid rgba(244,67,54,0.3); border-radius: var(--radius);
-  font-size: 17px; text-align: center;
-}
-
 /* ---- Work Dir Bar ---- */
 /* margin-bottom matches kit-manager gap (both 4px) so vertical and
    horizontal spacing between the three bordered boxes is identical. */
@@ -187,10 +180,6 @@
 }
 
 /* ---- Work Dir Prompt ---- */
-.workdir-prompt { flex-direction: column; min-height: 100px; }
-.workdir-prompt-content { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.workdir-prompt-icon { font-size: 26px; opacity: 0.6; }
-.workdir-prompt-text { font-size: 16px; color: var(--text-secondary); text-align: center; line-height: 1.4; max-width: 240px; }
 
 /* ============================================================
    Resize Handle
