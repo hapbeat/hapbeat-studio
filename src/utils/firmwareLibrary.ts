@@ -110,6 +110,9 @@ export interface FirmwareVersionInfo {
   local?: boolean
   /** Dev only: an earlier local build kept under dist/<env>/archive/. */
   archived?: boolean
+  /** Dev only: branch of the firmware git worktree a local build came from
+   *  (absent = the main checkout). */
+  origin?: string
 }
 
 export interface FirmwareLibraryEntry {
@@ -168,6 +171,9 @@ export interface FirmwareLibraryEntry {
   source?: 'live' | 'cache' | 'release'
   /** Epoch ms the cache snapshot was taken (dev `source:"cache"` only). */
   cachedAt?: number
+  /** Dev only: worktree branch of the default local build (absent = the
+   *  main checkout). Mirrors versions[0].origin. */
+  origin?: string
   /**
    * All published versions, newest first (archive support — users can
    * roll back to an older release). The top-level fwVersion/appOta/
@@ -349,7 +355,7 @@ export function mergeLocalWithReleases(
       ...e,
       versions: [
         // The dev list already carries the current build + archived builds.
-        ...(e.versions ?? [{ fwVersion: e.fwVersion ?? '', appOta: e.appOta, fullSerial: e.fullSerial, local: true }]),
+        ...(e.versions ?? [{ fwVersion: e.fwVersion ?? '', appOta: e.appOta, fullSerial: e.fullSerial, local: true, origin: e.origin }]),
         ...rel.versions,
       ],
     }
@@ -543,7 +549,8 @@ async function fetchArtifact(
   if (isProdMode() || artifact?.path.startsWith(`${DEV_RELEASE_BASE}/`)) {
     return fetchArtifactFromManifest(entry, stem)
   }
-  // An archived dev build carries the exact dev-plugin URL that serves it.
+  // A local build other than the main checkout's current one (archived, or
+  // from a firmware worktree) carries the exact dev-plugin URL that serves it.
   if (artifact?.path.startsWith('/firmware-builds/')) {
     return fetchArtifactFromDevUrl(artifact.path, entry.env)
   }
