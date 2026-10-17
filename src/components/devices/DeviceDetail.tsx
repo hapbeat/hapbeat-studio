@@ -180,7 +180,7 @@ const SUBTAB_KEY = 'hapbeat-studio-devices-subtab'
  */
 export function DeviceDetail() {
   const { t } = useI18n()
-  // Desktop app's simple layout: no playback / command test, PWM bench or debug dump.
+  // Desktop app's simple layout: no PWM bench tab or debug dump.
   const simpleUi = useSimpleUi()
   const { devices, lastMessage, send, injectMessage } = useHelperConnection()
   const pushLog = useLogStore((s) => s.push)

@@ -410,6 +410,9 @@ interface DeviceListProps {
   selectionScope?: DeviceSelectionScope
 }
 
+/** Offline cards in the first device list of this page load were hidden (see below). */
+let startupHistoryHidden = false
+
 export function DeviceList({ hapbeatOnly = false, selectionScope = 'manage' }: DeviceListProps = {}) {
   const { t } = useI18n()
   const { isConnected, devices, send } = useHelperConnection()
@@ -489,6 +492,16 @@ export function DeviceList({ hapbeatOnly = false, selectionScope = 'manage' }: D
   useEffect(() => {
     markOnlineness(devices.map((d) => ({ ip: d.ipAddress, online: d.online })))
   }, [devices, markOnlineness])
+
+  // A helper that has run for a while (pipx / auto-start) never forgets a device, so
+  // the first list after opening Studio carries every board it ever saw, offline.
+  // That is history, not this session: hide those cards at once instead of after
+  // AUTO_REMOVE_MS below (2026-10-18 user). One that comes online shows again.
+  useEffect(() => {
+    if (startupHistoryHidden || devices.length === 0) return
+    startupHistoryHidden = true
+    pruneStaleOffline(0)
+  }, [devices, pruneStaleOffline])
 
   // Auto-remove: once a device has been continuously offline for
   // AUTO_REMOVE_MS, hide its card the same way the manual ✕ does (so

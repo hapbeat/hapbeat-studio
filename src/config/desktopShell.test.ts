@@ -15,9 +15,9 @@ describe('desktop layout', () => {
     expect(visibleTabs(TABS, false)).toEqual([...TABS])
   })
 
-  it('drops the test and PWM sub-tabs of Manage', () => {
+  it('keeps the playback test and drops the bench-only PWM sub-tab of Manage', () => {
     expect(visibleSubTabs(['wifi', 'config', 'kit', 'test', 'firmware', 'pwm'], true))
-      .toEqual(['wifi', 'config', 'kit', 'firmware'])
+      .toEqual(['wifi', 'config', 'kit', 'test', 'firmware'])
     expect(visibleSubTabs(['espnow', 'audio', 'eq', 'dsp', 'firmware'], true))
       .toEqual(['espnow', 'audio', 'eq', 'dsp', 'firmware'])
     expect(visibleSubTabs(['wifi', 'test'], false)).toEqual(['wifi', 'test'])
