@@ -51,9 +51,6 @@ function initialTab(tabs: readonly Tab[]): Tab {
 
 const DOCS_URL = 'https://devtools.hapbeat.com/docs/tools/studio/initial-setup/'
 
-/** Show the tabs anyway if the startup work folder lookup hangs (e.g. IndexedDB blocked by another Studio tab). */
-const FOLDER_LOOKUP_TIMEOUT_MS = 1500
-
 /**
  * Render a tab pane that mounts on first visit and stays mounted on
  * later switches (toggled via `display: none`). This lets the Kit tab
@@ -93,19 +90,14 @@ export function App() {
   tabsRef.current = tabs
   const [activeTab, setActiveTab] = useState<Tab>(() => initialTab(tabs))
 
-  // The work folder is restored here, not in the Kit tab, so the first-run
-  // guide under the header knows the folder state whichever tab opens first.
+  // The work folder is restored here, not in the Kit tab, so the work folder
+  // modal knows the folder state as soon as the Kit tab is shown.
   const loadLibrary = useLibraryStore((s) => s.loadLibrary)
-  const workDirStatus = useLibraryStore((s) => s.workDirStatus)
-  const demoMode = useLibraryStore((s) => s.demoMode)
   useEffect(() => { void loadLibrary() }, [loadLibrary])
-  const [folderLookupTimedOut, setFolderLookupTimedOut] = useState(false)
-  useEffect(() => {
-    const timer = window.setTimeout(() => setFolderLookupTimedOut(true), FOLDER_LOOKUP_TIMEOUT_MS)
-    return () => window.clearTimeout(timer)
-  }, [])
-  // Tabs mount once the lookup is done, so the guide never pops in above them.
-  const tabsReady = workDirStatus !== 'checking' || demoMode || folderLookupTimedOut
+  // Only the Kit tab needs the work folder (Editor and Scene open their own
+  // folders; UI and Manage need none), so its modal shows there. "Later"
+  // hides it for this page load; the Clips list keeps its own prompt.
+  const [workFolderModalDismissed, setWorkFolderModalDismissed] = useState(false)
 
   // Track which tabs the user has visited at least once. We mount each
   // tab on first visit and keep it mounted after — see PersistentTab.
@@ -335,7 +327,9 @@ export function App() {
           >×</button>
         </div>
       )}
-      <WorkFolderPrompt variant="banner" onConnected={() => setActiveTab('kit')} />
+      {activeTab === 'kit' && !workFolderModalDismissed && (
+        <WorkFolderPrompt variant="modal" onDismiss={() => setWorkFolderModalDismissed(true)} />
+      )}
       {IS_DESKTOP_SHELL ? (
         <DesktopAppModal
           open={desktopPanelOpen}
@@ -359,7 +353,6 @@ export function App() {
         </>
       )}
       <main className={`tab-content ${activeTab === 'editor' || activeTab === 'scene' ? 'tab-content-editor' : ''}`}>
-        {tabsReady && <>
         <PersistentTab active={activeTab === 'editor'} visited={visitedTabs.has('editor')}>
           <WaveformEditor active={activeTab === 'editor'} />
         </PersistentTab>
@@ -375,7 +368,6 @@ export function App() {
         <PersistentTab active={activeTab === 'devices'} visited={visitedTabs.has('devices')}>
           <Devices />
         </PersistentTab>
-        </>}
       </main>
       <LogDrawer />
       <HelperFailureToastListener />
