@@ -21,6 +21,7 @@ import { useDeviceSelectionSync } from '@/hooks/useDeviceSelectionSync'
 import { useHelperUpdate, useStudioFrozenNotice } from '@/hooks/useReleaseNotices'
 import { MIN_HELPER_VERSION } from '@/config/helperCompat'
 import { IS_DESKTOP_SHELL, useSimpleUi, visibleTabs } from '@/config/desktopShell'
+import { CURRENT_STUDIO_VERSION } from '@/utils/studioVersions'
 import { useI18n } from '@/i18n/I18nProvider'
 import './App.css'
 import { handlePlaybackShortcut } from '@/utils/playbackShortcut'
@@ -224,7 +225,9 @@ export function App() {
       <header className={`app-header ${headerCollapsed ? 'app-header-folded' : ''}`}>
         <div className="header-title">
           <span className="header-brand"><span className="header-brand-full">Hapbeat </span>Studio</span>
-          {!IS_DESKTOP_SHELL && <VersionSwitcher compact />}
+          {IS_DESKTOP_SHELL
+            ? <span className="app-version-badge" title={t('version.badgeTitle')}>v{CURRENT_STUDIO_VERSION}</span>
+            : <VersionSwitcher compact />}
         </div>
         <div className="header-tabs-box">
           <button type="button" className="header-collapse-toggle" onClick={() => setHeaderCollapsed(!headerCollapsed)}

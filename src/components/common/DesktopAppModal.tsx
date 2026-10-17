@@ -9,6 +9,7 @@ import {
 } from '@/config/desktopShell'
 import type { HelperCompat } from '@/config/helperCompat'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
+import { CURRENT_STUDIO_VERSION } from '@/utils/studioVersions'
 import { useI18n } from '@/i18n/I18nProvider'
 import { DiscoveryRecoverySection } from './DiscoveryRecoverySection'
 import './HelperOnboardingModal.css'
@@ -261,7 +262,7 @@ export function DesktopAppModal({ open, onClose, helperStatus, helperCompat }: D
             <p className="helper-modal-section-desc">{t('desktop.update.desc')}</p>
             <div className="desktop-app-actions">
               <span className="desktop-app-version">
-                {t('desktop.update.version', { version: appVersion ?? '-' })}
+                {t('desktop.update.version', { version: appVersion ?? '-', studio: CURRENT_STUDIO_VERSION })}
               </span>
               <button
                 type="button"
