@@ -190,7 +190,7 @@ export const LED_CONDITION_METAS: LedConditionMeta[] = [
   // 警告 (priority 高、常に最優先で発火)
   { condition: 'battery_critical',  label: 'バッテリー危険',  description: '残量 ≤5%、間もなく停止',         group: 'warning' },
   { condition: 'battery_low',       label: 'バッテリー低下',  description: '残量 ≤15%、充電推奨',             group: 'warning' },
-  { condition: 'wifi_disconnected', label: 'Wi-Fi 未接続',    description: '設定済みなのに未接続',           group: 'warning' },
+  { condition: 'wifi_disconnected', label: 'Wi-Fi 未接続',    description: '未設定・接続中を含む（AP モード除く）', group: 'warning' },
   { condition: 'volume_mute',       label: '音量ミュート',    description: '音量 = 0、振動しない',           group: 'warning' },
   // 状態遷移: 待機 ⇄ アプリ接続中
   { condition: 'idle_wifi',         label: '待機',             description: 'Wi-Fi 接続済み・アプリ非接続',   group: 'state' },
