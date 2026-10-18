@@ -70,6 +70,11 @@ export function desktopApi(): HapbeatDesktopApi | null {
   return typeof window === 'undefined' ? null : window.hapbeatDesktop ?? null
 }
 
+/** The app can hand Studio what the PC plays (Windows app, apiVersion 2 and later). */
+export function desktopSystemAudio(): boolean {
+  return desktopApi()?.systemAudio === true
+}
+
 function detectDesktopShell(): boolean {
   if (typeof window === 'undefined') return false
   if (window.hapbeatDesktop) return true

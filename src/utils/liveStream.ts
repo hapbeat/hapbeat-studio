@@ -50,25 +50,17 @@ export function uint8ArrayToBase64(bytes: Uint8Array): string {
   return btoa(binary)
 }
 
-/** Where the soft knee of a boosted signal starts (as `sdk-multi-stream.md` §5.8). */
-const KNEE = 0.95
-
 /**
- * Interleaved stereo float samples (-1..1) as PCM16, times `gain`. A boosted signal
- * (gain above 1) is rounded off above 0.95 of full scale with the tanh knee of
- * `sdk-multi-stream.md` §5.8 instead of being cut flat; at gain 1 or below the
- * samples are only scaled. Returns the peak |sample| after the gain (0..1) for a
- * level meter.
+ * Interleaved stereo float samples (-1..1) as PCM16. Returns the peak |sample| (0..1)
+ * of the chunk too, for a level meter.
  */
-export function floatToPcm16(interleaved: Float32Array, gain = 1): { pcm: Int16Array; peak: number } {
+export function floatToPcm16(interleaved: Float32Array): { pcm: Int16Array; peak: number } {
   const pcm = new Int16Array(interleaved.length)
-  const knee = gain > 1
   let peak = 0
   for (let i = 0; i < interleaved.length; i++) {
-    let v = interleaved[i] * gain
+    const v = interleaved[i]
     const a = Math.abs(v)
     if (a > peak) peak = a
-    if (knee && a > KNEE) v = Math.sign(v) * (KNEE + (1 - KNEE) * Math.tanh((a - KNEE) / (1 - KNEE)))
     let s = Math.round(v * 32767)
     if (s > 32767) s = 32767
     else if (s < -32768) s = -32768
