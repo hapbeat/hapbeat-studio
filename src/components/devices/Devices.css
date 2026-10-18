@@ -1380,6 +1380,14 @@
   white-space: nowrap;
 }
 .system-audio-unit { color: var(--text-muted); font-size: 13px; }
+.form-input.system-audio-source { flex: 1 1 auto; min-width: 0; }
+/* Two lines kept for "capturing …" / the silence hint, so neither moves what follows. */
+.form-status.system-audio-detail {
+  margin-top: 6px;
+  min-height: 2.8em;
+  line-height: 1.4;
+  padding: 0 4px;
+}
 
 /* Inline label for action-row groupings (選択デバイス / ブロードキャスト) */
 .form-action-label {
