@@ -1,5 +1,6 @@
 /**
- * What the PC plays, as 16 kHz stereo chunks.
+ * What the PC plays, as 16 kHz stereo chunks, from the loopback of the default
+ * playback device or from a recording device.
  *
  * Desktop app (Windows): the app answers getDisplayMedia with the system audio
  * (WASAPI loopback) and Studio's own page as the video track, without a picker
@@ -10,6 +11,14 @@
  * The screen video is asked at 1 fps and small, and kept until `stop()` (whether
  * the browser goes on capturing the audio once the video track stops is not
  * checked).
+ *
+ * Recording device (`source.kind === 'input'`): getUserMedia on a chosen device, such as
+ * the recording side of a virtual cable (VB-Audio CABLE Output, Voicemeeter Out) or
+ * Stereo Mix. Needed where the loopback is silent: with a Voicemeeter virtual speaker
+ * (VAIO) as the default playback device the loopback gives only zeros, while its
+ * "Voicemeeter Out" buses and CABLE Output carry the sound (measured 2026-10-18).
+ * The desktop app allows it from apiVersion 4 (`audioInput`); a browser asks for the
+ * microphone permission.
  *
  * Web Audio resamples the capture (48 kHz in the app's checks) to 16 kHz, delays it
  * by the vibration delay (a DelayNode: no timers, so it holds while the window is
@@ -86,7 +95,19 @@ function displayMediaOptions(picker: boolean): DisplayMediaStreamOptions {
   } as DisplayMediaStreamOptions
 }
 
+/** Where PC sound comes from: the loopback of the default playback device, or a recording device. */
+export type CaptureSource = { kind: 'loopback' } | { kind: 'input'; deviceId: string }
+
+/** What is being captured, as far as the browser tells. */
+export interface CaptureInfo {
+  /** Device name (for the loopback: the default playback device; null when the browser does not name it). */
+  name: string | null
+  channels: number | null
+  sampleRate: number | null
+}
+
 export interface SystemAudioCapture {
+  readonly info: CaptureInfo
   /** Changes the vibration delay while it runs (seconds, 0..MAX_CAPTURE_DELAY_S). */
   setDelay(seconds: number): void
   /** Stops the capture (the tracks end; `onEnded` is not called). */
@@ -94,7 +115,8 @@ export interface SystemAudioCapture {
 }
 
 export interface SystemAudioOptions {
-  /** True in a browser: the user picks the screen and the system audio in its picker. */
+  source: CaptureSource
+  /** Loopback in a browser: the user picks the screen and the system audio in its picker. */
   picker: boolean
   /** Vibration delay at the start (seconds). */
   delaySeconds: number
@@ -106,14 +128,54 @@ export interface SystemAudioOptions {
 
 const clampDelay = (seconds: number) => Math.max(0, Math.min(MAX_CAPTURE_DELAY_S, Number.isFinite(seconds) ? seconds : 0))
 
+const DEFAULT_PREFIX = /^(default|既定)\s*-\s*/i
+
+/** The default playback device's name ("Default - <name>" in enumerateDevices), or null when not named. */
+export async function defaultPlaybackName(): Promise<string | null> {
+  try {
+    const device = (await navigator.mediaDevices.enumerateDevices())
+      .find((d) => d.kind === 'audiooutput' && d.deviceId === 'default')
+    return device?.label ? device.label.replace(DEFAULT_PREFIX, '') : null
+  } catch {
+    return null
+  }
+}
+
+export interface AudioInputDevice {
+  deviceId: string
+  /** Empty while the browser has no permission to name devices. */
+  label: string
+}
+
+/** Recording devices, without the "default" / "communications" aliases of a real one. */
+export async function listAudioInputs(): Promise<AudioInputDevice[]> {
+  try {
+    return (await navigator.mediaDevices.enumerateDevices())
+      .filter((d) => d.kind === 'audioinput' && d.deviceId !== 'default' && d.deviceId !== 'communications')
+      .map((d) => ({ deviceId: d.deviceId, label: d.label }))
+  } catch {
+    return []
+  }
+}
+
+/** Browser: the microphone permission, asked once, lets enumerateDevices name the recording devices. */
+export async function allowDeviceNames(): Promise<void> {
+  const media = await navigator.mediaDevices.getUserMedia({ audio: true })
+  for (const track of media.getTracks()) track.stop()
+}
+
 /**
  * Starts capturing what the PC plays. Call it straight from a click: getDisplayMedia
  * needs the user gesture (and the app grants the system audio only with one).
- * Rejects when the capture is refused or cancelled (NotAllowedError / AbortError)
- * or comes without audio (NotFoundError: the system audio was not shared).
+ * Rejects when the capture is refused or cancelled (NotAllowedError / AbortError),
+ * comes without audio (NotFoundError: the system audio was not shared) or the
+ * recording device is gone (NotFoundError / OverconstrainedError).
  */
 export async function startSystemAudioCapture(options: SystemAudioOptions): Promise<SystemAudioCapture> {
-  const media = await navigator.mediaDevices.getDisplayMedia(displayMediaOptions(options.picker))
+  const from = options.source
+  const media = from.kind === 'input'
+    ? await navigator.mediaDevices.getUserMedia({ audio: { ...AUDIO_CONSTRAINTS, deviceId: { exact: from.deviceId } } })
+    : await navigator.mediaDevices.getDisplayMedia(displayMediaOptions(options.picker))
   const videoTracks = media.getVideoTracks()
   if (!options.picker) for (const video of videoTracks) video.stop()
   const track = media.getAudioTracks()[0]
@@ -170,7 +232,15 @@ export async function startSystemAudioCapture(options: SystemAudioOptions): Prom
     stop()
     throw error
   }
+  const settings = track.getSettings()
+  const info: CaptureInfo = {
+    // The app's loopback track is just "System audio": name the device it plays on instead.
+    name: from.kind === 'loopback' && !options.picker ? await defaultPlaybackName() : track.label || null,
+    channels: settings.channelCount ?? null,
+    sampleRate: settings.sampleRate ?? null,
+  }
   return {
+    info,
     setDelay(seconds) {
       if (stopped) return
       // A short glide instead of a jump in the delayed signal.

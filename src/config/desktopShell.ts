@@ -44,6 +44,11 @@ export interface HapbeatDesktopApi {
    * without a picker: PC sound → Hapbeat (`systemAudioCapture`).
    */
   systemAudio?: boolean
+  /**
+   * (apiVersion 4) getUserMedia({ audio }) opens a recording device without a prompt and
+   * enumerateDevices names the devices: PC sound from a chosen source (`systemAudioCapture`).
+   */
+  audioInput?: boolean
   getInfo(): Promise<{ appVersion: string; platform: string; helper: DesktopHelperStatus; studio?: DesktopStudioStatus }>
   helper: {
     status(): Promise<DesktopHelperStatus>
