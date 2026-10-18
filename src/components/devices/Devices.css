@@ -81,78 +81,6 @@
   padding: 6px;
 }
 
-/* ---- PC sound → Hapbeat (desktop app): fixed height, pinned under the list ---- */
-.system-audio-panel {
-  flex-shrink: 0;
-  border-top: 1px solid var(--border);
-  padding: 10px 12px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.system-audio-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-/* Fixed width: the label changes (流す / 止める / 準備中) without moving the meter. */
-.system-audio-btn {
-  flex: 0 0 150px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--bg-surface);
-  color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.system-audio-btn:hover:not(:disabled) { border-color: var(--accent-light); }
-.system-audio-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.system-audio-btn.live { border-color: var(--accent); background: var(--accent); color: #fff; }
-
-.system-audio-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--text-muted);
-  flex-shrink: 0;
-}
-.system-audio-dot.live { background: #ff5a5a; }
-
-.system-audio-meter {
-  flex: 1 1 auto;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--border);
-  overflow: hidden;
-}
-.system-audio-meter-fill {
-  height: 100%;
-  background: var(--accent-light);
-  transform-origin: left center;
-  transition: transform 80ms linear;
-}
-
-.system-audio-status {
-  margin: 0;
-  min-height: 1.4em;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.system-audio-status.warn { color: var(--warning); }
-
 .devices-empty {
   padding: 24px 14px;
   font-size: 15px;
@@ -1422,6 +1350,36 @@
   color: #4cb6e6;
   border: 1px solid rgba(76, 175, 230, 0.4);
 }
+
+/* ---- PC sound → Hapbeat (playback test tab): fixed sizes, nothing moves when it starts / stops ---- */
+.system-audio-actions { align-items: center; flex-wrap: nowrap; }
+.system-audio-btn {
+  min-width: 160px;
+  text-align: center;
+  white-space: nowrap;
+}
+.system-audio-meter {
+  flex: 0 0 120px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+.system-audio-meter-fill {
+  height: 100%;
+  background: var(--accent-light);
+  transform-origin: left center;
+  transition: transform 80ms linear;
+}
+.form-status.system-audio-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-top: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.system-audio-unit { color: var(--text-muted); font-size: 13px; }
 
 /* Inline label for action-row groupings (選択デバイス / ブロードキャスト) */
 .form-action-label {
