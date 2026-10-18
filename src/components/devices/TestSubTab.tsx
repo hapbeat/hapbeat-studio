@@ -4,6 +4,9 @@ import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import { useToast } from '@/components/common/Toast'
 import { StreamingTestSection } from './StreamingTestSection'
 import { SystemAudioSection } from './SystemAudioSection'
+
+/** PC sound ("LIVE") block: frozen, not shown (see the render site). */
+const PC_SOUND_SHOWN = false
 import { useI18n } from '@/i18n/I18nProvider'
 
 const HISTORY_KEY = 'hapbeat-studio-test-event-history'
@@ -177,8 +180,10 @@ export function TestSubTab({ device, sendTo }: Props) {
 
   return (
     <>
-      {/* LIVE — what this PC plays, streamed as vibration (shown only where it can capture) */}
-      <SystemAudioSection device={device} />
+      {/* LIVE — what this PC plays, streamed as vibration. Frozen (2026-10-18): it needs a
+          virtual audio cable / Voicemeeter to capture reliably and always lags, too much
+          setup for what it gives. Kept as a component, not shown. */}
+      {PC_SOUND_SHOWN && <SystemAudioSection device={device} />}
 
       {/* CLIP — UDP streaming test (folder browser) */}
       <StreamingTestSection
