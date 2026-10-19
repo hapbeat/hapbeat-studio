@@ -3,6 +3,7 @@ import type {
   PerButtonActions, LedConfig, VolumeConfig, UiSettings, DisplayOrientation,
 } from '@/types/display'
 import type { DeviceModel } from '@/types/device'
+import type { MessageId } from '@/i18n/messages'
 
 /**
  * テンプレート定義
@@ -21,17 +22,18 @@ import type { DeviceModel } from '@/types/device'
  *   app_name: 8 (variant 4/8/16), wifi_ssid: 8 (variant 4/8/16)
  *
  * 初期状態は 2026-05-09 にユーザー提供 JSON
- * (Downloads/ui-config_20260508_173158.json) を baseline に再構成。
- *   Duo: main / exhibit / debug の 3 ページ
- *   Band: main / debug の 2 ページ
+ * (Downloads/ui-config_20260508_173158.json) を baseline に再構成し、
+ * 2026-10-19 に Band を main（バンド）/ exhibit に変更:
+ *   Duo: main（ネック）/ exhibit / debug の 3 ページ
+ *   Band: main（バンド）/ exhibit の 2 ページ
  */
 
 // ========================================
 // Page presets (1 ページ単位)
 // ========================================
 
-/** main: 通常稼働中の主表示。残量+音量+プレイヤー/グループ+モード+デバイス名 */
-const mainPage: DisplayPage = {
+/** main（ネック）: Duo の主表示。デバイス名 + プレイヤー/グループ + 残量 + Var/Fix + 音量 */
+const mainNeckPage: DisplayPage = {
   name: 'main',
   elements: [
     { id: 'el-name',   type: 'device_name',   pos: [0, 0] },                          // 5 chars (standard)
@@ -39,6 +41,20 @@ const mainPage: DisplayPage = {
     { id: 'el-group',  type: 'group_id',      pos: [11, 0] },                         // 5 chars
     { id: 'el-bat',    type: 'battery',       pos: [0, 1] },                          // 4 chars (% — variant 未指定)
     { id: 'el-mode',   type: 'volume_mode',   pos: [6, 1] },                          // 3 chars
+    { id: 'el-vol',    type: 'volume',        pos: [10, 1] },                         // 6 chars
+  ],
+}
+
+/** main（バンド）: Band の主表示。main（ネック）の Var/Fix の代わりに装着位置を出す。
+ *  2026-10-19 ユーザーが Band で使っている main (ui-config_20261019_183802.json の page_0) 由来。 */
+const mainBandPage: DisplayPage = {
+  name: 'main',
+  elements: [
+    { id: 'el-name',   type: 'device_name',   pos: [0, 0] },                          // 5 chars (standard)
+    { id: 'el-player', type: 'player_number', pos: [6, 0] },                          // 4 chars
+    { id: 'el-group',  type: 'group_id',      pos: [11, 0] },                         // 5 chars
+    { id: 'el-bat',    type: 'battery',       pos: [0, 1] },                          // 4 chars (% — variant 未指定)
+    { id: 'el-pos',    type: 'position',      pos: [5, 1],  variant: 'compact' },     // 4 chars
     { id: 'el-vol',    type: 'volume',        pos: [10, 1] },                         // 6 chars
   ],
 }
@@ -68,60 +84,44 @@ const debugPage: DisplayPage = {
   ],
 }
 
+/** プリセットのメニュー項目。`name` は一意な id、メニューの表示名は `labelKey`
+ *  (i18n)、挿入するページの名前は `page.name` (main は両方とも 'main')。 */
+export interface PagePresetEntry extends PagePreset {
+  labelKey: MessageId
+}
+
 /**
- * モデル別の page preset 一覧。Insert preset メニューに出すページの
- * リストを Duo / Band で分けたいというユーザ要望 (2026-05-09):
- *   - Duo: main / exhibit / debug
- *   - Band: main / debug (exhibit は非搭載)
+ * Insert preset メニューに出すページの一覧。Band / Duo で共通
+ * (2026-10-19 ユーザー決定。Band でも exhibit を使いたいため、2026-05-09 の
+ * 「Band には exhibit を出さない」機種別一覧を置き換えた)。
+ * main だけは機種で中身が違うので、main（バンド）と main（ネック）の 2 つに分ける。
  *
  * empty は意図的に除外 (= 「+ Page」ボタンで空ページ追加できるので preset に
  * 出す必要がない、2026-05-09 ユーザ要望)。
- *
- * Band で exhibit を除外するのは、Band の運用シナリオ
- * (= 個人装着 + 簡素な情報) では「展示用 App 名表示」が不要なため
- * (= 初期テンプレート構成と整合)。
  */
-const presetMain: PagePreset = {
-  name: 'main', description: '通常運用 (装着 + 動作確認)', page: mainPage,
-}
-const presetExhibit: PagePreset = {
-  name: 'exhibit', description: '展示・本番中ユーザー装着時用 (App名 + 番号)', page: exhibitPage,
-}
-const presetDebug: PagePreset = {
-  name: 'debug', description: 'ネットワーク / 位置 / IP / FW (整備員向け)', page: debugPage,
-}
-
-export const pagePresetsByModel: Record<DeviceModel, PagePreset[]> = {
-  // empty は意図的に除外 (2026-05-09 ユーザ要望)。
-  // 「+ Page」ボタンで空ページを追加できるので preset に出す必要がない。
-  duo_wl:  [presetMain, presetExhibit, presetDebug],
-  band_wl: [presetMain, presetDebug],
-}
-
-/** モデルを指定して preset リストを取得。デフォルト = Duo の preset。 */
-export function getPagePresetsFor(model: DeviceModel | undefined): PagePreset[] {
-  if (!model) return pagePresetsByModel.duo_wl
-  return pagePresetsByModel[model] ?? pagePresetsByModel.duo_wl
-}
-
-/**
- * 後方互換: モデル指定なしで参照される箇所向けの全 preset (= Duo 同等)。
- * 新規コードは `getPagePresetsFor(deviceModel)` を使ってモデル別を取ること。
- */
-export const pagePresets: PagePreset[] = pagePresetsByModel.duo_wl
+export const pagePresets: PagePresetEntry[] = [
+  { name: 'main_band', labelKey: 'display.presetMainBand',
+    description: 'バンド型の主表示 (装着位置 + 番号 + 音量)', page: mainBandPage },
+  { name: 'main_neck', labelKey: 'display.presetMainNeck',
+    description: 'ネック型の主表示 (Var/Fix + 番号 + 音量)', page: mainNeckPage },
+  { name: 'exhibit', labelKey: 'display.presetExhibit',
+    description: '展示・本番中ユーザー装着時用 (App名 + 番号)', page: exhibitPage },
+  { name: 'debug', labelKey: 'display.presetDebug',
+    description: 'ネットワーク / 位置 / IP / FW (整備員向け)', page: debugPage },
+]
 
 // ========================================
 // Full layout templates (全 page + buttons 上書き)
 // ========================================
 
-/** Duo (DuoWL) の出荷時レイアウト: main / exhibit / debug の 3 ページ。 */
+/** Duo (DuoWL) の出荷時レイアウト: main（ネック）/ exhibit / debug の 3 ページ。 */
 export const duoStandardTemplate: DisplayTemplate = {
   name: 'Duo Standard',
   description: 'Duo: main / exhibit / debug',
   layout: {
     grid: [16, 2],
     pages: [
-      structuredClone(mainPage),
+      structuredClone(mainNeckPage),
       structuredClone(exhibitPage),
       structuredClone(debugPage),
     ],
@@ -129,16 +129,17 @@ export const duoStandardTemplate: DisplayTemplate = {
   },
 }
 
-/** Band (BandWL) の出荷時レイアウト: main / debug の 2 ページ。
- *  exhibit は Band では非搭載 — 装着シナリオが Duo と異なるため。 */
+/** Band (BandWL) の出荷時レイアウト: main（バンド）/ exhibit の 2 ページ
+ *  (2026-10-19 ユーザー決定で debug を exhibit に替えた)。中央の短押し
+ *  (toggle_page) で 2 ページを行き来する。 */
 export const bandStandardTemplate: DisplayTemplate = {
   name: 'Band Standard',
-  description: 'Band: main / debug',
+  description: 'Band: main / exhibit',
   layout: {
     grid: [16, 2],
     pages: [
-      structuredClone(mainPage),
-      structuredClone(debugPage),
+      structuredClone(mainBandPage),
+      structuredClone(exhibitPage),
     ],
     buttons: { short_press: 'next_page', long_press: 'none' },
   },

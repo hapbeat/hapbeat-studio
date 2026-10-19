@@ -19,7 +19,7 @@ import { getElementPreviewText, DEFAULT_SIM_STATE, charCells } from '@/utils/dis
 import { isKnownNonHapbeatBoard } from '@/utils/hapbeatBoard'
 import type { SimState } from '@/utils/displayPreview'
 import {
-  getPagePresetsFor, duoStandardTemplate, bandStandardTemplate,
+  pagePresets, duoStandardTemplate, bandStandardTemplate,
   buildInitialLayoutByModel,
   INITIAL_PER_BUTTON_ACTIONS,
   INITIAL_LED_CONFIG,
@@ -870,16 +870,14 @@ export function DisplayEditor() {
     setPopupPos(null)
   }, [askConfirm, deviceModel])
 
-  // 現アクティブモデルに紐づく preset 一覧 (Duo: main/exhibit/debug/empty,
-  // Band: main/debug/empty)。Insert preset メニューと handleInsertPagePreset
-  // の index 解決に使う。
-  const activePresets = useMemo(() => getPagePresetsFor(deviceModel), [deviceModel])
-
+  // preset 一覧は Band / Duo で共通 (main（バンド）/ main（ネック）/ exhibit / debug)。
+  // Insert preset メニューと同じ `pagePresets` の index で解決する。
   const handleInsertPagePreset = useCallback((presetIndex: number) => {
-    const preset = activePresets[presetIndex]
+    const preset = pagePresets[presetIndex]
     if (!preset) return
     setLayout((prev) => {
-      // preset の name (= 'main' / 'exhibit' / 'debug' / 'empty') をそのまま採用。
+      // ページ名は preset.page.name (= 'main' / 'exhibit' / 'debug')。メニューの
+      // 表示名 (main（バンド）等) とは別で、main は両方とも 'main' になる。
       // 既に同名ページが存在する場合は `name (2)` で suffix。
       const usedNames = new Set(prev.pages.map((p) => p.name))
       let pageName = preset.page.name
@@ -895,7 +893,7 @@ export function DisplayEditor() {
     })
     setActivePageIndex(layout.pages.length)
     setPopupPos(null)
-  }, [layout.pages.length, activePresets])
+  }, [layout.pages.length])
 
   // --- Helper 接続 ---
   const { isConnected: managerConnected, lastMessage, send: managerSend, devices, injectMessage } = useHelperConnection()
@@ -1783,11 +1781,10 @@ function ControlBar({
           }}
         >
           <option value="" disabled>{t('display.preset')}</option>
-          {/* preset リストは deviceModel に応じて切替 (Duo: main/exhibit/debug/empty,
-              Band: main/debug/empty)。handleInsertPagePreset 側も同じ
-              `getPagePresetsFor(deviceModel)` で index 解決するため整合する。 */}
-          {getPagePresetsFor(deviceModel).map((p, idx) => (
-            <option key={p.name} value={idx} title={p.description}>{p.name}</option>
+          {/* preset リストは Band / Duo で共通。handleInsertPagePreset 側も同じ
+              `pagePresets` で index 解決するため整合する。 */}
+          {pagePresets.map((p, idx) => (
+            <option key={p.name} value={idx} title={p.description}>{t(p.labelKey)}</option>
           ))}
         </select>
       </div>
