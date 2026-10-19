@@ -48,8 +48,6 @@
    icon slashed in the pill's colour; grey while tentative, saturated green with ✓ once approved (the solid OK stays softer). */
 .events-badge.none-tentative { border-color: #8b93a1; color: #b4bac4; background: rgba(139,147,161,.08); box-shadow: inset 0 0 0 1px #8b93a1; }
 .events-badge.none-approved { border-color: #22c06e; color: #5be39b; background: rgba(34,192,110,.12); box-shadow: inset 0 0 0 1px #22c06e; }
-/* Kind icons in the event panels are monochrome (the kind colours stay with the waveforms). */
-:is(.events-panel, .scene-event) .kind-icon:is(.sound, .haptic) { color: var(--text-secondary); }
 .events-badge-check { color: #4fd18f; font-weight: 700; }
 .events-badge.unset { border-color: #c9a34a; color: #e3c27a; }
 /* A request to the agent is open (remake / go to haptics). */

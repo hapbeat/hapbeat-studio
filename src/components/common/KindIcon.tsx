@@ -12,11 +12,17 @@ type Props = {
 /** The diagonal slash of a `slashed` icon. */
 const SLASH = 'M2 2l12 12'
 
+/**
+ * The icon's colour, set on the icon itself so a muted text around it never greys it: the kind colour; a `slashed` icon
+ * (なし 仮 / なし ✓) takes its pill's colour instead.
+ */
+const colour = (kind: 'sound' | 'haptic', slashed: boolean) => slashed ? undefined : { color: `var(--${kind})` }
+
 /** Speaker with waves: marks sound (colour `--sound`). */
 export function SoundIcon({ size = 16, decorative = false, slashed = false }: Props) {
   const { t } = useI18n()
   const label = t('kind.sound')
-  return <svg className={`kind-icon sound${slashed ? ' slashed' : ''}`} viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+  return <svg className={`kind-icon sound${slashed ? ' slashed' : ''}`} style={colour('sound', slashed)} viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
     {...(decorative ? { 'aria-hidden': true } : { role: 'img', 'aria-label': label })}>
     {!decorative && <title>{label}</title>}
     <path d="M2 6h2.5L8 3v10L4.5 10H2z" fill="currentColor" fillOpacity=".35" />
@@ -30,7 +36,7 @@ export function SoundIcon({ size = 16, decorative = false, slashed = false }: Pr
 export function HapticIcon({ size = 16, decorative = false, slashed = false }: Props) {
   const { t } = useI18n()
   const label = t('kind.haptic')
-  return <svg className={`kind-icon haptic${slashed ? ' slashed' : ''}`} viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+  return <svg className={`kind-icon haptic${slashed ? ' slashed' : ''}`} style={colour('haptic', slashed)} viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
     {...(decorative ? { 'aria-hidden': true } : { role: 'img', 'aria-label': label })}>
     {!decorative && <title>{label}</title>}
     <path d="M6.5 14.5C5.2 14.5 4.5 13.4 4.5 12L2.4 9.3a1.1 1.1 0 0 1 1.7-1.4L4.5 8.4V4.8a1.15 1.15 0 0 1 2.3 0V3.6a1.15 1.15 0 0 1 2.3 0v1.2a1.15 1.15 0 0 1 2.3 0V12c0 1.4-.9 2.5-2.2 2.5z"

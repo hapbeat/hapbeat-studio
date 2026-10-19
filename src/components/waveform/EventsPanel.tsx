@@ -280,8 +280,8 @@ function SoundSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sce
   const play = (s: string) => { if (!openEventSound(key, s, true)) missing(s) }
   const show = (s: string) => { if (!openEventSound(key, s)) missing(s) }
   const describe = useDescribeMaterial()
-  // The material lists fold together (editor setting, open by default; the heading line stays).
-  const [open, setOpen] = useMaterialsOpen()
+  // The material list folds (editor setting, open by default; the heading line stays; the haptic section has its own).
+  const [open, setOpen] = useMaterialsOpen('sound')
   return <section className="events-sec">
     <h4 className={`events-sec-head ${!held ? 'held-elsewhere' : ''}`}><Fold open={open} set={setOpen} /><SoundIcon decorative />{t('events.sound')}
       {e.ref.variant === null && <GroupSwitch table={table} cue={e.ref.cue} field="sfx" edit={edit} buttonClass="agent-icon-btn" />}
@@ -319,7 +319,7 @@ function SoundSection({ table, lib, e, loop, edit }: { table: CueTable; lib: Sce
 function HapticSection({ table, lib, e, loop, edit }: { table: CueTable; lib: SceneLib; e: EffectiveEvent; loop: boolean; edit: Edit }) {
   const { t } = useI18n()
   const held = holdsField(table, e.ref, 'haptics')
-  const [hOpen, setHOpen] = useMaterialsOpen()
+  const [hOpen, setHOpen] = useMaterialsOpen('haptic')
   const atLabel = useAtLabel()
   const previewId = useEventStore(s => s.preview?.id)
   const key = eventKey(e.ref)
@@ -495,7 +495,8 @@ function MaterialOrigin({ cue }: { cue: string }) {
 function Reserves({ cue, target }: { cue: string; target: 'sound' | 'haptic' }) {
   const { t } = useI18n()
   const all = useEditorSettings(s => s.eventReserves)
-  const shownOpen = useEditorSettings(s => s.reservesOpen)
+  const openKey = target === 'sound' ? 'soundReservesOpen' : 'hapticReservesOpen'
+  const shownOpen = useEditorSettings(s => s[openKey])
   const shownAudition = useAgentTrialStore(s => s.audition ? `${s.audition.trialId}/${s.audition.candidateId}` : null)
   const trials = useAgentTrialStore(s => s.trials)
   const [busy, setBusy] = useState(false)
@@ -528,7 +529,7 @@ function Reserves({ cue, target }: { cue: string; target: 'sound' | 'haptic' }) 
   const show = (row: typeof rows[number]) => void useAgentTrialStore.getState().requestAudition(row.trialId, row.candidateId, false, false).catch(error => useWaveformStore.getState().setError(error))
   return <>
     <button type="button" className="events-reserves-toggle" aria-expanded={shownOpen} title={t('events.reservesHint')}
-      onClick={() => useEditorSettings.getState().update({ reservesOpen: !shownOpen })}>{shownOpen ? '▾' : '▸'} {t('events.reservesCount', { count: entries.length })}</button>
+      onClick={() => useEditorSettings.getState().update({ [openKey]: !shownOpen })}>{shownOpen ? '▾' : '▸'} {t('events.reservesCount', { count: entries.length })}</button>
     {shownOpen && <ul className="events-reserves" aria-label={t('events.reserves')} title={t('events.reservesHint')}>
     {materials.map(({ key, r }) => {
       const name = r.target === 'haptic' && r.at ? `${r.material} · ${atLabel(r.at)}` : r.material
@@ -696,10 +697,11 @@ function GroupPlaybackToggle() {
   </button>
 }
 
-/** The event detail's material fold (editor setting `materialsOpen`, shared by the sound and haptic sections). */
-function useMaterialsOpen(): [boolean, (open: boolean) => void] {
-  const open = useEditorSettings(s => s.materialsOpen)
-  return [open, next => useEditorSettings.getState().update({ materialsOpen: next })]
+/** The event detail's material fold of one section (editor setting `soundMaterialsOpen` / `hapticMaterialsOpen`). */
+function useMaterialsOpen(kind: 'sound' | 'haptic'): [boolean, (open: boolean) => void] {
+  const key = kind === 'sound' ? 'soundMaterialsOpen' : 'hapticMaterialsOpen'
+  const open = useEditorSettings(s => s[key])
+  return [open, next => useEditorSettings.getState().update({ [key]: next })]
 }
 
 /** ▸ / ▾ in a section heading. */

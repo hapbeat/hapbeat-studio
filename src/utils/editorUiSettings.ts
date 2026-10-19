@@ -53,10 +53,14 @@ export interface EditorUiSettings {
   clipScenes: Record<string, TrialSceneChoice>
   /** Decisions per editor clip id or AI candidate (`<trialId>/<candidateId>`); newest last. */
   eventMarks: Record<string, EventMark[]>
-  /** Events panel: the materials not in use (★3 reserves) shown under each section; false = folded. */
-  reservesOpen: boolean
-  /** The event detail's sound / haptic material lists are open (one fold for both; default open). */
-  materialsOpen: boolean
+  /** Events panel: the materials not in use (★3 reserves) shown under the sound section; false = folded. */
+  soundReservesOpen: boolean
+  /** Events panel: the materials not in use (★3 reserves) shown under the haptic section; false = folded. */
+  hapticReservesOpen: boolean
+  /** The event detail's sound material list is open (default open; the haptic section has its own fold). */
+  soundMaterialsOpen: boolean
+  /** The event detail's haptic material list is open (default open; the sound section has its own fold). */
+  hapticMaterialsOpen: boolean
   /** Events panel auditions play the whole group (cue + its variants) at the stretch; false = only the shown row (others: sound only). */
   groupPlayback: boolean
   /** Waveform panel 「発生に合わせて並べる」: draw an audition at the scene timing (the material placed at its firings / a loop cue's segments); false = the material file once at its own length (auditions play the scene timing either way). */
@@ -86,7 +90,7 @@ export interface EditorUiSettings {
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, soundLaneHeight: 84, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, scenePostRollSec: 0, scenePostRollFromSound: true, sceneContext: true, eventGroupEdits: {}, trialScenes: {}, clipScenes: {}, eventMarks: {}, reservesOpen: true, materialsOpen: true, groupPlayback: true, placeAtFirings: false, candidateSounds: {}, materialLinks: {}, hapticOnPc: false, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
+  sceneLeadSec: 1, scenePostRollSec: 0, scenePostRollFromSound: true, sceneContext: true, eventGroupEdits: {}, trialScenes: {}, clipScenes: {}, eventMarks: {}, soundReservesOpen: true, hapticReservesOpen: true, soundMaterialsOpen: true, hapticMaterialsOpen: true, groupPlayback: true, placeAtFirings: false, candidateSounds: {}, materialLinks: {}, hapticOnPc: false, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -147,6 +151,8 @@ function groupEdits(value: unknown): Record<string, GroupEdits> {
   }
   return out
 }
+/** The first boolean of `value` and the legacy `old`, else `fallback`. */
+const bool = (value: unknown, old: unknown, fallback: boolean) => typeof value === 'boolean' ? value : typeof old === 'boolean' ? old : fallback
 /** Shallow shape check; dockview itself rejects a layout it cannot restore. */
 const isDockLayout = (value: unknown): value is Record<string, unknown> => isRecord(value) && isRecord(value.grid) && isRecord(value.panels)
 
@@ -176,8 +182,11 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     eventMarks: eventMarks(v.eventMarks),
     groupPlayback: typeof v.groupPlayback === 'boolean' ? v.groupPlayback : d.groupPlayback,
     placeAtFirings: typeof v.placeAtFirings === 'boolean' ? v.placeAtFirings : d.placeAtFirings,
-    reservesOpen: typeof v.reservesOpen === 'boolean' ? v.reservesOpen : d.reservesOpen,
-    materialsOpen: typeof v.materialsOpen === 'boolean' ? v.materialsOpen : d.materialsOpen,
+    // The folds were one setting for both sections (`reservesOpen` / `materialsOpen`): a value saved before seeds both, once.
+    soundReservesOpen: bool(v.soundReservesOpen, v.reservesOpen, d.soundReservesOpen),
+    hapticReservesOpen: bool(v.hapticReservesOpen, v.reservesOpen, d.hapticReservesOpen),
+    soundMaterialsOpen: bool(v.soundMaterialsOpen, v.materialsOpen, d.soundMaterialsOpen),
+    hapticMaterialsOpen: bool(v.hapticMaterialsOpen, v.materialsOpen, d.hapticMaterialsOpen),
     candidateSounds: isRecord(v.candidateSounds) ? Object.fromEntries(Object.entries(v.candidateSounds).filter((e): e is [string, string] => typeof e[1] === 'string' && e[1].length <= 80).slice(-2000)) : {},
     eventReserves: reserves(v.eventReserves),
     reservesBackfilled: v.reservesBackfilled === true,

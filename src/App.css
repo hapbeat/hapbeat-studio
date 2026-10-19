@@ -60,10 +60,8 @@ body.is-dragging .char-cell.empty:hover {
   --transition: 150ms ease;
 }
 
-/* Sound / haptic marks (KindIcon): one colour each, aligned with the text they sit in. */
+/* Sound / haptic marks (KindIcon, which sets its kind colour itself): aligned with the text they sit in. */
 .kind-icon { display: inline-block; flex: none; vertical-align: -3px; }
-.kind-icon.sound { color: var(--sound); }
-.kind-icon.haptic { color: var(--haptic); }
 
 * {
   margin: 0;

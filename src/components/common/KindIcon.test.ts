@@ -28,3 +28,16 @@ describe('KindIcon slashed (no sound / no haptics)', () => {
     expect(html).toContain('aria-label="触覚"')
   })
 })
+
+describe('KindIcon colour', () => {
+  it('is the kind colour by default, set on the icon itself', () => {
+    expect(render(createElement(SoundIcon, { decorative: true }))).toContain('style="color:var(--sound)"')
+    expect(render(createElement(HapticIcon, { decorative: true }))).toContain('style="color:var(--haptic)"')
+    expect(render(createElement(KindIcon, { kind: 'haptic', size: 14 }))).toContain('style="color:var(--haptic)"')
+  })
+
+  it('a slashed icon takes its pill colour (no kind colour)', () => {
+    for (const kind of ['sound', 'haptic'] as const)
+      expect(render(createElement(KindIcon, { kind, slashed: true }))).not.toContain('style=')
+  })
+})
