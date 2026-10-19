@@ -1664,6 +1664,11 @@
 .firmware-version-chip.archive {
   opacity: 0.85;
 }
+/* "N more" / "Show less" toggle at the end of the version chips. */
+.firmware-version-chip.firmware-version-more {
+  font-family: var(--font-ui);
+  border-style: dashed;
+}
 .firmware-version-chip-latest {
   font-family: var(--font-ui);
   font-size: 10px;

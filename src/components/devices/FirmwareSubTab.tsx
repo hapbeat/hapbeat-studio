@@ -52,6 +52,8 @@ import { DriverHelpLinks } from './DriverHelpLinks'
 import { StreamV2SdkTip } from './StreamV2SdkTip'
 
 const ROLE_ORDER: NodeRole[] = ['receiver', 'sensor', 'broker', 'transmitter']
+/** Version chips shown before the "N more" toggle in the version picker. */
+const VISIBLE_VERSION_COUNT = 3
 const ROLE_LABEL: Record<NodeRole, string> = {
   receiver: 'Hapbeat',
   sensor: 'センサ送信機',
@@ -312,6 +314,9 @@ export function FirmwareSubTab({
       )
     } catch { /* localStorage unavailable */ }
   }, [libSelected, selectedVersionFw, VERSION_SELECTED_KEY])
+  // Version picker shows the newest few; the rest fold behind a toggle.
+  const [showAllVersions, setShowAllVersions] = useState(false)
+  useEffect(() => { setShowAllVersions(false) }, [libSelected])
 
   // Resolved entry: artifacts/fwVersion swapped to the chosen version so all
   // downstream consumers (OTA / Serial / verify) need no version awareness.
@@ -1235,11 +1240,19 @@ export function FirmwareSubTab({
 
                 {/* Version picker — latest + archive (older releases stay
                   * downloadable so users can roll back anytime). */}
-                {baseEntry?.versions && baseEntry.versions.length > 1 && (
+                {baseEntry?.versions && baseEntry.versions.length > 1 && (() => {
+                  const versions = baseEntry.versions
+                  const activeFw = selectedVersionFw ?? versions[0].fwVersion
+                  // Newest VISIBLE_VERSION_COUNT + the selected one; the rest
+                  // stay behind the toggle chip until the user opens it.
+                  const shown = (fw: string, i: number) =>
+                    showAllVersions || i < VISIBLE_VERSION_COUNT || fw === activeFw
+                  const hiddenCount = versions.filter((v, i) => !shown(v.fwVersion, i)).length
+                  return (
                   <div className="firmware-version-row">
                     <span className="firmware-version-row-label">{t('firmware.version')}</span>
-                    {baseEntry.versions.map((v, i) => {
-                      const activeFw = selectedVersionFw ?? baseEntry.versions![0].fwVersion
+                    {versions.map((v, i) => {
+                      if (!shown(v.fwVersion, i)) return null
                       const isActive = activeFw === v.fwVersion
                       return (
                         <button
@@ -1256,8 +1269,19 @@ export function FirmwareSubTab({
                         </button>
                       )
                     })}
+                    {versions.length > VISIBLE_VERSION_COUNT && (showAllVersions || hiddenCount > 0) && (
+                      <button
+                        type="button"
+                        className="firmware-version-chip firmware-version-more"
+                        aria-expanded={showAllVersions}
+                        onClick={() => setShowAllVersions((open) => !open)}
+                      >
+                        {showAllVersions ? t('firmware.fewerVersions') : t('firmware.moreVersions', { count: hiddenCount })}
+                      </button>
+                    )}
                   </div>
-                )}
+                  )
+                })()}
                 {/* Always render one line while the picker is shown so that
                   * switching latest ⇄ archive doesn't shift the rows below by
                   * a line. Latest = muted note, archive = warning (same box
