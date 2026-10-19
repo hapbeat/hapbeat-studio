@@ -726,13 +726,14 @@
 }
 
 /* ---- Detail pane ---- */
+/* The device header and the sub-tab row stay put; only the sub-tab body
+   scrolls, so the active tab is always visible (user 2026-10-19). */
 .devices-detail {
-  overflow-y: auto;
-  /* Always reserve the scrollbar gutter so expanding a sensor mapping row
-     (which grows the content past the viewport) doesn't shift the panel
-     width sideways (user feedback 2026-06-13: 開くと幅が変わる). */
-  scrollbar-gutter: stable;
-  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 20px 24px 0;
   background: var(--bg-primary);
 }
 
@@ -799,6 +800,7 @@
 }
 
 .devices-detail-header {
+  flex-shrink: 0;
   margin-bottom: 18px;
 }
 
@@ -897,10 +899,11 @@
 
 /* ---- Sub-tabs (per-device pages) ---- */
 .device-subtabs {
+  flex-shrink: 0;
   display: flex;
   gap: 0;
   border-bottom: 1px solid var(--border);
-  margin: 14px 0 16px;
+  margin: 14px 0 0;
 }
 
 .device-subtab-btn {
@@ -922,6 +925,16 @@
 }
 
 .device-subtab-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* Always reserve the scrollbar gutter so expanding a sensor mapping row
+     (which grows the content past the viewport) doesn't shift the panel
+     width sideways (user feedback 2026-06-13: 開くと幅が変わる). */
+  scrollbar-gutter: stable;
+  /* Bleed to the pane edges so the scrollbar sits at the pane's right edge. */
+  margin: 0 -24px;
+  padding: 16px 24px 20px;
   display: flex;
   flex-direction: column;
 }
