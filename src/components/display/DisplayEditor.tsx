@@ -15,7 +15,7 @@ import { getElementSize, LED_CONDITION_METAS } from '@/types/display'
 import type { DeviceModel, DeviceHardwareSpec } from '@/types/device'
 import { DEVICE_SPECS } from '@/types/device'
 import { ElementPalette, getElementMeta, PALETTE_SECTIONS } from '@/components/common/ElementPalette'
-import { getElementPreviewText, DEFAULT_SIM_STATE, charCells } from '@/utils/displayPreview'
+import { getElementPreviewText, DEFAULT_SIM_STATE, charCells, nextCyclePosition } from '@/utils/displayPreview'
 import { isKnownNonHapbeatBoard } from '@/utils/hapbeatBoard'
 import type { SimState } from '@/utils/displayPreview'
 import {
@@ -163,14 +163,15 @@ function buildActionGroups(pages: DisplayPage[], deviceModel: DeviceModel): Acti
   const groups: ActionGroup[] = [
     { label: 'Page', items: pageItems },
     {
-      // Position はボタン操作対象外 (設定でのみ変更)。
-      // Group はマルチプレイヤー時にボタンで切替できる。
-      label: 'Player / Group',
+      // Group はマルチプレイヤー時にボタンで切替できる。Position は増減せず、
+      // UI 設定の並び (position_cycle) を順に切り替える (DEC-100)。
+      label: 'Player / Group / Position',
       items: [
         { value: 'player_inc', label: 'Player +1' },
         { value: 'player_dec', label: 'Player -1' },
         { value: 'group_inc', label: 'Group +1' },
         { value: 'group_dec', label: 'Group -1' },
+        { value: 'position_cycle', label: 'Position cycle' },
       ],
     },
   ]
@@ -1171,13 +1172,14 @@ export function DisplayEditor() {
         case 'group_inc': setSimState((s) => ({ ...s, group: s.group + 1 })); break
         case 'group_dec': setSimState((s) => ({ ...s, group: Math.max(0, s.group - 1) })); break
         case 'vib_mode': setSimState((s) => ({ ...s, volumeAdcEnabled: !s.volumeAdcEnabled })); break
+        case 'position_cycle': setSimState((s) => ({ ...s, position: nextCyclePosition(s.position, uiSettings.position_cycle ?? []) })); break
         case 'wifi_select': break // Wi-Fi 選択モード遷移はファーム側で OLED が固定描画する。Studio のプレビューでは表現しない
         case 'eq_preset_toggle': break // EQ/HP 音量はプレビュー上の表示対象外 — 実機の OLED 表示要素に現れない
         case 'hp_vol_up': break // EQ/HP 音量はプレビュー上の表示対象外 — 実機の OLED 表示要素に現れない
         case 'hp_vol_down': break // EQ/HP 音量はプレビュー上の表示対象外 — 実機の OLED 表示要素に現れない
       }
     },
-    [perButtonActions, layout.pages.length]
+    [perButtonActions, layout.pages.length, uiSettings.position_cycle]
   )
 
   // 押し続けシミュレーション
@@ -1222,13 +1224,14 @@ export function DisplayEditor() {
         case 'group_inc': setSimState((s) => ({ ...s, group: s.group + 1 })); break
         case 'group_dec': setSimState((s) => ({ ...s, group: Math.max(0, s.group - 1) })); break
         case 'vib_mode': setSimState((s) => ({ ...s, volumeAdcEnabled: !s.volumeAdcEnabled })); break
+        case 'position_cycle': setSimState((s) => ({ ...s, position: nextCyclePosition(s.position, uiSettings.position_cycle ?? []) })); break
         case 'wifi_select': break // Wi-Fi 選択モード遷移はファーム側で OLED が固定描画する。Studio のプレビューでは表現しない
         case 'eq_preset_toggle': break // EQ/HP 音量はプレビュー上の表示対象外 — 実機の OLED 表示要素に現れない
         case 'hp_vol_up': break // EQ/HP 音量はプレビュー上の表示対象外 — 実機の OLED 表示要素に現れない
         case 'hp_vol_down': break // EQ/HP 音量はプレビュー上の表示対象外 — 実機の OLED 表示要素に現れない
       }
     },
-    [perButtonActions, layout.pages.length, activePageIndex]
+    [perButtonActions, layout.pages.length, activePageIndex, uiSettings.position_cycle]
   )
 
   const handleSimButtonUp = useCallback(() => {

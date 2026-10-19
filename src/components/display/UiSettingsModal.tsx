@@ -5,6 +5,7 @@ import { useDeviceStore } from '@/stores/deviceStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { BRIGHTNESS_STEPS, rawToStep, stepToRaw } from '@/utils/ledBrightness'
 import { useI18n } from '@/i18n/I18nProvider'
+import { POSITION_NAMES, positionLabel } from '@/components/devices/positions'
 import './LedConfigModal.css'
 
 interface UiSettingsModalProps {
@@ -80,6 +81,19 @@ export function UiSettingsModal({
     onUiSettingsChange({ ...uiSettings, hold_feedback_brightness: raw })
   }
   const feedbackBrightnessStep = rawToStep(uiSettings.hold_feedback_brightness)
+
+  // position_cycle (DEC-100): saved states from before the field carry none.
+  const positionCycle = uiSettings.position_cycle ?? []
+  const setPositionCycle = (next: string[]) =>
+    onUiSettingsChange({ ...uiSettings, position_cycle: next })
+  const movePosition = (i: number, delta: -1 | 1) => {
+    const j = i + delta
+    if (j < 0 || j >= positionCycle.length) return
+    const next = [...positionCycle]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    setPositionCycle(next)
+  }
+  const addablePositions = POSITION_NAMES.filter((p) => !positionCycle.includes(p))
 
   return createPortal(
     <>
@@ -235,6 +249,44 @@ export function UiSettingsModal({
             </label>
             <div className="ui-settings-hint-block">
               {t('ui.showHoldHint')}
+            </div>
+          </div>
+
+          {/* 装着位置の切り替え — Deploy 後反映 (DEC-100) */}
+          <div className="ui-settings-section">
+            <div className="ui-settings-section-title">{t('ui.positionCycle')}</div>
+            {positionCycle.length === 0 ? (
+              <div className="ui-settings-hint-block">{t('ui.positionCycleEmpty')}</div>
+            ) : (
+              positionCycle.map((pos, i) => (
+                <div key={pos} className="ui-settings-row" style={{ marginTop: 4 }}>
+                  <span className="ui-settings-row-label" style={{ fontFamily: 'monospace' }}>
+                    {i + 1}. {positionLabel(pos)}
+                  </span>
+                  <button type="button" className="btn btn-sm" disabled={i === 0}
+                    title={t('ui.positionCycleUp')} onClick={() => movePosition(i, -1)}>↑</button>
+                  <button type="button" className="btn btn-sm" disabled={i === positionCycle.length - 1}
+                    title={t('ui.positionCycleDown')} onClick={() => movePosition(i, 1)}>↓</button>
+                  <button type="button" className="btn btn-sm"
+                    title={t('ui.positionCycleRemove')}
+                    onClick={() => setPositionCycle(positionCycle.filter((p) => p !== pos))}>×</button>
+                </div>
+              ))
+            )}
+            <div className="ui-settings-row" style={{ marginTop: 6 }}>
+              <select
+                value=""
+                disabled={addablePositions.length === 0}
+                onChange={(e) => { if (e.target.value) setPositionCycle([...positionCycle, e.target.value]) }}
+              >
+                <option value="">{t('ui.positionCycleAdd')}</option>
+                {addablePositions.map((p) => (
+                  <option key={p} value={p}>{positionLabel(p)}</option>
+                ))}
+              </select>
+            </div>
+            <div className="ui-settings-hint-block">
+              {t('ui.positionCycleHint')}
             </div>
           </div>
 

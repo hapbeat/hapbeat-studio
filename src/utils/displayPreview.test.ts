@@ -4,6 +4,7 @@ import {
   textCells,
   padClipToCells,
   getElementPreviewText,
+  nextCyclePosition,
 } from './displayPreview'
 
 describe('charCells', () => {
@@ -99,5 +100,19 @@ describe('getElementPreviewText — セル幅 = 要素幅 の不変条件', () =
     expect(textCells(getElementPreviewText('estimated_runtime'))).toBe(8)
     expect(getElementPreviewText('estimated_runtime', undefined, 'compact')).toBe('245m')
     expect(textCells(getElementPreviewText('estimated_runtime', undefined, 'compact'))).toBe(4)
+  })
+})
+
+describe('nextCyclePosition (DEC-100)', () => {
+  const cycle = ['pos_r_wrist', 'pos_l_wrist']
+  it('並びの次へ進み、末尾の次は先頭', () => {
+    expect(nextCyclePosition('pos_r_wrist', cycle)).toBe('pos_l_wrist')
+    expect(nextCyclePosition('pos_l_wrist', cycle)).toBe('pos_r_wrist')
+  })
+  it('並びに無い位置は先頭へ', () => {
+    expect(nextCyclePosition('pos_neck', cycle)).toBe('pos_r_wrist')
+  })
+  it('並びが空なら変えない', () => {
+    expect(nextCyclePosition('pos_neck', [])).toBe('pos_neck')
   })
 })

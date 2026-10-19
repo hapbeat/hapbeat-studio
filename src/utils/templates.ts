@@ -228,7 +228,9 @@ export const INITIAL_VOLUME_CONFIG: VolumeConfig = {
  *  - oled_brightness=3 (High)
  *  - hold_ms=700 / hold_feedback_start_ms=150 → ホールド予告は 150-700ms の窓
  *  - hold_feedback_color=[255,136,0] (オレンジ)、輝度 35 (約 14%)
- *  - hold_show_oled_indicator=false (短押し時の pos/group 切替表示を遮らない) */
+ *  - hold_show_oled_indicator=false (短押し時の pos/group 切替表示を遮らない)
+ *  - position_cycle=右手首 → 左手首 (ボタンに position_cycle を割り当てたときの
+ *    左右の付け替え用、DEC-100。割り当てなければ使われない) */
 export const INITIAL_UI_SETTINGS: UiSettings = {
   oled_brightness: 3,
   hold_ms: 700,
@@ -236,6 +238,7 @@ export const INITIAL_UI_SETTINGS: UiSettings = {
   hold_feedback_color: [255, 136, 0],
   hold_feedback_brightness: 35,
   hold_show_oled_indicator: false,
+  position_cycle: ['pos_r_wrist', 'pos_l_wrist'],
 }
 
 /** 出荷時の orientation:

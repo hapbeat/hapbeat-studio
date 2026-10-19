@@ -127,3 +127,28 @@ describe('fromFirmwareFormat (firmware → Studio)', () => {
     expect(out.volumeConfig?.default_level).toBe(4)
   })
 })
+
+describe('ui.position_cycle (DEC-100)', () => {
+  it('Studio の並びをそのまま書き出す', () => {
+    const state = makeState()
+    state.uiSettings = { ...DEFAULT_UI_SETTINGS, position_cycle: ['pos_r_wrist', 'pos_l_wrist'] }
+    expect(toFirmwareFormat(state).ui?.position_cycle).toEqual(['pos_r_wrist', 'pos_l_wrist'])
+  })
+  it('文字列だけを読み込み、無ければ空にする', () => {
+    const base: FirmwareUiConfig = {
+      display: { grid: [16, 2], device_model: 'band_wl', pages: [], button_actions: {} },
+      led: { global_brightness: 200, rules: [] },
+      volume: { steps: 8, direction: 'ascending', default_level: 4 },
+    }
+    const ui = { ...DEFAULT_UI_SETTINGS }
+    const withList = fromFirmwareFormat({
+      ...base,
+      ui: { ...ui, position_cycle: ['pos_l_wrist', 3 as unknown as string, 'pos_neck'] },
+    })
+    expect(withList.uiSettings?.position_cycle).toEqual(['pos_l_wrist', 'pos_neck'])
+    const { position_cycle: _omit, ...uiWithout } = ui
+    void _omit
+    const without = fromFirmwareFormat({ ...base, ui: uiWithout })
+    expect(without.uiSettings?.position_cycle).toEqual([])
+  })
+})

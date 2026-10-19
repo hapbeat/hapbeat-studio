@@ -90,6 +90,8 @@ interface FirmwareUiSettingsSection {
   hold_feedback_color: [number, number, number]
   hold_feedback_brightness: number
   hold_show_oled_indicator: boolean
+  /** position_cycle が切り替える装着位置の並び (DEC-100)。 */
+  position_cycle?: string[]
 }
 
 /** ファームウェアに送る統合 JSON の型 */
@@ -254,6 +256,7 @@ export function toFirmwareFormat(state: DisplaySavedState): FirmwareUiConfig {
         uiSettings?.hold_feedback_brightness ?? DEFAULT_UI_SETTINGS.hold_feedback_brightness,
       hold_show_oled_indicator:
         uiSettings?.hold_show_oled_indicator ?? DEFAULT_UI_SETTINGS.hold_show_oled_indicator,
+      position_cycle: uiSettings?.position_cycle ?? DEFAULT_UI_SETTINGS.position_cycle,
     },
   }
 }
@@ -340,6 +343,9 @@ export function fromFirmwareFormat(fw: FirmwareUiConfig): ImportedFirmwareState 
             ? fw.ui.hold_feedback_brightness
             : DEFAULT_UI_SETTINGS.hold_feedback_brightness,
         hold_show_oled_indicator: !!fw.ui.hold_show_oled_indicator,
+        position_cycle: Array.isArray(fw.ui.position_cycle)
+          ? fw.ui.position_cycle.filter((p): p is string => typeof p === 'string')
+          : DEFAULT_UI_SETTINGS.position_cycle,
       }
     : { ...DEFAULT_UI_SETTINGS }
 

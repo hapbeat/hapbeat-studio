@@ -62,6 +62,8 @@ export type ButtonActionType =
   | 'pwm_bias_toggle'
   /** BandWL v4 MCU-PWM experiment: apply the playback bias while held. */
   | 'pwm_bias_hold'
+  /** 装着位置を UiSettings.position_cycle の次へ切り替える (DEC-100)。 */
+  | 'position_cycle'
 
 /** Hold 動作モード: momentary=離したら戻す, latch=1回押しと同じ */
 export type HoldMode = 'momentary' | 'latch'
@@ -256,6 +258,8 @@ export const DEFAULT_VOLUME_CONFIG: VolumeConfig = {
  *   控えめのデフォルトにしてある。
  * - `hold_show_oled_indicator`: hold 待機中 OLED に "Hold..." を出すか
  *   (default false — 短押し時の pos/group 切替表示を遮らないため)。
+ * - `position_cycle`: ボタンの動作 `position_cycle` が順に切り替える装着位置
+ *   (Position 語彙 `pos_*` の並び、DEC-100)。空なら何もしない。
  */
 export interface UiSettings {
   oled_brightness: 1 | 2 | 3
@@ -264,6 +268,7 @@ export interface UiSettings {
   hold_feedback_color: [number, number, number]
   hold_feedback_brightness: number
   hold_show_oled_indicator: boolean
+  position_cycle: string[]
 }
 
 export const DEFAULT_UI_SETTINGS: UiSettings = {
@@ -273,6 +278,7 @@ export const DEFAULT_UI_SETTINGS: UiSettings = {
   hold_feedback_color: [0, 255, 255],   // 純 cyan (brightness で scale される)
   hold_feedback_brightness: 30,         // raw 0-255、default ≈ 12%
   hold_show_oled_indicator: false,
+  position_cycle: [],
 }
 
 /**

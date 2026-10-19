@@ -2,13 +2,13 @@ import type { DisplayElementType } from '@/types/display'
 
 /** シミュレーション状態
  *  - player / group はボタン操作で増減 (player_inc/dec, group_inc/dec)
- *  - position は設定で決まる固定値 (ボタン操作対象外) なのでサンプル表示用
+ *  - position は装着位置の名前 (`pos_*`)。position_cycle ボタンで切り替わる
  *  - volume / volumeAdcEnabled は volume / vib_mode 系ボタンで変化
  */
 export interface SimState {
   player: number
   group: number
-  position: number
+  position: string
   volume: number
   volumeAdcEnabled: boolean
 }
@@ -16,9 +16,16 @@ export interface SimState {
 export const DEFAULT_SIM_STATE: SimState = {
   player: 0,
   group: 0,
-  position: 0,
+  position: 'pos_l_wrist',
   volume: 5,
   volumeAdcEnabled: true,
+}
+
+/** position_cycle の次の位置 (ファームと同じ規則、DEC-100): 今の位置が並びに
+ *  無ければ先頭、末尾の次は先頭。並びが空なら変えない。 */
+export function nextCyclePosition(current: string, cycle: readonly string[]): string {
+  if (cycle.length === 0) return current
+  return cycle[(cycle.indexOf(current) + 1) % cycle.length]
 }
 
 /**
@@ -140,7 +147,8 @@ export function getElementPreviewText(type: DisplayElementType, simState?: SimSt
       //   compact (4) = name 部のみ truncate (e.g. 'l_wr')
       //   standard (8) = `pos:` + name 4 字 (e.g. 'pos:l_wr')
       //   wide (16)    = `pos: ` + full name pad (e.g. 'pos: l_wrist    ')
-      const sample = 'pos_l_wrist'
+      // 古い保存状態では position が数値だったので、そのときはサンプルを出す。
+      const sample = typeof s.position === 'string' ? s.position : 'pos_l_wrist'
       const name = sample.startsWith('pos_') ? sample.slice(4) : sample
       if (variant === 'compact') return name.padEnd(4, ' ').slice(0, 4)
       if (variant === 'wide')    return `pos: ${name}`.padEnd(16, ' ').slice(0, 16)
