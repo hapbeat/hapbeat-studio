@@ -874,7 +874,7 @@ export function DeviceDetail() {
           {device.address && <> · {device.address}</>}
           {!device.online && <> · offline</>}
         </div>
-        <div className="form-action-row" style={{ marginTop: 10 }}>
+        <div className="form-action-row" style={{ marginTop: 6 }}>
           <button
             className="form-button-secondary"
             onClick={refreshInfo}
@@ -892,7 +892,7 @@ export function DeviceDetail() {
             {t('common.restart')}
           </button>
           {globalStatus && (
-            <span className={`form-status ${globalStatus.kind}`} style={{ alignSelf: 'center' }}>
+            <span className={`form-status devices-detail-status ${globalStatus.kind}`} title={globalStatus.msg}>
               {globalStatus.msg}
             </span>
           )}

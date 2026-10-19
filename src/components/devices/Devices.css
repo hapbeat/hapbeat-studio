@@ -78,7 +78,7 @@
 .devices-sidebar-list {
   flex: 1 1 auto;
   overflow-y: auto;
-  padding: 6px;
+  padding: 4px;
 }
 
 /* ---- PC sound → Hapbeat (desktop app): fixed height, pinned under the list ---- */
@@ -178,17 +178,17 @@
   /* Compact: the name moved to its own scannable row and the role/AP
      tags moved down to the meta row (user feedback 2026-06-13: cards
      too tall). Tight vertical padding keeps a 2-row card short. */
-  padding: 5px 10px;
+  padding: 3px 8px;
   border-radius: var(--radius);
   cursor: pointer;
   transition: background var(--transition), border-color var(--transition);
   border: 1px solid transparent;
   background: var(--bg-surface);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
   /* Consistent baseline height so a 1-meta-line card and a 2-meta-line card
      line up (user feedback 2026-06-13: 各カードの高さを揃えて). Cards with
      extra rows (USB flash progress) still grow beyond this. */
-  min-height: 46px;
+  min-height: 42px;
   justify-content: center;
 }
 
@@ -733,7 +733,7 @@
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
-  padding: 20px 24px 0;
+  padding: 10px 16px 0;
   background: var(--bg-primary);
 }
 
@@ -801,14 +801,13 @@
 
 .devices-detail-header {
   flex-shrink: 0;
-  margin-bottom: 18px;
 }
 
 .devices-detail-name {
   font-size: 20px;
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .devices-detail-sub {
@@ -903,7 +902,7 @@
   display: flex;
   gap: 0;
   border-bottom: 1px solid var(--border);
-  margin: 14px 0 0;
+  margin: 8px 0 0;
 }
 
 .device-subtab-btn {
@@ -933,8 +932,8 @@
      width sideways (user feedback 2026-06-13: 開くと幅が変わる). */
   scrollbar-gutter: stable;
   /* Bleed to the pane edges so the scrollbar sits at the pane's right edge. */
-  margin: 0 -24px;
-  padding: 16px 24px 20px;
+  margin: 0 -16px;
+  padding: 8px 16px 12px;
   display: flex;
   flex-direction: column;
 }
@@ -1214,6 +1213,19 @@
 .form-status.warn { color: var(--warning); }
 .form-status.err { color: var(--error); }
 .form-status.muted { color: var(--text-muted); }
+
+/* Header status (load / restart result) sits on the button row. It takes
+ * the remaining width and ellipsizes, so a long message never wraps the
+ * row and pushes the sub-tabs down (no passive layout shift). */
+.devices-detail-status {
+  flex: 1 1 0;
+  min-width: 0;
+  margin-top: 0;
+  align-self: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* ---- Inline button row ---- */
 .form-action-row {
