@@ -47,6 +47,7 @@ import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { LedConfigModal } from './LedConfigModal'
 import { VolumeConfigModal } from './VolumeConfigModal'
 import { DevicePill } from '@/components/devices/DevicePill'
+import { positionIdAt } from '@/utils/buttonPositions'
 import './DisplayEditor.css'
 
 /** パレットからドラッグ中の要素タイプ + variant */
@@ -1369,8 +1370,11 @@ export function DisplayEditor() {
 // OledSimulator
 // ========================================
 
-function buttonMessageId(id: string): MessageId {
-  const ids: Record<string, MessageId> = {
+// Labels take a POSITION id (positionIdAt). Band's left/centre/right read the
+// same in both orientations; flipped moves the Duo 3-button column to the
+// right, so its arrows and names mirror.
+function buttonMessageId(id: string, flipped: boolean): MessageId {
+  const normal: Record<string, MessageId> = {
     btn_1: 'display.button.upperLeft',
     btn_2: 'display.button.middleLeft',
     btn_3: 'display.button.lowerLeft',
@@ -1380,15 +1384,25 @@ function buttonMessageId(id: string): MessageId {
     btn_c: 'display.button.center',
     btn_r: 'display.button.right',
   }
-  return ids[id] ?? 'display.button.center'
+  const flippedDuo: Record<string, MessageId> = {
+    btn_1: 'display.button.flipped1',
+    btn_2: 'display.button.flipped2',
+    btn_3: 'display.button.flipped3',
+    btn_4: 'display.button.flipped4',
+    btn_5: 'display.button.flipped5',
+  }
+  return (flipped ? flippedDuo[id] : undefined) ?? normal[id] ?? 'display.button.center'
 }
 
-function buttonShortLabel(id: string): string {
-  const labels: Record<string, string> = {
+function buttonShortLabel(id: string, flipped: boolean): string {
+  const normal: Record<string, string> = {
     btn_1: '1 ↖', btn_2: '2 ←', btn_3: '3 ↙', btn_4: '4 ↗', btn_5: '5 ↘',
     btn_l: '1 ←', btn_c: '2 •', btn_r: '3 →',
   }
-  return labels[id] ?? id
+  const flippedDuo: Record<string, string> = {
+    btn_1: '1 ↗', btn_2: '2 →', btn_3: '3 ↘', btn_4: '4 ↖', btn_5: '5 ↙',
+  }
+  return (flipped ? flippedDuo[id] : undefined) ?? normal[id] ?? id
 }
 
 interface OledSimulatorProps {
@@ -1437,7 +1451,11 @@ function OledSimulator({
   const actionGroups = buildActionGroups(pages, deviceSpec.model)
 
   const renderButton = (btn: typeof deviceSpec.buttons[0]) => {
-    const act = perButtonActions[btn.id] ?? DEFAULT_BUTTON_ACTION
+    // The grid cell is the spec's (normal-orientation) switch; flipped rotates
+    // the cells 180°, so the cell shows the POSITION id that lands there
+    // (DEC-098) — assignments and labels follow what the user sees.
+    const id = positionIdAt(deviceSpec.model, btn.id, isFlipped)
+    const act = perButtonActions[id] ?? DEFAULT_BUTTON_ACTION
     const btnHoldMode = act.hold_mode ?? 'momentary'
     const holdGroups = buildHoldActionGroups(pages, btnHoldMode, deviceSpec.model)
     const allItems = [...actionGroups, ...holdGroups].flatMap((g) => g.items)
@@ -1445,19 +1463,19 @@ function OledSimulator({
       <div key={btn.id} className="device-button-row">
         <div
           className="device-button-dot-wrap"
-          title={t(buttonMessageId(btn.id))}
-          onClick={() => onSimButtonClick(btn.id)}
-          onMouseDown={() => onSimButtonDown(btn.id)}
+          title={t(buttonMessageId(id, isFlipped))}
+          onClick={() => onSimButtonClick(id)}
+          onMouseDown={() => onSimButtonDown(id)}
           onMouseUp={onSimButtonUp}
           onMouseLeave={onSimButtonUp}
         >
           <div className="device-button-dot" />
-          <span className="device-button-label">{buttonShortLabel(btn.id)}</span>
+          <span className="device-button-label">{buttonShortLabel(id, isFlipped)}</span>
         </div>
         <InlineButtonConfig
           action={act} allItems={allItems}
           actionGroups={actionGroups} holdGroups={holdGroups}
-          btnId={btn.id} onActionChange={onActionChange}
+          btnId={id} onActionChange={onActionChange}
         />
       </div>
     )

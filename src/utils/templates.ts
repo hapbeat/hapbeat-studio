@@ -185,7 +185,8 @@ const INITIAL_BUTTON_ACTIONS_DUO: PerButtonActions = {
  *  - btn_c (中): short=toggle_page, hold=wifi_select  (latch) — ページ切替 / Wi-Fi 設定
  *  - btn_r (右): short=group_inc,   hold=volume_up    (latch) — グループ +1 / 音量 UP
  *  (2026-10-15 ユーザ指示: 右 = プラス、左 = マイナス。旧既定は左右逆で
- *  2026-05-09 ユーザ提供 ui-config 061935.json 由来)
+ *  2026-05-09 ユーザ提供 ui-config 061935.json 由来。左右は画面の文字が読める
+ *  向きで見た位置で、出荷時の flipped でも見た目の右がプラスになる — DEC-098)
  *  player 番号変更は現場で再割当てする想定。 */
 const INITIAL_BUTTON_ACTIONS_BAND: PerButtonActions = {
   btn_l: { short_press: 'group_dec',   long_press: 'none', hold_tmp: 'none', hold_latch: 'volume_down', hold_mode: 'latch' },

@@ -932,6 +932,12 @@ export const messages = defineMessages({
   'display.button.left': { ja: 'ボタン 1（左）', en: 'Button 1 — left' },
   'display.button.center': { ja: 'ボタン 2（中央）', en: 'Button 2 — center' },
   'display.button.right': { ja: 'ボタン 3（右）', en: 'Button 3 — right' },
+  // Duo with the display flipped 180°: the 3-button column is on the right.
+  'display.button.flipped1': { ja: 'ボタン 1（右上）', en: 'Button 1 — upper right' },
+  'display.button.flipped2': { ja: 'ボタン 2（右中）', en: 'Button 2 — middle right' },
+  'display.button.flipped3': { ja: 'ボタン 3（右下）', en: 'Button 3 — lower right' },
+  'display.button.flipped4': { ja: 'ボタン 4（左上）', en: 'Button 4 — upper left' },
+  'display.button.flipped5': { ja: 'ボタン 5（左下）', en: 'Button 5 — lower left' },
   'volume.steps': { ja: '分割数', en: 'Steps' },
   'volume.direction': { ja: '方向', en: 'Direction' },
   'volume.ascending': { ja: '昇順（上げると大きく）', en: 'Ascending (up = louder)' },

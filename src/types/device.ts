@@ -52,10 +52,13 @@ export interface DeviceHardwareSpec {
  *      \          /
  *         3(底)               ← 底部中央 1 点
  *
- * ボタン配置 (物理位置 → GPIO):
+ * ボタン配置 (normal の向きの物理位置 → GPIO):
  *   Btn1(左上,SW2,GPIO33)   Btn4(右上,SW1,GPIO47)
  *   Btn2(左中,SW4,GPIO48)   [OLED]
  *   Btn3(左下,SW3,GPIO34)   [LED]   Btn5(右下,SW0,GPIO26)
+ * UI 設定の ID は見た目の位置 (DEC-098): btn_1..3 = 3 個の列の上・中・下、
+ * btn_4/5 = 2 個の列の上・下。flipped では 3 個の列が右に来て、btn_1 ⇄ btn_3、
+ * btn_4 ⇄ btn_5 の物理スイッチが入れ替わる (utils/buttonPositions.ts)。
  */
 export const DUO_WL_SPEC: DeviceHardwareSpec = {
   model: 'duo_wl',
@@ -84,11 +87,13 @@ export const DUO_WL_SPEC: DeviceHardwareSpec = {
  *   [btn_l] [btn_c] [btn_r]   ← 左から右へ
  *   [OLED]           [LED]
  *
- * firmware 側 (button_handler.cpp / element-registry.json) で
+ * firmware 側 (button_handler.cpp / element-registry.json) で、normal の向きでは
  *   btn_l → 物理 左 (= SW1/GPIO13, idx 1)
  *   btn_c → 物理 中 (= SW2/GPIO12, idx 2)
  *   btn_r → 物理 右 (= SW0/GPIO14, idx 0)
- * の対応になるよう同期が必要。
+ * の対応になるよう同期が必要。UI 設定の ID は画面の文字が読める向きで見た位置
+ * (DEC-098) で、flipped では btn_l ⇄ btn_r の物理スイッチが入れ替わる
+ * (utils/buttonPositions.ts、ファームも同じ対応)。
  */
 export const BAND_WL_SPEC: DeviceHardwareSpec = {
   model: 'band_wl',
