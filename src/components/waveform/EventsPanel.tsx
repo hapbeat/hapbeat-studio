@@ -96,7 +96,7 @@ export function EventsPanel() {
   const listItems: ReactNode[] = items.map(item => {
     const members = item.cues.map(k => rows.find(x => x.key === k)).filter((x): x is EventRow => !!x)
     return !item.group ? members.map(block) : <div key={`group:${item.cues.join('+')}`} className="events-group" title={t('events.simultaneousHint')}>
-      <div className="events-group-head">{groupLabel(item.cues)}<span className="events-tag simultaneous">{t('events.simultaneous')}</span></div>
+      <div className="events-group-head"><span className="events-group-name" title={groupLabel(item.cues)}>{groupLabel(item.cues)}</span><span className="events-tag simultaneous">{t('events.simultaneous')}</span></div>
       {members.map(block)}
     </div>
   })
@@ -194,17 +194,21 @@ function ProjectPicker() {
 
 function EventRowButton({ row, selected, onSelect, requested }: { row: EventRow; selected: boolean; onSelect: (key: string) => void; requested: { sound: boolean; haptic: boolean } }) {
   const { t } = useI18n()
-  // 音 未定 (yellow) / 音 なし 仮 (grey outline) / 音 なし ✓ (green outline: approved as no sound) / 音 仮 (blue) / 音 OK (green);
-  // — for a loop cue's sound where the project has none; 「依頼済み」 (purple) while a request to the agent for it is open. Fixed width.
+  // Compact pills (the name takes the rest of the row): the kind icon in its colour + a short state — 未 (yellow) / なし仮
+  // (grey outline) / なし✓ (green outline: approved as no sound) / 仮 (blue) / OK (green); 「依頼」 (purple) while a request
+  // to the agent is open. The full wording is the tooltip. Fixed width, so a state change moves nothing.
   // ▲ (a fixed slot before the pills): a sound or route of its own has nothing starred, so it plays nothing (DEC-092).
-  // The side that does not hold a field (DEC-091) shows who does instead of a state: 「グループ」 / 「各強弱」, faint and
-  // without the kind icon (its place kept, so nothing moves).
+  // The side that does not hold a field (DEC-091) shows who does instead of a state: ↑ (the group above) / ↓ (each variant
+  // below), faint and without the kind icon (its place kept, so nothing moves).
   const child = row.ref.variant !== null
-  const badge = (kind: 'sound' | 'haptic', label: string, status: MaterialStatus, asked: boolean, held: boolean) => !held ? <span className="events-badge held-elsewhere" title={t(child ? 'events.byGroup' : 'events.byEach')}><KindIcon kind={kind} size={14} decorative />{label} {t(child ? 'events.byGroup.short' : 'events.byEach.short')}</span>
-    : asked ? <span className="events-badge requested" title={t('events.requested.hint')}><KindIcon kind={kind} size={14} decorative />{label} {t('events.requested')}</span>
-    : <MaterialPillBadge kind={kind} status={status} label={label} />
+  const badge = (kind: 'sound' | 'haptic', label: string, status: MaterialStatus, asked: boolean, held: boolean) => !held ? <span className="events-badge compact held-elsewhere" title={`${label}: ${t(child ? 'events.byGroup' : 'events.byEach')}`}><KindIcon kind={kind} size={14} decorative />{child ? '↑' : '↓'}</span>
+    : asked ? <span className="events-badge compact requested" title={`${label} ${t('events.requested')}: ${t('events.requested.hint')}`}><KindIcon kind={kind} size={14} decorative />{t('events.pill.requested')}</span>
+    : <MaterialPillBadge kind={kind} status={status} label={label} compact />
+  const name = child ? `${row.ref.cue}:${row.ref.variant}` : row.key
   return <button type="button" role="option" aria-selected={selected} className={`events-row ${child ? 'variant' : ''} ${selected ? 'selected' : ''}`} onClick={() => onSelect(row.key)} title={row.description ?? ''}>
-    <span className="events-row-name">{child ? `${row.ref.cue} › ${row.ref.variant}` : row.key}{row.loop && <small>{t('events.loop')}</small>}</span>
+    {/* A variant: the cue prefix is dim and gives way first, so the variant part stays readable. */}
+    <span className="events-row-name" title={name}>{child ? <><span className="events-row-prefix">{row.ref.cue}:</span><span className="events-row-main">{row.ref.variant}</span></>
+      : <span className="events-row-main">{row.key}</span>}{row.loop && <small>{t('events.loop')}</small>}</span>
     <span className="events-row-badges"><span className="events-row-warn" style={{ visibility: row.noStar ? 'visible' : 'hidden' }}
       title={row.noStar ? t('events.noStar') : undefined} aria-label={row.noStar ? t('events.noStar') : undefined} aria-hidden={!row.noStar}>▲</span>
       {badge('sound', t('events.badge.sound'), row.sound, requested.sound, row.held.sound)}{badge('haptic', t('events.badge.haptic'), row.haptic, requested.haptic, row.held.haptic)}</span>
@@ -214,9 +218,10 @@ function EventRowButton({ row, selected, onSelect, requested }: { row: EventRow;
 
 /**
  * The state pill of a sound / haptic (`materialPill`): the kind icon (slashed for "none") and `label` (音 / 触覚; left
- * out next to a heading that already says it) with 未定 / なし 仮 / なし ✓ / 仮 / OK.
+ * out next to a heading that already says it) with 未定 / なし 仮 / なし ✓ / 仮 / OK. `compact` (the Events list): the icon
+ * and a short state only (未 / なし仮 / なし✓ / 仮 / OK), the full wording in the tooltip.
  */
-function MaterialPillBadge({ kind, status, label }: { kind: 'sound' | 'haptic'; status: MaterialStatus; label?: string }) {
+function MaterialPillBadge({ kind, status, label, compact }: { kind: 'sound' | 'haptic'; status: MaterialStatus; label?: string; compact?: boolean }) {
   const { t } = useI18n()
   const pill = materialPill(status)
   const none = pill === 'none-tentative' || pill === 'none-approved'
@@ -224,9 +229,11 @@ function MaterialPillBadge({ kind, status, label }: { kind: 'sound' | 'haptic'; 
     : pill === 'none-tentative' ? `${t('events.noneShort')} ${t('events.reviewTentative')}`
     : pill === 'none-approved' ? t('events.noneShort')
     : t(pill === 'approved' ? 'events.reviewApproved' : 'events.reviewTentative')
-  const title = pill === 'none-approved' ? t(kind === 'sound' ? 'events.noneOk.sound' : 'events.noneOk.haptic') : undefined
-  return <span className={`events-badge ${pill}`} title={title}><KindIcon kind={kind} size={14} decorative slashed={none} />
-    {label ? `${label} ${text}` : text}{pill === 'none-approved' && <span className="events-badge-check" aria-hidden="true">✓</span>}</span>
+  const short = pill === 'undecided' ? t('events.pill.undecided') : pill === 'none-tentative' ? t('events.pill.noneTentative') : text
+  const full = label ? `${label} ${text}${pill === 'none-approved' ? ' ✓' : ''}` : text
+  const title = pill === 'none-approved' ? t(kind === 'sound' ? 'events.noneOk.sound' : 'events.noneOk.haptic') : compact ? full : undefined
+  return <span className={`events-badge ${compact ? 'compact ' : ''}${pill}`} title={title}><KindIcon kind={kind} size={14} decorative slashed={none} />
+    {compact ? short : label ? `${label} ${text}` : text}{pill === 'none-approved' && <span className="events-badge-check" aria-hidden="true">✓</span>}</span>
 }
 
 type Edit = (change: (tb: CueTable) => CueTable | null) => boolean
