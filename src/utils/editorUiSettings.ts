@@ -39,8 +39,10 @@ export interface EditorUiSettings {
   dockLayout: Record<string, unknown> | null
   /** Scene video panel: the video starts this many seconds before the cue mark when an audition plays. */
   sceneLeadSec: number
-  /** Scene video panel: a scene audition runs at least this many seconds past its last firing (longer when a sound / haptic is longer). */
+  /** Scene video panel: a scene audition runs this many seconds past the end of its last sound (the haptic's end with no sound; longer when a haptic is longer). */
   scenePostRollSec: number
+  /** `scenePostRollSec` counts from the sound's end: a value saved before (counted from the last mark, default 1) is reset to 0 once. */
+  scenePostRollFromSound: boolean
   /** 「周りのイベントも鳴らす」: an audition over the representative stretch also plays its context (a trial's `scene.context`, the other cues of the event's 「同時」 group); false = the candidate / material alone. */
   sceneContext: boolean
   /** Events panel 「同時」 groups edited by hand, per Scene project (eventGroups.applyGroupEdits; cue names). */
@@ -84,7 +86,7 @@ export interface EditorUiSettings {
 export const DEFAULT_UI_SETTINGS: EditorUiSettings = {
   loop: false, loopDelay: 0, height: 180, soundLaneHeight: 84, muted: false, sendHaptics: true,
   clipThumbnails: false, clipGroupBy: 'project', collapsedGroups: [], projectNames: [], dockLayout: null,
-  sceneLeadSec: 1, scenePostRollSec: 1, sceneContext: true, eventGroupEdits: {}, trialScenes: {}, clipScenes: {}, eventMarks: {}, reservesOpen: true, materialsOpen: true, groupPlayback: true, placeAtFirings: false, candidateSounds: {}, materialLinks: {}, hapticOnPc: false, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
+  sceneLeadSec: 1, scenePostRollSec: 0, scenePostRollFromSound: true, sceneContext: true, eventGroupEdits: {}, trialScenes: {}, clipScenes: {}, eventMarks: {}, reservesOpen: true, materialsOpen: true, groupPlayback: true, placeAtFirings: false, candidateSounds: {}, materialLinks: {}, hapticOnPc: false, eventReserves: {}, reservesBackfilled: false, revisePending: [], hapticPending: [], soundPending: [], trialProjectFilter: '', trialTargetFilter: '',
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -165,7 +167,8 @@ export function sanitizeUiSettings(value: unknown): EditorUiSettings {
     projectNames: strings(v.projectNames, 500) ? [...new Set(v.projectNames.filter(isProjectName))] : d.projectNames,
     dockLayout: isDockLayout(v.dockLayout) ? v.dockLayout : d.dockLayout,
     sceneLeadSec: clamp(v.sceneLeadSec, 0, 10, d.sceneLeadSec),
-    scenePostRollSec: clamp(v.scenePostRollSec, 0, 5, d.scenePostRollSec),
+    scenePostRollSec: v.scenePostRollFromSound === true ? clamp(v.scenePostRollSec, 0, 5, d.scenePostRollSec) : d.scenePostRollSec,
+    scenePostRollFromSound: true,
     sceneContext: typeof v.sceneContext === 'boolean' ? v.sceneContext : d.sceneContext,
     eventGroupEdits: groupEdits(v.eventGroupEdits),
     trialScenes: sceneChoices(v.trialScenes),

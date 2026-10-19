@@ -172,12 +172,11 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const scenePcm = useSceneStore(state => state.pcm)
   // The playback runs to the end of the group's last haptic too (a bite after the last tear was cut off with the shown buffer).
   const groupEndSec = useMemo(() => groupHapticsEnd(JSON.parse(groupKey) as HapticPart[], scenePcm), [groupKey, scenePcm])
-  // A scene audition runs (haptic stream and Scene video, which pauses at its end) to the last firing + the post-roll, or
-  // to the end of the longest sound / haptic played if later (sceneStopSec); the sounds ring out on their own after it.
+  // A scene audition runs (haptic stream and Scene video, which pauses at its end) to the end of the last sound played +
+  // the post-roll, or to the end of the longest haptic if later; with no sound, the haptic's end + the post-roll (sceneStopSec).
   const sceneSounds = useSceneSounds()
   const postRollSec = useEditorSettings(state => state.scenePostRollSec)
   const stopSec = useMemo(() => !shownBuffer || !plan || (!audition && !eventPreview && !adjusting) ? 0 : sceneStopSec({
-    firings: [...plan.targets, ...plan.others.map(o => o.atSec), ...(plan.context?.firings ?? []).map(f => f.atSec)],
     postRollSec,
     untilSec: plan.context?.endSec,
     sounds: (sceneSounds.firings ?? []).map(f => ({ atSec: f.atSec, durSec: f.buffer.duration })),

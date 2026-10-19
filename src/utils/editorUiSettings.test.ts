@@ -28,12 +28,22 @@ describe('editor UI settings', () => {
     expect(sanitizeUiSettings({ clipScenes: { 'c1': { project: 'trex', file: '01.mp4' }, 'x': 3 } }).clipScenes).toEqual({ c1: { project: 'trex', file: '01.mp4' } })
   })
 
-  it('clamps the scene post-roll to 0–5 s (default 1 s)', () => {
-    expect(sanitizeUiSettings({}).scenePostRollSec).toBe(1)
-    expect(sanitizeUiSettings({ scenePostRollSec: 2.5 }).scenePostRollSec).toBe(2.5)
-    expect(sanitizeUiSettings({ scenePostRollSec: 9 }).scenePostRollSec).toBe(5)
-    expect(sanitizeUiSettings({ scenePostRollSec: -1 }).scenePostRollSec).toBe(0)
-    expect(sanitizeUiSettings({ scenePostRollSec: 'x' }).scenePostRollSec).toBe(1)
+  it('clamps the scene post-roll to 0–5 s (default 0 s)', () => {
+    const fromSound = { scenePostRollFromSound: true }
+    expect(sanitizeUiSettings({}).scenePostRollSec).toBe(0)
+    expect(sanitizeUiSettings({ ...fromSound, scenePostRollSec: 2.5 }).scenePostRollSec).toBe(2.5)
+    expect(sanitizeUiSettings({ ...fromSound, scenePostRollSec: 9 }).scenePostRollSec).toBe(5)
+    expect(sanitizeUiSettings({ ...fromSound, scenePostRollSec: -1 }).scenePostRollSec).toBe(0)
+    expect(sanitizeUiSettings({ ...fromSound, scenePostRollSec: 'x' }).scenePostRollSec).toBe(0)
+  })
+
+  it('resets a post-roll saved before it counted from the sound end to 0 once, then keeps the user value', () => {
+    const migrated = sanitizeUiSettings({ scenePostRollSec: 1 })
+    expect(migrated.scenePostRollSec).toBe(0)
+    expect(migrated.scenePostRollFromSound).toBe(true)
+    const changed = parseStoredUiSettings(JSON.stringify({ ...migrated, scenePostRollSec: 1.5 }))
+    expect(changed?.scenePostRollSec).toBe(1.5)
+    expect(sanitizeUiSettings(changed).scenePostRollSec).toBe(1.5)
   })
 
   it('keeps the context toggle (default on) and the hand-edited event groups per project', () => {
