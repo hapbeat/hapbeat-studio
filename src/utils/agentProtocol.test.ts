@@ -50,10 +50,10 @@ describe('agentProtocol', () => {
   it('accepts an optional game scene and rejects malformed ones', () => {
     const result = parseTrialRequest(request({ scene: { project: 'trex-encounter', cues: ['roar', 'roar_impact'] } }), 't-01')
     expect(result.ok && result.trial.scene).toEqual({ project: 'trex-encounter', cues: ['roar', 'roar_impact'] })
-    const withClip = parseTrialRequest(request({ scene: { project: 'trex-encounter', cues: ['footstep'], clip: '01_footstep-approach_both_t001.3s.mp4' } }), 't-01')
-    expect(withClip.ok && withClip.trial.scene?.clip).toBe('01_footstep-approach_both_t001.3s.mp4')
+    const withAt = parseTrialRequest(request({ scene: { project: 'trex-encounter', cues: ['footstep'], at: 17.367 } }), 't-01')
+    expect(withAt.ok && withAt.trial.scene?.at).toBe(17.367)
     for (const bad of [{}, { project: 'x', cues: [] }, { project: '', cues: ['a'] }, { project: 'x', cues: ['a b'] }, { project: 'x', cues: 'roar' }, 'roar',
-      { project: 'x', cues: ['a'], clip: '../a.mp4' }, { project: 'x', cues: ['a'], clip: '' }, { project: 'x', cues: ['a'], clip: 3 }]) {
+      { project: 'x', cues: ['a'], at: -1 }, { project: 'x', cues: ['a'], at: '3.2' }, { project: 'x', cues: ['a'], at: 1e6 }]) {
       const r = parseTrialRequest(request({ scene: bad }), 't-01')
       expect(r.ok ? null : r.error).toMatch(/scene/)
     }

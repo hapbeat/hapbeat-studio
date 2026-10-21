@@ -12,8 +12,11 @@ export const UI_SETTINGS_FILE = 'ui-settings.json'
 export const UI_SETTINGS_STORAGE_KEY = 'hapbeat-editor-settings'
 
 export type ClipGroupBy = 'project' | 'source'
-/** Scene moment chosen for an AI trial in the Scene video panel: the Scene project and the option's key (trialScene SceneClipOption.key). */
-export interface TrialSceneChoice { project: string; file: string }
+/**
+ * Scene moment chosen in the Scene video panel (per AI trial / editor clip / event): the Scene project and a time of its
+ * full replay (seconds; the moment containing it, trialScene.momentAt), or null = the representative stretch.
+ */
+export interface TrialSceneChoice { project: string; at: number | null }
 /** An editor clip / AI candidate decided as an event's sound or haptic (clip-list badge). */
 export interface EventMark { project: string; event: string; target: 'sound' | 'haptic' }
 /** Bounds of the sound lane's height (px): its header and a readable line stay; the haptic keeps at least 100 px. */
@@ -123,11 +126,12 @@ function reserves(value: unknown): Record<string, ReserveRef[]> {
 const clamp = (value: unknown, min: number, max: number, fallback: number) => typeof value === 'number' && Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback
 const strings = (value: unknown, max: number): value is string[] => Array.isArray(value) && value.length <= max && value.every(item => typeof item === 'string' && item.length <= 200)
 const isSceneChoice = (value: unknown): value is TrialSceneChoice => isRecord(value) && typeof value.project === 'string' && value.project.length <= 200
-  && typeof value.file === 'string' && value.file.length <= 300
-/** Choices keyed by AI trial / clip id (at most 2000); invalid entries are dropped. */
+  && (value.at === null || (typeof value.at === 'number' && Number.isFinite(value.at) && value.at >= 0 && value.at <= 86400))
+/** Choices keyed by AI trial / clip id (at most 2000); invalid entries (and the pre-time `{ project, file }` ones) are dropped. */
 function sceneChoices(value: unknown): Record<string, TrialSceneChoice> {
   if (!isRecord(value)) return {}
-  return Object.fromEntries(Object.entries(value).filter(([id, choice]) => /^[A-Za-z0-9_-]{1,80}$/.test(id) && isSceneChoice(choice)).slice(0, 2000)) as Record<string, TrialSceneChoice>
+  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, TrialSceneChoice] => /^[A-Za-z0-9_-]{1,80}$/.test(entry[0]) && isSceneChoice(entry[1]))
+    .map(([id, choice]) => [id, { project: choice.project, at: choice.at }] as const).slice(0, 2000))
 }
 const isEventMark = (value: unknown): value is EventMark => isRecord(value) && typeof value.project === 'string' && value.project.length <= 200
   && typeof value.event === 'string' && value.event.length <= 200 && (value.target === 'sound' || value.target === 'haptic')

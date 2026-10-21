@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveTrialScene, sceneEventTime, sceneProjectNeed, sceneVideoTime, stepSceneFrame, trialSceneOptions } from './trialScene'
+import { momentKey, resolveTrialScene, sceneChoiceOf, sceneEventTime, sceneProjectNeed, sceneVideoTime, stepSceneFrame, trialSceneOptions } from './trialScene'
 import { sampleData, sampleLib } from './sceneTestFixtures'
 
 describe('trial scene moments', () => {
@@ -29,18 +29,27 @@ describe('trial scene moments', () => {
     expect(auto.kind === 'ready' && auto.chosen).toMatchObject({ key: 'segment', file: 'full_replay.mp4', mark: 3.1, marks: [{ t: 3.1, name: 'grab', target: true }], segment: { repeating: false } })
     expect(auto.kind === 'ready' && auto.chosen!.end).toBeCloseTo(3.1 + 0.4 + 0.5)
     // The user's pick of a moment still wins (listed after the representative).
-    const saved = resolveTrialScene({ lib, data, scene: { project: 'mill', cues: ['grab'] }, saved: { project: 'mill', file: '@6.100' } })
+    const saved = resolveTrialScene({ lib, data, scene: { project: 'mill', cues: ['grab'] }, saved: { project: 'mill', at: 6.1 } })
     expect(saved.kind === 'ready' && saved.chosen?.key).toBe('@6.100')
     expect(saved.kind === 'ready' && saved.options.map(o => o.key)).toEqual(['segment', '@6.100'])
+    // The trial's own `scene.at`: the moment whose stretch contains it (6.1 s → the second grab); the user's pick still wins.
+    const named = resolveTrialScene({ lib, data, scene: { project: 'mill', cues: ['grab'], at: 7.5 }, soundSec: () => 0.4 })
+    expect(named.kind === 'ready' && named.chosen?.key).toBe('@6.100')
+    expect(named.kind === 'ready' && named.options.map(o => o.key)).toEqual(['segment', '@6.100'])
+    const pickedOver = resolveTrialScene({ lib, data, scene: { project: 'mill', cues: ['grab'], at: 7.5 }, saved: { project: 'mill', at: null }, soundSec: () => 0.4 })
+    expect(pickedOver.kind === 'ready' && pickedOver.chosen?.key).toBe('segment')
+    // A time inside the representative stretch is that stretch.
+    const inRep = resolveTrialScene({ lib, data, scene: { project: 'mill', cues: ['grab'], at: 3.2 }, soundSec: () => 0.4 })
+    expect(inRep.kind === 'ready' && inRep.chosen?.key).toBe('segment')
     const old = resolveTrialScene({ lib, data })
     expect(old.kind === 'ready' && old.options.length === 2 && old.chosen).toBeNull()
-    expect(resolveTrialScene({ lib, data, saved: { project: 'other', file: '01_button.mp4' } })).toEqual({ kind: 'otherProject', project: 'other' })
+    expect(resolveTrialScene({ lib, data, saved: { project: 'other', at: 3 } })).toEqual({ kind: 'otherProject', project: 'other' })
   })
 
   it('takes the video project only from the Events panel (a subject of another project gets a note, never a link)', () => {
     const lib = sampleLib()
     // A trex clip while Safety Mill (mill) is open: a note naming both, no link / switch.
-    const other = sceneProjectNeed(resolveTrialScene({ lib, data, saved: { project: 'trex', file: '01_button.mp4' } }), lib.project_name, 'mill')
+    const other = sceneProjectNeed(resolveTrialScene({ lib, data, saved: { project: 'trex', at: 3 } }), lib.project_name, 'mill')
     expect(other).toEqual({ kind: 'otherProject', project: 'trex', open: lib.project_name })
     // No project open: link the project last chosen in the Events panel, not the subject's.
     expect(sceneProjectNeed(resolveTrialScene({ lib: null, data: null, scene: { project: 'trex', cues: ['roar'] } }), null, 'mill')).toEqual({ kind: 'link', project: 'mill' })
@@ -79,18 +88,38 @@ describe('event moments (cue table v2)', () => {
     const state = resolveTrialScene({ lib: sampleLib(), data, scene })
     expect(state.kind === 'ready' && state.chosen?.key).toBe('@1.300')
     expect(state.kind === 'ready' && state.options.map(o => o.label)).toEqual(['01 button:soft (1.3 s)', '02 button (17.4 s)'])
-    const picked = resolveTrialScene({ lib: sampleLib(), data, scene, saved: { project: 'mill', file: '@17.400' } })
+    const picked = resolveTrialScene({ lib: sampleLib(), data, scene, saved: { project: 'mill', at: 17.4 } })
     expect(picked.kind === 'ready' && picked.chosen?.key).toBe('@17.400')
+  })
+
+  it('a time outside every moment: a stretch around it, marked at a target firing in it (else at the time)', () => {
+    const data = sampleData()
+    data.full.events = [{ t: 40.2, name: 'button', hand: '' }]
+    data.clips = []
+    const around = resolveTrialScene({ lib: sampleLib(), data, scene: { project: 'mill', cues: ['button'], at: 40 }, soundSec: () => 0.5 })
+    // The representative stretch is the same firing (it contains 40 s).
+    expect(around.kind === 'ready' && around.chosen?.key).toBe('segment')
+    const free = resolveTrialScene({ lib: sampleLib(), data, scene: { project: 'mill', cues: ['button'], at: 70 }, soundSec: () => 0.5 })
+    expect(free.kind === 'ready' && free.chosen).toMatchObject({ key: '@70.000', mark: 70, segment: { start: 69, end: 71, marks: [{ t: 70, name: 'button', target: true }] } })
+    // Cues never recorded, but a time: still a stretch (no "no clips").
+    data.full.events = []
+    const unrecorded = resolveTrialScene({ lib: sampleLib(), data, scene: { project: 'mill', cues: ['button'], at: 12 }, soundSec: () => 0.5 })
+    expect(unrecorded.kind === 'ready' && unrecorded.chosen?.segment).toMatchObject({ start: 11, end: 13, marks: [{ t: 12, name: 'button', target: true }] })
+    expect(resolveTrialScene({ lib: sampleLib(), data, scene: { project: 'mill', cues: ['button'] } }).kind).toBe('noClips')
   })
 
   it('with the cues in the recording: the representative stretch; a picked moment wins, and back again', () => {
     const data = sampleData()
     const state = resolveTrialScene({ lib: sampleLib(), data, scene: { project: 'mill', cues: ['button'] } })
     expect(state.kind === 'ready' && state.chosen?.key).toBe('segment')
-    const picked = resolveTrialScene({ lib: sampleLib(), data, scene: { project: 'mill', cues: ['button'] }, saved: { project: 'mill', file: '@3.000' } })
+    const picked = resolveTrialScene({ lib: sampleLib(), data, scene: { project: 'mill', cues: ['button'] }, saved: { project: 'mill', at: 3 } })
     expect(picked.kind === 'ready' && picked.chosen?.key).toBe('@3.000')
     expect(picked.kind === 'ready' && picked.options.map(o => o.key)).toEqual(['segment', '@3.000'])
-    const back = resolveTrialScene({ lib: sampleLib(), data, scene: { project: 'mill', cues: ['button'] }, saved: { project: 'mill', file: 'segment' } })
+    // The picker's keys round-trip through the saved time.
+    expect(sceneChoiceOf('mill', '@3.000')).toEqual({ project: 'mill', at: 3 })
+    expect(sceneChoiceOf('mill', 'segment')).toEqual({ project: 'mill', at: null })
+    expect(momentKey(sceneChoiceOf('mill', '@17.400').at!)).toBe('@17.400')
+    const back = resolveTrialScene({ lib: sampleLib(), data, scene: { project: 'mill', cues: ['button'] }, saved: { project: 'mill', at: null } })
     expect(back.kind === 'ready' && back.chosen?.key).toBe('segment')
   })
 })

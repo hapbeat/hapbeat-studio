@@ -4,7 +4,7 @@ import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useEditorSettings } from '@/stores/editorSettings'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { sceneVideoUrl, useSceneStore } from '@/stores/sceneStore'
-import { REPRESENTATIVE, resolveTrialScene, sceneEventTime, sceneProjectNeed, sceneVideoTime, stepSceneFrame, wantedSceneProject, type TrialSceneState } from '@/utils/trialScene'
+import { REPRESENTATIVE, resolveTrialScene, sceneChoiceOf, sceneEventTime, sceneProjectNeed, sceneVideoTime, stepSceneFrame, wantedSceneProject, type TrialSceneState } from '@/utils/trialScene'
 import { lastSceneProject } from '@/utils/sceneRegistry'
 import { FRAME_SEC, setScenePause, setScenePreRoll, useSceneVideoTarget, videoCorrection, type SceneVideoTarget } from '@/utils/editorSceneSync'
 import { eventSoundSec } from './eventAudio'
@@ -52,13 +52,14 @@ export function useSceneChoice(subject: SceneSubject) {
   // The targets: the trial's scene cues, or the event open in the Events panel (its variants are other cues of the scene).
   const targets = useMemo(() => subject.kind === 'event' && id ? [id] : undefined, [subject.kind, id])
   const state: TrialSceneState = useMemo(() => resolveTrialScene({ lib, data, scene, saved, project: wanted, soundSec: eventSoundSec, targets }), [lib, data, scene, saved, wanted, cues, sfx, targets])
-  /** Saves the pick: an option's `key` (in the choice's `file`), '' = none. */
+  /** Saves the pick of an option's `key` as its replay time (sceneChoiceOf), '' = none. */
   const choose = (key: string) => {
     if (!lib || !id) return
-    if (subject.kind === 'event') { useEventStore.getState().pickScene(id, key ? { project: lib.project_name, file: key } : null); return }
+    const choice = key ? sceneChoiceOf(lib.project_name, key) : null
+    if (subject.kind === 'event') { useEventStore.getState().pickScene(id, choice); return }
     const setting = subject.kind === 'trial' ? 'trialScenes' : 'clipScenes'
     const choices = { ...useEditorSettings.getState()[setting] }
-    if (key) choices[id] = { project: lib.project_name, file: key }; else delete choices[id]
+    if (choice) choices[id] = choice; else delete choices[id]
     useEditorSettings.getState().update({ [setting]: choices })
   }
   return { id, trial, scene, wanted, state, chosen: state.kind === 'ready' ? state.chosen : null, choose }
@@ -141,7 +142,7 @@ export function useLoopAudition(): LoopStretch | null {
 const OTHER_SCENES = '\u0000scene-tab'
 /**
  * Moment picker (a trial with `scene` always has one, so it offers no "none"). For an event / trial with
- * `scene`: the representative stretch first, then a recorded clip only when picked or named by the trial,
+ * `scene`: the representative stretch first, then a moment only when picked or named by the trial (`scene.at`),
  * and one item that opens the event's firings in the Scene tab (DEC-085: no list of moments here).
  */
 export function SceneChoiceSelect({ choice, label }: { choice: ReturnType<typeof useSceneChoice>; label: string }) {

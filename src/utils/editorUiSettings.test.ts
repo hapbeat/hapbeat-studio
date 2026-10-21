@@ -31,11 +31,11 @@ describe('editor UI settings', () => {
   })
 
   it('keeps valid scene choices per trial and clamps the scene lead', () => {
-    const s = sanitizeUiSettings({ sceneLeadSec: 30, trialScenes: { 't-01': { project: 'trex', file: '03_roar.mp4' }, 'bad id': { project: 'x', file: 'y' }, 't-02': { project: 1 } } })
+    const s = sanitizeUiSettings({ sceneLeadSec: 30, trialScenes: { 't-01': { project: 'trex', at: 7.9 }, 't-03': { project: 'trex', at: null }, 'bad id': { project: 'x', at: 1 }, 't-02': { project: 1, at: 1 }, 't-04': { project: 'trex', file: '03_roar.mp4' }, 't-05': { project: 'trex', at: -1 } } })
     expect(s.sceneLeadSec).toBe(10)
-    expect(s.trialScenes).toEqual({ 't-01': { project: 'trex', file: '03_roar.mp4' } })
+    expect(s.trialScenes).toEqual({ 't-01': { project: 'trex', at: 7.9 }, 't-03': { project: 'trex', at: null } })
     expect(sanitizeUiSettings({}).sceneLeadSec).toBe(1)
-    expect(sanitizeUiSettings({ clipScenes: { 'c1': { project: 'trex', file: '01.mp4' }, 'x': 3 } }).clipScenes).toEqual({ c1: { project: 'trex', file: '01.mp4' } })
+    expect(sanitizeUiSettings({ clipScenes: { 'c1': { project: 'trex', at: 1.3, extra: 1 }, 'x': 3 } }).clipScenes).toEqual({ c1: { project: 'trex', at: 1.3 } })
   })
 
   it('clamps the scene post-roll to 0–5 s (default 0 s)', () => {
