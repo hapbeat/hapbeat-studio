@@ -19,7 +19,7 @@ import { useLibraryStore } from '@/stores/libraryStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceSelectionSync } from '@/hooks/useDeviceSelectionSync'
 import { useHelperUpdate, useStudioFrozenNotice } from '@/hooks/useReleaseNotices'
-import { MIN_HELPER_VERSION } from '@/config/helperCompat'
+import { MIN_HELPER_VERSION, helperNewerThanStudio } from '@/config/helperCompat'
 import { IS_DESKTOP_SHELL, useSimpleUi, visibleTabs } from '@/config/desktopShell'
 import { CURRENT_STUDIO_VERSION } from '@/utils/studioVersions'
 import { useI18n } from '@/i18n/I18nProvider'
@@ -153,7 +153,7 @@ export function App() {
     window.addEventListener(OPEN_TAB_EVENT, open)
     return () => window.removeEventListener(OPEN_TAB_EVENT, open)
   }, [])
-  const { isConnected, helperVersion, helperCompat, send } = useHelperConnection()
+  const { isConnected, helperVersion, helperCompat, helperCaps, send } = useHelperConnection()
   const { toast } = useToast()
   const [helperModalOpen, setHelperModalOpen] = useState(false)
   const [helperManageOpen, setHelperManageOpen] = useState(false)
@@ -178,6 +178,8 @@ export function App() {
   // do NOT persist this to localStorage: an outdated Helper is a fix-it-now
   // problem that should remind the user every fresh Studio load.
   const [helperOutdatedDismissed, setHelperOutdatedDismissed] = useState(false)
+  /** The "Studio is older than Helper" banner is shown once per session (versioning.md §3.3). */
+  const [studioOutdatedDismissed, setStudioOutdatedDismissed] = useState(false)
   // 「使えてはいるが新しい版がある」お知らせ (上の必須警告とは別)。
   // 閉じた版は localStorage に記録され、より新しい版が出るまで再表示しない
   // — 版を意図的に固定している人に毎回閉じさせないため (DEC-053 §5.1)。
@@ -327,6 +329,27 @@ export function App() {
             aria-label={t('header.outdated.hideSession')}
             title={t('header.outdated.hideSession')}
             onClick={() => setHelperOutdatedDismissed(true)}
+          >×</button>
+        </div>
+      )}
+      {/* Helper's major is above Studio's (helper_hello `generation`): Studio should
+          be updated. A deployed Studio updates on reload. */}
+      {isConnected && !studioOutdatedDismissed && helperNewerThanStudio(helperCaps, CURRENT_STUDIO_VERSION) && (
+        <div className="helper-outdated-banner" role="alert">
+          <span className="helper-outdated-banner-icon" aria-hidden>⚠</span>
+          <div className="helper-outdated-banner-body">
+            <strong>{t('header.studioOutdated.title')}</strong>
+            <span className="helper-outdated-banner-detail">
+              {' '}
+              {t('header.studioOutdated.detail', { helper: helperCaps?.generation ?? '?', studio: CURRENT_STUDIO_VERSION })}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="helper-outdated-banner-close"
+            aria-label={t('header.outdated.hideSession')}
+            title={t('header.outdated.hideSession')}
+            onClick={() => setStudioOutdatedDismissed(true)}
           >×</button>
         </div>
       )}

@@ -71,6 +71,8 @@ export const messages = defineMessages({
   'header.dismissVersionNotice': { ja: '閉じる（この版については再表示しません）', en: 'Dismiss (do not show this version again)' },
   'header.outdated.title': { ja: 'hapbeat-helper の更新が必要です', en: 'hapbeat-helper update required' },
   'header.outdated.detail': { ja: '現在 v{current} / 必要 v{minimum} 以上 — 一部の Kit deploy / device 操作が失敗する可能性があります。', en: 'Current v{current} / required v{minimum}+ — some Kit deploy or device actions may fail.' },
+  'header.studioOutdated.title': { ja: 'Studio の更新が必要です', en: 'Studio update required' },
+  'header.studioOutdated.detail': { ja: 'Helper は {helper}.x 系、この Studio は v{studio} です — ページを再読み込みして最新の Studio にしてください。新しい機能が動かないことがあります。', en: 'Helper is on {helper}.x, this Studio is v{studio} — reload the page to get the latest Studio. Newer features may not work.' },
   'header.outdated.hideSession': { ja: 'このセッション中は非表示', en: 'Hide for this session' },
   "tabs.editor.main": { ja: "Editor", en: "Editor" },
   "tabs.editor.sub": { ja: "Waveform", en: "Waveform" },

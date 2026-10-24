@@ -7,7 +7,7 @@
  * `demoData.ts` sibling) out of the normal production bundle — nothing
  * here is ever fetched unless the flag is present.
  * `useHelperConnection.tsx` performs its own parallel guarded dynamic
- * import of the small `DEMO_DEVICES` / `DEMO_FW_VERSION` payload so the
+ * import of the small `DEMO_DEVICES` / `DEMO_HELPER_VERSION` payload so the
  * "Helper 接続中" connection state + device list can be faked without a
  * real WebSocket — see the comment there for why that's a separate,
  * narrower import instead of a callback threaded through this module.
