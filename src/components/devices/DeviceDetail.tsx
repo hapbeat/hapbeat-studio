@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { parseCapsFields } from '@/utils/deviceCaps'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore, type WifiProfile } from '@/stores/deviceStore'
 import { ApModeSection } from './ApModeSection'
@@ -403,6 +404,8 @@ export function DeviceDetail() {
         ap_ip: p.ap_ip as string | undefined,
         ap_has_pass: p.ap_has_pass as boolean | undefined,
         ap_client_count: p.ap_client_count as number | undefined,
+        // DEC-096: capability declaration, stream generation, storage state
+        ...parseCapsFields(p),
       })
       // Bump the per-IP get_info counter so device-backed controls reconcile
       // to the echoed value even when it's numerically unchanged (finding 3).
@@ -798,6 +801,10 @@ export function DeviceDetail() {
         effect_3d: masterInfo.effect_3d,
         agc: masterInfo.agc,
         haptic_pwm: masterInfo.haptic_pwm,
+        caps: masterInfo.caps,
+        stream_protocol: masterInfo.stream_protocol,
+        stream_formats: masterInfo.stream_formats,
+        storage_incompatible: masterInfo.storage_incompatible,
       } : undefined)
     : infoCache[selectedIp]
   const wifiStatus = transport.isSerial

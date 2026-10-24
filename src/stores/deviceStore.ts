@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { DeviceCaps, StorageArea } from '@/utils/deviceCaps'
 import type { EqBandReadout, MqttClientEntry, NodeRole, NodeTransport, SensorMapping, SensorReading } from '@/types/manager'
 import { useSerialMaster } from './serialMaster'
 import { isDemoMode } from '@/demo/isDemoMode'
@@ -232,6 +233,14 @@ interface DeviceState {
       state?: string
       output_mode?: 'pwm' | 'pam'
     }
+    /** Capability declaration (1.x firmware, passed through by helpers with
+     *  `device_caps`). Absent = generation 0, no added features. */
+    caps?: DeviceCaps
+    /** Stream generation (0.5.0+ 0.x firmware); 1.x copies `caps.stream_gens`. */
+    stream_protocol?: number
+    stream_formats?: string[]
+    /** Storage areas whose format version did not match at boot (1.x). */
+    storage_incompatible?: StorageArea[]
   }>
 
   /** Per-IP cache of the most recent get_wifi_status response. */
