@@ -10,7 +10,9 @@ import type { LibraryClip, LibraryViewMode, KitDefinition } from '@/types/librar
 import type { DeviceInfo } from '@/types/manager'
 import { resolvePlaybackTargets } from '@/utils/playbackDevices'
 import { CapacityGauge } from './CapacityGauge'
-import { summarizeCapacityProblems } from './capacityText'
+import { summarizeCapacityProblems, summarizeKitCompatProblems } from './capacityText'
+import { findKitCompatProblems } from '@/utils/kitCompat'
+import { useLogStore } from '@/stores/logStore'
 import { useDeviceSpace } from '@/hooks/useDeviceSpace'
 import { estimateKitStorageFromEvents, estimateKitStorageFromFiles } from '@/utils/kitSizeEstimate'
 import { findCapacityProblems, summarizeTargetSpace, type CapacityProblem, type SpaceEntry } from '@/utils/deviceSpace'
@@ -2061,6 +2063,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
   const { toast } = useToast()
   const { subscribe } = useHelperConnection()
   const selectedIps = useDeviceStore((s) => s.kitSelectedIps)
+  const infoCache = useDeviceStore((s) => s.infoCache)
   const workDirHandle = useLibraryStore((s) => s.workDirHandle)
 
   // Kits only go to PLAYBACK devices (receivers / no-role legacy). A
@@ -2266,6 +2269,18 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
       )
       return
     }
+    // Every target must accept the Kit (caps.kit_schema / kit_clip_formats,
+    // versioning.md §11). One that does not stops the whole deploy: writing
+    // only to the others would not be what the user chose.
+    const compat = findKitCompatProblems(deployTargets, (ip) => useDeviceStore.getState().infoCache[ip])
+    if (compat.unchecked.length > 0) {
+      useLogStore.getState().push('kit', `deploy: no get_info yet, kit compatibility not checked for ${compat.unchecked.join(', ')}`)
+    }
+    const compatBlocking = summarizeKitCompatProblems(compat.problems, t)
+    if (compatBlocking) {
+      toast(t('kit.capacity.deployBlocked', { reason: compatBlocking }), 'error')
+      return
+    }
 
     setIsExporting(true)
     setProgressByIp(
@@ -2354,8 +2369,10 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
   // name is valid — device / Helper presence is irrelevant. Deploy
   // additionally requires Helper online + at least one device.
   const saveBlocked = kit.events.length === 0 || isExporting || !outRoot || !!validateKitName(kit.name)
-  const capacityBlockReason = summarizeCapacityProblems(capacityProblems, t)
-  const deployBlocked = saveBlocked || !managerConnected || devices.length === 0 || !!capacityBlockReason
+  const compatBlockReason = summarizeKitCompatProblems(findKitCompatProblems(deployTargets, (ip) => infoCache[ip]).problems, t)
+  // Capacity first, then whether every target accepts the Kit at all (caps).
+  const deployBlockReason = summarizeCapacityProblems(capacityProblems, t) ?? compatBlockReason
+  const deployBlocked = saveBlocked || !managerConnected || devices.length === 0 || !!deployBlockReason
 
   // Save status (saving / saved / error) takes precedence over the passive
   // deploy-readiness hints — explicit Save Folder works without devices, so
@@ -2366,7 +2383,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
       ? saveStatusLabel
       : !managerConnected ? 'Helper offline'
       : devices.length === 0 ? 'デバイスが見つかりません'
-      : capacityBlockReason ? t('kit.capacity.deployBlocked', { reason: capacityBlockReason })
+      : deployBlockReason ? t('kit.capacity.deployBlocked', { reason: deployBlockReason })
       : `${devices.length} device(s) ready`
 
   return (
@@ -2376,7 +2393,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
           className="library-btn primary"
           disabled={deployBlocked}
           onClick={handleDeploy}
-          title={capacityBlockReason ? t('kit.capacity.deployBlocked', { reason: capacityBlockReason }) : t('kit.deployTitle')}
+          title={deployBlockReason ? t('kit.capacity.deployBlocked', { reason: deployBlockReason }) : t('kit.deployTitle')}
         >Deploy</button>
         <button
           className="library-btn"

@@ -1561,6 +1561,8 @@ export const messages = defineMessages({
   'kit.capacity.problem.fs': { ja: '{device} の LittleFS の空き {free} に manifest {need} が入りません', en: 'Manifest {need} does not fit in {device}’s free LittleFS {free}' },
   'kit.capacity.problem.board': { ja: 'Kit {need} が {device} の保存領域 {capacity} を超えています', en: 'Kit {need} exceeds {device}’s storage {capacity}' },
   'kit.capacity.problem.more': { ja: '（他 {count} 件）', en: ' (+{count} more)' },
+  'kit.compat.problem.schema': { ja: '{device} はこの Kit の形式（schema {major}）に対応していません（対応: {range}）。デバイスのファームウェアを更新してください', en: '{device} does not accept this Kit format (schema {major}; accepts {range}). Update the device firmware' },
+  'kit.compat.problem.clipFormat': { ja: '{device} は Kit の音声形式（{format}）に対応していません', en: '{device} does not accept the Kit audio format ({format})' },
   'kit.capacity.deployBlocked': { ja: 'Deploy できません: {reason}', en: 'Cannot deploy: {reason}' },
   // First-run guide: the work folder must be chosen before any clip shows up.
   'workFolder.none.title': { ja: 'まず作業フォルダを選んでください', en: 'First, choose a work folder' },

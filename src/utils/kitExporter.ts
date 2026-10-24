@@ -27,6 +27,7 @@
  * を更新する機会に rename を検討。詳細は DEC-031 参照。
  */
 
+import { KIT_SCHEMA_VERSION } from './kitCompat'
 import JSZip from 'jszip'
 import type { KitDefinition, KitEvent, KitEventMode } from '@/types/library'
 import {
@@ -548,7 +549,7 @@ export async function exportKitAsPack(
   // wire payloads carry the directory name in their `kit_id`
   // field (set by the caller, not pulled from manifest).
   const manifest = {
-    schema_version: '2.0.0',
+    schema_version: KIT_SCHEMA_VERSION,
     version: kit.version || '1.0.0',
     name: kitId,
     description: kit.description,
