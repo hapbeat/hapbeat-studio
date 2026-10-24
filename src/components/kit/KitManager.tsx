@@ -511,6 +511,7 @@ function useAudioPreview() {
           signal: controller.signal,
           intensity,
           cacheKey: `kit-preview:${id}`,
+          takeover: true,
         })
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') { /* cancelled */ }

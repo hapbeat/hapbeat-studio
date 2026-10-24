@@ -383,6 +383,7 @@ export function StreamingTestSection({
         })
         await streamClip(blob, sendForStream, {
           signal: ctrl.signal,
+          takeover: true,
           control: {
             isPaused: () => pausedRef.current,
             consumeSeek: () => {

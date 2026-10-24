@@ -12,7 +12,7 @@ import { useWaveformStore } from '@/stores/waveformStore'
 import { useSceneOverrides } from '@/hooks/useSceneOverrides'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { resolvePlaybackTargets } from '@/utils/playbackDevices'
-import { matchesAddress, RETRY_MS, tableTargets, type HapticDevice, type StreamAck, type StreamDisplaced } from '@/utils/sceneHaptics'
+import { matchesAddress, RETRY_MS, tableTargets, type HapticDevice, type StreamAck, type StreamDisplaced, type StreamLost } from '@/utils/sceneHaptics'
 import { focusEvent, isTick } from '@/utils/sceneData'
 import { isTypingTarget } from '@/utils/playbackShortcut'
 import { openSceneSelectionInEditor } from '@/stores/eventStore'
@@ -75,6 +75,10 @@ export function SceneView({ active }: { active: boolean }) {
       const d = message.payload as StreamDisplaced
       useSceneStore.getState().addLog(`stream_displaced ${d.stream_id} → ${(d.targets ?? []).join(', ')}: ${t(d.same_client ? 'scene.log.displacedSameClient' : 'scene.log.displaced', { by: d.by ?? '?', seconds: RETRY_MS / 1000 })}`)
       runtime.streamDisplaced(d)
+    } else if (message.type === 'stream_lost' && runtime.ownsStream(p.stream_id)) {
+      const l = message.payload as StreamLost
+      useSceneStore.getState().addLog(`stream_lost ${l.stream_id} → ${(l.targets ?? []).join(', ')}: ${t('scene.log.lost', { reason: l.reason ?? '?', seconds: RETRY_MS / 1000 })}`)
+      runtime.streamLost(l)
     } else if (message.type === 'error' && runtime.streaming) useSceneStore.getState().addLog(`helper error: ${p.message ?? ''}`)
   }), [subscribe, runtime, t])
   // Leaving the page (reload / close): end the device streams now, the helper otherwise ends them only on the socket close.

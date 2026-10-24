@@ -151,6 +151,12 @@ export interface StreamAck { stream_id?: string; status?: string; targets?: stri
  * (this tab's editor audition, or this mixer's own re-BEGIN).
  */
 export interface StreamDisplaced { stream_id?: string; targets?: string[]; by?: string; same_client?: boolean }
+/**
+ * hapbeat-helper `stream_lost` (1.x): the helper ended the stream on these
+ * devices because of the device side (`reason`: device_rebooted, lease_changed,
+ * superseded, stopped, target_mismatch, unreachable).
+ */
+export interface StreamLost { stream_id?: string; targets?: string[]; reason?: string }
 
 /** A BEGIN without a `stream_ack` within this long counts as lost. */
 export const ACK_TIMEOUT_MS = 1000
@@ -169,7 +175,10 @@ export const RETRY_MS = 1000
  * device) is such a rejection too. `onDisplaced()`: a device taken by another
  * client's stream is re-opened the same way; one taken by a stream of this tab
  * (`same_client`, e.g. the editor audition) is left to it while
- * `streamOpen(by)` and re-opened after it ends. A stream counts as playing
+ * `streamOpen(by)` and re-opened after it ends. `onLost()` (the helper ended the
+ * stream on a device) drops that device's session the same way. Scene BEGINs do
+ * not set `takeover`: its cues play by themselves, so a device another app took
+ * stays with that app (the helper defers it). A stream counts as playing
  * while its session is open (until QUIET_END_MS after playback stops); acks and
  * notices of ended streams are ignored.
  */
@@ -221,6 +230,14 @@ export class SceneHapticMixer {
       if (s.id !== note.stream_id || (note.targets && !note.targets.includes(ip))) continue
       if (note.same_client && note.by) this.heldBy.set(ip, note.by)
       this.drop(ip, now, `displaced by ${note.by ?? '?'}${note.same_client ? ', same client: held until it ends' : ''}`)
+    }
+  }
+
+  /** A `stream_lost` from the helper (other streams are ignored): re-open after the back-off. */
+  onLost(note: StreamLost, now: number) {
+    for (const [ip, s] of this.sessions) {
+      if (s.id !== note.stream_id || (note.targets && !note.targets.includes(ip))) continue
+      this.drop(ip, now, `lost: ${note.reason ?? '?'}`)
     }
   }
 

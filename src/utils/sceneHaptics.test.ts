@@ -185,6 +185,24 @@ describe('scene haptic streams', () => {
     expect(begins(sent)).toHaveLength(2)
   })
 
+  it('stream_lost: drop that device, BEGIN again after the back-off, never with takeover', () => {
+    const { sent, mixer, pump } = run()
+    pump(1000)
+    const [id] = begins(sent)
+    expect(sent.find(m => m.type === 'stream_begin')?.payload.takeover).toBeUndefined()
+    mixer.onAck({ stream_id: id, status: 'ok', targets: ['10.0.0.2'] }, 1005)
+    mixer.onLost({ stream_id: 'other', targets: ['10.0.0.2'], reason: 'stopped' }, 1100)
+    expect(mixer.streaming).toBe(true)
+    mixer.onLost({ stream_id: id, targets: ['10.0.0.2'], reason: 'stopped' }, 1200)
+    expect(mixer.streaming).toBe(false)
+    const before = sent.length
+    pump(1200 + RETRY_MS - 1)
+    expect(sent.length).toBe(before)
+    pump(1200 + RETRY_MS)
+    expect(begins(sent)).toHaveLength(2)
+    expect(sent.filter(m => m.type === 'stream_begin').every(m => m.payload.takeover === undefined)).toBe(true)
+  })
+
   it('displaced by a stream of this tab: no BEGIN while it is open, BEGIN once it ended', () => {
     const open = new Set(['studio-1'])
     const sent: { type: string; payload: Record<string, unknown> }[] = []

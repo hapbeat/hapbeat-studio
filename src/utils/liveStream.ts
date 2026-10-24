@@ -7,8 +7,13 @@
  * Every message names its devices in `targets`: a stream without targets would reach
  * every device the helper knows (its fallback), which a live source must never do.
  * A newer stream on a device (another app, or Studio's own clip preview) takes it
- * (helper `stream_displaced`); once no device is left, or the helper cannot start the
- * stream on any device, `onLost` is called and nothing more is sent.
+ * (helper `stream_displaced`), and the helper ends it on a device whose side changed
+ * (helper `stream_lost`, 1.x: rebooted, stopped by STOP_ALL, taken by another app);
+ * once no device is left, or the helper cannot start the stream on any device,
+ * `onLost` is called and nothing more is sent.
+ *
+ * Every stream begins with `takeover: true` (helper-streaming.md, Takeover): the user
+ * starts it or picks its devices, so it may take back a device another app holds.
  */
 
 import type { ManagerMessage } from '@/types/manager'
@@ -28,8 +33,12 @@ export const LIVE_CHUNK_FRAMES = 256
  */
 export const LIVE_PREROLL_CHUNKS = 3
 
-/** displaced = a newer stream took every device; unreachable = the helper started it on none; no_session = the helper holds no session for it. */
-export type LiveStreamLoss = 'displaced' | 'unreachable' | 'no_session'
+/**
+ * displaced = a newer stream took every device; unreachable = the helper started it on
+ * none; no_session = the helper holds no session for it; lost = the helper ended it on
+ * every device because of the device side (`stream_lost`, its reason is passed along).
+ */
+export type LiveStreamLoss = 'displaced' | 'unreachable' | 'no_session' | 'lost'
 
 let liveIdCounter = 0
 
@@ -79,7 +88,8 @@ export class LiveStream {
 
   constructor(
     private readonly channel: HelperChannel,
-    private readonly onLost: (reason: LiveStreamLoss) => void,
+    /** `detail` is the helper's `stream_lost` reason for `lost`. */
+    private readonly onLost: (reason: LiveStreamLoss, detail?: string) => void,
   ) {
     this.unsubscribe = channel.subscribe((message) => this.onHelperMessage(message))
   }
@@ -119,6 +129,7 @@ export class LiveStream {
         format: 'pcm16',
         total_samples: 0,
         targets: next,
+        takeover: true,
       },
     })
     for (let i = 0; i < LIVE_PREROLL_CHUNKS; i++) this.push(new Int16Array(LIVE_CHUNK_FRAMES * LIVE_CHANNELS))
@@ -161,12 +172,13 @@ export class LiveStream {
     this.routed.clear()
   }
 
-  private lose(reason: LiveStreamLoss): void {
+  private lose(reason: LiveStreamLoss, detail?: string): void {
     const streamId = this.streamId
     if (!streamId) return
     // No END: the helper routes this stream to no device any more.
     this.close(streamId)
-    this.onLost(reason)
+    if (detail === undefined) this.onLost(reason)
+    else this.onLost(reason, detail)
   }
 
   private onHelperMessage(message: ManagerMessage): void {
@@ -176,6 +188,10 @@ export class LiveStream {
       const taken = Array.isArray(p.targets) ? (p.targets as unknown[]).filter((ip): ip is string => typeof ip === 'string') : this.targets
       for (const ip of taken) this.routed.delete(ip)
       if (this.routed.size === 0) this.lose('displaced')
+    } else if (message.type === 'stream_lost') {
+      const gone = Array.isArray(p.targets) ? (p.targets as unknown[]).filter((ip): ip is string => typeof ip === 'string') : this.targets
+      for (const ip of gone) this.routed.delete(ip)
+      if (this.routed.size === 0) this.lose('lost', typeof p.reason === 'string' ? p.reason : undefined)
     } else if (message.type === 'stream_ack') {
       if (p.status === 'no_session') {
         this.lose('no_session')

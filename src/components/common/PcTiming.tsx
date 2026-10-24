@@ -36,7 +36,7 @@ function PcTimingDialog({ container, onClose }: { container: HTMLElement; onClos
   const targets = useMemo(() => isConnected ? resolvePlaybackTargets(devices, kitSelectedIps).map(d => d.ipAddress) : [], [isConnected, devices, kitSelectedIps])
   const sendRef = useRef(send); sendRef.current = send
   const test = useMemo(() => new PcTimingTest(message => sendRef.current(message),
-    async (blob, route, options) => (await import('@/utils/audioStreamer')).streamClip(blob, route, options), () => usePcTiming.getState().offsetMs), [])
+    async (blob, route, options) => (await import('@/utils/audioStreamer')).streamClip(blob, route, {...options, takeover: true}), () => usePcTiming.getState().offsetMs), [])
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => () => test.stop(), [test])
