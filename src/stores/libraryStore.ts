@@ -2072,7 +2072,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         stream_events?: Record<string, unknown>
         target_device?: {
           firmware_version_min?: string
-          firmware_version_max?: string
           board?: string
           volume_level?: number
           volume_wiper?: number
@@ -2320,7 +2319,6 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       const td = m.target_device ?? {}
       const targetDevice: KitDefinition['targetDevice'] = {}
       if (td.firmware_version_min) targetDevice.firmware_version_min = td.firmware_version_min
-      if (td.firmware_version_max) targetDevice.firmware_version_max = td.firmware_version_max
       if (td.board) targetDevice.board = td.board
       if (typeof td.volume_level === 'number') targetDevice.volume_level = td.volume_level
       if (typeof td.volume_wiper === 'number') targetDevice.volume_wiper = td.volume_wiper

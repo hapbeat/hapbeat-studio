@@ -11,7 +11,7 @@ import type { DeviceInfo } from '@/types/manager'
 import { resolvePlaybackTargets } from '@/utils/playbackDevices'
 import { CapacityGauge } from './CapacityGauge'
 import { summarizeCapacityProblems, summarizeKitCompatProblems } from './capacityText'
-import { findKitCompatProblems } from '@/utils/kitCompat'
+import { findKitCompatProblems, roundFirmwareMin } from '@/utils/kitCompat'
 import { useLogStore } from '@/stores/logStore'
 import { useDeviceSpace } from '@/hooks/useDeviceSpace'
 import { estimateKitStorageFromEvents, estimateKitStorageFromFiles } from '@/utils/kitSizeEstimate'
@@ -1710,6 +1710,13 @@ function KitEditor() {
                               firmware_version_min: e.target.value || undefined,
                             },
                           })}
+                          // Only the major counts (versioning.md §11): 0.5.3 → 0.1.0, 1.2.0 → 1.0.0.
+                          onBlur={(e) => {
+                            const rounded = roundFirmwareMin(e.target.value)
+                            if (rounded && rounded !== e.target.value) {
+                              updateKit(activeKit.id, { targetDevice: { ...activeKit.targetDevice, firmware_version_min: rounded } })
+                            }
+                          }}
                           placeholder="0.1.0"
                         />
                       </label>

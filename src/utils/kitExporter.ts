@@ -27,7 +27,7 @@
  * を更新する機会に rename を検討。詳細は DEC-031 参照。
  */
 
-import { KIT_SCHEMA_VERSION } from './kitCompat'
+import { KIT_SCHEMA_VERSION, kitFirmwareVersionMin } from './kitCompat'
 import JSZip from 'jszip'
 import type { KitDefinition, KitEvent, KitEventMode } from '@/types/library'
 import {
@@ -529,13 +529,14 @@ export async function exportKitAsPack(
     }
   }
   // Author tuning context. We always emit firmware_version_min (the
-  // schema requires it) but only keep extra hardware fields when the
-  // user supplied them — keeps manifest.json clean for new kits.
+  // schema requires it; the lowest major the Kit needs, versioning.md §11)
+  // but only keep extra hardware fields when the user supplied them —
+  // keeps manifest.json clean for new kits. firmware_version_max is not
+  // written (readers ignore it, §11).
   const td = kit.targetDevice ?? {}
   const targetDevice: Record<string, unknown> = {
-    firmware_version_min: td.firmware_version_min || '0.1.0',
+    firmware_version_min: kitFirmwareVersionMin(kit),
   }
-  if (td.firmware_version_max) targetDevice.firmware_version_max = td.firmware_version_max
   if (td.board) targetDevice.board = td.board
   if (typeof td.volume_level === 'number') targetDevice.volume_level = td.volume_level
   if (typeof td.volume_wiper === 'number') targetDevice.volume_wiper = td.volume_wiper

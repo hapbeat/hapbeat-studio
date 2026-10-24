@@ -1,3 +1,4 @@
+import type { KitDefinition } from '@/types/library'
 import type { DeviceCaps } from './deviceCaps'
 
 /**
@@ -56,4 +57,33 @@ export function findKitCompatProblems(
     }
   }
   return { problems, unchecked }
+}
+
+/** `target_device.firmware_version_min` for a major: `<major>.0.0`, and `0.1.0` for 0.x (the first 0.x release). */
+function firmwareMinForMajor(major: number): string {
+  return major === 0 ? '0.1.0' : `${major}.0.0`
+}
+
+/**
+ * The lowest firmware major the Kit needs (`versioning.md` §11). A Kit that
+ * uses only today's format (WAV audio) runs on 0.x firmware too, so this is
+ * `0.1.0`. A Kit using a feature added in 1.x (e.g. a future Opus clip format)
+ * would need `1.0.0`; none exists yet.
+ */
+export function kitRequiredFirmwareMin(_kit: Pick<KitDefinition, 'events'>): string {
+  return firmwareMinForMajor(0)
+}
+
+/** The user's FW min rounded to its major (`0.5.3` → `0.1.0`, `1.2.0` → `1.0.0`); undefined when it is not a version. */
+export function roundFirmwareMin(value: string | undefined): string | undefined {
+  const m = value ? /^v?(\d+)(?:\.\d+){0,2}/.exec(value.trim()) : null
+  return m ? firmwareMinForMajor(Number(m[1])) : undefined
+}
+
+/** What the manifest gets: the Kit's own need or the user's value, whichever major is higher. */
+export function kitFirmwareVersionMin(kit: Pick<KitDefinition, 'events' | 'targetDevice'>): string {
+  const required = kitRequiredFirmwareMin(kit)
+  const user = roundFirmwareMin(kit.targetDevice?.firmware_version_min)
+  if (!user) return required
+  return Number(user.split('.')[0]) > Number(required.split('.')[0]) ? user : required
 }

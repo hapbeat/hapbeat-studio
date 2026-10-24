@@ -128,6 +128,26 @@ describe('exportKitAsPack — source audio safety', () => {
     expect(manifest.events).toEqual({})
   })
 
+  it('target_device: firmware_version_min is the major of the need or the typed value; no firmware_version_max', async () => {
+    const kit = (targetDevice?: KitDefinition['targetDevice']): KitDefinition => ({
+      id: 'kit-fw', name: 'fw-kit', version: '1.0.0', description: '',
+      createdAt: '2026-07-27T00:00:00.000Z', updatedAt: '2026-07-27T00:00:00.000Z',
+      events: [], targetDevice,
+    })
+    const targetDevice = async (k: KitDefinition) => {
+      const result = await exportKitAsPack(k, async () => undefined)
+      const manifest = JSON.parse(await result.files[0].blob.text()) as { schema_version: string; target_device: Record<string, unknown> }
+      expect(manifest.schema_version).toBe('2.0.0')
+      return manifest.target_device
+    }
+    expect(await targetDevice(kit())).toEqual({ firmware_version_min: '0.1.0' })
+    expect(await targetDevice(kit({ firmware_version_min: '0.5.3' }))).toEqual({ firmware_version_min: '0.1.0' })
+    expect(await targetDevice(kit({ firmware_version_min: '1.2.0', board: 'band_wl_v5' }))).toEqual({ firmware_version_min: '1.0.0', board: 'band_wl_v5' })
+    const legacy = kit({ firmware_version_min: '0.1.0' })
+    ;(legacy.targetDevice as Record<string, unknown>).firmware_version_max = '0.9.0'
+    expect(await targetDevice(legacy)).not.toHaveProperty('firmware_version_max')
+  })
+
   it('rejects duplicate Event IDs before one manifest entry can overwrite another', async () => {
     const source = pcm16MonoWav()
     const resolveAudio = vi.fn(async () => source)

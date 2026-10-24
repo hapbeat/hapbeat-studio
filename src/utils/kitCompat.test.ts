@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DeviceCaps } from './deviceCaps'
-import { findKitCompatProblems, KIT_CLIP_FORMAT, KIT_SCHEMA_VERSION } from './kitCompat'
+import { findKitCompatProblems, KIT_CLIP_FORMAT, KIT_SCHEMA_VERSION, kitFirmwareVersionMin, kitRequiredFirmwareMin, roundFirmwareMin } from './kitCompat'
 
 const target = (ipAddress: string, name?: string) => ({ ipAddress, name })
 const infoOf = (map: Record<string, { caps?: DeviceCaps }>) => (ip: string) => map[ip]
@@ -42,5 +42,23 @@ describe('findKitCompatProblems', () => {
       infoOf({ '10.0.0.2': { caps: { kit_schema: { min: 2, max: 2 } } }, '10.0.0.3': { caps: { kit_schema: { min: 3, max: 3 } } } }),
     )
     expect(r.problems.map((p) => p.device)).toEqual(['B'])
+  })
+})
+
+describe('firmware_version_min (versioning.md §11)', () => {
+  it('今の形式だけの Kit は 0.1.0', () => {
+    expect(kitRequiredFirmwareMin({ events: [] })).toBe('0.1.0')
+    expect(kitFirmwareVersionMin({ events: [] })).toBe('0.1.0')
+  })
+  it('利用者の値は major に丸める', () => {
+    expect(roundFirmwareMin('0.5.3')).toBe('0.1.0')
+    expect(roundFirmwareMin('1.2.0')).toBe('1.0.0')
+    expect(roundFirmwareMin('v2.0.1d3')).toBe('2.0.0')
+    expect(roundFirmwareMin('')).toBeUndefined()
+    expect(roundFirmwareMin('abc')).toBeUndefined()
+  })
+  it('Kit の必要と利用者の値の大きい方', () => {
+    expect(kitFirmwareVersionMin({ events: [], targetDevice: { firmware_version_min: '0.5.3' } })).toBe('0.1.0')
+    expect(kitFirmwareVersionMin({ events: [], targetDevice: { firmware_version_min: '1.2.0' } })).toBe('1.0.0')
   })
 })
