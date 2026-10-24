@@ -46,10 +46,10 @@ import {
   type HierarchySelection,
 } from '@/utils/firmwareHierarchy'
 import { chipIdForBoard, validateOtaImage, type OtaValidationResult } from '@/utils/otaImageValidation'
-import { needsStreamV2Warning } from '@/utils/streamV2Compat'
+import { firmwareCompatNotice, type FirmwareCompatNotice, type StreamInfoFields } from '@/utils/firmwareCompat'
 import { readAppDescVersion } from '@/utils/espAppDesc'
 import { DriverHelpLinks } from './DriverHelpLinks'
-import { StreamV2SdkTip } from './StreamV2SdkTip'
+import { FirmwareCompatTip } from './FirmwareCompatTip'
 
 const ROLE_ORDER: NodeRole[] = ['receiver', 'sensor', 'broker', 'transmitter']
 /** Version chips shown before the "N more" toggle in the version picker. */
@@ -251,7 +251,7 @@ export function FirmwareSubTab({
   const [eraseAll, setEraseAll] = useState(false)
   const { ask, dialog: confirmDialog } = useConfirm()
   // Firmware version for the stream-v2 SDK tip shown during a write (null = hidden).
-  const [sdkTipVersion, setSdkTipVersion] = useState<string | null>(null)
+  const [compatNotice, setCompatNotice] = useState<FirmwareCompatNotice | null>(null)
   const lanBoard = useDeviceStore((s) =>
     device ? s.infoCache[device.ipAddress]?.board : undefined,
   )
@@ -639,19 +639,25 @@ export function FirmwareSubTab({
   }, [source, selectedEntry, selectedVersionFw, baseEntry, ask, pushLog, t])
 
   /**
-   * A stream-v2 image (firmware ≥ 0.5.0) silences streamed haptics from apps on
-   * pre-v2 SDKs. When writing one onto a target that runs pre-v2 or unknown
-   * firmware, show the minimum SDK versions as information WITHOUT holding the
-   * write: the new firmware is the recommended choice (user 2026-10-16). A local
-   * .bin is judged by the version in its app descriptor.
+   * When the image's major differs from a target's current major, tell the
+   * user how compatibility changes (`versioning.md` §5.4) WITHOUT holding the
+   * write: the new firmware is the recommended choice (user 2026-10-16). Only
+   * majors are compared. A local .bin is judged by the version in its app
+   * descriptor; one without a readable version is not judged.
    */
-  const showStreamV2TipIfNeeded = useCallback(async (
-    currentFws: Array<string | null | undefined>,
+  const showCompatNoticeIfNeeded = useCallback(async (
+    targets: Array<{ fw?: string | null; info?: StreamInfoFields | null }>,
   ): Promise<void> => {
-    const targetFw = source === 'library'
+    const imageFw = source === 'library'
       ? selectedEntry?.fwVersion
       : await readLocalRaw().then((raw) => readAppDescVersion(raw.bytes)).catch(() => null)
-    if (needsStreamV2Warning(targetFw, currentFws)) setSdkTipVersion(normalizeVersion(targetFw))
+    for (const target of targets) {
+      const notice = firmwareCompatNotice(imageFw, target)
+      if (notice) {
+        setCompatNotice(notice)
+        return
+      }
+    }
   }, [source, selectedEntry, readLocalRaw])
 
   const readSelectedBin = useCallback(async (): Promise<{
@@ -875,9 +881,10 @@ export function FirmwareSubTab({
       ip === device.ipAddress ? knownPwm : !!infoCache[ip]?.haptic_pwm
     if (!(await checkHapticOutputMatch(targets.map(pwmForIp)))) return
     if (!(await checkArchiveSelection())) return
-    const fwForIp = (ip: string): string | undefined =>
-      infoCache[ip]?.fw ?? devices.find((d) => d.ipAddress === ip)?.firmwareVersion
-    void showStreamV2TipIfNeeded(targets.map(fwForIp))
+    void showCompatNoticeIfNeeded(targets.map((ip) => ({
+      fw: infoCache[ip]?.fw ?? devices.find((d) => d.ipAddress === ip)?.firmwareVersion,
+      info: infoCache[ip],
+    })))
 
     otaClearResult(device.ipAddress)
     let bin: Awaited<ReturnType<typeof readSelectedBin>>
@@ -1015,7 +1022,7 @@ export function FirmwareSubTab({
     }
     if (!(await checkHapticOutputMatch(serialTargets.map((e) => !!e.info?.haptic_pwm)))) return
     if (!(await checkArchiveSelection())) return
-    void showStreamV2TipIfNeeded(serialTargets.map((e) => e.info?.fw))
+    void showCompatNoticeIfNeeded(serialTargets.map((e) => ({ fw: e.info?.fw, info: e.info })))
     let plan: Awaited<ReturnType<typeof readSelectedRegions>>
     try {
       plan = await readSelectedRegions()
@@ -1054,7 +1061,7 @@ export function FirmwareSubTab({
   return (
     <>
       {confirmDialog}
-      {sdkTipVersion && <StreamV2SdkTip version={sdkTipVersion} onClose={() => setSdkTipVersion(null)} />}
+      {compatNotice && <FirmwareCompatTip notice={compatNotice} onClose={() => setCompatNotice(null)} />}
       {/* --------- Source: Firmware Library --------- */}
       <div className="form-section">
         <div
