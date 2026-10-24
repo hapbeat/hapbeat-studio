@@ -15,6 +15,7 @@ const WRITE_CMD_LABEL: Record<string, MessageId> = {
   set_ap_pass: 'toast.command.apPassword', clear_ap_pass: 'toast.command.apPasswordDelete', reboot: 'toast.command.reboot', kit_delete: 'toast.command.kitDelete',
   set_haptic_gain: 'toast.command.hapticGain', set_dac_boost: 'toast.command.dacBoost', set_headphone_volume: 'toast.command.headphoneVolume', set_stream_buffer: 'toast.command.streamBuffer', set_input_mode: 'toast.command.inputMode',
   set_espnow_stream_opus_complexity: 'toast.command.opusComplexity', set_espnow_stream_hp_buffer: 'toast.command.hpJitterBuffer', set_eq_band: 'toast.command.eqBand', set_av_delay: 'toast.command.avDelay',
+  reset_storage: 'toast.command.resetStorage',
 }
 
 /** 即リブートして ACK を返さない可能性が高い cmd。成功トーストはパネル側の

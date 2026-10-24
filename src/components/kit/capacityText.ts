@@ -29,7 +29,9 @@ export function formatKitCompatProblem(problem: KitCompatProblem, t: Translate):
   switch (problem.kind) {
     case 'schema': {
       const range = problem.min === problem.max ? `${problem.min ?? '?'}` : `${problem.min ?? '?'}–${problem.max ?? '?'}`
-      return t('kit.compat.problem.schema', { device: problem.device, major: problem.major, range })
+      // Kit older than the device accepts → Studio is behind; newer → the firmware is.
+      const studioBehind = problem.min !== undefined && problem.major < problem.min
+      return t(studioBehind ? 'kit.compat.problem.schemaStudio' : 'kit.compat.problem.schemaFirmware', { device: problem.device, major: problem.major, range })
     }
     case 'clipFormat':
       return t('kit.compat.problem.clipFormat', { device: problem.device, format: problem.format })

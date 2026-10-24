@@ -121,7 +121,8 @@ export function useDeviceTransport(selectedIp: string | null) {
         // toast listener reports success/failure by result, not by the act
         // of sending (LAN path already gets write_result from helper).
         const ok = !!r && (r as Record<string, unknown>).status === 'ok'
-        const err = r ? String((r as Record<string, unknown>).error ?? '') : 'no response'
+        // Firmware errors carry `error` or (e.g. reset_storage) `message`.
+        const err = r ? String((r as Record<string, unknown>).error ?? (r as Record<string, unknown>).message ?? '') : 'no response'
         injectMessage({
           type: 'write_result',
           payload: {

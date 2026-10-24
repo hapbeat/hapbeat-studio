@@ -820,6 +820,40 @@
   flex-wrap: wrap;
 }
 
+/* Stored-data line (DEC-096 storage_incompatible): always present at one
+   height, so its state changing never moves the rows below. */
+.devices-detail-storage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  margin-top: 4px;
+  font-size: 14px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.devices-detail-storage-label::after {
+  content: ':';
+}
+.devices-detail-storage-value {
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.devices-detail-storage-value.muted {
+  color: var(--text-muted);
+}
+.devices-detail-storage-value.warn {
+  color: var(--warning, #d29922);
+}
+.devices-detail-storage-btn {
+  padding: 2px 10px;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
 .device-detail-pill {
   display: inline-block;
   font-size: 11px;

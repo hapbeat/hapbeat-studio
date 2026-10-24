@@ -3,6 +3,7 @@ import { parseCapsFields } from '@/utils/deviceCaps'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore, type WifiProfile } from '@/stores/deviceStore'
 import { ApModeSection } from './ApModeSection'
+import { StorageStatusRow } from './StorageStatusRow'
 import { useLibraryStore } from '@/stores/libraryStore'
 import type { KitDefinition, KitEvent } from '@/types/library'
 import { useLogStore } from '@/stores/logStore'
@@ -881,6 +882,13 @@ export function DeviceDetail() {
           {device.address && <> · {device.address}</>}
           {!device.online && <> · offline</>}
         </div>
+        <StorageStatusRow
+          info={cachedInfo}
+          isSerial={transport.isSerial}
+          online={device.online}
+          sendTo={transport.sendTo}
+          onReset={reconcileInfo}
+        />
         <div className="form-action-row" style={{ marginTop: 6 }}>
           <button
             className="form-button-secondary"

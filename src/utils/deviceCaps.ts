@@ -84,6 +84,8 @@ export function parseCapsFields(r: Record<string, unknown>): {
     caps: parseDeviceCaps(r.caps),
     stream_protocol: num(r.stream_protocol),
     stream_formats: strArray(r.stream_formats),
-    storage_incompatible: parseStorageIncompatible(r.storage_incompatible),
+    // Absent = no mismatch (§4.1). An explicit [] so a cached list from before a
+    // reset is replaced: the info cache merge keeps fields a reply leaves undefined.
+    storage_incompatible: parseStorageIncompatible(r.storage_incompatible) ?? [],
   }
 }
