@@ -8,7 +8,7 @@ import { isLoopCue, routeClips, sfxSounds, type CueRoute, type CueSfx, soundInte
 import { effectiveEvent, fireShot, MaterialPicker, resolveEventName } from '@/utils/cueEvents'
 import { runPosition } from '@/utils/sceneSegments'
 import { buildLoopSounds, LoopSoundPlayer, loopSoundLevel, type LoopSound } from '@/utils/sceneLoopSounds'
-import { buildLoopVoices, shotVoices, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, routeTargets, SceneHapticMixer, type HapticDevice, type HelperSend, type StreamAck, type StreamDisplaced } from '@/utils/sceneHaptics'
+import { buildLoopVoices, shotVoices, type LoopVoice, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, routeTargets, SceneHapticMixer, type HapticDevice, type HelperSend, type StreamAck, type StreamDisplaced } from '@/utils/sceneHaptics'
 import { SceneKitFire } from '@/utils/sceneKitFire'
 import { isStreamOpen } from '@/utils/openStreams'
 import { useSceneStrength } from '@/stores/sceneStrength'
@@ -107,7 +107,6 @@ export class SceneRuntime {
       if (now.videoVolume !== before.videoVolume) this.applyVideoSound()
       if (now.allDevices !== before.allDevices || now.overallGain !== before.overallGain) this.rebuildLoops()
     }))
-    this.unsubscribes.push(useSceneStrength.subscribe((now, before) => { if (now.muted !== before.muted || now.soloed !== before.soloed) this.rebuildLoops() }))
     this.rebuildLoops()
     if (useSceneStore.getState().items.length) this.loadItem()
   }
@@ -364,12 +363,10 @@ export class SceneRuntime {
     this.kitFire.flush(this.helper.connected)
   }
   private rebuildLoops() {
-    const s = useSceneStore.getState(), pb = useScenePlayback.getState(), st = useSceneStrength.getState(), lib = s.lib
-    // This PC's overall multiplier on the loops too (the CLIP mix and FIRE's loopTick read these voices), and the
-    // strength panel's M / S: a muted loop cue, or any solo of another event, leaves its voices out (FIRE stops them).
-    this.mixer.loopVoices = s.table && lib ? buildLoopVoices(s.table, lib, pb.allDevices)
-      .filter(v => hapticAllowed(lib.layers[v.layer]?.cue ?? '', st.muted, st.soloed))
-      .map(v => ({ ...v, gain: v.gain * pb.overallGain })) : []
+    const s = useSceneStore.getState(), pb = useScenePlayback.getState()
+    // This PC's overall multiplier on the loops too (the CLIP mix and FIRE's loopTick read these voices). M / S are
+    // applied each tick (loopOn), so toggling them never rebuilds the voices (their phases go on).
+    this.mixer.loopVoices = s.table && s.lib ? buildLoopVoices(s.table, s.lib, pb.allDevices).map(v => ({ ...v, gain: v.gain * pb.overallGain })) : []
     this.loopSounds = s.table && s.lib ? buildLoopSounds(s.table, s.lib) : []
   }
 
@@ -411,14 +408,18 @@ export class SceneRuntime {
       const t = v.currentTime
       this.loopPlayer.update(() => this.audio(), this.loopSounds, s.sfx, layer => loopSoundLevel(data.full.levels, data.fps, lib.layers[layer], t))
     } else if (this.actx) this.loopPlayer.stopAll(this.actx)
+    // The strength panel's M / S on the loops: a muted loop cue, or any solo of another event, leaves its voices out
+    // (FIRE stops them; the mix skips them, keeping their phase).
+    const st = useSceneStrength.getState()
+    const loopOn = lib && (st.muted.size || st.soloed.size) ? (x: LoopVoice) => hapticAllowed(lib.layers[x.layer]?.cue ?? '', st.muted, st.soloed) : undefined
     // FIRE loops at the level of the replay time the haptic plays for (+ offset = later: an earlier level now).
     if (!fireOn) this.kitFire.stopAll(this.helper.connected, this.helper.devices)
-    else if (playing && s.table && data && lib) this.kitFire.loopTick({ table: s.table, voices: this.mixer.loopVoices, t: v.currentTime - pb.fireOffsetMs / 1000 * v.playbackRate, devices: this.helper.devices,
+    else if (playing && s.table && data && lib) this.kitFire.loopTick({ table: s.table, voices: loopOn ? this.mixer.loopVoices.filter(loopOn) : this.mixer.loopVoices, t: v.currentTime - pb.fireOffsetMs / 1000 * v.playbackRate, devices: this.helper.devices,
       level: (t, layer, side) => levelAt(data.full.levels, data.fps, lib.layers[layer], t, side) })
     // The stream is off in FIRE output (STOP_ALL there would end its device sessions anyway).
     this.mixer.pump(now, {
       enabled: settings.sendHaptics && this.helper.connected && output === 'clip', playing, devices: this.helper.devices, leadMs: -usePcTiming.getState().offsetMs, pcm: s.pcm,
-      level: (t, layer, side) => data && lib ? levelAt(data.full.levels, data.fps, lib.layers[layer], t, side) : [0, 1],
+      level: (t, layer, side) => data && lib ? levelAt(data.full.levels, data.fps, lib.layers[layer], t, side) : [0, 1], loopOn,
     })
   }
 }

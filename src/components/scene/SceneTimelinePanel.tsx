@@ -19,7 +19,7 @@ import { spanWindow, stepView, timelineClick, type TimelineView } from '@/utils/
 import { firingBar, occurrenceKeys, recordingFiringGains, recordingFiringStrength, type FiringGains, type FiringStrength } from '@/utils/sceneFiringGain'
 import { kindColor } from '@/utils/kindColors'
 import { useSceneStrength } from '@/stores/sceneStrength'
-import { recordedIndexMap, recordedName } from '@/utils/sceneStrength'
+import { barDragRatio, recordedIndexMap, recordedName, selectableFirings } from '@/utils/sceneStrength'
 import type { SceneEvent } from '@/utils/sceneData'
 
 /**
@@ -317,19 +317,14 @@ export function SceneTimelinePanel() {
     if (event.shiftKey || event.ctrlKey || event.metaKey) { st.select([hit.index], 'toggle'); return event.shiftKey }
     if (!was) st.select([hit.index], 'replace')
     const [laneTop, laneBottom] = hapticLane.current, H = laneBottom - laneTop, gain = hit.gain ?? 0
-    // Drawn height (an over-cap bar is drawn at the lane top) and that height's value.
-    const shown = Math.min(1, gain), h0 = shown * H
     const editing = useSceneSettings.getState().editFirings
     let dragging = false, ratio = 1
     track(event, (_, dy) => {
       if (!editing) return
       if (!dragging && Math.abs(dy) > DRAG_PX) dragging = true
       if (!dragging) return
-      // The pressed bar's top follows the pointer (`v`: the value at the pointer, lane top = 1): below the lane top it
-      // becomes v; above it (drawn clamped) the gain scales by v. A bar too short to scale from goes ×2 per 40 px.
-      // Floored so the gains stay above 0 (scaleFiringGain keeps them ≥ 0.001) and a later ratio can raise them again.
-      const v = (h0 - dy) / H
-      ratio = h0 > 2 ? Math.max(0.001, v <= shown ? v / gain : v / shown) : 2 ** (-dy / 40)
+      // The pressed bar's drawn top follows the pointer (barDragRatio: 1 at the press point, never 0).
+      ratio = barDragRatio(gain, dy, H)
       useSceneStrength.getState().setDragRatio(ratio)
     }, () => {
       const after = useSceneStrength.getState()
@@ -351,16 +346,11 @@ export function SceneTimelinePanel() {
       useSceneStrength.getState().select(firingsBetween(time, timeAt(dx)), add ? 'add' : 'replace')
     })
   }
-  /** Recorded indices of the haptic one-shot firings (not ticks) between two replay times, from the recording itself. */
+  /** Recorded indices of the haptic one-shot firings between two replay times that the lane draws (a moment: its stretch only). */
   const firingsBetween = (a: number, b: number): number[] => {
-    const s = useSceneStore.getState(), events = s.data?.full.events ?? [], ticks = s.lib?.ticks ?? [], lo = Math.min(a, b), hi = Math.max(a, b)
-    const strength = s.table ? recordingFiringStrength(s.table, events) : new Map<string, FiringStrength | null>()
-    const indexOf = s.recorded ? recordedIndexMap(s.recorded.full.events) : new Map<string, number>()
-    const shownKeys = occurrenceKeys(events), recordedKeys = occurrenceKeys(events, recordedName)
-    return events.flatMap((ev, k) => {
-      const i = ev.t >= lo && ev.t <= hi && !isTick(ticks, ev.name) && strength.get(shownKeys[k]) ? indexOf.get(recordedKeys[k]) : undefined
-      return i === undefined ? [] : [i]
-    })
+    const s = useSceneStore.getState(), it = s.items[s.cur]
+    if (!s.table || !s.data || !s.recorded) return []
+    return selectableFirings(s.table, s.data.full.events, s.recorded.full.events, s.lib?.ticks ?? [], a, b, it?.kind === 'clip' ? [it.start, it.end] : null)
   }
   const onMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
     if (!useSceneStore.getState().items.length || event.button !== 0) return

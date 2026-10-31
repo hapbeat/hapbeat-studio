@@ -266,6 +266,8 @@ export const useSceneStore = create<SceneState>((set, get) => {
   let firingPending = new Map<number, FiringGainChange>()
   /** The project the pending firing gains belong to (a newly opened project still gets them written to the old one). */
   let firingRoot: FileSystemDirectoryHandle | null = null
+  /** That project's name (the notices say which project's gains could not be written). */
+  let firingProject = ''
   let firingTimer: ReturnType<typeof setTimeout> | null = null
   let firingSaving: Promise<void> | null = null
   /** After a failed write the next try waits longer (2 s, doubling up to 30 s); a write that works resets it. */
@@ -281,7 +283,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
         const result = rewriteViewerDataGains(await (await readProjectFile(root, VIEWER_DATA)).text(), changes)
         if (!result.ok) {
           const notice = result.reason === 'mismatch' ? { id: 'scene.firings.mismatch' as const, params: { index: result.index, file: VIEWER_DATA }, error: true }
-            : { id: 'scene.firings.saveFailed' as const, params: { error: result.error }, error: true }
+            : { id: 'scene.firings.saveFailed' as const, params: { project: firingProject, error: result.error }, error: true }
           note(notice); addLog(`${VIEWER_DATA}: firing gains not written (${result.reason === 'mismatch' ? `events[${result.index}] is not the firing Studio read` : result.error})`)
           return
         }
@@ -293,7 +295,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
         for (const c of changes) if (!firingPending.has(c.index)) firingPending.set(c.index, c)
         firingRetryMs = Math.min(30000, firingRetryMs ? firingRetryMs * 2 : 2000)
         if (!firingTimer) scheduleFiringSave(firingRetryMs)
-        note({ id: 'scene.firings.saveFailed', params: { error: message(error) }, error: true }); addLog(message(error))
+        note({ id: 'scene.firings.saveFailed', params: { project: firingProject, error: message(error) }, error: true }); addLog(message(error))
       }
     })()
     try { await firingSaving } finally { firingSaving = null }
@@ -303,6 +305,19 @@ export const useSceneStore = create<SceneState>((set, get) => {
     if (firingTimer) { clearTimeout(firingTimer); firingTimer = null }
     if (firingSaving) await firingSaving
     if (firingPending.size) await saveFiringsNow()
+  }
+  /**
+   * Another project replaces the open one while firing gains of the old one could not be written (flushFirings failed):
+   * its retries stop and one notice says which project and how many (they are not dropped silently).
+   */
+  const abandonFirings = (): SceneNotice | null => {
+    if (firingTimer) { clearTimeout(firingTimer); firingTimer = null }
+    firingRetryMs = 0
+    const count = firingPending.size
+    firingPending = new Map(); firingRoot = null
+    if (!count) return null
+    addLog(`${firingProject}: ${count} firing gain(s) could not be written to ${VIEWER_DATA}`)
+    return { id: 'scene.firings.unsaved', params: { project: firingProject, count }, error: true }
   }
 
   /** Reads the file again when it changed outside Studio and nothing is unsaved (every 2 s and on focus). */
@@ -353,6 +368,8 @@ export const useSceneStore = create<SceneState>((set, get) => {
     }
     clearVideoUrls()
     rememberSceneProject(opened.lib.project_name)
+    // The old project's firing gains that could still not be written (after the flush above) stop here, said once.
+    const unsaved = firingRoot && firingRoot !== handle ? abandonFirings() : null
     set({ root: handle, lib: opened.lib, recorded: opened.data, overrides: [], data: opened.data, items: buildItems(opened.data), sel: null, cur: 0, empty: null, table: null, noTable: false })
     await loadTable()
     restoreJournal()
@@ -361,6 +378,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
       addLog(`viewer-data.json: ${dropped} chapter(s) left out (start >= 0, start < end <= the video's length, a label)`)
       if (!restoredNotice) { restoredNotice = { id: 'scene.chapters.dropped', params: { count: dropped }, error: true }; note(restoredNotice) }
     }
+    if (unsaved) { restoredNotice = unsaved; note(unsaved) }
     let start = 1
     try { start = Number(localStorage.getItem(clipKey(opened.lib.project_name))) || 1 } catch { /* preference only */ }
     get().select(Math.min(start, get().items.length - 1))
@@ -463,7 +481,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
     setFiringGains: gains => {
       const { recorded, root } = get()
       if (!recorded || !root || !gains.size) return
-      if (firingRoot !== root) { firingPending = new Map(); firingRoot = root }
+      if (firingRoot !== root) { const unsaved = abandonFirings(); if (unsaved) note(unsaved); firingRoot = root; firingProject = get().lib?.project_name ?? '' }
       const events = recorded.full.events.map((ev, i) => {
         const gain = gains.get(i)
         // Absent and still 1 stays absent (in the file too).

@@ -3,7 +3,7 @@ import { effectiveEvent, setDistanceFalloff, setVariantScale } from './cueEvents
 import { firingGains, firingStrength, recordingFiringStrength, firingKey, occurrenceKeys } from './sceneFiringGain'
 import {
   eventRoutes, faderValue, gainsAtFader, hapticAllowed, JITTER_PCT_MAX, jitterDbToPct, jitterPctToDb, jitterRange, median, ratioDb, recordedIndexMap, recordedName,
-  scaleFiringGain, scaleRouteGain, setFiringGain, setRouteGains, strengthStep,
+  scaleFiringGain, scaleRouteGain, setFiringGain, setRouteGains, strengthStep, barDragRatio, selectableFirings, MIN_FIRING_GAIN,
 } from './sceneStrength'
 import { sampleData, sampleTable } from './sceneTestFixtures'
 import type { SceneEvent } from './sceneData'
@@ -60,6 +60,12 @@ describe('scaling a selection', () => {
     expect(scaleFiringGain(0, 4)).toBe(0)
     expect(setFiringGain(0)).toBe(0)
     expect(setFiringGain(0.123456)).toBe(0.1235)
+  })
+  it('a step down never raises a gain already below the floor; a set value above 0 is at least the floor', () => {
+    expect(scaleFiringGain(0.0005, 1 / strengthStep(false))).toBe(0.0005)
+    expect(scaleFiringGain(0.0005, strengthStep(false))).toBeGreaterThan(0.0005)
+    expect(scaleFiringGain(0.002, 0.1)).toBe(MIN_FIRING_GAIN)
+    expect(setFiringGain(0.0005)).toBe(MIN_FIRING_GAIN)
   })
   it('a ±1 dB step always moves a small gain (no rounding stall)', () => {
     const up = strengthStep(false)
@@ -146,5 +152,35 @@ describe('recorded firings and mute / solo', () => {
     expect(hapticAllowed('a', new Set(), new Set(['b']))).toBe(false)
     expect(hapticAllowed('b', new Set(['b']), new Set(['b']))).toBe(true)
     expect(hapticAllowed('a', new Set(), new Set())).toBe(true)
+  })
+})
+
+describe('bar drag (timeline)', () => {
+  const H = 100
+  it('the press point is ×1, the drawn top follows the pointer', () => {
+    expect(barDragRatio(0.5, 0, H)).toBe(1)
+    expect(barDragRatio(0.5, -25, H)).toBeCloseTo(1.5)
+    expect(barDragRatio(0.5, 25, H)).toBeCloseTo(0.5)
+  })
+  it('an over-cap bar (drawn clamped) scales from its drawn height, continuously across the lane top', () => {
+    expect(barDragRatio(1.6, 0, H)).toBe(1)
+    expect(barDragRatio(1.6, 1, H)).toBeCloseTo(0.99)
+    expect(barDragRatio(1.6, -1, H)).toBeCloseTo(1.01)
+    expect(barDragRatio(1.6, 50, H)).toBeCloseTo(0.5)
+  })
+  it('never reaches 0; a bar too short goes ×2 per 40 px', () => {
+    expect(barDragRatio(0.5, 500, H)).toBe(MIN_FIRING_GAIN)
+    expect(barDragRatio(0.01, -40, H)).toBeCloseTo(2)
+  })
+})
+
+describe('range selection (timeline)', () => {
+  it('picks haptic one-shots by time from the recording, only inside a moment stretch, never ticks', () => {
+    const table = sampleTable()
+    const events = [ev('button', 1), ev('detent', 2), ev('button', 3), ev('button', 3), ev('feed_loop', 3.5), ev('button', 6)]
+    // detent is a tick in the sample lib; feed_loop a loop cue.
+    expect(selectableFirings(table, events, events, ['detent'], 0, 10, null)).toEqual([0, 2, 3, 5])
+    expect(selectableFirings(table, events, events, ['detent'], 0, 10, [2.5, 5])).toEqual([2, 3])
+    expect(selectableFirings(table, events, events, [], 5, 1, null)).toEqual([0, 1, 2, 3])
   })
 })

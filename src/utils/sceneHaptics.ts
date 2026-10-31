@@ -249,7 +249,8 @@ export class SceneHapticMixer {
    * drops the voices. `devices` are the selected, online devices whose
    * address matches a table target.
    */
-  pump(now: number, o: { enabled: boolean; playing: boolean; devices: HapticDevice[]; leadMs: number; pcm: Record<string, Float32Array>; level: LevelFn }) {
+  /** `loopOn`: which loop voices are mixed now (the others keep their phase, so letting one in again does not restart it). */
+  pump(now: number, o: { enabled: boolean; playing: boolean; devices: HapticDevice[]; leadMs: number; pcm: Record<string, Float32Array>; level: LevelFn; loopOn?: (v: LoopVoice) => boolean }) {
     if (!o.enabled) { this.endSessions(); this.voices = []; return }
     if (o.playing || this.voices.length) this.quietSince = now
     if (now - this.quietSince > QUIET_END_MS) { this.endSessions(); return }
@@ -275,7 +276,7 @@ export class SceneHapticMixer {
       if (!o.devices.some(d => d.ipAddress === ip)) { this.send('stream_end', { stream_id: s.id, targets: [ip] }); this.sessions.delete(ip); this.log(`stream_end ${s.id} → ${ip}`); continue }
       if (s.wall < now - 200) s.wall = now // throttled tab: skip ahead instead of bursting
       while (s.wall < now + LEAD_MS) {
-        const chunk = renderChunk({ ip, address: s.address, wall: s.wall + o.leadMs, voices: this.voices, loopVoices: this.loopVoices, clock: this.clock, pcm: o.pcm, level: o.level })
+        const chunk = renderChunk({ ip, address: s.address, wall: s.wall + o.leadMs, voices: this.voices, loopVoices: o.loopOn ? this.loopVoices.filter(o.loopOn) : this.loopVoices, clock: this.clock, pcm: o.pcm, level: o.level })
         this.send('stream_data', { stream_id: s.id, targets: [ip], offset: s.bytes, data: bytesToBase64(chunk.buffer as ArrayBuffer) })
         s.bytes += chunk.byteLength
         s.wall += CHUNK / RATE * 1000
