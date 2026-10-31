@@ -18,6 +18,7 @@ import { focusEvent, isTick } from '@/utils/sceneData'
 import { isTypingTarget } from '@/utils/playbackShortcut'
 import { openSceneSelectionInEditor } from '@/stores/eventStore'
 import { SceneRuntime } from './sceneRuntime'
+import { useSceneStrength } from '@/stores/sceneStrength'
 import { SceneContext, type SceneShared } from './sceneContext'
 import { SceneDockLayout } from './SceneDockLayout'
 import { SceneTopBar } from './SceneTopBar'
@@ -100,11 +101,20 @@ export function SceneView({ active }: { active: boolean }) {
   // Keys (viewer's): ↑↓ item, Space play (App forwards it as studio:scene-playback), ←→ frame / Shift 1 s,
   // E before the cue, W ±0.5 s loop, R restart, F back to the full replay (where the moment / span is now), S speed, L loop, , . previous / next cue, M sound, H haptics,
   // O the selected event in the editor, 1–9 the project's chapters 1–9 (only with chapters: digits stay free otherwise).
+  // Strength edits (the strength panel / timeline): Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo, Esc clears the firing selection.
   useEffect(() => {
     if (!active) return
     const playback = () => { if (useSceneStore.getState().items.length) { runtime.audio(); runtime.togglePlay() } }
     const keydown = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
+      if (!e.altKey && !isTypingTarget(el)) {
+        const st = useSceneStrength.getState(), k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey
+        let done = false
+        if (mod && k === 'z' && !e.shiftKey) { if (st.undo.length) { st.undoLast(); done = true } }
+        else if (mod && ((k === 'z' && e.shiftKey) || k === 'y')) { if (st.redo.length) { st.redoLast(); done = true } }
+        else if (!mod && e.key === 'Escape' && st.selected.size) { st.clear(); done = true }
+        if (done) { e.preventDefault(); return }
+      }
       if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(el) || (el.closest && el.closest('input'))) return
       const s = useSceneStore.getState(), it = s.items[s.cur], v = runtime.video
       if (!it || !s.lib) return

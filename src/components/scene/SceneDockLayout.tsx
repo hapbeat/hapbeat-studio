@@ -8,14 +8,15 @@ import { SceneTimelinePanel } from './SceneTimelinePanel'
 import { SceneMomentsPanel } from './SceneMomentsPanel'
 import { SceneProjectPanel } from './SceneProjectPanel'
 import { SceneEventPanel } from './SceneEventPanel'
+import { SceneStrengthPanel } from './SceneStrengthPanel'
 import { withoutDockPanels } from '@/utils/dockPanels'
 
-export const SCENE_PANELS = ['video', 'timeline', 'moments', 'event', 'project'] as const
+export const SCENE_PANELS = ['video', 'timeline', 'strength', 'moments', 'event', 'project'] as const
 /** Panels of earlier Studios, dropped from saved layouts (the old per-cue Haptics / Sound panels: the Event panel edits materials). */
 const REMOVED_PANELS = ['haptics', 'sound']
 export type ScenePanelId = typeof SCENE_PANELS[number]
 export const SCENE_PANEL_TITLES: Record<ScenePanelId, MessageId> = {
-  video: 'scene.panel.video', timeline: 'scene.panel.timeline', moments: 'scene.panel.moments',
+  video: 'scene.panel.video', timeline: 'scene.panel.timeline', strength: 'scene.panel.strength', moments: 'scene.panel.moments',
   event: 'scene.panel.event', project: 'scene.panel.project',
 }
 type Translate = (id: MessageId, params?: Record<string, string | number>) => string
@@ -24,6 +25,7 @@ type Translate = (id: MessageId, params?: Record<string, string | number>) => st
 const COMPONENTS: Record<ScenePanelId, FunctionComponent<IDockviewPanelProps>> = {
   video: () => <SceneVideoPanel />,
   timeline: () => <SceneTimelinePanel />,
+  strength: () => <SceneStrengthPanel />,
   moments: () => <SceneMomentsPanel />,
   event: () => <SceneEventPanel />,
   project: () => <SceneProjectPanel />,
@@ -37,6 +39,7 @@ function addPanel(api: DockviewApi, id: ScenePanelId, t: Translate, inactive = f
   switch (id) {
     case 'video': return api.addPanel({ ...base, ...(near('timeline', 'above') ?? {}) })
     case 'timeline': return api.addPanel({ ...base, ...(near('video', 'below') ?? { position: { direction: 'below' } }), initialHeight: 210 })
+    case 'strength': return api.addPanel({ ...base, ...(near('timeline', 'right') ?? { position: { direction: 'below' } }), initialWidth: 460 })
     case 'moments': return api.addPanel({ ...base, position: { direction: 'left' }, initialWidth: 270 })
     case 'event': return api.addPanel({ ...base, ...(near('project', 'within') ?? { position: { direction: 'right' } }), initialWidth: 420 })
     case 'project': return api.addPanel({ ...base, ...(near('event', 'within') ?? { position: { direction: 'right' } }), initialWidth: 420 })
@@ -47,6 +50,7 @@ export function buildDefaultSceneLayout(api: DockviewApi, t: Translate) {
   api.clear()
   addPanel(api, 'video', t)
   addPanel(api, 'timeline', t)
+  addPanel(api, 'strength', t)
   addPanel(api, 'moments', t)
   addPanel(api, 'event', t)
   addPanel(api, 'project', t, true)

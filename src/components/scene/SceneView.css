@@ -191,3 +191,34 @@
 .scene-present-chapters { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; }
 .scene-present-chapters > button { flex: none; }
 .scene-present-chip { width: 22em; color: rgba(255,255,255,.8); font-size: 13px; text-align: right; }
+
+/* Event panel: the jitters per firing, folded. */
+.scene-event-jitter { grid-column: 1 / -1; }
+.scene-event-jitter > summary { cursor: pointer; color: var(--text-muted); font-size: 12px; margin: 2px 0; }
+.scene-event-jitter[open] { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 4px 12px; }
+.scene-event-jitter[open] > summary { grid-column: 1 / -1; }
+
+/* Strength panel (DEC-102 r3): vertical faders (scrolling sideways when narrow), the selection, the breakdown. */
+.scene-strength { display: flex; height: 100%; min-height: 0; overflow: hidden; font-size: 12px; font-variant-numeric: tabular-nums; outline: none; }
+.scene-strength-mixer { display: flex; gap: 2px; flex: 1 1 auto; min-width: 0; overflow-x: auto; overflow-y: hidden; padding: 8px; align-items: stretch; }
+.scene-strength-side { flex: 0 0 300px; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; border-left: 1px solid var(--border); }
+.scene-strength-strip { flex: 0 0 76px; width: 76px; display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 0; }
+.scene-strength-overall { border-right: 1px solid var(--border); margin-right: 4px; padding-right: 4px; }
+.scene-strength-track { position: relative; flex: 1 1 auto; min-height: 80px; display: flex; justify-content: center; }
+.scene-strength-fader { writing-mode: vertical-lr; direction: rtl; height: 100%; width: 20px; margin: 0; cursor: pointer; }
+.scene-strength-unity { position: absolute; left: 50%; width: 30px; margin-left: -15px; height: 1px; background: rgba(255,255,255,.35); pointer-events: none; }
+.scene-strength-value { display: inline-block; min-width: 46px; text-align: center; color: var(--text-primary); }
+.scene-strength-ratio { min-width: 104px; }
+.scene-strength-label, .scene-strength-range { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+.scene-strength-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: none; border: none; color: var(--accent-light); cursor: pointer; padding: 0; font: inherit; }
+.scene-strength-ms { display: inline-flex; gap: 3px; }
+.scene-strength-m, .scene-strength-s { width: 22px; height: 18px; padding: 0; font-size: 11px; line-height: 1; border: 1px solid #4a525c; border-radius: 3px; background: none; color: var(--text-muted); cursor: pointer; }
+.scene-strength-m.on { background: #c0392b; border-color: #c0392b; color: #fff; }
+.scene-strength-s.on { background: #d4a017; border-color: #d4a017; color: #111; }
+.scene-strength-count { min-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scene-strength-sel { display: flex; gap: 8px; min-height: 150px; }
+.scene-strength-relative { flex: 0 0 110px; width: 110px; }
+.scene-strength-buttons { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.scene-strength-reason { min-height: 32px; }
+.scene-strength-detail-line { min-height: 34px; }
+.scene-strength-clipped { margin-left: 8px; color: #ff4d4d; }
