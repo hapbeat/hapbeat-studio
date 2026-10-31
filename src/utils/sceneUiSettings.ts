@@ -18,9 +18,11 @@ export interface SceneUiSettings {
   leadSec: number
   /** dockview `toJSON()` output; null = default layout. */
   dockLayout: Record<string, unknown> | null
+  /** The strength panel / timeline may change each firing's own gain (rewrites viewer-data.json `events[].gain`; off by default). */
+  editFirings: boolean
 }
 
-export const DEFAULT_SCENE_UI: SceneUiSettings = { pcSound: true, loop: true, sendHaptics: true, leadSec: 1, dockLayout: null }
+export const DEFAULT_SCENE_UI: SceneUiSettings = { pcSound: true, loop: true, sendHaptics: true, leadSec: 1, dockLayout: null, editFirings: false }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const isDockLayout = (value: unknown): value is Record<string, unknown> => isRecord(value) && isRecord(value.grid) && isRecord(value.panels)
@@ -35,6 +37,7 @@ export function sanitizeSceneUi(value: unknown): SceneUiSettings {
     sendHaptics: typeof v.sendHaptics === 'boolean' ? v.sendHaptics : d.sendHaptics,
     leadSec: typeof v.leadSec === 'number' && Number.isFinite(v.leadSec) ? Math.max(0, Math.min(10, v.leadSec)) : d.leadSec,
     dockLayout: isDockLayout(v.dockLayout) ? v.dockLayout : d.dockLayout,
+    editFirings: typeof v.editFirings === 'boolean' ? v.editFirings : d.editFirings,
   }
 }
 

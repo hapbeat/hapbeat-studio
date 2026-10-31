@@ -11,6 +11,7 @@ import { applyEmits, emitSignature, newEmitSeed } from '@/utils/sceneEmit'
 import { pageVisible, perfTrack } from '@/utils/perfRegistry'
 import { RATE } from '@/utils/sceneHaptics'
 import { lastSceneProject, lookupSceneProject, registerSceneProject, rememberSceneProject, restoreSceneHandle } from '@/utils/sceneRegistry'
+import { rewriteViewerDataGains, type FiringGainChange } from '@/utils/viewerDataGains'
 
 /**
  * Scene tab (haptic authoring) state: the opened game project folder, its
@@ -48,6 +49,13 @@ interface SceneState {
   overrides: SceneOverride[]
   /** Replaces the overrides (data / items recomputed; the caller saves the file). */
   setOverrides: (overrides: SceneOverride[]) => void
+  /**
+   * Sets recorded firings' own gains (viewer-data `events[i].gain` by index; the strength panel with per-firing editing
+   * on): `recorded` and `data` change at once (the runtime fires from them, the bars follow), and viewer-data.json is
+   * rewritten 300 ms after the last change, only those `gain` values (rewriteViewerDataGains). The recording is never
+   * read again from the file meanwhile (only the cue table is watched), so a pending change is not overwritten.
+   */
+  setFiringGains: (gains: ReadonlyMap<number, number>) => void
   /** Seed of the emitted cues' firings (one per session, so a replay repeats them); `reseedEmit` draws a new one. */
   emitSeed: number
   reseedEmit: () => void
@@ -253,6 +261,40 @@ export const useSceneStore = create<SceneState>((set, get) => {
     })()
     try { await saving } finally { saving = null }
   }
+  // ── Firing gains → viewer-data.json (only `events[i].gain`; checked against the name and time read at that index) ──
+  const VIEWER_DATA = `${VIEWER_DIR}/viewer-data.json`
+  let firingPending = new Map<number, FiringGainChange>()
+  /** The project the pending firing gains belong to (a newly opened project still gets them written to the old one). */
+  let firingRoot: FileSystemDirectoryHandle | null = null
+  let firingTimer: ReturnType<typeof setTimeout> | null = null
+  let firingSaving: Promise<void> | null = null
+  const scheduleFiringSave = () => { if (firingTimer) clearTimeout(firingTimer); firingTimer = setTimeout(() => { firingTimer = null; void saveFiringsNow() }, 300) }
+  const saveFiringsNow = async (): Promise<void> => {
+    if (firingSaving) { await firingSaving; if (firingPending.size) return saveFiringsNow(); return }
+    const root = firingRoot, changes = [...firingPending.values()]
+    if (!root || !changes.length) return
+    firingPending = new Map()
+    firingSaving = (async () => {
+      try {
+        const result = rewriteViewerDataGains(await (await readProjectFile(root, VIEWER_DATA)).text(), changes)
+        if (!result.ok) {
+          const notice = result.reason === 'mismatch' ? { id: 'scene.firings.mismatch' as const, params: { index: result.index, file: VIEWER_DATA }, error: true }
+            : { id: 'scene.firings.saveFailed' as const, params: { error: result.error }, error: true }
+          note(notice); addLog(`${VIEWER_DATA}: firing gains not written (${result.reason === 'mismatch' ? `events[${result.index}] is not the firing Studio read` : result.error})`)
+          return
+        }
+        await writeProjectFile(root, VIEWER_DATA, result.text)
+        addLog(`firing gains (${changes.length}) → ${VIEWER_DATA}`)
+      } catch (error) {
+        // Kept for the next write (a newer change of the same firing wins).
+        for (const c of changes) if (!firingPending.has(c.index)) firingPending.set(c.index, c)
+        note({ id: 'scene.firings.saveFailed', params: { error: message(error) }, error: true }); addLog(message(error))
+      }
+    })()
+    try { await firingSaving } finally { firingSaving = null }
+  }
+  const flushFirings = () => { if (firingTimer) { clearTimeout(firingTimer); firingTimer = null; void saveFiringsNow() } }
+
   /** Reads the file again when it changed outside Studio and nothing is unsaved (every 2 s and on focus). */
   const checkOutside = async () => {
     const { root, lib, dirty, busy } = get()
@@ -270,7 +312,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
     const timer = setInterval(() => void checkOutside(), 2000)
     const onFocus = () => void checkOutside()
     // Leaving the page starts writing what is pending; the write may not finish, so the journal (written at every edit) is what keeps it.
-    const onHide = () => { if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; void saveNow() } }
+    const onHide = () => { if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; void saveNow() } flushFirings() }
     window.addEventListener('focus', onFocus); window.addEventListener('pagehide', onHide); window.addEventListener('beforeunload', onHide)
     perfTrack('intervals', 1)
     w.__sceneWatch = () => { clearInterval(timer); window.removeEventListener('focus', onFocus); window.removeEventListener('pagehide', onHide); window.removeEventListener('beforeunload', onHide); perfTrack('intervals', -1) }
@@ -279,6 +321,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
   /** Opens a project folder; a folder with a lib is remembered even when the recording is missing (one click after recording). */
   const openFolder = async (handle: FileSystemDirectoryHandle): Promise<boolean> => {
     restoredNotice = null
+    flushFirings()
     const opened = await openSceneProject(handle)
     if (!opened.ok && opened.reason === 'noLib') {
       const notice = opened.oldFormat ? oldFormatNotice(handle.name) : { id: 'scene.open.noLib' as const, params: { folder: handle.name, dir: VIEWER_DIR }, error: true }
@@ -405,6 +448,22 @@ export const useSceneStore = create<SceneState>((set, get) => {
       const derived = derivedData(get().table, overrides)
       if (!derived.data) { set({ overrides }); return }
       set({ overrides, data: derived.data, items: buildItems(derived.data) })
+    },
+    setFiringGains: gains => {
+      const { recorded, root } = get()
+      if (!recorded || !root || !gains.size) return
+      if (firingRoot !== root) { firingPending = new Map(); firingRoot = root }
+      const events = recorded.full.events.map((ev, i) => {
+        const gain = gains.get(i)
+        // Absent and still 1 stays absent (in the file too).
+        return gain === undefined || gain === (ev.gain ?? 1) ? ev : { ...ev, gain }
+      })
+      for (const [i, gain] of gains) { const ev = recorded.full.events[i]; if (ev) firingPending.set(i, { index: i, name: ev.name, t: ev.t, gain }) }
+      // Same levels and clips: the runtime and the moments list see the same recording, only its firings' gains moved.
+      set({ recorded: { ...recorded, full: { ...recorded.full, events } } })
+      const derived = derivedData(get().table)
+      if (derived.data) set({ data: derived.data })
+      scheduleFiringSave()
     },
     reseedEmit: () => {
       const emitSeed = newEmitSeed()

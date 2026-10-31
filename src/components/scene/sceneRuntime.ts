@@ -11,6 +11,8 @@ import { buildLoopSounds, LoopSoundPlayer, loopSoundLevel, type LoopSound } from
 import { buildLoopVoices, shotVoices, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, routeTargets, SceneHapticMixer, type HapticDevice, type HelperSend, type StreamAck, type StreamDisplaced } from '@/utils/sceneHaptics'
 import { SceneKitFire } from '@/utils/sceneKitFire'
 import { isStreamOpen } from '@/utils/openStreams'
+import { useSceneStrength } from '@/stores/sceneStrength'
+import { hapticAllowed } from '@/utils/sceneStrength'
 
 export const SPEEDS = [1, 0.5, 0.25]
 
@@ -89,9 +91,11 @@ export class SceneRuntime {
     let prev = useSceneStore.getState()
     this.unsubscribes.push(useSceneStore.subscribe(state => {
       // A new moment, another file, or a newly opened recording (a re-opened project revokes the old video URLs, even for
-      // the same file names); not a mere rename of the items (firing overrides), which keeps the video playing.
-      if (state.root !== prev.root || state.recorded !== prev.recorded) this.fullTime = 0
-      if (state.cur !== prev.cur || state.root !== prev.root || state.recorded !== prev.recorded || state.items[state.cur]?.file !== prev.items[prev.cur]?.file
+      // the same file names; its levels are new); not a mere rename of the items (firing overrides) or a firing gain
+      // edit (setFiringGains keeps the levels), which keep the video playing.
+      const newRecording = state.recorded?.full.levels !== prev.recorded?.full.levels
+      if (state.root !== prev.root || newRecording) this.fullTime = 0
+      if (state.cur !== prev.cur || state.root !== prev.root || newRecording || state.items[state.cur]?.file !== prev.items[prev.cur]?.file
         || (state.items !== prev.items && !state.items.length)) this.loadItem()
       if (state.table !== prev.table || state.lib !== prev.lib) this.rebuildLoops()
       prev = state
@@ -101,7 +105,7 @@ export class SceneRuntime {
     this.unsubscribes.push(useSceneSettings.subscribe((now, before) => { if (now.pcSound !== before.pcSound) this.applyVideoSound() }))
     this.unsubscribes.push(useScenePlayback.subscribe((now, before) => {
       if (now.videoVolume !== before.videoVolume) this.applyVideoSound()
-      if (now.allDevices !== before.allDevices) this.rebuildLoops()
+      if (now.allDevices !== before.allDevices || now.overallGain !== before.overallGain) this.rebuildLoops()
     }))
     this.rebuildLoops()
     if (useSceneStore.getState().items.length) this.loadItem()
@@ -300,12 +304,12 @@ export class SceneRuntime {
   testRoute(r: CueRoute): number {
     const s = useSceneStore.getState(), pb = useScenePlayback.getState(), name = routeClips(r)[0], clip = name === undefined ? undefined : s.table?.clips[name]
     if (!clip || name === undefined || !s.table) return 0
-    if (effectiveOutput(pb) === 'fire') return this.kitFire.test({ table: s.table, clip: name, at: r.at, gain: r.gain, devices: this.helper.devices, all: pb.allDevices })
+    if (effectiveOutput(pb) === 'fire') return this.kitFire.test({ table: s.table, clip: name, at: r.at, gain: r.gain * pb.overallGain, devices: this.helper.devices, all: pb.allDevices })
     let p = s.pcm[name]
     if (!p) return 0
     if (clip.loop) { const q = new Float32Array(RATE); for (let i = 0; i < RATE; i++) q[i] = p[i % p.length]; p = q }
     const targets = routeTargets(r.at, undefined, pb.allDevices)
-    this.mixer.voices.push({ pcm: p, targets, gain: clip.intensity * r.gain, start: performance.now() + LEAD_MS })
+    this.mixer.voices.push({ pcm: p, targets, gain: clip.intensity * r.gain * pb.overallGain, start: performance.now() + LEAD_MS })
     return this.helper.devices.filter(d => targets.some(tg => matchesAddress(tg, d.address))).length
   }
 
@@ -340,12 +344,16 @@ export class SceneRuntime {
       if (materials.length) for (const l of this.firedListeners) l(fired)
     }
     if (!useSceneSettings.getState().sendHaptics) return
-    const pb = useScenePlayback.getState()
+    // The strength panel's M / S (this session only).
+    const st = useSceneStrength.getState()
+    if (!hapticAllowed(ev.name, st.muted, st.soloed)) return
+    // The firing's own gain × this PC's overall multiplier (the send clamp stays where it was: the Kit PLAY, the PCM16 mix).
+    const pb = useScenePlayback.getState(), cueGain = (ev.gain ?? 1) * pb.overallGain
     if (effectiveOutput(pb) === 'fire') {
-      if (this.helper.connected) this.kitFire.shot({ table: s.table, shot, hand: ev.hand, cueGain: ev.gain ?? 1, delayMs: delay * 1000, offsetMs: pb.fireOffsetMs, devices: this.helper.devices, all: pb.allDevices })
+      if (this.helper.connected) this.kitFire.shot({ table: s.table, shot, hand: ev.hand, cueGain, delayMs: delay * 1000, offsetMs: pb.fireOffsetMs, devices: this.helper.devices, all: pb.allDevices })
       return
     }
-    this.mixer.voices.push(...shotVoices(s.table, s.pcm, shot, ev.hand, ev.gain ?? 1, performance.now() + delay * 1000, pb.allDevices))
+    this.mixer.voices.push(...shotVoices(s.table, s.pcm, shot, ev.hand, cueGain, performance.now() + delay * 1000, pb.allDevices))
   }
   private flush() {
     if (this.actx) for (const x of this.scheduledSfx) if (x.at > this.actx.currentTime) try { x.src.stop() } catch { /* already ended */ }
@@ -355,8 +363,9 @@ export class SceneRuntime {
     this.kitFire.flush(this.helper.connected)
   }
   private rebuildLoops() {
-    const s = useSceneStore.getState()
-    this.mixer.loopVoices = s.table && s.lib ? buildLoopVoices(s.table, s.lib, useScenePlayback.getState().allDevices) : []
+    const s = useSceneStore.getState(), pb = useScenePlayback.getState()
+    // This PC's overall multiplier on the loops too (the CLIP mix and FIRE's loopTick read these voices).
+    this.mixer.loopVoices = s.table && s.lib ? buildLoopVoices(s.table, s.lib, pb.allDevices).map(v => ({ ...v, gain: v.gain * pb.overallGain })) : []
     this.loopSounds = s.table && s.lib ? buildLoopSounds(s.table, s.lib) : []
   }
 

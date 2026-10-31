@@ -43,9 +43,9 @@ describe('scene haptic routing', () => {
   })
 
   it('reads the per-PC playback settings defensively', () => {
-    expect(parseScenePlayback(null)).toEqual({ output: 'clip', allDevices: false, fireOffsetMs: 0, videoVolume: 1 })
-    expect(parseScenePlayback({ output: 'fire', allDevices: true, fireOffsetMs: -999, videoVolume: 2 })).toEqual({ output: 'fire', allDevices: true, fireOffsetMs: -300, videoVolume: 1 })
-    expect(parseScenePlayback({ output: 'x', allDevices: 'yes', fireOffsetMs: 'a', videoVolume: -1 })).toEqual({ output: 'clip', allDevices: false, fireOffsetMs: 0, videoVolume: 0 })
+    expect(parseScenePlayback(null)).toEqual({ output: 'clip', allDevices: false, fireOffsetMs: 0, videoVolume: 1, overallGain: 1 })
+    expect(parseScenePlayback({ output: 'fire', allDevices: true, fireOffsetMs: -999, videoVolume: 2, overallGain: 5 })).toEqual({ output: 'fire', allDevices: true, fireOffsetMs: -300, videoVolume: 1, overallGain: 2 })
+    expect(parseScenePlayback({ output: 'x', allDevices: 'yes', fireOffsetMs: 'a', videoVolume: -1, overallGain: -1 })).toEqual({ output: 'clip', allDevices: false, fireOffsetMs: 0, videoVolume: 0, overallGain: 0 })
   })
 })
 

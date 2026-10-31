@@ -1,5 +1,5 @@
-import { effectiveEvent, fireShot, MaterialPicker, resolveEventName } from './cueEvents'
-import { isLoopCue, soundIntensity, type CueTable } from './sceneCueTable'
+import { effectiveEvent, falloffGain, fireShot, MaterialPicker, resolveEventName, scaleAt } from './cueEvents'
+import { isLoopCue, routeClips, soundIntensity, type CueTable } from './sceneCueTable'
 import type { SceneEvent } from './sceneData'
 import { runPosition } from './sceneSegments'
 
@@ -32,6 +32,34 @@ export function firingGains(table: CueTable, events: readonly SceneEvent[], ev: 
 export function recordingFiringGains(table: CueTable, events: readonly SceneEvent[]): Map<string, FiringGains> {
   return new Map(events.map(ev => [firingKey(ev.name, ev.t), firingGains(table, events, ev)]))
 }
+/**
+ * A haptic one-shot firing's strength in its groups (DEC-102 r3; never mixed): `material` = the loudest route's clip
+ * intensity (editor / Kit; the Scene tab never edits it), `software` = that route's gain × the variant's hapticsGain
+ * (ramp) × distanceFalloff × the firing's own gain, `sent` = material × software (what fire() sends, before this PC's
+ * overall multiplier and the send clamp). The software multiplier is `route` × `scale` (variant × falloff) × `firing`
+ * (viewer-data events[].gain, omitted = 1). Resolved like firingGains (the representative clip of each route, no
+ * jitter). null: not a haptic one-shot (no routes, a loop cue, an unknown event).
+ */
+export interface FiringStrength { software: number; material: number; sent: number; route: number; scale: number; firing: number }
+
+export function firingStrength(table: CueTable, events: readonly SceneEvent[], ev: SceneEvent): FiringStrength | null {
+  const r = resolveEventName(table, ev.name), e = r && effectiveEvent(table, r.ref)
+  if (!e || !e.haptics.length || isLoopCue(table, e.ref.cue)) return null
+  const scale = scaleAt(e, runPosition(events, ev)).haptics * falloffGain(e.falloff, ev.dist), firing = ev.gain ?? 1
+  let best: FiringStrength | null = null
+  for (const route of e.haptics) {
+    const name = routeClips(route)[0], clip = name === undefined ? undefined : table.clips[name]
+    if (clip?.loop) continue
+    const software = route.gain * scale * firing, material = clip?.intensity ?? 0, sent = material * software
+    if (!best || sent > best.sent) best = { software, material, sent, route: route.gain, scale, firing }
+  }
+  return best
+}
+/** Strength of every firing of the recording, keyed by firingKey (replay time). */
+export function recordingFiringStrength(table: CueTable, events: readonly SceneEvent[]): Map<string, FiringStrength | null> {
+  return new Map(events.map(ev => [firingKey(ev.name, ev.t), firingStrength(table, events, ev)]))
+}
+
 /** A firing's key: its name and replay time (ms). */
 export const firingKey = (name: string, replaySec: number) => `${name}@${Math.round(replaySec * 1000)}`
 
