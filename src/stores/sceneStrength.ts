@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { eventKey, parseEventKey } from '@/utils/cueEvents'
-import { eventRoutes, scaleFiringGain, setRouteGains } from '@/utils/sceneStrength'
+import { eventRoutes, scaleFiringGain, setFiringGain, setRouteGains } from '@/utils/sceneStrength'
 import { useSceneStore } from './sceneStore'
 import { useSceneSettings } from './sceneSettings'
 
@@ -43,21 +43,27 @@ interface SceneStrengthState {
   redoLast: () => void
 }
 
+/** A step that can no longer apply was dropped (said so; the next Ctrl+Z goes on with the older ones). */
+const dropped = () => useSceneStore.getState().note({ id: 'scene.strength.stepDropped', error: true })
 const toggled = <T,>(set: ReadonlySet<T>, value: T) => { const next = new Set(set); if (!next.delete(value)) next.add(value); return next }
 
 /**
- * Applies one side of an edit to the recording / the cue table; false when it cannot be now (firing gains with
- * per-firing editing off, or an event the table no longer has): the step stays where it is.
+ * Applies one side of an edit to the recording / the cue table: `off` = not now (firing gains with per-firing editing
+ * off; the step stays where it is), `gone` = never again (its firings or its event's routes are no longer there — the
+ * event renamed or removed, the table changed outside Studio; the step is dropped so older ones still work).
  */
-function apply(edit: StrengthEdit, side: 'before' | 'after'): boolean {
+function apply(edit: StrengthEdit, side: 'before' | 'after'): 'ok' | 'off' | 'gone' {
   const s = useSceneStore.getState()
   if (edit.kind === 'firings') {
-    if (!useSceneSettings.getState().editFirings) return false
+    if (!useSceneSettings.getState().editFirings) return 'off'
+    const events = s.recorded?.full.events ?? []
+    if (!s.root || edit[side].some(([i]) => !events[i])) return 'gone'
     s.setFiringGains(new Map(edit[side]))
-    return true
+    return 'ok'
   }
-  const owner = parseEventKey(edit.owner)
-  try { return s.edit(tb => setRouteGains(tb, owner, edit[side])) } catch { return false }
+  const now = s.table && eventRoutes(s.table, edit.owner)
+  if (!now || eventKey(now.owner) !== edit.owner || now.gains.length !== edit[side].length) return 'gone'
+  try { return s.edit(tb => setRouteGains(tb, parseEventKey(edit.owner), edit[side])) ? 'ok' : 'gone' } catch { return 'gone' }
 }
 /** The recorded gain of each selected firing (omitted = 1). */
 function selectedGains(selected: ReadonlySet<number>): [number, number][] {
@@ -88,17 +94,23 @@ export const useSceneStrength = create<SceneStrengthState>((set, get) => {
     toggleMute: name => set(st => ({ muted: toggled(st.muted, name) })),
     toggleSolo: name => set(st => ({ soloed: toggled(st.soloed, name) })),
     scaleSelected: ratio => firings(g => scaleFiringGain(g, ratio)),
-    setSelected: gain => firings(() => scaleFiringGain(gain, 1)),
+    setSelected: gain => firings(() => setFiringGain(gain)),
     pushRoutes: (owner, before, after) => { if (after.some((g, i) => g !== before[i])) push({ kind: 'routes', owner, before, after }) },
     undoLast: () => {
       const { undo } = get(), edit = undo[undo.length - 1]
-      if (!edit || !apply(edit, 'before')) return
-      set(st => ({ undo: st.undo.slice(0, -1), redo: [...st.redo, edit] }))
+      if (!edit) return
+      const result = apply(edit, 'before')
+      if (result === 'off') return
+      set(st => ({ undo: st.undo.slice(0, -1), redo: result === 'ok' ? [...st.redo, edit] : st.redo }))
+      if (result === 'gone') dropped()
     },
     redoLast: () => {
       const { redo } = get(), edit = redo[redo.length - 1]
-      if (!edit || !apply(edit, 'after')) return
-      set(st => ({ redo: st.redo.slice(0, -1), undo: [...st.undo, edit] }))
+      if (!edit) return
+      const result = apply(edit, 'after')
+      if (result === 'off') return
+      set(st => ({ redo: st.redo.slice(0, -1), undo: result === 'ok' ? [...st.undo, edit] : st.undo }))
+      if (result === 'gone') dropped()
     },
   }
 })

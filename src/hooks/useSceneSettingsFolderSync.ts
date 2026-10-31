@@ -34,9 +34,13 @@ export function useSceneSettingsFolderSync(root: FileSystemDirectoryHandle | nul
         try { localText = localStorage.getItem(SCENE_UI_STORAGE_KEY) } catch { /* storage may be unavailable */ }
         const resolved = resolveSceneUi(folderText, localText)
         if (resolved.source === 'folder') { useSceneSettings.getState().replace(resolved.settings); lastWritten = current() }
-        else if (resolved.folderMalformed !== undefined && folderText !== null) {
-          const keptAs = await keepSceneUiSettingsCopy(root, folderText)
-          noticeRef.current({ kind: 'unreadable', error: resolved.folderMalformed, keptAs })
+        else {
+          // Per-firing editing is the project's own (confirmed there): another project's choice never carries over.
+          if (useSceneSettings.getState().editFirings) useSceneSettings.getState().update({ editFirings: false })
+          if (resolved.folderMalformed !== undefined && folderText !== null) {
+            const keptAs = await keepSceneUiSettingsCopy(root, folderText)
+            noticeRef.current({ kind: 'unreadable', error: resolved.folderMalformed, keptAs })
+          }
         }
         if (cancelled) return
         ready = true

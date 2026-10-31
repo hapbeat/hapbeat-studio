@@ -268,7 +268,9 @@ export const useSceneStore = create<SceneState>((set, get) => {
   let firingRoot: FileSystemDirectoryHandle | null = null
   let firingTimer: ReturnType<typeof setTimeout> | null = null
   let firingSaving: Promise<void> | null = null
-  const scheduleFiringSave = () => { if (firingTimer) clearTimeout(firingTimer); firingTimer = setTimeout(() => { firingTimer = null; void saveFiringsNow() }, 300) }
+  /** After a failed write the next try waits longer (2 s, doubling up to 30 s); a write that works resets it. */
+  let firingRetryMs = 0
+  const scheduleFiringSave = (ms = 300) => { if (firingTimer) clearTimeout(firingTimer); firingTimer = setTimeout(() => { firingTimer = null; void saveFiringsNow() }, ms) }
   const saveFiringsNow = async (): Promise<void> => {
     if (firingSaving) { await firingSaving; if (firingPending.size) return saveFiringsNow(); return }
     const root = firingRoot, changes = [...firingPending.values()]
@@ -284,16 +286,24 @@ export const useSceneStore = create<SceneState>((set, get) => {
           return
         }
         await writeProjectFile(root, VIEWER_DATA, result.text)
+        firingRetryMs = 0
         addLog(`firing gains (${changes.length}) → ${VIEWER_DATA}`)
       } catch (error) {
-        // Kept for the next write (a newer change of the same firing wins).
+        // Kept and tried again later (a newer change of the same firing wins).
         for (const c of changes) if (!firingPending.has(c.index)) firingPending.set(c.index, c)
+        firingRetryMs = Math.min(30000, firingRetryMs ? firingRetryMs * 2 : 2000)
+        if (!firingTimer) scheduleFiringSave(firingRetryMs)
         note({ id: 'scene.firings.saveFailed', params: { error: message(error) }, error: true }); addLog(message(error))
       }
     })()
     try { await firingSaving } finally { firingSaving = null }
   }
-  const flushFirings = () => { if (firingTimer) { clearTimeout(firingTimer); firingTimer = null; void saveFiringsNow() } }
+  /** Writes whatever is pending now (after a write in flight, which it waits for). */
+  const flushFirings = async () => {
+    if (firingTimer) { clearTimeout(firingTimer); firingTimer = null }
+    if (firingSaving) await firingSaving
+    if (firingPending.size) await saveFiringsNow()
+  }
 
   /** Reads the file again when it changed outside Studio and nothing is unsaved (every 2 s and on focus). */
   const checkOutside = async () => {
@@ -312,7 +322,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
     const timer = setInterval(() => void checkOutside(), 2000)
     const onFocus = () => void checkOutside()
     // Leaving the page starts writing what is pending; the write may not finish, so the journal (written at every edit) is what keeps it.
-    const onHide = () => { if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; void saveNow() } flushFirings() }
+    const onHide = () => { if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; void saveNow() } void flushFirings() }
     window.addEventListener('focus', onFocus); window.addEventListener('pagehide', onHide); window.addEventListener('beforeunload', onHide)
     perfTrack('intervals', 1)
     w.__sceneWatch = () => { clearInterval(timer); window.removeEventListener('focus', onFocus); window.removeEventListener('pagehide', onHide); window.removeEventListener('beforeunload', onHide); perfTrack('intervals', -1) }
@@ -321,7 +331,8 @@ export const useSceneStore = create<SceneState>((set, get) => {
   /** Opens a project folder; a folder with a lib is remembered even when the recording is missing (one click after recording). */
   const openFolder = async (handle: FileSystemDirectoryHandle): Promise<boolean> => {
     restoredNotice = null
-    flushFirings()
+    // The open project's firing gains are written before another project's files are read.
+    await flushFirings()
     const opened = await openSceneProject(handle)
     if (!opened.ok && opened.reason === 'noLib') {
       const notice = opened.oldFormat ? oldFormatNotice(handle.name) : { id: 'scene.open.noLib' as const, params: { folder: handle.name, dir: VIEWER_DIR }, error: true }

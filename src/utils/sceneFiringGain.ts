@@ -28,9 +28,10 @@ export function firingGains(table: CueTable, events: readonly SceneEvent[], ev: 
   return { sound, haptics: e.haptics.length ? Math.max(0, ...routes) : null }
 }
 
-/** Gains of every firing of the recording, keyed by firingKey (replay time). */
+/** Gains of every firing of the recording, keyed by occurrenceKeys (name, replay time and which one at that time). */
 export function recordingFiringGains(table: CueTable, events: readonly SceneEvent[]): Map<string, FiringGains> {
-  return new Map(events.map(ev => [firingKey(ev.name, ev.t), firingGains(table, events, ev)]))
+  const keys = occurrenceKeys(events)
+  return new Map(events.map((ev, i) => [keys[i], firingGains(table, events, ev)]))
 }
 /**
  * A haptic one-shot firing's strength in its groups (DEC-102 r3; never mixed): `material` = the loudest route's clip
@@ -55,13 +56,23 @@ export function firingStrength(table: CueTable, events: readonly SceneEvent[], e
   }
   return best
 }
-/** Strength of every firing of the recording, keyed by firingKey (replay time). */
+/** Strength of every firing of the recording, keyed by occurrenceKeys. */
 export function recordingFiringStrength(table: CueTable, events: readonly SceneEvent[]): Map<string, FiringStrength | null> {
-  return new Map(events.map(ev => [firingKey(ev.name, ev.t), firingStrength(table, events, ev)]))
+  const keys = occurrenceKeys(events)
+  return new Map(events.map((ev, i) => [keys[i], firingStrength(table, events, ev)]))
 }
 
 /** A firing's key: its name and replay time (ms). */
 export const firingKey = (name: string, replaySec: number) => `${name}@${Math.round(replaySec * 1000)}`
+/**
+ * One key per firing of `events`, in order: firingKey of its name (`nameOf`) and time, then `#n` for the n-th further
+ * firing with the same key (two firings of one cue in the same frame, e.g. both hands, scene-recording §2). Firings with
+ * one name and time sit at one time, so a list cut by time (a moment's stretch) gives each the same key as the whole.
+ */
+export function occurrenceKeys<E extends { name: string; t: number }>(events: readonly E[], nameOf: (ev: E) => string = ev => ev.name): string[] {
+  const seen = new Map<string, number>()
+  return events.map(ev => { const key = firingKey(nameOf(ev), ev.t), n = seen.get(key) ?? 0; seen.set(key, n + 1); return n ? `${key}#${n}` : key })
+}
 
 /** Shortest bar drawn for a gain above 0 (CSS px). */
 export const MIN_BAR_PX = 3

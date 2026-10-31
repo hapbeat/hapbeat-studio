@@ -107,6 +107,7 @@ export class SceneRuntime {
       if (now.videoVolume !== before.videoVolume) this.applyVideoSound()
       if (now.allDevices !== before.allDevices || now.overallGain !== before.overallGain) this.rebuildLoops()
     }))
+    this.unsubscribes.push(useSceneStrength.subscribe((now, before) => { if (now.muted !== before.muted || now.soloed !== before.soloed) this.rebuildLoops() }))
     this.rebuildLoops()
     if (useSceneStore.getState().items.length) this.loadItem()
   }
@@ -363,9 +364,12 @@ export class SceneRuntime {
     this.kitFire.flush(this.helper.connected)
   }
   private rebuildLoops() {
-    const s = useSceneStore.getState(), pb = useScenePlayback.getState()
-    // This PC's overall multiplier on the loops too (the CLIP mix and FIRE's loopTick read these voices).
-    this.mixer.loopVoices = s.table && s.lib ? buildLoopVoices(s.table, s.lib, pb.allDevices).map(v => ({ ...v, gain: v.gain * pb.overallGain })) : []
+    const s = useSceneStore.getState(), pb = useScenePlayback.getState(), st = useSceneStrength.getState(), lib = s.lib
+    // This PC's overall multiplier on the loops too (the CLIP mix and FIRE's loopTick read these voices), and the
+    // strength panel's M / S: a muted loop cue, or any solo of another event, leaves its voices out (FIRE stops them).
+    this.mixer.loopVoices = s.table && lib ? buildLoopVoices(s.table, lib, pb.allDevices)
+      .filter(v => hapticAllowed(lib.layers[v.layer]?.cue ?? '', st.muted, st.soloed))
+      .map(v => ({ ...v, gain: v.gain * pb.overallGain })) : []
     this.loopSounds = s.table && s.lib ? buildLoopSounds(s.table, s.lib) : []
   }
 

@@ -61,8 +61,11 @@ class Scanner {
   }
 }
 
-/** A gain as written: 3 decimals, no trailing zeros. */
-export const formatGain = (gain: number) => String(Math.round(gain * 1000) / 1000)
+/**
+ * A gain as written: its shortest exact form (no rounding here — Studio rounds only the gains it makes, so an undo
+ * writes the recorded value back exactly).
+ */
+export const formatGain = (gain: number) => String(gain)
 
 export function rewriteViewerDataGains(text: string, changes: readonly FiringGainChange[]): ViewerDataRewrite {
   const sc = new Scanner(text)
@@ -80,8 +83,9 @@ export function rewriteViewerDataGains(text: string, changes: readonly FiringGai
       const t = value('t')
       if (value('name') !== change.name || typeof t !== 'number' || Math.abs(t - change.t) > 1e-6) return { ok: false, reason: 'mismatch', index: change.index }
       const gain = members.find(m => m.key === 'gain'), written = formatGain(change.gain)
-      if (gain) { if (text.slice(gain.valueStart, gain.valueEnd) !== written) edits.push({ at: gain.valueStart, end: gain.valueEnd, text: written }) }
-      else if (formatGain(change.gain) !== '1') {
+      // The same number in another form (`1.0`) is left as written.
+      if (gain) { if (JSON.parse(text.slice(gain.valueStart, gain.valueEnd)) !== change.gain) edits.push({ at: gain.valueStart, end: gain.valueEnd, text: written }) }
+      else if (change.gain !== 1) {
         // After the last member, in its style: its lead (newline + indent) and its key-to-value separator.
         const last = members[members.length - 1]
         if (!last) return { ok: false, reason: 'mismatch', index: change.index }

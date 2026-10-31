@@ -5,7 +5,7 @@ import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { clampOverallGain, OVERALL_GAIN_MAX, useScenePlayback } from '@/stores/scenePlayback'
 import { routesOf, useSceneStrength } from '@/stores/sceneStrength'
-import { firingKey, recordingFiringStrength, type FiringStrength } from '@/utils/sceneFiringGain'
+import { occurrenceKeys, recordingFiringStrength, type FiringStrength } from '@/utils/sceneFiringGain'
 import { faderValue, gainsAtFader, median, ratioDb, recordedIndexMap, recordedName, RELATIVE_RANGE, ROUTE_GAIN_MAX, setRouteGains, strengthStep } from '@/utils/sceneStrength'
 import { parseEventKey } from '@/utils/cueEvents'
 import { isTypingTarget } from '@/utils/playbackShortcut'
@@ -48,11 +48,12 @@ export function SceneStrengthPanel() {
   const byIndex = useMemo(() => {
     const out = new Map<number, Firing & { t: number }>()
     if (!data || !recorded) return out
-    const indexOf = recordedIndexMap(recorded.full.events)
-    for (const ev of data.full.events) {
-      const strength = strengths.get(firingKey(ev.name, ev.t)), i = indexOf.get(firingKey(recordedName(ev), ev.t))
+    const indexOf = recordedIndexMap(recorded.full.events), events = data.full.events
+    const shownKeys = occurrenceKeys(events), recordedKeys = occurrenceKeys(events, recordedName)
+    events.forEach((ev, k) => {
+      const strength = strengths.get(shownKeys[k]), i = indexOf.get(recordedKeys[k])
       if (strength && i !== undefined) out.set(i, { name: ev.name, strength, t: ev.t })
-    }
+    })
     return out
   }, [data, recorded, strengths])
   // The haptic events of the scope (the chapter playing, else the recording) with their firings.

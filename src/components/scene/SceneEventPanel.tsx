@@ -18,16 +18,16 @@ import { HapticIcon, SoundIcon } from '@/components/common/KindIcon'
 import { CuePicker, NumberField, useAtLabel } from './SceneCuePanels'
 import { useScene } from './sceneContext'
 import { LevelMaps } from './SceneLevelMap'
-import { jitterDbToPct, jitterPctToDb } from '@/utils/sceneStrength'
+import { JITTER_PCT_MAX, jitterDbToPct, jitterPctToDb, jitterRange } from '@/utils/sceneStrength'
 
 type Edit = (change: (tb: CueTable) => CueTable | null) => boolean
 
 /**
- * The jitters per firing; `gainJitterDb` is stored in dB (contract unchanged) but entered and shown as ±% (`pct`,
- * 0..100 %, jitterDbToPct / jitterPctToDb).
+ * The jitters per firing; `gainJitterDb` is stored in dB (contract unchanged, 0..12) but entered as % (`pct`,
+ * 0..≈298 %, jitterDbToPct / jitterPctToDb) with the multiplier range it gives shown next to it.
  */
 const VARIATION_FIELDS: { key: VariationNumberKey; max: number; step: number; loopOk: boolean; pct?: boolean }[] = [
-  { key: 'gainJitterDb', max: 100, step: 1, loopOk: true, pct: true },
+  { key: 'gainJitterDb', max: JITTER_PCT_MAX, step: 1, loopOk: true, pct: true },
   { key: 'pitchJitterSt', max: 12, step: 0.5, loopOk: false },
   { key: 'rateJitterPct', max: 50, step: 1, loopOk: false },
 ]
@@ -351,7 +351,7 @@ function Variation({ e, loop, edit }: { e: EffectiveEvent; loop: boolean; edit: 
   if (!own) {
     const pick = t(v.pick ? `events.variation.pick.${v.pick}` as MessageId : 'events.variation.pick.default')
     const jitters = VARIATION_FIELDS.filter(f => (!loop || f.loopOk) && typeof v[f.key] === 'number' && (v[f.key] as number) > 0)
-      .map(f => `${t(`events.variation.${f.key}` as MessageId)} ${f.pct ? Math.round(jitterDbToPct(v[f.key] as number)) : v[f.key]}`)
+      .map(f => `${t(`events.variation.${f.key}` as MessageId)} ${f.pct ? jitterText(v[f.key] as number) : v[f.key]}`)
     return <div className="scene-row">
       <span className="scene-dim scene-grow">{t('scene.variation.sameAs', { cue: e.ref.cue, summary: [pick, ...jitters, ...(v.paired ? [t('scene.event.paired')] : [])].join('・') })}</span>
       <button type="button" className="scene-icon-btn" onClick={() => edit(tb => setOverride(tb, e.ref, 'variation', true))}>{t('scene.variation.override')}</button>
@@ -370,11 +370,15 @@ function Variation({ e, loop, edit }: { e: EffectiveEvent; loop: boolean; edit: 
         const stored = typeof v[f.key] === 'number' ? v[f.key] as number : 0
         return <label key={f.key} title={t(`events.variation.${f.key}.hint` as MessageId)}><span>{t(`events.variation.${f.key}` as MessageId)}</span>
           <NumberField value={f.pct ? Math.round(jitterDbToPct(stored) * 10) / 10 : stored} min={0} max={f.max} step={f.step} disabled={!own} label={t(`events.variation.${f.key}` as MessageId)}
-            onCommit={x => { const y = Math.min(f.max, x); set({ [f.key]: y > 0 ? (f.pct ? Math.round(jitterPctToDb(y) * 1000) / 1000 : y) : undefined }) }} /></label>
+            onCommit={x => { const y = Math.min(f.max, x); set({ [f.key]: y > 0 ? (f.pct ? Math.round(jitterPctToDb(y) * 1000) / 1000 : y) : undefined }) }} />
+          {f.pct && <span className="scene-dim scene-jitter-range">{stored > 0 ? jitterText(stored) : ''}</span>}</label>
       })}
     </details>
   </div>
 }
+
+/** A gain jitter as the multipliers it gives (×0.77〜×1.30). */
+const jitterText = (db: number) => { const [lo, hi] = jitterRange(db); return `×${lo.toFixed(2)}〜×${hi.toFixed(2)}` }
 
 /** "Pair sounds and haptics" (variation.paired): sound i plays with clip i of every route; the pairs, or why they do not line up. */
 function Paired({ e, edit }: { e: EffectiveEvent; edit: Edit }) {

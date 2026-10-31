@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { effectiveEvent, setDistanceFalloff, setVariantScale } from './cueEvents'
-import { firingGains, firingStrength, recordingFiringStrength, firingKey } from './sceneFiringGain'
+import { firingGains, firingStrength, recordingFiringStrength, firingKey, occurrenceKeys } from './sceneFiringGain'
 import {
-  eventRoutes, faderValue, gainsAtFader, hapticAllowed, jitterDbToPct, jitterPctToDb, median, ratioDb, recordedIndexMap, recordedName,
-  scaleFiringGain, scaleRouteGain, setRouteGains, strengthStep,
+  eventRoutes, faderValue, gainsAtFader, hapticAllowed, JITTER_PCT_MAX, jitterDbToPct, jitterPctToDb, jitterRange, median, ratioDb, recordedIndexMap, recordedName,
+  scaleFiringGain, scaleRouteGain, setFiringGain, setRouteGains, strengthStep,
 } from './sceneStrength'
 import { sampleData, sampleTable } from './sceneTestFixtures'
 import type { SceneEvent } from './sceneData'
@@ -51,11 +51,21 @@ describe('firingStrength (software / material / sent, never mixed)', () => {
 })
 
 describe('scaling a selection', () => {
-  it('firing gains: same ratio, never below 0, 3 decimals, no upper limit', () => {
+  it('firing gains: same ratio, 4 significant digits, no upper limit, kept above 0 (0 stays 0)', () => {
     expect(scaleFiringGain(0.2, 1.5)).toBe(0.3)
-    expect(scaleFiringGain(0.2, -1)).toBe(0)
     expect(scaleFiringGain(3, 2)).toBe(6)
-    expect(scaleFiringGain(0.123456, 1)).toBe(0.123)
+    expect(scaleFiringGain(0.123456, 1.001)).toBe(0.1236)
+    expect(scaleFiringGain(0.2, -1)).toBe(0.001)
+    expect(scaleFiringGain(0.2, 0)).toBe(0.001)
+    expect(scaleFiringGain(0, 4)).toBe(0)
+    expect(setFiringGain(0)).toBe(0)
+    expect(setFiringGain(0.123456)).toBe(0.1235)
+  })
+  it('a ±1 dB step always moves a small gain (no rounding stall)', () => {
+    const up = strengthStep(false)
+    let g = 0.003
+    for (let i = 0; i < 5; i++) { const next = scaleFiringGain(g, up); expect(next).toBeGreaterThan(g); g = next }
+    for (let i = 0; i < 5; i++) { const next = scaleFiringGain(g, 1 / up); expect(next).toBeLessThan(g); g = next }
   })
   it('route gains: same ratio, clamped 0..2', () => {
     expect(scaleRouteGain(0.5, 2)).toBe(1)
@@ -98,11 +108,34 @@ describe('jitter dB ↔ %', () => {
     expect(jitterPctToDb(0)).toBe(0)
     expect(jitterPctToDb(100)).toBeCloseTo(6.0206, 3)
     expect(jitterPctToDb(jitterDbToPct(2.5))).toBeCloseTo(2.5)
-    expect(jitterPctToDb(500)).toBeCloseTo(6.0206, 3)
+    // The contract's 0..12 dB: the % input goes to ≈ 298 %, anything above is 12 dB.
+    expect(JITTER_PCT_MAX).toBe(298)
+    expect(jitterPctToDb(JITTER_PCT_MAX)).toBeLessThanOrEqual(12)
+    expect(jitterPctToDb(500)).toBe(12)
+    expect(jitterPctToDb(jitterDbToPct(9))).toBeCloseTo(9)
+  })
+  it('the multipliers a jitter gives are ×1/(1+p)..×(1+p)', () => {
+    const [lo, hi] = jitterRange(jitterPctToDb(30))
+    expect(hi).toBeCloseTo(1.3)
+    expect(lo).toBeCloseTo(1 / 1.3)
   })
 })
 
 describe('recorded firings and mute / solo', () => {
+  it('two firings of one cue at one time stay two (strength and index from the same events[i])', () => {
+    const table = sampleTable()
+    const events = [ev('detent', 2, { hand: 'left', gain: 0.2 }), ev('button', 2), ev('detent', 2, { hand: 'right', gain: 0.8 })]
+    const keys = occurrenceKeys(events)
+    expect(keys).toEqual([firingKey('detent', 2), firingKey('button', 2), `${firingKey('detent', 2)}#1`])
+    const strength = recordingFiringStrength(table, events)
+    expect(strength.get(keys[0])!.firing).toBe(0.2)
+    expect(strength.get(keys[2])!.firing).toBe(0.8)
+    const index = recordedIndexMap(events)
+    expect(index.get(keys[0])).toBe(0)
+    expect(index.get(keys[2])).toBe(2)
+    // A stretch cut by time keeps the keys (firings with one key are at one time).
+    expect(occurrenceKeys([ev('grab', 1), ...events].filter(e => e.t >= 1.5))).toEqual(keys)
+  })
   it('maps a shown firing back to its recorded index (overrides keep the recorded name)', () => {
     const events = sampleData().full.events, map = recordedIndexMap(events)
     expect(map.get(firingKey('grab', 3.1))).toBe(2)

@@ -16,7 +16,7 @@ import type { CueTable } from '@/utils/sceneCueTable'
 import { mapLevel } from '@/utils/levelMap'
 import { laneY, layerLanes, layerScaleMax, outputCurves, outputScaleMax, sideLevel, type Lane, type OutputCurve } from '@/utils/sceneTimelineLevels'
 import { spanWindow, stepView, timelineClick, type TimelineView } from '@/utils/sceneTimelineView'
-import { firingBar, firingKey, recordingFiringGains, recordingFiringStrength, type FiringGains, type FiringStrength } from '@/utils/sceneFiringGain'
+import { firingBar, occurrenceKeys, recordingFiringGains, recordingFiringStrength, type FiringGains, type FiringStrength } from '@/utils/sceneFiringGain'
 import { kindColor } from '@/utils/kindColors'
 import { useSceneStrength } from '@/stores/sceneStrength'
 import { recordedIndexMap, recordedName } from '@/utils/sceneStrength'
@@ -83,8 +83,8 @@ export function SceneTimelinePanel() {
   const indices = useRef<{ events: readonly SceneEvent[] | null; map: Map<string, number> }>({ events: null, map: new Map() })
   /** The haptic lane's bar range as drawn (CSS px): top = ×1, bottom = 0. */
   const hapticLane = useRef<[number, number]>([0, 0])
-  /** A range being dragged over the haptic lane (CSS px), drawn as a box. */
-  const rubber = useRef<{ x0: number; x1: number; y0: number; y1: number } | null>(null)
+  /** A range being dragged over the haptic lane (replay seconds), drawn as a box. */
+  const rubber = useRef<{ t0: number; t1: number } | null>(null)
 
   // Drawn only while the Scene tab is shown and the page visible.
   const { active } = useScene()
@@ -161,6 +161,8 @@ export function SceneTimelinePanel() {
       if (ix.events !== recorded) { ix.events = recorded; ix.map = recorded ? recordedIndexMap(recorded) : new Map() }
       const st = useSceneStrength.getState()
       hapticLane.current = [mid + 3, base]
+      // Each shown firing's key (strength / gains) and its recorded firing's key (index), one per firing even at one time.
+      const shownKeys = occurrenceKeys(events), recordedKeys = occurrenceKeys(events, recordedName)
       // A selected loop cue: bands over its layer's active runs (the recorded firings are only the layer's starts).
       const rc = runs.current
       if (rc.levels !== L || rc.name !== (sel?.name ?? '')) { rc.levels = L; rc.name = sel?.name ?? ''; rc.runs = sel ? loopCueRuns(L, fps, lib, sel.name) : [] }
@@ -181,14 +183,15 @@ export function SceneTimelinePanel() {
       const found: Hit[] = []
       for (const [y0, y1, has, color, lane] of lanes) {
         let labelX = -1e9
-        for (const ev of events) {
+        for (let k = 0; k < events.length; k++) {
+          const ev = events[k]
           if (!has(ev.name)) continue
           const x = X(ev.t), picked = !!sel && sel.name === ev.name && sel.t != null && Math.abs(ev.t - sel.t) < 0.02
           if (x < -10 || x > w + 10) continue
-          const tick = isTick(ticks, ev.name) && !picked, key = firingKey(ev.name, ev.t)
+          const tick = isTick(ticks, ev.name) && !picked, key = shownKeys[k]
           // Haptics: the software multiplier (a drag on the selection shows its ratio live); sound: the gain it plays at.
           const strength = lane === 'haptics' && !tick ? gc.strength.get(key) ?? null : null
-          const index = strength ? ix.map.get(firingKey(recordedName(ev), ev.t)) ?? null : null
+          const index = strength ? ix.map.get(recordedKeys[k]) ?? null : null
           const chosen = index !== null && st.selected.has(index)
           const gain = tick ? null : lane === 'haptics' ? strength && strength.software * (chosen && st.dragRatio !== null ? st.dragRatio : 1) : gc.map.get(key)?.sound ?? null
           found.push({ x, y0, y1, name: ev.name, t: ev.t, lane, gain, strength, index })
@@ -262,9 +265,9 @@ export function SceneTimelinePanel() {
       // A range being selected over the haptic lane.
       const rb = rubber.current
       if (rb) {
-        const rx = Math.min(rb.x0, rb.x1), rw = Math.abs(rb.x1 - rb.x0)
-        ctx.fillStyle = 'rgba(124,196,255,.12)'; ctx.fillRect(rx, rb.y0, rw, rb.y1 - rb.y0)
-        ctx.strokeStyle = SELECTED; ctx.lineWidth = 1; ctx.strokeRect(rx + 0.5, rb.y0 + 0.5, rw, rb.y1 - rb.y0 - 1)
+        const rx = Math.min(X(rb.t0), X(rb.t1)), rw = Math.abs(X(rb.t1) - X(rb.t0)), ry = mid + 1
+        ctx.fillStyle = 'rgba(124,196,255,.12)'; ctx.fillRect(rx, ry, rw, base - ry)
+        ctx.strokeStyle = SELECTED; ctx.lineWidth = 1; ctx.strokeRect(rx + 0.5, ry + 0.5, rw, base - ry - 1)
       }
       // Playhead.
       ctx.fillStyle = '#fff'; ctx.fillRect(X(v.currentTime) - 0.5, 0, 1.5, h)
@@ -313,15 +316,20 @@ export function SceneTimelinePanel() {
     const st = useSceneStrength.getState(), was = st.selected.has(hit.index)
     if (event.shiftKey || event.ctrlKey || event.metaKey) { st.select([hit.index], 'toggle'); return event.shiftKey }
     if (!was) st.select([hit.index], 'replace')
-    const [laneTop, laneBottom] = hapticLane.current, h0 = (hit.gain ?? 0) * (laneBottom - laneTop)
+    const [laneTop, laneBottom] = hapticLane.current, H = laneBottom - laneTop, gain = hit.gain ?? 0
+    // Drawn height (an over-cap bar is drawn at the lane top) and that height's value.
+    const shown = Math.min(1, gain), h0 = shown * H
     const editing = useSceneSettings.getState().editFirings
     let dragging = false, ratio = 1
     track(event, (_, dy) => {
       if (!editing) return
       if (!dragging && Math.abs(dy) > DRAG_PX) dragging = true
       if (!dragging) return
-      // The pressed bar follows the pointer; a bar too short to scale from goes ×2 per 40 px.
-      ratio = h0 > 2 ? Math.max(0, (h0 - dy) / h0) : 2 ** (-dy / 40)
+      // The pressed bar's top follows the pointer (`v`: the value at the pointer, lane top = 1): below the lane top it
+      // becomes v; above it (drawn clamped) the gain scales by v. A bar too short to scale from goes ×2 per 40 px.
+      // Floored so the gains stay above 0 (scaleFiringGain keeps them ≥ 0.001) and a later ratio can raise them again.
+      const v = (h0 - dy) / H
+      ratio = h0 > 2 ? Math.max(0.001, v <= shown ? v / gain : v / shown) : 2 ** (-dy / 40)
       useSceneStrength.getState().setDragRatio(ratio)
     }, () => {
       const after = useSceneStrength.getState()
@@ -332,15 +340,26 @@ export function SceneTimelinePanel() {
   }
   /** A press on an empty part of the haptic lane: a drag selects the firings in its time range (Shift / Ctrl: adds them), a click seeks as before. */
   const pressLane = (event: React.MouseEvent<HTMLCanvasElement>, time: number) => {
-    const r = event.currentTarget.getBoundingClientRect(), x0 = event.clientX - r.left, [laneTop, laneBottom] = hapticLane.current
+    const r = event.currentTarget.getBoundingClientRect(), x0 = event.clientX - r.left
     const add = event.shiftKey || event.ctrlKey || event.metaKey
-    const xAt = (dx: number) => Math.max(0, Math.min(r.width, x0 + dx))
-    track(event, dx => { rubber.current = Math.abs(dx) > DRAG_PX ? { x0, x1: xAt(dx), y0: laneTop - 2, y1: laneBottom } : null }, dx => {
+    // The pixel → time mapping of the press, kept for the whole drag (the view may scroll while playing).
+    const start = view.current.start, zoom = view.current.zoom
+    const timeAt = (dx: number) => start + Math.max(0, Math.min(r.width, x0 + dx)) / zoom
+    track(event, dx => { rubber.current = Math.abs(dx) > DRAG_PX ? { t0: time, t1: timeAt(dx) } : null }, dx => {
       rubber.current = null
       if (Math.abs(dx) <= DRAG_PX) { runtime.seek(time); return }
-      const other = view.current.start + xAt(dx) / view.current.zoom, lo = Math.min(time, other), hi = Math.max(time, other)
-      const inRange = hits.current.flatMap(m => m.lane === 'haptics' && m.index !== null && m.t >= lo && m.t <= hi ? [m.index] : [])
-      useSceneStrength.getState().select(inRange, add ? 'add' : 'replace')
+      useSceneStrength.getState().select(firingsBetween(time, timeAt(dx)), add ? 'add' : 'replace')
+    })
+  }
+  /** Recorded indices of the haptic one-shot firings (not ticks) between two replay times, from the recording itself. */
+  const firingsBetween = (a: number, b: number): number[] => {
+    const s = useSceneStore.getState(), events = s.data?.full.events ?? [], ticks = s.lib?.ticks ?? [], lo = Math.min(a, b), hi = Math.max(a, b)
+    const strength = s.table ? recordingFiringStrength(s.table, events) : new Map<string, FiringStrength | null>()
+    const indexOf = s.recorded ? recordedIndexMap(s.recorded.full.events) : new Map<string, number>()
+    const shownKeys = occurrenceKeys(events), recordedKeys = occurrenceKeys(events, recordedName)
+    return events.flatMap((ev, k) => {
+      const i = ev.t >= lo && ev.t <= hi && !isTick(ticks, ev.name) && strength.get(shownKeys[k]) ? indexOf.get(recordedKeys[k]) : undefined
+      return i === undefined ? [] : [i]
     })
   }
   const onMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {

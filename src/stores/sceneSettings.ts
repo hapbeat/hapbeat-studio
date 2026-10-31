@@ -8,15 +8,20 @@ interface SceneSettingsState extends SceneUiSettings {
   replace: (settings: SceneUiSettings) => void
 }
 
+/**
+ * `editFirings` belongs to one project (it was confirmed there): never kept in localStorage, off until the project's
+ * own settings file turns it on (useSceneSettingsFolderSync).
+ */
 function read(): SceneUiSettings {
-  try { return parseStoredSceneUi(localStorage.getItem(SCENE_UI_STORAGE_KEY)) ?? { ...DEFAULT_SCENE_UI } } catch { return { ...DEFAULT_SCENE_UI } }
+  try { return { ...(parseStoredSceneUi(localStorage.getItem(SCENE_UI_STORAGE_KEY)) ?? DEFAULT_SCENE_UI), editFirings: false } } catch { return { ...DEFAULT_SCENE_UI } }
 }
 export function sceneUiSettings(state: SceneUiSettings): SceneUiSettings {
   const { pcSound, loop, sendHaptics, leadSec, dockLayout, editFirings } = state
   return { pcSound, loop, sendHaptics, leadSec, dockLayout, editFirings }
 }
 function store(settings: SceneUiSettings) {
-  try { localStorage.setItem(SCENE_UI_STORAGE_KEY, JSON.stringify(settings)) } catch { /* UI preferences must not prevent work. */ }
+  const { editFirings: _project, ...local } = settings
+  try { localStorage.setItem(SCENE_UI_STORAGE_KEY, JSON.stringify(local)) } catch { /* UI preferences must not prevent work. */ }
 }
 export const useSceneSettings = create<SceneSettingsState>((set, get) => ({
   ...read(), layoutRevision: 0,

@@ -1,7 +1,7 @@
 import { effectiveEvent, resolveEventName, updateOwnRoute, type EventRef } from './cueEvents'
 import { isLoopCue, type CueTable } from './sceneCueTable'
 import type { SceneEvent } from './sceneData'
-import { firingKey } from './sceneFiringGain'
+import { occurrenceKeys } from './sceneFiringGain'
 
 /**
  * The Scene tab's strength panel (DEC-102 r3), pure parts: the software multiplier is edited in two places only —
@@ -18,8 +18,14 @@ export const strengthStep = (shift: boolean) => shift ? Math.SQRT2 : 10 ** (1 / 
 /** The relative fader's range (×0.25..×4) in log2 units. */
 export const RELATIVE_RANGE = 2
 
-/** A firing's own gain × `ratio` (≥ 0, 3 decimals). */
-export const scaleFiringGain = (gain: number, ratio: number) => round3(Math.max(0, gain * ratio))
+/** A gain made by Studio (scaled or set): 4 significant digits, so a ratio ≠ 1 always moves a small gain too. */
+export const roundGain = (x: number) => x > 0 ? Number(x.toPrecision(4)) : 0
+/** The smallest firing gain a ratio leaves (a gain at 0 could never be raised by a ratio again). */
+export const MIN_FIRING_GAIN = 0.001
+/** A firing's own gain × `ratio`: ≥ MIN_FIRING_GAIN while it is above 0 (0 stays 0), 4 significant digits. */
+export const scaleFiringGain = (gain: number, ratio: number) => gain > 0 ? Math.max(MIN_FIRING_GAIN, roundGain(gain * ratio)) : 0
+/** A firing's own gain set to `gain` (≥ 0, 4 significant digits). */
+export const setFiringGain = (gain: number) => roundGain(Math.max(0, gain))
 /** A route gain × `ratio` (0..2, 3 decimals). */
 export const scaleRouteGain = (gain: number, ratio: number) => round3(Math.max(0, Math.min(ROUTE_GAIN_MAX, gain * ratio)))
 /** A ratio in dB (`+3 dB`). */
@@ -32,10 +38,16 @@ export function median(values: readonly number[]): number {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
 }
 
-/** `variation.gainJitterDb` (stored as dB, contract unchanged) shown as ±%: (10^(dB/20) − 1) · 100. */
+/** `variation.gainJitterDb`'s range in the cue table (contract: 0..12 dB). */
+export const JITTER_DB_MAX = 12
+/** `variation.gainJitterDb` (stored as dB, contract unchanged) shown as %: (10^(dB/20) − 1) · 100. */
 export const jitterDbToPct = (db: number) => (10 ** (db / 20) - 1) * 100
-/** ±% entered → dB: 20 · log10(1 + pct / 100), pct 0..100. */
-export const jitterPctToDb = (pct: number) => 20 * Math.log10(1 + Math.max(0, Math.min(100, pct)) / 100)
+/** The % input's top: 12 dB (≈ 298 %). */
+export const JITTER_PCT_MAX = Math.floor(jitterDbToPct(JITTER_DB_MAX))
+/** % entered → dB: 20 · log10(1 + pct / 100), clamped to 0..12 dB. */
+export const jitterPctToDb = (pct: number) => Math.min(JITTER_DB_MAX, 20 * Math.log10(1 + Math.max(0, pct) / 100))
+/** The multipliers a gain jitter of `db` gives: ×10^(−dB/20) .. ×10^(dB/20) (not symmetric in %: ×1/(1+p) .. ×(1+p)). */
+export const jitterRange = (db: number): [number, number] => [10 ** (-db / 20), 10 ** (db / 20)]
 
 /**
  * The routes that set event `name`'s haptic strength: who holds them (a variant sharing its cue's haptics: the cue,
@@ -62,13 +74,12 @@ export function gainsAtFader(gains: readonly number[], value: number): number[] 
 /** The name a firing has in the recording (an overridden firing keeps it in `from`, sceneOverrides). */
 export const recordedName = (ev: SceneEvent & { from?: string }) => ev.from ?? ev.name
 /**
- * Index of each recorded firing (viewer-data `events[i]`) by firingKey of its recorded name and time; the firings
- * the Scene tab shows map back through recordedName. Emitted firings (sceneEmit) are not in it: they are not recorded.
+ * Index of each recorded firing (viewer-data `events[i]`) by its occurrenceKeys key; a shown firing maps back through
+ * occurrenceKeys(shown, recordedName) (Studio keeps the recorded order of firings at one time). Emitted firings
+ * (sceneEmit) are not recorded: their keys find nothing unless a recorded firing of that cue has the same time.
  */
 export function recordedIndexMap(events: readonly SceneEvent[]): Map<string, number> {
-  const out = new Map<string, number>()
-  events.forEach((ev, i) => { const key = firingKey(ev.name, ev.t); if (!out.has(key)) out.set(key, i) })
-  return out
+  return new Map(occurrenceKeys(events).map((key, i) => [key, i]))
 }
 
 /** Whether event `name`'s haptics are sent under the session's mute / solo (any solo: only the soloed ones). */

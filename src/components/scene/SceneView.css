@@ -231,3 +231,5 @@
 .scene-strength-detail { display: flex; align-items: flex-start; gap: 10px; padding: 6px 8px; border-top: 1px solid var(--border); flex: none; }
 .scene-strength-detail-line { flex: 1 1 auto; min-width: 0; height: 2.6em; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .scene-strength-clipped { margin-left: 8px; color: #ff4d4d; }
+.scene-event-jitter label:has(.scene-jitter-range) { grid-template-columns: minmax(0, 1fr) auto auto; }
+.scene-jitter-range { display: inline-block; min-width: 92px; font-variant-numeric: tabular-nums; }

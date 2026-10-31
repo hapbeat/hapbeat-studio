@@ -107,7 +107,8 @@ export function SceneView({ active }: { active: boolean }) {
     const playback = () => { if (useSceneStore.getState().items.length) { runtime.audio(); runtime.togglePlay() } }
     const keydown = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
-      if (!e.altKey && !isTypingTarget(el)) {
+      // Not while a dialog is open (its own Esc / buttons; a strength edit under it would go unseen).
+      if (!e.altKey && !e.defaultPrevented && !isTypingTarget(el) && !document.querySelector('[aria-modal="true"]') && !(el.closest && el.closest('[role="dialog"]'))) {
         const st = useSceneStrength.getState(), k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey
         let done = false
         if (mod && k === 'z' && !e.shiftKey) { if (st.undo.length) { st.undoLast(); done = true } }

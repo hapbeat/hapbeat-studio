@@ -27,8 +27,14 @@ const FILE = [
 
 describe('rewriteViewerDataGains', () => {
   it('changes only the gain value, keeping every other byte', () => {
-    const r = rewriteViewerDataGains(FILE, [{ index: 0, name: 'bound_toss', t: 0.55, gain: 0.29400001 }])
+    const r = rewriteViewerDataGains(FILE, [{ index: 0, name: 'bound_toss', t: 0.55, gain: 0.294 }])
     expect(r).toEqual({ ok: true, text: FILE.replace('"gain": 0.588', '"gain": 0.294') })
+  })
+  it('writes the value it is given exactly (an undo restores 0.8234567, not 0.823); the same number in another form stays', () => {
+    const r = rewriteViewerDataGains(FILE, [{ index: 0, name: 'bound_toss', t: 0.55, gain: 0.8234567 }])
+    expect(r).toEqual({ ok: true, text: FILE.replace('"gain": 0.588', '"gain": 0.8234567') })
+    const one = FILE.replace('"gain": 0.588', '"gain": 1.0')
+    expect(rewriteViewerDataGains(one, [{ index: 0, name: 'bound_toss', t: 0.55, gain: 1 }])).toEqual({ ok: true, text: one })
   })
   it('inserts an absent gain after the last member in its style (indentation, line ending)', () => {
     const r = rewriteViewerDataGains(FILE, [{ index: 1, name: 'stroke_weak', t: 13, gain: 0.5 }, { index: 2, name: 'x', t: 14, gain: 2 }])
