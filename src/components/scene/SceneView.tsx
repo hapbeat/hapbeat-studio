@@ -11,6 +11,7 @@ import { useSceneStore } from '@/stores/sceneStore'
 import { useWaveformStore } from '@/stores/waveformStore'
 import { useSceneOverrides } from '@/hooks/useSceneOverrides'
 import { useSceneSettings } from '@/stores/sceneSettings'
+import { useScenePlayback } from '@/stores/scenePlayback'
 import { resolvePlaybackTargets } from '@/utils/playbackDevices'
 import { matchesAddress, RETRY_MS, tableTargets, type HapticDevice, type StreamAck, type StreamDisplaced } from '@/utils/sceneHaptics'
 import { focusEvent, isTick } from '@/utils/sceneData'
@@ -20,6 +21,7 @@ import { SceneRuntime } from './sceneRuntime'
 import { SceneContext, type SceneShared } from './sceneContext'
 import { SceneDockLayout } from './SceneDockLayout'
 import { SceneTopBar } from './SceneTopBar'
+import { useSceneKitCheck } from './SceneKitStatus'
 import '@/components/waveform/WaveformEditor.css'
 import './SceneView.css'
 
@@ -52,18 +54,21 @@ export function SceneView({ active }: { active: boolean }) {
     ? t('scene.settings.unreadable', { error: value.error, file: value.keptAs }) : t('scene.settings.writeFailed', { error: value.error })), [t])
   useSceneSettingsFolderSync(root, onSettingsNotice)
 
-  // Haptic targets: the shared Kit device selection (Devices modal), narrowed to devices whose address a table route reaches.
+  // Haptic targets: the shared Kit device selection (Devices modal), narrowed to devices whose address a table route
+  // reaches; with all devices on, every selected device (every route plays on all of them, cue-table §4.5 substitution).
   const { isConnected, devices, send, subscribe } = useHelperConnection()
   const kitSelectedIps = useDeviceStore(s => s.kitSelectedIps)
+  const allDevices = useScenePlayback(s => s.allDevices)
   const targetDevices = useMemo<HapticDevice[]>(() => {
     if (!isConnected || !table) return []
     const targets = tableTargets(table)
-    return resolvePlaybackTargets(devices, kitSelectedIps).filter(d => d.address && targets.some(tg => matchesAddress(tg, d.address)))
+    return resolvePlaybackTargets(devices, kitSelectedIps).filter(d => allDevices || (d.address && targets.some(tg => matchesAddress(tg, d.address))))
       .map(d => ({ ipAddress: d.ipAddress, address: d.address, name: d.name }))
-  }, [isConnected, table, devices, kitSelectedIps])
+  }, [isConnected, table, devices, kitSelectedIps, allDevices])
   useEffect(() => {
     runtime.setHelper({ send: (type, payload) => send({ type, payload } as Parameters<typeof send>[0]), connected: isConnected, devices: targetDevices })
   }, [runtime, send, isConnected, targetDevices])
+  const kit = useSceneKitCheck(targetDevices, isConnected)
   // This tab's stream acknowledgements go to the mixer (a rejected BEGIN re-opens the stream) and, like helper errors
   // while this tab streams, to the Project panel log.
   useEffect(() => subscribe(message => {
@@ -94,7 +99,7 @@ export function SceneView({ active }: { active: boolean }) {
 
   // Keys (viewer's): ↑↓ item, Space play (App forwards it as studio:scene-playback), ←→ frame / Shift 1 s,
   // E before the cue, W ±0.5 s loop, R restart, F back to the full replay (where the moment / span is now), S speed, L loop, , . previous / next cue, M sound, H haptics,
-  // O the selected event in the editor.
+  // O the selected event in the editor, 1–9 the project's chapters 1–9 (only with chapters: digits stay free otherwise).
   useEffect(() => {
     if (!active) return
     const playback = () => { if (useSceneStore.getState().items.length) { runtime.audio(); runtime.togglePlay() } }
@@ -123,6 +128,7 @@ export function SceneView({ active }: { active: boolean }) {
         const next = key === '.' ? ev.find(x => x.t > time + 0.05) : [...ev].reverse().find(x => x.t < time - 0.3)
         if (next) { runtime.seek(next.t - 0.5); s.selectCue(next.name, next.t); if (runtime.part) runtime.setPart(true) }
       }
+      else if (/^[1-9]$/.test(key) && Number(key) <= (s.data?.chapters.length ?? 0)) runtime.playChapter(Number(key) - 1)
       else return
       e.preventDefault()
     }
@@ -132,7 +138,7 @@ export function SceneView({ active }: { active: boolean }) {
   }, [active, runtime])
   useEffect(() => useSceneSettings.subscribe((s, prev) => { if (s.loop !== prev.loop) runtime.applyLoop() }), [runtime])
 
-  const shared: SceneShared = { runtime, active, helperConnected: isConnected, devices: targetDevices, confirmDiscard }
+  const shared: SceneShared = { runtime, active, helperConnected: isConnected, devices: targetDevices, kit, confirmDiscard }
   const shownNotice = notice ? { text: t(notice.id, notice.params), error: !!notice.error } : layoutNotice ? { text: layoutNotice, error: true } : null
   return <SceneContext.Provider value={shared}>
     <div className="waveform-editor scene-view" data-dirty={dirty || undefined}

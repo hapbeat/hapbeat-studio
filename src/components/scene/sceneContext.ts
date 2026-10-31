@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react'
 import type { SceneRuntime } from './sceneRuntime'
 import type { HapticDevice } from '@/utils/sceneHaptics'
+import type { SceneKitCheck } from './SceneKitStatus'
 
 /** What every Scene dock panel reads besides the stores (panels render in dockview portals). */
 export interface SceneShared {
@@ -9,6 +10,8 @@ export interface SceneShared {
   helperConnected: boolean
   /** Selected (shared Kit selection), online playback devices with an address. */
   devices: HapticDevice[]
+  /** The FIRE output's Kit on those devices (useSceneKitCheck). */
+  kit: SceneKitCheck
   /** Asks before unsaved cue-table edits are dropped; true = go ahead. */
   confirmDiscard: () => Promise<boolean>
   /** Opens a file picker for one WAV. */

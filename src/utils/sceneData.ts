@@ -77,11 +77,17 @@ export interface SceneClip {
   end: number
   levels: number[][]
 }
+/** A stretch of the video to pick and repeat (scene-recording section 3.2.1; a sport, a demo part). Seconds of the replay. */
+export interface SceneChapter { start: number; end: number; label: string }
 export interface SceneData {
   fps: number
   clips: SceneClip[]
   /** `columns`: the names of the level columns (scene-recording section 2.1; empty without loop cues). */
   full: { file: string; levels: number[][]; columns: string[]; events: SceneEvent[] }
+  /** The valid chapters in file order (overlaps and gaps allowed); empty without any. */
+  chapters: SceneChapter[]
+  /** How many chapters of the file were left out as invalid (the open notice says so); absent when none. */
+  droppedChapters?: number
 }
 /** One entry of the moments list: the full replay first, then every moment. */
 export interface SceneItem extends SceneClip { kind: 'full' | 'clip' }
@@ -203,6 +209,7 @@ export function parseViewerData(text: string, lib: Pick<SceneLib, 'ticks' | 'mom
   if (!Array.isArray(events) || !events.every(e => isRecord(e) && isNumber(e.t) && e.t >= 0 && isString(e.name)
     && (e.hand === undefined || e.hand === 'left' || e.hand === 'right' || e.hand === 'both')
     && (e.gain === undefined || isNumber(e.gain)) && (e.dist === undefined || isNumber(e.dist)) && (e.note === undefined || isString(e.note)))) return fail('events')
+  if (v.chapters !== undefined && !Array.isArray(v.chapters)) fail('chapters')
   const lv = v.levels
   if (lv !== undefined && !(isRecord(lv) && isStrings(lv.columns) && lv.columns.length > 0 && isLevels(lv.rows, lv.columns.length))) fail('levels')
   const fps = v.fps as number, frames = v.frames as number, file = v.video as string
@@ -214,7 +221,18 @@ export function parseViewerData(text: string, lib: Pick<SceneLib, 'ticks' | 'mom
     ...(e.note !== undefined ? { note: e.note as string } : {}),
   }))
   const clips = deriveMoments(full, lib, frames / fps).map(m => ({ ...m, file, event: m.at, levels }))
-  return { fps, clips, full: { file, levels, columns, events: full } }
+  const raw = (v.chapters ?? []) as unknown[], chapters = parseChapters(raw, frames / fps)
+  return { fps, clips, full: { file, levels, columns, events: full }, chapters, ...(chapters.length < raw.length ? { droppedChapters: raw.length - chapters.length } : {}) }
+}
+
+/**
+ * The valid `chapters` (scene-recording section 3.2.1) in file order: start >= 0, start < end <= the video's `duration`
+ * (+ half a 30 fps frame of rounding), a non-empty label. An invalid one is left out rather than failing the recording:
+ * chapters only help to pick a stretch.
+ */
+export function parseChapters(raw: readonly unknown[], duration: number): SceneChapter[] {
+  return raw.flatMap(c => isRecord(c) && isNumber(c.start) && isNumber(c.end) && isString(c.label) && c.label.trim()
+    && c.start >= 0 && c.end > c.start && c.end <= duration + 0.05 ? [{ start: c.start, end: c.end, label: c.label }] : [])
 }
 
 const cueOf = (name: string) => name.split(':')[0]
@@ -275,6 +293,9 @@ export function buildItems(data: SceneData): SceneItem[] {
     ...data.clips.map(c => ({ kind: 'clip' as const, ...c })),
   ]
 }
+
+/** Replay seconds as m:ss (a chapter's range). */
+export const clockText = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`
 
 /** Where a moment's play range ends (the full replay: its own end). Video time is replay time for every item. */
 export const clipEnd = (item: SceneItem) => item.kind === 'full' ? Infinity : item.end

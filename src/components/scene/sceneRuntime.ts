@@ -1,5 +1,6 @@
 import { useSceneStore, sceneVideoUrl } from '@/stores/sceneStore'
 import { usePcTiming } from '@/stores/pcTiming'
+import { effectiveOutput, useScenePlayback, type SceneOutput } from '@/stores/scenePlayback'
 import { perfTrack } from '@/utils/perfRegistry'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { clipEnd, focusEvent, itemEvents, levelAt, momentStart, type SceneItem, type VisibleEvent } from '@/utils/sceneData'
@@ -7,7 +8,8 @@ import { isLoopCue, routeClips, sfxSounds, type CueRoute, type CueSfx, soundInte
 import { effectiveEvent, fireShot, MaterialPicker, resolveEventName } from '@/utils/cueEvents'
 import { runPosition } from '@/utils/sceneSegments'
 import { buildLoopSounds, LoopSoundPlayer, loopSoundLevel, type LoopSound } from '@/utils/sceneLoopSounds'
-import { buildLoopVoices, shotVoices, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, SceneHapticMixer, targetsOf, type HapticDevice, type HelperSend, type StreamAck, type StreamDisplaced } from '@/utils/sceneHaptics'
+import { buildLoopVoices, shotVoices, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, routeTargets, SceneHapticMixer, type HapticDevice, type HelperSend, type StreamAck, type StreamDisplaced } from '@/utils/sceneHaptics'
+import { SceneKitFire } from '@/utils/sceneKitFire'
 import { isStreamOpen } from '@/utils/openStreams'
 
 export const SPEEDS = [1, 0.5, 0.25]
@@ -16,8 +18,9 @@ export const SPEEDS = [1, 0.5, 0.25]
  * The Scene tab's playback engine (one per tab, outlives dock panels): the
  * video element (moved into whichever panel shows it), cue sounds via Web Audio
  * scheduled against the video clock, loop-cue sounds following the recorded
- * layer levels (like the haptic loop layers), and the per-device haptic streams through
- * hapbeat-helper. A 10 ms tick fires the cues the video is about to reach.
+ * layer levels (like the haptic loop layers), the video's own soundtrack (with the PC sound), and the haptics through
+ * hapbeat-helper: per-device PCM streams (CLIP output) or PLAY of the installed Kit's events (FIRE output,
+ * scenePlayback; CLIP until the Kit is known to be on every device, effectiveOutput). A 10 ms tick fires the cues the video is about to reach.
  * Every item plays the full replay video (video time = replay time); a moment is its stretch of it, played from
  * the lead-in before its mark (momentStart) to its end, where it stops (or, looped, goes back to that start).
  * Ported from the standalone viewer's tick() / fire() / pumpHaptics().
@@ -36,6 +39,7 @@ export class SceneRuntime {
   private actx: AudioContext | null = null
   private scheduledSfx: { src: AudioBufferSourceNode; at: number }[] = []
   private mixer: SceneHapticMixer
+  private kitFire: SceneKitFire
   /** Loop cues' sounds, looped at the recorded layer level. */
   private loopSounds: LoopSound[] = []
   private loopPlayer = new LoopSoundPlayer()
@@ -43,6 +47,8 @@ export class SceneRuntime {
   private cursor: number | null = null
   private lastVt = 0
   private lastItem = -1
+  /** The output the cursor fired its lookahead through (effectiveOutput). */
+  private lastOutput: SceneOutput = 'clip'
   /** Time to start from once the item's video is ready (playMoment / playFull while another item was shown). */
   private pendingStart: number | null = null
   /** Whether the pending start also plays (a moment / span / ▶ does; 「全編に戻って続ける」 keeps a paused video paused). */
@@ -57,7 +63,7 @@ export class SceneRuntime {
    */
   fullTime = 0
   private timer: ReturnType<typeof setInterval> | null = null
-  private unsubscribe: (() => void) | null = null
+  private unsubscribes: (() => void)[] = []
   /** Multi-material picks (v2 `clips` / `sounds`), per event. */
   private picker = new MaterialPicker()
   /** Called for every firing with its video time, event and what it plays (the overlay's "bite: bite_t51_a"). */
@@ -69,6 +75,11 @@ export class SceneRuntime {
     this.video.muted = true; this.video.playsInline = true; this.video.preload = 'auto'
     this.video.className = 'scene-video'
     this.mixer = new SceneHapticMixer((type, payload) => this.helper.send(type, payload), text => useSceneStore.getState().addLog(text), isStreamOpen)
+    this.kitFire = new SceneKitFire({
+      send: (type, payload) => this.helper.send(type, payload), now: () => performance.now(),
+      setTimer: (fn, ms) => setTimeout(fn, ms), clearTimer: handle => clearTimeout(handle as ReturnType<typeof setTimeout>),
+      log: text => useSceneStore.getState().addLog(text),
+    })
   }
 
   start() {
@@ -76,7 +87,7 @@ export class SceneRuntime {
     this.timer = setInterval(() => this.tick(), 10)
     perfTrack('intervals', 1)
     let prev = useSceneStore.getState()
-    this.unsubscribe = useSceneStore.subscribe(state => {
+    this.unsubscribes.push(useSceneStore.subscribe(state => {
       // A new moment, another file, or a newly opened recording (a re-opened project revokes the old video URLs, even for
       // the same file names); not a mere rename of the items (firing overrides), which keeps the video playing.
       if (state.root !== prev.root || state.recorded !== prev.recorded) this.fullTime = 0
@@ -84,16 +95,25 @@ export class SceneRuntime {
         || (state.items !== prev.items && !state.items.length)) this.loadItem()
       if (state.table !== prev.table || state.lib !== prev.lib) this.rebuildLoops()
       prev = state
-    })
+    }))
+    // The video's soundtrack follows the PC sound (M, the toggles) at this PC's video volume (a recording has none).
+    this.applyVideoSound()
+    this.unsubscribes.push(useSceneSettings.subscribe((now, before) => { if (now.pcSound !== before.pcSound) this.applyVideoSound() }))
+    this.unsubscribes.push(useScenePlayback.subscribe((now, before) => {
+      if (now.videoVolume !== before.videoVolume) this.applyVideoSound()
+      if (now.allDevices !== before.allDevices) this.rebuildLoops()
+    }))
     this.rebuildLoops()
     if (useSceneStore.getState().items.length) this.loadItem()
   }
   stop() {
     if (this.timer) { clearInterval(this.timer); perfTrack('intervals', -1) }
     this.timer = null
-    this.unsubscribe?.(); this.unsubscribe = null
+    for (const off of this.unsubscribes) off()
+    this.unsubscribes = []
     this.video.pause()
     this.flush()
+    this.kitFire.stopAll(this.helper.connected, this.helper.devices)
     this.mixer.endSessions()
   }
   dispose() { this.stop(); if (this.actx) { void this.actx.close(); perfTrack('audioContexts', -1) } this.actx = null }
@@ -147,14 +167,20 @@ export class SceneRuntime {
     const it = this.item()
     this.seek(it?.kind === 'clip' ? momentStart(it, useSceneSettings.getState().leadSec) : this.fullTime)
   }
-  /** The video element loops by itself only in the full replay (a moment's stretch and W's part loop in tick()). */
-  private loopOn() { return useSceneSettings.getState().loop && !this.part && this.item()?.kind !== 'clip' }
-  /** The stretch the shown item plays (W's part, else a moment's: from its lead-in to its end); null = the whole replay. */
+  /** The video element loops by itself only in the full replay without a chapter (a moment's stretch, W's part and a chapter loop in tick()). */
+  private loopOn() { return useSceneSettings.getState().loop && !this.part && this.item()?.kind !== 'clip' && useSceneStore.getState().chapter === null }
+  /**
+   * The stretch the shown item plays (W's part, else a moment's: from its lead-in to its end, else the full replay's
+   * chapter); null = the whole replay.
+   */
   private playRange(it: SceneItem): [number, number] | null {
     if (this.part && this.partAB) return this.partAB
-    return it.kind === 'clip' ? [momentStart(it, useSceneSettings.getState().leadSec), clipEnd(it)] : null
+    if (it.kind === 'clip') return [momentStart(it, useSceneSettings.getState().leadSec), clipEnd(it)]
+    const s = useSceneStore.getState(), c = s.chapter === null ? undefined : s.data?.chapters[s.chapter]
+    return c ? [c.start, c.end] : null
   }
   applyLoop() { this.video.loop = this.loopOn() }
+  private applyVideoSound() { this.video.muted = !useSceneSettings.getState().pcSound; this.video.volume = useScenePlayback.getState().videoVolume }
 
   /** ▶ at (or past) the end of the play range starts it again. */
   togglePlay() {
@@ -163,7 +189,12 @@ export class SceneRuntime {
     if (range && this.video.currentTime >= range[1] - 0.01) this.seek(range[0])
     void this.video.play().catch(() => {})
   }
-  seek(t: number) { this.video.currentTime = Math.max(0, Math.min(t, (this.video.duration || 0) - 0.001)) }
+  /** A seek out of the chapter playing (the overlay bar, the timeline, the keys) leaves the chapter: the full replay plays on from there. */
+  seek(t: number) {
+    const s = useSceneStore.getState(), c = s.chapter === null ? undefined : s.data?.chapters[s.chapter]
+    if (c && (t < c.start || t >= c.end)) { this.endChapter(); this.applyLoop() }
+    this.video.currentTime = Math.max(0, Math.min(t, (this.video.duration || 0) - 0.001))
+  }
   step(frames: number) {
     const fps = useSceneStore.getState().data?.fps ?? 30
     this.video.pause()
@@ -172,7 +203,7 @@ export class SceneRuntime {
   cycleSpeed() { this.speedIndex = (this.speedIndex + 1) % SPEEDS.length; this.video.playbackRate = SPEEDS[this.speedIndex] }
   /** W: loop ±0.5 s around the focused cue; `play` false only cues it (a moment just loaded). */
   setPart(on: boolean, play = true) {
-    this.endSpan()
+    this.endSpan(); this.endChapter()
     this.part = on
     this.partAB = null
     const it = this.item()
@@ -190,7 +221,9 @@ export class SceneRuntime {
     const s = useSceneStore.getState(), it = s.items[index]
     if (!it) return
     const wasSpan = this.span
-    if (this.span) { this.endSpan(); this.part = false; this.partAB = null; this.applyLoop() }
+    this.endChapter()
+    if (this.span) { this.endSpan(); this.part = false; this.partAB = null }
+    this.applyLoop()
     const t = it.kind === 'clip' ? momentStart(it, leadSec) : this.fullTime
     if (s.cur === index && this.video.readyState >= 1) { if (it.kind === 'clip' || wasSpan) this.seek(t); void this.video.play().catch(() => {}); return }
     this.pendingStart = t
@@ -219,7 +252,7 @@ export class SceneRuntime {
     const lead = useSceneSettings.getState().leadSec, play = !v.paused
     const t = it.kind === 'clip' ? (this.playedHere ? v.currentTime : Math.max(0, it.at - lead))
       : this.span && this.partAB && !this.playedHere ? this.partAB[0] : v.currentTime
-    this.endSpan(); this.part = false; this.partAB = null; this.applyLoop()
+    this.endSpan(); this.endChapter(); this.part = false; this.partAB = null; this.applyLoop()
     this.fullTime = t
     this.showFull(t, play)
   }
@@ -228,6 +261,7 @@ export class SceneRuntime {
    * `postSec` after its end, repeated like W's part until a moment, W or another span is chosen.
    */
   playSpan(run: [number, number], leadSec: number, postSec: number) {
+    this.endChapter()
     this.playedHere = false
     this.span = true
     this.part = true
@@ -236,6 +270,20 @@ export class SceneRuntime {
     this.applyLoop()
     this.playFull(this.partAB[0])
   }
+  /**
+   * Plays chapter `index` (data.chapters, scene-recording section 3.2.1) in the full replay from its start; its range
+   * then plays like a moment's (back to its start with the loop setting on, else it stops at its end). Ends a span or
+   * W's part; another item, a moment, W, a span or F ends the chapter.
+   */
+  playChapter(index: number) {
+    const c = useSceneStore.getState().data?.chapters[index]
+    if (!c) return
+    this.endSpan(); this.part = false; this.partAB = null
+    this.showFull(c.start, true) // selecting the full replay clears the chapter (sceneStore.select): set it after
+    useSceneStore.getState().setChapter(index)
+    this.applyLoop()
+  }
+  private endChapter() { if (useSceneStore.getState().chapter !== null) useSceneStore.getState().setChapter(null) }
   private endSpan() {
     if (!this.span) return
     this.span = false
@@ -245,14 +293,20 @@ export class SceneRuntime {
 
   /** Plays one cue sound now (▶ in the Sound panel; its first sound), regardless of the PC sound setting. */
   testSound(sfx: CueSfx) { const sound = sfxSounds(sfx)[0]; if (sound) this.playSfx(sound, sfx.volume, 0, true) }
-  /** Sends one route (its first clip) to its devices now (▶ in the Haptics panel). Returns how many devices it reaches. */
+  /**
+   * Sends one route (its first clip) to its devices now (▶ in the Haptics panel), by the output (CLIP: 1 s of a loop
+   * clip into the stream; FIRE: its Kit event, a loop stopped after 1 s). Returns how many devices it reaches.
+   */
   testRoute(r: CueRoute): number {
-    const s = useSceneStore.getState(), name = routeClips(r)[0], clip = name === undefined ? undefined : s.table?.clips[name]
-    let p = name === undefined ? undefined : s.pcm[name]
-    if (!clip || !p) return 0
+    const s = useSceneStore.getState(), pb = useScenePlayback.getState(), name = routeClips(r)[0], clip = name === undefined ? undefined : s.table?.clips[name]
+    if (!clip || name === undefined || !s.table) return 0
+    if (effectiveOutput(pb) === 'fire') return this.kitFire.test({ table: s.table, clip: name, at: r.at, gain: r.gain, devices: this.helper.devices, all: pb.allDevices })
+    let p = s.pcm[name]
+    if (!p) return 0
     if (clip.loop) { const q = new Float32Array(RATE); for (let i = 0; i < RATE; i++) q[i] = p[i % p.length]; p = q }
-    this.mixer.voices.push({ pcm: p, targets: targetsOf(r.at), gain: clip.intensity * r.gain, start: performance.now() + LEAD_MS })
-    return this.helper.devices.filter(d => targetsOf(r.at).some(tg => matchesAddress(tg, d.address))).length
+    const targets = routeTargets(r.at, undefined, pb.allDevices)
+    this.mixer.voices.push({ pcm: p, targets, gain: clip.intensity * r.gain, start: performance.now() + LEAD_MS })
+    return this.helper.devices.filter(d => targets.some(tg => matchesAddress(tg, d.address))).length
   }
 
   private playSfx(sound: string, volume: number, delay: number, force: boolean, rate = 1) {
@@ -286,23 +340,33 @@ export class SceneRuntime {
       if (materials.length) for (const l of this.firedListeners) l(fired)
     }
     if (!useSceneSettings.getState().sendHaptics) return
-    this.mixer.voices.push(...shotVoices(s.table, s.pcm, shot, ev.hand, ev.gain ?? 1, performance.now() + delay * 1000))
+    const pb = useScenePlayback.getState()
+    if (effectiveOutput(pb) === 'fire') {
+      if (this.helper.connected) this.kitFire.shot({ table: s.table, shot, hand: ev.hand, cueGain: ev.gain ?? 1, delayMs: delay * 1000, offsetMs: pb.fireOffsetMs, devices: this.helper.devices, all: pb.allDevices })
+      return
+    }
+    this.mixer.voices.push(...shotVoices(s.table, s.pcm, shot, ev.hand, ev.gain ?? 1, performance.now() + delay * 1000, pb.allDevices))
   }
   private flush() {
     if (this.actx) for (const x of this.scheduledSfx) if (x.at > this.actx.currentTime) try { x.src.stop() } catch { /* already ended */ }
     this.scheduledSfx.length = 0
     if (this.actx) this.loopPlayer.stopAll(this.actx)
     this.mixer.flush(performance.now())
+    this.kitFire.flush(this.helper.connected)
   }
   private rebuildLoops() {
     const s = useSceneStore.getState()
-    this.mixer.loopVoices = s.table && s.lib ? buildLoopVoices(s.table, s.lib) : []
+    this.mixer.loopVoices = s.table && s.lib ? buildLoopVoices(s.table, s.lib, useScenePlayback.getState().allDevices) : []
     this.loopSounds = s.table && s.lib ? buildLoopSounds(s.table, s.lib) : []
   }
 
   /** Fires the cues the video is about to reach (both outputs) and keeps the device streams fed. */
   private tick() {
     const s = useSceneStore.getState(), it = s.items[s.cur], now = performance.now(), v = this.video
+    const settings = useSceneSettings.getState(), pb = useScenePlayback.getState(), output = effectiveOutput(pb)
+    const fireOn = settings.sendHaptics && this.helper.connected && output === 'fire'
+    // The output switched: the old path drops the cues it had scheduled ahead, so fire the window again through the new one.
+    if (output !== this.lastOutput) { this.flush(); this.cursor = null; this.lastOutput = output }
     // The end of the play range: W's part and a looped moment go back to its start, an unlooped moment stops there.
     const range = it && this.loadedCur === s.cur ? this.playRange(it) : null
     if (range && (v.currentTime >= range[1] || v.ended)) {
@@ -319,21 +383,28 @@ export class SceneRuntime {
       const vt = v.currentTime, rate = v.playbackRate, t = vt
       if (this.cursor !== null && (vt < this.lastVt - 0.02 || vt > this.lastVt + 1)) { this.flush(); this.cursor = null } // loop / seek
       if (this.cursor === null) this.cursor = t - 0.005
-      const end = Math.min(t + LOOKAHEAD * rate, range ? range[1] : clipEnd(it))
+      // FIRE sends each PLAY at its cue's time + fireOffsetMs: a negative offset needs the cue that much earlier.
+      const lookahead = LOOKAHEAD + (output === 'fire' ? Math.max(0, -pb.fireOffsetMs) / 1000 : 0)
+      const end = Math.min(t + lookahead * rate, range ? range[1] : clipEnd(it))
       for (const ev of s.data.full.events) if (ev.t > this.cursor && ev.t <= end) this.fire(ev, Math.max(0, (ev.t - t) / rate))
       this.cursor = Math.max(this.cursor, end)
       this.lastVt = vt
       this.mixer.clock = { t, rate, wall: now }
     }
     if (this.actx) while (this.scheduledSfx.length && this.scheduledSfx[0].at < this.actx.currentTime - 5) this.scheduledSfx.shift()
-    const settings = useSceneSettings.getState(), data = s.data, lib = s.lib
+    const data = s.data, lib = s.lib
     // Loop-cue sounds at the level recorded for the replay time now (both hands' louder gain, its rate), with the PC sound on.
     if (playing && it && data && lib && settings.pcSound && this.loopSounds.length) {
       const t = v.currentTime
       this.loopPlayer.update(() => this.audio(), this.loopSounds, s.sfx, layer => loopSoundLevel(data.full.levels, data.fps, lib.layers[layer], t))
     } else if (this.actx) this.loopPlayer.stopAll(this.actx)
+    // FIRE loops at the level of the replay time the haptic plays for (+ offset = later: an earlier level now).
+    if (!fireOn) this.kitFire.stopAll(this.helper.connected, this.helper.devices)
+    else if (playing && s.table && data && lib) this.kitFire.loopTick({ table: s.table, voices: this.mixer.loopVoices, t: v.currentTime - pb.fireOffsetMs / 1000 * v.playbackRate, devices: this.helper.devices,
+      level: (t, layer, side) => levelAt(data.full.levels, data.fps, lib.layers[layer], t, side) })
+    // The stream is off in FIRE output (STOP_ALL there would end its device sessions anyway).
     this.mixer.pump(now, {
-      enabled: settings.sendHaptics && this.helper.connected, playing, devices: this.helper.devices, leadMs: -usePcTiming.getState().offsetMs, pcm: s.pcm,
+      enabled: settings.sendHaptics && this.helper.connected && output === 'clip', playing, devices: this.helper.devices, leadMs: -usePcTiming.getState().offsetMs, pcm: s.pcm,
       level: (t, layer, side) => data && lib ? levelAt(data.full.levels, data.fps, lib.layers[layer], t, side) : [0, 1],
     })
   }

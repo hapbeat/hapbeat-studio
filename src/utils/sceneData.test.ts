@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildItems, clipEnd, deriveMoments, familyColor, focusEvent, itemEvents, layersFromColumns, levelAt, momentCues, momentStart, parseViewerData, parseViewerLib, withRecordingLayers, type MomentRules, type SceneEvent } from './sceneData'
+import { buildItems, clipEnd, clockText, deriveMoments, familyColor, focusEvent, itemEvents, layersFromColumns, levelAt, momentCues, momentStart, parseViewerData, parseViewerLib, withRecordingLayers, type MomentRules, type SceneEvent } from './sceneData'
 import { AT_VALUES, parseCueTable, SceneFormatError, validateCueTable } from './sceneCueTable'
 import { sampleData, sampleLib, sampleViewerDataFile, sampleViewerLibFile } from './sceneTestFixtures'
 import { CONTRACT_CUE_TABLE, CONTRACT_SCENE_RECORDING } from './sceneContractFixtures'
@@ -36,6 +36,20 @@ describe('scene data files (scene-recording v1)', () => {
     expect(data.full.levels).toHaveLength(150)
     expect(data.full.columns).toEqual([])
     expect(data.full.events).toEqual([{ t: 1, name: 'button', hand: '' }])
+  })
+
+  it('shows a chapter range as m:ss', () => { expect(clockText(0)).toBe('0:00'); expect(clockText(75.9)).toBe('1:15') })
+
+  it('reads chapters in file order (overlaps allowed) and leaves out invalid ones, counting them', () => {
+    // The sample is 150 frames at 30 fps: 5 s.
+    const chapters = [{ start: 0, end: 2.5, label: 'Tennis' }, { start: 2, end: 5.04, label: 'Overlap' }, { start: 3, end: 3, label: 'empty range' },
+      { start: -1, end: 1, label: 'before 0' }, { start: 1, end: 2, label: ' ' }, { start: 4, end: 5.1, label: 'past the end' }, { start: 1, label: 'no end' }]
+    const data = parseViewerData(text({ ...sampleViewerDataFile(), chapters }), sampleLib())
+    expect(data.chapters).toEqual([{ start: 0, end: 2.5, label: 'Tennis' }, { start: 2, end: 5.04, label: 'Overlap' }])
+    expect(data.droppedChapters).toBe(5)
+    const plain = parseViewerData(text(sampleViewerDataFile()), sampleLib())
+    expect(plain.chapters).toEqual([]); expect(plain.droppedChapters).toBeUndefined()
+    expect(() => parseViewerData(text({ ...sampleViewerDataFile(), chapters: {} }), sampleLib())).toThrow(/chapters/)
   })
 
   it('lists the full replay first, then every moment as a stretch of the full replay', () => {

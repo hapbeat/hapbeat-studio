@@ -20,7 +20,7 @@ export function sampleLib(): SceneLib {
 export function sampleData(): SceneData {
   const levels = Array.from({ length: 150 }, (_, i) => [i / 150, 0, 1, 1])
   return {
-    fps: 30,
+    fps: 30, chapters: [],
     clips: [
       { file: 'full_replay.mp4', name: 'button', names: ['button', 'grab'], hand: 'right', at: 3.0, note: '', event: 3.0, start: 1.0, end: 5.0, levels },
     ],

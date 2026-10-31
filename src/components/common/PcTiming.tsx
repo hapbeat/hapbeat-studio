@@ -4,6 +4,7 @@ import { useI18n } from '@/i18n/I18nProvider'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { clampPcOffset, PC_OFFSET_MAX, PC_OFFSET_MIN, usePcTiming } from '@/stores/pcTiming'
+import { FIRE_OFFSET_MAX, FIRE_OFFSET_MIN, useScenePlayback } from '@/stores/scenePlayback'
 import { resolvePlaybackTargets } from '@/utils/playbackDevices'
 import { PcTimingTest } from '@/utils/pcTimingTest'
 import { NumberField } from '@/components/scene/SceneCuePanels'
@@ -24,6 +25,19 @@ export function PcOffsetField() {
     <NumberField value={offset} min={PC_OFFSET_MIN} max={PC_OFFSET_MAX} step={1} label={t('pcTiming.label')} onCommit={x => usePcTiming.getState().setOffsetMs(x)} /> ms
     <button type="button" className="toolbar-btn" onClick={() => setOpen(true)}>{t('pcTiming.adjust')}</button>
     {open && <PcTimingDialog container={anchor.current?.ownerDocument.body ?? document.body} onClose={() => setOpen(false)} />}
+  </span>
+}
+
+/**
+ * The Scene tab's own offset for the "Kit on device" path (scenePlayback.fireOffsetMs, + = the haptic later): a PLAY is
+ * one datagram with none of the stream's lead buffer, so it lands at another time than the streamed haptics the PC
+ * offset above is set for. The test pattern streams, so there is no "Adjust" here: it is set by watching a project.
+ */
+export function FireOffsetField() {
+  const { t } = useI18n()
+  const offset = useScenePlayback(s => s.fireOffsetMs)
+  return <span className="pc-offset-field" title={t('fireTiming.hint')}>{t('fireTiming.label')}
+    <NumberField value={offset} min={FIRE_OFFSET_MIN} max={FIRE_OFFSET_MAX} step={1} label={t('fireTiming.label')} onCommit={x => useScenePlayback.getState().update({ fireOffsetMs: x })} /> ms
   </span>
 }
 

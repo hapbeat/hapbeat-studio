@@ -4,7 +4,10 @@ import { useSceneStore } from '@/stores/sceneStore'
 import { matchesAddress, tableTargets } from '@/utils/sceneHaptics'
 import { useScene } from './sceneContext'
 import { useAtLabel } from './SceneCuePanels'
-import { PcOffsetField } from '@/components/common/PcTiming'
+import { FireOffsetField, PcOffsetField } from '@/components/common/PcTiming'
+import { useScenePlayback } from '@/stores/scenePlayback'
+import { SceneKitStatus } from './SceneKitStatus'
+import { SceneOutputSettings } from './SceneOutputToggles'
 
 /**
  * Applying the saved table to the game (step ③; only when the lib names a command), the cue table on disk, haptic
@@ -22,6 +25,8 @@ export function SceneProjectPanel() {
   const noTable = useSceneStore(s => s.noTable)
   const busy = useSceneStore(s => s.busy)
   const log = useSceneStore(s => s.log)
+  const fire = useScenePlayback(s => s.output) === 'fire'
+  const allDevices = useScenePlayback(s => s.allDevices)
   const logBox = useRef<HTMLPreElement>(null)
   useEffect(() => { const el = logBox.current; if (el) el.scrollTop = el.scrollHeight }, [log])
   if (lib && root && noTable) return <div className="scene-project">
@@ -53,14 +58,18 @@ export function SceneProjectPanel() {
     </div>
     <div className="scene-sec">
       <h3>{t('scene.output.heading')}</h3>
-      <div className="scene-row"><PcOffsetField /></div>
-      <div className="scene-coverage">{t('scene.output.coverage')}{' '}
+      <SceneOutputSettings />
+      <div className="scene-row"><PcOffsetField /><FireOffsetField /></div>
+      {/* With all Hapbeats on, every selected device plays every route: one count instead of the per-position ones. */}
+      <div className="scene-coverage">{t(allDevices ? 'scene.output.allCoverage' : 'scene.output.coverage')}{' '}
         {!helperConnected ? <span className="scene-dim">{t('scene.output.noHelper')}</span>
-          : targets.length ? targets.map(tg => { const n = devices.filter(d => matchesAddress(tg, d.address)).length
-            return <span key={tg} className={n ? 'scene-on' : 'scene-dim'}>{atLabel(tg.split('/').pop() ?? tg)} {t('scene.output.devices', { count: n })}</span> }) : '—'}
+          : allDevices ? <span className={devices.length ? 'scene-on' : 'scene-dim'}>{t('scene.output.devices', { count: devices.length })}</span>
+            : targets.length ? targets.map(tg => { const n = devices.filter(d => matchesAddress(tg, d.address)).length
+              return <span key={tg} className={n ? 'scene-on' : 'scene-dim'}>{atLabel(tg.split('/').pop() ?? tg)} {t('scene.output.devices', { count: n })}</span> }) : '—'}
       </div>
-      <div className="scene-dim">{t('scene.output.selectionHint')}</div>
+      <div className="scene-dim">{t(allDevices ? 'scene.output.selectionHintAll' : 'scene.output.selectionHint')}</div>
     </div>
+    {fire && <SceneKitStatus />}
     <div className="scene-sec">
       <h3>{t('scene.log')}</h3>
       <pre className="scene-log" ref={logBox}>{log.join('\n')}</pre>

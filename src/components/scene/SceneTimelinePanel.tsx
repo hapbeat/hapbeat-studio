@@ -42,6 +42,7 @@ const INPUT_DASH = [5, 3]
 export function SceneTimelinePanel() {
   const { t } = useI18n()
   const { runtime } = useScene()
+  const hasChapters = useSceneStore(s => !!s.data?.chapters.length)
   const canvas = useRef<HTMLCanvasElement>(null)
   const hits = useRef<Hit[]>([])
   const bands = useRef<Band[]>([])
@@ -288,7 +289,7 @@ export function SceneTimelinePanel() {
       <SceneOutputToggles />
     </div>
     <canvas className="scene-timeline-canvas" ref={canvas} tabIndex={0} title={t('scene.timeline.hint')} onMouseDown={onMouseDown} onMouseMove={onMouseMove} />
-    <div className="scene-help">{t('scene.keys')}</div>
+    <div className="scene-help">{t('scene.keys')}{hasChapters ? t('scene.keys.chapters') : ''}</div>
   </div>
 }
 

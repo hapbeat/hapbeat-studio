@@ -72,6 +72,9 @@ interface SceneState {
   /** The loop cue span playing in the full replay (replay seconds, without lead-in / post-roll; SceneRuntime.playSpan). */
   span: [number, number] | null
   setSpan: (span: [number, number] | null) => void
+  /** The chapter (data.chapters index) whose range plays in the full replay (SceneRuntime.playChapter); null = none. */
+  chapter: number | null
+  setChapter: (chapter: number | null) => void
   notice: SceneNotice | null
   /** Shown in the video panel while no recording is loaded. */
   empty: SceneNotice | null
@@ -196,7 +199,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
     const text = await (await readProjectFile(root, lib.paths.cues)).text()
     if (text === serializeCueTable(written) && get().table === written) clearJournal(key)
   }
-  /** The notice of the journal restored by the last openFolder (shown instead of "loaded"). */
+  /** The notice of the last openFolder to show instead of "loaded" (a restored journal, else chapters left out). */
   let restoredNotice: SceneNotice | null = null
   /** Applies a journal left by an earlier page (edits the file never got) onto the file just read, and saves it. */
   const restoreJournal = () => {
@@ -299,6 +302,11 @@ export const useSceneStore = create<SceneState>((set, get) => {
     set({ root: handle, lib: opened.lib, recorded: opened.data, overrides: [], data: opened.data, items: buildItems(opened.data), sel: null, cur: 0, empty: null, table: null, noTable: false })
     await loadTable()
     restoreJournal()
+    const dropped = opened.data.droppedChapters
+    if (dropped) {
+      addLog(`viewer-data.json: ${dropped} chapter(s) left out (start >= 0, start < end <= the video's length, a label)`)
+      if (!restoredNotice) { restoredNotice = { id: 'scene.chapters.dropped', params: { count: dropped }, error: true }; note(restoredNotice) }
+    }
     let start = 1
     try { start = Number(localStorage.getItem(clipKey(opened.lib.project_name))) || 1 } catch { /* preference only */ }
     get().select(Math.min(start, get().items.length - 1))
@@ -320,7 +328,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
   return {
     root: null, remembered: null, restored: false, busy: false,
     lib: null, data: null, recorded: null, overrides: [], items: [], table: null, noTable: false, loaded: null, clipFiles: [], soundFiles: [],
-    pending: { clips: {}, sounds: {} }, pcm: {}, sfx: {}, dirty: false, saveError: null, cur: 0, sel: null, span: null, emitSeed: newEmitSeed(),
+    pending: { clips: {}, sounds: {} }, pcm: {}, sfx: {}, dirty: false, saveError: null, cur: 0, sel: null, span: null, chapter: null, emitSeed: newEmitSeed(),
     notice: null, empty: null, log: [],
     note, addLog,
 
@@ -386,11 +394,13 @@ export const useSceneStore = create<SceneState>((set, get) => {
       const { items, lib } = get()
       if (!items.length) return
       const cur = (index + items.length) % items.length, it = items[cur]
-      set({ cur, sel: it.kind === 'clip' ? { name: it.name, t: it.event } : get().sel && { ...get().sel!, t: null } })
+      // Another selection leaves a chapter (SceneRuntime.playChapter sets it once the full replay is selected).
+      set({ cur, chapter: null, sel: it.kind === 'clip' ? { name: it.name, t: it.event } : get().sel && { ...get().sel!, t: null } })
       if (lib) try { localStorage.setItem(clipKey(lib.project_name), String(cur)) } catch { /* preference only */ }
     },
     selectCue: (name, t) => set({ sel: { name, t } }),
     setSpan: span => set({ span }),
+    setChapter: chapter => set({ chapter }),
     setOverrides: overrides => {
       const derived = derivedData(get().table, overrides)
       if (!derived.data) { set({ overrides }); return }

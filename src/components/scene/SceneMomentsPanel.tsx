@@ -4,7 +4,7 @@ import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useWaveformStore } from '@/stores/waveformStore'
-import { familyColor } from '@/utils/sceneData'
+import { clockText, familyColor } from '@/utils/sceneData'
 import { addVariant, allEventKeys, effectiveEvent, parseEventKey, resolveEventName } from '@/utils/cueEvents'
 import { VARIANT_NAME, type CueTable } from '@/utils/sceneCueTable'
 import { HapticIcon, SoundIcon } from '@/components/common/KindIcon'
@@ -17,7 +17,8 @@ import { MenuPopup } from '@/components/waveform/EditorMenu'
 import { loopCueRunAt, loopCueRuns, nearestFiring } from '@/utils/loopStretch'
 
 /**
- * "Moments and events": the full replay, then one stretch of it per cue moment, with which outputs its cues use. A click on
+ * "Moments and events": the project's chapters first (when it has any: a click plays that stretch, SceneRuntime.playChapter;
+ * keys 1–9), then the full replay, then one stretch of it per cue moment, with which outputs its cues use. A click on
  * a row jumps to that moment (from the lead-in setting before its mark) and plays it. "Change" opens a one-line
  * request over the rows (nothing moves): an existing event or a new `cue:variant`, a comment, "Request" — a new
  * variant is made in the cue table at once (multipliers only, 1 / 1) so it can be tuned here, and the agent gets a
@@ -43,6 +44,7 @@ export function SceneMomentsPanel() {
   const sel = useSceneStore(s => s.sel)
   const data = useSceneStore(s => s.data)
   const span = useSceneStore(s => s.span)
+  const chapter = useSceneStore(s => s.chapter)
   /** Each loop cue's active runs over the recording (once per recording). */
   const runsOf = useMemo(() => new Map(data && lib ? lib.loop_cues.map(c => [c, loopCueRuns(data.full.levels, data.fps, lib, c)]) : []), [data, lib])
   /** The span the row of cue `name` in moment `k` plays: its loop cue's run started by that firing (null for one-shot cues). */
@@ -67,7 +69,17 @@ export function SceneMomentsPanel() {
   }, [sel, items, cur])
   useEffect(() => { list.current?.querySelector('.scene-item.picked, .scene-item.sel')?.scrollIntoView({ block: 'nearest' }) }, [cur, picked])
   if (!lib) return <div className="scene-panel-empty">{t('scene.noProject')}</div>
+  const chapters = data?.chapters ?? []
   return <div className="scene-moments">
+    {chapters.length > 0 && <div className="scene-chapters">
+      <div className="scene-chapters-head">{t('scene.chapters.heading')}</div>
+      {chapters.map((c, i) => <div key={i} className={`scene-item scene-chapter ${i === chapter ? 'sel' : ''}`} title={t('scene.chapters.hint')}
+        onClick={() => { runtime.audio(); runtime.playChapter(i) }}>
+        <span className="scene-num">{i < 9 ? i + 1 : ''}</span>
+        <span className="scene-name">{c.label}</span>
+        <span className="scene-num">{clockText(c.start)}–{clockText(c.end)}</span>
+      </div>)}
+    </div>}
     <div className="scene-legend">
       {lib.families.map(f => <span key={f.label}><i style={{ background: f.color }} />{f.label}</span>)}
       <span className="scene-legend-kind"><HapticIcon size={14} decorative /> {t('scene.legend.haptics')}</span>

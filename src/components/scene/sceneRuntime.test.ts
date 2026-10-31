@@ -30,7 +30,7 @@ describe('Scene playback starts only on a user action, the full replay included'
     const { useSceneStore } = await import('@/stores/sceneStore')
     const { SceneRuntime } = await import('./sceneRuntime')
     const { buildItems } = await import('@/utils/sceneData')
-    const data = { fps: 30, full: { file: 'full.mp4', levels: [], columns: [], events: [] }, clips: [{ file: 'full.mp4', name: 'roar', names: ['roar'], hand: 'both', at: 7.9, note: '', event: 7.9, start: 5.9, end: 10.9, levels: [] }] }
+    const data = { fps: 30, chapters: [], full: { file: 'full.mp4', levels: [], columns: [], events: [] }, clips: [{ file: 'full.mp4', name: 'roar', names: ['roar'], hand: 'both', at: 7.9, note: '', event: 7.9, start: 5.9, end: 10.9, levels: [] }] }
     useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: null, data, recorded: data, items: buildItems(data), cur: 1, table: null })
     const runtime = new SceneRuntime()
     runtime.start()
@@ -66,7 +66,7 @@ describe('Scene playback starts only on a user action, the full replay included'
     const { SceneRuntime } = await import('./sceneRuntime')
     const { buildItems } = await import('@/utils/sceneData')
     // A recording with only the full replay (no cut clips): the full replay is moment 0 and stays selected.
-    const data = { fps: 30, full: { file: 'full.mp4', levels: [], columns: [], events: [] }, clips: [] }
+    const data = { fps: 30, chapters: [], full: { file: 'full.mp4', levels: [], columns: [], events: [] }, clips: [] }
     useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: null, data, recorded: data, items: buildItems(data), cur: 0, table: null })
     const runtime = new SceneRuntime()
     runtime.start(); await flush()
@@ -92,7 +92,7 @@ describe('Back to the full replay after tuning a moment or a span (「全編に�
     const { SceneRuntime } = await import('./sceneRuntime')
     const { buildItems } = await import('@/utils/sceneData')
     // Moment 1: its mark at 7.9 s of the full replay, its stretch 5.9–10.9 s.
-    const data = { fps: 30, full: { file: 'full.mp4', levels: [], columns: [], events: [] }, clips: [{ file: 'full.mp4', name: 'roar', names: ['roar'], hand: 'both', at: 7.9, note: '', event: 7.9, start: 5.9, end: 10.9, levels: [] }] }
+    const data = { fps: 30, chapters: [], full: { file: 'full.mp4', levels: [], columns: [], events: [] }, clips: [{ file: 'full.mp4', name: 'roar', names: ['roar'], hand: 'both', at: 7.9, note: '', event: 7.9, start: 5.9, end: 10.9, levels: [] }] }
     useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: null, data, recorded: data, items: buildItems(data), cur: 0, table: null, span: null })
     useSceneSettings.getState().update({ leadSec: 1 })
     const runtime = new SceneRuntime()
@@ -192,7 +192,7 @@ describe('Scene loop-cue sounds follow the recorded layer level', () => {
       loop_cues: ['spindle_loop', 'feed_loop'], ticks: [],
     }
     const table = { clips: {}, sounds: { Motor: { intensity: 0.5 } }, cues: { spindle_loop: { loop: true, sfx: { sound: 'Motor', volume: 0.8 }, haptics: [] }, feed_loop: { loop: true, sfx: null, haptics: [] } } }
-    const data = { fps: 30, full: { file: 'full.mp4', levels, columns: [], events: [] }, clips: [] }
+    const data = { fps: 30, chapters: [], full: { file: 'full.mp4', levels, columns: [], events: [] }, clips: [] }
     const motor = {} as AudioBuffer
     useSceneSettings.setState({ pcSound: true, sendHaptics: false })
     useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: lib as never, table: table as never, data, recorded: data, items: buildItems(data), cur: 0, sfx: { Motor: motor } })
@@ -227,7 +227,7 @@ describe('A loop cue span plays in the full replay over its own range', () => {
     const { useSceneStore } = await import('@/stores/sceneStore')
     const { SceneRuntime } = await import('./sceneRuntime')
     const { buildItems } = await import('@/utils/sceneData')
-    const data = { fps: 30, full: { file: 'full.mp4', levels: [], columns: [], events: [] }, clips: [{ file: 'full.mp4', name: 'grab', names: ['grab', 'feed_loop'], hand: 'right', at: 4.3, note: '', event: 4.3, start: 2.3, end: 7.3, levels: [] }] }
+    const data = { fps: 30, chapters: [], full: { file: 'full.mp4', levels: [], columns: [], events: [] }, clips: [{ file: 'full.mp4', name: 'grab', names: ['grab', 'feed_loop'], hand: 'right', at: 4.3, note: '', event: 4.3, start: 2.3, end: 7.3, levels: [] }] }
     useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: null, data, recorded: data, items: buildItems(data), cur: 1, table: null, span: null })
     const runtime = new SceneRuntime()
     runtime.start()
@@ -265,7 +265,7 @@ describe('A levelMap edit reaches the haptic stream at once (DEC-090)', () => {
     const lib = { project_name: 'mill', paths: { cues: 'cues.json', clips: 'clips', sounds: 'sounds' }, layers: [{ cue: 'feed_loop', gain: [0, 1], rate: [2, 3], colors: [] }], loop_cues: ['feed_loop'], ticks: [] }
     const table = { clips: { feed_loop: { intensity: 0.4202, loop: true } }, sounds: {},
       cues: { feed_loop: { loop: true, sfx: null, haptics: [{ clip: 'feed_loop', at: 'hand', gain: 1, levelMap: { points: [[0.08, 0.08], [1.225, 0.5]] } }] } } }
-    const data = { fps: 30, full: { file: 'full.mp4', levels, columns: [], events: [] }, clips: [] }
+    const data = { fps: 30, chapters: [], full: { file: 'full.mp4', levels, columns: [], events: [] }, clips: [] }
     useSceneSettings.setState({ pcSound: false, sendHaptics: true })
     useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: lib as never, table: table as never, loaded: null, data, recorded: data, items: buildItems(data), cur: 0,
       pcm: { feed_loop: new Float32Array(4000).fill(1) }, sfx: {} })
@@ -301,7 +301,7 @@ describe('Scene haptic streams end when the page goes away', () => {
     const { useSceneSettings } = await import('@/stores/sceneSettings')
     const { SceneRuntime } = await import('./sceneRuntime')
     const { buildItems } = await import('@/utils/sceneData')
-    const data = { fps: 30, full: { file: 'full.mp4', levels: [], columns: [], events: [] }, clips: [] }
+    const data = { fps: 30, chapters: [], full: { file: 'full.mp4', levels: [], columns: [], events: [] }, clips: [] }
     useSceneSettings.setState({ pcSound: false, sendHaptics: true })
     useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: null, table: { clips: {}, sounds: {}, cues: {} } as never, data, recorded: data, items: buildItems(data), cur: 0, pcm: {}, sfx: {} })
     const sent: { type: string; payload: Record<string, unknown> }[] = []
@@ -329,7 +329,7 @@ describe('A variant ramp counts firings in replay time while a moment plays', ()
     const runPosition = vi.mocked(segments.runPosition)
     // Two hits 0.1 s apart (one run) in the replay; the moment's stretch is 8.9–13.9 s.
     const events = [{ t: 10.9, name: 'hit', hand: 'right' }, { t: 11.0, name: 'hit', hand: 'right' }]
-    const data = { fps: 30, full: { file: 'full.mp4', levels: [], columns: [], events }, clips: [{ file: 'full.mp4', name: 'hit', names: ['hit'], hand: 'right', at: 10.9, note: '', event: 10.9, start: 8.9, end: 13.9, levels: Array.from({ length: 450 }, () => [0]) }] }
+    const data = { fps: 30, chapters: [], full: { file: 'full.mp4', levels: [], columns: [], events }, clips: [{ file: 'full.mp4', name: 'hit', names: ['hit'], hand: 'right', at: 10.9, note: '', event: 10.9, start: 8.9, end: 13.9, levels: Array.from({ length: 450 }, () => [0]) }] }
     useSceneSettings.setState({ pcSound: false, sendHaptics: false })
     useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: { layers: [], loop_cues: [], ticks: [] } as never, table: { clips: {}, sounds: {}, cues: { hit: { sfx: null, haptics: [] } } } as never,
       data: data as never, recorded: data as never, items: buildItems(data as never), cur: 1, pcm: {}, sfx: {} })
@@ -352,7 +352,7 @@ describe('A one-shot firing takes its gains from the table when it fires', () =>
     const { SceneRuntime } = await import('./sceneRuntime')
     const { buildItems } = await import('@/utils/sceneData')
     const events = [{ t: 1, name: 'bite', hand: 'right' }, { t: 2, name: 'bite', hand: 'right' }]
-    const data = { fps: 30, full: { file: 'full.mp4', levels: [], columns: [], events }, clips: [] }
+    const data = { fps: 30, chapters: [], full: { file: 'full.mp4', levels: [], columns: [], events }, clips: [] }
     const table = { clips: { b: { intensity: 0.5, loop: false } }, sounds: { Bite: { intensity: 0.5 } },
       cues: { bite: { sfx: { sound: 'Bite', volume: 1 }, haptics: [{ clip: 'b', at: 'both', gain: 1 }] } } }
     useSceneSettings.setState({ pcSound: true, sendHaptics: true })
@@ -371,6 +371,136 @@ describe('A one-shot firing takes its gains from the table when it fires', () =>
       cues: { bite: { sfx: { sound: 'Bite', volume: 0.5 }, haptics: [{ clip: 'b', at: 'both', gain: 1.5 }] } } }))
     playAt(1.5); playAt(1.95)
     expect(voices()[voices().length - 1].gain).toBeCloseTo(0.25 * 1.5); expect(ctx.gains[ctx.gains.length - 1].gain.value).toBeCloseTo(0.8 * 0.5)
+    runtime.stop()
+  })
+})
+
+describe('Scene FIRE output (the Kit installed on the Hapbeat, PLAY by Event ID)', () => {
+  afterEach(() => { vi.useRealTimers() })
+  /** The runtime started (real timers: its video loads), then fake timers for the scheduled PLAYs. */
+  const setup = async () => {
+    const { useSceneStore } = await import('@/stores/sceneStore')
+    const { useSceneSettings } = await import('@/stores/sceneSettings')
+    const { useScenePlayback } = await import('@/stores/scenePlayback')
+    const { SceneRuntime } = await import('./sceneRuntime')
+    const { buildItems } = await import('@/utils/sceneData')
+    const events = [{ t: 1, name: 'kick', hand: 'right' }]
+    const data = { fps: 30, chapters: [], full: { file: 'full.mp4', levels: [], columns: [], events }, clips: [] }
+    const table = { kit: 'sports-kit', clips: { kick: { intensity: 0.5, loop: false } }, sounds: {}, cues: { kick: { sfx: null, haptics: [{ clip: 'kick', at: 'pos_chest', gain: 1 }] } } }
+    useSceneSettings.setState({ pcSound: false, sendHaptics: true })
+    useScenePlayback.setState({ output: 'fire', allDevices: false, fireOffsetMs: 0, videoVolume: 1, kitState: 'ready' })
+    useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: { project_name: 'sports', paths: { cues: 'cues.json', clips: 'clips', sounds: 'sounds' }, layers: [], loop_cues: [], ticks: [] } as never, table: table as never, loaded: null,
+      data: data as never, recorded: data as never, items: buildItems(data as never), cur: 0, pcm: { kick: new Float32Array(1600).fill(1) }, sfx: {} })
+    const sent: { type: string; payload: Record<string, unknown> }[] = []
+    const runtime = new SceneRuntime(), tick = () => (runtime as unknown as { tick(): void }).tick()
+    runtime.setHelper({ send: (type, payload) => sent.push({ type, payload }), connected: true, devices: [{ ipAddress: '10.0.0.4', address: 'p1/pos_chest' }] })
+    runtime.start(); await flush()
+    vi.useFakeTimers()
+    const playAt = (vt: number) => { video.readyState = 2; video.paused = false; video.seeking = false; video.currentTime = vt; tick() }
+    return { runtime, sent, playAt, useScenePlayback, useSceneSettings }
+  }
+
+  it('sends play_event instead of streaming (the mixer is off); a pause lets the started one-shot play out, stop() sends STOP_ALL', async () => {
+    const { runtime, sent, playAt } = await setup()
+    playAt(0.95); vi.advanceTimersByTime(60)
+    expect(sent.some(m => m.type.startsWith('stream_'))).toBe(false)
+    expect(sent).toEqual([{ type: 'play_event', payload: { event_id: 'sports-kit.kick', target: '*/pos_chest', gain: 0.5, targets: ['10.0.0.4'] } }])
+    video.pause(); (runtime as unknown as { tick(): void }).tick()
+    expect(sent).toHaveLength(1)
+    runtime.stop()
+    expect(sent[1]).toEqual({ type: 'stop_event', payload: { target: '', targets: ['10.0.0.4'] } })
+  })
+
+  it('switching the output fires the cues already scheduled ahead again through the new path', async () => {
+    const { runtime, sent, playAt, useScenePlayback } = await setup()
+    useScenePlayback.setState({ fireOffsetMs: 100 })
+    playAt(0.95) // the PLAY waits 50 ms + 100 ms
+    useScenePlayback.setState({ output: 'clip' }); playAt(0.96)
+    expect((runtime as unknown as { mixer: { voices: unknown[] } }).mixer.voices).toHaveLength(1) // the cue at 1 s, now in the mixer
+    vi.advanceTimersByTime(300)
+    expect(sent.some(m => m.type === 'play_event')).toBe(false)
+    expect(sent.some(m => m.type === 'stream_begin')).toBe(true)
+    runtime.stop()
+  })
+
+  it('a negative FIRE offset looks that much further ahead and sends that much earlier', async () => {
+    const { runtime, sent, playAt, useScenePlayback } = await setup()
+    useScenePlayback.setState({ fireOffsetMs: -200 })
+    playAt(0.7) // the cue is 0.3 s ahead: beyond LOOKAHEAD alone, within LOOKAHEAD + 0.2 s
+    vi.advanceTimersByTime(99); expect(sent).toHaveLength(0)
+    vi.advanceTimersByTime(1); expect(sent.map(m => m.type)).toEqual(['play_event'])
+    runtime.stop()
+  })
+
+  it('output clip streams again (FIRE sends nothing); haptics off sends nothing in FIRE', async () => {
+    const { runtime, sent, playAt, useScenePlayback, useSceneSettings } = await setup()
+    useSceneSettings.setState({ sendHaptics: false })
+    playAt(0.95); vi.advanceTimersByTime(100); expect(sent).toEqual([])
+    useSceneSettings.setState({ sendHaptics: true }); useScenePlayback.setState({ output: 'clip' })
+    video.currentTime = 0.5; playAt(0.5); playAt(0.95); vi.advanceTimersByTime(100)
+    expect(sent.some(m => m.type === 'stream_begin')).toBe(true); expect(sent.some(m => m.type === 'play_event')).toBe(false)
+    runtime.stop()
+  })
+
+  it('a Hapbeat without the Kit (kitState missing) makes the whole playback stream from the PC; FIRE again once it is there', async () => {
+    const { runtime, sent, playAt, useScenePlayback } = await setup()
+    useScenePlayback.getState().setKitState('missing')
+    playAt(0.5); playAt(0.95); vi.advanceTimersByTime(100)
+    expect(sent.some(m => m.type === 'stream_begin')).toBe(true); expect(sent.some(m => m.type === 'play_event')).toBe(false)
+    expect(runtime.testRoute({ at: 'pos_chest', gain: 1, clip: 'kick' } as never)).toBe(1); expect(sent.some(m => m.type === 'play_event')).toBe(false)
+    sent.length = 0
+    useScenePlayback.getState().setKitState('ready')
+    video.currentTime = 0.5; playAt(0.5); playAt(0.95); vi.advanceTimersByTime(100)
+    expect(sent.some(m => m.type === 'play_event')).toBe(true)
+    runtime.stop()
+  })
+
+  it('the video sound follows the PC sound at the video volume', async () => {
+    const { runtime, useScenePlayback, useSceneSettings } = await setup()
+    const v = video as unknown as { muted: boolean; volume: number }
+    expect(v.muted).toBe(true)
+    useSceneSettings.getState().update({ pcSound: true }); expect(v.muted).toBe(false)
+    useScenePlayback.getState().update({ videoVolume: 0.3 }); expect(v.volume).toBe(0.3)
+    runtime.stop()
+    useSceneSettings.getState().update({ pcSound: false }); expect(v.muted).toBe(false) // unsubscribed
+  })
+})
+
+describe('A chapter plays its stretch of the full replay (scene-recording 3.2.1)', () => {
+  it('from its start; stops at its end with loop off, repeats with loop on; W, a moment or another item ends it', async () => {
+    const { useSceneStore } = await import('@/stores/sceneStore')
+    const { useSceneSettings } = await import('@/stores/sceneSettings')
+    const { SceneRuntime } = await import('./sceneRuntime')
+    const { buildItems } = await import('@/utils/sceneData')
+    const chapters = [{ start: 10, end: 20, label: 'Tennis' }, { start: 15, end: 30, label: 'Overlap' }]
+    const data = { fps: 30, chapters, full: { file: 'full.mp4', levels: [], columns: [], events: [] },
+      clips: [{ file: 'full.mp4', name: 'roar', names: ['roar'], hand: 'both', at: 40, note: '', event: 40, start: 38, end: 43, levels: [] }] }
+    useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: null, data, recorded: data, items: buildItems(data), cur: 1, table: null, chapter: null })
+    const runtime = new SceneRuntime(), tick = () => (runtime as unknown as { tick: () => void }).tick()
+    const chapter = () => useSceneStore.getState().chapter
+    useSceneSettings.getState().update({ loop: false })
+    runtime.start(); await flush()
+    // From a moment: the full replay is selected, then the chapter plays from its start.
+    runtime.playChapter(0); await flush()
+    expect(useSceneStore.getState().cur).toBe(0); expect(chapter()).toBe(0)
+    expect(video.currentTime).toBe(10); expect(video.paused).toBe(false); expect(video.loop).toBe(false)
+    video.currentTime = 20; tick(); expect(video.paused).toBe(true)
+    runtime.togglePlay(); expect(video.currentTime).toBe(10); expect(video.paused).toBe(false) // ▶ at its end: again
+    // Loop on: back to its start (the element itself does not loop: it would go back to 0).
+    useSceneSettings.getState().update({ loop: true }); runtime.applyLoop(); expect(video.loop).toBe(false)
+    video.currentTime = 20.01; tick(); expect(video.currentTime).toBe(10); expect(video.paused).toBe(false)
+    // Another chapter in the full replay (overlapping), then W ends it and the full replay loops by itself again.
+    runtime.playChapter(1); expect(chapter()).toBe(1); expect(video.currentTime).toBe(15)
+    runtime.setPart(true); expect(chapter()).toBe(null)
+    runtime.setPart(false); expect(video.loop).toBe(true)
+    // A moment ends it; so does selecting another item.
+    runtime.playChapter(0); runtime.playMoment(1, 1); expect(chapter()).toBe(null)
+    await flush(); runtime.playChapter(1); await flush(); expect(chapter()).toBe(1)
+    useSceneStore.getState().select(1); expect(chapter()).toBe(null)
+    runtime.playChapter(5); expect(chapter()).toBe(null) // no such chapter
+    // A seek out of the chapter (overlay bar, timeline, keys) leaves it; one inside keeps it.
+    await flush(); runtime.playChapter(0); await flush(); runtime.seek(12); expect(chapter()).toBe(0)
+    runtime.seek(45); expect(chapter()).toBe(null); expect(video.currentTime).toBe(45)
     runtime.stop()
   })
 })

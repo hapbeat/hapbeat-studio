@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { ACK_TIMEOUT_MS, buildLoopVoices, CHUNK, RETRY_MS, cueVoices, LEAD_MS, matchesAddress, QUIET_END_MS, renderChunk, SceneHapticMixer, tableTargets, targetsOf, WRIST } from './sceneHaptics'
+import { ACK_TIMEOUT_MS, buildLoopVoices, CHUNK, RETRY_MS, cueVoices, LEAD_MS, matchesAddress, QUIET_END_MS, renderChunk, routeTargets, SceneHapticMixer, tableTargets, targetsOf, WRIST } from './sceneHaptics'
+import { parseScenePlayback } from '@/stores/scenePlayback'
 import { sampleLib, sampleTable } from './sceneTestFixtures'
 
 const ones = (n: number) => new Float32Array(n).fill(0.5)
@@ -32,6 +33,19 @@ describe('scene haptic routing', () => {
   it('builds one loop voice per hand for hand routes', () => {
     const v = buildLoopVoices(sampleTable(), sampleLib())
     expect(v.map(x => [x.targets[0], x.side, x.gain])).toEqual([[WRIST.left, 0, 0.8], [WRIST.right, 1, 0.8]])
+  })
+
+  it('all devices: every route goes to every device (""), a loop once following the louder hand', () => {
+    expect(routeTargets('both', 'right', true)).toEqual([''])
+    expect(routeTargets('hand', 'left', false)).toEqual([WRIST.left])
+    expect(matchesAddress('', 'p1/pos_chest')).toBe(true)
+    expect(buildLoopVoices(sampleTable(), sampleLib(), true).map(x => [x.targets, x.side])).toEqual([[[''], -1]])
+  })
+
+  it('reads the per-PC playback settings defensively', () => {
+    expect(parseScenePlayback(null)).toEqual({ output: 'clip', allDevices: false, fireOffsetMs: 0, videoVolume: 1 })
+    expect(parseScenePlayback({ output: 'fire', allDevices: true, fireOffsetMs: -999, videoVolume: 2 })).toEqual({ output: 'fire', allDevices: true, fireOffsetMs: -300, videoVolume: 1 })
+    expect(parseScenePlayback({ output: 'x', allDevices: 'yes', fireOffsetMs: 'a', videoVolume: -1 })).toEqual({ output: 'clip', allDevices: false, fireOffsetMs: 0, videoVolume: 0 })
   })
 })
 

@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useToast } from '@/components/common/Toast'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
+import { isQuietSceneFireAck } from '@/utils/sceneFireAcks'
 
 /** デバイス書込みコマンド (write_result を返すもの) の日本語ラベル。
  *  結果トーストの文言に使う。未知の cmd は cmd 名そのまま。 */
@@ -63,6 +64,8 @@ export function HelperFailureToastListener() {
           : headline
         toast(translate('toast.writeFailed', { label, body }), 'error')
       } else if (!cmd) {
+        // The Scene tab's FIRE output: one play / stop per cue while a video plays, not a user command to confirm.
+        if (isQuietSceneFireAck(String(p.message ?? ''))) return
         // preview_event / stop は config write ではなく fire-and-forget の
         // ブロードキャスト *コマンド*。helper はログ用に write_result を返すが
         // `cmd` を持たず、device ACK も無い。これを「設定を反映しました」と

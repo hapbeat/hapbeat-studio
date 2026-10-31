@@ -37,6 +37,14 @@ export function targetsOf(at: string, hand?: string): string[] {
   return [`*/${at}`]
 }
 
+/**
+ * Device targets of a route as played: '' (every device) with the Scene's all-devices setting on — any selected Hapbeat
+ * stands in for the route's position (contracts cue-table §4.5 substitution) — else its position's (targetsOf).
+ */
+export function routeTargets(at: string, hand: string | undefined, all: boolean): string[] {
+  return all ? [''] : targetsOf(at, hand)
+}
+
 /** Every device target the table routes to, variants included (for the coverage read-out and device matching). */
 export function tableTargets(table: CueTable): string[] {
   const out = new Set<string>()
@@ -54,8 +62,11 @@ export interface LoopVoice { clip: string; targets: string[]; gain: number; leve
 export interface PlayClock { t: number; rate: number; wall: number }
 export type LevelFn = (t: number, layer: number, side: number) => [number, number]
 
-/** Continuous-layer voices: per loop cue route, one per hand for `hand` routes, else one following the louder hand. */
-export function buildLoopVoices(table: CueTable, lib: SceneLib): LoopVoice[] {
+/**
+ * Continuous-layer voices: per loop cue route, one per hand for `hand` routes, else one following the louder hand.
+ * `all` (every device plays every route): one voice per route to every device, following the louder hand.
+ */
+export function buildLoopVoices(table: CueTable, lib: SceneLib, all = false): LoopVoice[] {
   const out: LoopVoice[] = []
   lib.layers.forEach(({ cue: name }, layer) => {
     for (const r of table.cues[name]?.haptics ?? []) {
@@ -63,7 +74,8 @@ export function buildLoopVoices(table: CueTable, lib: SceneLib): LoopVoice[] {
       const clipName = routeClips(r)[0], clip = clipName === undefined ? undefined : table.clips[clipName]
       if (!clip || clipName === undefined) continue
       const add = (targets: string[], side: number) => out.push({ clip: clipName, targets, gain: clip.intensity * r.gain, levelMap: r.levelMap, layer, side, phase: {} })
-      if (r.at === 'hand') { add([WRIST.left], 0); add([WRIST.right], 1) } else add(targetsOf(r.at), -1)
+      if (all) add([''], -1)
+      else if (r.at === 'hand') { add([WRIST.left], 0); add([WRIST.right], 1) } else add(targetsOf(r.at), -1)
     }
   })
   return out
@@ -96,12 +108,12 @@ export function resampleClip(data: Float32Array, rate: number): Float32Array {
   return out
 }
 
-/** Voices of one firing (fireShot): its picked one-shot clips at the shot's rate, clip intensity × route gain (× jitter) × cue gain. */
-export function shotVoices(table: CueTable, pcm: Record<string, Float32Array>, shot: Shot, hand: string, cueGain: number, start: number): OneShotVoice[] {
+/** Voices of one firing (fireShot): its picked one-shot clips at the shot's rate, clip intensity × route gain (× jitter) × cue gain; `all`: see routeTargets. */
+export function shotVoices(table: CueTable, pcm: Record<string, Float32Array>, shot: Shot, hand: string, cueGain: number, start: number, all = false): OneShotVoice[] {
   return shot.routes.flatMap(r => {
     const clip = table.clips[r.clip], data = pcm[r.clip]
     if (!clip || !data || clip.loop) return []
-    return [{ pcm: resampleClip(data, shot.rate), targets: targetsOf(r.at, hand), gain: clip.intensity * r.gain * cueGain, start, cue: true }]
+    return [{ pcm: resampleClip(data, shot.rate), targets: routeTargets(r.at, hand, all), gain: clip.intensity * r.gain * cueGain, start, cue: true }]
   })
 }
 

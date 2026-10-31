@@ -22,8 +22,8 @@ export function SceneTopBar({ dockApi, notice }: { dockApi: DockviewApi | null; 
   const sendHaptics = useSceneSettings(s => s.sendHaptics)
   const pcSound = useSceneSettings(s => s.pcSound)
   const leadSec = useSceneSettings(s => s.leadSec)
-  /** Already on the full replay without a span's play range: 「全編に戻って続ける」 has nothing to do. */
-  const onFull = useSceneStore(s => s.items[s.cur]?.kind !== 'clip' && !s.span)
+  /** Already on the full replay without a span's or a chapter's play range: 「全編に戻って続ける」 has nothing to do. */
+  const onFull = useSceneStore(s => s.items[s.cur]?.kind !== 'clip' && !s.span && s.chapter === null)
   const settingsInput = useRef<HTMLInputElement>(null)
   const [openPanels, setOpenPanels] = useState<string[]>([])
   useEffect(() => {
