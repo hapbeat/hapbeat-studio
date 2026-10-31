@@ -85,39 +85,41 @@ export function SceneStrengthPanel() {
     useSceneSettings.getState().update({ editFirings: on })
   }
   const disabledReason = !editFirings ? t('scene.strength.editOff') : !picked.length ? t('scene.strength.noneSelected') : ''
+  const count = picked.length ? t('scene.strength.selectedCount', { count: picked.length, names: names(picked), range: span(picked.map(f => f.strength.firing)) }) : ''
 
+  // Three rows so the default dock height shows everything: the selection line, the faders, the breakdown.
   return <div className="scene-strength" tabIndex={-1} onKeyDown={onKeyDown}>
-    <div className="scene-strength-mixer">
-      <Fader className="scene-strength-overall" label={t('scene.strength.overall')} title={t('scene.strength.overallHint')} value={overall} max={OVERALL_GAIN_MAX}
-        onInput={x => useScenePlayback.getState().update({ overallGain: clampOverallGain(x) })}>
-        <span className="scene-dim">{t('scene.strength.notInBars')}</span>
-      </Fader>
-      {events.length ? events.map(([name, e]) => <EventFader key={name} name={name} gains={e.gains} indices={e.indices} chapter={!!range} />)
-        : <div className="scene-panel-empty">{t('scene.strength.noEvents')}</div>}
+    <div className="scene-strength-head">
+      <h3>{t('scene.strength.selected')}</h3>
+      <span className="scene-strength-count" title={[count, disabledReason].filter(Boolean).join('\n')}>
+        {count}{count && disabledReason ? '　' : ''}<span className="scene-dim">{disabledReason}</span>
+      </span>
+      <label className="scene-check" title={t('scene.strength.editFiringsHint')}>
+        <input type="checkbox" checked={editFirings} onChange={ev => void toggleEditing(ev.target.checked)} />{t('scene.strength.editFirings')}</label>
     </div>
-    <div className="scene-strength-side">
-      <div className="scene-sec">
-        <h3>{t('scene.strength.selected')}</h3>
-        <label className="scene-check" title={t('scene.strength.editFiringsHint')}>
-          <input type="checkbox" checked={editFirings} onChange={ev => void toggleEditing(ev.target.checked)} />{t('scene.strength.editFirings')}</label>
-        <div className="scene-strength-count">{picked.length
-          ? t('scene.strength.selectedCount', { count: picked.length, names: names(picked), range: span(picked.map(f => f.strength.firing)) }) : ''}</div>
-        <div className="scene-strength-sel">
-          <RelativeFader disabled={!!disabledReason} />
-          <div className="scene-strength-buttons">
+    <div className="scene-strength-body">
+      <div className="scene-strength-mixer">
+        <Fader className="scene-strength-overall" label={t('scene.strength.overall')} title={t('scene.strength.overallHint')} value={overall} max={OVERALL_GAIN_MAX}
+          onInput={x => useScenePlayback.getState().update({ overallGain: clampOverallGain(x) })} />
+        {events.length ? events.map(([name, e]) => <EventFader key={name} name={name} gains={e.gains} indices={e.indices} chapter={!!range} />)
+          : <div className="scene-panel-empty">{t('scene.strength.noEvents')}</div>}
+      </div>
+      <div className="scene-strength-sel">
+        <RelativeFader disabled={!!disabledReason} />
+        <div className="scene-strength-buttons">
+          <div className="scene-row">
             <button type="button" className="scene-icon-btn" disabled={!!disabledReason} title={t('scene.strength.upHint')} onClick={e => scale(strengthStep(e.shiftKey))}>▲</button>
             <button type="button" className="scene-icon-btn" disabled={!!disabledReason} title={t('scene.strength.downHint')} onClick={e => scale(1 / strengthStep(e.shiftKey))}>▼</button>
-            <SetAll key={`${[...selected].join(',')}:${median(picked.map(f => f.strength.firing))}`} disabled={!!disabledReason} start={median(picked.map(f => f.strength.firing))} />
-            <div className="scene-row">
-              <button type="button" className="scene-icon-btn" disabled={!canUndo} title={t('scene.strength.undoHint')} onClick={() => st().undoLast()}>{t('scene.strength.undo')}</button>
-              <button type="button" className="scene-icon-btn" disabled={!canRedo} title={t('scene.strength.redoHint')} onClick={() => st().redoLast()}>{t('scene.strength.redo')}</button>
-            </div>
+          </div>
+          <SetAll key={`${[...selected].join(',')}:${median(picked.map(f => f.strength.firing))}`} disabled={!!disabledReason} start={median(picked.map(f => f.strength.firing))} />
+          <div className="scene-row">
+            <button type="button" className="scene-icon-btn" disabled={!canUndo} title={t('scene.strength.undoHint')} onClick={() => st().undoLast()}>{t('scene.strength.undo')}</button>
+            <button type="button" className="scene-icon-btn" disabled={!canRedo} title={t('scene.strength.redoHint')} onClick={() => st().redoLast()}>{t('scene.strength.redo')}</button>
           </div>
         </div>
-        <div className="scene-strength-reason scene-dim">{disabledReason}</div>
       </div>
-      <Breakdown firings={shown} ratio={picked.length ? dragRatio : null} overall={overall} />
     </div>
+    <Breakdown firings={shown} ratio={picked.length ? dragRatio : null} overall={overall} />
     {dialog}
   </div>
 }
@@ -243,8 +245,9 @@ function Breakdown({ firings, ratio, overall }: { firings: readonly Firing[]; ra
   const r = ratio ?? 1
   const s = firings.map(f => ({ ...f.strength, firing: f.strength.firing * r, software: f.strength.software * r, sent: f.strength.sent * r }))
   const others = s.map(x => x.scale), clipped = s.filter(x => x.sent > 1).length
-  return <div className="scene-sec scene-strength-detail">
-    <h3>{t('scene.strength.breakdown')}</h3>
+  // One fixed height (two lines at most) so hovering bars never moves the panel; the overall note is in the heading's hint.
+  return <div className="scene-strength-detail">
+    <h3 title={`${t('scene.strength.detailHint')}\n${t('scene.strength.overallNote', { value: overall.toFixed(2) })}`}>{t('scene.strength.breakdown')}</h3>
     <div className="scene-strength-detail-line">{s.length ? <>
       {t('scene.strength.detail', {
         material: span(s.map(x => x.material)), software: span(s.map(x => x.software)), route: span(s.map(x => x.route)), firing: span(s.map(x => x.firing)),
@@ -252,6 +255,5 @@ function Breakdown({ firings, ratio, overall }: { firings: readonly Firing[]; ra
       })}
       {clipped > 0 && <span className="scene-strength-clipped">{t('scene.strength.clipped', { count: clipped })}</span>}
     </> : <span className="scene-dim">{t('scene.strength.noDetail')}</span>}</div>
-    <div className="scene-dim">{t('scene.strength.overallNote', { value: overall.toFixed(2) })}</div>
   </div>
 }

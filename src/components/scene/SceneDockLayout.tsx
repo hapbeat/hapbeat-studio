@@ -39,7 +39,8 @@ function addPanel(api: DockviewApi, id: ScenePanelId, t: Translate, inactive = f
   switch (id) {
     case 'video': return api.addPanel({ ...base, ...(near('timeline', 'above') ?? {}) })
     case 'timeline': return api.addPanel({ ...base, ...(near('video', 'below') ?? { position: { direction: 'below' } }), initialHeight: 210 })
-    case 'strength': return api.addPanel({ ...base, ...(near('timeline', 'right') ?? { position: { direction: 'below' } }), initialWidth: 460 })
+    // Below the timeline: the timeline keeps its width for picking firings, and a row of faders gets the column's width.
+    case 'strength': return api.addPanel({ ...base, ...(near('timeline', 'below') ?? { position: { direction: 'below' } }), initialHeight: 340 })
     case 'moments': return api.addPanel({ ...base, position: { direction: 'left' }, initialWidth: 270 })
     case 'event': return api.addPanel({ ...base, ...(near('project', 'within') ?? { position: { direction: 'right' } }), initialWidth: 420 })
     case 'project': return api.addPanel({ ...base, ...(near('event', 'within') ?? { position: { direction: 'right' } }), initialWidth: 420 })
@@ -54,6 +55,13 @@ export function buildDefaultSceneLayout(api: DockviewApi, t: Translate) {
   addPanel(api, 'moments', t)
   addPanel(api, 'event', t)
   addPanel(api, 'project', t, true)
+  // initialWidth / initialHeight are only hints once later splits take their share: settle the main sizes last.
+  api.getPanel('moments')?.api.setSize({ width: 300 })
+  api.getPanel('event')?.api.setSize({ width: 400 })
+  // The centre column top-down (a resize gives to / takes from the panels below it): the video gets what the timeline
+  // (210) and the strength row (340: selection line, faders, breakdown) leave.
+  api.getPanel('video')?.api.setSize({ height: Math.max(200, api.height - 210 - 340) })
+  api.getPanel('timeline')?.api.setSize({ height: 210 })
   api.getPanel('video')?.api.setActive()
 }
 
@@ -71,7 +79,7 @@ function applySavedLayout(api: DockviewApi, layout: Record<string, unknown> | nu
     api.fromJSON(withoutDockPanels(layout, REMOVED_PANELS) as unknown as Parameters<DockviewApi['fromJSON']>[0])
     if (!api.panels.length) buildDefaultSceneLayout(api, t)
     // Panels added in a later Studio (not known when the layout was saved) join it once; a panel the user closed stays closed.
-    const known = Array.isArray(layout.knownPanels) ? layout.knownPanels as string[] : SCENE_PANELS.filter(id => id !== 'event')
+    const known = Array.isArray(layout.knownPanels) ? layout.knownPanels as string[] : SCENE_PANELS.filter(id => id !== 'event' && id !== 'strength')
     for (const id of SCENE_PANELS) if (!known.includes(id) && !api.getPanel(id)) addPanel(api, id, t, true)
     return true
   } catch (error) {
