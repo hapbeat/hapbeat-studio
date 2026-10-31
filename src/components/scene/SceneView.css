@@ -92,6 +92,8 @@
 /* Fixed width (ja / en labels differ); disabled while no event is selected. */
 .scene-open-editor { width: 8.5em; text-align: center; overflow: hidden; text-overflow: ellipsis; }
 .scene-open-editor:disabled { opacity: .45; cursor: default; }
+/* "Change" while its request form is open: shown pressed (same size, only the colours change). */
+.scene-open-editor[aria-expanded="true"] { background: rgba(124,92,191,.35); border-color: var(--accent-light); box-shadow: inset 0 1px 3px rgba(0,0,0,.45); }
 .scene-chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; width: 100%; min-height: 24px; font-size: 12px; color: var(--text-muted); }
 .scene-chips button { padding: 0 8px; border-radius: 10px; font-size: 12px; background: var(--bg-surface); border: 1px solid var(--border-light); cursor: pointer; }
 .scene-icon-btn { white-space: nowrap; flex-shrink: 0; padding: 1px 6px; font-size: 12px; background: var(--bg-surface); color: var(--text-primary); border: 1px solid rgba(255,255,255,.1); border-radius: 4px; cursor: pointer; }
