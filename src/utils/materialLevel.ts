@@ -31,3 +31,13 @@ export function renormalize(peak: number, previousGain: number, clipGain: number
   const gain = normalizeGain(peak)
   return { gain, clipGain: Math.min(1, previousGain * clipGain / gain) }
 }
+
+/**
+ * The levels of an adjusted material written back (renormalize), except for a haptic clip whose clip_gain the project's
+ * Kit holds (`kitHeld`, DEC-103): Studio cannot change the Kit's clip_gain here, so the render is written with the last
+ * write's gain (`previousGain`, not normalized again) and the clip_gain stays the Kit's (`clipGain: null` = not written).
+ * Render × gain × clip_gain stays as loud as before either way.
+ */
+export function rewriteLevels(peak: number, previousGain: number, clipGain: number, kitHeld: boolean): { gain: number; clipGain: number | null } {
+  return kitHeld ? { gain: previousGain, clipGain: null } : renormalize(peak, previousGain, clipGain)
+}

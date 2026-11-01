@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clipGainForPeak, normalizeGain, peakOf, renormalize } from './materialLevel'
+import { clipGainForPeak, normalizeGain, peakOf, renormalize, rewriteLevels } from './materialLevel'
 import { MATERIAL_PEAK } from './sceneCueTable'
 
 describe('material levels (DEC-086)', () => {
@@ -25,5 +25,14 @@ describe('material levels (DEC-086)', () => {
     expect(next.clipGain).toBeCloseTo(first.clipGain / 2)
     // It cannot go above 1.
     expect(renormalize(1.5, 1, 1).clipGain).toBe(1)
+  })
+
+  it("an adjusted haptic clip the Kit holds keeps the Kit's clip_gain: the WAV takes the last write's gain, as loud as before (DEC-103)", () => {
+    // Last write: gain 1.888 at clip_gain 0.4 (the Kit's). The render peaks at 0.25 now.
+    const kit = rewriteLevels(0.25, 1.888, 0.4, true)
+    expect(kit).toEqual({ gain: 1.888, clipGain: null })
+    expect(0.25 * kit.gain * 0.4).toBeCloseTo(0.25 * 1.888 * 0.4)
+    // Not held by the Kit: renormalized as before.
+    expect(rewriteLevels(0.25, 1.888, 0.4, false)).toEqual(renormalize(0.25, 1.888, 0.4))
   })
 })

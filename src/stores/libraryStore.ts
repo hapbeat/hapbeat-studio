@@ -496,6 +496,8 @@ async function saveClipsMetaToDir(handle: FileSystemDirectoryHandle, clips: Libr
  *    (`clipName`, `clipSourceFilename`, clip*) copied off the current
  *    LibraryClip list. This is the structural migration that turned
  *    KitEvents into independent owners of their clip data.
+ *  - an event without a numeric `clipGain` (kits-meta.json / .studio-kit.json written before DEC-103, or edited by
+ *    hand) reads as the contract default 1.0, so no NaN / null reaches the manifest. The old name is not read.
  *
  * Pass the current library `clips` list so the migrator can resolve a
  * legacy event's `clipId` back to a snapshot. When the library entry is
@@ -513,6 +515,10 @@ function migrateKit(kit: KitDefinition, libraryClips: LibraryClip[]): KitDefinit
     let next = e
     if (!next.id) {
       next = { ...next, id: generateId() }
+      changed = true
+    }
+    if (typeof next.clipGain !== 'number' || !Number.isFinite(next.clipGain)) {
+      next = { ...next, clipGain: 1 }
       changed = true
     }
     if (!Array.isArray(next.modes) || next.modes.length === 0) {
@@ -2167,7 +2173,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           clipChannels,
           clipSampleRate,
           clipFileSize,
-          clipGain: typeof params.clip_gain === 'number' ? params.clip_gain : 0.5,
+          // No clip_gain = the contract default 1.0 (kit-format; the Scene reads it the same way, sceneKit.kitClipGains).
+          clipGain: typeof params.clip_gain === 'number' && Number.isFinite(params.clip_gain) ? params.clip_gain : 1,
           loop: params.loop ?? false,
           deviceWiper: typeof params.device_wiper === 'number' ? params.device_wiper : null,
         })
@@ -2373,7 +2380,14 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
     // Scan actual files in clips/
     const fileList = await listClipFiles(workDirHandle)
-    const metaMap = new Map((savedClips ?? []).map((c) => [c.sourceFilename, c]))
+    // A libraryClipGain that is not a number (absent, or written before DEC-103) is dropped: the clip then gets the
+    // default amp everywhere (`?? 0.5`), never NaN.
+    const metaMap = new Map((savedClips ?? []).map((c) => {
+      if (c.libraryClipGain === undefined || (typeof c.libraryClipGain === 'number' && Number.isFinite(c.libraryClipGain))) return [c.sourceFilename, c]
+      const { libraryClipGain: _drop, ...rest } = c
+      void _drop
+      return [c.sourceFilename, rest as LibraryClip]
+    }))
 
     const clips: LibraryClip[] = []
     const ctx = new AudioContext()

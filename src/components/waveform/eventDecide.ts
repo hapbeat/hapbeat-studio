@@ -60,12 +60,13 @@ export async function encodeDecided(buffer: AudioBuffer, target: DecideTarget): 
  * A material WAV (DEC-086): the shape at full scale (peak −0.5 dBFS) when `normalize`; `peak` is the peak before
  * (at the material's rate / channels) and `gain` the factor applied (1 without normalizing).
  */
-export async function encodeMaterial(buffer: AudioBuffer, target: DecideTarget, normalize = true): Promise<{ wav: ArrayBuffer; peak: number; gain: number }> {
+/** `fixedGain`: written with this gain instead (an adjusted Kit clip keeps its last write's gain, materialLevel.rewriteLevels). */
+export async function encodeMaterial(buffer: AudioBuffer, target: DecideTarget, normalize = true, fixedGain?: number): Promise<{ wav: ArrayBuffer; peak: number; gain: number }> {
   const rate = target === 'haptic' ? RATE : SOUND_RATE
   const b = await resample(buffer, rate), ch = b.numberOfChannels
   const channels = target === 'haptic' ? [(() => { const mono = new Float32Array(b.length); for (let c = 0; c < ch; c++) { const d = b.getChannelData(c); for (let i = 0; i < b.length; i++) mono[i] += d[i] / ch } return mono })()]
     : Array.from({ length: ch }, (_, c) => b.getChannelData(c))
-  const peak = peakOf(channels), gain = normalize ? normalizeGain(peak) : 1
+  const peak = peakOf(channels), gain = fixedGain ?? (normalize ? normalizeGain(peak) : 1)
   const n = channels[0].length, out = new Float32Array(n * channels.length)
   for (let c = 0; c < channels.length; c++) { const d = channels[c]; for (let i = 0; i < n; i++) out[i * channels.length + c] = d[i] * gain }
   return { wav: encodePcm16Wav(out, rate, channels.length), peak, gain }
