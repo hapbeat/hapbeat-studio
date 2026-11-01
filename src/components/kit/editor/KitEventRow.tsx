@@ -14,7 +14,7 @@ export interface KitEventRowProps {
   disabled?: boolean
   onSelect: () => void
   onTogglePlay: () => void
-  onIntensityChange: (v: number) => void
+  onClipGainChange: (v: number) => void
   /** Replace the event's selected modes. Caller is responsible for
    *  enforcing length ≥ 1 — the row UI also blocks the click that
    *  would zero out the set. */
@@ -113,7 +113,7 @@ export function KitEventRow({
   disabled = false,
   onSelect,
   onTogglePlay,
-  onIntensityChange,
+  onClipGainChange,
   onModesChange,
   onDelete,
   onDragOverRow,
@@ -197,8 +197,8 @@ export function KitEventRow({
         tags={tags}
         showDetails={showDetails}
         note={event.note}
-        intensity={event.intensity}
-        onIntensityChange={onIntensityChange}
+        clipGain={event.clipGain}
+        onClipGainChange={onClipGainChange}
         playing={playing}
         onTogglePlay={onTogglePlay}
         interactionDisabled={disabled}

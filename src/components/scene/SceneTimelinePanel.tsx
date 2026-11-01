@@ -12,7 +12,7 @@ import { SPEEDS } from './sceneRuntime'
 import { SceneOutputToggles } from './SceneOutputToggles'
 import { loopCueRuns } from '@/utils/loopStretch'
 import { useMomentPlace } from './SceneCuePanels'
-import type { CueTable } from '@/utils/sceneCueTable'
+import type { CueTable, KitClipGains } from '@/utils/sceneCueTable'
 import { mapLevel } from '@/utils/levelMap'
 import { laneY, layerLanes, layerScaleMax, outputCurves, outputScaleMax, sideLevel, type Lane, type OutputCurve } from '@/utils/sceneTimelineLevels'
 import { spanWindow, stepView, timelineClick, type TimelineView } from '@/utils/sceneTimelineView'
@@ -23,7 +23,7 @@ import { barDragRatio, recordedIndexMap, recordedName, selectableFirings } from 
 import type { SceneEvent } from '@/utils/sceneData'
 
 /**
- * A drawn marker; `gain`: what its bar shows in its lane (sound: the gain it plays at; haptics: the software multiplier,
+ * A drawn marker; `gain`: what its bar shows in its lane (sound: the gain it plays at; haptics: the app gain,
  * DEC-102 r3; null: a loop cue / tick, drawn as before). Haptic one-shots: `strength` and the recorded firing `index`
  * (viewer-data events[i]; null for an emitted firing, which cannot be selected).
  */
@@ -33,7 +33,7 @@ type Band = { x0: number; x1: number; y0: number; y1: number }
 const MAX_ZOOM = 2000
 /** The selected loop cue's input (recorded level) line and legend swatch: dashed; its output: solid. */
 const INPUT_DASH = [5, 3]
-/** Cap of a haptic bar whose sent value (material × software) is above 1: the device gets it clipped. */
+/** Cap of a haptic bar whose sent value (material × app) is above 1: the device gets it clipped. */
 const CLIPPED_CAP = '#ff4d4d'
 /** Outline of a selected haptic bar (the strength panel's selection). */
 const SELECTED = '#7cc4ff'
@@ -44,8 +44,8 @@ const DRAG_PX = 3
  * Timeline: two lanes, sound (upper) and haptics (lower), as in the editor, each with its continuous-layer levels
  * scaled inside it (a selected loop cue: also its output, levelMap applied); a cue shows in each lane it uses (a selected loop cue: its whole active
  * span, as long as its layer's recorded level is above 0, as bands in those lanes); a one-shot firing's marker is as tall
- * as the gain it plays at in that lane (sound) or its software multiplier (haptics: lane top = ×1, the material as
- * authored; the tooltip splits software / material / sent; a cap marks above ×1, red when the sent value is clipped).
+ * as the gain it plays at in that lane (sound) or its app gain (haptics: lane top = ×1, the material as
+ * authored; the tooltip splits app / material / sent; a cap marks above ×1, red when the sent value is clipped).
  * A click seeks (timelineClick); Ctrl (Cmd) + click a marker to edit that cue (the moments list marks it too), a band to
  * play that span in the full replay (SceneRuntime.playSpan; within the span already playing: seek). A firing is
  * reassigned from the moments list. Haptic one-shots are also the strength panel's selection (sceneStrength): a click
@@ -78,7 +78,7 @@ export function SceneTimelinePanel() {
   /** The selected loop cue's output curves (levelMap applied) and their scale top (again only when the recording, table or cue changes). */
   const outputs = useRef<{ levels: number[][] | null; table: CueTable | null; cue: string; curves: OutputCurve[]; max: number }>({ levels: null, table: null, cue: '', curves: [], max: 1 })
   /** Each firing's gains (sceneFiringGain; again when the table or the recording changes, so an edit shows at once). */
-  const gains = useRef<{ table: CueTable | null; events: unknown; map: Map<string, FiringGains>; strength: Map<string, FiringStrength | null> }>({ table: null, events: null, map: new Map(), strength: new Map() })
+  const gains = useRef<{ table: CueTable | null; kit: KitClipGains | null; events: unknown; map: Map<string, FiringGains>; strength: Map<string, FiringStrength | null> }>({ table: null, kit: null, events: null, map: new Map(), strength: new Map() })
   /** Recorded firing index by firingKey (again only for another recording or a gain edit). */
   const indices = useRef<{ events: readonly SceneEvent[] | null; map: Map<string, number> }>({ events: null, map: new Map() })
   /** The haptic lane's bar range as drawn (CSS px): top = ×1, bottom = 0. */
@@ -152,10 +152,11 @@ export function SceneTimelinePanel() {
         [mid + 1, base, name => { const e = effective(name); return !!e && (e.haptics.length > 0 || lib.loop_cues.includes(e.ref.cue)) }, name => familyColor(lib, name), 'haptics'],
       ]
       const gc = gains.current
-      if (gc.table !== table || gc.events !== data.full.events) {
-        gc.table = table; gc.events = data.full.events
-        gc.map = table ? recordingFiringGains(table, data.full.events) : new Map()
-        gc.strength = table ? recordingFiringStrength(table, data.full.events) : new Map()
+      const kit = s.projectKit?.clipGains ?? null
+      if (gc.table !== table || gc.kit !== kit || gc.events !== data.full.events) {
+        gc.table = table; gc.kit = kit; gc.events = data.full.events
+        gc.map = table ? recordingFiringGains(table, data.full.events, kit) : new Map()
+        gc.strength = table ? recordingFiringStrength(table, data.full.events, kit) : new Map()
       }
       const ix = indices.current, recorded = s.recorded?.full.events ?? null
       if (ix.events !== recorded) { ix.events = recorded; ix.map = recorded ? recordedIndexMap(recorded) : new Map() }
@@ -189,11 +190,11 @@ export function SceneTimelinePanel() {
           const x = X(ev.t), picked = !!sel && sel.name === ev.name && sel.t != null && Math.abs(ev.t - sel.t) < 0.02
           if (x < -10 || x > w + 10) continue
           const tick = isTick(ticks, ev.name) && !picked, key = shownKeys[k]
-          // Haptics: the software multiplier (a drag on the selection shows its ratio live); sound: the gain it plays at.
+          // Haptics: the app gain (a drag on the selection shows its ratio live); sound: the gain it plays at.
           const strength = lane === 'haptics' && !tick ? gc.strength.get(key) ?? null : null
           const index = strength ? ix.map.get(recordedKeys[k]) ?? null : null
           const chosen = index !== null && st.selected.has(index)
-          const gain = tick ? null : lane === 'haptics' ? strength && strength.software * (chosen && st.dragRatio !== null ? st.dragRatio : 1) : gc.map.get(key)?.sound ?? null
+          const gain = tick ? null : lane === 'haptics' ? strength && strength.app * (chosen && st.dragRatio !== null ? st.dragRatio : 1) : gc.map.get(key)?.sound ?? null
           found.push({ x, y0, y1, name: ev.name, t: ev.t, lane, gain, strength, index })
           ctx.fillStyle = color(ev.name)
           ctx.globalAlpha = picked || chosen ? 1 : sel && sel.t != null ? 0.35 : it.kind === 'clip' && !ev.own ? 0.5 : 1
@@ -294,7 +295,7 @@ export function SceneTimelinePanel() {
    */
   const onMouseMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
     const { hit } = hitAt(event)
-    const text = hit?.strength ? t('scene.strength.tip', { software: hit.strength.software.toFixed(2), material: hit.strength.material.toFixed(2), sent: hit.strength.sent.toFixed(2) })
+    const text = hit?.strength ? t('scene.strength.tip', { app: hit.strength.app.toFixed(2), material: hit.strength.material.toFixed(2), sent: hit.strength.sent.toFixed(2) })
       : hit && hit.gain !== null ? `${t(hit.lane === 'sound' ? 'scene.lane.sound' : 'scene.lane.haptics')} ${hit.gain.toFixed(2)}` : t('scene.timeline.hint')
     if (event.currentTarget.title !== text) event.currentTarget.title = text
     useSceneStrength.getState().setHover(hit?.index ?? null)

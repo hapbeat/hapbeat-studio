@@ -12,7 +12,7 @@ export const QUICK_TEST_TONE = {
  *
  * Keeping the source at the device stream rate makes this useful even when
  * there is no Kit or local audio folder selected. The normal stream pipeline
- * still owns routing, intensity, cancellation, and format conversion.
+ * still owns routing, clip_gain, cancellation, and format conversion.
  */
 export function createSineWav(
   frequencyHz: number,

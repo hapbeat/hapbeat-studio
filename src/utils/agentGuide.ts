@@ -154,12 +154,12 @@ If the user says a trial you submitted does not appear: check with \`list_trials
 3. Read each new outbox file, then move it to \`outbox/_read/\`.
 4. For a rating: read each candidate's \`overall\`, \`comment\`, \`useRange\` and the trial's \`comment\`. Every candidate rated ★4+ (\`verdict\` "use") is added to the trial's first scene cue, best first, without duplicates (Studio does this on every Save). For a \`cue:variant\`: while the cue's variants share its sound / haptics (the variant writes none of its own) it goes to the cue, shared by all of them; while each variant holds its own, to that variant (a plain cue then: to every variant). Only starred materials play (\`sfx.sounds\` / route \`clips\`, the first is the representative); adopted ones go to the unstarred \`alternates\` (\`sfx.alternates\` / route \`alternates\`, never played) and the user stars what plays — except when the cue has nothing starred yet: then the first one is starred and becomes the representative. Never add free-plan output (label or source path containing "free plan" / "(free)": not for commercial use), nor what the comments explicitly reject. Then make the next candidates.
 
-## Strength of materials (DEC-086)
+## Strength of materials (DEC-086, DEC-103)
 
 - WAV = the shape, always written at full scale (peak −0.5 dBFS).
-- \`clips.<name>.intensity\` / \`sounds.<Name>.intensity\` (0..1, absent = 1) = the material's base strength; Studio's editor sets it (Adjust slider) and plays WAV × intensity.
-- Route \`gain\` / \`sfx.volume\` (default 1) = the scene multiplier, edited in the Scene tab only. Final output = WAV × intensity × scene multiplier × device volume.
-- Studio writes adopted candidates normalized, with their own size as the intensity. Do not bake loudness into WAVs.
+- \`clips.<name>.clip_gain\` / \`sounds.<Name>.clip_gain\` (0..1, absent = 1) = the material's strength (clip gain); Studio's editor sets it (Adjust slider) and plays WAV × clip_gain. In a project with a Kit, a haptic clip's clip_gain comes from the Kit manifest (the cue table holds a copy).
+- Route \`gain\` / \`sfx.volume\` (default 1) = part of the app gain, edited in the Scene tab only. Final output = WAV × clip_gain × app gain × device volume.
+- Studio writes adopted candidates normalized, with their own size × the rated \`intensity\` as the clip_gain. Do not bake loudness into WAVs.
 
 ## Messages from Studio \`hapbeat-agent-message@1\` (Studio writes, you read)
 

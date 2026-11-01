@@ -7,7 +7,7 @@ export function PackBuilder() {
   const { t } = useI18n()
   const [events, setEvents] = useState<EventDefinition[]>([])
   const [newEventId, setNewEventId] = useState('')
-  const [newIntensity, setNewIntensity] = useState(1.0)
+  const [newClipGain, setNewClipGain] = useState(1.0)
 
   const handleAddEvent = useCallback(() => {
     if (!newEventId.trim()) return
@@ -17,13 +17,13 @@ export function PackBuilder() {
     }
     const event: EventDefinition = {
       eventId: newEventId.trim(),
-      intensity: newIntensity,
+      clipGain: newClipGain,
       loop: false,
     }
     setEvents((prev) => [...prev, event])
     setNewEventId('')
-    setNewIntensity(1.0)
-  }, [newEventId, newIntensity, events, t])
+    setNewClipGain(1.0)
+  }, [newEventId, newClipGain, events, t])
 
   const handleDeleteEvent = useCallback((eventId: string) => {
     setEvents((prev) => prev.filter((e) => e.eventId !== eventId))
@@ -67,15 +67,15 @@ export function PackBuilder() {
               />
             </div>
             <div className="config-field">
-              <label className="label">Intensity</label>
+              <label className="label">Clip gain</label>
               <input
                 type="number"
                 className="input mono"
-                value={newIntensity}
+                value={newClipGain}
                 min={0}
                 max={1}
                 step={0.1}
-                onChange={(e) => setNewIntensity(parseFloat(e.target.value) || 0)}
+                onChange={(e) => setNewClipGain(parseFloat(e.target.value) || 0)}
               />
             </div>
             <button className="btn btn-primary" onClick={handleAddEvent}>
@@ -88,13 +88,13 @@ export function PackBuilder() {
             <div className="event-list">
               <div className="event-list-header">
                 <span className="event-col-id">Event ID</span>
-                <span className="event-col-gain">Intensity</span>
+                <span className="event-col-gain">Clip gain</span>
                 <span className="event-col-loop">{t('pack.loop')}</span><span className="event-col-clip">{t('pack.clip')}</span><span className="event-col-actions">{t('pack.actions')}</span>
               </div>
               {events.map((event) => (
                 <div key={event.eventId} className="event-row">
                   <span className="event-col-id mono">{event.eventId}</span>
-                  <span className="event-col-gain mono">{event.intensity.toFixed(1)}</span>
+                  <span className="event-col-gain mono">{event.clipGain.toFixed(1)}</span>
                   <span className="event-col-loop">
                     <button
                       className={`loop-toggle ${event.loop ? 'active' : ''}`}

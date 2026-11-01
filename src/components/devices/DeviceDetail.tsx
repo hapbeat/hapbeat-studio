@@ -604,25 +604,25 @@ export function DeviceDetail() {
 
   const playEvent = useCallback((eventId: string, fromKitList: number | null = null) => {
     if (!selectedIp) return
-    let intensity = 1.0
+    let clipGain = 1.0
     let source = 'fallback 1.0'
     if (fromKitList != null) {
-      intensity = fromKitList
-      source = `device kit_list (amp ${(intensity * 100).toFixed(0)}%)`
+      clipGain = fromKitList
+      source = `device kit_list (amp ${(clipGain * 100).toFixed(0)}%)`
     } else {
       const kits = useLibraryStore.getState().kits
       const tryFind = (matchId: string): { ev: KitEvent; k: KitDefinition } | null => {
         for (const k of kits) {
           const ev = k.events.find((e) => e.eventId === matchId)
-          if (ev && typeof ev.intensity === 'number') return { ev, k }
+          if (ev && typeof ev.clipGain === 'number') return { ev, k }
         }
         return null
       }
       const hit = tryFind(eventId)
       if (hit) {
-        intensity = hit.ev.intensity
+        clipGain = hit.ev.clipGain
         const mode = hit.ev.modes?.[0] ?? 'command'
-        source = `libraryStore (kit=${hit.k.id}, mode=${mode}, amp ${(intensity * 100).toFixed(0)}%)`
+        source = `libraryStore (kit=${hit.k.id}, mode=${mode}, amp ${(clipGain * 100).toFixed(0)}%)`
       }
     }
 
@@ -645,11 +645,11 @@ export function DeviceDetail() {
       pushLog('preview', `× preview_event skipped: serial-only selection (event_id=${eventId})`)
       return
     }
-    const payload = { event_id: eventId, target: '', gain: intensity, targets }
+    const payload = { event_id: eventId, target: '', gain: clipGain, targets }
     send({ type: 'preview_event', payload })
     pushLog(
       'preview',
-      `→ ${targets.join(', ')}: preview_event event_id=${eventId} gain=${intensity.toFixed(2)} (${source})`,
+      `→ ${targets.join(', ')}: preview_event event_id=${eventId} gain=${clipGain.toFixed(2)} (${source})`,
     )
   }, [selectedIp, send, pushLog])
 

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { movePair, removeMaterial, setStarred, type EffectiveEvent } from '@/utils/cueEvents'
-import { materialIntensity, routeAlternates, routeClips, setClipIntensity, setSoundIntensity, sfxAlternates, sfxSounds, type CueTable } from '@/utils/sceneCueTable'
+import { kitHolds, materialClipGain, routeAlternates, routeClips, setClipGain, setSoundClipGain, sfxAlternates, sfxSounds, type CueTable } from '@/utils/sceneCueTable'
 import { MaterialList } from './MaterialList'
 import { KindIcon } from '@/components/common/KindIcon'
 import './EventsPanel.css'
@@ -11,7 +11,7 @@ type Edit = (change: (tb: CueTable) => CueTable | null) => boolean
 
 /**
  * A paired cue's materials as pairs (variation.paired: sound i plays with clip i of every route), one line each:
- * `1  [sound icon] sound  ↔  [haptic icon] clip`, ▶ (both together), the strengths of both (intensity, DEC-086) and ↑ / ↓ (the pair moves as
+ * `1  [sound icon] sound  ↔  [haptic icon] clip`, ▶ (both together), the strengths of both (clip_gain, DEC-086) and ↑ / ↓ (the pair moves as
  * one, on every route of the same length). A side without a partner is shown in red. Shown for the first route; the
  * other routes follow the same order. Only starred materials pair (DEC-089): each side's ★ unstars it, and the
  * unstarred alternates (sounds, then the first route's clips) are listed under the pairs with ☆ to star them (appended).
@@ -32,6 +32,7 @@ export function PairedList({ e, edit, onPlay, onShow, active, extra, describe }:
 }) {
   const { t } = useI18n()
   const table = useSceneStore(s => s.table)
+  const kit = useSceneStore(s => s.projectKit?.clipGains ?? null)
   const titled = (base: string, name: string) => [base, describe?.(name)].filter(Boolean).join('\n')
   const sounds = sfxSounds(e.sfx), route = e.haptics[0], clips = route ? routeClips(route) : []
   const count = Math.max(sounds.length, clips.length)
@@ -45,9 +46,11 @@ export function PairedList({ e, edit, onPlay, onShow, active, extra, describe }:
     onSelect={onShow ? name => onShow(target, name, route?.at) : undefined}
     onStar={own(target) ? (name, on) => star(target, name, on) : null} onRemove={own(target) ? name => remove(target, name) : null}
     extra={extra ? name => extra(target, name) : undefined} describe={describe} />
+  // A haptic clip the project's Kit has: its clip_gain is the Kit's (DEC-103), shown read only.
   const strength = (target: 'sound' | 'haptic', name: string) => <input type="number" className="events-pair-level" min={0} max={1} step={0.05}
-    value={materialIntensity(table, target, name)} aria-label={t('events.pair.level', { name })} title={t('events.pair.levelHint', { name })}
-    onChange={ev => { const v = parseFloat(ev.target.value); if (Number.isFinite(v)) edit(tb => target === 'sound' ? setSoundIntensity(tb, name, v) : tb.clips[name] ? setClipIntensity(tb, name, v) : null) }} />
+    value={materialClipGain(table, target, name, kit)} aria-label={t('events.pair.level', { name })}
+    disabled={target === 'haptic' && kitHolds(kit, name)} title={target === 'haptic' && kitHolds(kit, name) ? t('editor.clipGainFromKit') : t('events.pair.levelHint', { name })}
+    onChange={ev => { const v = parseFloat(ev.target.value); if (Number.isFinite(v)) edit(tb => target === 'sound' ? setSoundClipGain(tb, name, v) : tb.clips[name] ? setClipGain(tb, name, v) : null) }} />
   const side = (target: 'sound' | 'haptic', name: string | undefined) => !name
     ? <span className="events-pair-missing">{t('events.pair.noPartner')}</span>
     : <span className={`events-pair-side ${active === name ? 'active' : ''}`}>

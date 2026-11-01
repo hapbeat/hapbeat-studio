@@ -3,7 +3,7 @@ import { useWaveformStore } from '@/stores/waveformStore'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useEditorSettings } from '@/stores/editorSettings'
 import { useSceneStore } from '@/stores/sceneStore'
-import { matchIntensity, materialIntensity, setClipIntensity, setSoundIntensity } from '@/utils/sceneCueTable'
+import { kitHolds, matchClipGain, materialClipGain, setClipGain, setSoundClipGain } from '@/utils/sceneCueTable'
 import { effectiveEvent, otherStarred, parseEventKey } from '@/utils/cueEvents'
 import { levelKey, useEventStore } from '@/stores/eventStore'
 import { LevelSlider } from './LevelSlider'
@@ -54,9 +54,9 @@ export function WaveformPanel() {
       <span className={`editor-shown-layout ${shownLayout?.loop ? 'loop' : shownLayout?.starts ? 'sequence' : ''}`} role="status" title={shownLayout?.starts ? t('editor.shown.sequenceHint') : undefined}>
         {layoutLine ? t(layoutLine.id, layoutLine.params) : ''}</span>
       <PlaceAtFiringsToggle />
-      {eventPreview ? <><IntensitySlider key={eventPreview.material} target={eventPreview.target} wav={eventPreview.material} />
+      {eventPreview ? <><ClipGainSlider key={eventPreview.material} target={eventPreview.target} wav={eventPreview.material} />
         <MatchStarred key={`${eventPreview.event}|${eventPreview.material}`} event={eventPreview.event} target={eventPreview.target} wav={eventPreview.material} /></>
-        : adjusting && !audition && <><IntensitySlider key={adjusting.wav} target={adjusting.target} wav={adjusting.wav} project={adjusting.project} />
+        : adjusting && !audition && <><ClipGainSlider key={adjusting.wav} target={adjusting.target} wav={adjusting.wav} project={adjusting.project} />
         <MatchStarred key={`${adjusting.event}|${adjusting.wav}`} event={adjusting.event} target={adjusting.target} wav={adjusting.wav} project={adjusting.project} /></>}
       <div className="editor-segmented" role="group" aria-label={t('editor.showing')}>
         <button className={`toolbar-btn ${!original ? 'selected' : ''}`} disabled={!canCompare} aria-pressed={!original} title={t('editor.committedHint')} onClick={() => { if (original) s.setSelectedRegion(null); setOriginal(false) }}>∿ {t('editor.edited')}</button>
@@ -91,30 +91,35 @@ export function WaveformPanel() {
 }
 
 /**
- * The strength of the shown event material (DEC-086): its intensity, always available (no "Adjust" needed), written
+ * The strength of the shown event material (DEC-086): its clip_gain, always available (no "Adjust" needed), written
  * to the cue table (LevelSlider: live gain and drawing, saved debounced). The WAV keeps the shape; effects are for the shape.
+ * A haptic clip the project's Kit has gets its clip_gain from the Kit (DEC-103, contracts cue-table §9.1): shown read
+ * only here ("set it in the Kit editor"), since a cue table value would go back to the Kit's at the next save.
  */
-function IntensitySlider({ target, wav, project }: { target: 'sound' | 'haptic'; wav: string; project?: string }) {
+function ClipGainSlider({ target, wav, project }: { target: 'sound' | 'haptic'; wav: string; project?: string }) {
   const { t } = useI18n()
-  const saved = useSceneStore(state => state.table && (!project || state.lib?.project_name === project) && (target === 'sound' || state.table.clips[wav]) ? materialIntensity(state.table, target, wav) : null)
+  const saved = useSceneStore(state => state.table && (!project || state.lib?.project_name === project) && (target === 'sound' || state.table.clips[wav])
+    ? materialClipGain(state.table, target, wav, state.projectKit?.clipGains) : null)
+  const fromKit = useSceneStore(state => target === 'haptic' && kitHolds(state.projectKit?.clipGains, wav))
   if (saved === null) return null
-  return <LevelSlider levelKey={levelKey.material(target, wav)} saved={saved} label={t('editor.intensity')} title={t('editor.intensityHint')}
-    onSave={v => useSceneStore.getState().edit(tb => target === 'haptic' ? (tb.clips[wav] ? setClipIntensity(tb, wav, v) : null) : setSoundIntensity(tb, wav, v))} />
+  return <LevelSlider levelKey={levelKey.material(target, wav)} saved={saved} label={t('editor.clipGain')} title={t(fromKit ? 'editor.clipGainFromKit' : 'editor.clipGainHint')} disabled={fromKit}
+    onSave={v => useSceneStore.getState().edit(tb => target === 'haptic' ? (tb.clips[wav] ? setClipGain(tb, wav, v) : null) : setSoundClipGain(tb, wav, v))} />
 }
 
 /**
  * "Match the other ★" beside the strength of a shown event material that is starred together with others in its
- * event's sound / haptics: sets their strength (intensity) to this one's once — nothing follows later, each can still be
+ * event's sound / haptics: sets their strength (clip_gain) to this one's once — nothing follows later, each can still be
  * set on its own. Right after, the same slot reads "undo the match" (their previous strengths back) until another
  * material is shown. Both labels stacked (fixed width); hidden, not removed, when it does not apply; out of the Tab
- * order (cards and their strength slider only). Each press is written to the Scene log.
+ * order (cards and their strength slider only). Each press is written to the Scene log. Haptic clips the project's Kit
+ * has are left out (their clip_gain is the Kit's, ClipGainSlider).
  */
 function MatchStarred({ event, target, wav, project }: { event: string; target: 'sound' | 'haptic'; wav: string; project?: string }) {
   const { t } = useI18n()
   const others = useSceneStore(state => {
     if (!state.table || (project && state.lib?.project_name !== project)) return ''
     const e = effectiveEvent(state.table, parseEventKey(event))
-    return e ? otherStarred(e, target, wav).join('\n') : ''
+    return e ? otherStarred(e, target, wav).filter(name => target === 'sound' || !kitHolds(state.projectKit?.clipGains, name)).join('\n') : ''
   })
   const names = others ? others.split('\n') : []
   const [undo, setUndo] = useState<Record<string, number> | null>(null)
@@ -123,17 +128,17 @@ function MatchStarred({ event, target, wav, project }: { event: string; target: 
     const scene = useSceneStore.getState()
     if (!scene.table || !names.length) return
     const live = useEventStore.getState().liveLevel
-    const value = live?.key === levelKey.material(target, wav) ? live.value : materialIntensity(scene.table, target, wav)
-    const before = Object.fromEntries(names.map(name => [name, materialIntensity(scene.table!, target, name)]))
-    if (!scene.edit(tb => matchIntensity(tb, target, names, value))) return
+    const value = live?.key === levelKey.material(target, wav) ? live.value : materialClipGain(scene.table, target, wav, scene.projectKit?.clipGains)
+    const before = Object.fromEntries(names.map(name => [name, materialClipGain(scene.table!, target, name)]))
+    if (!scene.edit(tb => matchClipGain(tb, target, names, value))) return
     setUndo(before)
-    scene.addLog(`${event}: intensity of ${names.join(', ')} matched to ${wav} (${value}); before ${names.map(n => `${n} ${before[n]}`).join(', ')}`)
+    scene.addLog(`${event}: clip_gain of ${names.join(', ')} matched to ${wav} (${value}); before ${names.map(n => `${n} ${before[n]}`).join(', ')}`)
   }
   const revert = () => {
     const scene = useSceneStore.getState()
     if (!undo) return
-    if (scene.edit(tb => Object.entries(undo).reduce((next, [name, value]) => matchIntensity(next, target, [name], value), tb)))
-      scene.addLog(`${event}: intensity match undone (${Object.entries(undo).map(([n, v]) => `${n} ${v}`).join(', ')})`)
+    if (scene.edit(tb => Object.entries(undo).reduce((next, [name, value]) => matchClipGain(next, target, [name], value), tb)))
+      scene.addLog(`${event}: clip_gain match undone (${Object.entries(undo).map(([n, v]) => `${n} ${v}`).join(', ')})`)
     setUndo(null)
   }
   const shown = names.length > 0 || !!undo

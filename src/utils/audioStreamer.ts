@@ -52,7 +52,7 @@ let streamIdCounter = 0
 
 /**
  * Live control surface for an in-flight stream. All hooks are pulled
- * once per chunk so React state can drive pause / seek / intensity /
+ * once per chunk so React state can drive pause / seek / gain /
  * progress without rebuilding the streamer.
  */
 export interface StreamControl {
@@ -65,11 +65,11 @@ export interface StreamControl {
    *  seek bar, then null on subsequent calls. The streamer consumes the
    *  request, jumps the read offset, and re-anchors pacing. */
   consumeSeek?: () => number | null
-  /** Live intensity multiplier (typically 0..2). Read each chunk and
+  /** Live gain multiplier (typically 0..2). Read each chunk and
    *  applied before send, so a slider above the player can boost or
    *  cut the haptic level mid-stream. When absent, falls back to the
-   *  static `intensity` option (frozen at start). `atSec`: the chunk's position in the stream (seconds). */
-  getIntensity?: (atSec: number) => number
+   *  static `gain` option (frozen at start). `atSec`: the chunk's position in the stream (seconds). */
+  getGain?: (atSec: number) => number
   /** Live samples: the chunk at `atSec` (its position in the stream, seconds) as mono samples at the target rate,
    *  `frames` long, sent in place of the prepared PCM (L = R), so a source mixed again while it streams (a gain
    *  edited during a scene audition) reaches the device from the next chunk. Null (or another length) = the prepared PCM. */
@@ -81,8 +81,8 @@ export interface StreamControl {
 export interface StreamOptions {
   /** Target sample rate (default: 16000) */
   sampleRate?: number
-  /** Intensity multiplier applied to PCM data before sending (default: 1.0) */
-  intensity?: number
+  /** Gain multiplier applied to PCM data before sending (default: 1.0) */
+  gain?: number
   /** Abort signal */
   signal?: AbortSignal
   /** Pause / seek / progress hooks */
@@ -120,7 +120,7 @@ export async function streamClip(
   // reject されるので、Studio で **2ch に upmix して送る** ことで衝突回避する。
   // mono ソースは Web Audio の up-mix ルールで L=R duplicate される。
   const targetChannels = 2
-  const intensity = options?.intensity ?? 1.0
+  const gain = options?.gain ?? 1.0
   const control = options?.control
   let streamId = createStreamId()
 
@@ -136,10 +136,10 @@ export async function streamClip(
   throwIfAborted(signal)
   const { channels, pcm16 } = prepared
 
-  // Intensity is applied per-chunk inside the loop so a live slider
+  // The gain is applied per-chunk inside the loop so a live slider
   // can boost / cut the haptic level mid-stream. The static
-  // `intensity` option is the fallback when the caller hasn't wired
-  // a live `control.getIntensity` callback.
+  // `gain` option is the fallback when the caller hasn't wired
+  // a live `control.getGain` callback.
 
   const totalFrames = Math.floor(pcm16.length / channels)
   const frameSize = channels * 2 // PCM16
@@ -240,12 +240,12 @@ export async function streamClip(
       const live = control?.liveChunk?.(frameOffset / targetRate, endFrame - frameOffset)
       const chunk = live && live.length === endFrame - frameOffset ? monoToPcm16(live, channels) : pcm16.slice(frameOffset * channels, endFrame * channels)
 
-      // Apply current intensity per-chunk. `slice` already returned a
+      // Apply the current gain per-chunk. `slice` already returned a
       // new buffer so this mutation doesn't affect the source pcm16.
-      const liveIntensity = control?.getIntensity?.(frameOffset / targetRate) ?? intensity
-      if (liveIntensity !== 1.0) {
+      const liveGain = control?.getGain?.(frameOffset / targetRate) ?? gain
+      if (liveGain !== 1.0) {
         for (let i = 0; i < chunk.length; i++) {
-          let val = Math.round(chunk[i] * liveIntensity)
+          let val = Math.round(chunk[i] * liveGain)
           if (val > 32767) val = 32767
           if (val < -32768) val = -32768
           chunk[i] = val

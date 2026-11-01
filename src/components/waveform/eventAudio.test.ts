@@ -18,7 +18,7 @@ describe('A material opened from the Scene tab is shown as the plain file (Event
     const { useSceneStore } = await import('@/stores/sceneStore')
     const { useEventStore } = await import('@/stores/eventStore')
     const { openEventDefault, openEventHaptic } = await import('./eventAudio')
-    useSceneStore.setState({ table: { clips: { b: { intensity: 1, loop: false } }, sounds: {}, cues: { bite: { sfx: null, haptics: [{ clip: 'b', at: 'hand', gain: 1 }] } } } as never,
+    useSceneStore.setState({ table: { clips: { b: { clip_gain: 1, loop: false } }, sounds: {}, cues: { bite: { sfx: null, haptics: [{ clip: 'b', at: 'hand', gain: 1 }] } } } as never,
       pcm: { b: new Float32Array(1600) } })
     useEventStore.setState({ preview: null })
     openEventDefault('bite', true)

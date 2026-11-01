@@ -10,27 +10,39 @@ import type { SceneEvent } from './sceneData'
 
 const ev = (name: string, t = 3, extra: Partial<SceneEvent> = {}): SceneEvent => ({ t, name, hand: 'right', ...extra })
 
-describe('firingStrength (software / material / sent, never mixed)', () => {
-  it('splits a firing into material × software, sent matching the runtime gain', () => {
+describe('firingStrength (app / material / sent, never mixed)', () => {
+  it('splits a firing into material × app, sent matching the runtime gain', () => {
     const table = sampleTable(), d = ev('detent', 1, { gain: 0.4 })
-    // detent: thump intensity 0.5 (material) × route 0.5 × firing 0.4 (software 0.2) = 0.1 sent.
+    // detent: thump clip_gain 0.5 (material) × route 0.5 × firing 0.4 (app 0.2) = 0.1 sent.
     const s = firingStrength(table, [d], d)!
     expect(s.material).toBe(0.5)
-    expect(s.software).toBeCloseTo(0.2)
+    expect(s.app).toBeCloseTo(0.2)
     expect(s.route).toBe(0.5)
     expect(s.firing).toBe(0.4)
     expect(s.scale).toBe(1)
     expect(s.sent).toBeCloseTo(0.1)
     expect(s.sent).toBeCloseTo(firingGains(table, [d], d).haptics!)
   })
+  it("with a Kit, the material is the Kit's clip_gain: the bar (app), the breakdown and the lane gain follow it (DEC-103)", () => {
+    const table = sampleTable(), d = ev('detent', 1, { gain: 0.4 }), kit = { thump: 0.25 }
+    // thump: the Kit's 0.25 (the cue table's copy 0.5 is not used) × route 0.5 × firing 0.4.
+    const s = firingStrength(table, [d], d, kit)!
+    expect(s.material).toBe(0.25)
+    expect(s.app).toBeCloseTo(0.2)
+    expect(s.sent).toBeCloseTo(0.05)
+    expect(firingGains(table, [d], d, kit).haptics).toBeCloseTo(0.05)
+    expect(recordingFiringStrength(table, [d], kit).get(firingKey('detent', 1))?.material).toBe(0.25)
+    // A clip the Kit lacks: the cue table's.
+    expect(firingStrength(table, [ev('button')], ev('button'), kit)!.material).toBe(1)
+  })
   it('an omitted firing gain is 1; loops, events without routes and unknown ones are not one-shots', () => {
     const table = sampleTable()
-    expect(firingStrength(table, [ev('button')], ev('button'))).toMatchObject({ software: 1, material: 1, sent: 1, firing: 1 })
+    expect(firingStrength(table, [ev('button')], ev('button'))).toMatchObject({ app: 1, material: 1, sent: 1, firing: 1 })
     expect(firingStrength(table, [ev('feed_loop')], ev('feed_loop'))).toBeNull()
     expect(firingStrength(table, [ev('grab')], ev('grab'))).toBeNull()
     expect(firingStrength(table, [ev('nope')], ev('nope'))).toBeNull()
   })
-  it('the variant multiplier and the falloff are software, the loudest route is the one shown', () => {
+  it('the variant multiplier and the falloff are app, the loudest route is the one shown', () => {
     let table = sampleTable()
     table.cues.button.variants = { soft: { hapticsGain: 0.5 } }
     table.cues.button.haptics!.push({ clip: 'thump', at: 'pos_chest', gain: 2 })
@@ -41,11 +53,11 @@ describe('firingStrength (software / material / sent, never mixed)', () => {
     expect(s.scale).toBeCloseTo(0.25)
     expect(s.material).toBe(1)
     table = setVariantScale(table, { cue: 'button', variant: 'soft' }, { hapticsGain: 1 })
-    expect(firingStrength(table, [e], e)!.software).toBeCloseTo(0.5)
+    expect(firingStrength(table, [e], e)!.app).toBeCloseTo(0.5)
   })
   it('keys every firing of the recording', () => {
     const data = sampleData(), map = recordingFiringStrength(sampleTable(), data.full.events)
-    expect(map.get(firingKey('button', 3))?.software).toBe(1)
+    expect(map.get(firingKey('button', 3))?.app).toBe(1)
     expect(map.get(firingKey('feed_loop', 4.5))).toBeNull()
   })
 })

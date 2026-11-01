@@ -114,7 +114,7 @@ describe('exportKitAsPack — source audio safety', () => {
         clipFileSize: 0,
         modes: ['command'],
         loop: false,
-        intensity: 1,
+        clipGain: 1,
         deviceWiper: null,
       }],
     }
@@ -142,7 +142,7 @@ describe('exportKitAsPack — source audio safety', () => {
       clipFileSize: source.size,
       modes: ['command'],
       loop: false,
-      intensity: 0.5,
+      clipGain: 0.5,
       deviceWiper: null,
     })
     const kit: KitDefinition = {
@@ -169,7 +169,7 @@ describe('exportKitAsPack — source audio safety', () => {
 
   it('shares one generated WAV while keeping per-event parameters', async () => {
     const source = pcm16MonoWav()
-    const event = (id: string, eventId: string, clipName: string, intensity: number): KitDefinition['events'][number] => ({
+    const event = (id: string, eventId: string, clipName: string, clipGain: number): KitDefinition['events'][number] => ({
       id,
       eventId,
       clipName,
@@ -180,7 +180,7 @@ describe('exportKitAsPack — source audio safety', () => {
       clipFileSize: source.size,
       modes: ['command'],
       loop: false,
-      intensity,
+      clipGain,
       deviceWiper: null,
     })
     const kit: KitDefinition = {
@@ -203,11 +203,11 @@ describe('exportKitAsPack — source audio safety', () => {
     expect(result.files.some((file) => file.path.startsWith('source/'))).toBe(false)
     const manifestFile = result.files.find((file) => file.path.endsWith('-manifest.json'))!
     const manifest = JSON.parse(await manifestFile.blob.text()) as {
-      events: Record<string, { clip: string; parameters: { intensity: number } }>
+      events: Record<string, { clip: string; parameters: { clip_gain: number } }>
     }
     expect(manifest.events['shared-kit.soft'].clip).toBe('soft-hit.wav')
     expect(manifest.events['shared-kit.hard'].clip).toBe('soft-hit.wav')
-    expect(manifest.events['shared-kit.soft'].parameters.intensity).toBe(0.25)
-    expect(manifest.events['shared-kit.hard'].parameters.intensity).toBe(0.8)
+    expect(manifest.events['shared-kit.soft'].parameters.clip_gain).toBe(0.25)
+    expect(manifest.events['shared-kit.hard'].parameters.clip_gain).toBe(0.8)
   })
 })

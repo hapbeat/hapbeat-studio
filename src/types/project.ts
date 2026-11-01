@@ -7,7 +7,7 @@
 export interface EventDefinition {
   eventId: string
   clipFile?: string // filename of wav
-  intensity: number
+  clipGain: number
   device_wiper?: number
   loop: boolean
   ledColor?: string

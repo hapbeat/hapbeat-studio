@@ -11,7 +11,7 @@ const LIB = {
   layers: [{ cue: 'feed_loop', gain: [0, 1], rate: null, colors: [] }, { cue: 'cut_loop', gain: [2, 2], rate: null, colors: [] }],
 } as unknown as SceneLib
 const TABLE = {
-  clips: { feed: { intensity: 0.5, loop: true }, chip_h: { intensity: 1 } },
+  clips: { feed: { clip_gain: 0.5, loop: true }, chip_h: { clip_gain: 1 } },
   cues: {
     engage: { sfx: { sound: 'Engage', volume: 1 } },
     chip: { sfx: { sound: 'Chip', volume: 1 }, haptics: [{ clip: 'chip_h', at: 'both', gain: 1 }], variants: { big: {} } },
@@ -49,7 +49,7 @@ describe('audition context (scene.context, simultaneous groups)', () => {
     const pcm = { feed: new Float32Array([1, 1, 1, 1]) }
     const out = renderContextLoops(TABLE, LIB, DATA, { layers: [0], mark: 0.5 }, pcm, 1)!
     expect(out.length).toBe(RATE)
-    // Before 1 s of the replay (0.5 s of the playback) the layer is off; after it, clip × level 1 × intensity 0.5 (no route gain, like the one-shots).
+    // Before 1 s of the replay (0.5 s of the playback) the layer is off; after it, clip × level 1 × clip_gain 0.5 (no route gain, like the one-shots).
     expect(out[Math.round(0.2 * RATE)]).toBe(0)
     expect(out[Math.round(0.8 * RATE)]).toBeCloseTo(0.5)
     // A sound-only loop cue has no haptic.
@@ -74,8 +74,8 @@ describe('audition context (scene.context, simultaneous groups)', () => {
     const plan = contextPlan(DATA, LIB, ['chip', 'cut_loop'], 1, 3)
     expect(contextSoundFirings(TABLE, plan).map(f => [f.sound, Number(f.atSec.toFixed(3))])).toEqual([['Chip', 0.2], ['Chip', 1.5]])
     expect(contextHapticParts(TABLE, plan).map(p => [p.clip, Number(p.atSec.toFixed(3)), p.gain])).toEqual([['chip_h', 0.2, 1], ['chip_h', 1.5, 1]])
-    // cut_loop's sound (sfx.volume × intensity 1); feed_loop has none.
-    expect(contextLoopSounds(TABLE, { ...LIB, loop_cue_sounds: true } as SceneLib, { layers: [0, 1] })).toEqual([{ layer: 1, sound: 'Cutting', gain: 1 }])  // the sound's intensity only (sfx.volume 0.8 not applied)
+    // cut_loop's sound (sfx.volume × clip_gain 1); feed_loop has none.
+    expect(contextLoopSounds(TABLE, { ...LIB, loop_cue_sounds: true } as SceneLib, { layers: [0, 1] })).toEqual([{ layer: 1, sound: 'Cutting', gain: 1 }])  // the sound's clip_gain only (sfx.volume 0.8 not applied)
     expect(contextLoopSounds(TABLE, LIB, { layers: [0] })).toEqual([])
     // Playback 0.5 s with the PC sounds 0.1 s late: the levels of replay time 1.4 s.
     expect(contextReplayTime(plan, 0.5, 0.1)).toBeCloseTo(1.4)

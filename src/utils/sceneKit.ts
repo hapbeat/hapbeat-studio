@@ -1,11 +1,13 @@
 import type { SceneKitState } from '@/stores/scenePlayback'
 import type { ExportFile } from './kitExporter'
 import { dirAt, isNotFound } from './sceneProject'
+import { clampNumber, type KitClipGains } from './sceneCueTable'
 
 /**
  * The Kit a haptic video project's FIRE output plays (contracts scene-recording §1): the cue table's `kit`, kept in
  * the project folder as Studio saves a Kit (`<kit>-manifest.json`, `install-clips/`, `stream-clips/`). SceneKitStatus
- * compares it with what each Hapbeat reports (`kit_list`) and installs it (`deploy_kit_data`).
+ * compares it with what each Hapbeat reports (`kit_list`) and installs it (`deploy_kit_data`). Its manifest is also
+ * where the project's haptic clips get their material strength (clip_gain, contracts cue-table §9.1; sceneStore.projectKit).
  */
 
 export interface ProjectKit {
@@ -16,9 +18,31 @@ export interface ProjectKit {
   manifest: string
   /** The manifest's `version`; null when it has none (nothing to compare). */
   version: string | null
+  /** The material strength of each clip the Kit has (kitClipGains): what the Scene plays, the cue table holding a copy. */
+  clipGains: KitClipGains
 }
 
 const MANIFEST_NAMES = (kit: string) => [`${kit}-manifest.json`, 'manifest.json']
+
+/**
+ * A Kit manifest's clip gains (contracts cue-table §9.1, kit-format `clip_gain`): per Event ID `<kit>.<clip>`, its
+ * `parameters.clip_gain` in `events`, else in `stream_events` (absent = 1; kept to 0..1, the cue table's range). Event
+ * IDs of another category are not clips of this Kit.
+ */
+export function kitClipGains(manifest: unknown, kit: string): Record<string, number> {
+  const out: Record<string, number> = {}
+  const m = (manifest ?? {}) as { events?: unknown; stream_events?: unknown }
+  // stream_events first, so an `events` entry of the same clip wins.
+  for (const bucket of [m.stream_events, m.events]) {
+    if (!bucket || typeof bucket !== 'object') continue
+    for (const [id, entry] of Object.entries(bucket as Record<string, unknown>)) {
+      if (!id.startsWith(`${kit}.`)) continue
+      const gain = (entry as { parameters?: { clip_gain?: unknown } } | null)?.parameters?.clip_gain
+      out[id.slice(kit.length + 1)] = typeof gain === 'number' && Number.isFinite(gain) ? clampNumber(gain, 0, 1) : 1
+    }
+  }
+  return out
+}
 
 /**
  * The project's folder of Kit `kit`: `kits/<kit>/`, else the parent of the clip folder (`clipsPath`, viewer-lib
@@ -37,7 +61,7 @@ export async function locateProjectKit(root: FileSystemDirectoryHandle, kit: str
       let parsed: unknown
       try { parsed = JSON.parse(text) } catch (error) { throw new Error(`${folder}/${manifest}: ${error instanceof Error ? error.message : String(error)}`) }
       const version = parsed && typeof parsed === 'object' && typeof (parsed as { version?: unknown }).version === 'string' ? (parsed as { version: string }).version : null
-      return { kit, folder, manifest, version }
+      return { kit, folder, manifest, version, clipGains: kitClipGains(parsed, kit) }
     }
   }
   return null

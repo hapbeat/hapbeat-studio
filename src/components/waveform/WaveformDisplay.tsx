@@ -29,7 +29,7 @@ type OverviewMode = 'left' | 'right' | 'move' | 'seek'
  * `viewKey` identifies what is shown (defaults to the clip id); a new key re-fits the zoom.
  * Mouse playback: a click plays from there (a click while playing stops), a drag selects a
  * range, a double click plays from the start. `transport` sits right under the waveform.
- * `scale` multiplies the drawing only (a material's intensity): a change redraws, nothing is decoded or rendered.
+ * `scale` multiplies the drawing only (a material's clip_gain): a change redraws, nothing is decoded or rendered.
  * `placements`: the copies of a material placed at its event's firings; each gets a start line and an alternating tint.
  * `loop`: a loop cue's material looped over its layer's active segments: each segment gets a start and an end line, and
  * the recorded level is drawn as a line over the haptic (bottom = 0, top = 1).

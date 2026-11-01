@@ -5,7 +5,7 @@ import type { CueTable } from './sceneCueTable'
 
 /** breath: paired — sound i goes with clip i. */
 const table = (clips = ['breath_t56_a', 'breath_t56_b', 'breath_t56_c']): CueTable => ({
-  clips: Object.fromEntries(['breath_t56_a', 'breath_t56_b', 'breath_t56_c'].map(c => [c, { intensity: 1, loop: false }])),
+  clips: Object.fromEntries(['breath_t56_a', 'breath_t56_b', 'breath_t56_c'].map(c => [c, { clip_gain: 1, loop: false }])),
   sounds: {},
   cues: {
     ...(structuredClone(sampleTableCues())),

@@ -6,7 +6,7 @@ import type { CueTable } from './sceneCueTable'
 import type { Shot } from './cueEvents'
 import { sampleLib } from './sceneTestFixtures'
 
-const table = { kit: 'sports-kit', clips: { kick: { intensity: 0.5, loop: false }, crowd: { intensity: 0.8, loop: true } }, sounds: {},
+const table = { kit: 'sports-kit', clips: { kick: { clip_gain: 0.5, loop: false }, crowd: { clip_gain: 0.8, loop: true } }, sounds: {},
   cues: { kick: { sfx: null, haptics: [{ clip: 'kick', at: 'both', gain: 1 }] } } } as unknown as CueTable
 const devices: HapticDevice[] = [{ ipAddress: '10.0.0.2', address: 'p1/pos_l_wrist' }, { ipAddress: '10.0.0.3', address: 'p1/pos_r_wrist' }, { ipAddress: '10.0.0.4', address: 'p1/pos_chest' }]
 const shot = (routes: Shot['routes'], rate = 1): Shot => ({ sound: null, soundGain: 0, pitchSt: 0, jitterDb: 0, rate, routes })
@@ -23,7 +23,7 @@ beforeEach(() => { vi.useFakeTimers(); now = 1000; sent = []; logs = [] })
 afterEach(() => vi.useRealTimers())
 
 describe('FIRE one-shots: PLAY by Event ID through the helper', () => {
-  it('sends <kit>.<clip> at intensity × route gain × cue gain, clamped, unicast per wrist target', () => {
+  it('sends <kit>.<clip> at clip_gain × route gain × cue gain, clamped, unicast per wrist target', () => {
     const fire = make()
     fire.shot({ table, shot: shot([{ clip: 'kick', at: 'both', gain: 1.5 }]), hand: 'right', cueGain: 0.8, delayMs: 0, offsetMs: 0, devices, all: false })
     expect(sent).toEqual([]) // scheduled, not sent inline
@@ -37,6 +37,30 @@ describe('FIRE one-shots: PLAY by Event ID through the helper', () => {
     vi.advanceTimersByTime(0)
     expect(sent.map(m => m.payload.gain)).toEqual([1]) // clamped
     expect(kitEventId('k', 'c')).toBe('k.c')
+  })
+
+  it('sent = clamp(clip_gain × app_gain, 0, 1), with the Kit\'s clip_gain in a project with a Kit (DEC-103)', () => {
+    const fire = make()
+    // clip_gain from the Kit (kick 0.5 in the cue table copy; the Kit's value is used) × route gain × cue gain.
+    const send = (kit: Record<string, number> | null, routeGain: number, cueGain: number, clips = table.clips) => {
+      sent = []
+      fire.shot({ ...chest(), table: { ...table, clips } as CueTable, kit, shot: shot([{ clip: 'kick', at: 'pos_chest', gain: routeGain }]), cueGain })
+      vi.advanceTimersByTime(0)
+      return sent[0]?.payload.gain
+    }
+    expect(send({ kick: 0.5 }, 1, 1)).toBeCloseTo(0.5)
+    expect(send({ kick: 0.5 }, 2, 1)).toBeCloseTo(1)
+    expect(send({ kick: 0.8 }, 2, 1)).toBe(1) // clamped
+    expect(send({ kick: 0.5 }, 0, 1)).toBe(0)
+    expect(send({ kick: 0.8 }, 1.5, 0.5)).toBeCloseTo(0.6) // route gain 1.5 × cue gain 0.5 × clip_gain 0.8
+    expect(send({ kick: 0.25 }, 1, 1)).toBeCloseTo(0.25) // the Kit wins over the copy (0.5)
+    expect(send({ other: 0.1 }, 1, 1)).toBeCloseTo(0.5) // a clip the Kit lacks: the cue table's
+    // clip_gain unknown (no Kit, the cue table entry without one) × 1.5: 1 × 1.5, clamped.
+    expect(send(null, 1.5, 1, { kick: { loop: false } } as unknown as CueTable['clips'])).toBe(1)
+    // The ▶ test too.
+    sent = []
+    fire.test({ table, kit: { kick: 0.3 }, clip: 'kick', at: 'pos_chest', gain: 2, devices, all: false })
+    expect(sent[0].payload.gain).toBeCloseTo(0.6)
   })
 
   it('a hand route goes to the acting wrist; no matching device: nothing sent (never broadcast); loop clips are skipped', () => {
@@ -110,7 +134,7 @@ describe('FIRE flush (seek, loop jump, pause) and stopAll (output switch, haptic
 })
 
 describe('FIRE loops follow the recorded level', () => {
-  const loopTable = { kit: 'mill-kit', clips: { feed_loop: { intensity: 0.8, loop: true }, crowd: { intensity: 1, loop: true } }, sounds: {},
+  const loopTable = { kit: 'mill-kit', clips: { feed_loop: { clip_gain: 0.8, loop: true }, crowd: { clip_gain: 1, loop: true } }, sounds: {},
     cues: { feed_loop: { loop: true, sfx: null, haptics: [{ clip: 'feed_loop', at: 'both', gain: 1 }] } } } as unknown as CueTable
   const voices: LoopVoice[] = buildLoopVoices(loopTable, sampleLib())
   const run = (fire: SceneKitFire, level: number, vs = voices, ds = devices) => fire.loopTick({ table: loopTable, voices: vs, t: 1, level: () => [level, 1], devices: ds })

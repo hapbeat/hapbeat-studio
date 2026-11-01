@@ -32,7 +32,7 @@ export interface EventPreview {
   id: string; event: string; target: DecideTarget; label: string
   /** The material (WAV name without .wav). */
   material: string
-  /** The WAV as it is (a loop cue's repeated); its intensity is a playback gain and a drawing scale (DEC-086), never baked in. */
+  /** The WAV as it is (a loop cue's repeated); its clip_gain is a playback gain and a drawing scale (DEC-086), never baked in. */
   buffer: AudioBuffer
   /** Play it from the start as soon as it is shown (▶ on a material). */
   autoplay?: boolean
@@ -48,7 +48,7 @@ export interface EventPreview {
 
 /** A strength slider while it moves, before its value is saved (`key`: see `levelKey`). */
 export interface LiveLevel { key: string; value: number }
-/** Whose strength a slider sets: an event material (cue table intensity) or an AI candidate (its rating). */
+/** Whose strength a slider sets: an event material (cue table clip_gain) or an AI candidate (its rating). */
 export const levelKey = {
   material: (target: DecideTarget, wav: string) => `material:${target}:${wav}`,
   candidate: (trialId: string, candidateId: string) => `candidate:${trialId}/${candidateId}`,

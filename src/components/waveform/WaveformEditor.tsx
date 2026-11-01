@@ -22,7 +22,7 @@ import { lookupMaterials, provenanceLine } from '@/utils/materials'
 import type { WaveformClip } from '@/types/waveform'
 import { onlinePlaybackDevices, resolvePlaybackTargets, routePlaybackTargets } from '@/utils/playbackDevices'
 import { cueRoutePositions, materialRoutePositions } from '@/utils/cueEvents'
-import { materialIntensity } from '@/utils/sceneCueTable'
+import { materialClipGain } from '@/utils/sceneCueTable'
 import { handlePlaybackShortcut, isTypingTarget } from '@/utils/playbackShortcut'
 import { useEditorSettingsFolderSync, type SettingsSyncNotice } from '@/hooks/useEditorSettingsFolderSync'
 import { EditorContext, type EditorShared } from './editorContext'
@@ -201,14 +201,14 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const sceneData = useSceneStore(state => state.data)
   const contextLoops = useMemo(() => plan?.context?.layers.length && sceneTable && sceneLib && sceneData && audioBuffer
     ? renderContextLoops(sceneTable, sceneLib, sceneData, plan.context, scenePcm, audioBuffer.duration) : null, [plan, sceneTable, sceneLib, sceneData, scenePcm, audioBuffer?.duration])
-  // The shown material's strength (DEC-086: WAV × intensity): a gain on the PC output and the device stream and a scale
+  // The shown material's strength (DEC-086: WAV × clip_gain): a gain on the PC output and the device stream and a scale
   // of the "edited" drawing, changed live by the strength slider; the buffer is never rendered again for it. A group /
   // context mix (groupStream) is mixed again with it instead (the shown haptic only) and streamed live (playback.samples).
   // An AI candidate's comes from its rating form (published by the AI trials panel).
   const levelKeyShown = audition ? levelKey.candidate(audition.trialId, audition.candidateId)
     : eventPreview ? levelKey.material(eventPreview.target, eventPreview.material) : adjusting ? levelKey.material(adjusting.target, adjusting.wav) : null
   const levelMaterial = audition ? null : eventPreview ? { target: eventPreview.target, wav: eventPreview.material } : adjusting ?? null
-  const materialLevel = useSceneStore(state => levelMaterial && state.table ? materialIntensity(state.table, levelMaterial.target, levelMaterial.wav) : 1)
+  const materialLevel = useSceneStore(state => levelMaterial && state.table ? materialClipGain(state.table, levelMaterial.target, levelMaterial.wav, state.projectKit?.clipGains) : 1)
   const candidateLevel = useEventStore(state => audition ? state.levels[levelKey.candidate(audition.trialId, audition.candidateId)] ?? 1 : 1)
   const savedLevel = audition ? candidateLevel : materialLevel
   const liveLevel = useEventStore(state => levelKeyShown && state.liveLevel?.key === levelKeyShown ? state.liveLevel.value : null)

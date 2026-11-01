@@ -33,7 +33,7 @@ const layer = (cue: string, gain: number[], rate: number[] | null = null): Scene
 // Safety Mill's shape: a haptic-only layer, a hand layer with a sound, one sound-only layer and one with a rate column.
 const MILL = lib([layer('feed_loop', [0, 1], [2, 3]), layer('brush_loop', [4, 5]), layer('cut_loop', [6, 6]), layer('spindle_loop', [7, 7], [8, 8])])
 const TABLE = {
-  clips: {}, sounds: { BrushLoop: { intensity: 0.5 }, Cutting: { intensity: 0.1 } },
+  clips: {}, sounds: { BrushLoop: { clip_gain: 0.5 }, Cutting: { clip_gain: 0.1 } },
   cues: {
     feed_loop: { sfx: null, haptics: [] },
     brush_loop: { sfx: { sound: 'BrushLoop', volume: 1 } },
@@ -43,11 +43,11 @@ const TABLE = {
 } as unknown as CueTable
 
 describe('loop-cue sounds', () => {
-  it('takes each layer cue with a sound: its first sound, sfx.volume × the sound intensity', () => {
+  it('takes each layer cue with a sound: its first sound, sfx.volume × the sound clip gain', () => {
     expect(buildLoopSounds(TABLE, MILL)).toEqual([
       { layer: 1, sound: 'BrushLoop', gain: 0.5 },
       { layer: 2, sound: 'Cutting', gain: 0.8 * 0.1 },
-      { layer: 3, sound: 'Motor', gain: 1 }, // no re-pick: the first of `sounds`; no `sounds` entry = intensity 1
+      { layer: 3, sound: 'Motor', gain: 1 }, // no re-pick: the first of `sounds`; no `sounds` entry = clip_gain 1
     ])
     // A layer cue missing from the table, or with no sfx key, stays silent.
     expect(buildLoopSounds({ clips: {}, cues: { hold: {} } } as unknown as CueTable, lib([layer('hold', [0, 1]), layer('gone', [2, 3])]))).toEqual([])

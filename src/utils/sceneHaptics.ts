@@ -1,4 +1,4 @@
-import { routeClips, type CueTable } from './sceneCueTable'
+import { clipGainOf, routeClips, type CueTable, type KitClipGains } from './sceneCueTable'
 import { effectiveEvent, eventKey, MaterialPicker, resolveEventName, type Shot } from './cueEvents'
 import type { SceneLib } from './sceneData'
 import { mapLevel, type LevelMap } from './levelMap'
@@ -8,7 +8,7 @@ import { mapLevel, type LevelMap } from './levelMap'
  * source mixed per device (hapbeat-contracts sdk-multi-stream: 16 kHz stereo
  * PCM16, gain applied before the mix, the device's full address as the
  * STREAM_BEGIN `target`, exact unicast via `targets`). Gains follow the Unreal
- * SDK: WAV × clip intensity × route gain × cue gain (one-shots) or × the
+ * SDK: WAV × clip_gain (clipGainOf: the Kit's in a project with a Kit, `kit`) × route gain × cue gain (one-shots) or × the
  * recorded layer level through the route's levelMap (loops, DEC-090). Ported from the standalone haptic clip viewer.
  */
 
@@ -64,16 +64,16 @@ export type LevelFn = (t: number, layer: number, side: number) => [number, numbe
 
 /**
  * Continuous-layer voices: per loop cue route, one per hand for `hand` routes, else one following the louder hand.
- * `all` (every device plays every route): one voice per route to every device, following the louder hand.
+ * `all` (every device plays every route): one voice per route to every device, following the louder hand. `kit`: clipGainOf.
  */
-export function buildLoopVoices(table: CueTable, lib: SceneLib, all = false): LoopVoice[] {
+export function buildLoopVoices(table: CueTable, lib: SceneLib, all = false, kit: KitClipGains | null = null): LoopVoice[] {
   const out: LoopVoice[] = []
   lib.layers.forEach(({ cue: name }, layer) => {
     for (const r of table.cues[name]?.haptics ?? []) {
       // A loop does not re-pick while it plays: a multi-clip route loops its first clip.
       const clipName = routeClips(r)[0], clip = clipName === undefined ? undefined : table.clips[clipName]
       if (!clip || clipName === undefined) continue
-      const add = (targets: string[], side: number) => out.push({ clip: clipName, targets, gain: clip.intensity * r.gain, levelMap: r.levelMap, layer, side, phase: {} })
+      const add = (targets: string[], side: number) => out.push({ clip: clipName, targets, gain: clipGainOf(table, clipName, kit) * r.gain, levelMap: r.levelMap, layer, side, phase: {} })
       if (all) add([''], -1)
       else if (r.at === 'hand') { add([WRIST.left], 0); add([WRIST.right], 1) } else add(targetsOf(r.at), -1)
     }
@@ -88,14 +88,14 @@ export function buildLoopVoices(table: CueTable, lib: SceneLib, all = false): Lo
  * event's `variation.pick`; `jitter` is this firing's gain factor (shared with its sound).
  */
 export function cueVoices(table: CueTable, pcm: Record<string, Float32Array>, ev: { name: string; hand: string; gain?: number }, start: number,
-  opts: { picker?: MaterialPicker; jitter?: number } = {}): OneShotVoice[] {
+  opts: { picker?: MaterialPicker; jitter?: number; kit?: KitClipGains | null } = {}): OneShotVoice[] {
   const resolved = resolveEventName(table, ev.name), e = resolved && effectiveEvent(table, resolved.ref)
   if (!e) return []
   const picker = opts.picker ?? new MaterialPicker(), out: OneShotVoice[] = []
   e.haptics.forEach((r, i) => {
     const name = picker.pick(`${eventKey(e.ref)}#${i}`, routeClips(r), e.variation?.pick), clip = name === undefined ? undefined : table.clips[name]
     if (name === undefined || !pcm[name] || !clip || clip.loop) return
-    out.push({ pcm: pcm[name], targets: targetsOf(r.at, ev.hand), gain: clip.intensity * r.gain * (ev.gain ?? 1) * (opts.jitter ?? 1), start, cue: true })
+    out.push({ pcm: pcm[name], targets: targetsOf(r.at, ev.hand), gain: clipGainOf(table, name, opts.kit) * r.gain * (ev.gain ?? 1) * (opts.jitter ?? 1), start, cue: true })
   })
   return out
 }
@@ -108,12 +108,13 @@ export function resampleClip(data: Float32Array, rate: number): Float32Array {
   return out
 }
 
-/** Voices of one firing (fireShot): its picked one-shot clips at the shot's rate, clip intensity × route gain (× jitter) × cue gain; `all`: see routeTargets. */
-export function shotVoices(table: CueTable, pcm: Record<string, Float32Array>, shot: Shot, hand: string, cueGain: number, start: number, all = false): OneShotVoice[] {
+/** Voices of one firing (fireShot): its picked one-shot clips at the shot's rate, clip_gain (clipGainOf with `kit`) × route gain (× jitter) × cue gain; `all`: see routeTargets. */
+export function shotVoices(table: CueTable, pcm: Record<string, Float32Array>, shot: Shot, hand: string, cueGain: number, start: number, all = false,
+  kit: KitClipGains | null = null): OneShotVoice[] {
   return shot.routes.flatMap(r => {
     const clip = table.clips[r.clip], data = pcm[r.clip]
     if (!clip || !data || clip.loop) return []
-    return [{ pcm: resampleClip(data, shot.rate), targets: routeTargets(r.at, hand, all), gain: clip.intensity * r.gain * cueGain, start, cue: true }]
+    return [{ pcm: resampleClip(data, shot.rate), targets: routeTargets(r.at, hand, all), gain: clipGainOf(table, r.clip, kit) * r.gain * cueGain, start, cue: true }]
   })
 }
 

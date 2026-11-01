@@ -12,10 +12,10 @@ import { useI18n } from '@/i18n/I18nProvider'
  * to a Studio-local lookup (which doesn't survive browser restart).
  *
  * New firmware (≥ v0.1.3, see
- * `hapbeat-device-firmware/instructions/instructions-kit-list-include-intensity-…`)
+ * `hapbeat-device-firmware/instructions/instructions-kit-list-include-intensity-…`; the key is `clip_gain` since DEC-103)
  * embeds the manifest's `parameters.*` directly in each event row,
  * so the UI can render amp / loop / device_wiper without any
- * client-side state. `intensity` / `loop` / `device_wiper` are all
+ * client-side state. `clip_gain` / `loop` / `device_wiper` are all
  * optional — old firmware drops them, and we degrade to "amp ?"
  * with a one-line banner explaining the version requirement.
  */
@@ -24,7 +24,7 @@ type EventEntry =
   | {
       name: string
       mode?: string
-      intensity?: number
+      clip_gain?: number
       loop?: boolean
       device_wiper?: number
     }
@@ -39,12 +39,12 @@ interface Props {
   device: DeviceInfo
   kits?: KitEntry[]
   sendTo: (msg: ManagerMessage) => void
-  /** Plays the event via UDP PLAY broadcast. `intensity` is the
-   *  manifest-side amp value from the device's kit_list response —
+  /** Plays the event via UDP PLAY broadcast. `clipGain` is the
+   *  manifest-side clip gain (`clip_gain`) from the device's kit_list response —
    *  forwarded so the wire-time gain matches what the panel shows.
    *  `null` when unavailable (old firmware) → DeviceDetail's playEvent
    *  falls back to gain=1.0. */
-  onPlayEvent: (eventId: string, intensity: number | null) => void
+  onPlayEvent: (eventId: string, clipGain: number | null) => void
 }
 
 interface NormalizedEvent {
@@ -55,7 +55,7 @@ interface NormalizedEvent {
   mode: string
   /** Manifest-side amp (0.0–1.0). `null` when the firmware response
    *  didn't include the field (i.e. fw < v0.1.3). */
-  intensity: number | null
+  clipGain: number | null
 }
 
 function normalizeEvents(kit: KitEntry): NormalizedEvent[] {
@@ -63,19 +63,19 @@ function normalizeEvents(kit: KitEntry): NormalizedEvent[] {
   return evs.map((ev) => {
     const id = typeof ev === 'string' ? ev : ev.name
     const mode = typeof ev === 'string' ? 'command' : (ev.mode ?? 'command')
-    const intensity = typeof ev === 'string'
+    const clipGain = typeof ev === 'string'
       ? null
-      : typeof ev.intensity === 'number' ? ev.intensity : null
+      : typeof ev.clip_gain === 'number' ? ev.clip_gain : null
     const display = id.startsWith(`${kit.kit_id}.`)
       ? id.slice(kit.kit_id.length + 1)
       : id
-    return { id, display, mode, intensity }
+    return { id, display, mode, clipGain }
   })
 }
 
 const STREAM_MODES = new Set(['stream_clip'])
 
-/** Minimum firmware version that emits `parameters.intensity` (and
+/** Minimum firmware version that emits `parameters.clip_gain` (and
  *  friends) in `kit_list_result` event rows. Bumped here when the
  *  firmware spec for the response shape changes. */
 const KIT_LIST_PARAMS_MIN_FW = '0.1.3'
@@ -103,19 +103,19 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
   }
 
   // Detect "old firmware" by checking whether ANY event in the
-  // response carried an `intensity` field. If the firmware returns
+  // response carried a `clip_gain` field. If the firmware returns
   // only `{name, mode}` for every event, the panel can't show amp
   // values from device data alone — surface a one-line banner so
   // the user knows to update firmware (≥ v0.1.3).
   //
-  // We treat "kits present but all events lack intensity" as the
+  // We treat "kits present but all events lack clip_gain" as the
   // signal — an empty kits array doesn't tell us anything about
   // firmware capabilities.
   const oldFirmware = useMemo(() => {
     if (!kits || kits.length === 0) return false
     const allNormalized = kits.flatMap(normalizeEvents)
     if (allNormalized.length === 0) return false
-    return allNormalized.every((e) => e.intensity === null)
+    return allNormalized.every((e) => e.clipGain === null)
   }, [kits])
 
   // Default-expand the only kit so the events are visible without an extra click.
@@ -166,7 +166,7 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
           }}
           title={
             `Firmware が古いため amp 値が取得できません。\n` +
-            `kit_list_result の event 行に parameters.intensity を含める firmware (v${KIT_LIST_PARAMS_MIN_FW} 以上) が必要です。\n` +
+            `kit_list_result の event 行に parameters.clip_gain を含める firmware (v${KIT_LIST_PARAMS_MIN_FW} 以上) が必要です。\n` +
             `Manage → Firmware から更新してください。`
           }
         >
@@ -224,17 +224,17 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
                         </div>
                         <ul className="installed-kit-events">
                           {fireEvents.map((ev) => {
-                            const ampPct = ev.intensity != null
-                              ? Math.round(ev.intensity * 100)
+                            const ampPct = ev.clipGain != null
+                              ? Math.round(ev.clipGain * 100)
                               : null
                             const ampLabel = ampPct != null ? `amp ${ampPct}%` : 'amp ?'
                             return (
                               <li key={ev.id} style={{ display: 'flex', gap: 4, alignItems: 'stretch' }}>
                                 <button
                                   className="installed-kit-event-btn"
-                                  onClick={() => onPlayEvent(ev.id, ev.intensity)}
+                                  onClick={() => onPlayEvent(ev.id, ev.clipGain)}
                                   title={ampPct != null
-                                    ? `クリックで PLAY: event_id=${ev.id}, gain=${(ev.intensity ?? 1).toFixed(2)} (device manifest amp ${ampPct}%)`
+                                    ? `クリックで PLAY: event_id=${ev.id}, gain=${(ev.clipGain ?? 1).toFixed(2)} (device manifest amp ${ampPct}%)`
                                     : `クリックで PLAY: event_id=${ev.id}, gain=1.0 (firmware が古いため amp 未取得 — v${KIT_LIST_PARAMS_MIN_FW} 以上で device 側から取得可)`}
                                 >
                                   <span className="installed-kit-event-name">{ev.display}</span>
@@ -270,8 +270,8 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
                         </div>
                         <ul className="installed-kit-events">
                           {clipEvents.map((ev) => {
-                            const ampPct = ev.intensity != null
-                              ? Math.round(ev.intensity * 100)
+                            const ampPct = ev.clipGain != null
+                              ? Math.round(ev.clipGain * 100)
                               : null
                             const ampLabel = ampPct != null ? `amp ${ampPct}%` : 'amp ?'
                             return (

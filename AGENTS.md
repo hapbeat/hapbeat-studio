@@ -68,7 +68,7 @@ Helper itself reaches the device over **UDP 7700** (commands) and **TCP 7701**
 - **First-time device bring-up:** Manage → Onboarding wizard = USB Serial
   connect → flash firmware → set Wi-Fi.
 - **Author + ship a Kit:** Kit tab → import WAVs → set Event id + mode
-  (FIRE = command / CLIP = stream / BOTH) + intensity → **Save Folder** (writes
+  (FIRE = command / CLIP = stream / BOTH) + clip gain (`clip_gain`) → **Save Folder** (writes
   the Kit folder to disk with `install-clips/` + `stream-clips/`) →
   **Deploy** (flashes command clips to selected devices via Helper).
 - **Edit device UI:** UI tab → arrange OLED elements / LED / buttons → write to

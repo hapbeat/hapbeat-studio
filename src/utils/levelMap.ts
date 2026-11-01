@@ -5,7 +5,7 @@
  * input order; each segment [(x0, y0), (x1, y1)] is y0 + (y1 − y0)·c((x − x0) / (x1 − x0)) with c the `curve` shape
  * (rampCurve's); beyond the last point the last segment's secant extends it linearly; the output is kept in 0..4, and
  * input 0 (the loop is not playing) is always 0. Absent = the output is the input itself.
- * Output = WAV × intensity × gain / volume × levelMap(input).
+ * Output = WAV × clip_gain × gain / volume × levelMap(input).
  */
 import { curveAt, RAMP_CURVES, type RampCurve } from './rampCurve'
 

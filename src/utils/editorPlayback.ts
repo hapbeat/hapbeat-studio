@@ -24,7 +24,7 @@ export interface PlaybackLeadIn { seconds: (start: number) => number; begin: (st
 /** Loop repeats start at least this long apart (a near-zero range or an instant end never spins). */
 export const MIN_LOOP_PERIOD_MS = 50
 export class EditorPlayback {
-  /** The device stream's gain (DEC-086 intensity) at `time` (seconds of the player), read for every chunk sent: a change applies mid-stream without restarting. */
+  /** The device stream's gain (DEC-086 clip_gain) at `time` (seconds of the player), read for every chunk sent: a change applies mid-stream without restarting. */
   level: ((time: number) => number) | null = null
   /**
    * The device stream's samples from `time` (seconds of the player), `frames` long at the stream rate, read for every
@@ -171,7 +171,7 @@ export class EditorPlayback {
           leading.begin(start, leadSec); leading = null
           leadTimer = setTimeout(() => { leadTimer = null; if (!controller.signal.aborted) go() }, leadSec * 1000)
         }
-      }, {signal: controller.signal, leadInSec: leadSec, control: {consumeSeek: () => {const seek = this.seekRequest; this.seekRequest = null; return seek}, getIntensity: at => this.level?.(range.start + at) ?? 1,
+      }, {signal: controller.signal, leadInSec: leadSec, control: {consumeSeek: () => {const seek = this.seekRequest; this.seekRequest = null; return seek}, getGain: at => this.level?.(range.start + at) ?? 1,
         liveChunk: (at, frames) => this.samples?.(range.start + at, frames) ?? null}})
     } catch (error) {
       // The helper took the devices from this stream (audioStreamer StreamLostError): the sound plays on, the notice says why the haptics stopped.

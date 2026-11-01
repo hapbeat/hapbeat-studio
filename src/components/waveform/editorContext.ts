@@ -30,7 +30,7 @@ export interface EditorShared {
   soundLane: SoundLane | null
   /** A sound is shown (AI sound candidate, event sound, adjusted sound material): drawn in the sound colour, else the haptic one. */
   soundShown: boolean
-  /** The shown material's / AI candidate's strength (intensity, live while its slider moves): playback gain and "edited" drawing scale. */
+  /** The shown material's / AI candidate's strength (clip_gain, live while its slider moves): playback gain and "edited" drawing scale. */
   level: number
   player: EditorBufferPlayer
   playback: EditorPlayback

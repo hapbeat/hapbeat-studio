@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ACK_TIMEOUT_MS, buildLoopVoices, CHUNK, RETRY_MS, cueVoices, LEAD_MS, matchesAddress, QUIET_END_MS, renderChunk, routeTargets, SceneHapticMixer, tableTargets, targetsOf, WRIST } from './sceneHaptics'
+import { ACK_TIMEOUT_MS, buildLoopVoices, CHUNK, RETRY_MS, cueVoices, LEAD_MS, matchesAddress, QUIET_END_MS, renderChunk, routeTargets, SceneHapticMixer, shotVoices, tableTargets, targetsOf, WRIST } from './sceneHaptics'
 import { parseScenePlayback } from '@/stores/scenePlayback'
 import { sampleLib, sampleTable } from './sceneTestFixtures'
 
@@ -21,13 +21,23 @@ describe('scene haptic routing', () => {
     expect(tableTargets(sampleTable()).sort()).toEqual(['*/pos_chest', WRIST.left, WRIST.right].sort())
   })
 
-  it('builds one-shot voices with clip intensity × route gain × cue gain', () => {
+  it('builds one-shot voices with clip gain × route gain × cue gain', () => {
     const pcm = { click: ones(10), thump: ones(10), hum: ones(10) }
     const v = cueVoices(sampleTable(), pcm, { name: 'detent', hand: 'right', gain: 0.5 }, 100)
     expect(v).toHaveLength(1)
     expect(v[0].gain).toBeCloseTo(0.5 * 0.5 * 0.5)
     expect(v[0].targets).toEqual(['*/pos_chest'])
     expect(cueVoices(sampleTable(), pcm, { name: 'feed_loop', hand: 'right' }, 0)).toEqual([]) // loop clips are layer-driven
+  })
+
+  it("CLIP: the Kit's clip_gain in a project with a Kit (one-shots, firings and loops; DEC-103)", () => {
+    const pcm = { click: ones(10), thump: ones(10), hum: ones(10) }, kit = { thump: 0.2, hum: 0.4 }
+    expect(cueVoices(sampleTable(), pcm, { name: 'detent', hand: 'right', gain: 0.5 }, 100, { kit })[0].gain).toBeCloseTo(0.2 * 0.5 * 0.5)
+    const shot = { sound: null, soundGain: 0, pitchSt: 0, jitterDb: 0, rate: 1, routes: [{ clip: 'thump', at: 'pos_chest', gain: 1.5 }, { clip: 'click', at: 'pos_chest', gain: 1 }] }
+    // thump from the Kit, click (not in the Kit) from the cue table (1.0); × route gain × cue gain 0.5.
+    expect(shotVoices(sampleTable(), pcm, shot, 'right', 0.5, 0, false, kit).map(v => v.gain)).toEqual([0.2 * 1.5 * 0.5, 1 * 1 * 0.5])
+    expect(shotVoices(sampleTable(), pcm, shot, 'right', 0.5, 0, false, null).map(v => v.gain)).toEqual([0.5 * 1.5 * 0.5, 0.5])
+    expect(buildLoopVoices(sampleTable(), sampleLib(), false, kit).map(x => x.gain)).toEqual([0.4 * 0.8, 0.4 * 0.8])
   })
 
   it('builds one loop voice per hand for hand routes', () => {

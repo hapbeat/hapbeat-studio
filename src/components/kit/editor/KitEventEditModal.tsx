@@ -26,7 +26,7 @@ export interface KitEventEditModalProps {
  * Modal editor for a single kit event. Counterpart to `ClipEditModal`
  * — same shape (Name / Note / footer with destructive action) but
  * scoped to kit-event metadata. Tags / group / sourceFilename live on
- * the library clip and aren't editable here; mode / intensity / loop
+ * the library clip and aren't editable here; mode / clip gain / loop
  * are tuned inline on the kit row, not in this dialog.
  */
 export function KitEventEditModal({ event, onClose, onUpdate, onRemove }: KitEventEditModalProps) {

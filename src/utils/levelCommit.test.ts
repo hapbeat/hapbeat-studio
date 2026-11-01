@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EditorPlayback } from './editorPlayback'
 import { EditorBufferPlayer } from './editorBufferPlayer'
 import { LevelCommit, levelText } from './levelCommit'
-import { setClipIntensity, type CueTable } from './sceneCueTable'
+import { setClipGain, type CueTable } from './sceneCueTable'
 import type { StreamControl, StreamOptions } from './audioStreamer'
 import type { ManagerMessage } from '@/types/manager'
 
@@ -18,7 +18,7 @@ function engine() {
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve() }
 afterEach(() => vi.useRealTimers())
 
-describe('strength slider (DEC-086 intensity) during loop playback', () => {
+describe('strength slider (DEC-086 clip_gain) during loop playback', () => {
   it('ten moves change the PC gain and the device stream gain live, never stop or restart, and save once debounced', async () => {
     vi.useFakeTimers()
     const e = engine(), player = new EditorBufferPlayer({ duration: 2 } as AudioBuffer, e.create)
@@ -35,9 +35,9 @@ describe('strength slider (DEC-086 intensity) during loop playback', () => {
     // The editor's wiring (WaveformEditor): the shown level is the PC gain and the stream's per-chunk gain.
     let level = 1
     playback.level = () => level
-    let table = { kit: 'k', clips: { step: { intensity: 1 } }, cues: { footstep: { haptics: [] } } } as unknown as CueTable
+    let table = { kit: 'k', clips: { step: { clip_gain: 1 } }, cues: { footstep: { haptics: [] } } } as unknown as CueTable
     const cues = table.cues
-    const save = vi.fn((value: number) => { table = setClipIntensity(table, 'step', value) })
+    const save = vi.fn((value: number) => { table = setClipGain(table, 'step', value) })
     const commit = new LevelCommit(save)
     const move = (value: number) => { level = value; player.setLevel(value); commit.input(value) }
 
@@ -46,7 +46,7 @@ describe('strength slider (DEC-086 intensity) during loop playback', () => {
     const sent: number[] = []
     for (let i = 1; i <= 10; i++) {
       move(1 - i * 0.05)
-      sent.push(control!.getIntensity!(0)) // the next chunk the stream sends
+      sent.push(control!.getGain!(0)) // the next chunk the stream sends
       expect(e.gain.gain.value).toBeCloseTo(1 - i * 0.05)
       await vi.advanceTimersByTimeAsync(100)
     }
@@ -58,7 +58,7 @@ describe('strength slider (DEC-086 intensity) during loop playback', () => {
     expect(save).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(400)
     expect(save).toHaveBeenCalledOnce(); expect(save).toHaveBeenLastCalledWith(0.5)
-    expect(table.clips.step.intensity).toBe(0.5); expect(table.cues).toBe(cues)
+    expect(table.clips.step.clip_gain).toBe(0.5); expect(table.cues).toBe(cues)
     expect(e.sources).toHaveLength(1); expect(player.isPlaying()).toBe(true)
     playback.stop(); player.dispose()
   })

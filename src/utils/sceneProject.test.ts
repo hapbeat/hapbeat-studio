@@ -66,12 +66,12 @@ describe('scene project folder', () => {
   it('writes new WAVs and the cue table exactly where the viewer did', async () => {
     const folder = project(), lib = sampleLib()
     const table = sampleTable()
-    table.clips.new_hit = { intensity: 1, loop: false }
+    table.clips.new_hit = { clip_gain: 1, loop: false }
     await writeSceneSave(folder.handle, lib, table, { clips: { new_hit: new TextEncoder().encode('RIFF').buffer }, sounds: { Bell: new TextEncoder().encode('RIFF').buffer } })
     expect(folder.read(`${lib.paths.clips}/new_hit.wav`)).toBe('RIFF')
     expect(folder.read(`${lib.paths.sounds}/Bell.wav`)).toBe('RIFF')
     expect(folder.read(lib.paths.cues)).toBe(serializeCueTable(table))
-    expect(parseCueTable(folder.read(lib.paths.cues)!).clips.new_hit.intensity).toBe(1)
+    expect(parseCueTable(folder.read(lib.paths.cues)!).clips.new_hit.clip_gain).toBe(1)
     expect(folder.exists(`${lib.paths.clips}/click.wav`)).toBe(true) // nothing removed
   })
 

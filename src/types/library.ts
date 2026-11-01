@@ -27,7 +27,7 @@ export interface LibraryClip {
   /** Set when this clip was imported from built-in library */
   builtinId?: string
   /** Library 側のプレビュー amp (0-1)。Kit 追加時のデフォルト値にもなる。 */
-  libraryIntensity?: number
+  libraryClipGain?: number
   /**
    * Optional free-form annotation by the user. Surfaced as a tooltip on
    * the clip name in cards and as a multi-line note field in
@@ -36,12 +36,12 @@ export interface LibraryClip {
   note?: string
 }
 
-/** Library amp preset - clipId → intensity のマップ */
+/** Library amp preset - clipId → clip gain のマップ */
 export interface ClipAmpPreset {
   name: string
   /** 保存した日時 (ISO 8601) */
   createdAt: string
-  /** clipId → intensity (0.0–1.0) */
+  /** clipId → clip gain (0.0–1.0) */
   values: Record<string, number>
 }
 
@@ -191,7 +191,7 @@ export interface KitEvent {
    * one in each bucket — under the same base eventId (schema 2.0.0 bucket
    * separation, DEC-031).
    *
-   * intensity / loop / deviceWiper are shared across modes (the kit exporter
+   * clipGain / loop / deviceWiper are shared across modes (the kit exporter
    * applies them per-bucket where relevant; device_wiper is dropped from
    * stream_events as it has no SDK meaning).
    */
@@ -199,11 +199,11 @@ export interface KitEvent {
   /** Loop playback */
   loop: boolean
   /**
-   * Intensity: the author's intended base strength (0.0–1.0).
-   * SDK gain=1.0 plays at this intensity. gain=1.5 plays 50% stronger.
+   * Clip gain (manifest `parameters.clip_gain`, DEC-103): the material strength (0.0–1.0).
+   * Sent = clamp(clip_gain × app_gain, 0, 1): app gain 1.0 plays at this clip gain, 1.5 plays 50% stronger.
    * Default: 1.0 (WAV at full amplitude).
    */
-  intensity: number
+  clipGain: number
   /**
    * MCP4018 wiper value (0–127) of the Hapbeat device when this event was tuned.
    * Allows exact reproduction of the author's experience.

@@ -9,9 +9,9 @@ const ev = (name: string, t = 3, extra: Partial<SceneEvent> = {}): SceneEvent =>
 describe('firingGains', () => {
   it('resolves sound and haptic gain like the runtime', () => {
     const table = sampleTable(), events = [ev('button')]
-    // sound: intensity 1 × volume 0.6; haptics: click intensity 1 × route 1.0 × recorded gain 1.
+    // sound: clip_gain 1 × volume 0.6; haptics: click clip_gain 1 × route 1.0 × recorded gain 1.
     expect(firingGains(table, events, events[0])).toEqual({ sound: 0.6, haptics: 1 })
-    // detent: no sound; thump intensity 0.5 × route 0.5 × recorded gain 0.5.
+    // detent: no sound; thump clip_gain 0.5 × route 0.5 × recorded gain 0.5.
     const d = ev('detent', 1, { gain: 0.5 })
     const g = firingGains(table, [d], d)
     expect(g.sound).toBeNull()

@@ -59,7 +59,7 @@ function round2(v: number): number {
  * Convention (2026-05-17, instructions-kitname-manifest-rename):
  * `<kit-id>-manifest.json` so multiple kits side-by-side stay
  * identifiable in OS Explorer / Unity SDK pickers. The Unity SDK
- * (`HapbeatManifestIntensity.FindKitManifest`) and Helper deploy
+ * (`HapbeatManifestClipGain.FindKitManifest`) and Helper deploy
  * code follow the same convention with fallback to any
  * `*manifest*.json` for legacy kits.
  */
@@ -257,7 +257,7 @@ export async function exportKitAsPack(
   // Per-event lazy decode. When every mode of this event hits the IDB
   // encoded-WAV cache (sourceHash unchanged since the last save), the
   // decoder is never touched — the dominant cost of Save Folder /
-  // Deploy when the user only adjusts amp / intensity. The decode is
+  // Deploy when the user only adjusts amp / clip_gain. The decode is
   // shared across modes (command + stream_clip) so multi-mode events
   // decode at most once.
   type DecodedAudio = {
@@ -493,7 +493,7 @@ export async function exportKitAsPack(
           clip: fname,
           description: '',
           parameters: {
-            intensity: round2(ev.intensity),
+            clip_gain: round2(ev.clipGain),
             loop: ev.loop,
             ...(ev.deviceWiper !== null ? { device_wiper: ev.deviceWiper } : {}),
           },
@@ -519,7 +519,7 @@ export async function exportKitAsPack(
           clip: fname,
           description: '',
           parameters: {
-            intensity: round2(ev.intensity),
+            clip_gain: round2(ev.clipGain),
             loop: ev.loop,
           },
         }
@@ -565,7 +565,7 @@ export async function exportKitAsPack(
   }
 
   // manifest.json is always emitted as a fresh blob — it's tiny (<= a
-  // few KB) and its content (parameters / intensity / target_device)
+  // few KB) and its content (parameters / clip_gain / target_device)
   // can change on any kit edit, so flushKitFolderNow writes it on
   // every save regardless of WAV-skip logic.
   const manifestJson = JSON.stringify(manifest, null, 2)

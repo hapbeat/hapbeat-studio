@@ -118,17 +118,40 @@ export const routeAlternates = (route: CueRoute | null | undefined): string[] =>
 /** A sfx's unstarred sounds (DEC-089: kept for quick swaps, never played). */
 export const sfxAlternates = (sfx: CueSfx | null | undefined): string[] => Array.isArray(sfx?.alternates) ? sfx.alternates : []
 /** `syncMs` (clips and sounds, DEC-093): the material's sync point, ms from the file start (absent = 0 in the game; see syncPoint). */
-export interface ClipEntry { intensity: number; loop: boolean; description?: string; syncMs?: number; [key: string]: unknown }
-/** A sound's base level (DEC-086): the WAV holds the shape at full scale, `intensity` how strong it is (0..1; absent = 1). */
-export interface SoundEntry { intensity: number; syncMs?: number; [key: string]: unknown }
+export interface ClipEntry { clip_gain: number; loop: boolean; description?: string; syncMs?: number; [key: string]: unknown }
+/** A sound's base level (DEC-086): the WAV holds the shape at full scale, `clip_gain` how strong it is (0..1; absent = 1). */
+export interface SoundEntry { clip_gain: number; syncMs?: number; [key: string]: unknown }
 export interface CueTable { schema_version?: number; kit?: string; clips: Record<string, ClipEntry>; sounds?: Record<string, SoundEntry>; cues: Record<string, CueEntry>; [key: string]: unknown }
 
 /** WAV peak the materials are written at (−0.5 dBFS, DEC-086). */
 export const MATERIAL_PEAK = 10 ** (-0.5 / 20)
 /** The base level of a sound (its `sounds` entry; 1 when it has none). */
-export const soundIntensity = (table: CueTable, sound: string) => table.sounds?.[sound]?.intensity ?? 1
-/** The base level of a material: a clip's intensity, or a sound's. */
-export const materialIntensity = (table: CueTable, target: 'sound' | 'haptic', name: string) => target === 'haptic' ? table.clips[name]?.intensity ?? 1 : soundIntensity(table, name)
+export const soundClipGain = (table: CueTable, sound: string) => table.sounds?.[sound]?.clip_gain ?? 1
+/**
+ * The clip gains of a project's Kit (contracts cue-table §9.1): clip → `parameters.clip_gain` of the Kit manifest's
+ * event `<kit>.<clip>`, for the clips the Kit has (sceneKit.kitClipGains). Null: the project has no Kit.
+ */
+export type KitClipGains = Readonly<Record<string, number>>
+/**
+ * A haptic clip's material strength (clip_gain, DEC-103): with a Kit, the Kit's value for a clip the Kit has (the cue
+ * table holds a copy), else the cue table's (absent = 1). FIRE, CLIP and the timeline all resolve it here.
+ */
+export const clipGainOf = (table: CueTable, clip: string, kit?: KitClipGains | null) =>
+  kit && kitHolds(kit, clip) ? kit[clip] : table.clips[clip]?.clip_gain ?? 1
+/** Whether the Kit has `clip` (its clip_gain is then the Kit's: the editors show it read only). */
+export const kitHolds = (kit: KitClipGains | null | undefined, clip: string) => !!kit && Object.prototype.hasOwnProperty.call(kit, clip)
+/** The base level of a material: a clip's clip_gain (clipGainOf), or a sound's (always the cue table's). */
+export const materialClipGain = (table: CueTable, target: 'sound' | 'haptic', name: string, kit?: KitClipGains | null) =>
+  target === 'haptic' ? clipGainOf(table, name, kit) : soundClipGain(table, name)
+/** The cue table's clips whose clip_gain (the copy) differs from the Kit's, in the table's order. */
+export const kitCopyDiffers = (table: CueTable, kit: KitClipGains | null): string[] =>
+  kit ? Object.keys(table.clips).filter(c => kitHolds(kit, c) && table.clips[c].clip_gain !== kit[c]) : []
+/** The table with the copy aligned: every clip the Kit has gets the Kit's clip_gain (the same object when nothing differs). */
+export function alignClipGains(table: CueTable, kit: KitClipGains | null): CueTable {
+  const differs = kitCopyDiffers(table, kit)
+  if (!kit || !differs.length) return table
+  return { ...table, clips: { ...table.clips, ...Object.fromEntries(differs.map(c => [c, { ...table.clips[c], clip_gain: kit[c] }])) } }
+}
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 
@@ -219,7 +242,7 @@ export function validateCueTable(table: CueTable, ctx: CueTableContext): string[
   const clips = table.clips
   for (const [name, c] of Object.entries(clips)) {
     if (!CLIP_NAME.test(name)) err.push(`clip name ${name} must match ${CLIP_NAME.source}`)
-    if (!inRange(c.intensity, 0, 1)) err.push(`clip ${name}: intensity must be 0..1`)
+    if (!inRange(c.clip_gain, 0, 1)) err.push(`clip ${name}: clip_gain must be 0..1`)
     if (typeof c.loop !== 'boolean') err.push(`clip ${name}: loop must be true/false`)
     if (c.syncMs !== undefined && !inRange(c.syncMs, 0, SYNC_MAX_MS)) err.push(`clip ${name}: syncMs must be a number of ms ≥ 0`)
     if (!ctx.clipFiles.has(name)) err.push(`clip ${name}: ${lib.paths.clips}/${name}.wav missing`)
@@ -230,7 +253,7 @@ export function validateCueTable(table: CueTable, ctx: CueTableContext): string[
     else {
       for (const [name, entry] of Object.entries(sounds)) {
         if (!SOUND_NAME.test(name)) err.push(`sound name ${name} must match ${SOUND_NAME.source}`)
-        if (!isRecord(entry) || !inRange(entry.intensity, 0, 1)) err.push(`sound ${name}: intensity must be 0..1`)
+        if (!isRecord(entry) || !inRange(entry.clip_gain, 0, 1)) err.push(`sound ${name}: clip_gain must be 0..1`)
         else if (entry.syncMs !== undefined && !inRange(entry.syncMs, 0, SYNC_MAX_MS)) err.push(`sound ${name}: syncMs must be a number of ms ≥ 0`)
         if (!ctx.soundFiles.has(name)) err.push(`sound ${name}: ${lib.paths.sounds}/${name}.wav missing`)
       }
@@ -386,16 +409,16 @@ export function pairedProblem(sfx: CueSfx | null, routes: readonly CueRoute[]): 
 export const clampNumber = (value: number, lo: number, hi: number) => Number.isFinite(value) ? Math.max(lo, Math.min(hi, value)) : lo
 
 /** Sets a sound's base level (adds its `sounds` entry). */
-// Intensity setters share every untouched part (cues stay the same object): a strength change re-resolves nothing that reads only the cues.
-export function setSoundIntensity(table: CueTable, sound: string, intensity: number): CueTable {
-  return { ...table, sounds: { ...(table.sounds ?? {}), [sound]: { ...(table.sounds?.[sound] ?? {}), intensity: clampNumber(intensity, 0, 1) } } }
+// Clip gain setters share every untouched part (cues stay the same object): a strength change re-resolves nothing that reads only the cues.
+export function setSoundClipGain(table: CueTable, sound: string, clipGain: number): CueTable {
+  return { ...table, sounds: { ...(table.sounds ?? {}), [sound]: { ...(table.sounds?.[sound] ?? {}), clip_gain: clampNumber(clipGain, 0, 1) } } }
 }
-/** Sets every material of `names` to `intensity` ("match the other ★"); clips the table does not have are skipped. */
-export function matchIntensity(table: CueTable, target: 'sound' | 'haptic', names: readonly string[], intensity: number): CueTable {
-  return names.reduce((t, name) => target === 'sound' ? setSoundIntensity(t, name, intensity) : t.clips[name] ? setClipIntensity(t, name, intensity) : t, table)
+/** Sets every material of `names` to `clipGain` ("match the other ★"); clips the table does not have are skipped. */
+export function matchClipGain(table: CueTable, target: 'sound' | 'haptic', names: readonly string[], clipGain: number): CueTable {
+  return names.reduce((t, name) => target === 'sound' ? setSoundClipGain(t, name, clipGain) : t.clips[name] ? setClipGain(t, name, clipGain) : t, table)
 }
-export function setClipIntensity(table: CueTable, clip: string, intensity: number): CueTable {
-  return { ...table, clips: { ...table.clips, [clip]: { ...table.clips[clip], intensity: clampNumber(intensity, 0, 1) } } }
+export function setClipGain(table: CueTable, clip: string, clipGain: number): CueTable {
+  return { ...table, clips: { ...table.clips, [clip]: { ...table.clips[clip], clip_gain: clampNumber(clipGain, 0, 1) } } }
 }
 
 /** Interleaved float samples → PCM16 WAV (the viewer's writer: clips 16 kHz mono, sounds 48 kHz). */

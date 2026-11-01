@@ -29,7 +29,7 @@ describe('cue table autosave', () => {
     const f = file(sampleTable())
     const sync = new CueTableSync(f.io); sync.reset(f.disk.text, f.disk.mtime)
     // The agent updates a pool and adds a clip entry while Studio approves button's sound.
-    f.external(t => { t.cues.detent.haptics = [{ clips: ['thump', 'click'], at: 'pos_chest', gain: 0.5 }]; t.cues.button.sfx = { sounds: ['Click', 'Clack'], volume: 0.6 }; t.clips.extra = { intensity: 1, loop: false } })
+    f.external(t => { t.cues.detent.haptics = [{ clips: ['thump', 'click'], at: 'pos_chest', gain: 0.5 }]; t.cues.button.sfx = { sounds: ['Click', 'Clack'], volume: 0.6 }; t.clips.extra = { clip_gain: 1, loop: false } })
     const ours = clone(sampleTable()); ours.cues.button.review = { sfx: 'approved' }
     const r = await sync.save(ours, {}, ok)
     expect(r.ok && r.external).toBe(true)
@@ -65,11 +65,11 @@ describe('cue table autosave', () => {
   })
 
   it('merges the sounds map per sound (DEC-086 levels)', () => {
-    const base = { ...sampleTable(), sounds: { Click: { intensity: 0.5 } } } as CueTable
-    const ours = clone(base); ours.sounds!.Click = { intensity: 0.3 }
-    const theirs = clone(base); theirs.sounds!.Clack = { intensity: 0.8 }
+    const base = { ...sampleTable(), sounds: { Click: { clip_gain: 0.5 } } } as CueTable
+    const ours = clone(base); ours.sounds!.Click = { clip_gain: 0.3 }
+    const theirs = clone(base); theirs.sounds!.Clack = { clip_gain: 0.8 }
     const { table, conflicts } = mergeCueTables(base, ours, theirs)
-    expect(table.sounds).toEqual({ Click: { intensity: 0.3 }, Clack: { intensity: 0.8 } })
+    expect(table.sounds).toEqual({ Click: { clip_gain: 0.3 }, Clack: { clip_gain: 0.8 } })
     expect(conflicts).toEqual([])
   })
 })

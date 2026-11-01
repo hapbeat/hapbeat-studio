@@ -9,48 +9,48 @@ export const CONTRACT_CUE_TABLE = {
   "kit": "sample-scene-kit",
   "clips": {
     "footstep": {
-      "intensity": 0.8,
+      "clip_gain": 0.8,
       "loop": false,
       "description": "heavy step",
       "syncMs": 12
     },
     "roar": {
-      "intensity": 1,
+      "clip_gain": 1,
       "loop": false
     },
     "roar_b": {
-      "intensity": 0.9,
+      "clip_gain": 0.9,
       "loop": false
     },
     "grab": {
-      "intensity": 0.6,
+      "clip_gain": 0.6,
       "loop": false
     },
     "purr": {
-      "intensity": 0.4,
+      "clip_gain": 0.4,
       "loop": false
     },
     "rub_loop": {
-      "intensity": 0.5,
+      "clip_gain": 0.5,
       "loop": true
     }
   },
   "sounds": {
     "Footstep_A": {
-      "intensity": 0.9,
+      "clip_gain": 0.9,
       "syncMs": 30
     },
     "Footstep_B": {
-      "intensity": 0.85
+      "clip_gain": 0.85
     },
     "Roar_A": {
-      "intensity": 1
+      "clip_gain": 1
     },
     "Roar_B": {
-      "intensity": 0.8
+      "clip_gain": 0.8
     },
     "Rub": {
-      "intensity": 0.5
+      "clip_gain": 0.5
     }
   },
   "cues": {

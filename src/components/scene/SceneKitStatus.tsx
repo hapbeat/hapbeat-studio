@@ -6,10 +6,11 @@ import { useDeviceStore } from '@/stores/deviceStore'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useScenePlayback } from '@/stores/scenePlayback'
 import { bytesToBase64, type HapticDevice } from '@/utils/sceneHaptics'
+import { kitCopyDiffers } from '@/utils/sceneCueTable'
 import { findCapacityProblems } from '@/utils/deviceSpace'
 import { estimateKitStorageFromFiles } from '@/utils/kitSizeEstimate'
 import { summarizeCapacityProblems } from '@/components/kit/capacityText'
-import { deviceKitState, kitStateOf, locateProjectKit, missingClips, parseKitList, readKitFiles, type DeviceKitAnswer, type DeviceKitState, type ProjectKit } from '@/utils/sceneKit'
+import { deviceKitState, kitStateOf, missingClips, parseKitList, readKitFiles, type DeviceKitAnswer, type DeviceKitState, type ProjectKit } from '@/utils/sceneKit'
 import { useScene } from './sceneContext'
 
 /** The FIRE output's Kit on the target devices (useSceneKitCheck), shared through the Scene context. */
@@ -38,22 +39,15 @@ const SETTLED = new Set(['ready', 'differs', 'unreachable', 'missing'])
  */
 export function useSceneKitCheck(devices: HapticDevice[], connected: boolean): SceneKitCheck {
   const fire = useScenePlayback(s => s.output) === 'fire'
-  const root = useSceneStore(s => s.root)
-  const clipsPath = useSceneStore(s => s.lib?.paths.clips)
   const kit = useSceneStore(s => s.table ? s.table.kit ?? null : null)
   const tableClips = useSceneStore(s => s.table?.clips)
   const clips = useMemo(() => Object.keys(tableClips ?? {}), [tableClips])
+  // The project's Kit folder is read by the scene store (its clip gains are what every output plays, DEC-103).
+  const projectKit = useSceneStore(s => s.projectKit)
+  const kitError = useSceneStore(s => s.kitError)
   const { send, subscribe } = useHelperConnection()
-  const [project, setProject] = useState<{ found: ProjectKit | null; error: string | null } | undefined>(undefined)
   const [answers, setAnswers] = useState<Record<string, DeviceKitAnswer>>({})
   const [round, setRound] = useState(0)
-  useEffect(() => {
-    setProject(undefined)
-    if (!fire || !root || !kit || clipsPath === undefined) return
-    let live = true
-    locateProjectKit(root, kit, clipsPath).then(found => { if (live) setProject({ found, error: null }) }, error => { if (live) setProject({ found: null, error: message(error) }) })
-    return () => { live = false }
-  }, [fire, root, kit, clipsPath, round])
   useEffect(() => { setAnswers({}) }, [fire, kit])
   const ips = devices.map(d => d.ipAddress).join(',')
   useEffect(() => {
@@ -67,7 +61,7 @@ export function useSceneKitCheck(devices: HapticDevice[], connected: boolean): S
     const answer = parseKitList(m.payload, kit)
     if (answer) setAnswers(cur => ({ ...cur, [answer.ip]: answer }))
   }), [subscribe, kit])
-  const version = project?.found?.version ?? null
+  const project = fire ? projectKit : undefined, version = project?.version ?? null
   const rows = useMemo(() => devices.map(device => {
     const a = answers[device.ipAddress]
     return { device, state: deviceKitState(a, version, clips), version: a?.version ?? null, missing: missingClips(a, clips), error: a?.error ?? null }
@@ -80,8 +74,8 @@ export function useSceneKitCheck(devices: HapticDevice[], connected: boolean): S
     pb.setKitState(state)
   }, [state, hold])
   useEffect(() => () => useScenePlayback.getState().setKitState('none'), [])
-  const recheck = useCallback(() => setRound(n => n + 1), [])
-  return { kit, project: project?.found ?? (project ? null : undefined), error: project?.error ?? null, rows, recheck }
+  const recheck = useCallback(() => { setRound(n => n + 1); void useSceneStore.getState().reloadKit() }, [])
+  return { kit, project, error: fire ? kitError : null, rows, recheck }
 }
 
 interface InstallRow { pct: number; done?: boolean; ok?: boolean; msg?: string }
@@ -175,5 +169,28 @@ export function SceneKitStatus() {
         <button type="button" className="toolbar-btn" disabled={installing} onClick={recheck}>{t('scene.kit.recheck')}</button>
       </div>
     </>}
+  </div>
+}
+
+/**
+ * "Clip gains in the cue table" in the Project panel (any output): with a Kit in the project, the haptic clips play at
+ * the Kit's clip_gain and the cue table holds a copy (contracts cue-table §9.1). Says whether the copy matches, names
+ * the clips that differ, and 「cue 表をそろえる」 writes the Kit's values now (a cue table edit, saved like any other;
+ * Studio aligns the copy whenever it saves the cue table anyway). Nothing without a Kit in the project.
+ */
+export function SceneKitCopy() {
+  const { t } = useI18n()
+  const table = useSceneStore(s => s.table)
+  const projectKit = useSceneStore(s => s.projectKit)
+  const differs = useMemo(() => table && projectKit ? kitCopyDiffers(table, projectKit.clipGains) : [], [table, projectKit])
+  if (!table?.kit || !projectKit) return null
+  return <div className="scene-sec scene-kit-copy">
+    <h3>{t('scene.kit.copyHeading')}</h3>
+    <div className={differs.length ? 'scene-warn' : 'scene-dim'}>{differs.length
+      ? t('scene.kit.copyDiffers', { kit: projectKit.kit, count: differs.length, clips: differs.join(', ') }) : t('scene.kit.copySame', { kit: projectKit.kit })}</div>
+    {/* Always there (disabled while the copy matches): the panel does not move when it starts to differ. */}
+    <div className="scene-row">
+      <button type="button" className="toolbar-btn" disabled={!differs.length} title={t('scene.kit.copyAlignHint')} onClick={() => useSceneStore.getState().alignToKit()}>{t('scene.kit.copyAlign')}</button>
+    </div>
   </div>
 }

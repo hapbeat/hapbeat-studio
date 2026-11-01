@@ -3027,7 +3027,7 @@ function clampEqGainDb(g: number): number {
  * only parsed + committed (via `onCommit`, which the caller wires to
  * clampEqFc/clampEqQ/clampEqGainDb + onChange) on blur or Enter; Escape
  * reverts to the last committed `value`. Mirrors the proven
- * IntensityValueEditor pattern (IntensityControl.tsx) but stays always-
+ * ClipGainValueEditor pattern (ClipGainControl.tsx) but stays always-
  * visible (not click-to-edit) since these fields are edited far more often.
  * `type="text"` (not "number") also removes the native spinner arrows.
  */

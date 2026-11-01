@@ -6,7 +6,7 @@ import { useScene } from './sceneContext'
 import { useAtLabel } from './SceneCuePanels'
 import { FireOffsetField, PcOffsetField } from '@/components/common/PcTiming'
 import { useScenePlayback } from '@/stores/scenePlayback'
-import { SceneKitStatus } from './SceneKitStatus'
+import { SceneKitCopy, SceneKitStatus } from './SceneKitStatus'
 import { SceneOutputSettings } from './SceneOutputToggles'
 
 /**
@@ -70,6 +70,7 @@ export function SceneProjectPanel() {
       <div className="scene-dim">{t(allDevices ? 'scene.output.selectionHintAll' : 'scene.output.selectionHint')}</div>
     </div>
     {fire && <SceneKitStatus />}
+    <SceneKitCopy />
     <div className="scene-sec">
       <h3>{t('scene.log')}</h3>
       <pre className="scene-log" ref={logBox}>{log.join('\n')}</pre>

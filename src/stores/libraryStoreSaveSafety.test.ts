@@ -90,14 +90,14 @@ describe('addEventToKit — disk source ownership', () => {
       clipFileSize: blob.size,
       modes: ['command'],
       loop: false,
-      intensity: 0.5,
+      clipGain: 0.5,
       deviceWiper: null,
     }
 
     const firstId = await useLibraryStore.getState().addEventToKit(kit.id, event, blob)
     const secondId = await useLibraryStore.getState().addEventToKit(
       kit.id,
-      { ...event, clipName: 'hard-hit', clipSourceFilename: 'other.wav', intensity: 0.8 },
+      { ...event, clipName: 'hard-hit', clipSourceFilename: 'other.wav', clipGain: 0.8 },
       blob,
     )
 
@@ -131,7 +131,7 @@ describe('addEventToKit — disk source ownership', () => {
       clipFileSize: blob.size,
       modes: ['stream_clip'],
       loop: false,
-      intensity: 0.5,
+      clipGain: 0.5,
       deviceWiper: null,
     }
 
@@ -187,7 +187,7 @@ describe('flushKitFolderNow — source audio resolution', () => {
       clipFileSize: 4,
       modes: ['command'],
       loop: false,
-      intensity: 1,
+      clipGain: 1,
       deviceWiper: null,
     }
     const kitWithAudio: KitDefinition = { ...kit, events: [event] }
@@ -349,7 +349,7 @@ describe('Kit operation ordering', () => {
       clipFileSize: 4,
       modes: ['command'],
       loop: false,
-      intensity: 1,
+      clipGain: 1,
       deviceWiper: null,
     })
     const removed = makeEvent('remove-me', 'old')

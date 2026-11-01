@@ -10,7 +10,7 @@
    ============================================================ */
 .clip-card {
   /* Three-column grid:
-   *   col 1 = variable content (play+name in row 1, intensity in row 2)
+   *   col 1 = variable content (play+name in row 1, clip gain in row 2)
    *   col 2 = primary action track (Swap + first action button)
    *   col 3 = secondary action track (Close + second action button)
    * Both action cols are `auto`-sized so each grows to the widest

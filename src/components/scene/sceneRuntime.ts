@@ -4,7 +4,7 @@ import { effectiveOutput, useScenePlayback, type SceneOutput } from '@/stores/sc
 import { perfTrack } from '@/utils/perfRegistry'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { clipEnd, focusEvent, itemEvents, levelAt, momentStart, type SceneItem, type VisibleEvent } from '@/utils/sceneData'
-import { isLoopCue, routeClips, sfxSounds, type CueRoute, type CueSfx, soundIntensity } from '@/utils/sceneCueTable'
+import { clipGainOf, isLoopCue, routeClips, sfxSounds, type CueRoute, type CueSfx, soundClipGain } from '@/utils/sceneCueTable'
 import { effectiveEvent, fireShot, MaterialPicker, resolveEventName } from '@/utils/cueEvents'
 import { runPosition } from '@/utils/sceneSegments'
 import { buildLoopSounds, LoopSoundPlayer, loopSoundLevel, type LoopSound } from '@/utils/sceneLoopSounds'
@@ -97,7 +97,7 @@ export class SceneRuntime {
       if (state.root !== prev.root || newRecording) this.fullTime = 0
       if (state.cur !== prev.cur || state.root !== prev.root || newRecording || state.items[state.cur]?.file !== prev.items[prev.cur]?.file
         || (state.items !== prev.items && !state.items.length)) this.loadItem()
-      if (state.table !== prev.table || state.lib !== prev.lib) this.rebuildLoops()
+      if (state.table !== prev.table || state.lib !== prev.lib || state.projectKit !== prev.projectKit) this.rebuildLoops()
       prev = state
     }))
     // The video's soundtrack follows the PC sound (M, the toggles) at this PC's video volume (a recording has none).
@@ -302,14 +302,14 @@ export class SceneRuntime {
    * clip into the stream; FIRE: its Kit event, a loop stopped after 1 s). Returns how many devices it reaches.
    */
   testRoute(r: CueRoute): number {
-    const s = useSceneStore.getState(), pb = useScenePlayback.getState(), name = routeClips(r)[0], clip = name === undefined ? undefined : s.table?.clips[name]
+    const s = useSceneStore.getState(), pb = useScenePlayback.getState(), name = routeClips(r)[0], clip = name === undefined ? undefined : s.table?.clips[name], kit = s.projectKit?.clipGains ?? null
     if (!clip || name === undefined || !s.table) return 0
-    if (effectiveOutput(pb) === 'fire') return this.kitFire.test({ table: s.table, clip: name, at: r.at, gain: r.gain * pb.overallGain, devices: this.helper.devices, all: pb.allDevices })
+    if (effectiveOutput(pb) === 'fire') return this.kitFire.test({ table: s.table, kit, clip: name, at: r.at, gain: r.gain * pb.overallGain, devices: this.helper.devices, all: pb.allDevices })
     let p = s.pcm[name]
     if (!p) return 0
     if (clip.loop) { const q = new Float32Array(RATE); for (let i = 0; i < RATE; i++) q[i] = p[i % p.length]; p = q }
     const targets = routeTargets(r.at, undefined, pb.allDevices)
-    this.mixer.voices.push({ pcm: p, targets, gain: clip.intensity * r.gain * pb.overallGain, start: performance.now() + LEAD_MS })
+    this.mixer.voices.push({ pcm: p, targets, gain: clipGainOf(s.table, name, kit) * r.gain * pb.overallGain, start: performance.now() + LEAD_MS })
     return this.helper.devices.filter(d => targets.some(tg => matchesAddress(tg, d.address))).length
   }
 
@@ -319,7 +319,7 @@ export class SceneRuntime {
     const c = this.audio(), src = c.createBufferSource(), g = c.createGain()
     // WAV × the sound's base level × the scene multiplier (sfx.volume, with this firing's jitter) — DEC-086.
     const table = useSceneStore.getState().table
-    src.buffer = b; src.playbackRate.value = rate; g.gain.value = volume * (table ? soundIntensity(table, sound) : 1); src.connect(g).connect(c.destination)
+    src.buffer = b; src.playbackRate.value = rate; g.gain.value = volume * (table ? soundClipGain(table, sound) : 1); src.connect(g).connect(c.destination)
     const at = c.currentTime + delay
     src.start(at)
     if (!force) this.scheduledSfx.push({ src, at }) // cue sounds are cancelled on seek; a ▶ test is not
@@ -348,12 +348,12 @@ export class SceneRuntime {
     const st = useSceneStrength.getState()
     if (!hapticAllowed(ev.name, st.muted, st.soloed)) return
     // The firing's own gain × this PC's overall multiplier (the send clamp stays where it was: the Kit PLAY, the PCM16 mix).
-    const pb = useScenePlayback.getState(), cueGain = (ev.gain ?? 1) * pb.overallGain
+    const pb = useScenePlayback.getState(), cueGain = (ev.gain ?? 1) * pb.overallGain, kit = s.projectKit?.clipGains ?? null
     if (effectiveOutput(pb) === 'fire') {
-      if (this.helper.connected) this.kitFire.shot({ table: s.table, shot, hand: ev.hand, cueGain, delayMs: delay * 1000, offsetMs: pb.fireOffsetMs, devices: this.helper.devices, all: pb.allDevices })
+      if (this.helper.connected) this.kitFire.shot({ table: s.table, kit, shot, hand: ev.hand, cueGain, delayMs: delay * 1000, offsetMs: pb.fireOffsetMs, devices: this.helper.devices, all: pb.allDevices })
       return
     }
-    this.mixer.voices.push(...shotVoices(s.table, s.pcm, shot, ev.hand, cueGain, performance.now() + delay * 1000, pb.allDevices))
+    this.mixer.voices.push(...shotVoices(s.table, s.pcm, shot, ev.hand, cueGain, performance.now() + delay * 1000, pb.allDevices, kit))
   }
   private flush() {
     if (this.actx) for (const x of this.scheduledSfx) if (x.at > this.actx.currentTime) try { x.src.stop() } catch { /* already ended */ }
@@ -366,7 +366,7 @@ export class SceneRuntime {
     const s = useSceneStore.getState(), pb = useScenePlayback.getState()
     // This PC's overall multiplier on the loops too (the CLIP mix and FIRE's loopTick read these voices). M / S are
     // applied each tick (loopOn), so toggling them never rebuilds the voices (their phases go on).
-    this.mixer.loopVoices = s.table && s.lib ? buildLoopVoices(s.table, s.lib, pb.allDevices).map(v => ({ ...v, gain: v.gain * pb.overallGain })) : []
+    this.mixer.loopVoices = s.table && s.lib ? buildLoopVoices(s.table, s.lib, pb.allDevices, s.projectKit?.clipGains ?? null).map(v => ({ ...v, gain: v.gain * pb.overallGain })) : []
     this.loopSounds = s.table && s.lib ? buildLoopSounds(s.table, s.lib) : []
   }
 

@@ -11,7 +11,7 @@ export class EditorBufferPlayer {
   private began = 0
   private end = 0
   private muted = false
-  /** The material's strength (DEC-086 intensity) as the output gain: changed live, the buffer is never re-rendered for it. */
+  /** The material's strength (DEC-086 clip_gain) as the output gain: changed live, the buffer is never re-rendered for it. */
   private level = 1
   /** Connected to the PC speakers (off while a haptic is auditioned: it only goes to the devices). */
   private output = true

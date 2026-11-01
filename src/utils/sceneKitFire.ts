@@ -1,4 +1,4 @@
-import type { CueTable } from './sceneCueTable'
+import { clipGainOf, type CueTable, type KitClipGains } from './sceneCueTable'
 import type { Shot } from './cueEvents'
 import { mapLevel } from './levelMap'
 import { matchesAddress, routeTargets, type HapticDevice, type HelperSend, type LevelFn, type LoopVoice } from './sceneHaptics'
@@ -7,8 +7,8 @@ import { markSceneFireSend } from './sceneFireAcks'
 /**
  * The Scene tab's FIRE output: the cue table's Kit is installed on the Hapbeats, and Studio sends PLAY by Event ID
  * (`<kit>.<clip>`, contracts event-id) through hapbeat-helper (`play_event` / `stop_event`, unicast to the matching
- * devices' IPs, never broadcast) instead of streaming PCM. The firmware ignores the manifest intensity, so the gain
- * sent is the whole product: clip intensity × route gain (× the firing's jitter and variant multipliers, in the Shot)
+ * devices' IPs, never broadcast) instead of streaming PCM. The firmware never reads the manifest clip_gain, so the gain
+ * sent is the whole product: clip_gain (clipGainOf: the Kit's, `kit`) × route gain (× the firing's jitter and variant multipliers, in the Shot)
  * × cue gain, clamped to 0..1. What a Kit clip cannot do here: the firing's haptic rate (the device plays its copy
  * as is), a gain change while it plays (a re-PLAY restarts it), more than 2 one-shots + 1 loop at once (firmware).
  * STOP_ALL also ends a device's stream session, so the runtime never runs this and the CLIP mixer together.
@@ -79,14 +79,14 @@ export class SceneKitFire {
    * `offsetMs` (the FIRE offset) from now, at once when that is < 0. Loop clips are layer driven (loopTick). `all`: see
    * routeTargets.
    */
-  shot(o: { table: CueTable; shot: Shot; hand: string; cueGain: number; delayMs: number; offsetMs: number; devices: HapticDevice[]; all: boolean }) {
+  shot(o: { table: CueTable; kit?: KitClipGains | null; shot: Shot; hand: string; cueGain: number; delayMs: number; offsetMs: number; devices: HapticDevice[]; all: boolean }) {
     const kit = this.kitOf(o.table)
     if (!kit) return
     if (o.shot.rate !== 1) this.note('rate', 'FIRE: a firing\'s haptic rate is not applied (the Hapbeat plays its Kit clip as is)')
     const sends = o.shot.routes.flatMap(r => {
       const clip = o.table.clips[r.clip]
       if (!clip || clip.loop) return []
-      const gain = clip.intensity * r.gain * o.cueGain
+      const gain = clipGainOf(o.table, r.clip, o.kit) * r.gain * o.cueGain
       return routeTargets(r.at, o.hand, o.all).map(target => ({ id: kitEventId(kit, r.clip), target, gain }))
     })
     if (!sends.length) return
@@ -99,7 +99,7 @@ export class SceneKitFire {
 
   /**
    * Loops, every tick while the video plays, at replay time `t` (already shifted by the FIRE offset): per loop voice
-   * (buildLoopVoices) the gain the mixer would use, mapLevel(levelMap, level) × intensity × route gain. A device has one
+   * (buildLoopVoices) the gain the mixer would use, mapLevel(levelMap, level) × clip_gain × route gain. A device has one
    * loop voice, so each device plays its loudest voice (the others are dropped, logged once). Rising above 0 starts it,
    * a change of LOOP_RESEND_DB or more (or another loop taking over) re-sends it, at most every LOOP_RESEND_MS (the
    * device restarts the loop, accepted); a device with no voice above 0 left, or gone from `devices`, is stopped.
@@ -179,15 +179,15 @@ export class SceneKitFire {
   }
 
   /**
-   * ▶ in the Haptics panel: one PLAY of `clip` at clip intensity × route gain (a loop clip stops after TEST_LOOP_MS).
+   * ▶ in the Haptics panel: one PLAY of `clip` at clip gain × route gain (a loop clip stops after TEST_LOOP_MS).
    * Not cancelled by flush (the paused runtime flushes every tick). Returns how many devices it reached.
    */
-  test(o: { table: CueTable; clip: string; at: string; gain: number; devices: HapticDevice[]; all: boolean }): number {
+  test(o: { table: CueTable; kit?: KitClipGains | null; clip: string; at: string; gain: number; devices: HapticDevice[]; all: boolean }): number {
     const kit = this.kitOf(o.table), clip = o.table.clips[o.clip]
     if (!kit || !clip) return 0
     const id = kitEventId(kit, o.clip), reached = new Set<string>()
     const sends = routeTargets(o.at, undefined, o.all).map(target => ({ target, ips: this.ipsOf(target, o.devices) }))
-    for (const x of sends) { this.play(id, x.target, clip.intensity * o.gain, x.ips); for (const ip of x.ips) reached.add(ip) }
+    for (const x of sends) { this.play(id, x.target, clipGainOf(o.table, o.clip, o.kit) * o.gain, x.ips); for (const ip of x.ips) reached.add(ip) }
     if (clip.loop && reached.size) this.deps.setTimer(() => { for (const x of sends) this.stop(id, x.target, x.ips) }, TEST_LOOP_MS)
     return reached.size
   }

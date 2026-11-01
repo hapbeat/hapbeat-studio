@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { MessageId, MessageParams } from '@/i18n/messages'
 import { loadDirectoryHandle, saveDirectoryHandle } from '@/utils/localDirectory'
 import { buildItems, VIEWER_DIR, type SceneData, type SceneItem, type SceneLib } from '@/utils/sceneData'
-import { loopCuesOf, SceneFormatError, serializeCueTable, validateCueTable, type CueTable } from '@/utils/sceneCueTable'
+import { alignClipGains, kitCopyDiffers, loopCuesOf, SceneFormatError, serializeCueTable, validateCueTable, type CueTable } from '@/utils/sceneCueTable'
 import { createSceneTable, listWavs, openSceneProject, readProjectFile, readSceneTable, writeProjectFile, writeSceneSave, type PendingWavs } from '@/utils/sceneProject'
 import { CueTableSync } from '@/utils/cueTableSync'
 import { clearJournal, journalKey, readJournal, restoreFromJournal, writeJournal } from '@/utils/sceneJournal'
@@ -12,6 +12,8 @@ import { pageVisible, perfTrack } from '@/utils/perfRegistry'
 import { RATE } from '@/utils/sceneHaptics'
 import { lastSceneProject, lookupSceneProject, registerSceneProject, rememberSceneProject, restoreSceneHandle } from '@/utils/sceneRegistry'
 import { rewriteViewerDataGains, type FiringGainChange } from '@/utils/viewerDataGains'
+import { locateProjectKit, type ProjectKit } from '@/utils/sceneKit'
+import { onKitManifestWritten } from '@/utils/kitManifestWrites'
 
 /**
  * Scene tab (haptic authoring) state: the opened game project folder, its
@@ -67,6 +69,19 @@ interface SceneState {
   createTable: () => Promise<void>
   /** kit and cue names as loaded (the tab never changes them; save checks it). */
   loaded: { kit: string | undefined; cueNames: string[] } | null
+  /**
+   * The project's Kit (the cue table's `kit`, locateProjectKit): its manifest's clip gains are the haptic clips'
+   * material strength (contracts cue-table §9.1; clipGainOf), the cue table holding a copy that Studio aligns whenever it
+   * saves. undefined while looking, null = no Kit (no `kit`, or no Kit folder in the project: the cue table's values).
+   * Read again after the table, when the editor writes a Kit manifest (kitManifestWrites) and every 2 s / on focus.
+   */
+  projectKit: ProjectKit | null | undefined
+  /** Why the project's Kit could not be read (a manifest that is not JSON); projectKit is null then. */
+  kitError: string | null
+  /** Reads the project's Kit again (SceneKitStatus "Check again"). */
+  reloadKit: () => Promise<void>
+  /** 「cue 表をそろえる」: writes the Kit's clip gains into the cue table now (an edit, saved like any other); false when nothing differs. */
+  alignToKit: () => boolean
   clipFiles: string[]
   soundFiles: string[]
   pending: PendingWavs
@@ -167,7 +182,9 @@ export const useSceneStore = create<SceneState>((set, get) => {
     if (!root || !lib) return
     const files = await readSceneTable(root, lib)
     if (!files) {
-      set({ table: null, noTable: true, ...derivedData(null), loaded: null, clipFiles: [], soundFiles: [], pcm: {}, sfx: {}, pending: { clips: {}, sounds: {} }, dirty: false, saveError: null })
+      kitRead++
+      set({ table: null, noTable: true, ...derivedData(null), loaded: null, clipFiles: [], soundFiles: [], pcm: {}, sfx: {}, pending: { clips: {}, sounds: {} }, dirty: false, saveError: null,
+        projectKit: null, kitError: null })
       note({ id: 'scene.table.missing', params: { file: lib.paths.cues } })
       addLog(`${lib.paths.cues}: no cue table yet`)
       return
@@ -183,7 +200,28 @@ export const useSceneStore = create<SceneState>((set, get) => {
     ])
     set({ table: files.table, noTable: false, ...derivedData(files.table), loaded: { kit: files.table.kit, cueNames: Object.keys(files.table.cues) }, clipFiles: files.clipFiles, soundFiles: files.soundFiles,
       pcm, sfx, pending: { clips: {}, sounds: {} }, dirty: false, saveError: null })
+    await loadKit()
   }
+
+  // ── The project's Kit: the haptic clips' material strength (DEC-103, contracts cue-table §9.1) ──
+  /** Bumped by every read of the Kit (and a table without one): a read that a later one superseded is dropped. */
+  let kitRead = 0
+  const sameKit = (a: ProjectKit | null, b: ProjectKit | null) => a === b || (!!a && !!b && a.folder === b.folder && a.manifest === b.manifest
+    && a.version === b.version && JSON.stringify(a.clipGains) === JSON.stringify(b.clipGains))
+  /** Reads the cue table's Kit from the project folder; an unchanged result keeps the state as it is (no re-render, no rebuilt loops). */
+  const loadKit = async () => {
+    const { root, lib, table } = get(), kit = table?.kit, read = ++kitRead
+    if (!root || !lib || !kit) { set({ projectKit: null, kitError: null }); return }
+    let found: ProjectKit | null = null, error: string | null = null
+    try { found = await locateProjectKit(root, kit, lib.paths.clips) } catch (e) { error = message(e) }
+    if (read !== kitRead || get().root !== root || get().table?.kit !== kit) return
+    const now = get().projectKit
+    if (now !== undefined && sameKit(now, found) && get().kitError === error) return
+    set({ projectKit: found, kitError: error })
+    addLog(error ? `Kit ${kit}: ${error}` : found ? `Kit ${kit}: clip gains from ${found.folder}/${found.manifest}` : `Kit ${kit}: not in the project (the cue table's clip gains)`)
+  }
+  /** The polling read (every 2 s and on focus, like the cue table's): only while a project with a Kit is open and idle. */
+  const refreshKit = () => { const s = get(); if (s.root && s.table?.kit && !s.busy && pageVisible()) void loadKit().catch(() => {}) }
 
   // ── Autosave and outside changes ──
   const sync = new CueTableSync<PendingWavs>({
@@ -226,8 +264,12 @@ export const useSceneStore = create<SceneState>((set, get) => {
   /** Writes Studio's table (merged onto an outside change); a later edit made during the write is saved next. */
   const saveNow = async (): Promise<void> => {
     if (saving) { await saving; if (get().dirty) return saveNow(); return }
-    const { root, lib, table, loaded, pending } = get()
-    if (!root || !lib || !table || !loaded || !get().dirty) return
+    const { root, lib, loaded, pending } = get()
+    const current = get().table
+    if (!root || !lib || !current || !loaded || !get().dirty) return
+    // The cue table's clip gains are a copy of the Kit's (contracts cue-table §9.1): written aligned, in memory too.
+    const table = alignClipGains(current, get().projectKit?.clipGains ?? null)
+    if (table !== current) { set({ table }); journal(table) }
     saving = (async () => {
       try {
         const result = await sync.save(table, pending, async (next, external) => {
@@ -334,13 +376,15 @@ export const useSceneStore = create<SceneState>((set, get) => {
     // One watcher per page: a hot reload of this module replaces the previous one instead of adding another.
     const w = window as unknown as { __sceneWatch?: () => void }
     w.__sceneWatch?.()
-    const timer = setInterval(() => void checkOutside(), 2000)
-    const onFocus = () => void checkOutside()
+    const timer = setInterval(() => { void checkOutside(); refreshKit() }, 2000)
+    const onFocus = () => { void checkOutside(); refreshKit() }
+    // The editor wrote a Kit manifest (Save Folder / Deploy): the open project's Kit, when it is that one, is read again at once.
+    const offKitWrites = onKitManifestWritten(kitId => { if (get().table?.kit === kitId) void loadKit().catch(() => {}) })
     // Leaving the page starts writing what is pending; the write may not finish, so the journal (written at every edit) is what keeps it.
     const onHide = () => { if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; void saveNow() } void flushFirings() }
     window.addEventListener('focus', onFocus); window.addEventListener('pagehide', onHide); window.addEventListener('beforeunload', onHide)
     perfTrack('intervals', 1)
-    w.__sceneWatch = () => { clearInterval(timer); window.removeEventListener('focus', onFocus); window.removeEventListener('pagehide', onHide); window.removeEventListener('beforeunload', onHide); perfTrack('intervals', -1) }
+    w.__sceneWatch = () => { clearInterval(timer); offKitWrites(); window.removeEventListener('focus', onFocus); window.removeEventListener('pagehide', onHide); window.removeEventListener('beforeunload', onHide); perfTrack('intervals', -1) }
   }
 
   /** Opens a project folder; a folder with a lib is remembered even when the recording is missing (one click after recording). */
@@ -370,7 +414,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
     rememberSceneProject(opened.lib.project_name)
     // The old project's firing gains that could still not be written (after the flush above) stop here, said once.
     const unsaved = firingRoot && firingRoot !== handle ? abandonFirings() : null
-    set({ root: handle, lib: opened.lib, recorded: opened.data, overrides: [], data: opened.data, items: buildItems(opened.data), sel: null, cur: 0, empty: null, table: null, noTable: false })
+    set({ root: handle, lib: opened.lib, recorded: opened.data, overrides: [], data: opened.data, items: buildItems(opened.data), sel: null, cur: 0, empty: null, table: null, noTable: false, projectKit: undefined, kitError: null })
     await loadTable()
     restoreJournal()
     const dropped = opened.data.droppedChapters
@@ -400,7 +444,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
   return {
     root: null, remembered: null, restored: false, busy: false,
     lib: null, data: null, recorded: null, overrides: [], items: [], table: null, noTable: false, loaded: null, clipFiles: [], soundFiles: [],
-    pending: { clips: {}, sounds: {} }, pcm: {}, sfx: {}, dirty: false, saveError: null, cur: 0, sel: null, span: null, chapter: null, emitSeed: newEmitSeed(),
+    pending: { clips: {}, sounds: {} }, pcm: {}, sfx: {}, dirty: false, saveError: null, projectKit: null, kitError: null, cur: 0, sel: null, span: null, chapter: null, emitSeed: newEmitSeed(),
     notice: null, empty: null, log: [],
     note, addLog,
 
@@ -557,6 +601,14 @@ export const useSceneStore = create<SceneState>((set, get) => {
         await loadTable()
         note({ id: 'scene.table.created', params: { file: lib.paths.cues } })
       })
+    },
+    reloadKit: () => loadKit(),
+    alignToKit: () => {
+      const kit = get().projectKit?.clipGains ?? null, table = get().table
+      const differs = table ? kitCopyDiffers(table, kit) : []
+      if (!differs.length || !get().edit(tb => { const next = alignClipGains(tb, kit); return next === tb ? null : next })) return false
+      addLog(`cue table clip_gain aligned to the Kit (${differs.join(', ')})`)
+      return true
     },
     revert: async () => {
       if (!get().root) return

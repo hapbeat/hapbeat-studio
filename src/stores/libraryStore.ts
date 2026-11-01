@@ -42,6 +42,7 @@ import {
   type ExportFile,
 } from '@/utils/kitExporter'
 import { getActiveHelperChannel } from '@/utils/helperRequest'
+import { notifyKitManifestWritten } from '@/utils/kitManifestWrites'
 import { KIT_CREDITS_FILENAME, writeKitCredits } from '@/utils/materials'
 import { formatMessage, messages, type MessageId, type MessageParams } from '@/i18n/messages'
 
@@ -359,8 +360,8 @@ interface LibraryState {
   updateClip: (id: string, updates: Partial<LibraryClip>) => Promise<void>
   /** name の現在値に合わせて clips/ 配下の実ファイル名を同期する（Edit modal の確定時などに呼ぶ） */
   commitClipRename: (id: string) => Promise<void>
-  /** Library の amp (libraryIntensity) を更新。workDir に永続化される。 */
-  setLibraryIntensity: (id: string, value: number) => Promise<void>
+  /** Library の amp (libraryClipGain) を更新。workDir に永続化される。 */
+  setLibraryClipGain: (id: string, value: number) => Promise<void>
 
   // Amp preset actions
   ampPresets: ClipAmpPreset[]
@@ -560,7 +561,7 @@ async function saveKitsMetaToDir(handle: FileSystemDirectoryHandle, kits: KitDef
   await writeMetadataJson(handle, KITS_META_FILE, kits)
 }
 
-// Continuous controls (intensity / target volume) can emit dozens of changes
+// Continuous controls (clip gain / target volume) can emit dozens of changes
 // per second. Their UI state + revision update synchronously; only the durable
 // authoring metadata is coalesced. This cache is never authoritative — Save /
 // Deploy flushes the latest Zustand snapshot before building the Pack.
@@ -622,7 +623,7 @@ const lastBuiltKit = new Map<string, { files: ExportFile[]; kitId: string }>()
 /**
  * Drop the cached build for a kit whose *content* changed.
  *
- * Event edits (mode toggle, intensity, rename, add/remove) deliberately
+ * Event edits (mode toggle, clip gain, rename, add/remove) deliberately
  * skip the Pack rebuild — it used to re-encode every WAV on each
  * keystroke — and rely on Deploy to rebuild. But Deploy prefers
  * `getLastBuiltKit` when present, so without this the next Deploy ships
@@ -1303,6 +1304,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // Studio never decides that a user's file is safe to delete.
       // Explicit close actions move content into `_archive` instead.
 
+      // The Scene tab reads its project's Kit again (its clip gains, DEC-103) once a manifest landed.
+      if (manifestFiles.length > 0) notifyKitManifestWritten(kitId)
       lastWrittenKitId.set(kit.id, kitId)
       lastBuiltKit.set(kit.id, { files: result.files, kitId })
 
@@ -1550,9 +1553,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         // pre-fix bug) — reading it would surface phantom rows.
         //
         // The Devices → Kit panel used to need libraryStore.kits to
-        // resolve `intensity` per event; that responsibility now
+        // resolve `clip_gain` per event; that responsibility now
         // lives on the device firmware itself (`cmdKitList` includes
-        // `parameters.intensity` in each event object), so the UI
+        // `parameters.clip_gain` in each event object), so the UI
         // works without a local kit hydration step. See
         // `instructions/instructions-kit-list-include-intensity-…`
         // in hapbeat-device-firmware for the firmware change spec.
@@ -2113,7 +2116,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         clipChannels: number
         clipSampleRate: number
         clipFileSize: number
-        intensity: number
+        clipGain: number
         loop: boolean
         deviceWiper: number | null
       }
@@ -2152,7 +2155,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           }
         }
 
-        const params = (ev.parameters ?? {}) as { intensity?: number; loop?: boolean; device_wiper?: number }
+        const params = (ev.parameters ?? {}) as { clip_gain?: number; loop?: boolean; device_wiper?: number }
         const clipName = clipFilename.replace(/\.wav$/i, '') || eventId
 
         raws.push({
@@ -2164,7 +2167,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           clipChannels,
           clipSampleRate,
           clipFileSize,
-          intensity: typeof params.intensity === 'number' ? params.intensity : 0.5,
+          clipGain: typeof params.clip_gain === 'number' ? params.clip_gain : 0.5,
           loop: params.loop ?? false,
           deviceWiper: typeof params.device_wiper === 'number' ? params.device_wiper : null,
         })
@@ -2251,13 +2254,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
       for (const [baseEventId, group] of buckets) {
         // Mergeable when both buckets reference the same WAV with identical
-        // intensity / loop. device_wiper is only on the command side in
+        // clip_gain / loop. device_wiper is only on the command side in
         // schema 2.0.0 so we don't require its equality.
         const mergeable =
           group.length > 1 &&
           group.every((r) =>
             r.clipFilename === group[0].clipFilename &&
-            Math.abs(r.intensity - group[0].intensity) < 1e-6 &&
+            Math.abs(r.clipGain - group[0].clipGain) < 1e-6 &&
             r.loop === group[0].loop
           )
 
@@ -2289,7 +2292,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
             clipFileSize: seed.clipFileSize,
             modes,
             loop: seed.loop,
-            intensity: seed.intensity,
+            clipGain: seed.clipGain,
             deviceWiper: seed.deviceWiper,
           })
         } else {
@@ -2307,7 +2310,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
               clipFileSize: r.clipFileSize,
               modes: [r.mode],
               loop: r.loop,
-              intensity: r.intensity,
+              clipGain: r.clipGain,
               deviceWiper: r.deviceWiper,
             })
           }
@@ -2727,9 +2730,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     }
   },
 
-  setLibraryIntensity: async (id, value) => {
+  setLibraryClipGain: async (id, value) => {
     const clamped = Math.max(0, Math.min(1, value))
-    await get().updateClip(id, { libraryIntensity: Math.round(clamped * 100) / 100 })
+    await get().updateClip(id, { libraryClipGain: Math.round(clamped * 100) / 100 })
   },
 
   loadAmpPresets: async () => {
@@ -2745,7 +2748,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const { workDirHandle, clips, ampPresets } = get()
     if (!workDirHandle) return
     const values: Record<string, number> = {}
-    for (const c of clips) values[c.id] = c.libraryIntensity ?? 0.5
+    for (const c of clips) values[c.id] = c.libraryClipGain ?? 0.5
     const entry: ClipAmpPreset = {
       name: trimmed,
       createdAt: new Date().toISOString(),
@@ -2764,7 +2767,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const updated = clips.map((c) => {
       const v = preset.values[c.id]
       if (typeof v !== 'number') return c
-      return { ...c, libraryIntensity: Math.round(Math.max(0, Math.min(1, v)) * 100) / 100, updatedAt: new Date().toISOString() }
+      return { ...c, libraryClipGain: Math.round(Math.max(0, Math.min(1, v)) * 100) / 100, updatedAt: new Date().toISOString() }
     })
     set({ clips: updated })
     if (workDirHandle) await saveClipsMetaToDir(workDirHandle, updated)

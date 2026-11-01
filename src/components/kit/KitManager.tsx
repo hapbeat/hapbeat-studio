@@ -158,7 +158,7 @@ function AmpPresetBar() {
   const savePreset = useLibraryStore((s) => s.saveAmpPreset)
   const applyPreset = useLibraryStore((s) => s.applyAmpPreset)
   const deletePreset = useLibraryStore((s) => s.deleteAmpPreset)
-  const setLibraryIntensity = useLibraryStore((s) => s.setLibraryIntensity)
+  const setLibraryClipGain = useLibraryStore((s) => s.setLibraryClipGain)
   const workDirHandle = useLibraryStore((s) => s.workDirHandle)
   const demoMode = useLibraryStore((s) => s.demoMode)
   const { toast } = useToast()
@@ -177,7 +177,7 @@ function AmpPresetBar() {
     if (value === NEW_PRESET_VALUE) {
       // (new) = 全クリップ amp を 0.5 にリセット
       for (const c of clips) {
-        if ((c.libraryIntensity ?? 0.5) !== 0.5) await setLibraryIntensity(c.id, 0.5)
+        if ((c.libraryClipGain ?? 0.5) !== 0.5) await setLibraryClipGain(c.id, 0.5)
       }
       toast('Reset amps to 0.5', 'success')
     } else {
@@ -316,7 +316,7 @@ function ShortcutHelp() {
             <li><span className="shortcut-help-key">{t('kit.help.click')}</span>{t('kit.help.select')}</li>
             <li><span className="shortcut-help-key">▶</span>{t('kit.help.playStop')}</li>
             <li><span className="shortcut-help-key">{t('kit.help.drag')}</span>{t('kit.help.addToKit')}</li>
-            <li><span className="shortcut-help-key">{t('kit.help.amp')}</span>{t('kit.help.intensity')}</li>
+            <li><span className="shortcut-help-key">{t('kit.help.amp')}</span>{t('kit.help.clipGain')}</li>
             <li><span className="shortcut-help-key">{t('kit.help.edit')}</span>{t('kit.help.editFields')}</li>
             <li><span className="shortcut-help-key">{t('kit.help.addButton')}</span>{t('kit.help.addSelected')}</li>
           </ul>
@@ -466,8 +466,8 @@ function useAudioPreview() {
     setPlayingId(null)
   }, [])
 
-  /** Toggle play/stop. intensity (0.0-1.0) is applied to PCM before streaming. */
-  const toggle = useCallback(async (id: string, getBlob: () => Promise<Blob | undefined>, intensity = 1.0) => {
+  /** Toggle play/stop. clipGain (0.0-1.0) is applied to PCM before streaming. */
+  const toggle = useCallback(async (id: string, getBlob: () => Promise<Blob | undefined>, clipGain = 1.0) => {
     if (playingIdRef.current === id) { stop(); return }
     stop()
     const runId = runIdRef.current
@@ -509,7 +509,7 @@ function useAudioPreview() {
       try {
         await streamClip(blob, sendToTargets, {
           signal: controller.signal,
-          intensity,
+          gain: clipGain,
           cacheKey: `kit-preview:${id}`,
         })
       } catch (err) {
@@ -531,7 +531,7 @@ function useAudioPreview() {
       }
       const url = URL.createObjectURL(blob)
       const audio = new Audio(url)
-      audio.volume = Math.min(1, Math.max(0, intensity))
+      audio.volume = Math.min(1, Math.max(0, clipGain))
       audioRef.current = audio
       audio.onended = () => {
         if (runIdRef.current === runId) {
@@ -754,15 +754,15 @@ function ClipsPanel() {
   const { playingId, toggle, stop: stopPreview } = useAudioPreview()
   const displayed = filteredClips()
   const editingClip = editingClipId ? clips.find((c) => c.id === editingClipId) ?? null : null
-  const setLibraryIntensity = useLibraryStore((s) => s.setLibraryIntensity)
+  const setLibraryClipGain = useLibraryStore((s) => s.setLibraryClipGain)
 
-  const getIntensity = useCallback((id: string) => {
+  const getClipGain = useCallback((id: string) => {
     const c = clips.find((x) => x.id === id)
-    return c?.libraryIntensity ?? 0.5
+    return c?.libraryClipGain ?? 0.5
   }, [clips])
-  const setIntensity = useCallback((id: string, v: number) => {
-    void setLibraryIntensity(id, v)
-  }, [setLibraryIntensity])
+  const setClipGain = useCallback((id: string, v: number) => {
+    void setLibraryClipGain(id, v)
+  }, [setLibraryClipGain])
 
   useEffect(() => {
     if (!workDirHandle) return
@@ -840,29 +840,29 @@ function ClipsPanel() {
       ...(clip.note ? { note: clip.note } : {}),
       modes: ['command'],
       loop: false,
-      intensity: getIntensity(clip.id),
+      clipGain: getClipGain(clip.id),
       deviceWiper: null,
     }, blob)
     if (newId) toast(`Added "${clip.name}" to kit`, 'success')
     else toast('Kit not found', 'error')
-  }, [activeKitId, activeKitSaving, addEventToKit, toast, getIntensity, getClipAudio])
+  }, [activeKitId, activeKitSaving, addEventToKit, toast, getClipGain, getClipAudio])
 
   useEffect(() => {
-    const playSelected = () => { if (activeSelection?.panel === 'library' && selectedId) void toggle(selectedId, () => getClipAudio(selectedId), getIntensity(selectedId)) }
+    const playSelected = () => { if (activeSelection?.panel === 'library' && selectedId) void toggle(selectedId, () => getClipAudio(selectedId), getClipGain(selectedId)) }
     window.addEventListener('studio:kit-playback', playSelected)
     return () => window.removeEventListener('studio:kit-playback', playSelected)
-  }, [activeSelection, selectedId, toggle, getClipAudio, getIntensity])
+  }, [activeSelection, selectedId, toggle, getClipAudio, getClipGain])
 
   // キーボードショートカット: Space=再生、↑↓=選択移動、←→=Amp 増減
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const panel = panelRef.current
       if (!panel || panel.getClientRects().length === 0) return
-      // テキスト入力中はスキップ（判定は cardListKeys.arrowKeyOwner: AI 提案・Events の素材と共通）。range スライダー (intensity) 上では:
+      // テキスト入力中はスキップ（判定は cardListKeys.arrowKeyOwner: AI 提案・Events の素材と共通）。range スライダー (clipGain) 上では:
       //   - ←→ は native の value adjust に任せる (既存挙動)
       //   - ↑↓ は card 切替に振る (panel handler で扱う + e.preventDefault で
       //     native value change も同時に抑制する)。
-      //   こうしないとスライダーに focus している間 ↑↓ で intensity も
+      //   こうしないとスライダーに focus している間 ↑↓ で clipGain も
       //   動いてカード移動できない問題が起きる。
       const active = document.activeElement as HTMLElement | null
       const owner = arrowKeyOwner(active)
@@ -904,16 +904,16 @@ function ClipsPanel() {
           moveTo(stepIndex(curIdx, orderedClips.length, e.key))
           break
         case 'ArrowRight':
-          if (selectedId) { e.preventDefault(); setIntensity(selectedId, getIntensity(selectedId) + 0.05) }
+          if (selectedId) { e.preventDefault(); setClipGain(selectedId, getClipGain(selectedId) + 0.05) }
           break
         case 'ArrowLeft':
-          if (selectedId) { e.preventDefault(); setIntensity(selectedId, getIntensity(selectedId) - 0.05) }
+          if (selectedId) { e.preventDefault(); setClipGain(selectedId, getClipGain(selectedId) - 0.05) }
           break
         case ' ':
         case 'Spacebar':
           if (selectedId) {
             e.preventDefault()
-            toggle(selectedId, () => getClipAudio(selectedId), getIntensity(selectedId))
+            toggle(selectedId, () => getClipAudio(selectedId), getClipGain(selectedId))
           }
           break
         case 'Enter': {
@@ -928,7 +928,7 @@ function ClipsPanel() {
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [orderedClips, selectedId, setSelectedId, editingClipId, activeSelection, toggle, stopPreview, getClipAudio, getIntensity, setIntensity, clips, addClipToActiveKit])
+  }, [orderedClips, selectedId, setSelectedId, editingClipId, activeSelection, toggle, stopPreview, getClipAudio, getClipGain, setClipGain, clips, addClipToActiveKit])
 
   const handleImport = useCallback(async (files: FileList) => {
     const arr = Array.from(files)
@@ -958,12 +958,12 @@ function ClipsPanel() {
         await commitClipRename(c.id)
       }}
       playingId={playingId}
-      onToggle={(id, intensity) => toggle(id, () => getClipAudio(id), intensity)}
+      onToggle={(id, clipGain) => toggle(id, () => getClipAudio(id), clipGain)}
       onAddToKit={() => addClipToActiveKit(c)}
       kitAvailable={!!activeKitId && !activeKitSaving}
       showDetails={showClipDetails}
-      intensity={getIntensity(c.id)}
-      onIntensityChange={(v) => setIntensity(c.id, v)}
+      clipGain={getClipGain(c.id)}
+      onClipGainChange={(v) => setClipGain(c.id, v)}
       selected={selectedId === c.id}
       onSelect={() => setSelectedId(c.id)}
       onArchive={() => {
@@ -1137,12 +1137,12 @@ interface ClipRowProps {
   onStartEdit: () => void
   onRenameCommit: (next: string) => void | Promise<void>
   playingId: string | null
-  onToggle: (id: string, intensity: number) => void
+  onToggle: (id: string, clipGain: number) => void
   onAddToKit: () => void
   kitAvailable: boolean
   showDetails: boolean
-  intensity: number
-  onIntensityChange: (v: number) => void
+  clipGain: number
+  onClipGainChange: (v: number) => void
   selected: boolean
   onSelect: () => void
   /** Archive (move to clips/archive/) — same UX as Kit list's × button. */
@@ -1162,8 +1162,8 @@ function ClipRow({
   onAddToKit,
   kitAvailable,
   showDetails,
-  intensity,
-  onIntensityChange,
+  clipGain,
+  onClipGainChange,
   selected,
   onSelect,
   onArchive,
@@ -1180,10 +1180,10 @@ function ClipRow({
       tags={clip.tags}
       showDetails={showDetails}
       note={clip.note}
-      intensity={intensity}
-      onIntensityChange={onIntensityChange}
+      clipGain={clipGain}
+      onClipGainChange={onClipGainChange}
       playing={playingId === clip.id}
-      onTogglePlay={() => onToggle(clip.id, intensity)}
+      onTogglePlay={() => onToggle(clip.id, clipGain)}
       selected={selected}
       onSelect={onSelect}
       dataCardId={clip.id}
@@ -1379,23 +1379,23 @@ function KitEditor() {
     const playSelected = () => {
       if (editLocked || activeSelection?.panel !== 'kit') return
       const event = sortedEvents.find(item => item.id === selectedEventId)
-      if (event) void togglePreview(event.id, () => getKitEventAudio(event.id), event.intensity)
+      if (event) void togglePreview(event.id, () => getKitEventAudio(event.id), event.clipGain)
     }
     window.addEventListener('studio:kit-playback', playSelected)
     return () => window.removeEventListener('studio:kit-playback', playSelected)
   }, [editLocked, activeSelection, sortedEvents, selectedEventId, togglePreview, getKitEventAudio])
 
-  // Kit 内のキーボード操作: Space=再生、↑↓=選択移動、←→=intensity ±0.05
+  // Kit 内のキーボード操作: Space=再生、↑↓=選択移動、←→=clipGain ±0.05
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (editLocked) return
       const panel = kitPanelRef.current
       if (!panel || panel.getClientRects().length === 0 || !activeKit) return
-      // テキスト入力中はスキップ（判定は cardListKeys.arrowKeyOwner: AI 提案・Events の素材と共通）。range スライダー (intensity) 上では:
+      // テキスト入力中はスキップ（判定は cardListKeys.arrowKeyOwner: AI 提案・Events の素材と共通）。range スライダー (clipGain) 上では:
       //   - ←→ は native の value adjust に任せる (既存挙動)
       //   - ↑↓ は card 切替に振る (panel handler で扱う + e.preventDefault で
       //     native value change も同時に抑制する)。
-      //   こうしないとスライダーに focus している間 ↑↓ で intensity も
+      //   こうしないとスライダーに focus している間 ↑↓ で clipGain も
       //   動いてカード移動できない問題が起きる。
       const active = document.activeElement as HTMLElement | null
       const owner = arrowKeyOwner(active)
@@ -1421,7 +1421,7 @@ function KitEditor() {
         const next = events[idx]
         if (!next || next.id === selectedEventId) return
         // Blur the range input that still has focus on the previous
-        // row — otherwise ←→ keeps adjusting the OLD card's intensity
+        // row — otherwise ←→ keeps adjusting the OLD card's clipGain
         // because the browser routes the event to the focused input.
         if (isRange) (active as HTMLInputElement).blur()
         // 選択を動かすときは再生中のプレビューを停止 (= 停止ボタンと同じ挙動)
@@ -1439,22 +1439,22 @@ function KitEditor() {
         case 'ArrowRight':
           if (currentEvent) {
             e.preventDefault()
-            const next = Math.max(0, Math.min(1, currentEvent.intensity + 0.05))
-            updateKitEvent(activeKit.id, currentEvent.id, { intensity: next })
+            const next = Math.max(0, Math.min(1, currentEvent.clipGain + 0.05))
+            updateKitEvent(activeKit.id, currentEvent.id, { clipGain: next })
           }
           break
         case 'ArrowLeft':
           if (currentEvent) {
             e.preventDefault()
-            const next = Math.max(0, Math.min(1, currentEvent.intensity - 0.05))
-            updateKitEvent(activeKit.id, currentEvent.id, { intensity: next })
+            const next = Math.max(0, Math.min(1, currentEvent.clipGain - 0.05))
+            updateKitEvent(activeKit.id, currentEvent.id, { clipGain: next })
           }
           break
         case ' ':
         case 'Spacebar':
           if (currentEvent) {
             e.preventDefault()
-            togglePreview(currentEvent.id, () => getKitEventAudio(currentEvent.id), currentEvent.intensity)
+            togglePreview(currentEvent.id, () => getKitEventAudio(currentEvent.id), currentEvent.clipGain)
             const w = getDeviceWiper()
             if (w !== null && w !== currentEvent.deviceWiper) {
               updateKitEvent(activeKit.id, currentEvent.id, { deviceWiper: w })
@@ -1528,7 +1528,7 @@ function KitEditor() {
         ...(c.note ? { note: c.note } : {}),
         modes: ['command'],
         loop: false,
-        intensity: 0.5,
+        clipGain: 0.5,
         deviceWiper: null,
       }, blob)
       if (newId) toast(`Added "${c.name}"`, 'success')
@@ -1880,11 +1880,11 @@ function KitEditor() {
                           disabled={editLocked}
                           onSelect={() => setSelectedEventId(ev.id)}
                           onTogglePlay={() => {
-                            togglePreview(ev.id, () => getKitEventAudio(ev.id), ev.intensity)
+                            togglePreview(ev.id, () => getKitEventAudio(ev.id), ev.clipGain)
                             const w = getDeviceWiper()
                             if (w !== null && w !== ev.deviceWiper) updateKitEvent(activeKit.id, ev.id, { deviceWiper: w })
                           }}
-                          onIntensityChange={(v) => updateKitEvent(activeKit.id, ev.id, { intensity: v })}
+                          onClipGainChange={(v) => updateKitEvent(activeKit.id, ev.id, { clipGain: v })}
                           onModesChange={(modes) => {
                             // Stop playback before mutating modes — the same
                             // KitEvent can switch transport (device-flash
@@ -2220,7 +2220,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
    * パフォーマンス: WAV の re-encode は IDB の encoded-WAV キャッシュ
    * (キーは event の source-blob SHA-1 hash) で skip される。前回保存
    * 以降に音声が変わっていない event は decode + 16 kHz resample +
-   * encode を全部 skip するので、amp / intensity / device_wiper を
+   * encode を全部 skip するので、amp / clipGain / device_wiper を
    * 触っただけのケースは manifest 書き換えのみで完了する。
    *
    * Kit メタ (kits-meta.json) は編集停止後にまとめて自動保存されるが、
@@ -2384,7 +2384,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
           title={
             'Kit メタ + manifest + WAV を kit フォルダに保存する。\n' +
             'Device には送らない (Deploy せずローカル保存だけしたい時に使う)。\n' +
-            '音声が前回保存時から変わっていない event は WAV 再 encode を skip するので、amp / intensity 調整のみのケースは高速。'
+            '音声が前回保存時から変わっていない event は WAV 再 encode を skip するので、amp / clipGain 調整のみのケースは高速。'
           }
         >Save Folder</button>
 

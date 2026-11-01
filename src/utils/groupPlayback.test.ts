@@ -8,8 +8,8 @@ import type { StreamOptions } from './audioStreamer'
 
 /** bite (sound + haptic), bite:tear (its own sound, the haptic inherited) and footstep outside the group. */
 const table = (): CueTable => ({
-  clips: { bite_hit: { intensity: 0.8, loop: false }, step: { intensity: 1, loop: false } },
-  sounds: { BiteCrunch: { intensity: 0.7 }, TearRip: { intensity: 0.9 }, Step: { intensity: 0.5 } },
+  clips: { bite_hit: { clip_gain: 0.8, loop: false }, step: { clip_gain: 1, loop: false } },
+  sounds: { BiteCrunch: { clip_gain: 0.7 }, TearRip: { clip_gain: 0.9 }, Step: { clip_gain: 0.5 } },
   cues: {
     bite: { sfx: { sound: 'BiteCrunch', volume: 1 }, haptics: [{ clip: 'bite_hit', at: 'pos_neck', gain: 1 }],
       variants: { tear: { sfx: { sound: 'TearRip', volume: 1 } } } },
@@ -23,7 +23,7 @@ describe('group playback (cue + its variants)', () => {
   it('bite:tear selected: the bite firing sends its haptic and plays its sound; footstep stays sound only', () => {
     const tear = { event: 'bite:tear', target: 'sound' as const, material: 'TearRip' }
     const { haptics, sounds } = groupFirings(table(), plan, tear, true)
-    // Haptics to the devices: tear's own firing (the inherited bite haptic) and the bite firing, at the clip intensity.
+    // Haptics to the devices: tear's own firing (the inherited bite haptic) and the bite firing, at the clip gain.
     expect(haptics).toEqual([{ clip: 'bite_hit', atSec: 0.8, gain: 0.8 }, { clip: 'bite_hit', atSec: 0, gain: 0.8 }])
     // Sounds on the PC: bite's and the footstep's representative sounds at their intensities (no scene multiplier).
     expect(sounds).toEqual([{ sound: 'BiteCrunch', atSec: 0.8, gain: 0.7 }, { sound: 'Step', atSec: 1.2, gain: 0.5 }])
@@ -52,6 +52,6 @@ describe('group playback (cue + its variants)', () => {
     await playback.play()
     expect(stream).toHaveBeenCalledOnce()
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'stream_begin', payload: expect.objectContaining({ targets: ['10.0.0.9'] }) }))
-    expect(options!.control!.getIntensity!(0.1)).toBe(1) // no chunk gain over the mix
+    expect(options!.control!.getGain!(0.1)).toBe(1) // no chunk gain over the mix
   })
 })

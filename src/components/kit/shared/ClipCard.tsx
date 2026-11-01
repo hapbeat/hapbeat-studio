@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { IntensityControl } from './IntensityControl'
+import { ClipGainControl } from './ClipGainControl'
 import { WiperBadge } from './WiperBadge'
 import { useToast } from '@/components/common/Toast'
 import { useI18n } from '@/i18n/I18nProvider'
@@ -41,8 +41,8 @@ export interface ClipCardProps {
   note?: string
 
   /** Amp (0–1). Pass null to hide the control. */
-  intensity: number | null
-  onIntensityChange?: (v: number) => void
+  clipGain: number | null
+  onClipGainChange?: (v: number) => void
 
   /** Play/stop toggle */
   playing: boolean
@@ -143,8 +143,8 @@ export function ClipCard({
   tags: _tags,
   showDetails,
   note,
-  intensity,
-  onIntensityChange,
+  clipGain,
+  onClipGainChange,
   playing,
   onTogglePlay,
   playDisabled,
@@ -239,7 +239,7 @@ export function ClipCard({
     >
       {/* The card is a 3-column grid: `1fr auto auto`.
           - col 1 holds the variable-width left content (play+name in
-            row 1, intensity in row 2). The 1fr eats spare width.
+            row 1, clipGain in row 2). The 1fr eats spare width.
           - col 2 = "primary action" track. Row 1 puts Swap here; row 2
             puts the first action button (+Kit on library, Edit on kit).
             Both items share the same `auto` track so the track width
@@ -333,10 +333,10 @@ export function ClipCard({
         >×</button>
       )}
 
-      {/* Row 2, col 1 — intensity slider. */}
+      {/* Row 2, col 1 — clipGain slider. */}
       <div className="clip-card-controls-left">
-        {intensity !== null && onIntensityChange && (
-          <IntensityControl value={intensity} onChange={onIntensityChange} disabled={interactionDisabled} />
+        {clipGain !== null && onClipGainChange && (
+          <ClipGainControl value={clipGain} onChange={onClipGainChange} disabled={interactionDisabled} />
         )}
       </div>
       {/* Row 2 cols 2 + 3 — action buttons. The first action goes

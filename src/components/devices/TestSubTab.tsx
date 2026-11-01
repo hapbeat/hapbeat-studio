@@ -7,7 +7,7 @@ import { useI18n } from '@/i18n/I18nProvider'
 
 const HISTORY_KEY = 'hapbeat-studio-test-event-history'
 const TARGET_KEY = 'hapbeat-studio-test-target'
-const INTENSITY_KEY = 'hapbeat-studio-test-intensity'
+const GAIN_KEY = 'hapbeat-studio-test-gain'
 const MAX_HISTORY = 5
 
 function loadHistory(): string[] {
@@ -32,12 +32,10 @@ interface Props {
  * section = `[>] FIRE コマンド送信テスト` (event-id + history +
  * selected-device send + broadcast send).
  *
- * Intensity scope: only the CLIP streaming pipeline. FIRE PLAY honors
- * the manifest-baked `intensity` field (entry->gain on the device,
- * set when the kit was deployed) — passing a runtime gain multiplier
- * here would override that intent, so we send `gain = 1.0` for FIRE.
- * That matches what the Studio CLAUDE.md describes as the kit-time
- * source of truth.
+ * Gain scope: only the CLIP streaming pipeline. The FIRE test sends a
+ * free-text Event ID with `gain = 1.0`: the device does not read the
+ * manifest's `clip_gain` (DEC-103, the sender multiplies it in), so this
+ * test plays the installed WAV as it is (no Kit lookup here).
  */
 export function TestSubTab({ device, sendTo }: Props) {
   const { t } = useI18n()
@@ -64,21 +62,20 @@ export function TestSubTab({ device, sendTo }: Props) {
   // so it can't toast a stray timeout after navigating away.
   useEffect(() => () => { if (pingTimerRef.current) clearTimeout(pingTimerRef.current) }, [])
 
-  // Intensity slider — scoped to the streaming test only. CLIP stream
-  // multiplies PCM samples by this value per chunk (live). FIRE
-  // (command) playback does *not* read this; the firmware uses the
-  // kit's manifest intensity (entry->gain) baked in at deploy time.
-  const [intensityPct, setIntensityPct] = useState<number>(() => {
-    const raw = localStorage.getItem(INTENSITY_KEY)
+  // Gain slider (app gain) — scoped to the streaming test only. The CLIP
+  // stream multiplies PCM samples by this value per chunk (live). The
+  // FIRE test below does *not* read it (it sends gain = 1.0).
+  const [gainPct, setGainPct] = useState<number>(() => {
+    const raw = localStorage.getItem(GAIN_KEY)
     if (raw === null) return 100
     const v = Number(raw)
     return Number.isFinite(v) && v >= 0 && v <= 100 ? v : 100
   })
   useEffect(() => {
-    localStorage.setItem(INTENSITY_KEY, String(intensityPct))
-  }, [intensityPct])
-  const intensityRef = useRef(intensityPct)
-  intensityRef.current = intensityPct
+    localStorage.setItem(GAIN_KEY, String(gainPct))
+  }, [gainPct])
+  const gainRef = useRef(gainPct)
+  gainRef.current = gainPct
 
   useEffect(() => { localStorage.setItem(TARGET_KEY, target) }, [target])
 
@@ -104,9 +101,8 @@ export function TestSubTab({ device, sendTo }: Props) {
     try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)) } catch { /* ignore */ }
   }
 
-  // FIRE PLAY uses gain=1.0 so the manifest-baked intensity is the
-  // sole source of truth. The user controls FIRE intensity by editing
-  // the kit's clip amp (kit-time), not by this transient slider.
+  // FIRE PLAY uses gain=1.0: the installed WAV as it is (the device
+  // never applies the manifest clip_gain; see the component comment).
   const playSelected = () => {
     if (!eventId.trim()) return
     recordEvent(eventId.trim())
@@ -156,7 +152,7 @@ export function TestSubTab({ device, sendTo }: Props) {
     if (!eventId.trim()) return
     recordEvent(eventId.trim())
     // Broadcast — bypass selected device, use the global send.
-    // gain=1.0 — see playSelected note: manifest intensity wins.
+    // gain=1.0 — see playSelected note.
     send({
       type: 'preview_event',
       payload: {
@@ -179,9 +175,9 @@ export function TestSubTab({ device, sendTo }: Props) {
       {/* CLIP — UDP streaming test (folder browser, top of pane) */}
       <StreamingTestSection
         device={device}
-        intensityRef={intensityRef}
-        intensityPct={intensityPct}
-        onIntensityChange={setIntensityPct}
+        gainRef={gainRef}
+        gainPct={gainPct}
+        onGainChange={setGainPct}
       />
 
       {/* FIRE — command send test (event-id + history + send buttons) */}

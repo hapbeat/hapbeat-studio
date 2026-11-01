@@ -136,7 +136,7 @@ describe('levelMap in the cue table', () => {
 
   it('is kept through other edits and removed with undefined', () => {
     const table = structuredClone(setLevelMap(sampleTable(), 'feed_loop', 0, MAP))
-    table.clips.hum2 = { intensity: 1, loop: true }
+    table.clips.hum2 = { clip_gain: 1, loop: true }
     let next: CueTable = addMaterial(table, FEED, 'haptic', 0, 'hum2')!
     next = setStarred(next, FEED, 'haptic', 0, 'hum2', true)!
     next = updateOwnRoute(next, FEED, 0, { gain: 0.4 })
@@ -169,7 +169,7 @@ describe('levelMap in loop playback', () => {
   it('editor context loops: rendered through the route levelMap', () => {
     const lib = sampleLib(), data = { fps: 30, full: { file: 'f.mp4', events: [], levels: Array.from({ length: 60 }, () => [0.5, 0, 1, 1]) } } as unknown as SceneData
     const plain = renderContextLoops(sampleTable(), lib, data, { layers: [0], mark: 0 }, pcm, 0.5)!
-    expect(plain[100]).toBeCloseTo(0.5 * 0.5) // intensity 1 × level 0.5
+    expect(plain[100]).toBeCloseTo(0.5 * 0.5) // clip_gain 1 × level 0.5
     const mapped = renderContextLoops(setLevelMap(sampleTable(), 'feed_loop', 0, { points: [[0.5, 1.5]] }), lib, data, { layers: [0], mark: 0 }, pcm, 0.5)!
     expect(mapped[100]).toBeCloseTo(0.5 * 1.5)
   })

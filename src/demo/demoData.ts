@@ -47,7 +47,7 @@ export const DEMO_CLIPS: LibraryClip[] = [
     sourceFilename: 'impact/impact_hit.wav',
     createdAt: DEMO_CREATED_AT,
     updatedAt: DEMO_UPDATED_AT,
-    libraryIntensity: 0.8,
+    libraryClipGain: 0.8,
     note: 'Demo clip — no audio backing file.',
   },
   {
@@ -62,7 +62,7 @@ export const DEMO_CLIPS: LibraryClip[] = [
     sourceFilename: 'movement/footstep_soft.wav',
     createdAt: DEMO_CREATED_AT,
     updatedAt: DEMO_UPDATED_AT,
-    libraryIntensity: 0.45,
+    libraryClipGain: 0.45,
   },
   {
     id: 'demo-clip-heartbeat',
@@ -76,7 +76,7 @@ export const DEMO_CLIPS: LibraryClip[] = [
     sourceFilename: 'ambient/heartbeat_loop.wav',
     createdAt: DEMO_CREATED_AT,
     updatedAt: DEMO_UPDATED_AT,
-    libraryIntensity: 0.6,
+    libraryClipGain: 0.6,
   },
   {
     id: 'demo-clip-explosion',
@@ -90,7 +90,7 @@ export const DEMO_CLIPS: LibraryClip[] = [
     sourceFilename: 'impact/explosion_big.wav',
     createdAt: DEMO_CREATED_AT,
     updatedAt: DEMO_UPDATED_AT,
-    libraryIntensity: 1.0,
+    libraryClipGain: 1.0,
   },
   {
     id: 'demo-clip-notify',
@@ -104,7 +104,7 @@ export const DEMO_CLIPS: LibraryClip[] = [
     sourceFilename: 'ui/notify_short.wav',
     createdAt: DEMO_CREATED_AT,
     updatedAt: DEMO_UPDATED_AT,
-    libraryIntensity: 0.5,
+    libraryClipGain: 0.5,
   },
 ]
 
@@ -117,7 +117,7 @@ const demoEvent = (
   id: string,
   clip: LibraryClip,
   modes: KitEvent['modes'],
-  intensity: number,
+  clipGain: number,
   deviceWiper: number | null,
 ): KitEvent => ({
   id,
@@ -130,7 +130,7 @@ const demoEvent = (
   clipFileSize: clip.fileSize,
   modes,
   loop: false,
-  intensity,
+  clipGain,
   deviceWiper,
 })
 
@@ -261,23 +261,23 @@ export const DEMO_WIFI_PROFILES_CACHE: Record<string, { profiles: WifiProfile[];
 
 /** Per-IP `kit_list` cache (deviceStore.kitListCache) — the device's own
  *  report of installed kits, shown in the "Kit" sub-tab. Every event carries
- *  `intensity` so InstalledKitsSection renders real amp% (needs fw >= 0.1.3,
+ *  `clip_gain` so InstalledKitsSection renders real amp% (needs fw >= 0.1.3,
  *  satisfied by DEMO_FW_VERSION above) instead of "amp ?". */
 export const DEMO_KIT_LIST_CACHE: Record<string, Array<{
   kit_id: string
   version: string
-  events: Array<{ name: string; mode: string; intensity: number }>
+  events: Array<{ name: string; mode: string; clip_gain: number }>
 }>> = {
   [DEMO_NECKLACE_IP]: [
     {
       kit_id: DEMO_KIT_ID,
       version: '1.0.0',
       events: [
-        { name: `${DEMO_KIT_ID}.impact_hit`, mode: 'command', intensity: 0.8 },
-        { name: `${DEMO_KIT_ID}.notify_short`, mode: 'command', intensity: 0.5 },
-        { name: `${DEMO_KIT_ID}.heartbeat_loop`, mode: 'stream_clip', intensity: 0.6 },
-        { name: `${DEMO_KIT_ID}.explosion_big`, mode: 'command', intensity: 1.0 },
-        { name: `${DEMO_KIT_ID}.explosion_big`, mode: 'stream_clip', intensity: 1.0 },
+        { name: `${DEMO_KIT_ID}.impact_hit`, mode: 'command', clip_gain: 0.8 },
+        { name: `${DEMO_KIT_ID}.notify_short`, mode: 'command', clip_gain: 0.5 },
+        { name: `${DEMO_KIT_ID}.heartbeat_loop`, mode: 'stream_clip', clip_gain: 0.6 },
+        { name: `${DEMO_KIT_ID}.explosion_big`, mode: 'command', clip_gain: 1.0 },
+        { name: `${DEMO_KIT_ID}.explosion_big`, mode: 'stream_clip', clip_gain: 1.0 },
       ],
     },
   ],
@@ -286,8 +286,8 @@ export const DEMO_KIT_LIST_CACHE: Record<string, Array<{
       kit_id: DEMO_KIT_ID,
       version: '1.0.0',
       events: [
-        { name: `${DEMO_KIT_ID}.impact_hit`, mode: 'command', intensity: 0.8 },
-        { name: `${DEMO_KIT_ID}.notify_short`, mode: 'command', intensity: 0.5 },
+        { name: `${DEMO_KIT_ID}.impact_hit`, mode: 'command', clip_gain: 0.8 },
+        { name: `${DEMO_KIT_ID}.notify_short`, mode: 'command', clip_gain: 0.5 },
       ],
     },
   ],

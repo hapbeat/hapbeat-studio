@@ -49,7 +49,7 @@ export function setSyncMs(table: CueTable, target: SyncTarget, name: string, ms:
   if (target === 'haptic') return table.clips[name] ? { ...table, clips: { ...table.clips, [name]: put(table.clips[name]) } } : table
   const entry = table.sounds?.[name]
   if (!entry && value === null) return table
-  return { ...table, sounds: { ...(table.sounds ?? {}), [name]: put(entry ?? { intensity: 1 }) } }
+  return { ...table, sounds: { ...(table.sounds ?? {}), [name]: put(entry ?? { clip_gain: 1 }) } }
 }
 
 /**

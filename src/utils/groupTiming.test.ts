@@ -9,8 +9,8 @@ import type { CueTable } from './sceneCueTable'
 import type { SceneEvent } from './sceneData'
 
 const table = (): CueTable => ({
-  clips: { bite_t51_a: { intensity: 1, loop: false }, tear_hit: { intensity: 1, loop: false } },
-  sounds: { BiteCrunch: { intensity: 1 }, chew_meat_1s: { intensity: 1 } },
+  clips: { bite_t51_a: { clip_gain: 1, loop: false }, tear_hit: { clip_gain: 1, loop: false } },
+  sounds: { BiteCrunch: { clip_gain: 1 }, chew_meat_1s: { clip_gain: 1 } },
   cues: {
     bite: { sfx: { sound: 'BiteCrunch', volume: 1 }, haptics: [{ clip: 'bite_t51_a', at: 'pos_neck', gain: 1 }],
       variants: { tear: { sfx: { sound: 'chew_meat_1s', volume: 1 } } } },

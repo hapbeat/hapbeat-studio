@@ -8,8 +8,8 @@ import { CLIP_NAME, encodePcm16Wav, isLoopCue, SOUND_NAME } from '@/utils/sceneC
 import { readProjectFile, writeProjectFile } from '@/utils/sceneProject'
 import { RATE } from '@/utils/sceneHaptics'
 import { addEventMark, applyHapticDecision, applySoundDecision, defaultAt, effectiveEvent, nextWavName, ownerKeys, parseEventKey, safeWavName, sameBytes, wavBaseName } from '@/utils/cueEvents'
-import { routeClips, setSoundIntensity, sfxSounds } from '@/utils/sceneCueTable'
-import { intensityForPeak, normalizeGain, peakOf } from '@/utils/materialLevel'
+import { routeClips, setSoundClipGain, sfxSounds } from '@/utils/sceneCueTable'
+import { clipGainForPeak, normalizeGain, peakOf } from '@/utils/materialLevel'
 import { sameSound } from '@/utils/wavCompare'
 import { appendActivity } from '@/utils/activityLog'
 import { localIsoString } from '@/utils/hapticKnowledge'
@@ -17,7 +17,7 @@ import { initialIntensity } from '@/utils/agentTrialUi'
 
 /**
  * The strength the rating chose for an AI candidate (its rating form value, unsaved too, else the saved rating's
- * `intensity`, else the trial's proposed starting `intensity`); 1 for an editor clip. Multiplied into the new material's intensity (intensityForPeak).
+ * `intensity`, else the trial's proposed starting `intensity`); 1 for an editor clip. Multiplied into the new material's clip_gain (clipGainForPeak).
  */
 export function ratedIntensity(source: DecideSource): number {
   if (source.kind !== 'candidate') return 1
@@ -137,8 +137,8 @@ export interface DecisionInput {
   at: string | null
   /** Pre-encoded WAV (the dialog encodes once to suggest a name). */
   wav?: ArrayBuffer
-  /** The intensity of a new material written from `wav` (its size before normalizing × the rated strength). */
-  intensity?: number
+  /** The clip_gain of a new material written from `wav` (its size before normalizing × the rated strength). */
+  clipGain?: number
 }
 
 /**
@@ -149,10 +149,10 @@ export interface DecisionInput {
  * clip list, and publishes the result (Events panel / trial notices).
  */
 export async function runDecision(input: DecisionInput): Promise<{ ok: true; result: DecideResult } | { ok: false; notice: SceneNotice }> {
-  // Written normalized; the candidate's / clip's own size × its rated strength becomes the new material's intensity (DEC-086).
-  const encoded = input.wav ? { wav: input.wav, intensity: input.intensity ?? 1 } : await (async () => {
+  // Written normalized; the candidate's / clip's own size × its rated strength becomes the new material's clip_gain (DEC-086).
+  const encoded = input.wav ? { wav: input.wav, clipGain: input.clipGain ?? 1 } : await (async () => {
     const m = await encodeMaterial(await decideSourceBuffer(input.source), input.target)
-    return { wav: m.wav, intensity: intensityForPeak(m.peak, ratedIntensity(input.source)) }
+    return { wav: m.wav, clipGain: clipGainForPeak(m.peak, ratedIntensity(input.source)) }
   })()
   const wav = encoded.wav
   const before = useSceneStore.getState()
@@ -170,11 +170,11 @@ export async function runDecision(input: DecisionInput): Promise<{ ok: true; res
   for (const key of events) {
     const ref = parseEventKey(key)
     next = input.target === 'haptic'
-      ? applyHapticDecision(next, { ref, clip: picked.name, at: input.at ?? defaultAt(lib, next, ref.cue), gain: 1, intensity: encoded.intensity })
+      ? applyHapticDecision(next, { ref, clip: picked.name, at: input.at ?? defaultAt(lib, next, ref.cue), gain: 1, clipGain: encoded.clipGain })
       : applySoundDecision(next, ref, picked.name)
   }
   // A new sound gets its base level; one already in the table keeps its own.
-  if (input.target === 'sound' && !next.sounds?.[picked.name]) next = setSoundIntensity(next, picked.name, encoded.intensity)
+  if (input.target === 'sound' && !next.sounds?.[picked.name]) next = setSoundClipGain(next, picked.name, encoded.clipGain)
   const kind = input.target === 'haptic' ? 'clips' : 'sounds'
   // A WAV overwritten under the same name with other bytes is kept in _archive first (never lost).
   if (previous && !same && before.root) await writeProjectFile(before.root, `_archive/${dirOf(input.target)}/${picked.name}_${new Date().toISOString().replace(/[:.]/g, '-')}.wav`, previous)

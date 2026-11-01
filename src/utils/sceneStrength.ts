@@ -4,9 +4,9 @@ import { isTick, type SceneEvent } from './sceneData'
 import { occurrenceKeys, recordingFiringStrength } from './sceneFiringGain'
 
 /**
- * The Scene tab's strength panel (DEC-102 r3), pure parts: the software multiplier is edited in two places only —
+ * The Scene tab's strength panel (DEC-102 r3), pure parts: the app gain is edited in two places only —
  * an event's route gain (cue table, 0..2) and a firing's own gain (viewer-data `events[].gain`, ≥ 0). The clip
- * intensity (material) and this PC's overall multiplier are never part of these edits.
+ * clip_gain (material) and this PC's overall multiplier are never part of these edits.
  */
 
 /** Gains are written with 3 decimals (the recording's precision). */

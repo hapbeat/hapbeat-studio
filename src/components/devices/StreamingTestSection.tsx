@@ -24,13 +24,13 @@ import {
 
 interface Props {
   device: DeviceInfo
-  /** Live intensity ref (0..100 %). Polled per chunk by streamClip
+  /** Live gain ref (0..100 %). Polled per chunk by streamClip
    *  so dragging the slider re-modulates an in-flight stream without
    *  rebuilding it. */
-  intensityRef: MutableRefObject<number>
-  /** Intensity slider value (0..100 %), controlled by the parent. */
-  intensityPct: number
-  onIntensityChange: (next: number) => void
+  gainRef: MutableRefObject<number>
+  /** Gain slider value (0..100 %), controlled by the parent. */
+  gainPct: number
+  onGainChange: (next: number) => void
 }
 
 /** Subset of audio/video extensions the browser can decode via
@@ -89,9 +89,9 @@ interface DirEntry {
  */
 export function StreamingTestSection({
   device,
-  intensityRef,
-  intensityPct,
-  onIntensityChange,
+  gainRef,
+  gainPct,
+  onGainChange,
 }: Props) {
   const { send } = useHelperConnection()
   const { t } = useI18n()
@@ -390,7 +390,7 @@ export function StreamingTestSection({
               seekRequestRef.current = null
               return v
             },
-            getIntensity: () => intensityRef.current / 100,
+            getGain: () => gainRef.current / 100,
             onProgress: (current, total, sr) =>
               setProgress({ current, total, sr }),
           },
@@ -409,7 +409,7 @@ export function StreamingTestSection({
         }
       }
     },
-    [device.ipAddress, intensityRef, send, t],
+    [device.ipAddress, gainRef, send, t],
   )
 
   const startStreamFromHandle = useCallback(
@@ -798,28 +798,28 @@ export function StreamingTestSection({
       </div>
 
       <div className="form-row">
-        <label>Intensity</label>
+        <label>Gain</label>
         <div className="form-row-multi" style={{ width: '100%' }}>
           <input
             type="range"
             min={0}
             max={100}
-            value={intensityPct}
-            onChange={(e) => onIntensityChange(Number(e.target.value))}
+            value={gainPct}
+            onChange={(e) => onGainChange(Number(e.target.value))}
             style={{ flex: 1 }}
-            aria-label={t('manage.stream.intensity.aria')}
+            aria-label={t('manage.stream.gain.aria')}
           />
           <span
             className="form-input mono short"
             style={{ textAlign: 'right', minWidth: 60 }}
           >
-            {intensityPct}%
+            {gainPct}%
           </span>
         </div>
         <span />
       </div>
       <div className="form-status muted" style={{ padding: '0 4px', marginTop: -4 }}>
-        {t('manage.stream.intensity.info')}
+        {t('manage.stream.gain.info')}
       </div>
 
       <div className="form-action-row">

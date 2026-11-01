@@ -10,7 +10,7 @@ import { CLIP_NAME, isLoopCue, positionsForCue, SOUND_NAME } from '@/utils/scene
 import { allEventKeys, defaultAt, effectiveEvent, matchesName, needsRouteForm, overwriteUsers, parseEventKey, sameBytes, soundFirstNote, trialEvent } from '@/utils/cueEvents'
 import { useAtLabel } from '@/components/scene/SceneCuePanels'
 import { autoWavName, decideSourceBuffer, encodeMaterial, existingWav, ratedIntensity, runDecision } from './eventDecide'
-import { intensityForPeak } from '@/utils/materialLevel'
+import { clipGainForPeak } from '@/utils/materialLevel'
 import { SoundFirstNote } from './EventsPanel'
 import '@/components/common/ConfirmDialog.css'
 import './EventsPanel.css'
@@ -60,7 +60,7 @@ function DecideForm({ request }: { request: DecideRequest }) {
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     let cancelled = false
-    void decideSourceBuffer(source).then(b => encodeMaterial(b, target)).then(m => { if (!cancelled) { setWav(m.wav); setIntensity(intensityForPeak(m.peak, ratedIntensity(source))) } }, e => { if (!cancelled) setError(message(e)) })
+    void decideSourceBuffer(source).then(b => encodeMaterial(b, target)).then(m => { if (!cancelled) { setWav(m.wav); setClipGain(clipGainForPeak(m.peak, ratedIntensity(source))) } }, e => { if (!cancelled) setError(message(e)) })
     return () => { cancelled = true }
   }, [])
   useEffect(() => {
@@ -79,8 +79,8 @@ function DecideForm({ request }: { request: DecideRequest }) {
   }, [wav, name, target])
   const [at, setAt] = useState(() => valid ? defaultAt(lib!, table, ref.cue) : 'hand')
   useEffect(() => { if (valid) setAt(defaultAt(lib!, table, ref.cue)) }, [event])
-  /** The new material's intensity (its size before normalizing × the rated strength; DEC-086). */
-  const [intensity, setIntensity] = useState(1)
+  /** The new material's clip_gain (its size before normalizing × the rated strength; DEC-086). */
+  const [clipGain, setClipGain] = useState(1)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !busy) close() }
     window.addEventListener('keydown', onKey)
@@ -132,7 +132,7 @@ function DecideForm({ request }: { request: DecideRequest }) {
     if (!canSubmit || !wav) return
     setBusy(true); setError(null)
     try {
-      const r = await runDecision({ target, source, events: [event], name, at, wav, intensity })
+      const r = await runDecision({ target, source, events: [event], name, at, wav, clipGain })
       // Success is logged (activity log), not shown: the dialog just closes.
       if (r.ok) { close(); return }
       else setError(t(r.notice.id, r.notice.params))

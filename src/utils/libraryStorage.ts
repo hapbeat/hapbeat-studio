@@ -13,7 +13,7 @@ const STORE_KITS = 'kits'
  * to invalidate the cache when the underlying audio changes. Lets
  * "Save Folder" skip decode+encode for events whose audio hasn't moved
  * since the last save (the common case when the user only adjusted
- * intensity / amp / device_wiper).
+ * clip_gain / amp / device_wiper).
  */
 const STORE_ENCODED = 'encoded-wavs'
 

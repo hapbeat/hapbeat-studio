@@ -1,12 +1,12 @@
 import { levelAt, type SceneLayer, type SceneLib } from './sceneData'
-import { sfxSounds, soundIntensity, type CueTable } from './sceneCueTable'
+import { sfxSounds, soundClipGain, type CueTable } from './sceneCueTable'
 import { mapLevel, type LevelMap } from './levelMap'
 
 /**
  * The Scene tab's loop-cue sounds (cue-table section 5.6: a loop cue's sfx loops too): while the
  * replay plays, each loop cue with an `sfx` loops its first sound (a loop does not re-pick or vary) at the recorded level of its layer,
  * like the haptic loop layers. Gain = levelMap(recorded level) × sfx.volume × the sound's
- * intensity (DEC-086 / DEC-090; no levelMap = the level); a layer with a rate column sets the playback rate.
+ * clip_gain (DEC-086 / DEC-090; no levelMap = the level); a layer with a rate column sets the playback rate.
  */
 export interface LoopSound { layer: number; sound: string; gain: number; levelMap?: LevelMap }
 
@@ -15,7 +15,7 @@ export function buildLoopSounds(table: CueTable, lib: SceneLib): LoopSound[] {
   const out: LoopSound[] = []
   lib.layers.forEach(({ cue }, layer) => {
     const sfx = table.cues[cue]?.sfx, sound = sfxSounds(sfx)[0]
-    if (sfx && sound !== undefined) out.push({ layer, sound, gain: sfx.volume * soundIntensity(table, sound), levelMap: sfx.levelMap })
+    if (sfx && sound !== undefined) out.push({ layer, sound, gain: sfx.volume * soundClipGain(table, sound), levelMap: sfx.levelMap })
   })
   return out
 }

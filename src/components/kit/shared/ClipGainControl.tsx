@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useElementSize } from '../hooks/useElementSize'
 import { useI18n } from '@/i18n/I18nProvider'
-import './IntensityControl.css'
+import './ClipGainControl.css'
 
-export interface IntensityControlProps {
+export interface ClipGainControlProps {
   value: number
   onChange: (v: number) => void
   label?: string
@@ -12,7 +12,7 @@ export interface IntensityControlProps {
 }
 
 /**
- * Amp (intensity) control that auto-adapts to its cell width.
+ * Amp (clip gain) control that auto-adapts to its cell width.
  * - Wide cell (>= COMPACT_THRESHOLD): inline slider with range input
  * - Narrow cell: compact "Amp NN%" button that opens a popover with the slider
  *
@@ -27,7 +27,7 @@ export interface IntensityControlProps {
  */
 const COMPACT_THRESHOLD = 70
 
-export function IntensityControl({ value, onChange, label = 'Amp', disabled = false }: IntensityControlProps) {
+export function ClipGainControl({ value, onChange, label = 'Amp', disabled = false }: ClipGainControlProps) {
   const { ref, width } = useElementSize<HTMLDivElement>()
   // Hysteresis: switch to compact if clearly below threshold, back to inline
   // only once clearly above. Avoids jitter right at the boundary.
@@ -39,26 +39,26 @@ export function IntensityControl({ value, onChange, label = 'Amp', disabled = fa
   }, [width])
 
   return (
-    <div ref={ref} className="intensity-control">
+    <div ref={ref} className="clip-gain-control">
       {compact
-        ? <IntensityPopoverButton value={value} onChange={onChange} label={label} disabled={disabled} />
-        : <IntensityInlineSlider value={value} onChange={onChange} label={label} disabled={disabled} />}
+        ? <ClipGainPopoverButton value={value} onChange={onChange} label={label} disabled={disabled} />
+        : <ClipGainInlineSlider value={value} onChange={onChange} label={label} disabled={disabled} />}
     </div>
   )
 }
 
-function IntensityInlineSlider({ value, onChange, label, disabled }: { value: number; onChange: (v: number) => void; label: string; disabled: boolean }) {
+function ClipGainInlineSlider({ value, onChange, label, disabled }: { value: number; onChange: (v: number) => void; label: string; disabled: boolean }) {
   const { t } = useI18n()
   const [focused, setFocused] = useState(false)
   return (
     <label
-      className={`intensity-inline ${focused ? 'focused' : ''}`}
+      className={`clip-gain-inline ${focused ? 'focused' : ''}`}
       draggable={false}
       onMouseDown={(e) => e.stopPropagation()}
       onDragStart={(e) => { e.preventDefault(); e.stopPropagation() }}
-      title={t('kit.intensitySliderTitle')}
+      title={t('kit.clipGainSliderTitle')}
     >
-      <span className="intensity-inline-label">{label}</span>
+      <span className="clip-gain-inline-label">{label}</span>
       <input
         type="range"
         min={0} max={1} step={0.05}
@@ -70,17 +70,17 @@ function IntensityInlineSlider({ value, onChange, label, disabled }: { value: nu
         onBlur={() => setFocused(false)}
         onMouseDown={(e) => e.stopPropagation()}
       />
-      <IntensityValueEditor
+      <ClipGainValueEditor
         value={value}
         onChange={onChange}
-        className="intensity-inline-val"
+        className="clip-gain-inline-val"
         disabled={disabled}
       />
     </label>
   )
 }
 
-function IntensityPopoverButton({ value, onChange, label, disabled }: { value: number; onChange: (v: number) => void; label: string; disabled: boolean }) {
+function ClipGainPopoverButton({ value, onChange, label, disabled }: { value: number; onChange: (v: number) => void; label: string; disabled: boolean }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -94,34 +94,34 @@ function IntensityPopoverButton({ value, onChange, label, disabled }: { value: n
   }, [open])
 
   return (
-    <div className="intensity-popover-wrap" ref={ref}
+    <div className="clip-gain-popover-wrap" ref={ref}
       draggable={false}
       onMouseDown={(e) => e.stopPropagation()}>
-      <button className="intensity-popover-trigger"
+      <button className="clip-gain-popover-trigger"
         disabled={disabled}
         onClick={() => setOpen(!open)}
         title={`${label} — click to edit`}>
-        <span className="intensity-popover-label">{label}</span>
-        <IntensityValueEditor
+        <span className="clip-gain-popover-label">{label}</span>
+        <ClipGainValueEditor
           value={value}
           onChange={onChange}
-          className="intensity-popover-val"
+          className="clip-gain-popover-val"
           disabled={disabled}
         />
       </button>
       {open && (
-        <div className="intensity-popover-panel">
-          <span className="intensity-inline-label">{label}</span>
+        <div className="clip-gain-popover-panel">
+          <span className="clip-gain-inline-label">{label}</span>
           <input type="range" min={0} max={1} step={0.05} value={value}
             disabled={disabled}
             autoFocus
             draggable={false}
             onChange={(e) => onChange(Number(e.target.value))}
             onMouseDown={(e) => e.stopPropagation()} />
-          <IntensityValueEditor
+          <ClipGainValueEditor
             value={value}
             onChange={onChange}
-            className="intensity-inline-val"
+            className="clip-gain-inline-val"
             disabled={disabled}
           />
         </div>
@@ -131,7 +131,7 @@ function IntensityPopoverButton({ value, onChange, label, disabled }: { value: n
 }
 
 /**
- * Click-to-edit value badge for amp / intensity displays.
+ * Click-to-edit value badge for amp / clip gain displays.
  *
  * Default render is a plain `<span>` showing `NN%` (rounded to integer).
  * Clicking the span turns it into an inline `<input type="number">`
@@ -139,7 +139,7 @@ function IntensityPopoverButton({ value, onChange, label, disabled }: { value: n
  * directly (e.g. `12` for 12%). Enter / blur commits, Escape cancels.
  *
  * Used in both the inline slider and the popover variants of
- * IntensityControl — the 5%-step slider stays exactly the same, this
+ * ClipGainControl — the 5%-step slider stays exactly the same, this
  * just adds a "direct typing" path next to it.
  *
  * Commit rules:
@@ -153,7 +153,7 @@ function IntensityPopoverButton({ value, onChange, label, disabled }: { value: n
  *   - `e.stopPropagation()` on keydown so global keyboard shortcuts
  *     (Space play / ↑↓←→ navigation) don't fire while typing
  */
-function IntensityValueEditor({
+function ClipGainValueEditor({
   value, onChange, className, style, disabled = false,
 }: {
   value: number
@@ -201,7 +201,7 @@ function IntensityValueEditor({
         ref={inputRef}
         type="number"
         min={0} max={100} step={1}
-        className={`${className ?? ''} intensity-value-input`}
+        className={`${className ?? ''} clip-gain-value-input`}
         style={style}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
@@ -222,7 +222,7 @@ function IntensityValueEditor({
       className={className}
       aria-disabled={disabled}
       style={{ cursor: disabled ? 'default' : 'text', ...style }}
-      title={t('kit.intensityValueTitle')}
+      title={t('kit.clipGainValueTitle')}
       onMouseDown={(e) => { e.stopPropagation(); e.preventDefault() }}
       onClick={startEdit}
     >

@@ -31,7 +31,7 @@ import { renderLoopStretch, type LoopStretch } from '@/utils/loopStretch'
  */
 
 /**
- * The WAV as it is (the intensity is a playback gain, never baked in). A loop cue's material is not repeated here:
+ * The WAV as it is (the clip_gain is a playback gain, never baked in). A loop cue's material is not repeated here:
  * repeating is the transport's Loop toggle, so it can be switched off.
  */
 function asBuffer(channels: Float32Array[], rate: number): AudioBuffer {
@@ -52,7 +52,7 @@ function soundBuffer(sound: string): AudioBuffer | null {
   return b && s.table ? asBuffer(Array.from({ length: b.numberOfChannels }, (_, c) => b.getChannelData(c)), b.sampleRate) : null
 }
 /**
- * Opens clip `clip` of event `key` in the waveform panel, played and drawn at its base level (DEC-086: WAV × intensity
+ * Opens clip `clip` of event `key` in the waveform panel, played and drawn at its base level (DEC-086: WAV × clip_gain
  * as a gain; the route gain is a scene multiplier, not applied in the editor).
  * When it is already shown, only `autoplay` and `plain` act (the shown buffer stays).
  * `plain`: as the plain file (opened from the Scene tab, EventPreview.plain); false ends that mode for this material.

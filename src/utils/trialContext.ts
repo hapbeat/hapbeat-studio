@@ -1,5 +1,5 @@
 import { levelAt, type SceneData, type SceneLib } from './sceneData'
-import { routeClips, soundIntensity, type CueTable } from './sceneCueTable'
+import { routeClips, soundClipGain, type CueTable } from './sceneCueTable'
 import { effectiveEvent, parseEventKey, resolveEventName } from './cueEvents'
 import { groupContext } from './eventGroups'
 import { groupFirings, type SoundFiring } from './groupPlayback'
@@ -53,13 +53,13 @@ export function contextPlan(data: Pick<SceneData, 'full'>, lib: Pick<SceneLib, '
 /**
  * The context loop cues' haptics as one mono stream (RATE), `durationSec` long: each route's clip looped at its layer's
  * recorded level (through the route's levelMap, DEC-090) and rate (renderChunk's loop voices, sceneHaptics). The editor sends one
- * stream, so a `hand` route's two wrists become one voice following the louder hand. Gain = clip intensity only (no scene route gain),
+ * stream, so a `hand` route's two wrists become one voice following the louder hand. Gain = clip gain only (no scene route gain),
  * like the context's one-shots.
  */
 export function renderContextLoops(table: CueTable, lib: SceneLib, data: Pick<SceneData, 'full' | 'fps'>, plan: Pick<ContextPlan, 'layers' | 'mark'>,
   pcm: Record<string, Float32Array>, durationSec: number): Float32Array | null {
   const voices: LoopVoice[] = buildLoopVoices(table, lib).filter(v => plan.layers.includes(v.layer) && v.side !== 1)
-    .map(v => ({ ...v, side: -1, gain: table.clips[v.clip]?.intensity ?? 1 }))
+    .map(v => ({ ...v, side: -1, gain: table.clips[v.clip]?.clip_gain ?? 1 }))
   const live = voices.filter(v => pcm[v.clip]?.length)
   if (!live.length) return null
   const out = new Float32Array(Math.max(1, Math.round(durationSec * RATE)))
@@ -88,22 +88,22 @@ export function auditionContext(o: { own: readonly string[]; groups: readonly (r
   return { contextCues, context: o.on && contextCues.length && o.data && o.lib ? contextPlan(o.data, o.lib, contextCues, o.mark, o.end) : null }
 }
 
-/** The context's one-shot firings as sounds (each event's decided sound at its intensity, as the stretch's other cues; groupFirings). */
+/** The context's one-shot firings as sounds (each event's decided sound at its clip_gain, as the stretch's other cues; groupFirings). */
 export function contextSoundFirings(table: CueTable, plan: Pick<ContextPlan, 'firings'>): SoundFiring[] {
   return groupFirings(table, { targets: [], others: plan.firings }, { event: '', target: 'haptic', material: '' }, false).sounds
 }
 
-/** The context's one-shot firings as haptic parts of the device stream: each event's first route clip at its intensity (as a group member's, groupFirings). */
+/** The context's one-shot firings as haptic parts of the device stream: each event's first route clip at its clip_gain (as a group member's, groupFirings). */
 export function contextHapticParts(table: CueTable, plan: Pick<ContextPlan, 'firings'>): { clip: string; atSec: number; gain: number }[] {
   return plan.firings.flatMap(f => {
     const r = resolveEventName(table, f.name), e = r && effectiveEvent(table, r.ref), clip = e?.haptics[0] ? routeClips(e.haptics[0])[0] : undefined
-    return clip !== undefined && !table.clips[clip]?.loop ? [{ clip, atSec: f.atSec, gain: table.clips[clip]?.intensity ?? 1 }] : []
+    return clip !== undefined && !table.clips[clip]?.loop ? [{ clip, atSec: f.atSec, gain: table.clips[clip]?.clip_gain ?? 1 }] : []
   })
 }
 
-/** The context loop cues' sounds (those layers' loop sounds, levelMap kept) at the sound's intensity only (no sfx.volume), like the context's one-shots. */
+/** The context loop cues' sounds (those layers' loop sounds, levelMap kept) at the sound's clip_gain only (no sfx.volume), like the context's one-shots. */
 export function contextLoopSounds(table: CueTable, lib: SceneLib, plan: Pick<ContextPlan, 'layers'>): LoopSound[] {
-  return buildLoopSounds(table, lib).filter(x => plan.layers.includes(x.layer)).map(x => ({ ...x, gain: soundIntensity(table, x.sound) }))
+  return buildLoopSounds(table, lib).filter(x => plan.layers.includes(x.layer)).map(x => ({ ...x, gain: soundClipGain(table, x.sound) }))
 }
 
 /** The full replay time whose recorded loop levels play at editor playback time `playSec` (the PC sounds play `leadSec` later). */

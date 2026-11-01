@@ -3,7 +3,7 @@ import { detectSyncMs, savedSyncMs, setSyncMs, soundLeadInSec } from './syncPoin
 import type { CueTable } from './sceneCueTable'
 
 const buffer = (channels: number[][], sampleRate = 1000) => ({ sampleRate, numberOfChannels: channels.length, getChannelData: (c: number) => Float32Array.from(channels[c]) })
-const table = (): CueTable => ({ clips: { hit: { intensity: 1, loop: false } }, sounds: { Punch: { intensity: .5 } }, cues: {} })
+const table = (): CueTable => ({ clips: { hit: { clip_gain: 1, loop: false } }, sounds: { Punch: { clip_gain: .5 } }, cues: {} })
 
 describe('sync points (DEC-093)', () => {
   it('detects the first sample at 1/10 of the peak on any channel; silence is 0', () => {
@@ -17,12 +17,12 @@ describe('sync points (DEC-093)', () => {
   it('saves, reads and removes a sync point per material without touching the rest', () => {
     const t = setSyncMs(setSyncMs(table(), 'haptic', 'hit', 12.4), 'sound', 'Punch', 31)
     expect(savedSyncMs(t, 'haptic', 'hit')).toBe(12)
-    expect(t.sounds!.Punch).toEqual({ intensity: .5, syncMs: 31 })
+    expect(t.sounds!.Punch).toEqual({ clip_gain: .5, syncMs: 31 })
     const back = setSyncMs(t, 'haptic', 'hit', null)
-    expect(back.clips.hit).toEqual({ intensity: 1, loop: false })
+    expect(back.clips.hit).toEqual({ clip_gain: 1, loop: false })
     expect(savedSyncMs(back, 'haptic', 'hit')).toBeUndefined()
     expect(setSyncMs(table(), 'haptic', 'nope', 5)).toEqual(table())
-    expect(setSyncMs(table(), 'sound', 'New', 5).sounds!.New).toEqual({ intensity: 1, syncMs: 5 })
+    expect(setSyncMs(table(), 'sound', 'New', 5).sounds!.New).toEqual({ clip_gain: 1, syncMs: 5 })
     expect(setSyncMs(table(), 'sound', 'New', null)).toEqual(table())
     expect(savedSyncMs(setSyncMs(table(), 'sound', 'Punch', -3), 'sound', 'Punch')).toBe(0)
   })

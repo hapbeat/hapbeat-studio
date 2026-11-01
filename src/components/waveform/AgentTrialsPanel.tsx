@@ -519,7 +519,7 @@ function TrialDetail({ record, known, audition, onAudition, deviceNames, onSelec
               <VerdictTag overall={form.candidates[requested.id].overall} />
               {/* The strength (saved in the rating as `intensity`): this candidate's audition gain, live. */}
               <LevelSlider className="agent-card-level" levelKey={levelKey.candidate(trial.id, requested.id)} saved={form.candidates[requested.id].intensity}
-                label={t('editor.intensity')} title={t(target === 'sound' ? 'editor.agent.intensitySoundHint' : 'editor.agent.intensityHapticHint')}
+                label={t('editor.clipGain')} title={t(target === 'sound' ? 'editor.agent.intensitySoundHint' : 'editor.agent.intensityHapticHint')}
                 onSave={intensity => { useEventStore.getState().setLevels({ [levelKey.candidate(trial.id, requested.id)]: intensity }); editCandidate(requested.id, { intensity }) }} />
               {/* A haptic candidate's sound (the cue's pool; its `sound`, else the representative), picked per candidate. */}
               {soundPool.length > 1 && <select className="agent-card-sound" aria-label={t('editor.agent.withSound')} title={t('editor.agent.withSoundHint')}

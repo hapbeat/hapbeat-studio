@@ -58,9 +58,9 @@ export function sampleTable(): CueTable {
     schema_version: 1,
     kit: 'mill-kit',
     clips: {
-      click: { intensity: 1.0, loop: false, description: 'click' },
-      thump: { intensity: 0.5, loop: false },
-      hum: { intensity: 1.0, loop: true },
+      click: { clip_gain: 1.0, loop: false, description: 'click' },
+      thump: { clip_gain: 0.5, loop: false },
+      hum: { clip_gain: 1.0, loop: true },
     },
     cues: {
       button: { description: 'press', sfx: { sound: 'Click', volume: 0.6 }, haptics: [{ clip: 'click', at: 'hand', gain: 1.0 }] },

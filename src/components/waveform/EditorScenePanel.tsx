@@ -36,7 +36,7 @@ export type SceneSubject = { kind: 'trial'; trialId: string | null } | { kind: '
 export function useSceneChoice(subject: SceneSubject) {
   const lib = useSceneStore(s => s.lib)
   const data = useSceneStore(s => s.data)
-  // The cues only: a strength (intensity) change touches clips / sounds and must not re-resolve the scene.
+  // The cues only: a strength (clip_gain) change touches clips / sounds and must not re-resolve the scene.
   const cues = useSceneStore(s => s.table?.cues)
   const trials = useAgentTrialStore(s => s.trials)
   const id = subject.kind === 'trial' ? subject.trialId : subject.kind === 'clip' ? subject.clipId : subject.key

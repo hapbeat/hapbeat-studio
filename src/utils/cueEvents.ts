@@ -2,7 +2,7 @@ import type { SceneLib } from './sceneData'
 import type { MaterialReserve } from './editorUiSettings'
 import {
   type CueReview, type ReviewState,
-  clampNumber, isLoopCue, soundIntensity, positionsForCue, routeAlternates, routeClips, sfxAlternates, sfxSounds, VARIANT_NAME,
+  clampNumber, isLoopCue, soundClipGain, positionsForCue, routeAlternates, routeClips, sfxAlternates, sfxSounds, VARIANT_NAME,
   type CueEntry, type CueRoute, type CueSfx, type CueTable, type CueVariant, type CueVariation, type PickMode, type DistanceFalloff, type CueEmit,
 } from './sceneCueTable'
 import type { LevelMap } from './levelMap'
@@ -392,7 +392,7 @@ function edited(table: CueTable, ref: EventRef, change: (entry: CueEntry | CueVa
   return next
 }
 
-export interface HapticDecision { ref: EventRef; clip: string; /** at / gain for a new route (used only when the event has none). */ at: string; gain: number; /** A new clip entry's intensity (default 1). */ intensity?: number }
+export interface HapticDecision { ref: EventRef; clip: string; /** at / gain for a new route (used only when the event has none). */ at: string; gain: number; /** A new clip entry's clip_gain (default 1). */ clipGain?: number }
 
 // ── Starred (played) and alternates (DEC-089) ──
 
@@ -426,7 +426,7 @@ function adoptInto(starred: readonly string[], alternates: readonly string[], na
 }
 
 /**
- * Clip entry (added with intensity 1.0 and the cue's loop kind; an existing entry keeps its values) + the event's
+ * Clip entry (added with clip_gain 1.0 and the cue's loop kind; an existing entry keeps its values) + the event's
  * haptics: `clip` joins the first route's alternates (DEC-089; the user stars what plays), or becomes its starred
  * clip when the route has none; a new route when there is none. Never twice. A variant that inherited its haptics
  * gets its own copy first. The review goes back to tentative only when what plays changed.
@@ -444,7 +444,7 @@ export function applyHapticDecision(table: CueTable, d: HapticDecision): CueTabl
     // A decision that changes what plays is tentative until the user approves it.
     if (plays) entry.review = { ...(entry.review ?? {}), haptics: 'tentative' }
   })
-  if (!next.clips[d.clip]) next.clips[d.clip] = { intensity: clampNumber(d.intensity ?? 1, 0, 1), loop: isLoopCue(table, d.ref.cue), description: `Decided in Studio for ${eventKey(d.ref)}` }
+  if (!next.clips[d.clip]) next.clips[d.clip] = { clip_gain: clampNumber(d.clipGain ?? 1, 0, 1), loop: isLoopCue(table, d.ref.cue), description: `Decided in Studio for ${eventKey(d.ref)}` }
   return next
 }
 /**
@@ -806,7 +806,7 @@ export interface Shot {
   jitterDb: number
   /** Haptic playback rate (frequency and length together). */
   rate: number
-  routes: { clip: string; at: string; /** route gain × gain jitter (× clip intensity is applied by the player). */ gain: number }[]
+  routes: { clip: string; at: string; /** route gain × gain jitter (× clip gain is applied by the player). */ gain: number }[]
 }
 const jitter = (amount: number | undefined, random: () => number) => amount ? (random() * 2 - 1) * amount : 0
 
@@ -882,7 +882,7 @@ export function representativeSound<B>(table: CueTable, names: readonly string[]
     // `prefer`: a sound of the event's pool picked for what is shown (an AI candidate's `sound`), else the representative.
     const sounds = sfxSounds(e?.sfx), first = prefer && sounds.includes(prefer) && buffers[prefer] ? prefer : sounds[0]
     // The editor plays a material at its base level only (DEC-086: sfx.volume is the scene multiplier).
-    if (e?.sfx && first && buffers[first]) return { buffer: buffers[first], volume: soundIntensity(table, first), loop: isLoopCue(table, e.ref.cue), name: first }
+    if (e?.sfx && first && buffers[first]) return { buffer: buffers[first], volume: soundClipGain(table, first), loop: isLoopCue(table, e.ref.cue), name: first }
   }
   return null
 }

@@ -1070,7 +1070,7 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 /* The candidate's strength and its sound sit in the wrapping meta line (fixed widths: moving the slider never shifts it). */
 .agent-card-level { gap: 4px; font-size: 11px; }
 .agent-card-level input { width: 72px; }
-.agent-card-level .editor-intensity-value { min-width: 8.5em; }
+.agent-card-level .editor-level-value { min-width: 8.5em; }
 .agent-card-sound { flex: 0 1 auto; min-width: 0; max-width: 100%; font-size: 12px; }
 .agent-card-head .agent-play-btn { min-width: 0; padding: 3px 8px; }
 .agent-card-head .agent-short-id { white-space: nowrap; }
@@ -1102,10 +1102,10 @@ fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; bor
 .editor-routing.empty { color: #e3c27a; }
 /* Editor / Scene tabs fill the space above the log bar: no bottom padding (it showed as an empty band). */
 .tab-content.tab-content-editor { padding-bottom: 0; }
-/* Strength of an adjusted material (intensity) in the waveform heading. */
-.editor-intensity { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); white-space: nowrap; flex: none; }
-.editor-intensity input { width: 120px; }
-.editor-intensity-value { min-width: 9.5em; font-variant-numeric: tabular-nums; }
+/* Strength of an adjusted material (clip_gain) in the waveform heading. */
+.editor-level { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); white-space: nowrap; flex: none; }
+.editor-level input { width: 120px; }
+.editor-level-value { min-width: 9.5em; font-variant-numeric: tabular-nums; }
 /* Sync points (DEC-093): a dashed line per material over its lane, dragged along its waveform. */
 .editor-sync-line { position: absolute; width: 9px; margin-left: -4px; z-index: 4; cursor: ew-resize; touch-action: none; }
 .editor-sync-line::after { content: ''; position: absolute; left: 3px; top: 0; bottom: 0; border-left: 2px dashed #e879f9; }

@@ -13,19 +13,19 @@
       "clip": "sine_50hz.wav",
       "description": "50 Hz 純音 (低域)",
       "tags": ["sample", "sine", "calibration"],
-      "parameters": { "intensity": 1.0, "loop": false }
+      "parameters": { "clip_gain": 1.0, "loop": false }
     },
     "sample-kit.sine_100hz": {
       "clip": "sine_100hz.wav",
       "description": "100 Hz 純音 (canonical — 疎通確認の既定イベント)",
       "tags": ["sample", "sine", "calibration"],
-      "parameters": { "intensity": 1.0, "loop": false }
+      "parameters": { "clip_gain": 1.0, "loop": false }
     },
     "sample-kit.sine_200hz": {
       "clip": "sine_200hz.wav",
       "description": "200 Hz 純音 (高域)",
       "tags": ["sample", "sine", "calibration"],
-      "parameters": { "intensity": 1.0, "loop": false }
+      "parameters": { "clip_gain": 1.0, "loop": false }
     }
   },
   "install_clips": {

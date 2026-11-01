@@ -179,7 +179,7 @@ class FakeAudioContext {
 }
 
 describe('Scene loop-cue sounds follow the recorded layer level', () => {
-  it('plays while the replay plays at level × sfx.volume × intensity; stops at level 0, on pause, seek and with PC sound off', async () => {
+  it('plays while the replay plays at level × sfx.volume × clip_gain; stops at level 0, on pause, seek and with PC sound off', async () => {
     vi.stubGlobal('AudioContext', FakeAudioContext)
     const { useSceneStore } = await import('@/stores/sceneStore')
     const { useSceneSettings } = await import('@/stores/sceneSettings')
@@ -191,7 +191,7 @@ describe('Scene loop-cue sounds follow the recorded layer level', () => {
       layers: [{ cue: 'spindle_loop', gain: [0, 0], rate: [1, 1], colors: [] }, { cue: 'feed_loop', gain: [2, 3], rate: null, colors: [] }],
       loop_cues: ['spindle_loop', 'feed_loop'], ticks: [],
     }
-    const table = { clips: {}, sounds: { Motor: { intensity: 0.5 } }, cues: { spindle_loop: { loop: true, sfx: { sound: 'Motor', volume: 0.8 }, haptics: [] }, feed_loop: { loop: true, sfx: null, haptics: [] } } }
+    const table = { clips: {}, sounds: { Motor: { clip_gain: 0.5 } }, cues: { spindle_loop: { loop: true, sfx: { sound: 'Motor', volume: 0.8 }, haptics: [] }, feed_loop: { loop: true, sfx: null, haptics: [] } } }
     const data = { fps: 30, chapters: [], full: { file: 'full.mp4', levels, columns: [], events: [] }, clips: [] }
     const motor = {} as AudioBuffer
     useSceneSettings.setState({ pcSound: true, sendHaptics: false })
@@ -263,7 +263,7 @@ describe('A levelMap edit reaches the haptic stream at once (DEC-090)', () => {
     // Safety Mill's feed_loop: right hand at input 1.225 (its recorded max), the left hand still; rate 1.
     const levels = Array.from({ length: 300 }, () => [0, 1.225, 1, 1])
     const lib = { project_name: 'mill', paths: { cues: 'cues.json', clips: 'clips', sounds: 'sounds' }, layers: [{ cue: 'feed_loop', gain: [0, 1], rate: [2, 3], colors: [] }], loop_cues: ['feed_loop'], ticks: [] }
-    const table = { clips: { feed_loop: { intensity: 0.4202, loop: true } }, sounds: {},
+    const table = { clips: { feed_loop: { clip_gain: 0.4202, loop: true } }, sounds: {},
       cues: { feed_loop: { loop: true, sfx: null, haptics: [{ clip: 'feed_loop', at: 'hand', gain: 1, levelMap: { points: [[0.08, 0.08], [1.225, 0.5]] } }] } } }
     const data = { fps: 30, chapters: [], full: { file: 'full.mp4', levels, columns: [], events: [] }, clips: [] }
     useSceneSettings.setState({ pcSound: false, sendHaptics: true })
@@ -345,7 +345,7 @@ describe('A variant ramp counts firings in replay time while a moment plays', ()
 })
 
 describe('A one-shot firing takes its gains from the table when it fires', () => {
-  it('a gain edited between two firings (route gain, clip / sound intensity, sfx.volume) is used by the next one, haptic and sound', async () => {
+  it('a gain edited between two firings (route gain, clip / sound clip gain, sfx.volume) is used by the next one, haptic and sound', async () => {
     vi.stubGlobal('AudioContext', FakeAudioContext)
     const { useSceneStore } = await import('@/stores/sceneStore')
     const { useSceneSettings } = await import('@/stores/sceneSettings')
@@ -353,7 +353,7 @@ describe('A one-shot firing takes its gains from the table when it fires', () =>
     const { buildItems } = await import('@/utils/sceneData')
     const events = [{ t: 1, name: 'bite', hand: 'right' }, { t: 2, name: 'bite', hand: 'right' }]
     const data = { fps: 30, chapters: [], full: { file: 'full.mp4', levels: [], columns: [], events }, clips: [] }
-    const table = { clips: { b: { intensity: 0.5, loop: false } }, sounds: { Bite: { intensity: 0.5 } },
+    const table = { clips: { b: { clip_gain: 0.5, loop: false } }, sounds: { Bite: { clip_gain: 0.5 } },
       cues: { bite: { sfx: { sound: 'Bite', volume: 1 }, haptics: [{ clip: 'b', at: 'both', gain: 1 }] } } }
     useSceneSettings.setState({ pcSound: true, sendHaptics: true })
     useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: { project_name: 'mill', paths: { cues: 'cues.json', clips: 'clips', sounds: 'sounds' }, layers: [], loop_cues: [], ticks: [] } as never, table: table as never, loaded: null,
@@ -367,7 +367,7 @@ describe('A one-shot firing takes its gains from the table when it fires', () =>
     const ctx = FakeAudioContext.last!
     expect(voices().map(v => v.gain)).toEqual([0.5]); expect(ctx.gains[ctx.gains.length - 1].gain.value).toBeCloseTo(0.5)
     // Edited while it plays (unsaved): the next firing uses the new values.
-    useSceneStore.getState().edit(tb => ({ ...tb, clips: { b: { intensity: 0.25, loop: false } }, sounds: { Bite: { intensity: 0.8 } },
+    useSceneStore.getState().edit(tb => ({ ...tb, clips: { b: { clip_gain: 0.25, loop: false } }, sounds: { Bite: { clip_gain: 0.8 } },
       cues: { bite: { sfx: { sound: 'Bite', volume: 0.5 }, haptics: [{ clip: 'b', at: 'both', gain: 1.5 }] } } }))
     playAt(1.5); playAt(1.95)
     expect(voices()[voices().length - 1].gain).toBeCloseTo(0.25 * 1.5); expect(ctx.gains[ctx.gains.length - 1].gain.value).toBeCloseTo(0.8 * 0.5)
@@ -386,7 +386,7 @@ describe('Scene FIRE output (the Kit installed on the Hapbeat, PLAY by Event ID)
     const { buildItems } = await import('@/utils/sceneData')
     const events = [{ t: 1, name: 'kick', hand: 'right' }]
     const data = { fps: 30, chapters: [], full: { file: 'full.mp4', levels: [], columns: [], events }, clips: [] }
-    const table = { kit: 'sports-kit', clips: { kick: { intensity: 0.5, loop: false } }, sounds: {}, cues: { kick: { sfx: null, haptics: [{ clip: 'kick', at: 'pos_chest', gain: 1 }] } } }
+    const table = { kit: 'sports-kit', clips: { kick: { clip_gain: 0.5, loop: false } }, sounds: {}, cues: { kick: { sfx: null, haptics: [{ clip: 'kick', at: 'pos_chest', gain: 1 }] } } }
     useSceneSettings.setState({ pcSound: false, sendHaptics: true })
     useScenePlayback.setState({ output: 'fire', allDevices: false, fireOffsetMs: 0, videoVolume: 1, kitState: 'ready' })
     useSceneStore.setState({ root: {} as FileSystemDirectoryHandle, lib: { project_name: 'sports', paths: { cues: 'cues.json', clips: 'clips', sounds: 'sounds' }, layers: [], loop_cues: [], ticks: [] } as never, table: table as never, loaded: null,

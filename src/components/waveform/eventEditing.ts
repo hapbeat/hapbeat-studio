@@ -10,7 +10,7 @@ import type { MaterialLink } from '@/utils/editorUiSettings'
 import { appendActivity } from '@/utils/activityLog'
 import { localIsoString } from '@/utils/hapticKnowledge'
 import { encodeDecided, encodeMaterial, existingWav } from './eventDecide'
-import { materialIntensity, setClipIntensity, setSoundIntensity } from '@/utils/sceneCueTable'
+import { materialClipGain, setClipGain, setSoundClipGain } from '@/utils/sceneCueTable'
 import { renormalize } from '@/utils/materialLevel'
 import { ADJUST_FORMAT, hasMaterialAdjust, readMaterialAdjust, writeMaterialAdjust, writeMaterialOriginal, type MaterialAdjust } from '@/utils/materialAdjust'
 import { decodeAudioFile } from '@/utils/wavIO'
@@ -129,18 +129,18 @@ async function writeBack(buffer: AudioBuffer, link: MaterialLink) {
   const scene = useSceneStore.getState(), editor = useWaveformStore.getState()
   try {
     if (!scene.root || !scene.lib || !scene.table || scene.lib.project_name !== link.project) throw new Error(`open the game project ${link.project} to update ${link.wav}.wav`)
-    // The shape goes to the WAV at full scale; the intensity follows so it sounds as loud as before (DEC-086).
+    // The shape goes to the WAV at full scale; the clip_gain follows so it sounds as loud as before (DEC-086).
     const encoded = await encodeMaterial(buffer, link.target)
     const current = await existingWav(link.target, link.wav)
     if (current && sameBytes(current, encoded.wav)) return
     const saved = editor.folder ? await readMaterialAdjust(editor.folder.root, link.project, link.target, link.wav).catch(() => null) : null
-    const level = renormalize(encoded.peak, saved?.data.normGain ?? 1, materialIntensity(scene.table, link.target, link.wav))
+    const level = renormalize(encoded.peak, saved?.data.normGain ?? 1, materialClipGain(scene.table, link.target, link.wav))
     const { archived } = await scene.replaceMaterial(link.target, link.wav, encoded.wav)
     if (editor.folder && saved) await writeMaterialAdjust(editor.folder.root, { ...saved.data, normGain: level.gain, updatedAt: localIsoString(new Date()) })
     const field = link.target === 'haptic' ? 'haptics' : 'sfx'
     const users = materialUsers(useSceneStore.getState().table!, link.target === 'haptic' ? 'clip' : 'sound', link.wav)
     useSceneStore.getState().edit(tb => users.reduce((t, key) => setReview(t, parseEventKey(key), field, 'tentative'),
-      link.target === 'haptic' ? setClipIntensity(tb, link.wav, level.intensity) : setSoundIntensity(tb, link.wav, level.intensity)))
+      link.target === 'haptic' ? setClipGain(tb, link.wav, level.clipGain) : setSoundClipGain(tb, link.wav, level.clipGain)))
     if (editor.folder) void appendActivity(editor.folder.root, { at: localIsoString(new Date()), kind: 'material-updated', events: users, file: `${link.wav}.wav`, note: `previous → ${archived}` }).catch(() => {})
   } catch (error) {
     useWaveformStore.getState().setError(`${link.wav}.wav: ${error instanceof Error ? error.message : String(error)}`)

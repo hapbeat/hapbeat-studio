@@ -22,15 +22,16 @@ function span(values: readonly number[], digits = 2): string {
 const signedDb = (ratio: number) => { const db = ratioDb(ratio); return `${db >= 0 ? '+' : '−'}${Math.abs(db).toFixed(1)}` }
 
 /**
- * 「強さ」 panel (DEC-102 r3): a mixer of the software multipliers. The overall fader is this PC's (scenePlayback, applied
+ * 「強さ」 panel (DEC-102 r3): a mixer of the app gain's parts. The overall fader is this PC's (scenePlayback, applied
  * when sending, not in the bars); one vertical fader per haptic event with firings in the recording (or the chapter
  * playing) edits its route gain in the cue table (live, one undo step per drag), with M / S for this session; 「選んだ
  * 発生」 scales the selected firings' own gains (viewer-data, with per-firing editing on); 「内訳」 splits the selection's
- * (or the hovered firing's) strength into material / software / sent. The clip intensity (material) is never edited here.
+ * (or the hovered firing's) strength into material / app / sent. The clip gain (material) is never edited here.
  */
 export function SceneStrengthPanel() {
   const { t } = useI18n()
   const table = useSceneStore(s => s.table)
+  const kitGains = useSceneStore(s => s.projectKit?.clipGains ?? null)
   const data = useSceneStore(s => s.data)
   const recorded = useSceneStore(s => s.recorded)
   const chapter = useSceneStore(s => s.chapter)
@@ -44,7 +45,7 @@ export function SceneStrengthPanel() {
   const { ask, dialog } = useConfirm()
 
   // Each firing the runtime plays, by its recorded index (emitted firings have none) — and the strength of every one.
-  const strengths = useMemo(() => table && data ? recordingFiringStrength(table, data.full.events) : new Map<string, FiringStrength | null>(), [table, data])
+  const strengths = useMemo(() => table && data ? recordingFiringStrength(table, data.full.events, kitGains) : new Map<string, FiringStrength | null>(), [table, data, kitGains])
   const byIndex = useMemo(() => {
     const out = new Map<number, Firing & { t: number }>()
     if (!data || !recorded) return out
@@ -237,21 +238,21 @@ function SetAll({ disabled, start }: { disabled: boolean; start: number }) {
 }
 
 /**
- * 「内訳」: material (editor / Kit) | software (event route gain × the firing's own gain, × variant / distance when they
+ * 「内訳」: material (editor / Kit) | app (event route gain × the firing's own gain, × variant / distance when they
  * are not 1) | sent, for the selection (ranges) or the hovered firing; how many would be clipped; this PC's overall
  * shown apart (not included). `ratio`: a drag on the selection, shown live.
  */
 function Breakdown({ firings, ratio, overall }: { firings: readonly Firing[]; ratio: number | null; overall: number }) {
   const { t } = useI18n()
   const r = ratio ?? 1
-  const s = firings.map(f => ({ ...f.strength, firing: f.strength.firing * r, software: f.strength.software * r, sent: f.strength.sent * r }))
+  const s = firings.map(f => ({ ...f.strength, firing: f.strength.firing * r, app: f.strength.app * r, sent: f.strength.sent * r }))
   const others = s.map(x => x.scale), clipped = s.filter(x => x.sent > 1).length
   // One fixed height (two lines at most) so hovering bars never moves the panel; the overall note is in the heading's hint.
   return <div className="scene-strength-detail">
     <h3 title={`${t('scene.strength.detailHint')}\n${t('scene.strength.overallNote', { value: overall.toFixed(2) })}`}>{t('scene.strength.breakdown')}</h3>
     <div className="scene-strength-detail-line">{s.length ? <>
       {t('scene.strength.detail', {
-        material: span(s.map(x => x.material)), software: span(s.map(x => x.software)), route: span(s.map(x => x.route)), firing: span(s.map(x => x.firing)),
+        material: span(s.map(x => x.material)), app: span(s.map(x => x.app)), route: span(s.map(x => x.route)), firing: span(s.map(x => x.firing)),
         other: others.some(x => Math.abs(x - 1) > 1e-6) ? t('scene.strength.other', { value: span(others) }) : '', sent: span(s.map(x => x.sent)),
       })}
       {clipped > 0 && <span className="scene-strength-clipped">{t('scene.strength.clipped', { count: clipped })}</span>}

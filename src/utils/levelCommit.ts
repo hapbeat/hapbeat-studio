@@ -2,7 +2,7 @@
 export const LEVEL_SAVE_DELAY_MS = 500
 
 /**
- * Saving of a strength slider (DEC-086 intensity). The caller applies every move live — the playback
+ * Saving of a strength slider (DEC-086 clip_gain). The caller applies every move live — the playback
  * gain (PC GainNode, device stream gain) and the drawing scale; this only saves, `delayMs` after the
  * last move or at once on `flush` (release, blur, unmount). Saving never re-renders or restarts anything.
  */

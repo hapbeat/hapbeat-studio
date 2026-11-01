@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AT_VALUES, newCueTable, positionsForCue, clipsForCue, SceneFormatError, encodePcm16Wav, parseCueTable, serializeCueTable, setClipIntensity, setSoundIntensity, soundIntensity, materialIntensity, validateCueTable, type CueTableContext } from './sceneCueTable'
+import { AT_VALUES, newCueTable, positionsForCue, clipsForCue, SceneFormatError, encodePcm16Wav, parseCueTable, serializeCueTable, setClipGain, setSoundClipGain, soundClipGain, materialClipGain, validateCueTable, alignClipGains, clipGainOf, kitCopyDiffers, kitHolds, type CueTableContext } from './sceneCueTable'
 import { sampleLib, sampleTable } from './sceneTestFixtures'
 
 const ctx = (patch: Partial<CueTableContext> = {}): CueTableContext => ({
@@ -18,7 +18,7 @@ describe('scene cue table validation (the demos\' validate())', () => {
     t.schema_version = 2
     t.cues.button.variants = { soft: { loop: true, emit: { during: 'feed_loop', intervalSec: 1 } } }
     t.cues.button.loop = 'yes' as unknown as boolean
-    t.clips['Bad Name'] = { intensity: 2, loop: 'yes' as unknown as boolean }
+    t.clips['Bad Name'] = { clip_gain: 2, loop: 'yes' as unknown as boolean }
     t.cues.button.sfx = { sound: 'Motor', volume: 3 }
     t.cues.feed_loop.sfx = { sound: 'Click', volume: 1 }
     t.cues.grab.haptics = [{ clip: 'hum', at: 'pos_head', gain: -1 }, { clip: 'missing', at: 'hand', gain: 1 }]
@@ -28,7 +28,7 @@ describe('scene cue table validation (the demos\' validate())', () => {
       'schema_version must be 1',
       'kit must be mill-kit',
       'clip name Bad Name must match ^[a-z][a-z0-9_-]*$',
-      'clip Bad Name: intensity must be 0..1',
+      'clip Bad Name: clip_gain must be 0..1',
       'clip Bad Name: loop must be true/false',
       'clip Bad Name: Content/Kit/stream-clips/Bad Name.wav missing',
       'cues must be exactly button, grab, detent, feed_loop',
@@ -72,24 +72,53 @@ describe('scene cue table validation (the demos\' validate())', () => {
   })
 
   it('reads and checks the sounds map (base levels, DEC-086)', () => {
-    let t = setSoundIntensity(sampleTable(), 'Click', 0.4)
-    expect(t.sounds).toEqual({ Click: { intensity: 0.4 } })
+    let t = setSoundClipGain(sampleTable(), 'Click', 0.4)
+    expect(t.sounds).toEqual({ Click: { clip_gain: 0.4 } })
     expect(validateCueTable(t, ctx())).toEqual([])
-    expect(soundIntensity(t, 'Click')).toBe(0.4)
-    expect(soundIntensity(sampleTable(), 'Click')).toBe(1) // absent = 1
-    expect(materialIntensity(t, 'haptic', 'thump')).toBe(0.5)
-    expect(setSoundIntensity(t, 'Click', 3).sounds!.Click.intensity).toBe(1)
-    t = { ...t, sounds: { Click: { intensity: 2 }, '9bad': { intensity: 0.5 }, Ghost: { intensity: 0.5 } } }
-    expect(validateCueTable(t, ctx())).toEqual(expect.arrayContaining(['sound Click: intensity must be 0..1', 'sound name 9bad must match ^[A-Za-z][A-Za-z0-9_]*$', 'sound Ghost: Content/Audio/Ghost.wav missing']))
-    expect(parseCueTable(serializeCueTable(setSoundIntensity(sampleTable(), 'Click', 0.4))).sounds).toEqual({ Click: { intensity: 0.4 } })
+    expect(soundClipGain(t, 'Click')).toBe(0.4)
+    expect(soundClipGain(sampleTable(), 'Click')).toBe(1) // absent = 1
+    expect(materialClipGain(t, 'haptic', 'thump')).toBe(0.5)
+    expect(setSoundClipGain(t, 'Click', 3).sounds!.Click.clip_gain).toBe(1)
+    t = { ...t, sounds: { Click: { clip_gain: 2 }, '9bad': { clip_gain: 0.5 }, Ghost: { clip_gain: 0.5 } } }
+    expect(validateCueTable(t, ctx())).toEqual(expect.arrayContaining(['sound Click: clip_gain must be 0..1', 'sound name 9bad must match ^[A-Za-z][A-Za-z0-9_]*$', 'sound Ghost: Content/Audio/Ghost.wav missing']))
+    expect(parseCueTable(serializeCueTable(setSoundClipGain(sampleTable(), 'Click', 0.4))).sounds).toEqual({ Click: { clip_gain: 0.4 } })
+  })
+})
+
+describe('clip gains of a project with a Kit (DEC-103, contracts cue-table §9.1)', () => {
+  it("the Kit's value for a clip the Kit has, else the cue table's; sounds always from the cue table", () => {
+    const t = setSoundClipGain(sampleTable(), 'Click', 0.4), kit = { thump: 0.2, ghost: 0.9 }
+    expect(clipGainOf(t, 'thump', kit)).toBe(0.2)
+    expect(clipGainOf(t, 'thump', null)).toBe(0.5)
+    expect(clipGainOf(t, 'click', kit)).toBe(1)
+    expect(clipGainOf(t, 'unknown', null)).toBe(1)
+    expect(materialClipGain(t, 'haptic', 'thump', kit)).toBe(0.2)
+    expect(materialClipGain(t, 'sound', 'Click', kit)).toBe(0.4)
+    expect(kitHolds(kit, 'thump')).toBe(true)
+    expect(kitHolds(kit, 'click')).toBe(false)
+    expect(kitHolds(null, 'thump')).toBe(false)
+  })
+
+  it('the copy: which clips differ from the Kit, and the table aligned to it (unchanged object when nothing differs)', () => {
+    const t = sampleTable(), kit = { thump: 0.2, click: 1, ghost: 0.9 }
+    expect(kitCopyDiffers(t, kit)).toEqual(['thump'])
+    expect(kitCopyDiffers(t, null)).toEqual([])
+    const aligned = alignClipGains(t, kit)
+    expect(aligned.clips.thump).toEqual({ clip_gain: 0.2, loop: false })
+    expect(aligned.clips.click).toBe(t.clips.click)
+    expect(aligned.clips.ghost).toBeUndefined() // a Kit clip the table does not have is not added
+    expect(aligned.cues).toBe(t.cues)
+    expect(t.clips.thump.clip_gain).toBe(0.5)
+    expect(alignClipGains(aligned, kit)).toBe(aligned)
+    expect(alignClipGains(t, null)).toBe(t)
   })
 })
 
 describe('scene cue table edits', () => {
-  it('clamps a clip intensity and lists the clips that fit a cue', () => {
+  it('clamps a clip gain and lists the clips that fit a cue', () => {
     const t = sampleTable()
-    expect(setClipIntensity(t, 'click', -1).clips.click.intensity).toBe(0)
-    expect(t.clips.click.intensity).toBe(1)
+    expect(setClipGain(t, 'click', -1).clips.click.clip_gain).toBe(0)
+    expect(t.clips.click.clip_gain).toBe(1)
     expect(clipsForCue(sampleTable(), 'button')).toEqual(['click', 'thump'])
   })
 

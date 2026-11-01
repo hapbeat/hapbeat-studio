@@ -12,8 +12,10 @@ import { onPageHide } from '@/utils/pageHide'
  * there they move to the previous / next card, as in the Kit editor — cardListKeys). A press anywhere on the track moves
  * the thumb there and keeps dragging.
  */
-export function LevelSlider({ levelKey: key, saved, onSave, label, title, className }: {
+export function LevelSlider({ levelKey: key, saved, onSave, label, title, className, disabled = false }: {
   levelKey: string; saved: number; onSave: (value: number) => void; label: string; title: string; className?: string
+  /** Read only (`saved` shown, nothing moves or saves): a haptic clip whose clip_gain the Kit holds (editor.clipGainFromKit). */
+  disabled?: boolean
 }) {
   const live = useEventStore(state => state.liveLevel?.key === key ? state.liveLevel.value : null)
   const save = useRef(onSave); save.current = onSave
@@ -27,10 +29,10 @@ export function LevelSlider({ levelKey: key, saved, onSave, label, title, classN
   const value = live ?? saved
   const input = useRef<HTMLInputElement>(null)
   const set = (v: number) => { const next = Math.round(Math.max(0, Math.min(1, v)) * 100) / 100; useEventStore.getState().setLiveLevel({ key, value: next }); commit.input(next) }
-  return <label className={`editor-intensity ${className ?? ''}`} title={title}
+  return <label className={`editor-level ${className ?? ''}`} title={title}
     onMouseDown={e => { if (e.target !== input.current) { e.preventDefault(); input.current?.focus() } }}>
     {label}
-    <input ref={input} type="range" min={0} max={1} step={0.01} value={value} aria-label={label}
+    <input ref={input} type="range" min={0} max={1} step={0.01} value={value} aria-label={label} disabled={disabled}
       onChange={e => set(parseFloat(e.target.value))}
       onKeyDown={e => {
         if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
@@ -39,6 +41,6 @@ export function LevelSlider({ levelKey: key, saved, onSave, label, title, classN
         set(value + (e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : 1) * (e.shiftKey ? 0.1 : 0.01))
       }}
       onPointerUp={() => commit.flush()} onKeyUp={() => commit.flush()} onBlur={() => commit.flush()} />
-    <span className="editor-intensity-value">{levelText(value)}</span>
+    <span className="editor-level-value">{levelText(value)}</span>
   </label>
 }
