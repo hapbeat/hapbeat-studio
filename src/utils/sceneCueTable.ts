@@ -105,8 +105,11 @@ export class SceneFormatError extends Error {
     super(`${file}: schema_version must be ${CUE_TABLE_VERSION} (an older format): migrate it with hapbeat-haptic-authoring tools/migrate_scene_v1.py`)
   }
 }
-/** The script that renames the strength key once (DEC-103: intensity → clip_gain), named when a file still has the old key. */
-export const CLIP_GAIN_RENAME_SCRIPT = 'C:\\GitHub\\Hapbeat\\hapbeat-sdk-workspace\\tools\\dec103_rename_local_data.py'
+/**
+ * The script that renames the strength key once (DEC-103: intensity → clip_gain), named when a file still has the old
+ * key. Its path in the development workspace (not shipped with Studio), so no local absolute path is named.
+ */
+export const CLIP_GAIN_RENAME_SCRIPT = 'tools/dec103_rename_local_data.py'
 /**
  * A file (cue table, Kit manifest, kits-meta.json) whose entries still carry the strength under its name before DEC-103
  * (`intensity`) and no clip_gain: never read, as it would play (and be saved back) at 1. Converted with
@@ -114,7 +117,7 @@ export const CLIP_GAIN_RENAME_SCRIPT = 'C:\\GitHub\\Hapbeat\\hapbeat-sdk-workspa
  */
 export class StaleClipGainKeyError extends Error {
   constructor(readonly file: string, readonly entries: readonly string[]) {
-    super(`${file}: ${entries.join(', ')} still carry the key intensity (before DEC-103) and no clip_gain: not read. Convert it with python ${CLIP_GAIN_RENAME_SCRIPT} <folder> --write, then open it again`)
+    super(`${file}: ${entries.join(', ')} still carry the key intensity (before DEC-103) and no clip_gain: not read. Convert it with the DEC-103 conversion script (python ${CLIP_GAIN_RENAME_SCRIPT} <folder> --write in the development workspace), then open it again`)
   }
 }
 /** The names in `entries` whose value (or its `parameters` with `inParameters`) has `old` and no `current`. */

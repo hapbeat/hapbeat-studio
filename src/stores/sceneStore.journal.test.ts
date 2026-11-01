@@ -104,6 +104,18 @@ describe('Scene edits survive a reload before the autosave (journal)', () => {
     store = await openPage(folder)
     expect(store.getState().table).toEqual(sampleTable())
   })
+
+  it('a journal from before DEC-103 (intensity) is not restored, not cleared silently, and said', async () => {
+    const folder = project()
+    const old = (text: string) => text.replace(/"clip_gain"/g, '"intensity"')
+    const file = serializeCueTable(sampleTable())
+    storage.set(key, JSON.stringify({ table: old(file.replace('"description": "click"', '"description": "edited"')), base: old(file), savedAt: 1 }))
+    const store = await openPage(folder)
+    expect(store.getState().table).toEqual(sampleTable())
+    expect(store.getState().dirty).toBe(false)
+    expect(store.getState().notice).toEqual({ id: 'scene.journal.staleKey', error: true })
+    expect(storage.get(key)).toBeDefined()
+  })
 })
 
 describe('outside changes never drop Studio-only fields of a pending edit', () => {

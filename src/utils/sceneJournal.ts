@@ -1,4 +1,4 @@
-import { parseCueTable, serializeCueTable, type CueTable } from './sceneCueTable'
+import { parseCueTable, serializeCueTable, StaleClipGainKeyError, type CueTable } from './sceneCueTable'
 import { mergeCueTables } from './cueTableSync'
 
 /**
@@ -34,11 +34,15 @@ export function clearJournal(key: string): void {
 /**
  * The table to restore from `journal` onto the file's text now: Studio's journaled edits applied onto the file
  * (mergeCueTables with the journal's base; a unit changed on both sides keeps the journaled value and is a conflict).
- * Null when the file already has them (nothing to restore) or the journal cannot be read.
+ * Null when the file already has them (nothing to restore) or the journal cannot be read. A journal (or file) still
+ * carrying the strength key before DEC-103 throws StaleClipGainKeyError: it is kept, not dropped as unreadable.
  */
 export function restoreFromJournal(journal: SceneJournal, fileText: string): { table: CueTable; conflicts: string[] } | null {
   let base: CueTable, ours: CueTable, theirs: CueTable
-  try { base = parseCueTable(journal.base); ours = parseCueTable(journal.table); theirs = parseCueTable(fileText) } catch { return null }
+  try { base = parseCueTable(journal.base); ours = parseCueTable(journal.table); theirs = parseCueTable(fileText) } catch (error) {
+    if (error instanceof StaleClipGainKeyError) throw error
+    return null
+  }
   const merged = journal.base === fileText ? { table: ours, conflicts: [] } : mergeCueTables(base, ours, theirs)
   return serializeCueTable(merged.table) === serializeCueTable(theirs) ? null : merged
 }

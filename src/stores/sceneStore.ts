@@ -254,7 +254,15 @@ export const useSceneStore = create<SceneState>((set, get) => {
   const restoreJournal = () => {
     const key = journalOf(), j = key ? readJournal(key) : null
     if (!key || !j) return
-    const restored = restoreFromJournal(j, sync.fileText)
+    let restored: ReturnType<typeof restoreFromJournal>
+    try { restored = restoreFromJournal(j, sync.fileText) } catch (error) {
+      if (!(error instanceof StaleClipGainKeyError)) throw error
+      // Edits journaled before DEC-103 (intensity): said, never cleared silently (the next edit journals over them).
+      addLog(`${key}: the journal is not restored: ${error.message}`)
+      restoredNotice = { id: 'scene.journal.staleKey', error: true }
+      note(restoredNotice)
+      return
+    }
     if (!restored) { clearJournal(key); return }
     set({ table: restored.table, ...derivedData(restored.table), dirty: true })
     journal(restored.table)
