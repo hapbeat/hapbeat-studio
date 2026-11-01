@@ -4,7 +4,7 @@ import { effectiveOutput, useScenePlayback, type SceneOutput } from '@/stores/sc
 import { perfTrack } from '@/utils/perfRegistry'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { clipEnd, focusEvent, itemEvents, levelAt, momentStart, type SceneItem, type VisibleEvent } from '@/utils/sceneData'
-import { clipGainOf, isLoopCue, routeClips, sfxSounds, type CueRoute, type CueSfx, soundClipGain } from '@/utils/sceneCueTable'
+import { clipGainOf, isLoopCue, kitGainsFor, routeClips, sfxSounds, type CueRoute, type CueSfx, soundClipGain } from '@/utils/sceneCueTable'
 import { effectiveEvent, fireShot, MaterialPicker, resolveEventName } from '@/utils/cueEvents'
 import { runPosition } from '@/utils/sceneSegments'
 import { buildLoopSounds, LoopSoundPlayer, loopSoundLevel, type LoopSound } from '@/utils/sceneLoopSounds'
@@ -44,6 +44,8 @@ export class SceneRuntime {
   private kitFire: SceneKitFire
   /** Loop cues' sounds, looped at the recorded layer level. */
   private loopSounds: LoopSound[] = []
+  /** The loop voices FIRE's loopTick plays: the mixer's, with the Kit's `events` clip gains (the mixer's are `stream_events`'). */
+  private fireLoopVoices: LoopVoice[] = []
   private loopPlayer = new LoopSoundPlayer()
   private helper: { send: HelperSend; connected: boolean; devices: HapticDevice[] } = { send: () => {}, connected: false, devices: [] }
   private cursor: number | null = null
@@ -302,14 +304,15 @@ export class SceneRuntime {
    * clip into the stream; FIRE: its Kit event, a loop stopped after 1 s). Returns how many devices it reaches.
    */
   testRoute(r: CueRoute): number {
-    const s = useSceneStore.getState(), pb = useScenePlayback.getState(), name = routeClips(r)[0], clip = name === undefined ? undefined : s.table?.clips[name], kit = s.projectKit?.clipGains ?? null
+    const s = useSceneStore.getState(), pb = useScenePlayback.getState(), name = routeClips(r)[0], clip = name === undefined ? undefined : s.table?.clips[name]
     if (!clip || name === undefined || !s.table) return 0
-    if (effectiveOutput(pb) === 'fire') return this.kitFire.test({ table: s.table, kit, clip: name, at: r.at, gain: r.gain * pb.overallGain, devices: this.helper.devices, all: pb.allDevices })
+    // Each output plays its own bucket's clip_gain of the Kit (contracts cue-table §9.1: FIRE `events`, CLIP `stream_events`).
+    if (effectiveOutput(pb) === 'fire') return this.kitFire.test({ table: s.table, kit: kitGainsFor(s.projectKit?.clipGains, 'fire'), clip: name, at: r.at, gain: r.gain * pb.overallGain, devices: this.helper.devices, all: pb.allDevices })
     let p = s.pcm[name]
     if (!p) return 0
     if (clip.loop) { const q = new Float32Array(RATE); for (let i = 0; i < RATE; i++) q[i] = p[i % p.length]; p = q }
     const targets = routeTargets(r.at, undefined, pb.allDevices)
-    this.mixer.voices.push({ pcm: p, targets, gain: clipGainOf(s.table, name, kit) * r.gain * pb.overallGain, start: performance.now() + LEAD_MS })
+    this.mixer.voices.push({ pcm: p, targets, gain: clipGainOf(s.table, name, kitGainsFor(s.projectKit?.clipGains, 'clip')) * r.gain * pb.overallGain, start: performance.now() + LEAD_MS })
     return this.helper.devices.filter(d => targets.some(tg => matchesAddress(tg, d.address))).length
   }
 
@@ -348,12 +351,12 @@ export class SceneRuntime {
     const st = useSceneStrength.getState()
     if (!hapticAllowed(ev.name, st.muted, st.soloed)) return
     // The firing's own gain × this PC's overall multiplier (the send clamp stays where it was: the Kit PLAY, the PCM16 mix).
-    const pb = useScenePlayback.getState(), cueGain = (ev.gain ?? 1) * pb.overallGain, kit = s.projectKit?.clipGains ?? null
+    const pb = useScenePlayback.getState(), cueGain = (ev.gain ?? 1) * pb.overallGain
     if (effectiveOutput(pb) === 'fire') {
-      if (this.helper.connected) this.kitFire.shot({ table: s.table, kit, shot, hand: ev.hand, cueGain, delayMs: delay * 1000, offsetMs: pb.fireOffsetMs, devices: this.helper.devices, all: pb.allDevices })
+      if (this.helper.connected) this.kitFire.shot({ table: s.table, kit: kitGainsFor(s.projectKit?.clipGains, 'fire'), shot, hand: ev.hand, cueGain, delayMs: delay * 1000, offsetMs: pb.fireOffsetMs, devices: this.helper.devices, all: pb.allDevices })
       return
     }
-    this.mixer.voices.push(...shotVoices(s.table, s.pcm, shot, ev.hand, cueGain, performance.now() + delay * 1000, pb.allDevices, kit))
+    this.mixer.voices.push(...shotVoices(s.table, s.pcm, shot, ev.hand, cueGain, performance.now() + delay * 1000, pb.allDevices, kitGainsFor(s.projectKit?.clipGains, 'clip')))
   }
   private flush() {
     if (this.actx) for (const x of this.scheduledSfx) if (x.at > this.actx.currentTime) try { x.src.stop() } catch { /* already ended */ }
@@ -366,7 +369,9 @@ export class SceneRuntime {
     const s = useSceneStore.getState(), pb = useScenePlayback.getState()
     // This PC's overall multiplier on the loops too (the CLIP mix and FIRE's loopTick read these voices). M / S are
     // applied each tick (loopOn), so toggling them never rebuilds the voices (their phases go on).
-    this.mixer.loopVoices = s.table && s.lib ? buildLoopVoices(s.table, s.lib, pb.allDevices, s.projectKit?.clipGains ?? null).map(v => ({ ...v, gain: v.gain * pb.overallGain })) : []
+    const voices = (output: 'fire' | 'clip') => s.table && s.lib ? buildLoopVoices(s.table, s.lib, pb.allDevices, kitGainsFor(s.projectKit?.clipGains, output)).map(v => ({ ...v, gain: v.gain * pb.overallGain })) : []
+    this.mixer.loopVoices = voices('clip')
+    this.fireLoopVoices = voices('fire')
     this.loopSounds = s.table && s.lib ? buildLoopSounds(s.table, s.lib) : []
   }
 
@@ -414,7 +419,7 @@ export class SceneRuntime {
     const loopOn = lib && (st.muted.size || st.soloed.size) ? (x: LoopVoice) => hapticAllowed(lib.layers[x.layer]?.cue ?? '', st.muted, st.soloed) : undefined
     // FIRE loops at the level of the replay time the haptic plays for (+ offset = later: an earlier level now).
     if (!fireOn) this.kitFire.stopAll(this.helper.connected, this.helper.devices)
-    else if (playing && s.table && data && lib) this.kitFire.loopTick({ table: s.table, voices: loopOn ? this.mixer.loopVoices.filter(loopOn) : this.mixer.loopVoices, t: v.currentTime - pb.fireOffsetMs / 1000 * v.playbackRate, devices: this.helper.devices,
+    else if (playing && s.table && data && lib) this.kitFire.loopTick({ table: s.table, voices: loopOn ? this.fireLoopVoices.filter(loopOn) : this.fireLoopVoices, t: v.currentTime - pb.fireOffsetMs / 1000 * v.playbackRate, devices: this.helper.devices,
       level: (t, layer, side) => levelAt(data.full.levels, data.fps, lib.layers[layer], t, side) })
     // The stream is off in FIRE output (STOP_ALL there would end its device sessions anyway).
     this.mixer.pump(now, {

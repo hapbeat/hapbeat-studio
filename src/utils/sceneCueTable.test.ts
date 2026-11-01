@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AT_VALUES, newCueTable, positionsForCue, clipsForCue, SceneFormatError, encodePcm16Wav, parseCueTable, serializeCueTable, setClipGain, setSoundClipGain, soundClipGain, materialClipGain, validateCueTable, alignClipGains, clipGainOf, kitCopyDiffers, kitHolds, type CueTableContext } from './sceneCueTable'
+import { AT_VALUES, newCueTable, positionsForCue, clipsForCue, SceneFormatError, encodePcm16Wav, parseCueTable, serializeCueTable, setClipGain, setSoundClipGain, soundClipGain, materialClipGain, validateCueTable, alignClipGains, clipGainOf, kitBucketsDiffer, kitCopyDiffers, kitGainsFor, kitHolds, type CueTableContext } from './sceneCueTable'
 import { sampleLib, sampleTable } from './sceneTestFixtures'
 
 const ctx = (patch: Partial<CueTableContext> = {}): CueTableContext => ({
@@ -100,7 +100,7 @@ describe('clip gains of a project with a Kit (DEC-103, contracts cue-table §9.1
   })
 
   it('the copy: which clips differ from the Kit, and the table aligned to it (unchanged object when nothing differs)', () => {
-    const t = sampleTable(), kit = { thump: 0.2, click: 1, ghost: 0.9 }
+    const one = { thump: 0.2, click: 1, ghost: 0.9 }, kit = { fire: one, clip: one }, t = sampleTable()
     expect(kitCopyDiffers(t, kit)).toEqual(['thump'])
     expect(kitCopyDiffers(t, null)).toEqual([])
     const aligned = alignClipGains(t, kit)
@@ -111,6 +111,17 @@ describe('clip gains of a project with a Kit (DEC-103, contracts cue-table §9.1
     expect(t.clips.thump.clip_gain).toBe(0.5)
     expect(alignClipGains(aligned, kit)).toBe(aligned)
     expect(alignClipGains(t, null)).toBe(t)
+  })
+
+  it('a clip with another clip_gain in FIRE (events) than in CLIP (stream_events) is not aligned and is named', () => {
+    const t = sampleTable(), kit = { fire: { thump: 0.2, click: 0.9 }, clip: { thump: 0.4, click: 0.9 } }
+    expect(kitGainsFor(kit, 'fire')).toBe(kit.fire)
+    expect(kitGainsFor(null, 'clip')).toBeNull()
+    expect(kitBucketsDiffer(t, kit)).toEqual(['thump'])
+    expect(kitCopyDiffers(t, kit)).toEqual(['click'])
+    const aligned = alignClipGains(t, kit)
+    expect(aligned.clips.thump.clip_gain).toBe(0.5)
+    expect(aligned.clips.click.clip_gain).toBe(0.9)
   })
 })
 

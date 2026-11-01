@@ -432,6 +432,7 @@ export const messages = defineMessages({
   'scene.kit.copyHeading': { ja: 'cue 表の素材の強さ', en: 'Clip gains in the cue table' },
   'scene.kit.copySame': { ja: 'cue 表の clip_gain は Kit（{kit}）と同じです。Scene は Kit の値で再生します', en: 'The cue table’s clip_gain values match the Kit ({kit}). The Scene plays the Kit’s values.' },
   'scene.kit.copyDiffers': { ja: 'cue 表の clip_gain が Kit（{kit}）と違う clip が {count} 件あります: {clips}。Scene は Kit の値で再生します', en: '{count} clip(s) have a clip_gain in the cue table that differs from the Kit ({kit}): {clips}. The Scene plays the Kit’s values.' },
+  'scene.kit.copyBuckets': { ja: 'Kit（{kit}）の FIRE と CLIP で強さが違う clip が {count} 件あります: {clips}。cue 表は 1 つの値なのでそろえません。Scene はそれぞれの出力の値で再生します', en: '{count} clip(s) have a different clip_gain for FIRE and CLIP in the Kit ({kit}): {clips}. The cue table holds one value, so they are not aligned; the Scene plays each output’s value.' },
   'scene.kit.copyAlign': { ja: 'cue 表をそろえる', en: 'Align the cue table' },
   'scene.kit.copyAlignHint': { ja: 'cue 表の clip_gain を Kit の値で今すぐ書きます（Studio は cue 表を保存する時にも Kit の値にそろえます）', en: 'Writes the Kit’s clip_gain values into the cue table now (Studio also aligns them whenever it saves the cue table).' },
   'scene.kit.state.checking': { ja: 'Kit 確認中', en: 'Checking Kit' },

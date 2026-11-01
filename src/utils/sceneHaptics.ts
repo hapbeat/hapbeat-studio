@@ -124,12 +124,16 @@ export function shotVoices(table: CueTable, pcm: Record<string, Float32Array>, s
  * recorded layer level (through each voice's levelMap) while the video plays. Returns interleaved stereo PCM16
  * (L = R). Loop phases advance per device ip.
  */
+/** A gain as mixed: 0 when it is not a finite number. */
+export const finiteGain = (gain: number) => Number.isFinite(gain) ? gain : 0
+
 export function renderChunk(opts: { ip: string; address: string; wall: number; voices: OneShotVoice[]; loopVoices: LoopVoice[]; clock: PlayClock | null; pcm: Record<string, Float32Array>; level: LevelFn }): Int16Array {
   const { ip, address, wall, voices, loopVoices, clock, pcm, level } = opts
   const out = new Float32Array(CHUNK)
+  // A voice gain that is not a finite number (NaN, ±Infinity) adds nothing (contracts cue-table §9.1).
   for (const x of voices) if (x.targets.some(tg => matchesAddress(tg, address))) {
-    const o = Math.round((wall - x.start) * RATE / 1000)
-    for (let k = Math.max(0, -o); k < CHUNK && o + k < x.pcm.length; k++) out[k] += x.pcm[o + k] * x.gain
+    const o = Math.round((wall - x.start) * RATE / 1000), gain = finiteGain(x.gain)
+    for (let k = Math.max(0, -o); k < CHUNK && o + k < x.pcm.length; k++) out[k] += x.pcm[o + k] * gain
   }
   if (clock) {
     const t0 = clock.t + (wall - clock.wall) / 1000 * clock.rate, t1 = t0 + CHUNK / RATE * clock.rate
@@ -138,7 +142,8 @@ export function renderChunk(opts: { ip: string; address: string; wall: number; v
       if (!p || !p.length || !x.targets.some(tg => matchesAddress(tg, address))) continue
       const [l0, r0] = level(t0, x.layer, x.side), [l1] = level(t1, x.layer, x.side), g0 = mapLevel(x.levelMap, l0), g1 = mapLevel(x.levelMap, l1)
       let ph = x.phase[ip] || 0
-      if (g0 > 0 || g1 > 0) for (let k = 0; k < CHUNK; k++) { out[k] += p[Math.floor(ph) % p.length] * (g0 + (g1 - g0) * k / CHUNK) * x.gain; ph += r0 }
+      const gain = finiteGain(x.gain)
+      if (g0 > 0 || g1 > 0) for (let k = 0; k < CHUNK; k++) { out[k] += p[Math.floor(ph) % p.length] * (g0 + (g1 - g0) * k / CHUNK) * gain; ph += r0 }
       x.phase[ip] = ph % p.length
     }
   }

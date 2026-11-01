@@ -2,7 +2,8 @@ import type { ReactNode } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { movePair, removeMaterial, setStarred, type EffectiveEvent } from '@/utils/cueEvents'
-import { kitHolds, materialClipGain, routeAlternates, routeClips, setClipGain, setSoundClipGain, sfxAlternates, sfxSounds, type CueTable } from '@/utils/sceneCueTable'
+import { effectiveOutput, useScenePlayback } from '@/stores/scenePlayback'
+import { kitGainsFor, kitHolds, materialClipGain, routeAlternates, routeClips, setClipGain, setSoundClipGain, sfxAlternates, sfxSounds, type CueTable } from '@/utils/sceneCueTable'
 import { MaterialList } from './MaterialList'
 import { KindIcon } from '@/components/common/KindIcon'
 import './EventsPanel.css'
@@ -32,7 +33,9 @@ export function PairedList({ e, edit, onPlay, onShow, active, extra, describe }:
 }) {
   const { t } = useI18n()
   const table = useSceneStore(s => s.table)
-  const kit = useSceneStore(s => s.projectKit?.clipGains ?? null)
+  // The Kit's clip gains of the Scene tab's output now (FIRE `events`, CLIP `stream_events`).
+  const output = useScenePlayback(s => effectiveOutput(s))
+  const kit = useSceneStore(s => kitGainsFor(s.projectKit?.clipGains, output))
   const titled = (base: string, name: string) => [base, describe?.(name)].filter(Boolean).join('\n')
   const sounds = sfxSounds(e.sfx), route = e.haptics[0], clips = route ? routeClips(route) : []
   const count = Math.max(sounds.length, clips.length)

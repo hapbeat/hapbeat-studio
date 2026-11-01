@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ACK_TIMEOUT_MS, buildLoopVoices, CHUNK, RETRY_MS, cueVoices, LEAD_MS, matchesAddress, QUIET_END_MS, renderChunk, routeTargets, SceneHapticMixer, shotVoices, tableTargets, targetsOf, WRIST } from './sceneHaptics'
+import { ACK_TIMEOUT_MS, buildLoopVoices, CHUNK, RETRY_MS, cueVoices, LEAD_MS, matchesAddress, QUIET_END_MS, renderChunk, routeTargets, SceneHapticMixer, shotVoices, finiteGain, tableTargets, targetsOf, WRIST } from './sceneHaptics'
 import { parseScenePlayback } from '@/stores/scenePlayback'
 import { sampleLib, sampleTable } from './sceneTestFixtures'
 
@@ -38,6 +38,17 @@ describe('scene haptic routing', () => {
     expect(shotVoices(sampleTable(), pcm, shot, 'right', 0.5, 0, false, kit).map(v => v.gain)).toEqual([0.2 * 1.5 * 0.5, 1 * 1 * 0.5])
     expect(shotVoices(sampleTable(), pcm, shot, 'right', 0.5, 0, false, null).map(v => v.gain)).toEqual([0.5 * 1.5 * 0.5, 0.5])
     expect(buildLoopVoices(sampleTable(), sampleLib(), false, kit).map(x => x.gain)).toEqual([0.4 * 0.8, 0.4 * 0.8])
+  })
+
+  it('CLIP: a voice gain that is not a finite number adds nothing (NaN / Infinity → 0)', () => {
+    const pcm = { a: ones(CHUNK) }
+    const voice = (gain: number) => ({ pcm: pcm.a, targets: [''], gain, start: 0 })
+    const chunk = (gains: number[]) => renderChunk({ ip: 'a', address: 'p1/pos_chest', wall: 0, voices: gains.map(voice), loopVoices: [], clock: null, pcm, level: () => [0, 1] })
+    expect(chunk([NaN]).every(s => s === 0)).toBe(true)
+    expect(chunk([Infinity]).every(s => s === 0)).toBe(true)
+    expect(Array.from(chunk([NaN, 0.5]))).toEqual(Array.from(chunk([0.5])))
+    expect(finiteGain(NaN)).toBe(0)
+    expect(finiteGain(0.7)).toBe(0.7)
   })
 
   it('builds one loop voice per hand for hand routes', () => {

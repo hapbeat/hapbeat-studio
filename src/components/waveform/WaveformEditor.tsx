@@ -22,7 +22,8 @@ import { lookupMaterials, provenanceLine } from '@/utils/materials'
 import type { WaveformClip } from '@/types/waveform'
 import { onlinePlaybackDevices, resolvePlaybackTargets, routePlaybackTargets } from '@/utils/playbackDevices'
 import { cueRoutePositions, materialRoutePositions } from '@/utils/cueEvents'
-import { materialClipGain } from '@/utils/sceneCueTable'
+import { kitGainsFor, materialClipGain } from '@/utils/sceneCueTable'
+import { effectiveOutput, useScenePlayback } from '@/stores/scenePlayback'
 import { handlePlaybackShortcut, isTypingTarget } from '@/utils/playbackShortcut'
 import { useEditorSettingsFolderSync, type SettingsSyncNotice } from '@/hooks/useEditorSettingsFolderSync'
 import { EditorContext, type EditorShared } from './editorContext'
@@ -208,7 +209,9 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const levelKeyShown = audition ? levelKey.candidate(audition.trialId, audition.candidateId)
     : eventPreview ? levelKey.material(eventPreview.target, eventPreview.material) : adjusting ? levelKey.material(adjusting.target, adjusting.wav) : null
   const levelMaterial = audition ? null : eventPreview ? { target: eventPreview.target, wav: eventPreview.material } : adjusting ?? null
-  const materialLevel = useSceneStore(state => levelMaterial && state.table ? materialClipGain(state.table, levelMaterial.target, levelMaterial.wav, state.projectKit?.clipGains) : 1)
+  // A Kit clip at the Scene tab's output's clip_gain (FIRE `events`, CLIP `stream_events`).
+  const sceneOutput = useScenePlayback(s => effectiveOutput(s))
+  const materialLevel = useSceneStore(state => levelMaterial && state.table ? materialClipGain(state.table, levelMaterial.target, levelMaterial.wav, kitGainsFor(state.projectKit?.clipGains, sceneOutput)) : 1)
   const candidateLevel = useEventStore(state => audition ? state.levels[levelKey.candidate(audition.trialId, audition.candidateId)] ?? 1 : 1)
   const savedLevel = audition ? candidateLevel : materialLevel
   const liveLevel = useEventStore(state => levelKeyShown && state.liveLevel?.key === levelKeyShown ? state.liveLevel.value : null)

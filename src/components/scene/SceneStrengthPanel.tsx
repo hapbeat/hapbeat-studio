@@ -3,7 +3,8 @@ import { useI18n } from '@/i18n/I18nProvider'
 import { useConfirm } from '@/components/common/useConfirm'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
-import { clampOverallGain, OVERALL_GAIN_MAX, useScenePlayback } from '@/stores/scenePlayback'
+import { clampOverallGain, effectiveOutput, OVERALL_GAIN_MAX, useScenePlayback } from '@/stores/scenePlayback'
+import { kitGainsFor } from '@/utils/sceneCueTable'
 import { routesOf, useSceneStrength } from '@/stores/sceneStrength'
 import { occurrenceKeys, recordingFiringStrength, type FiringStrength } from '@/utils/sceneFiringGain'
 import { faderValue, gainsAtFader, median, ratioDb, recordedIndexMap, recordedName, RELATIVE_RANGE, ROUTE_GAIN_MAX, setRouteGains, strengthStep } from '@/utils/sceneStrength'
@@ -31,7 +32,9 @@ const signedDb = (ratio: number) => { const db = ratioDb(ratio); return `${db >=
 export function SceneStrengthPanel() {
   const { t } = useI18n()
   const table = useSceneStore(s => s.table)
-  const kitGains = useSceneStore(s => s.projectKit?.clipGains ?? null)
+  // The Kit's clip gains of the output playing now (FIRE: `events`, CLIP: `stream_events`; contracts cue-table §9.1).
+  const output = useScenePlayback(s => effectiveOutput(s))
+  const kitGains = useSceneStore(s => kitGainsFor(s.projectKit?.clipGains, output))
   const data = useSceneStore(s => s.data)
   const recorded = useSceneStore(s => s.recorded)
   const chapter = useSceneStore(s => s.chapter)

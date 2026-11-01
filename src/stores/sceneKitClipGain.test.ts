@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { kitCopyDiffers, parseCueTable, serializeCueTable, type CueTable } from '@/utils/sceneCueTable'
+import { kitBucketsDiffer, kitCopyDiffers, kitGainsFor, parseCueTable, serializeCueTable, type CueTable, type KitBucketGains } from '@/utils/sceneCueTable'
 import { memoryFolder, sampleTable, sampleViewerDataFile, sampleViewerLibFile } from '@/utils/sceneTestFixtures'
 import { recordingFiringStrength, firingKey } from '@/utils/sceneFiringGain'
 import { SceneKitFire } from '@/utils/sceneKitFire'
@@ -31,19 +31,21 @@ function wav(): Uint8Array {
   ascii(36, 'data'); view.setUint32(40, 2, true); view.setInt16(44, 1000, true)
   return bytes
 }
-const manifest = (thump: number) => JSON.stringify({
+/** `streamThump`: thump in stream_events too, at that clip_gain (FIRE and CLIP buckets). */
+const manifest = (thump: number, streamThump?: number) => JSON.stringify({
   schema_version: '2.0.0', name: 'sports-kit', version: '1.0.0',
   events: { 'sports-kit.thump': { clip: 'thump.wav', parameters: { clip_gain: thump, loop: false } }, 'sports-kit.click': { clip: 'click.wav', parameters: { clip_gain: 1, loop: false } } },
-  stream_events: { 'sports-kit.hum': { clip: 'hum.wav', parameters: { clip_gain: 1, loop: true } } },
+  stream_events: { 'sports-kit.hum': { clip: 'hum.wav', parameters: { clip_gain: 1, loop: true } },
+    ...(streamThump === undefined ? {} : { 'sports-kit.thump': { clip: 'thump.wav', parameters: { clip_gain: streamThump, loop: false } } }) },
 })
-const project = (withKit: boolean, thump = 0.5) => memoryFolder({
+const project = (withKit: boolean, thump = 0.5, streamThump?: number) => memoryFolder({
   'Saved/HapticViewer/viewer-lib.json': JSON.stringify({ ...sampleViewerLibFile(), title: 'Haptic Sports', project_name: 'haptic-sports', paths }),
   'Saved/HapticViewer/viewer-data.json': JSON.stringify(sampleViewerDataFile()),
   [paths.cues]: serializeCueTable(table()),
   [`${paths.clips}/click.wav`]: 'x', [`${paths.clips}/thump.wav`]: 'x', [`${paths.clips}/hum.wav`]: 'x',
   [`${paths.sounds}/Click.wav`]: 'x', [`${paths.sounds}/Motor.wav`]: 'x',
   ...(withKit ? {
-    'kits/sports-kit/sports-kit-manifest.json': manifest(thump),
+    'kits/sports-kit/sports-kit-manifest.json': manifest(thump, streamThump),
     'kits/sports-kit/source/thump.wav': wav(), 'kits/sports-kit/source/click.wav': wav(),
   } : {}),
 }, 'haptic-sports')
@@ -70,28 +72,50 @@ function kitDefinition(thump: number): KitDefinition {
     events: [event('ev-thump', 'thump', thump), event('ev-click', 'click', 1)] }
 }
 
-/** What each output sends for the recording's detent firing (thump × route 0.5 × its gain 1), from the store's state now. */
-function sent(state: { table: CueTable | null; data: { full: { events: { t: number; name: string; hand: string; gain?: number }[] } } | null; projectKit?: { clipGains: Record<string, number> } | null }) {
-  const t = state.table!, kit = state.projectKit?.clipGains ?? null
-  const bar = recordingFiringStrength(t, state.data!.full.events, kit).get(firingKey('detent', 1))!.sent
+/**
+ * What each output sends for the recording's detent firing (thump × route 0.5 × its gain 1), from the store's state now:
+ * FIRE with the Kit's `events` clip gains, CLIP with its `stream_events` ones; the bar as each output shows it.
+ */
+function sent(state: { table: CueTable | null; data: { full: { events: { t: number; name: string; hand: string; gain?: number }[] } } | null; projectKit?: { clipGains: KitBucketGains } | null }) {
+  const t = state.table!, fireKit = kitGainsFor(state.projectKit?.clipGains, 'fire'), clipKit = kitGainsFor(state.projectKit?.clipGains, 'clip')
+  const barOf = (kit: typeof fireKit) => recordingFiringStrength(t, state.data!.full.events, kit).get(firingKey('detent', 1))!.sent
+  const bar = barOf(fireKit), clipBar = barOf(clipKit), kit = clipKit
   const shot = { sound: null, soundGain: 0, pitchSt: 0, jitterDb: 0, rate: 1, routes: [{ clip: 'thump', at: 'pos_chest', gain: 0.5 }] }
   const clip = shotVoices(t, { thump: new Float32Array(4) }, shot, 'right', 1, 0, false, kit)[0].gain
   const plays: number[] = [], timers: (() => void)[] = []
   const fire = new SceneKitFire({ send: (_type, payload) => plays.push(payload.gain as number), now: () => 0, setTimer: fn => timers.push(fn), clearTimer: () => {} })
-  fire.shot({ table: t, kit, shot, hand: 'right', cueGain: 1, delayMs: 0, offsetMs: 0, devices: [{ ipAddress: '10.0.0.9', address: 'p1/pos_chest' }], all: false })
+  fire.shot({ table: t, kit: fireKit, shot, hand: 'right', cueGain: 1, delayMs: 0, offsetMs: 0, devices: [{ ipAddress: '10.0.0.9', address: 'p1/pos_chest' }], all: false })
   for (const fn of timers) fn()
-  return { bar, clip, fire: plays[0] }
+  return { bar, clipBar, clip, fire: plays[0] }
 }
 
 beforeEach(() => { storage.clear(); vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] }) })
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers() })
 
 describe('Scene clip gains from the project Kit (DEC-103)', () => {
+  it('a Kit with another clip_gain in events (FIRE) than in stream_events (CLIP): each output its own, the copy left as it is', async () => {
+    const folder = project(true, 0.3, 0.6)
+    const { useSceneStore } = await openPage(folder)
+    const s = useSceneStore.getState()
+    const v = sent(s)
+    expect(v.fire).toBeCloseTo(0.3 * 0.5)
+    expect(v.bar).toBeCloseTo(0.3 * 0.5)
+    expect(v.clip).toBeCloseTo(0.6 * 0.5)
+    expect(v.clipBar).toBeCloseTo(0.6 * 0.5)
+    // No one value to copy: not aligned (by the button or a save), named as such.
+    expect(kitCopyDiffers(s.table!, s.projectKit!.clipGains)).toEqual([])
+    expect(kitBucketsDiffer(s.table!, s.projectKit!.clipGains)).toEqual(['thump'])
+    expect(s.alignToKit()).toBe(false)
+    expect(s.edit(tb => ({ ...tb, cues: { ...tb.cues, detent: { ...tb.cues.detent, haptics: [{ clip: 'thump', at: 'pos_chest', gain: 0.6 }] } } }))).toBe(true)
+    await vi.advanceTimersByTimeAsync(400)
+    expect(parseCueTable(folder.read(paths.cues)!).clips.thump.clip_gain).toBe(0.5)
+  })
+
   it('a project with a Kit: FIRE, CLIP and the bar use the Kit\'s clip_gain, not the cue table copy', async () => {
     const folder = project(true, 0.3)
     const { useSceneStore } = await openPage(folder)
     const s = useSceneStore.getState()
-    expect(s.projectKit).toMatchObject({ kit: 'sports-kit', folder: 'kits/sports-kit', clipGains: { thump: 0.3, click: 1, hum: 1 } })
+    expect(s.projectKit).toMatchObject({ kit: 'sports-kit', folder: 'kits/sports-kit', clipGains: { fire: { thump: 0.3, click: 1, hum: 1 }, clip: { thump: 0.3, click: 1, hum: 1 } } })
     expect(s.table!.clips.thump.clip_gain).toBe(0.5) // the copy, as read
     const v = sent(s)
     expect(v.bar).toBeCloseTo(0.3 * 0.5)
@@ -122,7 +146,7 @@ describe('Scene clip gains from the project Kit (DEC-103)', () => {
     expect(written.events['sports-kit.thump'].parameters.clip_gain).toBe(0.2)
     await settle()
     const s = useSceneStore.getState()
-    expect(s.projectKit?.clipGains.thump).toBe(0.2)
+    expect(s.projectKit?.clipGains.fire.thump).toBe(0.2)
     const v = sent(s)
     expect(v.fire).toBeCloseTo(0.2 * 0.5)
     expect(v.clip).toBeCloseTo(0.2 * 0.5)

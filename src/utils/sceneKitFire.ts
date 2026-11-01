@@ -22,7 +22,8 @@ export const LOOP_RESEND_MS = 250
 export const TEST_LOOP_MS = 1000
 
 export const kitEventId = (kit: string, clip: string) => `${kit}.${clip}`
-const clamp01 = (g: number) => Math.max(0, Math.min(1, g))
+/** The send clamp: 0..1, and 0 for a product that is not a finite number (NaN, ±Infinity; contracts cue-table §9.1). */
+export const clamp01 = (g: number) => Number.isFinite(g) ? Math.max(0, Math.min(1, g)) : 0
 
 export interface KitFireDeps {
   send: HelperSend

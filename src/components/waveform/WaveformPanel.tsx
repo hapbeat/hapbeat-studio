@@ -3,7 +3,8 @@ import { useWaveformStore } from '@/stores/waveformStore'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useEditorSettings } from '@/stores/editorSettings'
 import { useSceneStore } from '@/stores/sceneStore'
-import { kitHolds, matchClipGain, materialClipGain, setClipGain, setSoundClipGain } from '@/utils/sceneCueTable'
+import { effectiveOutput, useScenePlayback } from '@/stores/scenePlayback'
+import { kitGainsFor, kitHolds, matchClipGain, materialClipGain, setClipGain, setSoundClipGain } from '@/utils/sceneCueTable'
 import { effectiveEvent, otherStarred, parseEventKey } from '@/utils/cueEvents'
 import { levelKey, useEventStore } from '@/stores/eventStore'
 import { LevelSlider } from './LevelSlider'
@@ -94,13 +95,15 @@ export function WaveformPanel() {
  * The strength of the shown event material (DEC-086): its clip_gain, always available (no "Adjust" needed), written
  * to the cue table (LevelSlider: live gain and drawing, saved debounced). The WAV keeps the shape; effects are for the shape.
  * A haptic clip the project's Kit has gets its clip_gain from the Kit (DEC-103, contracts cue-table §9.1): shown read
- * only here ("set it in the Kit editor"), since a cue table value would go back to the Kit's at the next save.
+ * only here ("set it in the Kit editor"), since a cue table value would go back to the Kit's at the next save. With
+ * different values in the Kit's two buckets, the Scene tab's output now decides which one (FIRE `events`, CLIP `stream_events`).
  */
 function ClipGainSlider({ target, wav, project }: { target: 'sound' | 'haptic'; wav: string; project?: string }) {
   const { t } = useI18n()
+  const output = useScenePlayback(s => effectiveOutput(s))
   const saved = useSceneStore(state => state.table && (!project || state.lib?.project_name === project) && (target === 'sound' || state.table.clips[wav])
-    ? materialClipGain(state.table, target, wav, state.projectKit?.clipGains) : null)
-  const fromKit = useSceneStore(state => target === 'haptic' && kitHolds(state.projectKit?.clipGains, wav))
+    ? materialClipGain(state.table, target, wav, kitGainsFor(state.projectKit?.clipGains, output)) : null)
+  const fromKit = useSceneStore(state => target === 'haptic' && kitHolds(kitGainsFor(state.projectKit?.clipGains, 'fire'), wav))
   if (saved === null) return null
   return <LevelSlider levelKey={levelKey.material(target, wav)} saved={saved} label={t('editor.clipGain')} title={t(fromKit ? 'editor.clipGainFromKit' : 'editor.clipGainHint')} disabled={fromKit}
     onSave={v => useSceneStore.getState().edit(tb => target === 'haptic' ? (tb.clips[wav] ? setClipGain(tb, wav, v) : null) : setSoundClipGain(tb, wav, v))} />
@@ -119,7 +122,7 @@ function MatchStarred({ event, target, wav, project }: { event: string; target: 
   const others = useSceneStore(state => {
     if (!state.table || (project && state.lib?.project_name !== project)) return ''
     const e = effectiveEvent(state.table, parseEventKey(event))
-    return e ? otherStarred(e, target, wav).filter(name => target === 'sound' || !kitHolds(state.projectKit?.clipGains, name)).join('\n') : ''
+    return e ? otherStarred(e, target, wav).filter(name => target === 'sound' || !kitHolds(kitGainsFor(state.projectKit?.clipGains, 'fire'), name)).join('\n') : ''
   })
   const names = others ? others.split('\n') : []
   const [undo, setUndo] = useState<Record<string, number> | null>(null)
@@ -128,7 +131,7 @@ function MatchStarred({ event, target, wav, project }: { event: string; target: 
     const scene = useSceneStore.getState()
     if (!scene.table || !names.length) return
     const live = useEventStore.getState().liveLevel
-    const value = live?.key === levelKey.material(target, wav) ? live.value : materialClipGain(scene.table, target, wav, scene.projectKit?.clipGains)
+    const value = live?.key === levelKey.material(target, wav) ? live.value : materialClipGain(scene.table, target, wav, kitGainsFor(scene.projectKit?.clipGains, effectiveOutput(useScenePlayback.getState())))
     const before = Object.fromEntries(names.map(name => [name, materialClipGain(scene.table!, target, name)]))
     if (!scene.edit(tb => matchClipGain(tb, target, names, value))) return
     setUndo(before)

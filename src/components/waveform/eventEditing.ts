@@ -10,7 +10,7 @@ import type { MaterialLink } from '@/utils/editorUiSettings'
 import { appendActivity } from '@/utils/activityLog'
 import { localIsoString } from '@/utils/hapticKnowledge'
 import { encodeDecided, encodeMaterial, existingWav } from './eventDecide'
-import { kitHolds, materialClipGain, setClipGain, setSoundClipGain } from '@/utils/sceneCueTable'
+import { kitGainsFor, kitHolds, materialClipGain, setClipGain, setSoundClipGain } from '@/utils/sceneCueTable'
 import { rewriteLevels } from '@/utils/materialLevel'
 import { ADJUST_FORMAT, hasMaterialAdjust, readMaterialAdjust, writeMaterialAdjust, writeMaterialOriginal, type MaterialAdjust } from '@/utils/materialAdjust'
 import { decodeAudioFile } from '@/utils/wavIO'
@@ -133,11 +133,11 @@ async function writeBack(buffer: AudioBuffer, link: MaterialLink) {
     // whose clip_gain the project's Kit holds keeps the Kit's: its WAV is written at the last write's gain (rewriteLevels).
     const saved = editor.folder ? await readMaterialAdjust(editor.folder.root, link.project, link.target, link.wav).catch(() => null) : null
     const previousGain = saved?.data.normGain ?? 1
-    const kitHeld = link.target === 'haptic' && kitHolds(scene.projectKit?.clipGains, link.wav)
+    const kitHeld = link.target === 'haptic' && kitHolds(kitGainsFor(scene.projectKit?.clipGains, 'fire'), link.wav)
     const encoded = await encodeMaterial(buffer, link.target, true, kitHeld ? previousGain : undefined)
     const current = await existingWav(link.target, link.wav)
     if (current && sameBytes(current, encoded.wav)) return
-    const level = rewriteLevels(encoded.peak, previousGain, materialClipGain(scene.table, link.target, link.wav, scene.projectKit?.clipGains), kitHeld)
+    const level = rewriteLevels(encoded.peak, previousGain, materialClipGain(scene.table, link.target, link.wav, kitGainsFor(scene.projectKit?.clipGains, 'fire')), kitHeld)
     const clipGain = level.clipGain
     const { archived } = await scene.replaceMaterial(link.target, link.wav, encoded.wav)
     if (editor.folder && saved) await writeMaterialAdjust(editor.folder.root, { ...saved.data, normGain: level.gain, updatedAt: localIsoString(new Date()) })

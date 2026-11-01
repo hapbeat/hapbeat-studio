@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { kitEventId, LOOP_RESEND_MS, SceneKitFire, TEST_LOOP_MS } from './sceneKitFire'
+import { clamp01, kitEventId, LOOP_RESEND_MS, SceneKitFire, TEST_LOOP_MS } from './sceneKitFire'
 import { isQuietSceneFireAck, QUIET_FIRE_ACK_MS } from './sceneFireAcks'
 import { buildLoopVoices, WRIST, type HapticDevice, type LoopVoice } from './sceneHaptics'
 import type { CueTable } from './sceneCueTable'
@@ -57,6 +57,10 @@ describe('FIRE one-shots: PLAY by Event ID through the helper', () => {
     expect(send({ other: 0.1 }, 1, 1)).toBeCloseTo(0.5) // a clip the Kit lacks: the cue table's
     // clip_gain unknown (no Kit, the cue table entry without one) × 1.5: 1 × 1.5, clamped.
     expect(send(null, 1.5, 1, { kick: { loop: false } } as unknown as CueTable['clips'])).toBe(1)
+    // A product that is not a finite number is sent as 0 (contracts cue-table §9.1).
+    expect(send({ kick: NaN }, 1, 1)).toBe(0)
+    expect(send({ kick: 0.5 }, Infinity, 1)).toBe(0)
+    expect([clamp01(NaN), clamp01(Infinity), clamp01(-Infinity), clamp01(-0.2), clamp01(0.4)]).toEqual([0, 0, 0, 0, 0.4])
     // The ▶ test too.
     sent = []
     fire.test({ table, kit: { kick: 0.3 }, clip: 'kick', at: 'pos_chest', gain: 2, devices, all: false })

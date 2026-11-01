@@ -6,7 +6,7 @@ import { useDeviceStore } from '@/stores/deviceStore'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useScenePlayback } from '@/stores/scenePlayback'
 import { bytesToBase64, type HapticDevice } from '@/utils/sceneHaptics'
-import { kitCopyDiffers } from '@/utils/sceneCueTable'
+import { kitBucketsDiffer, kitCopyDiffers } from '@/utils/sceneCueTable'
 import { findCapacityProblems } from '@/utils/deviceSpace'
 import { estimateKitStorageFromFiles } from '@/utils/kitSizeEstimate'
 import { summarizeCapacityProblems } from '@/components/kit/capacityText'
@@ -176,18 +176,22 @@ export function SceneKitStatus() {
  * "Clip gains in the cue table" in the Project panel (any output): with a Kit in the project, the haptic clips play at
  * the Kit's clip_gain and the cue table holds a copy (contracts cue-table §9.1). Says whether the copy matches, names
  * the clips that differ, and 「cue 表をそろえる」 writes the Kit's values now (a cue table edit, saved like any other;
- * Studio aligns the copy whenever it saves the cue table anyway). Nothing without a Kit in the project.
+ * Studio aligns the copy whenever it saves the cue table anyway). A clip the Kit plays at another clip_gain in FIRE
+ * (`events`) than in CLIP (`stream_events`) has no one value to copy: it is never aligned and is named here. Nothing
+ * without a Kit in the project.
  */
 export function SceneKitCopy() {
   const { t } = useI18n()
   const table = useSceneStore(s => s.table)
   const projectKit = useSceneStore(s => s.projectKit)
   const differs = useMemo(() => table && projectKit ? kitCopyDiffers(table, projectKit.clipGains) : [], [table, projectKit])
+  const buckets = useMemo(() => table && projectKit ? kitBucketsDiffer(table, projectKit.clipGains) : [], [table, projectKit])
   if (!table?.kit || !projectKit) return null
   return <div className="scene-sec scene-kit-copy">
     <h3>{t('scene.kit.copyHeading')}</h3>
     <div className={differs.length ? 'scene-warn' : 'scene-dim'}>{differs.length
       ? t('scene.kit.copyDiffers', { kit: projectKit.kit, count: differs.length, clips: differs.join(', ') }) : t('scene.kit.copySame', { kit: projectKit.kit })}</div>
+    {buckets.length > 0 && <div className="scene-warn">{t('scene.kit.copyBuckets', { kit: projectKit.kit, count: buckets.length, clips: buckets.join(', ') })}</div>}
     {/* Always there (disabled while the copy matches): the panel does not move when it starts to differ. */}
     <div className="scene-row">
       <button type="button" className="toolbar-btn" disabled={!differs.length} title={t('scene.kit.copyAlignHint')} onClick={() => useSceneStore.getState().alignToKit()}>{t('scene.kit.copyAlign')}</button>

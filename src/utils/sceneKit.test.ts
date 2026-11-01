@@ -20,9 +20,9 @@ const manifest = (version?: string) => JSON.stringify({ schema_version: '2.0.0',
 describe('the project Kit folder', () => {
   it('kits/<kit>/ with <kit>-manifest.json first, also manifest.json', async () => {
     const root = dir({ kits: { 'sports-kit': { 'sports-kit-manifest.json': manifest('1.0.0') } } })
-    expect(await locateProjectKit(root, 'sports-kit', 'haptics/clips')).toEqual({ kit: 'sports-kit', folder: 'kits/sports-kit', manifest: 'sports-kit-manifest.json', version: '1.0.0', clipGains: {} })
+    expect(await locateProjectKit(root, 'sports-kit', 'haptics/clips')).toEqual({ kit: 'sports-kit', folder: 'kits/sports-kit', manifest: 'sports-kit-manifest.json', version: '1.0.0', clipGains: { fire: {}, clip: {} } })
     const plain = dir({ kits: { 'sports-kit': { 'manifest.json': manifest() } } })
-    expect(await locateProjectKit(plain, 'sports-kit', 'haptics/clips')).toEqual({ kit: 'sports-kit', folder: 'kits/sports-kit', manifest: 'manifest.json', version: null, clipGains: {} })
+    expect(await locateProjectKit(plain, 'sports-kit', 'haptics/clips')).toEqual({ kit: 'sports-kit', folder: 'kits/sports-kit', manifest: 'manifest.json', version: null, clipGains: { fire: {}, clip: {} } })
   })
 
   it('else the clip folder\'s parent when it is named after the Kit; none found is null', async () => {
@@ -35,19 +35,20 @@ describe('the project Kit folder', () => {
 
   it('the deploy files: the manifest and every WAV under install-clips/ (not stream-clips)', async () => {
     const root = dir({ kits: { k: { 'k-manifest.json': manifest('1'), 'install-clips': { 'a.wav': 'a', sub: { 'b.WAV': 'b' }, 'notes.txt': 'x' }, 'stream-clips': { 'c.wav': 'c' } } } })
-    const files = await readKitFiles(root, { kit: 'k', folder: 'kits/k', manifest: 'k-manifest.json', version: '1', clipGains: {} })
+    const files = await readKitFiles(root, { kit: 'k', folder: 'kits/k', manifest: 'k-manifest.json', version: '1', clipGains: { fire: {}, clip: {} } })
     expect(files.map(f => f.path)).toEqual(['k-manifest.json', 'install-clips/a.wav', 'install-clips/sub/b.WAV'])
   })
 
-  it('the clip gains: events[<kit>.<clip>].parameters.clip_gain, else stream_events; absent = 1; another category is not a clip', async () => {
+  it('the clip gains per output: FIRE events, CLIP stream_events, the other bucket when only there; absent = 1; another category is not a clip', async () => {
     const m = {
       events: { 'sports-kit.kick': { clip: 'kick.wav', parameters: { clip_gain: 0.3, loop: false } }, 'sports-kit.whistle': { clip: 'w.wav', parameters: { loop: false } }, 'other.kick': { parameters: { clip_gain: 0.9 } } },
       stream_events: { 'sports-kit.kick': { clip: 'kick.wav', parameters: { clip_gain: 0.7 } }, 'sports-kit.crowd': { clip: 'crowd.wav', parameters: { clip_gain: 0.45, loop: true } } },
     }
-    expect(kitClipGains(m, 'sports-kit')).toEqual({ kick: 0.3, whistle: 1, crowd: 0.45 })
-    expect(kitClipGains({ events: { 'k.a': { parameters: { clip_gain: 3 } } } }, 'k')).toEqual({ a: 1 })
+    const both = { fire: { kick: 0.3, whistle: 1, crowd: 0.45 }, clip: { kick: 0.7, whistle: 1, crowd: 0.45 } }
+    expect(kitClipGains(m, 'sports-kit')).toEqual(both)
+    expect(kitClipGains({ events: { 'k.a': { parameters: { clip_gain: 3 } } } }, 'k')).toEqual({ fire: { a: 1 }, clip: { a: 1 } })
     const root = dir({ kits: { 'sports-kit': { 'sports-kit-manifest.json': JSON.stringify({ version: '1.0.0', ...m }) } } })
-    expect((await locateProjectKit(root, 'sports-kit', 'haptics/clips'))?.clipGains).toEqual({ kick: 0.3, whistle: 1, crowd: 0.45 })
+    expect((await locateProjectKit(root, 'sports-kit', 'haptics/clips'))?.clipGains).toEqual(both)
   })
 })
 

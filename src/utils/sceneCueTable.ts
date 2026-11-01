@@ -128,10 +128,17 @@ export const MATERIAL_PEAK = 10 ** (-0.5 / 20)
 /** The base level of a sound (its `sounds` entry; 1 when it has none). */
 export const soundClipGain = (table: CueTable, sound: string) => table.sounds?.[sound]?.clip_gain ?? 1
 /**
- * The clip gains of a project's Kit (contracts cue-table §9.1): clip → `parameters.clip_gain` of the Kit manifest's
- * event `<kit>.<clip>`, for the clips the Kit has (sceneKit.kitClipGains). Null: the project has no Kit.
+ * The clip gains of a project's Kit for one output (contracts cue-table §9.1): clip → `parameters.clip_gain` of the Kit
+ * manifest's event `<kit>.<clip>`, for the clips the Kit has (sceneKit.kitClipGains). Null: the project has no Kit.
  */
 export type KitClipGains = Readonly<Record<string, number>>
+/**
+ * A Kit's clip gains per output: `fire` = the `events` value (the Kit installed on the device), `clip` = the
+ * `stream_events` value (PCM streamed); an Event ID in only one bucket has that value in both (§9.1).
+ */
+export interface KitBucketGains { fire: KitClipGains; clip: KitClipGains }
+/** The clip gains the output `output` plays (FIRE / CLIP); null without a Kit. */
+export const kitGainsFor = (kit: KitBucketGains | null | undefined, output: 'fire' | 'clip'): KitClipGains | null => kit ? kit[output] : null
 /**
  * A haptic clip's material strength (clip_gain, DEC-103): with a Kit, the Kit's value for a clip the Kit has (the cue
  * table holds a copy), else the cue table's (absent = 1). FIRE, CLIP and the timeline all resolve it here.
@@ -143,14 +150,22 @@ export const kitHolds = (kit: KitClipGains | null | undefined, clip: string) => 
 /** The base level of a material: a clip's clip_gain (clipGainOf), or a sound's (always the cue table's). */
 export const materialClipGain = (table: CueTable, target: 'sound' | 'haptic', name: string, kit?: KitClipGains | null) =>
   target === 'haptic' ? clipGainOf(table, name, kit) : soundClipGain(table, name)
-/** The cue table's clips whose clip_gain (the copy) differs from the Kit's, in the table's order. */
-export const kitCopyDiffers = (table: CueTable, kit: KitClipGains | null): string[] =>
-  kit ? Object.keys(table.clips).filter(c => kitHolds(kit, c) && table.clips[c].clip_gain !== kit[c]) : []
-/** The table with the copy aligned: every clip the Kit has gets the Kit's clip_gain (the same object when nothing differs). */
-export function alignClipGains(table: CueTable, kit: KitClipGains | null): CueTable {
+/** The one value the copy can hold for `clip`: the Kit's when both outputs play it at the same clip_gain, else null. */
+const copyValue = (kit: KitBucketGains, clip: string): number | null => kitHolds(kit.fire, clip) && kit.fire[clip] === kit.clip[clip] ? kit.fire[clip] : null
+/** The cue table's clips whose clip_gain (the copy) differs from the Kit's one value, in the table's order. */
+export const kitCopyDiffers = (table: CueTable, kit: KitBucketGains | null): string[] =>
+  kit ? Object.keys(table.clips).filter(c => { const v = copyValue(kit, c); return v !== null && table.clips[c].clip_gain !== v }) : []
+/** The cue table's clips the Kit plays at another clip_gain in FIRE (`events`) than in CLIP (`stream_events`): never aligned. */
+export const kitBucketsDiffer = (table: CueTable, kit: KitBucketGains | null): string[] =>
+  kit ? Object.keys(table.clips).filter(c => kitHolds(kit.fire, c) && kit.fire[c] !== kit.clip[c]) : []
+/**
+ * The table with the copy aligned: every clip the Kit has with one value gets it (a clip whose two buckets differ keeps
+ * its copy, kitBucketsDiffer); the same object when nothing differs.
+ */
+export function alignClipGains(table: CueTable, kit: KitBucketGains | null): CueTable {
   const differs = kitCopyDiffers(table, kit)
   if (!kit || !differs.length) return table
-  return { ...table, clips: { ...table.clips, ...Object.fromEntries(differs.map(c => [c, { ...table.clips[c], clip_gain: kit[c] }])) } }
+  return { ...table, clips: { ...table.clips, ...Object.fromEntries(differs.map(c => [c, { ...table.clips[c], clip_gain: copyValue(kit, c) ?? table.clips[c].clip_gain }])) } }
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)

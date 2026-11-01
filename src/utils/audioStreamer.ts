@@ -242,7 +242,8 @@ export async function streamClip(
 
       // Apply the current gain per-chunk. `slice` already returned a
       // new buffer so this mutation doesn't affect the source pcm16.
-      const liveGain = control?.getGain?.(frameOffset / targetRate) ?? gain
+      // A gain that is not a finite number (NaN, ±Infinity) sends silence, never full scale (contracts cue-table §9.1).
+      const wanted = control?.getGain?.(frameOffset / targetRate) ?? gain, liveGain = Number.isFinite(wanted) ? wanted : 0
       if (liveGain !== 1.0) {
         for (let i = 0; i < chunk.length; i++) {
           let val = Math.round(chunk[i] * liveGain)

@@ -1,7 +1,7 @@
 import type { SceneKitState } from '@/stores/scenePlayback'
 import type { ExportFile } from './kitExporter'
 import { dirAt, isNotFound } from './sceneProject'
-import { clampNumber, type KitClipGains } from './sceneCueTable'
+import { clampNumber, type KitBucketGains } from './sceneCueTable'
 
 /**
  * The Kit a haptic video project's FIRE output plays (contracts scene-recording §1): the cue table's `kit`, kept in
@@ -18,30 +18,31 @@ export interface ProjectKit {
   manifest: string
   /** The manifest's `version`; null when it has none (nothing to compare). */
   version: string | null
-  /** The material strength of each clip the Kit has (kitClipGains): what the Scene plays, the cue table holding a copy. */
-  clipGains: KitClipGains
+  /** The material strength of each clip the Kit has, per output (kitClipGains): what the Scene plays, the cue table holding a copy. */
+  clipGains: KitBucketGains
 }
 
 const MANIFEST_NAMES = (kit: string) => [`${kit}-manifest.json`, 'manifest.json']
 
 /**
- * A Kit manifest's clip gains (contracts cue-table §9.1, kit-format `clip_gain`): per Event ID `<kit>.<clip>`, its
- * `parameters.clip_gain` in `events`, else in `stream_events` (absent = 1; kept to 0..1, the cue table's range). Event
- * IDs of another category are not clips of this Kit.
+ * A Kit manifest's clip gains per output (contracts cue-table §9.1, kit-format `clip_gain`): per Event ID `<kit>.<clip>`,
+ * its `parameters.clip_gain` (absent = 1; kept to 0..1, the cue table's range). FIRE reads `events`, CLIP `stream_events`;
+ * an ID in one bucket only has that value for both. Event IDs of another category are not clips of this Kit.
  */
-export function kitClipGains(manifest: unknown, kit: string): Record<string, number> {
-  const out: Record<string, number> = {}
+export function kitClipGains(manifest: unknown, kit: string): KitBucketGains {
   const m = (manifest ?? {}) as { events?: unknown; stream_events?: unknown }
-  // stream_events first, so an `events` entry of the same clip wins.
-  for (const bucket of [m.stream_events, m.events]) {
-    if (!bucket || typeof bucket !== 'object') continue
+  const read = (bucket: unknown) => {
+    const out: Record<string, number> = {}
+    if (!bucket || typeof bucket !== 'object') return out
     for (const [id, entry] of Object.entries(bucket as Record<string, unknown>)) {
       if (!id.startsWith(`${kit}.`)) continue
       const gain = (entry as { parameters?: { clip_gain?: unknown } } | null)?.parameters?.clip_gain
       out[id.slice(kit.length + 1)] = typeof gain === 'number' && Number.isFinite(gain) ? clampNumber(gain, 0, 1) : 1
     }
+    return out
   }
-  return out
+  const events = read(m.events), streams = read(m.stream_events)
+  return { fire: { ...streams, ...events }, clip: { ...events, ...streams } }
 }
 
 /**

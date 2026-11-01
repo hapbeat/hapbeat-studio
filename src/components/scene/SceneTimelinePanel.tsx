@@ -12,7 +12,8 @@ import { SPEEDS } from './sceneRuntime'
 import { SceneOutputToggles } from './SceneOutputToggles'
 import { loopCueRuns } from '@/utils/loopStretch'
 import { useMomentPlace } from './SceneCuePanels'
-import type { CueTable, KitClipGains } from '@/utils/sceneCueTable'
+import { kitGainsFor, type CueTable, type KitClipGains } from '@/utils/sceneCueTable'
+import { effectiveOutput, useScenePlayback } from '@/stores/scenePlayback'
 import { mapLevel } from '@/utils/levelMap'
 import { laneY, layerLanes, layerScaleMax, outputCurves, outputScaleMax, sideLevel, type Lane, type OutputCurve } from '@/utils/sceneTimelineLevels'
 import { spanWindow, stepView, timelineClick, type TimelineView } from '@/utils/sceneTimelineView'
@@ -152,7 +153,8 @@ export function SceneTimelinePanel() {
         [mid + 1, base, name => { const e = effective(name); return !!e && (e.haptics.length > 0 || lib.loop_cues.includes(e.ref.cue)) }, name => familyColor(lib, name), 'haptics'],
       ]
       const gc = gains.current
-      const kit = s.projectKit?.clipGains ?? null
+      // The Kit's clip gains of the output playing now (contracts cue-table §9.1).
+      const kit = kitGainsFor(s.projectKit?.clipGains, effectiveOutput(useScenePlayback.getState()))
       if (gc.table !== table || gc.kit !== kit || gc.events !== data.full.events) {
         gc.table = table; gc.kit = kit; gc.events = data.full.events
         gc.map = table ? recordingFiringGains(table, data.full.events, kit) : new Map()
