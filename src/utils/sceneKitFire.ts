@@ -1,7 +1,7 @@
 import { clipGainOf, type CueTable, type KitClipGains } from './sceneCueTable'
 import type { Shot } from './cueEvents'
 import { mapLevel } from './levelMap'
-import { matchesAddress, routeTargets, type HapticDevice, type HelperSend, type LevelFn, type LoopVoice } from './sceneHaptics'
+import { matchesAddress, routeTargets, sendGain, type HapticDevice, type HelperSend, type LevelFn, type LoopVoice } from './sceneHaptics'
 import { markSceneFireSend } from './sceneFireAcks'
 
 /**
@@ -22,8 +22,8 @@ export const LOOP_RESEND_MS = 250
 export const TEST_LOOP_MS = 1000
 
 export const kitEventId = (kit: string, clip: string) => `${kit}.${clip}`
-/** The send clamp: 0..1, and 0 for a product that is not a finite number (NaN, ±Infinity; contracts cue-table §9.1). */
-export const clamp01 = (g: number) => Number.isFinite(g) ? Math.max(0, Math.min(1, g)) : 0
+/** The send clamp: 0..1, and 0 for a product that is not a finite number (NaN, ±Infinity; contracts cue-table §9.1). The mix's (sendGain). */
+export const clamp01 = sendGain
 
 export interface KitFireDeps {
   send: HelperSend

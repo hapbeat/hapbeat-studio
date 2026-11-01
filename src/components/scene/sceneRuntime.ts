@@ -8,7 +8,7 @@ import { clipGainOf, isLoopCue, kitGainsFor, routeClips, sfxSounds, type CueRout
 import { effectiveEvent, fireShot, MaterialPicker, resolveEventName } from '@/utils/cueEvents'
 import { runPosition } from '@/utils/sceneSegments'
 import { buildLoopSounds, LoopSoundPlayer, loopSoundLevel, type LoopSound } from '@/utils/sceneLoopSounds'
-import { buildLoopVoices, shotVoices, type LoopVoice, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, routeTargets, SceneHapticMixer, type HapticDevice, type HelperSend, type StreamAck, type StreamDisplaced } from '@/utils/sceneHaptics'
+import { buildLoopVoices, sendGain, shotVoices, type LoopVoice, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, routeTargets, SceneHapticMixer, type HapticDevice, type HelperSend, type StreamAck, type StreamDisplaced } from '@/utils/sceneHaptics'
 import { SceneKitFire } from '@/utils/sceneKitFire'
 import { isStreamOpen } from '@/utils/openStreams'
 import { useSceneStrength } from '@/stores/sceneStrength'
@@ -312,7 +312,7 @@ export class SceneRuntime {
     if (!p) return 0
     if (clip.loop) { const q = new Float32Array(RATE); for (let i = 0; i < RATE; i++) q[i] = p[i % p.length]; p = q }
     const targets = routeTargets(r.at, undefined, pb.allDevices)
-    this.mixer.voices.push({ pcm: p, targets, gain: clipGainOf(s.table, name, kitGainsFor(s.projectKit?.clipGains, 'clip')) * r.gain * pb.overallGain, start: performance.now() + LEAD_MS })
+    this.mixer.voices.push({ pcm: p, targets, gain: sendGain(clipGainOf(s.table, name, kitGainsFor(s.projectKit?.clipGains, 'clip')) * r.gain * pb.overallGain), start: performance.now() + LEAD_MS })
     return this.helper.devices.filter(d => targets.some(tg => matchesAddress(tg, d.address))).length
   }
 
@@ -350,7 +350,7 @@ export class SceneRuntime {
     // The strength panel's M / S (this session only).
     const st = useSceneStrength.getState()
     if (!hapticAllowed(ev.name, st.muted, st.soloed)) return
-    // The firing's own gain × this PC's overall multiplier (the send clamp stays where it was: the Kit PLAY, the PCM16 mix).
+    // The firing's own gain × this PC's overall multiplier; the whole product is sent kept to 0..1 (DEC-103: shotVoices' sendGain, the Kit PLAY's clamp).
     const pb = useScenePlayback.getState(), cueGain = (ev.gain ?? 1) * pb.overallGain
     if (effectiveOutput(pb) === 'fire') {
       if (this.helper.connected) this.kitFire.shot({ table: s.table, kit: kitGainsFor(s.projectKit?.clipGains, 'fire'), shot, hand: ev.hand, cueGain, delayMs: delay * 1000, offsetMs: pb.fireOffsetMs, devices: this.helper.devices, all: pb.allDevices })
@@ -367,9 +367,9 @@ export class SceneRuntime {
   }
   private rebuildLoops() {
     const s = useSceneStore.getState(), pb = useScenePlayback.getState()
-    // This PC's overall multiplier on the loops too (the CLIP mix and FIRE's loopTick read these voices). M / S are
+    // This PC's overall multiplier on the loops too, the product kept to 0..1 (sendGain; the CLIP mix and FIRE's loopTick read these voices). M / S are
     // applied each tick (loopOn), so toggling them never rebuilds the voices (their phases go on).
-    const voices = (output: 'fire' | 'clip') => s.table && s.lib ? buildLoopVoices(s.table, s.lib, pb.allDevices, kitGainsFor(s.projectKit?.clipGains, output)).map(v => ({ ...v, gain: v.gain * pb.overallGain })) : []
+    const voices = (output: 'fire' | 'clip') => s.table && s.lib ? buildLoopVoices(s.table, s.lib, pb.allDevices, kitGainsFor(s.projectKit?.clipGains, output)).map(v => ({ ...v, gain: sendGain(v.gain * pb.overallGain) })) : []
     this.mixer.loopVoices = voices('clip')
     this.fireLoopVoices = voices('fire')
     this.loopSounds = s.table && s.lib ? buildLoopSounds(s.table, s.lib) : []
