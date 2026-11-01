@@ -8,7 +8,7 @@ import { clipGainOf, isLoopCue, kitGainsFor, routeClips, sfxSounds, type CueRout
 import { effectiveEvent, fireShot, MaterialPicker, resolveEventName } from '@/utils/cueEvents'
 import { runPosition } from '@/utils/sceneSegments'
 import { buildLoopSounds, LoopSoundPlayer, loopSoundLevel, type LoopSound } from '@/utils/sceneLoopSounds'
-import { buildLoopVoices, sendGain, shotVoices, type LoopVoice, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, routeTargets, SceneHapticMixer, type HapticDevice, type HelperSend, type StreamAck, type StreamDisplaced } from '@/utils/sceneHaptics'
+import { buildLoopVoices, sendGain, shotVoices, withOverallGain, type LoopVoice, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, routeTargets, SceneHapticMixer, type HapticDevice, type HelperSend, type StreamAck, type StreamDisplaced } from '@/utils/sceneHaptics'
 import { SceneKitFire } from '@/utils/sceneKitFire'
 import { isStreamOpen } from '@/utils/openStreams'
 import { useSceneStrength } from '@/stores/sceneStrength'
@@ -367,9 +367,9 @@ export class SceneRuntime {
   }
   private rebuildLoops() {
     const s = useSceneStore.getState(), pb = useScenePlayback.getState()
-    // This PC's overall multiplier on the loops too, the product kept to 0..1 (sendGain; the CLIP mix and FIRE's loopTick read these voices). M / S are
-    // applied each tick (loopOn), so toggling them never rebuilds the voices (their phases go on).
-    const voices = (output: 'fire' | 'clip') => s.table && s.lib ? buildLoopVoices(s.table, s.lib, pb.allDevices, kitGainsFor(s.projectKit?.clipGains, output)).map(v => ({ ...v, gain: sendGain(v.gain * pb.overallGain) })) : []
+    // This PC's overall multiplier on the loops too (withOverallGain), not kept to 0..1 yet: the CLIP mix and FIRE's loopTick clamp the
+    // product after the layer level. M / S are applied each tick (loopOn), so toggling them never rebuilds the voices (their phases go on).
+    const voices = (output: 'fire' | 'clip') => s.table && s.lib ? withOverallGain(buildLoopVoices(s.table, s.lib, pb.allDevices, kitGainsFor(s.projectKit?.clipGains, output)), pb.overallGain) : []
     this.mixer.loopVoices = voices('clip')
     this.fireLoopVoices = voices('fire')
     this.loopSounds = s.table && s.lib ? buildLoopSounds(s.table, s.lib) : []

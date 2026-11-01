@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { clamp01, kitEventId, LOOP_RESEND_MS, SceneKitFire, TEST_LOOP_MS } from './sceneKitFire'
 import { isQuietSceneFireAck, QUIET_FIRE_ACK_MS } from './sceneFireAcks'
-import { buildLoopVoices, WRIST, type HapticDevice, type LoopVoice } from './sceneHaptics'
+import { buildLoopVoices, withOverallGain, WRIST, type HapticDevice, type LoopVoice } from './sceneHaptics'
 import type { CueTable } from './sceneCueTable'
 import type { Shot } from './cueEvents'
 import { sampleLib } from './sceneTestFixtures'
@@ -163,6 +163,16 @@ describe('FIRE loops follow the recorded level', () => {
       { type: 'stop_event', payload: { event_id: 'mill-kit.feed_loop', target: WRIST.left, targets: ['10.0.0.2'] } },
       { type: 'stop_event', payload: { event_id: 'mill-kit.feed_loop', target: WRIST.right, targets: ['10.0.0.3'] } },
     ])
+  })
+
+  it('the product is kept to 0..1 after the layer level, not before (DEC-103: the level is part of the app gain)', () => {
+    // clip_gain 0.8 × route 1 × overall 1.5 = 1.2; at level 0.5 the send is clamp(0.6), not clamp(1.2) × 0.5.
+    const fire = make()
+    run(fire, 0.5, withOverallGain(voices, 1.5))
+    expect(sent.map(m => m.payload.gain)).toEqual([0.6, 0.6].map(g => expect.closeTo(g, 10)))
+    sent = []; now += LOOP_RESEND_MS
+    run(fire, 1, withOverallGain(voices, 1.5))
+    expect(sent.map(m => m.payload.gain)).toEqual([1, 1])
   })
 
   it('flush stops the playing loops by Event ID (one-shots play on), and the next tick starts them again', () => {

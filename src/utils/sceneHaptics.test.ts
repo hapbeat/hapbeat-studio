@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ACK_TIMEOUT_MS, buildLoopVoices, CHUNK, RETRY_MS, cueVoices, LEAD_MS, matchesAddress, QUIET_END_MS, renderChunk, routeTargets, SceneHapticMixer, shotVoices, sendGain, tableTargets, targetsOf, WRIST } from './sceneHaptics'
+import { ACK_TIMEOUT_MS, buildLoopVoices, CHUNK, RETRY_MS, cueVoices, LEAD_MS, withOverallGain, matchesAddress, QUIET_END_MS, renderChunk, routeTargets, SceneHapticMixer, shotVoices, sendGain, tableTargets, targetsOf, WRIST } from './sceneHaptics'
 import { parseScenePlayback } from '@/stores/scenePlayback'
 import { sampleLib, sampleTable } from './sceneTestFixtures'
 
@@ -99,6 +99,19 @@ describe('scene per-device mix', () => {
     const out = renderChunk({ ...opts, clock: { t: 0, rate: 1, wall: 0 } })
     expect(out[0]).toBe(Math.round(0.5 * 0.8 * 32767))
     expect(loopVoices[1].phase.a).toBe(CHUNK % 4)
+  })
+
+  it('CLIP loops: the layer level is part of the app gain, so the product is kept to 0..1 after it (DEC-103)', () => {
+    // sampleTable's feed_loop: hum clip_gain 1 × route 0.8; route gain ×1.25 and overall 1.5 make it 1 × 1 × 1.5 = 1.5.
+    const table = sampleTable(), pcm = { hum: ones(4) }, at = (v: { targets: string[] }) => v.targets.includes(WRIST.right)
+    for (const r of Object.values(table.cues).flatMap(c => c?.haptics ?? [])) r.gain *= 1.25
+    const loud = withOverallGain(buildLoopVoices(table, sampleLib()), 1.5)
+    expect(loud.filter(at).map(v => v.gain)).toEqual([1.5])
+    const mix = (level: number, vs: typeof loud) => renderChunk({ ip: 'a', address: 'p1/pos_r_wrist', wall: 0, voices: [], loopVoices: vs.filter(at), clock: { t: 0, rate: 1, wall: 0 }, pcm, level: () => [level, 1] })[0]
+    // ones() is 0.5 full scale: clamp(1.5 × 0.5) = 0.75, not clamp(1.5) × 0.5 = 0.5.
+    expect(mix(0.5, loud)).toBe(Math.round(0.5 * 0.75 * 32767))
+    expect(mix(1, loud)).toBe(Math.round(0.5 * 32767))
+    expect(withOverallGain(loud, NaN).map(v => v.gain)).toEqual(loud.map(() => 0))
   })
 
   it('clips the sum to PCM16', () => {

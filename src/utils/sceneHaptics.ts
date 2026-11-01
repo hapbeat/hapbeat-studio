@@ -126,10 +126,18 @@ export function shotVoices(table: CueTable, pcm: Record<string, Float32Array>, s
  */
 /**
  * A voice's gain as sent (contracts cue-table §9.1, DEC-103): clamp(clip_gain × app gain, 0, 1), 0 when it is not a
- * finite number. Set where a voice gets its whole product (cue / shot / test voices, the runtime's loops after the
- * overall multiplier) and applied again by the mix.
+ * finite number. Set where a one-shot voice gets its whole product (cue / shot / test voices) and applied again by the
+ * mix; a loop's product includes the layer level, so the mix applies it per sample (withOverallGain).
  */
 export const sendGain = (gain: number) => Number.isFinite(gain) ? Math.min(1, Math.max(0, gain)) : 0
+
+/**
+ * Loop voices × this PC's overall multiplier, not kept to 0..1 here: the layer level (through the levelMap) is part of
+ * the app gain too, so the clamp goes on the whole product per sample (renderChunk) or per tick (FIRE's loopTick).
+ * A product that is not a finite number is 0.
+ */
+export const withOverallGain = (voices: LoopVoice[], overall: number): LoopVoice[] =>
+  voices.map(v => { const gain = v.gain * overall; return { ...v, gain: Number.isFinite(gain) ? gain : 0 } })
 
 export function renderChunk(opts: { ip: string; address: string; wall: number; voices: OneShotVoice[]; loopVoices: LoopVoice[]; clock: PlayClock | null; pcm: Record<string, Float32Array>; level: LevelFn }): Int16Array {
   const { ip, address, wall, voices, loopVoices, clock, pcm, level } = opts
@@ -146,8 +154,8 @@ export function renderChunk(opts: { ip: string; address: string; wall: number; v
       if (!p || !p.length || !x.targets.some(tg => matchesAddress(tg, address))) continue
       const [l0, r0] = level(t0, x.layer, x.side), [l1] = level(t1, x.layer, x.side), g0 = mapLevel(x.levelMap, l0), g1 = mapLevel(x.levelMap, l1)
       let ph = x.phase[ip] || 0
-      const gain = sendGain(x.gain)
-      if (g0 > 0 || g1 > 0) for (let k = 0; k < CHUNK; k++) { out[k] += p[Math.floor(ph) % p.length] * (g0 + (g1 - g0) * k / CHUNK) * gain; ph += r0 }
+      // The level × the voice's gain is the whole app gain of a loop, kept to 0..1 per sample (sendGain), like FIRE's loopTick.
+      if (g0 > 0 || g1 > 0) for (let k = 0; k < CHUNK; k++) { out[k] += p[Math.floor(ph) % p.length] * sendGain((g0 + (g1 - g0) * k / CHUNK) * x.gain); ph += r0 }
       x.phase[ip] = ph % p.length
     }
   }
