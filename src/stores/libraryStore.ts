@@ -503,7 +503,16 @@ function reportStaleClipGain(file: string, entries: string[]): void {
   const msg = storeMessage('clipGain.staleKey', { file, entries: entries.join(', '), script: CLIP_GAIN_RENAME_SCRIPT })
   console.warn('[libraryStore]', msg)
   useLibraryStore.getState().setLocalFsStatus('error', msg)
+  staleMetaMsg = msg
 }
+
+/**
+ * The work folder whose kits-meta.json was refused for the key before DEC-103 (set by each Kit scan, cleared by a scan
+ * that finds it converted). While refused, no write replaces it (Kit edits, + Kit, archive, Save Folder): the in-memory
+ * list lacks the refused Kits, so writing it would drop their ids and clip records before the convert script runs.
+ */
+let staleMetaDir: FileSystemDirectoryHandle | null = null
+let staleMetaMsg = ''
 
 /**
  * Upgrade legacy KitDefinitions to the current shape. Currently handles:
@@ -582,6 +591,8 @@ function migrateKit(kit: KitDefinition, libraryClips: LibraryClip[]): KitDefinit
 
 /** Save kits metadata to the local work directory */
 async function saveKitsMetaToDir(handle: FileSystemDirectoryHandle, kits: KitDefinition[]) {
+  // Refused for the old key: not written over, and the notice stays up.
+  if (handle === staleMetaDir) { if (staleMetaMsg) useLibraryStore.getState().setLocalFsStatus('error', staleMetaMsg); return }
   await writeMetadataJson(handle, KITS_META_FILE, kits)
 }
 
@@ -999,6 +1010,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   localFsLastMsg: '',
   localFsLastTs: 0,
   setLocalFsStatus: (status, msg = '') => {
+    // While the work folder's kits-meta.json is refused for the old key, a later save does not clear that notice.
+    if (status === 'saved' && staleMetaDir && staleMetaDir === get().workDirHandle) { status = 'error'; msg = `${msg} / ${staleMetaMsg}` }
     set({
       localFsStatus: status,
       localFsLastMsg: msg,
@@ -2047,6 +2060,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
           workDirHandle, KITS_META_FILE,
         )
         staleMeta = savedKits ? staleMetaEvents(savedKits) : []
+        staleMetaDir = staleMeta.length ? workDirHandle : null
         if (existingKits.length === 0 && savedKits && savedKits.length > 0 && !staleMeta.length) {
           existingKits = savedKits.map((k) => migrateKit(k, updatedClips))
         }
@@ -2392,7 +2406,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ clips: updatedClips, kits: updatedKits })
     if (workDirHandle) {
       await saveClipsMetaToDir(workDirHandle, updatedClips)
-      if (!staleMeta.length) await saveKitsMetaToDir(workDirHandle, updatedKits)
+      await saveKitsMetaToDir(workDirHandle, updatedKits)
     }
     // One report for every refused file (the status holds one message).
     const refused = [...(staleMeta.length ? [{ folder: `${workDirHandle?.name ?? ''}/${KITS_META_FILE}`, entries: staleMeta }] : []), ...staleKits]

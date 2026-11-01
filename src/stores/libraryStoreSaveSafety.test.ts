@@ -501,4 +501,34 @@ describe('kits-meta.json with the strength key before DEC-103', () => {
     expect(useLibraryStore.getState().localFsLastMsg).toMatch(/work\/kits-meta\.json/)
     expect(useLibraryStore.getState().localFsLastMsg).toMatch(/k\/k\.hit/)
   })
+
+  it('is not written over by a later write (+ Kit, a later save) until a scan finds it converted', async () => {
+    vi.stubGlobal('AudioContext', class { decodeAudioData() { return Promise.resolve({ duration: 0, numberOfChannels: 1, sampleRate: 16000 }) } })
+    let meta: unknown = [{ ...kit, name: 'k', events: [{ id: 'ev-1', eventId: 'k.hit', intensity: 0.3, modes: ['command'] }] }]
+    const work = {
+      name: 'work',
+      getDirectoryHandle: vi.fn().mockRejectedValue(new DOMException('missing', 'NotFoundError')),
+      getFileHandle: vi.fn(async (name: string) => {
+        if (name !== 'kits-meta.json') throw new DOMException('missing', 'NotFoundError')
+        return { getFile: async () => ({ text: async () => JSON.stringify(meta) }) }
+      }),
+    } as unknown as FileSystemDirectoryHandle
+    useLibraryStore.setState({ workDirHandle: work })
+    mocks.scanKitOutputFolder.mockResolvedValue([{ folderName: 'k', manifestJson: { name: 'k', events: { 'k.hit': { clip: 'hit.wav', parameters: { clip_gain: 0.3 } } } }, clipFiles: new Map() }])
+    const metaWrites = () => mocks.writeMetadataJson.mock.calls.filter(([, file]) => file === 'kits-meta.json').length
+
+    await useLibraryStore.getState().importKitsFromOutputDir()
+    await useLibraryStore.getState().createKit('added')
+    expect(metaWrites()).toBe(0)
+    // A later successful save keeps the notice.
+    useLibraryStore.getState().setLocalFsStatus('saved', 'kit "added" saved')
+    expect(useLibraryStore.getState().localFsStatus).toBe('error')
+    expect(useLibraryStore.getState().localFsLastMsg).toMatch(/kits-meta\.json/)
+
+    meta = [{ ...kit, name: 'k', events: [{ id: 'ev-1', eventId: 'k.hit', clipGain: 0.3, modes: ['command'] }] }]
+    await useLibraryStore.getState().importKitsFromOutputDir()
+    expect(metaWrites()).toBe(1)
+    useLibraryStore.getState().setLocalFsStatus('saved', 'ok')
+    expect(useLibraryStore.getState().localFsStatus).toBe('saved')
+  })
 })
