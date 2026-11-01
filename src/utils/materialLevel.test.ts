@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { clipGainForPeak, normalizeGain, peakOf, renormalize, rewriteLevels } from './materialLevel'
+import { clipGainForPeak, KitClipOverflowError, normalizeGain, peakOf, renormalize, rewriteLevels } from './materialLevel'
 import { MATERIAL_PEAK } from './sceneCueTable'
 
 describe('material levels (DEC-086)', () => {
@@ -34,5 +34,13 @@ describe('material levels (DEC-086)', () => {
     expect(0.25 * kit.gain * 0.4).toBeCloseTo(0.25 * 1.888 * 0.4)
     // Not held by the Kit: renormalized as before.
     expect(rewriteLevels(0.25, 1.888, 0.4, false)).toEqual(renormalize(0.25, 1.888, 0.4))
+  })
+
+  it('an adjusted Kit clip whose render would peak above the material peak at the last gain is not written back (DEC-103)', () => {
+    // Last write: gain 1.888 (a render peaking at 0.5). The effect makes it peak at 0.6: × 1.888 > MATERIAL_PEAK.
+    expect(() => rewriteLevels(0.6, 1.888, 0.4, true)).toThrow(KitClipOverflowError)
+    // Exactly the last write's level is still written; not held by the Kit, it is renormalized instead.
+    expect(rewriteLevels(MATERIAL_PEAK / 1.888, 1.888, 0.4, true)).toEqual({ gain: 1.888, clipGain: null })
+    expect(rewriteLevels(0.6, 1.888, 0.4, false)).toEqual(renormalize(0.6, 1.888, 0.4))
   })
 })

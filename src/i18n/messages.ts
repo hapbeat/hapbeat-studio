@@ -1619,6 +1619,7 @@ export const messages = defineMessages({
   'events.fold.open': { ja: '開く', en: 'Open' },
   'events.fold.close': { ja: '畳む', en: 'Fold' },
   'events.adjust': { ja: '調整', en: 'Adjust' },
+  'events.adjust.kitClipOverflow': { ja: 'Kit の強さ（clip_gain）のまま書くと WAV が割れるので（ピーク {peak}）、書き戻しませんでした。効果を弱めるか、Kit のエディタで clip_gain を下げてから調整し直してください', en: 'Written at the Kit’s clip_gain the WAV would clip (peak {peak}), so it was not written back. Make the effect weaker, or lower the clip_gain in the Kit editor first, then adjust again.' },
   'events.adjustHint': { ja: 'この素材の形をその場でエフェクト（LPF など）で調整します。変更はすぐイベントの WAV に反映され（元の音声とチェーンは残ります。チェーンを空にすれば元に戻ります）、レビューは「仮」に戻ります。強さは、調整しなくても波形パネル上部のスライダーで変えられます', en: 'Adjust this material’s shape in place with effects (LPF …). Changes go straight to the event’s WAV (the original and the chain are kept; an empty chain restores it); its review goes back to tentative. The strength is set with the slider above the waveform, no adjusting needed.' },
   'editor.adjusting': { ja: 'イベント: {event} · {file}（調整中）', en: 'Event: {event} · {file} (adjusting)' },
   'events.request.send': { ja: '依頼する', en: 'Request' },

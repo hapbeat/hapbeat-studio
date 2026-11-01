@@ -33,11 +33,23 @@ export function renormalize(peak: number, previousGain: number, clipGain: number
 }
 
 /**
+ * A Kit clip's render that the last write's gain would take above the material peak (`peak` × `gain`): written so, its
+ * WAV would clip. Not written back (rewriteLevels); the effect is to be weaker, or the Kit's clip_gain lower first.
+ */
+export class KitClipOverflowError extends Error {
+  constructor(readonly peak: number, readonly gain: number) {
+    super(`the render × the last write's gain peaks at ${(peak * gain).toFixed(3)}, above the material peak ${MATERIAL_PEAK.toFixed(3)}: not written back`)
+  }
+}
+
+/**
  * The levels of an adjusted material written back (renormalize), except for a haptic clip whose clip_gain the project's
  * Kit holds (`kitHeld`, DEC-103): Studio cannot change the Kit's clip_gain here, so the render is written with the last
  * write's gain (`previousGain`, not normalized again) and the clip_gain stays the Kit's (`clipGain: null` = not written).
- * Render × gain × clip_gain stays as loud as before either way.
+ * Render × gain × clip_gain stays as loud as before either way. A Kit clip whose render would then peak above the
+ * material peak throws KitClipOverflowError (nothing is written).
  */
 export function rewriteLevels(peak: number, previousGain: number, clipGain: number, kitHeld: boolean): { gain: number; clipGain: number | null } {
+  if (kitHeld && peak * previousGain > MATERIAL_PEAK * (1 + 1e-6)) throw new KitClipOverflowError(peak, previousGain)
   return kitHeld ? { gain: previousGain, clipGain: null } : renormalize(peak, previousGain, clipGain)
 }

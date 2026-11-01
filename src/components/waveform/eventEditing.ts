@@ -11,7 +11,8 @@ import { appendActivity } from '@/utils/activityLog'
 import { localIsoString } from '@/utils/hapticKnowledge'
 import { encodeDecided, encodeMaterial, existingWav } from './eventDecide'
 import { kitGainsFor, kitHolds, materialClipGain, setClipGain, setSoundClipGain } from '@/utils/sceneCueTable'
-import { rewriteLevels } from '@/utils/materialLevel'
+import { KitClipOverflowError, rewriteLevels } from '@/utils/materialLevel'
+import { documentMessage } from '@/i18n/messages'
 import { ADJUST_FORMAT, hasMaterialAdjust, readMaterialAdjust, writeMaterialAdjust, writeMaterialOriginal, type MaterialAdjust } from '@/utils/materialAdjust'
 import { decodeAudioFile } from '@/utils/wavIO'
 import type { EffectEntry, SampleRate } from '@/types/waveform'
@@ -130,7 +131,8 @@ async function writeBack(buffer: AudioBuffer, link: MaterialLink) {
   try {
     if (!scene.root || !scene.lib || !scene.table || scene.lib.project_name !== link.project) throw new Error(`open the game project ${link.project} to update ${link.wav}.wav`)
     // The shape goes to the WAV at full scale; the clip_gain follows so it sounds as loud as before (DEC-086). A haptic clip
-    // whose clip_gain the project's Kit holds keeps the Kit's: its WAV is written at the last write's gain (rewriteLevels).
+    // whose clip_gain the project's Kit holds keeps the Kit's: its WAV is written at the last write's gain (rewriteLevels),
+    // and not at all when that would clip it (KitClipOverflowError, before anything is written).
     const saved = editor.folder ? await readMaterialAdjust(editor.folder.root, link.project, link.target, link.wav).catch(() => null) : null
     const previousGain = saved?.data.normGain ?? 1
     const kitHeld = link.target === 'haptic' && kitHolds(kitGainsFor(scene.projectKit?.clipGains, 'fire'), link.wav)
@@ -147,7 +149,10 @@ async function writeBack(buffer: AudioBuffer, link: MaterialLink) {
       clipGain === null ? tb : link.target === 'haptic' ? setClipGain(tb, link.wav, clipGain) : setSoundClipGain(tb, link.wav, clipGain)))
     if (editor.folder) void appendActivity(editor.folder.root, { at: localIsoString(new Date()), kind: 'material-updated', events: users, file: `${link.wav}.wav`, note: `previous → ${archived}` }).catch(() => {})
   } catch (error) {
-    useWaveformStore.getState().setError(`${link.wav}.wav: ${error instanceof Error ? error.message : String(error)}`)
+    // A Kit clip whose render would clip at the Kit's level is not written: said with what to do instead.
+    const why = error instanceof KitClipOverflowError ? documentMessage('events.adjust.kitClipOverflow', { peak: (error.peak * error.gain).toFixed(2) })
+      : error instanceof Error ? error.message : String(error)
+    useWaveformStore.getState().setError(`${link.wav}.wav: ${why}`)
   }
 }
 
