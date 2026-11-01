@@ -167,9 +167,12 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const groupOn = useEditorSettings(state => state.groupPlayback)
   const groupShown = !audition && sceneLib && !eventPreview?.plain ? eventPreview ? { event: eventPreview.event, target: eventPreview.target, material: eventPreview.material }
     : adjusting && adjusting.project === sceneLib.project_name ? { event: adjusting.event, target: adjusting.target, material: adjusting.wav } : null : null
+  // A Kit clip at the Scene tab's output's clip_gain (FIRE `events`, CLIP `stream_events`), in the mixes and the shown level alike.
+  const sceneOutput = useScenePlayback(s => effectiveOutput(s))
+  const sceneKitGains = useSceneStore(state => kitGainsFor(state.projectKit?.clipGains, sceneOutput))
   // With them, the context's one-shot cues (an audition's scene.context / 「同時」 group: their decided haptics at their firings).
-  const groupKey = sceneTable && (groupShown || plan?.context) ? JSON.stringify([...groupShown ? groupFirings(sceneTable, plan ?? { targets: [0], others: [], contextCues: [], context: null }, groupShown, groupOn).haptics : [],
-    ...plan?.context ? contextHapticParts(sceneTable, plan.context) : []]) : '[]'
+  const groupKey = sceneTable && (groupShown || plan?.context) ? JSON.stringify([...groupShown ? groupFirings(sceneTable, plan ?? { targets: [0], others: [], contextCues: [], context: null }, groupShown, groupOn, sceneKitGains).haptics : [],
+    ...plan?.context ? contextHapticParts(sceneTable, plan.context, sceneKitGains) : []]) : '[]'
   const scenePcm = useSceneStore(state => state.pcm)
   // The playback runs to the end of the group's last haptic too (a bite after the last tear was cut off with the shown buffer).
   const groupEndSec = useMemo(() => groupHapticsEnd(JSON.parse(groupKey) as HapticPart[], scenePcm), [groupKey, scenePcm])
@@ -201,7 +204,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   // The context's loop cues: their haptics at the recorded layer levels over the playback (mono, to the same devices).
   const sceneData = useSceneStore(state => state.data)
   const contextLoops = useMemo(() => plan?.context?.layers.length && sceneTable && sceneLib && sceneData && audioBuffer
-    ? renderContextLoops(sceneTable, sceneLib, sceneData, plan.context, scenePcm, audioBuffer.duration) : null, [plan, sceneTable, sceneLib, sceneData, scenePcm, audioBuffer?.duration])
+    ? renderContextLoops(sceneTable, sceneLib, sceneData, plan.context, scenePcm, audioBuffer.duration, sceneKitGains) : null, [plan, sceneTable, sceneLib, sceneData, scenePcm, audioBuffer?.duration, sceneKitGains])
   // The shown material's strength (DEC-086: WAV × clip_gain): a gain on the PC output and the device stream and a scale
   // of the "edited" drawing, changed live by the strength slider; the buffer is never rendered again for it. A group /
   // context mix (groupStream) is mixed again with it instead (the shown haptic only) and streamed live (playback.samples).
@@ -209,9 +212,7 @@ export function WaveformEditor({ active }: { active: boolean }) {
   const levelKeyShown = audition ? levelKey.candidate(audition.trialId, audition.candidateId)
     : eventPreview ? levelKey.material(eventPreview.target, eventPreview.material) : adjusting ? levelKey.material(adjusting.target, adjusting.wav) : null
   const levelMaterial = audition ? null : eventPreview ? { target: eventPreview.target, wav: eventPreview.material } : adjusting ?? null
-  // A Kit clip at the Scene tab's output's clip_gain (FIRE `events`, CLIP `stream_events`).
-  const sceneOutput = useScenePlayback(s => effectiveOutput(s))
-  const materialLevel = useSceneStore(state => levelMaterial && state.table ? materialClipGain(state.table, levelMaterial.target, levelMaterial.wav, kitGainsFor(state.projectKit?.clipGains, sceneOutput)) : 1)
+  const materialLevel = useSceneStore(state => levelMaterial && state.table ? materialClipGain(state.table, levelMaterial.target, levelMaterial.wav, sceneKitGains) : 1)
   const candidateLevel = useEventStore(state => audition ? state.levels[levelKey.candidate(audition.trialId, audition.candidateId)] ?? 1 : 1)
   const savedLevel = audition ? candidateLevel : materialLevel
   const liveLevel = useEventStore(state => levelKeyShown && state.liveLevel?.key === levelKeyShown ? state.liveLevel.value : null)

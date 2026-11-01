@@ -1,12 +1,13 @@
 import { effectiveEvent, pairedClips, parseEventKey, resolveEventName } from './cueEvents'
-import { routeClips, sfxSounds, soundClipGain, type CueTable } from './sceneCueTable'
+import { clipGainOf, routeClips, sfxSounds, soundClipGain, type CueTable, type KitClipGains } from './sceneCueTable'
 import { RATE, resampleClip } from './sceneHaptics'
 
 /**
  * What the editor plays besides the shown material at the representative stretch (DEC-085): the other firings
  * of the stretch. With "play the group" (cue + its variants, e.g. bite and bite:tear), a group member's firing
  * plays the member's representative sound AND haptic (the haptic goes to the devices), each at its material's
- * clip_gain (no scene multiplier); a cue outside the group plays its sound only (as before).
+ * clip_gain (no scene multiplier; a clip the project's Kit has at the Kit's, `kit`, clipGainOf); a cue outside the group
+ * plays its sound only (as before).
  * With a shown sound, the shown event's own firings get its haptic too (the clip paired with that sound on a
  * paired cue — also with the group off —, else the representative). Pure: offsets are seconds from the start of the shown buffer.
  */
@@ -14,10 +15,11 @@ export interface GroupPlan { targets: readonly number[]; others: readonly { atSe
 export interface HapticPart { clip: string; atSec: number; gain: number }
 export interface SoundFiring { sound: string; atSec: number; gain: number }
 
-export function groupFirings(table: CueTable, plan: GroupPlan, shown: { event: string; target: 'sound' | 'haptic'; material: string }, group: boolean): { haptics: HapticPart[]; sounds: SoundFiring[] } {
+export function groupFirings(table: CueTable, plan: GroupPlan, shown: { event: string; target: 'sound' | 'haptic'; material: string }, group: boolean,
+  kit?: KitClipGains | null): { haptics: HapticPart[]; sounds: SoundFiring[] } {
   const cue = parseEventKey(shown.event).cue
   const haptics: HapticPart[] = [], sounds: SoundFiring[] = []
-  const clipGain = (clip: string) => table.clips[clip]?.clip_gain ?? 1
+  const clipGain = (clip: string) => clipGainOf(table, clip, kit)
   for (const o of plan.others) {
     const r = resolveEventName(table, o.name), e = r && effectiveEvent(table, r.ref)
     if (!e) continue

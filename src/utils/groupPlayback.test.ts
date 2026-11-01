@@ -31,6 +31,13 @@ describe('group playback (cue + its variants)', () => {
     expect(groupFirings(table(), plan, tear, false).haptics).toEqual([])
   })
 
+  it("a clip the project's Kit has plays at the Kit's clip_gain, not the cue table copy (DEC-103)", () => {
+    const tear = { event: 'bite:tear', target: 'sound' as const, material: 'TearRip' }
+    expect(groupFirings(table(), plan, tear, true, { bite_hit: 0.3 }).haptics.map(h => h.gain)).toEqual([0.3, 0.3])
+    // A clip the Kit does not have: the cue table's.
+    expect(groupFirings(table(), plan, tear, true, { step: 0.2 }).haptics.map(h => h.gain)).toEqual([0.8, 0.8])
+  })
+
   it('the haptic stream carries the bite firing and is sent; the strength scales the shown haptic only', async () => {
     const pcm = { bite_hit: new Float32Array(160).fill(0.5) }
     const shown = { data: new Float32Array(RATE * 0.2).fill(0.25), rate: RATE, gain: 0.3 }
