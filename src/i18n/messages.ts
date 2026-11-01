@@ -429,6 +429,8 @@ export const messages = defineMessages({
   'scene.kit.installDone': { ja: '完了', en: 'Done' },
   'scene.kit.installFailed': { ja: '失敗: {message}', en: 'Failed: {message}' },
   'scene.kit.recheck': { ja: '再確認', en: 'Check again' },
+  'clipGain.staleKey': { ja: '{file} の {entries} は、強さを古いキー intensity で持っています（clip_gain がありません）。このまま読むと強さが 1 になるので開きません。python {script} <フォルダ> --write で変換してから開き直してください', en: '{entries} in {file} still hold the strength under the old key intensity (no clip_gain). Read as it is, the strength would be 1, so it is not opened. Convert it with python {script} <folder> --write, then open it again.' },
+  'scene.kit.editorHint': { ja: 'Kit のエディタで変えた強さは、そこで「Save Folder」を押すと Scene に届きます', en: 'A clip gain changed in the Kit editor reaches the Scene once you press “Save Folder” there.' },
   'scene.kit.copyHeading': { ja: 'cue 表の素材の強さ', en: 'Clip gains in the cue table' },
   'scene.kit.copySame': { ja: 'cue 表の clip_gain は Kit（{kit}）と同じです。Scene は Kit の値で再生します', en: 'The cue table’s clip_gain values match the Kit ({kit}). The Scene plays the Kit’s values.' },
   'scene.kit.copyDiffers': { ja: 'cue 表の clip_gain が Kit（{kit}）と違う clip が {count} 件あります: {clips}。Scene は Kit の値で再生します', en: '{count} clip(s) have a clip_gain in the cue table that differs from the Kit ({kit}): {clips}. The Scene plays the Kit’s values.' },
@@ -1695,4 +1697,10 @@ export type MessageId = keyof typeof messages
 
 export function formatMessage(template: string, params: MessageParams = {}): string {
   return template.replace(/\{(\w+)\}/g, (_, name: string) => String(params[name] ?? `{${name}}`))
+}
+
+/** Copy outside React (stores, log lines): follows the locale the I18nProvider set on <html lang>. */
+export function documentMessage(id: MessageId, params?: MessageParams): string {
+  const locale = typeof document !== 'undefined' && document.documentElement.lang === 'en' ? 'en' : 'ja'
+  return formatMessage(messages[id][locale], params)
 }

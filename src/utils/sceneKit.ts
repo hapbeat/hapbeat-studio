@@ -1,7 +1,7 @@
 import type { SceneKitState } from '@/stores/scenePlayback'
 import type { ExportFile } from './kitExporter'
 import { dirAt, isNotFound } from './sceneProject'
-import { clampNumber, type KitBucketGains } from './sceneCueTable'
+import { clampNumber, staleKeyEntries, StaleClipGainKeyError, type KitBucketGains } from './sceneCueTable'
 
 /**
  * The Kit a haptic video project's FIRE output plays (contracts scene-recording §1): the cue table's `kit`, kept in
@@ -28,9 +28,12 @@ const MANIFEST_NAMES = (kit: string) => [`${kit}-manifest.json`, 'manifest.json'
  * A Kit manifest's clip gains per output (contracts cue-table §9.1, kit-format `clip_gain`): per Event ID `<kit>.<clip>`,
  * its `parameters.clip_gain` (absent = 1; kept to 0..1, the cue table's range). FIRE reads `events`, CLIP `stream_events`;
  * an ID in one bucket only has that value for both. Event IDs of another category are not clips of this Kit.
+ * A manifest with an entry still carrying `parameters.intensity` (no clip_gain) throws StaleClipGainKeyError (`file`).
  */
-export function kitClipGains(manifest: unknown, kit: string): KitBucketGains {
+export function kitClipGains(manifest: unknown, kit: string, file = `${kit}-manifest.json`): KitBucketGains {
   const m = (manifest ?? {}) as { events?: unknown; stream_events?: unknown }
+  const stale = staleManifestEntries(m)
+  if (stale.length) throw new StaleClipGainKeyError(file, stale)
   const read = (bucket: unknown) => {
     const out: Record<string, number> = {}
     if (!bucket || typeof bucket !== 'object') return out
@@ -45,10 +48,17 @@ export function kitClipGains(manifest: unknown, kit: string): KitBucketGains {
   return { fire: { ...streams, ...events }, clip: { ...events, ...streams } }
 }
 
+/** A Kit manifest's entries (`events.<id>` / `stream_events.<id>`) whose parameters have `intensity` and no `clip_gain`. */
+export const staleManifestEntries = (manifest: unknown): string[] => {
+  const m = (manifest ?? {}) as { events?: unknown; stream_events?: unknown }
+  return [...staleKeyEntries(m.events, 'intensity', 'clip_gain', true).map(id => `events.${id}`),
+    ...staleKeyEntries(m.stream_events, 'intensity', 'clip_gain', true).map(id => `stream_events.${id}`)]
+}
+
 /**
  * The project's folder of Kit `kit`: `kits/<kit>/`, else the parent of the clip folder (`clipsPath`, viewer-lib
  * `paths.clips`) when that folder is named `kit`; a folder counts once it holds `<kit>-manifest.json` or `manifest.json`.
- * Null when neither is there; throws on a manifest that is not JSON.
+ * Null when neither is there; throws on a manifest that is not JSON or still has the key before DEC-103 (kitClipGains).
  */
 export async function locateProjectKit(root: FileSystemDirectoryHandle, kit: string, clipsPath: string): Promise<ProjectKit | null> {
   const parts = clipsPath.split('/').filter(Boolean), parent = parts.slice(0, -1)
@@ -62,7 +72,7 @@ export async function locateProjectKit(root: FileSystemDirectoryHandle, kit: str
       let parsed: unknown
       try { parsed = JSON.parse(text) } catch (error) { throw new Error(`${folder}/${manifest}: ${error instanceof Error ? error.message : String(error)}`) }
       const version = parsed && typeof parsed === 'object' && typeof (parsed as { version?: unknown }).version === 'string' ? (parsed as { version: string }).version : null
-      return { kit, folder, manifest, version, clipGains: kitClipGains(parsed, kit) }
+      return { kit, folder, manifest, version, clipGains: kitClipGains(parsed, kit, `${folder}/${manifest}`) }
     }
   }
   return null

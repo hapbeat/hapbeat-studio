@@ -1,8 +1,8 @@
 import { create } from 'zustand'
-import type { MessageId, MessageParams } from '@/i18n/messages'
+import { documentMessage, type MessageId, type MessageParams } from '@/i18n/messages'
 import { loadDirectoryHandle, saveDirectoryHandle } from '@/utils/localDirectory'
 import { buildItems, VIEWER_DIR, type SceneData, type SceneItem, type SceneLib } from '@/utils/sceneData'
-import { alignClipGains, kitCopyDiffers, loopCuesOf, SceneFormatError, serializeCueTable, validateCueTable, type CueTable } from '@/utils/sceneCueTable'
+import { alignClipGains, CLIP_GAIN_RENAME_SCRIPT, kitCopyDiffers, loopCuesOf, SceneFormatError, serializeCueTable, StaleClipGainKeyError, validateCueTable, type CueTable } from '@/utils/sceneCueTable'
 import { createSceneTable, listWavs, openSceneProject, readProjectFile, readSceneTable, writeProjectFile, writeSceneSave, type PendingWavs } from '@/utils/sceneProject'
 import { CueTableSync } from '@/utils/cueTableSync'
 import { clearJournal, journalKey, readJournal, restoreFromJournal, writeJournal } from '@/utils/sceneJournal'
@@ -137,6 +137,8 @@ interface SceneState {
 }
 
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
+/** The clipGain.staleKey parameters of a file still carrying `intensity` (`file` names it better than the error can). */
+const staleParams = (error: StaleClipGainKeyError, file = error.file): MessageParams => ({ file, entries: error.entries.join(', '), script: CLIP_GAIN_RENAME_SCRIPT })
 const clipKey = (project: string) => `hapbeat-scene-clip:${project}`
 
 async function decode(buf: ArrayBuffer, rate: number): Promise<AudioBuffer> { return new OfflineAudioContext(1, 1, rate).decodeAudioData(buf) }
@@ -213,7 +215,8 @@ export const useSceneStore = create<SceneState>((set, get) => {
     const { root, lib, table } = get(), kit = table?.kit, read = ++kitRead
     if (!root || !lib || !kit) { set({ projectKit: null, kitError: null }); return }
     let found: ProjectKit | null = null, error: string | null = null
-    try { found = await locateProjectKit(root, kit, lib.paths.clips) } catch (e) { error = message(e) }
+    // A manifest with the key before DEC-103 is not read (projectKit null): the copy is not aligned to 1s on the next save.
+    try { found = await locateProjectKit(root, kit, lib.paths.clips) } catch (e) { error = e instanceof StaleClipGainKeyError ? documentMessage('clipGain.staleKey', staleParams(e)) : message(e) }
     if (read !== kitRead || get().root !== root || get().table?.kit !== kit) return
     const now = get().projectKit
     if (now !== undefined && sameKit(now, found) && get().kitError === error) return
@@ -431,12 +434,16 @@ export const useSceneStore = create<SceneState>((set, get) => {
 
   /** A Scene file of an older format (SceneFormatError): migrated with hapbeat-haptic-authoring, never read. */
   const oldFormatNotice = (folder: string): SceneNotice => ({ id: 'scene.open.oldFormat', params: { folder }, error: true })
+  /** A cue table still carrying `intensity` (StaleClipGainKeyError): not opened, converted with the DEC-103 script. */
+  const errorNotice = (error: unknown): SceneNotice => error instanceof SceneFormatError ? oldFormatNotice(get().root?.name ?? '')
+    : error instanceof StaleClipGainKeyError ? { id: 'clipGain.staleKey', params: staleParams(error, get().lib?.paths.cues), error: true }
+      : { id: 'scene.open.failed', params: { error: message(error) }, error: true }
   let restoring: Promise<void> | null = null
   const guarded = async (work: () => Promise<void>) => {
     if (get().busy) return
     set({ busy: true })
     try { await work() } catch (error) {
-      note(error instanceof SceneFormatError ? oldFormatNotice(get().root?.name ?? '') : { id: 'scene.open.failed', params: { error: message(error) }, error: true })
+      note(errorNotice(error))
       addLog(message(error))
     } finally { set({ busy: false }) }
   }

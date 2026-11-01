@@ -105,6 +105,26 @@ export class SceneFormatError extends Error {
     super(`${file}: schema_version must be ${CUE_TABLE_VERSION} (an older format): migrate it with hapbeat-haptic-authoring tools/migrate_scene_v1.py`)
   }
 }
+/** The script that renames the strength key once (DEC-103: intensity → clip_gain), named when a file still has the old key. */
+export const CLIP_GAIN_RENAME_SCRIPT = 'C:\\GitHub\\Hapbeat\\hapbeat-sdk-workspace\\tools\\dec103_rename_local_data.py'
+/**
+ * A file (cue table, Kit manifest, kits-meta.json) whose entries still carry the strength under its name before DEC-103
+ * (`intensity`) and no clip_gain: never read, as it would play (and be saved back) at 1. Converted with
+ * CLIP_GAIN_RENAME_SCRIPT. No compatibility reading (pre-release).
+ */
+export class StaleClipGainKeyError extends Error {
+  constructor(readonly file: string, readonly entries: readonly string[]) {
+    super(`${file}: ${entries.join(', ')} still carry the key intensity (before DEC-103) and no clip_gain: not read. Convert it with python ${CLIP_GAIN_RENAME_SCRIPT} <folder> --write, then open it again`)
+  }
+}
+/** The names in `entries` whose value (or its `parameters` with `inParameters`) has `old` and no `current`. */
+export function staleKeyEntries(entries: unknown, old: string, current: string, inParameters = false): string[] {
+  if (!entries || typeof entries !== 'object') return []
+  return Object.entries(entries as Record<string, unknown>).filter(([, entry]) => {
+    const at = inParameters ? (entry as { parameters?: unknown } | null)?.parameters : entry
+    return !!at && typeof at === 'object' && old in at && !(current in at)
+  }).map(([name]) => name)
+}
 /** Ranges of the numeric `variation` fields. */
 export const VARIATION_RANGES = { gainJitterDb: [0, 12], pitchJitterSt: [0, 12], rateJitterPct: [0, 50] } as const
 export type VariationNumberKey = keyof typeof VARIATION_RANGES
@@ -170,12 +190,17 @@ export function alignClipGains(table: CueTable, kit: KitBucketGains | null): Cue
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 
-/** Structural parse; value ranges are checked by `validateCueTable`. Another `schema_version` throws SceneFormatError. */
+/**
+ * Structural parse; value ranges are checked by `validateCueTable`. Another `schema_version` throws SceneFormatError, a
+ * clip or sound still carrying `intensity` (no clip_gain) StaleClipGainKeyError.
+ */
 export function parseCueTable(text: string): CueTable {
   let v: unknown
   try { v = JSON.parse(text) } catch (error) { throw new Error(`cue table: ${error instanceof Error ? error.message : String(error)}`) }
   if (isRecord(v) && v.schema_version !== CUE_TABLE_VERSION) throw new SceneFormatError('cue table')
   if (!isRecord(v) || !isRecord(v.clips) || !isRecord(v.cues)) throw new Error('cue table: clips and cues must be objects')
+  const stale = [...staleKeyEntries(v.clips, 'intensity', 'clip_gain').map(n => `clips.${n}`), ...staleKeyEntries(v.sounds, 'intensity', 'clip_gain').map(n => `sounds.${n}`)]
+  if (stale.length) throw new StaleClipGainKeyError('cue table', stale)
   for (const [name, clip] of Object.entries(v.clips)) if (!isRecord(clip)) throw new Error(`cue table: clip ${name} must be an object`)
   for (const [name, cue] of Object.entries(v.cues)) {
     if (!isRecord(cue)) throw new Error(`cue table: cue ${name} must be an object`)

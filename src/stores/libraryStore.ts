@@ -44,13 +44,12 @@ import {
 import { getActiveHelperChannel } from '@/utils/helperRequest'
 import { notifyKitManifestWritten } from '@/utils/kitManifestWrites'
 import { KIT_CREDITS_FILENAME, writeKitCredits } from '@/utils/materials'
-import { formatMessage, messages, type MessageId, type MessageParams } from '@/i18n/messages'
+import { documentMessage } from '@/i18n/messages'
+import { CLIP_GAIN_RENAME_SCRIPT, staleKeyEntries } from '@/utils/sceneCueTable'
+import { staleManifestEntries } from '@/utils/sceneKit'
 
 /** Store-side copy for the log drawer; follows the locale the I18nProvider set on <html lang>. */
-function storeMessage(id: MessageId, params?: MessageParams): string {
-  const locale = typeof document !== 'undefined' && document.documentElement.lang === 'en' ? 'en' : 'ja'
-  return formatMessage(messages[id][locale], params)
-}
+const storeMessage = documentMessage
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
@@ -485,6 +484,25 @@ function savePersistedSort(filter: LibraryFilter): void {
 /** Save clips metadata to the local work directory */
 async function saveClipsMetaToDir(handle: FileSystemDirectoryHandle, clips: LibraryClip[]) {
   await writeMetadataJson(handle, CLIPS_META_FILE, clips)
+}
+
+/**
+ * The events of kits-meta.json that still carry `intensity` and no `clipGain` (DEC-103),
+ * as `<kit>/<event>`: such a list is not used, as migrateKit would read their strength as 1.0.
+ */
+function staleMetaEvents(kits: KitDefinition[]): string[] {
+  if (!Array.isArray(kits)) return []
+  return kits.flatMap((kit) => {
+    const events = Array.isArray(kit?.events) ? kit.events : []
+    return staleKeyEntries(Object.fromEntries(events.map((e, i) => [e?.eventId ?? String(i), e])), 'intensity', 'clipGain').map((id) => `${kit.name}/${id}`)
+  })
+}
+
+/** Says (in the folder status, until the next successful write) that `file` was not read: it still has the key before DEC-103. */
+function reportStaleClipGain(file: string, entries: string[]): void {
+  const msg = storeMessage('clipGain.staleKey', { file, entries: entries.join(', '), script: CLIP_GAIN_RENAME_SCRIPT })
+  console.warn('[libraryStore]', msg)
+  useLibraryStore.getState().setLocalFsStatus('error', msg)
 }
 
 /**
@@ -2020,12 +2038,16 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     //      disk folders below; this just supplies prior ev.ids to match.
     //   (The old IDB `listKits()` legacy seed was removed — see below.)
     let existingKits = [...get().kits]
-    if (existingKits.length === 0 && workDirHandle) {
+    // kits-meta.json with the key before DEC-103 is not used, nor written over by this scan (it is converted first).
+    // It is checked on every scan, so the refusal is said even when the kit list is already in memory.
+    let staleMeta: string[] = []
+    if (workDirHandle) {
       try {
         const savedKits = await readMetadataJson<KitDefinition[]>(
           workDirHandle, KITS_META_FILE,
         )
-        if (savedKits && savedKits.length > 0) {
+        staleMeta = savedKits ? staleMetaEvents(savedKits) : []
+        if (existingKits.length === 0 && savedKits && savedKits.length > 0 && !staleMeta.length) {
           existingKits = savedKits.map((k) => migrateKit(k, updatedClips))
         }
       } catch (err) {
@@ -2066,8 +2088,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // owns an on-disk `source/` copy. Browser storage is never the source.
 
     let importedCount = 0
+    // Kit folders whose manifest still has `parameters.intensity` (no clip_gain, DEC-103): not taken in, so their
+    // strength is neither read as 1.0 nor written back over the next Save Folder.
+    const staleKits: { folder: string; entries: string[] }[] = []
     for (const { folderName, manifestJson, authoringJson, clipFiles } of discovered as DiscoveredKit[]) {
       if (!manifestJson || typeof manifestJson !== 'object') continue
+      const staleEntries = staleManifestEntries(manifestJson)
+      if (staleEntries.length) { staleKits.push({ folder: `${outRoot.name}/${folderName}`, entries: staleEntries }); continue }
       // `name` is the only kit identifier in modern manifests; older
       // exports also carried `kit_id` which we now ignore (it always
       // equalled `name` anyway).
@@ -2365,9 +2392,16 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ clips: updatedClips, kits: updatedKits })
     if (workDirHandle) {
       await saveClipsMetaToDir(workDirHandle, updatedClips)
-      await saveKitsMetaToDir(workDirHandle, updatedKits)
+      if (!staleMeta.length) await saveKitsMetaToDir(workDirHandle, updatedKits)
     }
-    return importedCount
+    // One report for every refused file (the status holds one message).
+    const refused = [...(staleMeta.length ? [{ folder: `${workDirHandle?.name ?? ''}/${KITS_META_FILE}`, entries: staleMeta }] : []), ...staleKits]
+    if (refused.length) {
+      reportStaleClipGain(refused.map((r) => r.folder).join(', '),
+        refused.length === 1 ? refused[0].entries : refused.flatMap((r) => r.entries.map((e) => `${r.folder}: ${e}`)))
+    }
+    // A refused Kit folder counts as found: syncClipsFromDir must not show kits-meta.json's copy of it instead.
+    return importedCount + staleKits.length
   },
 
   syncClipsFromDir: async () => {
@@ -2483,7 +2517,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       console.warn('Kit folder scan failed, falling back to metadata:', err)
       return 0
     })
-    if (importedKitCount === 0 && savedKits) {
+    // kits-meta.json with the key before DEC-103 is not used (importKitsFromOutputDir said so).
+    if (importedKitCount === 0 && savedKits && !staleMetaEvents(savedKits).length) {
       const currentClips = get().clips
       const migrated = savedKits.map((k) => migrateKit(k, currentClips))
       // (Disk-as-truth) Don't mirror to IDB. State + saveKitsMetaToDir

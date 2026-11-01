@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AT_VALUES, newCueTable, positionsForCue, clipsForCue, SceneFormatError, encodePcm16Wav, parseCueTable, serializeCueTable, setClipGain, setSoundClipGain, soundClipGain, materialClipGain, validateCueTable, alignClipGains, clipGainOf, kitBucketsDiffer, kitCopyDiffers, kitGainsFor, kitHolds, type CueTableContext } from './sceneCueTable'
+import { AT_VALUES, StaleClipGainKeyError, newCueTable, positionsForCue, clipsForCue, SceneFormatError, encodePcm16Wav, parseCueTable, serializeCueTable, setClipGain, setSoundClipGain, soundClipGain, materialClipGain, validateCueTable, alignClipGains, clipGainOf, kitBucketsDiffer, kitCopyDiffers, kitGainsFor, kitHolds, type CueTableContext } from './sceneCueTable'
 import { sampleLib, sampleTable } from './sceneTestFixtures'
 
 const ctx = (patch: Partial<CueTableContext> = {}): CueTableContext => ({
@@ -142,6 +142,14 @@ describe('scene cue table edits', () => {
     expect(() => parseCueTable('{"clips":{},"cues":{}}')).toThrow(SceneFormatError)
     // Missing sfx / haptics stay missing (undecided), and serialize back as missing.
     expect(parseCueTable('{"schema_version":1,"clips":{},"cues":{"a":{}}}').cues.a).toEqual({})
+  })
+
+  it('a cue table whose clips / sounds still carry intensity (no clip_gain) is not read (DEC-103)', () => {
+    const text = (clips: unknown, sounds: unknown) => JSON.stringify({ schema_version: 1, clips, sounds, cues: {} })
+    expect(() => parseCueTable(text({ a: { intensity: 0.4, loop: false } }, {}))).toThrow(StaleClipGainKeyError)
+    expect(() => parseCueTable(text({ a: { clip_gain: 0.4, loop: false } }, { S: { intensity: 0.5 } }))).toThrow(/sounds\.S/)
+    // clip_gain (also beside the old key) and entries with neither are read as before.
+    expect(parseCueTable(text({ a: { clip_gain: 0.4, intensity: 0.4, loop: false }, b: { loop: false } }, { S: {} })).clips.b).toEqual({ loop: false })
   })
 
   it('writes PCM16 WAV headers', () => {

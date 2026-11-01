@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { StaleClipGainKeyError } from './sceneCueTable'
 import { deviceKitState, kitClipGains, kitStateOf, locateProjectKit, missingClips, parseKitList, readKitFiles, type DeviceKitAnswer } from './sceneKit'
 import { effectiveOutput } from '@/stores/scenePlayback'
 
@@ -49,6 +50,17 @@ describe('the project Kit folder', () => {
     expect(kitClipGains({ events: { 'k.a': { parameters: { clip_gain: 3 } } } }, 'k')).toEqual({ fire: { a: 1 }, clip: { a: 1 } })
     const root = dir({ kits: { 'sports-kit': { 'sports-kit-manifest.json': JSON.stringify({ version: '1.0.0', ...m }) } } })
     expect((await locateProjectKit(root, 'sports-kit', 'haptics/clips'))?.clipGains).toEqual(both)
+  })
+
+  it('a manifest still carrying parameters.intensity (no clip_gain) is not read: it throws, naming the file and the entries', async () => {
+    const m = { events: { 'k.a': { parameters: { intensity: 0.3 } }, 'k.b': { parameters: { clip_gain: 0.4 } }, 'k.c': { parameters: { intensity: 0.2, clip_gain: 0.2 } } },
+      stream_events: { 'k.d': { parameters: { intensity: 0.5 } } } }
+    expect(() => kitClipGains(m, 'k')).toThrow(StaleClipGainKeyError)
+    expect(() => kitClipGains(m, 'k')).toThrow(/events\.k\.a, stream_events\.k\.d/)
+    // The entries with clip_gain (with or without the old key besides) read as before.
+    expect(kitClipGains({ events: { 'k.b': m.events['k.b'], 'k.c': m.events['k.c'] } }, 'k')).toEqual({ fire: { b: 0.4, c: 0.2 }, clip: { b: 0.4, c: 0.2 } })
+    const root = dir({ kits: { k: { 'k-manifest.json': JSON.stringify(m) } } })
+    await expect(locateProjectKit(root, 'k', 'x/y')).rejects.toThrow(/kits\/k\/k-manifest\.json.*dec103_rename_local_data\.py/)
   })
 })
 

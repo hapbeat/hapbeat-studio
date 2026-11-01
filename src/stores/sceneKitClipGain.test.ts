@@ -38,7 +38,8 @@ const manifest = (thump: number, streamThump?: number) => JSON.stringify({
   stream_events: { 'sports-kit.hum': { clip: 'hum.wav', parameters: { clip_gain: 1, loop: true } },
     ...(streamThump === undefined ? {} : { 'sports-kit.thump': { clip: 'thump.wav', parameters: { clip_gain: streamThump, loop: false } } }) },
 })
-const project = (withKit: boolean, thump = 0.5, streamThump?: number) => memoryFolder({
+/** `files`: written over the project's (a file of an older shape). */
+const project = (withKit: boolean, thump = 0.5, streamThump?: number, files: Record<string, string> = {}) => memoryFolder({
   'Saved/HapticViewer/viewer-lib.json': JSON.stringify({ ...sampleViewerLibFile(), title: 'Haptic Sports', project_name: 'haptic-sports', paths }),
   'Saved/HapticViewer/viewer-data.json': JSON.stringify(sampleViewerDataFile()),
   [paths.cues]: serializeCueTable(table()),
@@ -48,6 +49,7 @@ const project = (withKit: boolean, thump = 0.5, streamThump?: number) => memoryF
     'kits/sports-kit/sports-kit-manifest.json': manifest(thump, streamThump),
     'kits/sports-kit/source/thump.wav': wav(), 'kits/sports-kit/source/click.wav': wav(),
   } : {}),
+  ...files,
 }, 'haptic-sports')
 
 /** Opens `folder` in fresh stores (a page load) through the folder picker. */
@@ -174,5 +176,35 @@ describe('Scene clip gains from the project Kit (DEC-103)', () => {
     expect(saved.clips.thump.clip_gain).toBe(0.7)
     expect(saved.cues.detent.haptics![0].gain).toBe(0.6)
     expect(saved.clips.click.clip_gain).toBe(1)
+  })
+
+  it('a Kit manifest with the key before DEC-103 is not read: the error names the script, the copy is never aligned to 1', async () => {
+    const stale = manifest(0.3).replace('"clip_gain":0.3', '"intensity":0.3')
+    const folder = project(true, 0.5, undefined, { 'kits/sports-kit/sports-kit-manifest.json': stale })
+    const { useSceneStore } = await openPage(folder)
+    const s = useSceneStore.getState()
+    expect(s.projectKit).toBeNull()
+    expect(s.kitError).toMatch(/kits\/sports-kit\/sports-kit-manifest\.json/)
+    expect(s.kitError).toMatch(/events\.sports-kit\.thump/)
+    expect(s.kitError).toMatch(/dec103_rename_local_data\.py/)
+    // An edit saves the cue table with its copy as it was (the cue table's value plays: no Kit read).
+    expect(s.edit(tb => ({ ...tb, cues: { ...tb.cues, detent: { ...tb.cues.detent, haptics: [{ clip: 'thump', at: 'pos_chest', gain: 0.6 }] } } }))).toBe(true)
+    await vi.advanceTimersByTimeAsync(400)
+    expect(parseCueTable(folder.read(paths.cues)!).clips.thump.clip_gain).toBe(0.5)
+    expect(sent(useSceneStore.getState()).clip).toBeCloseTo(0.5 * 0.5)
+    expect(folder.read('kits/sports-kit/sports-kit-manifest.json')).toBe(stale)
+  })
+
+  it('a cue table with the key before DEC-103 is not opened: the notice names the file, the entries and the script', async () => {
+    const old = JSON.parse(serializeCueTable(table())) as { clips: Record<string, Record<string, unknown>> }
+    old.clips.thump = { intensity: 0.5, loop: false }
+    const text = JSON.stringify(old, null, 2)
+    const folder = project(false, 0.5, undefined, { [paths.cues]: text })
+    const { useSceneStore } = await openPage(folder)
+    const s = useSceneStore.getState()
+    expect(s.table).toBeNull()
+    expect(s.notice).toMatchObject({ id: 'clipGain.staleKey', params: { file: paths.cues, entries: 'clips.thump' }, error: true })
+    expect(String(s.notice?.params?.script)).toMatch(/dec103_rename_local_data\.py/)
+    expect(folder.read(paths.cues)).toBe(text)
   })
 })

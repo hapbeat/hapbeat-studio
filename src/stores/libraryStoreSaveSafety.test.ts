@@ -447,3 +447,58 @@ describe('sample-kit repair', () => {
     expect(files.some((file: { path: string }) => file.path === 'sample-kit-manifest.json')).toBe(false)
   })
 })
+
+describe('Kit folders with the strength key before DEC-103', () => {
+  const manifest = (parameters: Record<string, unknown>) => ({
+    schema_version: '2.0.0', name: 'k', version: '1.0.0',
+    events: { 'k.hit': { clip: 'hit.wav', parameters: { loop: false, ...parameters } } },
+  })
+  const scan = (...kits: [string, Record<string, unknown>][]) => mocks.scanKitOutputFolder.mockResolvedValue(
+    kits.map(([folderName, parameters]) => ({ folderName, manifestJson: manifest(parameters), clipFiles: new Map() })))
+
+  it('a manifest with parameters.intensity and no clip_gain is not taken in (not read as 1.0), and the status says to convert it', async () => {
+    vi.stubGlobal('AudioContext', class { decodeAudioData() { return Promise.resolve({ duration: 0, numberOfChannels: 1, sampleRate: 16000 }) } })
+    const root = { name: 'kits', getDirectoryHandle: vi.fn().mockRejectedValue(new DOMException('missing', 'NotFoundError')) } as unknown as FileSystemDirectoryHandle
+    useLibraryStore.setState({ kitDirHandle: root })
+    scan(['stale-kit', { intensity: 0.3 }], ['new-kit', { clip_gain: 0.3 }], ['plain-kit', {}])
+
+    const found = await useLibraryStore.getState().importKitsFromOutputDir()
+
+    const kits = useLibraryStore.getState().kits
+    expect(kits.map((k) => k.name)).toEqual(['new-kit', 'plain-kit'])
+    // Another key is read as before: clip_gain as written, none = the default 1.0.
+    expect(kits.map((k) => k.events[0].clipGain)).toEqual([0.3, 1])
+    // The refused folder counts as found, so kits-meta.json is not shown in its place.
+    expect(found).toBe(3)
+    expect(useLibraryStore.getState().localFsStatus).toBe('error')
+    expect(useLibraryStore.getState().localFsLastMsg).toMatch(/kits\/stale-kit/)
+    expect(useLibraryStore.getState().localFsLastMsg).toMatch(/events\.k\.hit/)
+    expect(useLibraryStore.getState().localFsLastMsg).toMatch(/dec103_rename_local_data\.py/)
+  })
+})
+
+describe('kits-meta.json with the strength key before DEC-103', () => {
+  it('is neither used nor written over by a scan, and the status says to convert it', async () => {
+    vi.stubGlobal('AudioContext', class { decodeAudioData() { return Promise.resolve({ duration: 0, numberOfChannels: 1, sampleRate: 16000 }) } })
+    const meta = [{ ...kit, name: 'k', events: [{ id: 'ev-1', eventId: 'k.hit', intensity: 0.3, modes: ['command'] }] }]
+    const work = {
+      name: 'work',
+      getDirectoryHandle: vi.fn().mockRejectedValue(new DOMException('missing', 'NotFoundError')),
+      getFileHandle: vi.fn(async (name: string) => {
+        if (name !== 'kits-meta.json') throw new DOMException('missing', 'NotFoundError')
+        return { getFile: async () => ({ text: async () => JSON.stringify(meta) }) }
+      }),
+    } as unknown as FileSystemDirectoryHandle
+    useLibraryStore.setState({ workDirHandle: work })
+    mocks.scanKitOutputFolder.mockResolvedValue([{ folderName: 'k', manifestJson: { name: 'k', events: { 'k.hit': { clip: 'hit.wav', parameters: { clip_gain: 0.3 } } } }, clipFiles: new Map() }])
+
+    await useLibraryStore.getState().importKitsFromOutputDir()
+
+    // The Kit comes from its manifest as before; kits-meta.json (its ids) is not used, nor written.
+    expect(useLibraryStore.getState().kits[0].events[0]).toMatchObject({ eventId: 'k.hit', clipGain: 0.3 })
+    expect(useLibraryStore.getState().kits[0].events[0].id).not.toBe('ev-1')
+    expect(mocks.writeMetadataJson.mock.calls.map(([, file]) => file)).not.toContain('kits-meta.json')
+    expect(useLibraryStore.getState().localFsLastMsg).toMatch(/work\/kits-meta\.json/)
+    expect(useLibraryStore.getState().localFsLastMsg).toMatch(/k\/k\.hit/)
+  })
+})

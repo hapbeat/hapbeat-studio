@@ -19,7 +19,7 @@ export interface SceneKitCheck {
   kit: string | null
   /** The project's Kit folder: undefined while looking (or not in FIRE output), null when not found. */
   project: ProjectKit | null | undefined
-  /** Why the project's Kit could not be read. */
+  /** Why the project's Kit could not be read (in any output). */
   error: string | null
   /** Per target device: its state, its Kit's version, the cue table's clips its Kit lacks, why the helper could not ask it. */
   rows: { device: HapticDevice; state: DeviceKitState; version: string | null; missing: string[]; error: string | null }[]
@@ -75,7 +75,7 @@ export function useSceneKitCheck(devices: HapticDevice[], connected: boolean): S
   }, [state, hold])
   useEffect(() => () => useScenePlayback.getState().setKitState('none'), [])
   const recheck = useCallback(() => { setRound(n => n + 1); void useSceneStore.getState().reloadKit() }, [])
-  return { kit, project, error: fire ? kitError : null, rows, recheck }
+  return { kit, project, error: kitError, rows, recheck }
 }
 
 interface InstallRow { pct: number; done?: boolean; ok?: boolean; msg?: string }
@@ -177,18 +177,27 @@ export function SceneKitStatus() {
  * the Kit's clip_gain and the cue table holds a copy (contracts cue-table §9.1). Says whether the copy matches, names
  * the clips that differ, and 「cue 表をそろえる」 writes the Kit's values now (a cue table edit, saved like any other;
  * Studio aligns the copy whenever it saves the cue table anyway). A clip the Kit plays at another clip_gain in FIRE
- * (`events`) than in CLIP (`stream_events`) has no one value to copy: it is never aligned and is named here. Nothing
- * without a Kit in the project.
+ * (`events`) than in CLIP (`stream_events`) has no one value to copy: it is never aligned and is named here. A Kit that
+ * cannot be read (a broken manifest, one with the key before DEC-103) is said here outside FIRE (SceneKitStatus says
+ * it in FIRE). A standing line says a clip gain changed in the Kit editor reaches the Scene on its Save Folder (the
+ * manifest write; kits-meta is not read here). Nothing without a Kit in the project.
  */
 export function SceneKitCopy() {
   const { t } = useI18n()
   const table = useSceneStore(s => s.table)
   const projectKit = useSceneStore(s => s.projectKit)
+  const kitError = useSceneStore(s => s.kitError)
+  const fire = useScenePlayback(s => s.output) === 'fire'
   const differs = useMemo(() => table && projectKit ? kitCopyDiffers(table, projectKit.clipGains) : [], [table, projectKit])
   const buckets = useMemo(() => table && projectKit ? kitBucketsDiffer(table, projectKit.clipGains) : [], [table, projectKit])
-  if (!table?.kit || !projectKit) return null
+  if (!table?.kit) return null
+  if (!projectKit) return kitError && !fire ? <div className="scene-sec scene-kit-copy">
+    <h3>{t('scene.kit.copyHeading')}</h3>
+    <div className="scene-warn">{t('scene.kit.readFailed', { error: kitError })}</div>
+  </div> : null
   return <div className="scene-sec scene-kit-copy">
     <h3>{t('scene.kit.copyHeading')}</h3>
+    <div className="scene-dim">{t('scene.kit.editorHint')}</div>
     <div className={differs.length ? 'scene-warn' : 'scene-dim'}>{differs.length
       ? t('scene.kit.copyDiffers', { kit: projectKit.kit, count: differs.length, clips: differs.join(', ') }) : t('scene.kit.copySame', { kit: projectKit.kit })}</div>
     {buckets.length > 0 && <div className="scene-warn">{t('scene.kit.copyBuckets', { kit: projectKit.kit, count: buckets.length, clips: buckets.join(', ') })}</div>}
