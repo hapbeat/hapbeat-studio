@@ -30,6 +30,16 @@ export type SystemAudioState = 'idle' | 'starting' | 'live'
 /** Why the last run did not start or stopped by itself (null after a stop by the user). */
 export type SystemAudioNotice =
   | 'denied' | 'noAudio' | 'sourceMissing' | 'noHelper' | 'noDevice' | 'helperLost' | 'ended' | LiveStreamLoss
+  | 'lostStopped' | 'lostRebooted'
+
+/** The notice for a loss, naming the helper's `stream_lost` reason where it tells the user something. */
+export function lossNotice(reason: LiveStreamLoss, detail?: string): SystemAudioNotice {
+  if (reason !== 'lost') return reason
+  if (detail === 'stopped') return 'lostStopped'
+  if (detail === 'device_rebooted') return 'lostRebooted'
+  if (detail === 'superseded') return 'displaced'
+  return 'lost'
+}
 
 /** A chosen recording device; null = the loopback of the default playback device. */
 export interface SourceChoice {
@@ -215,7 +225,7 @@ export const useSystemAudio = create<SystemAudioStore>((set, get) => {
       capture = started
       started.setDelay(get().delayMs / 1000) // changed while the picker was open
       channel = helper
-      stream = new LiveStream(helper, (reason) => finish(run, reason))
+      stream = new LiveStream(helper, (reason, detail) => finish(run, lossNotice(reason, detail)))
       stream.setTargets(targets)
       levelPeak = 0
       levelAt = performance.now()

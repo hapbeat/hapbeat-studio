@@ -93,14 +93,18 @@ export interface StreamOptions {
   leadInSec?: number
   /** Helper messages. When supplied, the stream stops (StreamLostError) once the
    *  helper reports it lost its devices: `stream_displaced` by another client,
-   *  or a `no_session` ack. */
+   *  `stream_lost` (1.x, the device side ended it), or a `no_session` ack. */
   subscribe?: (listener: (message: ManagerMessage) => void) => () => void
+  /** The user started this playback: every BEGIN (also after a pause or seek) asks
+   *  the helper to take back devices another app holds (helper-streaming.md, Takeover). */
+  takeover?: boolean
 }
 
 /** The helper no longer routes this stream to any device (no auto re-BEGIN: the next play opens a new one). */
 export class StreamLostError extends Error {
-  constructor(readonly streamId: string, readonly reason: 'displaced' | 'no_session', readonly by?: string) {
-    super(`Stream ${streamId} lost its devices (${reason}${by ? ` by ${by}` : ''})`)
+  /** `by` is the newer stream for `displaced`; `lostReason` is the helper's `stream_lost` reason for `lost`. */
+  constructor(readonly streamId: string, readonly reason: 'displaced' | 'no_session' | 'lost', readonly by?: string, readonly lostReason?: string) {
+    super(`Stream ${streamId} lost its devices (${reason}${by ? ` by ${by}` : ''}${lostReason ? `: ${lostReason}` : ''})`)
     this.name = 'StreamLostError'
   }
 }
@@ -152,6 +156,7 @@ export async function streamClip(
     const p = message.payload ?? {}
     if (lost || p.stream_id !== streamId) return
     if (message.type === 'stream_displaced' && !p.same_client) lost = new StreamLostError(streamId, 'displaced', typeof p.by === 'string' ? p.by : undefined)
+    else if (message.type === 'stream_lost') lost = new StreamLostError(streamId, 'lost', undefined, typeof p.reason === 'string' ? p.reason : undefined)
     else if (message.type === 'stream_ack' && p.status === 'no_session') lost = new StreamLostError(streamId, 'no_session')
   })
   // Send STREAM_BEGIN. Destination = whatever the caller-wrapped `send`
@@ -166,6 +171,7 @@ export async function streamClip(
         channels: channels,
         format: 'pcm16',
         total_samples: totalFrames,
+        ...(options?.takeover ? { takeover: true } : {}),
       },
     })
   }

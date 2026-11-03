@@ -66,6 +66,23 @@ describe('streamClip sessions', () => {
     expect(secondMessages[0]?.payload.stream_id).not.toBe(ids[0])
   })
 
+  it('takeover goes on every BEGIN only when asked (also the BEGIN after a pause)', async () => {
+    const plain: ManagerMessage[] = []
+    await streamClip(new Blob([new Uint8Array([4])]), message => plain.push(message), { cacheKey: 'takeover-a' })
+    expect(plain[0].type).toBe('stream_begin')
+    expect('takeover' in plain[0].payload).toBe(false)
+
+    const sent: ManagerMessage[] = []
+    let paused = true
+    const done = streamClip(new Blob([new Uint8Array([5])]), message => sent.push(message), { takeover: true, control: { isPaused: () => paused } })
+    while (sent.length < 2) await new Promise(resolve => setTimeout(resolve, 5))
+    paused = false
+    await done
+    const begins = sent.filter(m => m.type === 'stream_begin')
+    expect(begins).toHaveLength(2)
+    expect(begins.every(m => m.payload.takeover === true)).toBe(true)
+  })
+
   it('does not send BEGIN after cancellation during decode', async () => {
     const messages: ManagerMessage[] = []
     const controller = new AbortController()
@@ -119,6 +136,14 @@ describe('streamClip lost streams', () => {
     h.deliver({ type: 'stream_ack', payload: { stream_id: 'someone-else', status: 'no_session' } })
     h.deliver({ type: 'stream_ack', payload: { stream_id: id, status: 'no_session' } })
     await expect(h.done).rejects.toMatchObject({ name: 'StreamLostError', reason: 'no_session' })
+  })
+
+  it('stops on stream_lost for its stream and keeps the helper reason', async () => {
+    const h = streaming(), id = await h.id()
+    h.deliver({ type: 'stream_lost', payload: { stream_id: 'someone-else', targets: ['10.0.0.2'], reason: 'stopped' } })
+    h.deliver({ type: 'stream_lost', payload: { stream_id: id, targets: ['10.0.0.2'], reason: 'stopped' } })
+    await expect(h.done).rejects.toMatchObject({ name: 'StreamLostError', reason: 'lost', lostReason: 'stopped' })
+    expect(h.sent.filter(m => m.type !== 'stream_data').map(m => m.type)).toEqual(['stream_begin'])
   })
 
   it('a same-client displacement does not stop it', async () => {

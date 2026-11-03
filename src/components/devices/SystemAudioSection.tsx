@@ -30,6 +30,9 @@ const NOTICE_TEXT: Record<SystemAudioNotice, MessageId> = {
   displaced: 'manage.systemAudio.notice.displaced',
   unreachable: 'manage.systemAudio.notice.unreachable',
   no_session: 'manage.systemAudio.notice.displaced',
+  lost: 'manage.systemAudio.notice.lost',
+  lostStopped: 'manage.systemAudio.notice.lostStopped',
+  lostRebooted: 'manage.systemAudio.notice.lostRebooted',
 }
 
 interface Props {

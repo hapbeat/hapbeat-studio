@@ -17,9 +17,12 @@ import type { WifiProfile } from '@/stores/deviceStore'
 /** Firmware version reported by both demo devices. Kept >= the
  *  `KIT_LIST_PARAMS_MIN_FW` ('0.1.3') gate in InstalledKitsSection so the
  *  Kit sub-tab's per-event amp% renders instead of the "amp ?" / old-firmware
- *  banner, and >= MIN_HELPER_VERSION so the header pill reads "Helper 接続中"
- *  (not "Helper 要更新"). */
+ *  banner. */
 export const DEMO_FW_VERSION = '0.1.4'
+
+/** Helper version the demo reports. Kept >= MIN_HELPER_VERSION so the header
+ *  pill reads "Helper 接続中" (not "Helper 要更新"). */
+export const DEMO_HELPER_VERSION = '0.5.0'
 
 const DEMO_CREATED_AT = '2026-06-01T09:00:00.000Z'
 const DEMO_UPDATED_AT = '2026-06-15T09:00:00.000Z'

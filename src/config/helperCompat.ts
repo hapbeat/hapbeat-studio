@@ -1,26 +1,67 @@
 /**
- * Helper version compatibility — the contract Studio expects from the
- * `hapbeat-helper` daemon it talks to over WebSocket.
+ * Helper compatibility — what Studio may use of the `hapbeat-helper` daemon it
+ * talks to over WebSocket (contracts `helper-ws.md`, DEC-096).
  *
- * Bump `MIN_HELPER_VERSION` whenever Studio depends on:
- *   - a new WS message type / field in a result payload
- *   - a behavioural fix in Helper that older builds can't fulfil
+ * A 1.x Helper declares its request `types` and `features` in `helper_hello`;
+ * Studio enables a feature only when the Helper lists it, and shows "update
+ * Helper" for that feature alone (`helperHasType` / `helperHasFeature`).
+ * Versions are never compared to enable features.
  *
- * Studio surfaces a warning banner + an "outdated" colour on the Helper
- * header pill whenever the connected Helper is older than this minimum,
- * with copy-paste-able upgrade commands in the Helper Manage modal.
- *
- * Why a separate file: this constant is the single source of truth for
- * "does this Studio + Helper combo work?". Keeping it out of code that
- * happens to call it makes it easy to grep + bump in a one-line PR
- * alongside the feature commit that introduced the dependency.
+ * A Helper without `types` (0.x) offers only what Helper 0.5.0 offered.
+ * `MIN_HELPER_VERSION` is kept for that case only: a 0.x Helper below it
+ * cannot serve Studio (0.5.0 is the first Helper that streams to Stream Gen 2
+ * firmware; an older one leaves Studio's streams silent), so Studio shows the
+ * outdated banner + the upgrade commands in the Helper Manage modal.
  *
  * The Windows app (hapbeat-studio-desktop, DEC-094) loads this Studio as soon
  * as it is deployed but bundles its helper. Before deploying a bump above the
  * app's bundled helper (`helper/helper-version.txt` there), publish an app
  * release with that helper, or app users are stuck with an outdated Helper.
  */
-export const MIN_HELPER_VERSION = '0.1.3'
+export const MIN_HELPER_VERSION = '0.5.0'
+
+/** What the connected Helper declared in `helper_hello`. */
+export interface HelperCaps {
+  /** Helper's major (1.x); null for a 0.x Helper. */
+  generation: number | null
+  /** Request types Helper handles (1.x); null for a 0.x Helper. */
+  types: string[] | null
+  features: string[]
+}
+
+/** Request types added in Helper 1.x: a 0.x Helper (no `types`) lacks them. */
+const HELPER_1X_TYPES: readonly string[] = ['reset_storage']
+/** The `features` a 0.x Helper (0.5.0) has without declaring them. */
+const HELPER_0X_FEATURES: readonly string[] = ['stream_gen2']
+
+/** Reads `helper_hello`; unknown fields and values are ignored. */
+export function parseHelperHello(payload: Record<string, unknown>): HelperCaps {
+  const strings = (v: unknown): string[] | null =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : null
+  return {
+    generation: typeof payload.generation === 'number' ? payload.generation : null,
+    types: strings(payload.types),
+    features: strings(payload.features) ?? [],
+  }
+}
+
+/** Whether Helper handles the request `type`. False until `helper_hello` arrived. */
+export function helperHasType(caps: HelperCaps | null, type: string): boolean {
+  if (!caps) return false
+  return caps.types ? caps.types.includes(type) : !HELPER_1X_TYPES.includes(type)
+}
+
+/** Whether Helper has the `features` value. False until `helper_hello` arrived. */
+export function helperHasFeature(caps: HelperCaps | null, feature: string): boolean {
+  if (!caps) return false
+  return caps.types ? caps.features.includes(feature) : HELPER_0X_FEATURES.includes(feature)
+}
+
+/** Helper's major is above Studio's: Studio should be updated (`versioning.md` §3.3). */
+export function helperNewerThanStudio(caps: HelperCaps | null, studioVersion: string): boolean {
+  const m = /^v?(\d+)\./.exec(studioVersion.trim())
+  return !!caps && caps.generation !== null && !!m && caps.generation > Number(m[1])
+}
 
 /**
  * Numeric-segment comparison of two Helper version strings.
@@ -61,12 +102,13 @@ export function compareVersion(a: string, b: string): number {
 /**
  * Three-way compat state:
  *  - `unknown`: no Helper connected, or `helper_hello` not received yet
- *  - `ok`:      Helper version >= MIN_HELPER_VERSION
- *  - `outdated`: Helper version <  MIN_HELPER_VERSION (upgrade needed)
+ *  - `ok`:      a 1.x Helper (it declares `types`), or a 0.x Helper >= MIN_HELPER_VERSION
+ *  - `outdated`: a 0.x Helper < MIN_HELPER_VERSION (upgrade needed)
  */
 export type HelperCompat = 'unknown' | 'ok' | 'outdated'
 
-export function checkHelperCompat(helperVersion: string | null): HelperCompat {
+export function checkHelperCompat(helperVersion: string | null, caps: HelperCaps | null = null): HelperCompat {
+  if (caps?.types) return 'ok'
   if (!helperVersion) return 'unknown'
   return compareVersion(helperVersion, MIN_HELPER_VERSION) < 0 ? 'outdated' : 'ok'
 }

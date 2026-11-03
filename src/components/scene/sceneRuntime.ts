@@ -8,7 +8,7 @@ import { clipGainOf, isLoopCue, kitGainsFor, routeClips, sfxSounds, type CueRout
 import { effectiveEvent, fireShot, MaterialPicker, resolveEventName } from '@/utils/cueEvents'
 import { runPosition } from '@/utils/sceneSegments'
 import { buildLoopSounds, LoopSoundPlayer, loopSoundLevel, type LoopSound } from '@/utils/sceneLoopSounds'
-import { buildLoopVoices, sendGain, shotVoices, withOverallGain, type LoopVoice, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, routeTargets, SceneHapticMixer, type HapticDevice, type HelperSend, type StreamAck, type StreamDisplaced } from '@/utils/sceneHaptics'
+import { buildLoopVoices, sendGain, shotVoices, withOverallGain, type LoopVoice, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, routeTargets, SceneHapticMixer, type HapticDevice, type HelperSend, type StreamAck, type StreamDisplaced, type StreamLost } from '@/utils/sceneHaptics'
 import { SceneKitFire } from '@/utils/sceneKitFire'
 import { isStreamOpen } from '@/utils/openStreams'
 import { useSceneStrength } from '@/stores/sceneStrength'
@@ -132,6 +132,8 @@ export class SceneRuntime {
   streamAck(ack: StreamAck) { this.mixer.onAck(ack, performance.now()) }
   /** A helper `stream_displaced`: another client's stream re-opens after the back-off, this tab's waits until it ends. */
   streamDisplaced(note: StreamDisplaced) { this.mixer.onDisplaced(note, performance.now()) }
+  /** A helper `stream_lost` (1.x): that device's stream re-opens after the back-off. */
+  streamLost(note: StreamLost) { this.mixer.onLost(note, performance.now()) }
   /** Sends stream_end for every open device stream (page unload: React cleanups do not run). */
   endStreams() { this.mixer.endSessions() }
 

@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
-import { checkHelperCompat, type HelperCompat } from '@/config/helperCompat'
+import { checkHelperCompat, parseHelperHello, type HelperCaps, type HelperCompat } from '@/config/helperCompat'
 import { isDemoMode } from '@/demo/isDemoMode'
 import { setActiveHelperChannel } from '@/utils/helperRequest'
 
@@ -29,6 +29,9 @@ interface HelperConnectionValue {
    * - `outdated` when an upgrade is needed (banner + upgrade hint UI)
    */
   helperCompat: HelperCompat
+  /** Request types / features the Helper declared in `helper_hello`
+   *  (`config/helperCompat.ts` helperHasType / helperHasFeature). null until it arrives. */
+  helperCaps: HelperCaps | null
   devices: DeviceInfo[]
   lastMessage: ManagerMessage | null
   /** Receive every Helper message synchronously, including bursts that React
@@ -57,6 +60,7 @@ const HelperConnectionContext = createContext<HelperConnectionValue | null>(null
 export function HelperConnectionProvider({ children }: { children: ReactNode }) {
   const [isConnected, setIsConnected] = useState(false)
   const [helperVersion, setHelperVersion] = useState<string | null>(null)
+  const [helperCaps, setHelperCaps] = useState<HelperCaps | null>(null)
   const [devices, setDevices] = useState<DeviceInfo[]>([])
   const [lastMessage, setLastMessage] = useState<ManagerMessage | null>(null)
   const messageListenersRef = useRef(new Set<(message: ManagerMessage) => void>())
@@ -119,6 +123,7 @@ export function HelperConnectionProvider({ children }: { children: ReactNode }) 
         if (message.type === 'helper_hello') {
           const v = (message.payload as { version?: string }).version
           if (v) setHelperVersion(v)
+          setHelperCaps(parseHelperHello(message.payload ?? {}))
         }
       } catch (err) {
         console.error('[Helper] メッセージのパースに失敗:', err)
@@ -130,6 +135,7 @@ export function HelperConnectionProvider({ children }: { children: ReactNode }) 
       console.log('[Helper] 接続が切断されました')
       setIsConnected(false)
       setHelperVersion(null)
+      setHelperCaps(null)
       wsRef.current = null
       scheduleReconnect()
     }
@@ -188,10 +194,10 @@ export function HelperConnectionProvider({ children }: { children: ReactNode }) 
     // flag is present, so production carries zero extra bytes/behavior.
     if (isDemoMode()) {
       let cancelled = false
-      void import('@/demo/demoData').then(({ DEMO_DEVICES, DEMO_FW_VERSION }) => {
+      void import('@/demo/demoData').then(({ DEMO_DEVICES, DEMO_HELPER_VERSION }) => {
         if (cancelled) return
         setDevices(DEMO_DEVICES)
-        setHelperVersion(DEMO_FW_VERSION)
+        setHelperVersion(DEMO_HELPER_VERSION)
         setIsConnected(true)
       })
       return () => { cancelled = true }
@@ -219,10 +225,10 @@ export function HelperConnectionProvider({ children }: { children: ReactNode }) 
     return () => setActiveHelperChannel(null)
   }, [isConnected, send, subscribe])
 
-  const helperCompat = checkHelperCompat(helperVersion)
+  const helperCompat = checkHelperCompat(helperVersion, helperCaps)
 
   return (
-    <HelperConnectionContext.Provider value={{ isConnected, helperVersion, helperCompat, devices, lastMessage, subscribe, send, injectMessage }}>
+    <HelperConnectionContext.Provider value={{ isConnected, helperVersion, helperCompat, helperCaps, devices, lastMessage, subscribe, send, injectMessage }}>
       {children}
     </HelperConnectionContext.Provider>
   )

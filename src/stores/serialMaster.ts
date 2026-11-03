@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { parseCapsFields, type DeviceCaps, type StorageArea } from '@/utils/deviceCaps'
 import { useLogStore } from '@/stores/logStore'
 import { useDeviceStore } from '@/stores/deviceStore'
 import type { EqBandReadout, MqttClientEntry, NodeRole, NodeTransport } from '@/types/manager'
@@ -315,6 +316,14 @@ export interface SerialDeviceInfo {
     state?: string
     output_mode?: 'pwm' | 'pam'
   }
+  /** Capability declaration (1.x firmware, passed through by helpers with
+   *  `device_caps`). Absent = generation 0, no added features. */
+  caps?: DeviceCaps
+  /** Stream generation (0.5.0+ 0.x firmware); 1.x copies `caps.stream_gens`. */
+  stream_protocol?: number
+  stream_formats?: string[]
+  /** Storage areas whose format version did not match at boot (1.x). */
+  storage_incompatible?: StorageArea[]
 }
 
 /** Parse a firmware get_info JSON into a SerialDeviceInfo (shared by
@@ -368,6 +377,7 @@ function parseSerialInfo(r: Record<string, unknown>): SerialDeviceInfo {
     effect_3d: r.effect_3d as SerialDeviceInfo['effect_3d'],
     agc: r.agc as SerialDeviceInfo['agc'],
     haptic_pwm: r.haptic_pwm as SerialDeviceInfo['haptic_pwm'],
+    ...parseCapsFields(r),
   }
 }
 

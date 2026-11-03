@@ -92,10 +92,9 @@ export interface BuiltinLibraryIndex {
  * but losing it means players can't reproduce the author's setup.
  */
 export interface KitTargetDevice {
-  /** firmware semver lower bound (default "0.1.0" if absent) */
+  /** Lowest firmware major the Kit needs, as `<major>.0.0` (`0.1.0` for 0.x;
+   *  versioning.md §11). The exporter rounds a typed value to its major. */
   firmware_version_min?: string
-  /** firmware semver upper bound (optional) */
-  firmware_version_max?: string
   /** Board identifier the author tuned on (e.g. "duo_wl_v3") */
   board?: string
   /** Author's device volume level when tuning */

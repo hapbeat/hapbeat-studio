@@ -145,3 +145,33 @@ describe('LiveStream', () => {
     expect(stream.active).toBe(true)
   })
 })
+
+describe('LiveStream (1.x helper)', () => {
+  it('asks the helper to take the devices back (the user starts it)', () => {
+    const helper = fakeChannel()
+    const stream = new LiveStream(helper.channel, vi.fn())
+    stream.setTargets(['10.0.0.2'])
+    expect(helper.sent[0]).toMatchObject({ type: 'stream_begin', payload: { takeover: true } })
+    stream.setTargets(['10.0.0.3'])
+    expect(helper.sent.filter((m) => m.type === 'stream_begin').every((m) => m.payload.takeover === true)).toBe(true)
+  })
+
+  it('stream_lost removes devices; once none is left it is lost with the reason', () => {
+    const helper = fakeChannel()
+    const onLost = vi.fn()
+    const stream = new LiveStream(helper.channel, onLost)
+    stream.setTargets(['10.0.0.2', '10.0.0.3'])
+    const id = helper.sent[0].payload.stream_id as string
+    helper.emit({ type: 'stream_lost', payload: { stream_id: 'other', targets: ['10.0.0.2', '10.0.0.3'], reason: 'stopped' } })
+    expect(stream.active).toBe(true)
+    helper.emit({ type: 'stream_lost', payload: { stream_id: id, targets: ['10.0.0.2'], reason: 'device_rebooted' } })
+    expect(stream.active).toBe(true)
+    expect(onLost).not.toHaveBeenCalled()
+    const before = helper.sent.length
+    helper.emit({ type: 'stream_lost', payload: { stream_id: id, targets: ['10.0.0.3'], reason: 'stopped' } })
+    expect(onLost).toHaveBeenCalledWith('lost', 'stopped')
+    expect(stream.active).toBe(false)
+    expect(isStreamOpen(id)).toBe(false)
+    expect(helper.sent.length).toBe(before) // no END: the helper already ended it
+  })
+})
