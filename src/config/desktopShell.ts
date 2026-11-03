@@ -44,6 +44,11 @@ export interface HapbeatDesktopApi {
    * without a picker: PC sound → Hapbeat (`systemAudioCapture`).
    */
   systemAudio?: boolean
+  /**
+   * (apiVersion 4) getUserMedia({ audio }) opens a recording device without a prompt and
+   * enumerateDevices names the devices: PC sound from a chosen source (`systemAudioCapture`).
+   */
+  audioInput?: boolean
   getInfo(): Promise<{ appVersion: string; platform: string; helper: DesktopHelperStatus; studio?: DesktopStudioStatus }>
   helper: {
     status(): Promise<DesktopHelperStatus>
@@ -68,11 +73,6 @@ declare global {
 /** The app's API, or null in a browser (including a browser opened with `?shell=desktop`). */
 export function desktopApi(): HapbeatDesktopApi | null {
   return typeof window === 'undefined' ? null : window.hapbeatDesktop ?? null
-}
-
-/** The app can hand Studio what the PC plays (Windows app, apiVersion 2 and later). */
-export function desktopSystemAudio(): boolean {
-  return desktopApi()?.systemAudio === true
 }
 
 function detectDesktopShell(): boolean {
@@ -127,7 +127,7 @@ export function useSimpleUi(): boolean {
 }
 
 /** Top tabs of the simple layout: Kit, UI (display) and Manage (devices). */
-export const SIMPLE_TABS: readonly string[] = ['kit', 'devices'] // TEMP update test (2026-10-18): UI tab hidden in the app; revert
+export const SIMPLE_TABS: readonly string[] = ['kit', 'display', 'devices']
 
 export function visibleTabs<T extends string>(all: readonly T[], simple: boolean): T[] {
   return simple ? all.filter((tab) => SIMPLE_TABS.includes(tab)) : [...all]

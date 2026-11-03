@@ -13,6 +13,7 @@ import { DesktopAppModal, formatSavedAt, useDesktopHelperStatus, useDesktopStudi
 import { ExternalLinkIcon } from '@/components/common/ExternalLinkIcon'
 import { useToast } from '@/components/common/Toast'
 import { HelperFailureToastListener } from '@/components/common/HelperFailureToastListener'
+import { StudioUpdateNotice } from '@/components/common/StudioUpdateNotice'
 import { VersionSwitcher } from '@/components/common/VersionSwitcher'
 import { WorkFolderPrompt } from '@/components/common/WorkFolderPrompt'
 import { useLibraryStore } from '@/stores/libraryStore'
@@ -371,6 +372,7 @@ export function App() {
         </PersistentTab>
       </main>
       <LogDrawer />
+      <StudioUpdateNotice />
       <HelperFailureToastListener />
       <EditorFolderConfirm />
     </div>

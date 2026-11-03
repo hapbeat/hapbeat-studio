@@ -3,6 +3,10 @@ import { useHelperConnection } from '@/hooks/useHelperConnection'
 import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import { useToast } from '@/components/common/Toast'
 import { StreamingTestSection } from './StreamingTestSection'
+import { SystemAudioSection } from './SystemAudioSection'
+
+/** PC sound ("LIVE") block: frozen, not shown (see the render site). */
+const PC_SOUND_SHOWN = false
 import { useI18n } from '@/i18n/I18nProvider'
 
 const HISTORY_KEY = 'hapbeat-studio-test-event-history'
@@ -28,9 +32,9 @@ interface Props {
 
 /**
  * Per-device 再生テスト pane. Layout mirrors the Kit editor's mode
- * grouping: top section = `[♪] CLIP ストリーミングテスト`, bottom
- * section = `[>] FIRE コマンド送信テスト` (event-id + history +
- * selected-device send + broadcast send).
+ * grouping: `[♪] LIVE PC の音` (this PC's sound as vibration), then
+ * `[♪] CLIP ストリーミングテスト`, then `[>] FIRE コマンド送信テスト`
+ * (event-id + history + selected-device send + broadcast send).
  *
  * Gain scope: only the CLIP streaming pipeline. The FIRE test sends a
  * free-text Event ID with `gain = 1.0`: the device does not read the
@@ -172,7 +176,12 @@ export function TestSubTab({ device, sendTo }: Props) {
 
   return (
     <>
-      {/* CLIP — UDP streaming test (folder browser, top of pane) */}
+      {/* LIVE — what this PC plays, streamed as vibration. Frozen (2026-10-18): it needs a
+          virtual audio cable / Voicemeeter to capture reliably and always lags, too much
+          setup for what it gives. Kept as a component, not shown. */}
+      {PC_SOUND_SHOWN && <SystemAudioSection device={device} />}
+
+      {/* CLIP — UDP streaming test (folder browser) */}
       <StreamingTestSection
         device={device}
         gainRef={gainRef}

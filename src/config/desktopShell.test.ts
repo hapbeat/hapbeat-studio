@@ -11,7 +11,7 @@ describe('desktop layout', () => {
   })
 
   it('keeps Kit, UI and Manage in their order', () => {
-    expect(visibleTabs(TABS, true)).toEqual(['kit', 'devices'])
+    expect(visibleTabs(TABS, true)).toEqual(['kit', 'display', 'devices'])
     expect(visibleTabs(TABS, false)).toEqual([...TABS])
   })
 })
