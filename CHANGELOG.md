@@ -19,6 +19,7 @@ Hapbeat Studio の変更履歴。形式は [Keep a Changelog](https://keepachang
 - ファームウェアライブラリに PWM 改造基板専用の実験版「Band v4 PWM」を BETA 表示で追加。PWM 駆動を報告しないデバイスには既定選択・更新通知で提示せず、PWM 改造基板には通常の Band v4 を更新として出さない。PWM 版を通常基板へ、通常版を PWM 改造基板へ書き込む時は確認を出す
 
 ### Changed（変更）
+- ファームウェアの一覧で、ESP-NOW 用のファームウェアを畳んだ。「ESP-NOW 用のファームウェア」を押すと出る。今 ESP-NOW で動いている機体では最初から出す
 - 素材の強さの名前を `intensity` から `clip_gain` に変更（Kit の manifest の `parameters.clip_gain`、cue 表の `clips.<clip>.clip_gain`・`sounds.<Sound>.clip_gain`、本体の kit list の応答）。画面の 3 つの枠は「クリップ（素材）」「アプリ」「本体」。Kit を持つプロジェクトの Scene は、触覚の clip の素材の強さを Kit の manifest から取り（FIRE・CLIP・タイムラインのバーと内訳）、Kit のエディタで保存すると Scene に出る。cue 表の clip_gain は Kit の写しとして保存時にそろえ、違う時は「cue 表をそろえる」を出す（DEC-103）
 - ファームウェアの書き込みで、最新版（推奨）を選んだ時は確認で止めないようにした。アーカイブ版（古い版）を選んで書き込む時だけ確認を出す
 - 【1.x 対応・contracts 1.0.0 予定（DEC-096）】書き込むファームウェアと機体の今のファームの系列（先頭の数字）が違う時だけ、互換の変化を書き込みを止めずに案内する（版の大小や SDK の最低版の表では判定しない）。機体が受け付けるストリームの世代も表示する

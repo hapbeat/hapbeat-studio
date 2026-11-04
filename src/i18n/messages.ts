@@ -924,6 +924,8 @@ export const messages = defineMessages({
   'firmware.fewerVersions': { ja: '折りたたむ ▴', en: 'Show less ▴' },
   'firmware.familyAria': { ja: 'ファームウェア種別', en: 'Firmware family' },
   'firmware.hardware': { ja: 'Hardware Version', en: 'Hardware Version' },
+  'firmware.espNowToggle': { ja: 'ESP-NOW 用のファームウェア', en: 'ESP-NOW firmware' },
+  'firmware.espNowToggleHint': { ja: 'Wi-Fi で SDK や Studio から再生する通常の使い方では要りません。ESP-NOW で使うと決めている機体のときだけ開いてください', en: 'Not needed for the usual setup, playing from an SDK or Studio over Wi-Fi. Open this only for a device you have decided to run on ESP-NOW' },
   'firmware.aria': { ja: 'ファームウェア', en: 'Firmware' },
   'firmware.local': { ja: 'ローカル .bin', en: 'Local .bin' },
   'firmware.localDesc': { ja: '— 任意の .bin ファイルを直接指定して書き込む', en: '— choose any .bin file to write directly' },

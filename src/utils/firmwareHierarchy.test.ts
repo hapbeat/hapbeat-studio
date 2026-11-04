@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest'
 import {
   entriesForSelection,
   familyOfEntry,
+  foldEspNow,
   hapticOutputFlashWarning,
   hwOfEntry,
+  isEspNowEntry,
   listAvailability,
   listFamilies,
   listHw,
@@ -193,5 +195,35 @@ describe('PWM 出力版 (band_v4_pwm) の既定選択と書き込み確認', () 
   it('通常版を PWM 改造基板に書くと確認する', () => {
     expect(hapticOutputFlashWarning(plain, [false, true])).toBe('removes-pwm')
     expect(hapticOutputFlashWarning(plain, [false])).toBeNull()
+  })
+})
+
+describe('foldEspNow', () => {
+  const wifi = entry('necklace_v3', { transport: 'wifi_udp' })
+  const espNow = entry('necklace_v3_stream_espnow', { transport: 'espnow_stream' })
+  const inferred = entry('duowl_v4_stream_espnow')
+  const transmitter = entry('m5stack_espnow_stream_source')
+
+  it('tells an ESP-NOW image by its transport, else by the env name', () => {
+    expect(isEspNowEntry(espNow)).toBe(true)
+    expect(isEspNowEntry(inferred)).toBe(true)
+    expect(isEspNowEntry(transmitter)).toBe(true)
+    expect(isEspNowEntry(wifi)).toBe(false)
+    expect(isEspNowEntry(entry('necklace_v3_mqtt'))).toBe(false)
+  })
+
+  it('hides ESP-NOW images until opened', () => {
+    expect(foldEspNow([wifi, espNow], false)).toEqual({ visible: [wifi], foldable: true })
+    expect(foldEspNow([wifi, espNow], true)).toEqual({ visible: [wifi, espNow], foldable: true })
+  })
+
+  it('has nothing to fold when one kind is all there is', () => {
+    expect(foldEspNow([wifi], false)).toEqual({ visible: [wifi], foldable: false })
+    expect(foldEspNow([espNow, transmitter], false)).toEqual({ visible: [espNow, transmitter], foldable: false })
+    expect(foldEspNow([], false)).toEqual({ visible: [], foldable: false })
+  })
+
+  it('never picks a folded image as the default', () => {
+    expect(pickDefaultEntry(foldEspNow([espNow, wifi], false).visible, false)).toBe(wifi)
   })
 })

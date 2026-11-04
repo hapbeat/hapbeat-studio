@@ -35,6 +35,7 @@ import {
 import { setFirmwareLibraryCache } from '@/utils/firmwareUpdate'
 import {
   entriesForSelection,
+  foldEspNow,
   entryBoard,
   FAMILY_LABEL,
   hapticOutputFlashWarning,
@@ -316,6 +317,8 @@ export function FirmwareSubTab({
   }, [libSelected, selectedVersionFw, VERSION_SELECTED_KEY])
   // Version picker shows the newest few; the rest fold behind a toggle.
   const [showAllVersions, setShowAllVersions] = useState(false)
+  // ESP-NOW images stay folded until asked for, per device (few users need one).
+  const [espNowOpen, setEspNowOpen] = useState(false)
   useEffect(() => { setShowAllVersions(false) }, [libSelected])
 
   // Resolved entry: artifacts/fwVersion swapped to the chosen version so all
@@ -496,10 +499,22 @@ export function FirmwareSubTab({
     [availability, selection],
   )
 
+  // A device already on ESP-NOW has its own image in the list without asking.
+  const lanTransport = useDeviceStore((s) =>
+    device ? s.infoCache[device.ipAddress]?.transport : undefined,
+  )
+  const serialMasterTransport = useSerialMaster((s) => s.info?.transport)
+  const knownTransport = lanBoard !== undefined ? lanTransport : serialMasterTransport
+  const espNowUnfolded = espNowOpen || knownTransport === 'espnow_stream'
+
+  useEffect(() => {
+    setEspNowOpen(false)
+  }, [deviceIp])
+
   /** Entries shown: variants matching the selected family + hardware. */
-  const entriesShown = useMemo(
-    () => entriesForSelection(libEntries, selection),
-    [libEntries, selection],
+  const { visible: entriesShown, foldable: espNowFoldable } = useMemo(
+    () => foldEspNow(entriesForSelection(libEntries, selection), espNowUnfolded),
+    [libEntries, selection, espNowUnfolded],
   )
 
   /** Variant the user clicked for the device on screen. Only an explicit click
@@ -532,12 +547,12 @@ export function FirmwareSubTab({
       if (next.hw) localStorage.setItem(HW_SELECTED_KEY, next.hw)
       else localStorage.removeItem(HW_SELECTED_KEY)
     } catch { /* localStorage unavailable */ }
-    const pick = pickDefaultEntry(entriesForSelection(libEntries, next), knownPwm)
+    const pick = pickDefaultEntry(foldEspNow(entriesForSelection(libEntries, next), espNowUnfolded).visible, knownPwm)
     if (pick) {
       setLibSelected(pick.env)
       setSource('library')
     }
-  }, [libEntries, deviceIp, knownPwm, FAMILY_SELECTED_KEY, HW_SELECTED_KEY])
+  }, [libEntries, deviceIp, knownPwm, espNowUnfolded, FAMILY_SELECTED_KEY, HW_SELECTED_KEY])
 
   const selectFamily = useCallback((family: FirmwareFamily) => {
     const hws = availability.find((a) => a.family === family)?.hws ?? []
@@ -1190,6 +1205,19 @@ export function FirmwareSubTab({
                   )
                 })}
               </div>
+            )}
+
+            {espNowFoldable && knownTransport !== 'espnow_stream' && (
+              <button
+                type="button"
+                className={`firmware-espnow-toggle${espNowOpen ? ' open' : ''}`}
+                aria-expanded={espNowOpen}
+                title={t('firmware.espNowToggleHint')}
+                onClick={() => setEspNowOpen((open) => !open)}
+              >
+                <span className="firmware-espnow-toggle-mark" aria-hidden="true">▸</span>
+                {t('firmware.espNowToggle')}
+              </button>
             )}
 
             {selectedEntry && (

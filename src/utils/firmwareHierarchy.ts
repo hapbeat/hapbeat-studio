@@ -213,6 +213,25 @@ export function resolveDefaultSelection({
   return pickFamily(pool, pool[0].family) ?? null
 }
 
+/** An image that talks ESP-NOW (the receiver's ESP-NOW build, a transmitter). */
+export function isEspNowEntry(e: FirmwareLibraryEntry): boolean {
+  return (e.transport ?? inferVariantFromEnv(e.env).transport) === 'espnow_stream'
+}
+
+/**
+ * The variants to list. Few users need an ESP-NOW image and it is easy to pick by
+ * mistake, so those stay folded until asked for (`open`). A set with nothing else
+ * has nothing to fold. `foldable` says whether a set has anything to unfold.
+ */
+export function foldEspNow(
+  shown: FirmwareLibraryEntry[],
+  open: boolean,
+): { visible: FirmwareLibraryEntry[]; foldable: boolean } {
+  const plain = shown.filter((e) => !isEspNowEntry(e))
+  const foldable = plain.length > 0 && plain.length < shown.length
+  return { visible: foldable && !open ? plain : shown, foldable }
+}
+
 /**
  * Default variant within the shown set for a device. The PWM-output image
  * (band_v4_pwm) is never picked for a device that does not report

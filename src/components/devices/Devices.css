@@ -1541,6 +1541,28 @@
 }
 
 /* Variant list — uniform 2-column grid (equal width/height cells). */
+.firmware-espnow-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+}
+.firmware-espnow-toggle:hover {
+  color: var(--text-primary);
+}
+.firmware-espnow-toggle-mark {
+  display: inline-block;
+  transition: transform 0.1s;
+}
+.firmware-espnow-toggle.open .firmware-espnow-toggle-mark {
+  transform: rotate(90deg);
+}
 .firmware-variant-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
