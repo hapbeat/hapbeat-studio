@@ -1,10 +1,14 @@
-import React from 'react'
+import React, { Suspense } from 'react'
 import ReactDOM from 'react-dom/client'
 import { App } from './App'
 import { ToastProvider } from '@/components/common/Toast'
 import { HelperConnectionProvider } from '@/hooks/useHelperConnection'
 import { I18nProvider } from '@/i18n/I18nProvider'
 import { isDemoMode } from '@/demo/isDemoMode'
+import { IS_PLAYER_SHELL } from '@/config/playerShell'
+
+// Only the player app (`?shell=player`) fetches the player: the normal Studio carries none of it.
+const PlayerApp = React.lazy(() => import('@/components/player/PlayerApp').then(m => ({ default: m.PlayerApp })))
 
 function renderApp(): void {
   ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -12,7 +16,7 @@ function renderApp(): void {
       <I18nProvider>
         <HelperConnectionProvider>
           <ToastProvider>
-            <App />
+            {IS_PLAYER_SHELL ? <Suspense fallback={null}><PlayerApp /></Suspense> : <App />}
           </ToastProvider>
         </HelperConnectionProvider>
       </I18nProvider>

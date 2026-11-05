@@ -1,0 +1,42 @@
+/* The player app's whole window: the video contained on black, the bar and the notices over it (they take no layout space). */
+.player { position: fixed; inset: 0; background: #000; color: #fff; font-size: 13px; overflow: hidden; user-select: none; }
+.player[data-idle], .player[data-idle] * { cursor: none !important; }
+.player-stage { position: absolute; inset: 0; }
+.player-stage video { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; }
+
+.player-bigplay { position: absolute; left: 50%; top: 50%; width: 96px; height: 96px; margin: -48px 0 0 -48px; padding: 0 0 0 8px; border: none; border-radius: 50%;
+  background: rgba(0, 0, 0, .6); color: #fff; font-size: 44px; line-height: 1; cursor: pointer; }
+.player-bigplay:hover { background: rgba(255, 255, 255, .22); }
+.player-loading { position: absolute; left: 0; right: 0; top: 50%; margin-top: -10px; text-align: center; opacity: .75; pointer-events: none; }
+
+.player-notices { position: absolute; left: 16px; right: 16px; bottom: 88px; display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; transition: opacity .2s; }
+.player-notice { display: flex; align-items: center; gap: 10px; max-width: 100%; padding: 6px 12px; border-radius: 6px; background: rgba(20, 20, 20, .88); pointer-events: auto; }
+.player-notice.error { background: rgba(140, 30, 30, .92); }
+
+.player-bar { position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; gap: 4px; padding: 20px 12px 10px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, .8) 35%); white-space: nowrap; transition: opacity .2s; }
+.player[data-idle] .player-bar, .player[data-idle] .player-notices, .player[data-idle] .player-notice { opacity: 0; pointer-events: none; }
+
+.player-seek-row { display: flex; align-items: center; gap: 10px; }
+.player-seek { flex: 1; min-width: 40px; position: relative; height: 16px; display: flex; align-items: center; cursor: pointer; touch-action: none; }
+.player-seek-track { position: relative; width: 100%; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .3); overflow: hidden; }
+.player-seek:hover .player-seek-track { height: 6px; }
+.player-seek-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent-light, #b9a8ff); }
+.player-time { flex: none; width: 13ch; text-align: right; font-variant-numeric: tabular-nums; }
+
+.player-controls { display: flex; align-items: center; gap: 8px; height: 30px; }
+.player-btn { flex: none; height: 28px; padding: 0 10px; border: 1px solid rgba(255, 255, 255, .25); border-radius: 4px; background: rgba(255, 255, 255, .08); color: #fff; font: inherit; line-height: 1; cursor: pointer; }
+.player-btn:hover:not(:disabled) { background: rgba(255, 255, 255, .2); }
+.player-btn[aria-pressed="true"] { background: rgba(185, 168, 255, .35); border-color: var(--accent-light, #b9a8ff); }
+.player-btn:disabled { opacity: .45; cursor: default; }
+/* Fixed width: 再生 / 一時停止 never move what follows. */
+.player-play { width: 7em; }
+.player-chapters { flex: 1; min-width: 0; display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+.player-chapters::-webkit-scrollbar { display: none; }
+.player-chapter { max-width: 14em; overflow: hidden; text-overflow: ellipsis; }
+.player-slider { flex: none; display: flex; align-items: center; gap: 6px; }
+.player-slider input { width: 72px; margin: 0; accent-color: var(--accent-light, #b9a8ff); cursor: pointer; }
+.player-slider[data-off] { opacity: .45; }
+.player-percent { width: 4ch; text-align: right; font-variant-numeric: tabular-nums; }
+/* Fixed width: the text changes with the connection, nothing else moves. */
+.player-chip { flex: none; width: 112px; overflow: hidden; text-overflow: ellipsis; text-align: center; opacity: .85; }

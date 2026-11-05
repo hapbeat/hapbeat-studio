@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { documentMessage, type MessageId, type MessageParams } from '@/i18n/messages'
+import { bundledFileUrl, isBundledProject } from '@/utils/bundledProject'
 import { loadDirectoryHandle, saveDirectoryHandle } from '@/utils/localDirectory'
 import { buildItems, VIEWER_DIR, type SceneData, type SceneItem, type SceneLib } from '@/utils/sceneData'
 import { alignClipGains, CLIP_GAIN_RENAME_SCRIPT, kitCopyDiffers, loopCuesOf, SceneFormatError, serializeCueTable, StaleClipGainKeyError, validateCueTable, type CueTable } from '@/utils/sceneCueTable'
@@ -104,6 +105,8 @@ interface SceneState {
   log: string[]
   /** Opens the last opened project (else the Scene tab's remembered folder) once per page; later calls wait for the same run. */
   restore: () => Promise<void>
+  /** Opens the project the player app bundles (read-only, bundledProject) at its full replay. */
+  openBundled: (handle: FileSystemDirectoryHandle) => Promise<void>
   /** Opens the folder picker (call from the click handler). */
   pick: () => Promise<void>
   reconnect: () => Promise<void>
@@ -148,16 +151,20 @@ function mono(b: AudioBuffer): Float32Array {
   return out
 }
 
-/** The mp4s are read from the project folder: one Blob URL per file while the project is open. */
+/**
+ * The mp4s are read from the project folder: one Blob URL per file while the project is open. A bundled project's
+ * video streams from its own absolute URL instead (by Range, never read whole; SceneRuntime.loadItem compares it with video.src).
+ */
 const videoUrls = new Map<string, Promise<string>>()
 function clearVideoUrls() {
-  for (const url of videoUrls.values()) void url.then(u => URL.revokeObjectURL(u), () => {})
+  for (const url of videoUrls.values()) void url.then(u => { if (u.startsWith('blob:')) URL.revokeObjectURL(u) }, () => {})
   videoUrls.clear()
 }
 export function sceneVideoUrl(root: FileSystemDirectoryHandle, file: string): Promise<string> {
   let url = videoUrls.get(file)
   if (!url) {
-    url = readProjectFile(root, `${VIEWER_DIR}/${file}`).then(f => URL.createObjectURL(f))
+    const bundled = bundledFileUrl(root, `${VIEWER_DIR}/${file}`)
+    url = bundled !== null ? Promise.resolve(bundled) : readProjectFile(root, `${VIEWER_DIR}/${file}`).then(f => URL.createObjectURL(f))
     url.catch(() => videoUrls.delete(file))
     videoUrls.set(file, url)
   }
@@ -411,8 +418,11 @@ export const useSceneStore = create<SceneState>((set, get) => {
       return false
     }
     set({ remembered: handle })
-    await saveDirectoryHandle(handle, 'scenedir').catch(() => {})
-    await registerSceneProject(opened.lib.project_name, handle).catch(() => {})
+    // A bundled project cannot be cloned into IndexedDB (and is opened anew every launch).
+    if (!isBundledProject(handle)) {
+      await saveDirectoryHandle(handle, 'scenedir').catch(() => {})
+      await registerSceneProject(opened.lib.project_name, handle).catch(() => {})
+    }
     if (!opened.ok) {
       const notice = opened.oldFormat ? oldFormatNotice(handle.name)
         : opened.lib.record_command ? { id: 'scene.open.noData' as const, params: { title: opened.lib.title, dir: VIEWER_DIR, command: opened.lib.record_command }, error: true }
@@ -477,6 +487,11 @@ export const useSceneStore = create<SceneState>((set, get) => {
       })
       return restoring
     },
+    openBundled: handle => guarded(async () => {
+      if (!await openFolder(handle)) return
+      const full = get().items.findIndex(it => it.kind === 'full')
+      if (full >= 0) get().select(full)
+    }),
     pick: async () => {
       if (!('showDirectoryPicker' in window)) { note({ id: 'scene.open.unsupported', error: true }); return }
       let handle: FileSystemDirectoryHandle
