@@ -1,7 +1,20 @@
 {
   "schema_version": "1.0.0",
-  "generated_at": "2026-11-05T02:00:33.561Z",
+  "generated_at": "2026-11-05T02:41:16.588Z",
   "clips": [
+    {
+      "id": "builtin/hapbeat-demos.boxing.guard_arm_hard_t138_c",
+      "name": "Guard Arm Hard T138 C",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "boxing.guard_arm_hard_t138_c",
+      "description": "",
+      "filename": "hapbeat-demos/boxing/guard_arm_hard_t138_c.wav",
+      "duration_ms": 45,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 1484
+    },
     {
       "id": "builtin/hapbeat-demos.boxing.guard_arm_hard_t138_e",
       "name": "Guard Arm Hard T138 E",
@@ -14,6 +27,84 @@
       "sample_rate": 16000,
       "channels": 1,
       "filesize_bytes": 1644
+    },
+    {
+      "id": "builtin/hapbeat-demos.boxing.guard_glove_hard_t146_b",
+      "name": "Guard Glove Hard T146 B",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "boxing.guard_glove_hard_t146_b",
+      "description": "",
+      "filename": "hapbeat-demos/boxing/guard_glove_hard_t146_b.wav",
+      "duration_ms": 90,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 2924
+    },
+    {
+      "id": "builtin/hapbeat-demos.boxing.guard_glove_hard_t146_d",
+      "name": "Guard Glove Hard T146 D",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "boxing.guard_glove_hard_t146_d",
+      "description": "",
+      "filename": "hapbeat-demos/boxing/guard_glove_hard_t146_d.wav",
+      "duration_ms": 50,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 1644
+    },
+    {
+      "id": "builtin/hapbeat-demos.boxing.hit_body_hard_t140_a",
+      "name": "Hit Body Hard T140 A",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "boxing.hit_body_hard_t140_a",
+      "description": "",
+      "filename": "hapbeat-demos/boxing/hit_body_hard_t140_a.wav",
+      "duration_ms": 153,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 4934
+    },
+    {
+      "id": "builtin/hapbeat-demos.boxing.hit_body_soft_t149_b",
+      "name": "Hit Body Soft T149 B",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "boxing.hit_body_soft_t149_b",
+      "description": "",
+      "filename": "hapbeat-demos/boxing/hit_body_soft_t149_b.wav",
+      "duration_ms": 90,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 2924
+    },
+    {
+      "id": "builtin/hapbeat-demos.boxing.punch_body_hard_t151_b",
+      "name": "Punch Body Hard T151 B",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "boxing.punch_body_hard_t151_b",
+      "description": "",
+      "filename": "hapbeat-demos/boxing/punch_body_hard_t151_b.wav",
+      "duration_ms": 243,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 7820
+    },
+    {
+      "id": "builtin/hapbeat-demos.boxing.punch_body_t150_a",
+      "name": "Punch Body T150 A",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "boxing.punch_body_t150_a",
+      "description": "",
+      "filename": "hapbeat-demos/boxing/punch_body_t150_a.wav",
+      "duration_ms": 90,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 2924
     },
     {
       "id": "builtin/hapbeat-demos.boxing.punch_glove_hard_t145_b",
@@ -29,6 +120,32 @@
       "filesize_bytes": 1964
     },
     {
+      "id": "builtin/hapbeat-demos.energy-duel.arm_collide",
+      "name": "Arm Collide",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "energy-duel.arm_collide",
+      "description": "",
+      "filename": "hapbeat-demos/energy-duel/arm_collide.wav",
+      "duration_ms": 198,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 6366
+    },
+    {
+      "id": "builtin/hapbeat-demos.energy-duel.body_collide",
+      "name": "Body Collide",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "energy-duel.body_collide",
+      "description": "",
+      "filename": "hapbeat-demos/energy-duel/body_collide.wav",
+      "duration_ms": 220,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 7084
+    },
+    {
       "id": "builtin/hapbeat-demos.energy-duel.bodysoft",
       "name": "BodySoft",
       "category": "hapbeat-demos",
@@ -42,6 +159,19 @@
       "filesize_bytes": 4524
     },
     {
+      "id": "builtin/hapbeat-demos.energy-duel.charge_full",
+      "name": "Charge Full",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "energy-duel.charge_full",
+      "description": "",
+      "filename": "hapbeat-demos/energy-duel/charge_full.wav",
+      "duration_ms": 72,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 2348
+    },
+    {
       "id": "builtin/hapbeat-demos.energy-duel.charge_hold",
       "name": "Charge Hold",
       "category": "hapbeat-demos",
@@ -53,6 +183,19 @@
       "sample_rate": 16000,
       "channels": 1,
       "filesize_bytes": 38444
+    },
+    {
+      "id": "builtin/hapbeat-demos.energy-duel.charge_level",
+      "name": "Charge Level",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "energy-duel.charge_level",
+      "description": "",
+      "filename": "hapbeat-demos/energy-duel/charge_level.wav",
+      "duration_ms": 48,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 1580
     },
     {
       "id": "builtin/hapbeat-demos.energy-duel.charge_sweep",
@@ -79,6 +222,45 @@
       "sample_rate": 16000,
       "channels": 1,
       "filesize_bytes": 3244
+    },
+    {
+      "id": "builtin/hapbeat-demos.energy-duel.release_lv1",
+      "name": "Release Lv1",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "energy-duel.release_lv1",
+      "description": "",
+      "filename": "hapbeat-demos/energy-duel/release_lv1.wav",
+      "duration_ms": 76,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 2488
+    },
+    {
+      "id": "builtin/hapbeat-demos.energy-duel.release_lv2",
+      "name": "Release Lv2",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "energy-duel.release_lv2",
+      "description": "",
+      "filename": "hapbeat-demos/energy-duel/release_lv2.wav",
+      "duration_ms": 110,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 3564
+    },
+    {
+      "id": "builtin/hapbeat-demos.energy-duel.release_lv3",
+      "name": "Release Lv3",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "energy-duel.release_lv3",
+      "description": "",
+      "filename": "hapbeat-demos/energy-duel/release_lv3.wav",
+      "duration_ms": 245,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 7884
     },
     {
       "id": "builtin/hapbeat-demos.energy-duel.shield_block",
@@ -120,6 +302,19 @@
       "filesize_bytes": 19244
     },
     {
+      "id": "builtin/hapbeat-demos.energy-duel.shield_up",
+      "name": "Shield Up",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "energy-duel.shield_up",
+      "description": "",
+      "filename": "hapbeat-demos/energy-duel/shield_up.wav",
+      "duration_ms": 110,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 3564
+    },
+    {
       "id": "builtin/hapbeat-demos.fps.beat_pulse",
       "name": "Beat Pulse",
       "category": "hapbeat-demos",
@@ -157,6 +352,32 @@
       "sample_rate": 16000,
       "channels": 1,
       "filesize_bytes": 32044
+    },
+    {
+      "id": "builtin/hapbeat-demos.fps.charge",
+      "name": "Charge",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "fps.charge",
+      "description": "",
+      "filename": "hapbeat-demos/fps/charge.wav",
+      "duration_ms": 3588,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 114856
+    },
+    {
+      "id": "builtin/hapbeat-demos.fps.damage",
+      "name": "Damage",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "fps.damage",
+      "description": "",
+      "filename": "hapbeat-demos/fps/damage.wav",
+      "duration_ms": 153,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 4934
     },
     {
       "id": "builtin/hapbeat-demos.fps.ghost_left_to_right",
@@ -250,6 +471,32 @@
       "filesize_bytes": 4844
     },
     {
+      "id": "builtin/hapbeat-demos.fps.landing",
+      "name": "Landing",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "fps.landing",
+      "description": "",
+      "filename": "hapbeat-demos/fps/landing.wav",
+      "duration_ms": 74,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 2396
+    },
+    {
+      "id": "builtin/hapbeat-demos.fps.launchershot",
+      "name": "LauncherShot",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "fps.launchershot",
+      "description": "",
+      "filename": "hapbeat-demos/fps/launcherShot.wav",
+      "duration_ms": 200,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 6444
+    },
+    {
       "id": "builtin/hapbeat-demos.fps.maze_loop",
       "name": "Maze Loop",
       "category": "hapbeat-demos",
@@ -315,6 +562,19 @@
       "filesize_bytes": 3884
     },
     {
+      "id": "builtin/hapbeat-demos.hand-demo.grab_light",
+      "name": "Grab Light",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "hand-demo.grab_light",
+      "description": "",
+      "filename": "hapbeat-demos/hand-demo/grab_light.wav",
+      "duration_ms": 50,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 1644
+    },
+    {
       "id": "builtin/hapbeat-demos.hand-demo.hold_heavy",
       "name": "Hold Heavy",
       "category": "hapbeat-demos",
@@ -367,6 +627,45 @@
       "filesize_bytes": 640044
     },
     {
+      "id": "builtin/hapbeat-demos.hand-demo.snap_fit",
+      "name": "Snap Fit",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "hand-demo.snap_fit",
+      "description": "",
+      "filename": "hapbeat-demos/hand-demo/snap_fit.wav",
+      "duration_ms": 200,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 6444
+    },
+    {
+      "id": "builtin/hapbeat-demos.hand-demo.ui_click_heavy",
+      "name": "Ui Click Heavy",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "hand-demo.ui_click_heavy",
+      "description": "",
+      "filename": "hapbeat-demos/hand-demo/ui_click_heavy.wav",
+      "duration_ms": 18,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 616
+    },
+    {
+      "id": "builtin/hapbeat-demos.hand-demo.ui_click_light",
+      "name": "Ui Click Light",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "hand-demo.ui_click_light",
+      "description": "",
+      "filename": "hapbeat-demos/hand-demo/ui_click_light.wav",
+      "duration_ms": 16,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 564
+    },
+    {
       "id": "builtin/hapbeat-demos.safety-mill.brush_loop_t98_d",
       "name": "Brush Loop T98 D",
       "category": "hapbeat-demos",
@@ -393,6 +692,19 @@
       "filesize_bytes": 3884
     },
     {
+      "id": "builtin/hapbeat-demos.safety-mill.entangle_t100_a",
+      "name": "Entangle T100 A",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "safety-mill.entangle_t100_a",
+      "description": "",
+      "filename": "hapbeat-demos/safety-mill/entangle_t100_a.wav",
+      "duration_ms": 1300,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 41644
+    },
+    {
       "id": "builtin/hapbeat-demos.safety-mill.feed_loop",
       "name": "Feed Loop",
       "category": "hapbeat-demos",
@@ -417,6 +729,58 @@
       "sample_rate": 16000,
       "channels": 1,
       "filesize_bytes": 19244
+    },
+    {
+      "id": "builtin/hapbeat-demos.safety-mill.grab",
+      "name": "Grab",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "safety-mill.grab",
+      "description": "",
+      "filename": "hapbeat-demos/safety-mill/grab.wav",
+      "duration_ms": 50,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 1644
+    },
+    {
+      "id": "builtin/hapbeat-demos.safety-mill.machine_button_t90_b",
+      "name": "Machine Button T90 B",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "safety-mill.machine_button_t90_b",
+      "description": "",
+      "filename": "hapbeat-demos/safety-mill/machine_button_t90_b.wav",
+      "duration_ms": 170,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 5484
+    },
+    {
+      "id": "builtin/hapbeat-demos.safety-mill.neck_impact",
+      "name": "Neck Impact",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "safety-mill.neck_impact",
+      "description": "",
+      "filename": "hapbeat-demos/safety-mill/neck_impact.wav",
+      "duration_ms": 1400,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 44844
+    },
+    {
+      "id": "builtin/hapbeat-demos.safety-mill.release",
+      "name": "Release",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "safety-mill.release",
+      "description": "",
+      "filename": "hapbeat-demos/safety-mill/release.wav",
+      "duration_ms": 50,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 1644
     },
     {
       "id": "builtin/hapbeat-demos.safety-mill.step_done_t102_a",
@@ -510,6 +874,19 @@
       "filesize_bytes": 44524
     },
     {
+      "id": "builtin/hapbeat-demos.trex-encounter.grab_handdemo",
+      "name": "Grab Handdemo",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "trex-encounter.grab_handdemo",
+      "description": "",
+      "filename": "hapbeat-demos/trex-encounter/grab_handdemo.wav",
+      "duration_ms": 50,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 1644
+    },
+    {
       "id": "builtin/hapbeat-demos.trex-encounter.rub_t57_d",
       "name": "Rub T57 D",
       "category": "hapbeat-demos",
@@ -521,6 +898,32 @@
       "sample_rate": 16000,
       "channels": 1,
       "filesize_bytes": 32044
+    },
+    {
+      "id": "builtin/hapbeat-demos.volley.arm_collide",
+      "name": "Arm Collide",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "volley.arm_collide",
+      "description": "",
+      "filename": "hapbeat-demos/volley/arm_collide.wav",
+      "duration_ms": 50,
+      "sample_rate": 16000,
+      "channels": 2,
+      "filesize_bytes": 3244
+    },
+    {
+      "id": "builtin/hapbeat-demos.volley.landing",
+      "name": "Landing",
+      "category": "hapbeat-demos",
+      "tags": [],
+      "event_id": "volley.landing",
+      "description": "",
+      "filename": "hapbeat-demos/volley/landing.wav",
+      "duration_ms": 74,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 2396
     },
     {
       "id": "builtin/sdk-samples.basic-example.sine_100hz_1s",
@@ -549,6 +952,45 @@
       "filesize_bytes": 32044
     },
     {
+      "id": "builtin/sdk-samples.showcase.z1_pin_hit",
+      "name": "Z1 Pin Hit",
+      "category": "sdk-samples",
+      "tags": [],
+      "event_id": "showcase.z1_pin_hit",
+      "description": "",
+      "filename": "sdk-samples/showcase/z1_pin_hit.wav",
+      "duration_ms": 50,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 1644
+    },
+    {
+      "id": "builtin/sdk-samples.showcase.z2_door_close",
+      "name": "Z2 Door Close",
+      "category": "sdk-samples",
+      "tags": [],
+      "event_id": "showcase.z2_door_close",
+      "description": "",
+      "filename": "sdk-samples/showcase/z2_door_close.wav",
+      "duration_ms": 2781,
+      "sample_rate": 16000,
+      "channels": 2,
+      "filesize_bytes": 177996
+    },
+    {
+      "id": "builtin/sdk-samples.showcase.z2_door_open",
+      "name": "Z2 Door Open",
+      "category": "sdk-samples",
+      "tags": [],
+      "event_id": "showcase.z2_door_open",
+      "description": "",
+      "filename": "sdk-samples/showcase/z2_door_open.wav",
+      "duration_ms": 2643,
+      "sample_rate": 16000,
+      "channels": 2,
+      "filesize_bytes": 169208
+    },
+    {
       "id": "builtin/sdk-samples.showcase.z3_hook_loop",
       "name": "Z3 Hook Loop",
       "category": "sdk-samples",
@@ -560,6 +1002,19 @@
       "sample_rate": 16000,
       "channels": 2,
       "filesize_bytes": 640044
+    },
+    {
+      "id": "builtin/sdk-samples.showcase.z4_slider_tick",
+      "name": "Z4 Slider Tick",
+      "category": "sdk-samples",
+      "tags": [],
+      "event_id": "showcase.z4_slider_tick",
+      "description": "",
+      "filename": "sdk-samples/showcase/z4_slider_tick.wav",
+      "duration_ms": 11,
+      "sample_rate": 16000,
+      "channels": 2,
+      "filesize_bytes": 756
     },
     {
       "id": "builtin/sdk-samples.showcase.z4_stream_loop",
@@ -586,6 +1041,32 @@
       "sample_rate": 16000,
       "channels": 2,
       "filesize_bytes": 640044
+    },
+    {
+      "id": "builtin/sdk-samples.showcase.z5_charge_thd",
+      "name": "Z5 Charge Thd",
+      "category": "sdk-samples",
+      "tags": [],
+      "event_id": "showcase.z5_charge_thd",
+      "description": "",
+      "filename": "sdk-samples/showcase/z5_charge_thd.wav",
+      "duration_ms": 200,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 6444
+    },
+    {
+      "id": "builtin/sdk-samples.showcase.z5_tar_hit_light",
+      "name": "Z5 Tar Hit Light",
+      "category": "sdk-samples",
+      "tags": [],
+      "event_id": "showcase.z5_tar_hit_light",
+      "description": "",
+      "filename": "sdk-samples/showcase/z5_tar_hit_light.wav",
+      "duration_ms": 50,
+      "sample_rate": 16000,
+      "channels": 1,
+      "filesize_bytes": 1644
     },
     {
       "id": "builtin/sine-tones.100hz",
