@@ -14,10 +14,7 @@ import type { LibraryClip, KitDefinition, KitEvent } from '@/types/library'
 import type { DeviceInfo } from '@/types/manager'
 import type { WifiProfile } from '@/stores/deviceStore'
 
-/** Firmware version reported by both demo devices. Kept >= the
- *  `KIT_LIST_PARAMS_MIN_FW` ('0.1.3') gate in InstalledKitsSection so the
- *  Kit sub-tab's per-event amp% renders instead of the "amp ?" / old-firmware
- *  banner. */
+/** Firmware version reported by both demo devices. */
 export const DEMO_FW_VERSION = '0.1.4'
 
 /** Helper version the demo reports. Kept >= MIN_HELPER_VERSION so the header
@@ -264,8 +261,7 @@ export const DEMO_WIFI_PROFILES_CACHE: Record<string, { profiles: WifiProfile[];
 
 /** Per-IP `kit_list` cache (deviceStore.kitListCache) — the device's own
  *  report of installed kits, shown in the "Kit" sub-tab. Every event carries
- *  `clip_gain` so InstalledKitsSection renders real amp% (needs fw >= 0.1.3,
- *  satisfied by DEMO_FW_VERSION above) instead of "amp ?". */
+ *  `clip_gain` so InstalledKitsSection renders real amp% instead of "amp ?". */
 export const DEMO_KIT_LIST_CACHE: Record<string, Array<{
   kit_id: string
   version: string

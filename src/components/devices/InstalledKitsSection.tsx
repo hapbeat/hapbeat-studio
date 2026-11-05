@@ -6,18 +6,13 @@ import { useI18n } from '@/i18n/I18nProvider'
 /**
  * Event entry shape inside a `kit_list_result` payload.
  *
- * Old firmware (≤ v0.1.x) returns events as **bare strings** or as
- * `{ name, mode }` — no per-event parameters. The UI then has no
- * way to display the manifest-side amp value without falling back
- * to a Studio-local lookup (which doesn't survive browser restart).
- *
- * New firmware (≥ v0.1.3, see
- * `hapbeat-device-firmware/instructions/instructions-kit-list-include-intensity-…`; the key is `clip_gain` since DEC-103)
- * embeds the manifest's `parameters.*` directly in each event row,
- * so the UI can render amp / loop / device_wiper without any
+ * The firmware embeds the installed manifest's `parameters.*` in each
+ * event row, so the UI can render amp / loop / device_wiper without any
  * client-side state. `clip_gain` / `loop` / `device_wiper` are all
- * optional — old firmware drops them, and we degrade to "amp ?"
- * with a one-line banner explaining the version requirement.
+ * optional. `clip_gain` is missing when the Kit on the device was
+ * deployed before DEC-103 (its manifest says `intensity`) or when the
+ * firmware is older than 1.0 (it looks for `intensity`). We then degrade
+ * to "amp ?" with a one-line banner saying how to get the value back.
  */
 type EventEntry =
   | string
@@ -75,11 +70,6 @@ function normalizeEvents(kit: KitEntry): NormalizedEvent[] {
 
 const STREAM_MODES = new Set(['stream_clip'])
 
-/** Minimum firmware version that emits `parameters.clip_gain` (and
- *  friends) in `kit_list_result` event rows. Bumped here when the
- *  firmware spec for the response shape changes. */
-const KIT_LIST_PARAMS_MIN_FW = '0.1.3'
-
 /**
  * Mirrors the Manager's "インストール済み Kit" tree: per-kit list of
  * Event IDs, with refresh / delete + click-to-play on event rows.
@@ -102,16 +92,10 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
     toast(t('kits.copy', { id }), 'info')
   }
 
-  // Detect "old firmware" by checking whether ANY event in the
-  // response carried a `clip_gain` field. If the firmware returns
-  // only `{name, mode}` for every event, the panel can't show amp
-  // values from device data alone — surface a one-line banner so
-  // the user knows to update firmware (≥ v0.1.3).
-  //
-  // We treat "kits present but all events lack clip_gain" as the
-  // signal — an empty kits array doesn't tell us anything about
-  // firmware capabilities.
-  const oldFirmware = useMemo(() => {
+  // No event in the response carried a `clip_gain`: the panel can't show
+  // amp values from device data alone, so surface a one-line banner. An
+  // empty kits array says nothing, so it doesn't count.
+  const noClipGain = useMemo(() => {
     if (!kits || kits.length === 0) return false
     const allNormalized = kits.flatMap(normalizeEvents)
     if (allNormalized.length === 0) return false
@@ -153,7 +137,7 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
         </button>
       </div>
 
-      {oldFirmware && (
+      {noClipGain && (
         <div
           className="form-status muted"
           style={{
@@ -164,13 +148,9 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
             color: 'var(--text-secondary)',
             marginBottom: 4,
           }}
-          title={
-            `Firmware が古いため amp 値が取得できません。\n` +
-            `kit_list_result の event 行に parameters.clip_gain を含める firmware (v${KIT_LIST_PARAMS_MIN_FW} 以上) が必要です。\n` +
-            `Manage → Firmware から更新してください。`
-          }
+          title={t('kits.ampOldHint')}
         >
-          {t('kits.ampOld', { version: KIT_LIST_PARAMS_MIN_FW })}
+          {t('kits.ampOld')}
         </div>
       )}
       {!kits ? (
@@ -235,7 +215,7 @@ export function InstalledKitsSection({ device, kits, sendTo, onPlayEvent }: Prop
                                   onClick={() => onPlayEvent(ev.id, ev.clipGain)}
                                   title={ampPct != null
                                     ? `クリックで PLAY: event_id=${ev.id}, gain=${(ev.clipGain ?? 1).toFixed(2)} (device manifest amp ${ampPct}%)`
-                                    : `クリックで PLAY: event_id=${ev.id}, gain=1.0 (firmware が古いため amp 未取得 — v${KIT_LIST_PARAMS_MIN_FW} 以上で device 側から取得可)`}
+                                    : `クリックで PLAY: event_id=${ev.id}, gain=1.0 (${t('kits.ampOldHint')})`}
                                 >
                                   <span className="installed-kit-event-name">{ev.display}</span>
                                   <span
