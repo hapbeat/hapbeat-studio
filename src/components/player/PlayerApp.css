@@ -40,3 +40,13 @@
 .player-percent { width: 4ch; text-align: right; font-variant-numeric: tabular-nums; }
 /* Fixed width: the text changes with the connection, nothing else moves. */
 .player-chip { flex: none; width: 112px; overflow: hidden; text-overflow: ellipsis; text-align: center; opacity: .85; }
+
+/* Narrow windows (the app's minimum is 960px): a tighter bar, so every chapter stays visible in one row, in ja and en. */
+@media (max-width: 1180px) {
+  .player { font-size: 12px; }
+  .player-controls { gap: 6px; }
+  .player-btn { padding: 0 8px; }
+  .player-play { width: 6.5em; }
+  .player-slider input { width: 52px; }
+  .player-chip { width: 96px; }
+}
