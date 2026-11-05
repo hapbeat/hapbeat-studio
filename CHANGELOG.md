@@ -6,7 +6,7 @@ Hapbeat Studio の変更履歴。形式は [Keep a Changelog](https://keepachang
 - **最新版** `https://studio.hapbeat.com/` は master の package.json バージョンを表示。
 - **凍結版** `https://studio.hapbeat.com/vX.Y/` は `vX.Y.Z` タグ push 時に作成（マイナー単位）。
 
-## [Unreleased]
+## [1.0.0] - 2026-11-06
 
 ### Added（追加）
 - 【ベータ】波形エディターに「イベント」パネルを追加。ゲームの cue 表の各イベントについて、音・触覚の素材候補（プール、先頭が代表）・仮/OK の確認・素材の「調整」（エフェクトと強さスライダー、変更は即イベントの WAV に反映し元音声とチェーンは adjust/ に保存）・エージェントへの依頼（音の依頼・再作成・触覚へ進む）を行える
