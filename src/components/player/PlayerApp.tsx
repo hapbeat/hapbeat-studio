@@ -108,12 +108,14 @@ export function PlayerApp() {
   }, [])
 
   useEffect(() => () => runtime.dispose(), [runtime])
-  // The runtime (10 ms tick, video) runs only while the page is visible.
+  // The runtime (10 ms tick, video) runs only while the page is visible. The app keeps its page visible (so the timing
+  // holds behind other windows) and says when the window is minimized instead: playback pauses then.
   const visible = usePageVisible()
   useEffect(() => {
     if (visible) runtime.start()
     else { runtime.video.pause(); runtime.stop() }
   }, [visible, runtime])
+  useEffect(() => playerApi()?.onMinimize(() => runtime.video.pause()), [runtime])
   useEffect(() => {
     const video = runtime.video
     stage.current?.appendChild(video)
@@ -206,7 +208,9 @@ export function PlayerApp() {
   }, [])
 
   const helperDown = helperStatus?.state === 'crashed' || helperStatus?.state === 'missing'
-  const chip = !isConnected ? t(helperDown ? 'player.status.helperStopped' : 'player.status.helperStarting')
+  // The app found something on the helper's port and left it alone (another helper), yet the page cannot reach it.
+  const portBusy = settled && !isConnected && helperStatus?.state === 'external'
+  const chip = !isConnected ? t(helperDown ? 'player.status.helperStopped' : portBusy ? 'player.status.helperUnreachable' : 'player.status.helperStarting')
     : targetDevices.length ? t('player.status.devices', { count: targetDevices.length }) : t('player.status.noDevice')
   const chipTitle = targetDevices.map(d => d.name || d.ipAddress).join(', ') || undefined
   const oldHelper = !!helperVersion && Number.parseInt(helperVersion, 10) < 1
@@ -224,6 +228,7 @@ export function PlayerApp() {
         <span>{t('player.notice.helperFailed', { error: helperStatus?.error ?? helperStatus?.state })}</span>
         <button type="button" className="player-btn" onClick={e => { e.currentTarget.blur(); restartHelper() }}>{t('player.restart')}</button>
       </div>}
+      {portBusy && <div className="player-notice error">{t('player.notice.portBusy', { port: helperStatus?.port ?? 7703 })}</div>}
       {settled && isConnected && oldHelper && <div className="player-notice error">{t('player.notice.oldHelper', { version: helperVersion })}</div>}
       {settled && isConnected && !!table && !targetDevices.length && <div className="player-notice">{t('player.notice.noDevice')}</div>}
       {notice?.error && <div className="player-notice error">{t(notice.id, notice.params)}</div>}

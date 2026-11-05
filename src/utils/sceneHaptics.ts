@@ -219,7 +219,8 @@ export class SceneHapticMixer {
   /** Per device ip: the same-client stream that took it; no BEGIN while that stream is open. */
   private heldBy = new Map<string, string>()
   private sid = 0
-  private quietSince = 0
+  /** When something last played (ms, the pump clock); -Infinity until then, so no stream opens before the first play. */
+  private quietSince = -Infinity
   voices: OneShotVoice[] = []
   loopVoices: LoopVoice[] = []
   clock: PlayClock | null = null

@@ -148,6 +148,15 @@ describe('scene haptic streams', () => {
     expect(sent[sent.length - 1]?.type).toBe('stream_end')
   })
 
+  it('opens no stream before anything has played, even just after the page loaded', () => {
+    const { sent, pump } = run()
+    pump(10, { playing: false })
+    pump(1000, { playing: false })
+    expect(sent).toEqual([])
+    pump(1010)
+    expect(sent[0]?.type).toBe('stream_begin')
+  })
+
   it('ends a device stream when the device leaves the selection', () => {
     const { sent, pump } = run()
     pump(1000)

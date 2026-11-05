@@ -11,8 +11,9 @@ import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import { checkHelperCompat, parseHelperHello, type HelperCaps, type HelperCompat } from '@/config/helperCompat'
 import { isDemoMode } from '@/demo/isDemoMode'
 import { setActiveHelperChannel } from '@/utils/helperRequest'
+import { PLAYER_HELPER_PORT } from '@/config/playerShell'
 
-const HELPER_WS_URL = 'ws://localhost:7703'
+const HELPER_WS_URL = `ws://localhost:${PLAYER_HELPER_PORT ?? 7703}`
 const RECONNECT_INTERVAL_BASE = 2000
 const RECONNECT_INTERVAL_MAX = 30000
 

@@ -1761,9 +1761,11 @@ export const messages = defineMessages({
   'player.loading': { ja: '読み込み中', en: 'Loading' },
   'player.status.helperStarting': { ja: 'Helper 起動中', en: 'Helper starting' },
   'player.status.helperStopped': { ja: 'Helper 停止', en: 'Helper stopped' },
+  'player.status.helperUnreachable': { ja: 'Helper 未接続', en: 'No Helper' },
   'player.status.noDevice': { ja: 'Hapbeat 未検出', en: 'No Hapbeat' },
   'player.status.devices': { ja: 'Hapbeat {count} 台', en: 'Hapbeat × {count}' },
-  'player.notice.noDevice': { ja: 'Hapbeat の電源を入れ、PC と同じ Wi-Fi に接続してください', en: 'Turn on the Hapbeat and connect it to the same Wi-Fi as this PC' },
+  'player.notice.noDevice': { ja: 'Hapbeat の電源を入れ、PC と同じ Wi-Fi に接続してください。Windows のファイアウォールの確認が出たら「アクセスを許可する」を選んでください', en: 'Turn on the Hapbeat and connect it to the same Wi-Fi as this PC. If Windows Firewall asks about hapbeat-helper, choose Allow access' },
+  'player.notice.portBusy': { ja: '別のプログラムがポート {port} を使っていて、Helper につながりません。Hapbeat Studio や Helper を閉じて、このアプリを開き直してください', en: 'Another program is using port {port}, so the Helper cannot be reached. Close Hapbeat Studio or the Helper, then reopen this app' },
   'player.notice.oldHelper': { ja: '古い Helper（{version}）が動いています。Hapbeat Studio などを閉じて、このアプリを開き直してください', en: 'An old Helper ({version}) is running. Close Hapbeat Studio and other such apps, then open this app again' },
   'player.notice.helperFailed': { ja: 'Helper を起動できませんでした（{error}）', en: 'The Helper could not start ({error})' },
 })

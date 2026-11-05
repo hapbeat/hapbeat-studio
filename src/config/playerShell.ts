@@ -11,14 +11,16 @@ import type { DesktopHelperStatus } from './desktopShell'
 
 export type PlayerHelperStatus = DesktopHelperStatus
 
+/** What the app was built from (its build-info.json); null when the app could not read it. */
 export interface PlayerInfo {
   appVersion: string
   /** The Studio build the app bundles. */
-  studio: string
-  helperBundled: boolean
-  /** The project the app bundles. */
-  project: string
-  builtAt: string
+  studio: { sha: string; version: string } | null
+  /** The bundled helper's `version` output, e.g. "hapbeat-helper 1.0.0". */
+  helperBundled: string | null
+  /** The project the app bundles: its commit (with -dirty for uncommitted data). */
+  project: string | null
+  builtAt: string | null
 }
 
 export interface HapbeatPlayerApi {
@@ -30,6 +32,11 @@ export interface HapbeatPlayerApi {
     restart(): Promise<PlayerHelperStatus>
     onStatus(callback: (status: PlayerHelperStatus) => void): () => void
   }
+  /**
+   * Called when the window is minimized. The app keeps the page "visible" (no background throttling, so playback
+   * keeps its timing behind other windows), so the page cannot tell by itself.
+   */
+  onMinimize(callback: () => void): () => void
 }
 
 declare global {
@@ -57,3 +64,13 @@ export const IS_PLAYER_SHELL = queryParam('shell') === 'player'
 
 /** `haptics=off`: the player never sends haptics and its haptics toggle stays disabled. */
 export const PLAYER_HAPTICS_OFF = queryParam('haptics') === 'off'
+
+/**
+ * `helperPort=<n>` (player only): the helper's port when the app runs its helper apart from 7703 (the app's checks put
+ * their stand-in helper there, next to a helper the user has running). null = the usual 7703.
+ */
+export const PLAYER_HELPER_PORT: number | null = (() => {
+  if (!IS_PLAYER_SHELL) return null
+  const port = Number(queryParam('helperPort'))
+  return Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : null
+})()
