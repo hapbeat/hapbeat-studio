@@ -83,13 +83,18 @@ async function findWavFiles(dir) {
   return results
 }
 
-// Generate event_id from filename: "impact/hit-soft.wav" -> "impact.hit-soft"
-// Contracts require at least category.name (one dot). Flat files get "clip." prefix.
+// The whole path, so two demos can hold clips of the same name:
+// "hapbeat-demos/fps/damage.wav" -> "hapbeat-demos.fps.damage"
+function filenameToClipId(relPath) {
+  return relPath.replace(/\.wav$/i, '').replace(/[\\/]/g, '.').toLowerCase()
+}
+
+// Default event_id from the clip's folder and name: "hapbeat-demos/fps/damage.wav" -> "fps.damage"
+// (contracts: <kit-name>.<file-name>, one dot). Flat files get a "clip." prefix.
 function filenameToEventId(relPath) {
-  const withoutExt = relPath.replace(/\.wav$/i, '')
-  const dotted = withoutExt.replace(/\//g, '.').replace(/\\/g, '.').toLowerCase()
-  if (!dotted.includes('.')) return `clip.${dotted}`
-  return dotted
+  const parts = filenameToClipId(relPath).split('.')
+  if (parts.length < 2) return `clip.${parts[0]}`
+  return parts.slice(-2).join('.')
 }
 
 // Generate display name from filename: "hit-soft" -> "Hit Soft"
@@ -161,7 +166,7 @@ async function main() {
       const metaOverride = metaMap.get(relPath) || {}
 
       const clip = {
-        id: `builtin/${filenameToEventId(relPath)}`,
+        id: `builtin/${filenameToClipId(relPath)}`,
         name: metaOverride.name || filenameToDisplayName(relPath),
         category,
         // Empty by default — the previous `tags: [category]` fallback
@@ -185,8 +190,8 @@ async function main() {
     }
   }
 
-  // Sort by category then name
-  clips.sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name))
+  // By path, so the clips of one demo stay together
+  clips.sort((a, b) => a.filename.localeCompare(b.filename))
 
   const index = {
     schema_version: '1.0.0',

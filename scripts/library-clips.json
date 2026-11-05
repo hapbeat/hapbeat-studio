@@ -1,0 +1,72 @@
+{
+  "sdk-samples/basic-example": {
+    "from": "repos-sdk/hapbeat-unity-sdk/Samples~/BasicExample/Kit/basic-exam-kit",
+    "clips": ["install-clips/sine_200hz_1s", "stream-clips/sine_100hz_1s"]
+  },
+  "sdk-samples/showcase": {
+    "from": "repos-sdk/hapbeat-unity-sdk/Samples~/Showcase/Kit/showcase-kit/install-clips",
+    "clips": [
+      "z1_pin_hit",
+      "z2_door_close", "z2_door_lock", "z2_door_open", "z2_door_rattle", "z2_door_slam", "z2_door_unlock",
+      "z3_hook_loop", "z3_hook_release", "z3_hook_start",
+      "z4_slider_tick", "z4_stream_loop",
+      "z5_charge_loop", "z5_charge_thd", "z5_shot_heavy", "z5_tar_hit_heavy", "z5_tar_hit_light"
+    ]
+  },
+  "hapbeat-demos/boxing": {
+    "from": "hapbeat-demos/unity/boxing-vr/Assets/Boxing/Haptics/stream-clips",
+    "clips": [
+      "guard_arm_hard_t138_c", "guard_arm_hard_t138_e",
+      "guard_glove_hard_t146_b", "guard_glove_hard_t146_d",
+      "hit_body_hard_t140_a", "hit_body_soft_t149_b",
+      "punch_body_hard_t151_b", "punch_body_t150_a",
+      "punch_glove_hard_t145_b"
+    ]
+  },
+  "hapbeat-demos/energy-duel": {
+    "from": "hapbeat-demos/unity/energy-duel/Assets/EnergyDuel/Haptics/Clips",
+    "clips": [
+      "arm_collide", "body_collide", "BodySoft", "GloveHard",
+      "charge_full", "charge_hold", "charge_level", "charge_sweep",
+      "release_lv1", "release_lv2", "release_lv3",
+      "shield_block", "shield_break", "shield_break_neck", "shield_up"
+    ]
+  },
+  "hapbeat-demos/fps": {
+    "from": "hapbeat-demos/unity/fps/Assets/FPS/Haptics/Clips",
+    "clips": [
+      "beat_pulse", "block_thud", "booster", "charge", "charge_loop", "damage",
+      "footstep_1", "footstep_2", "ghost_left_to_right", "ghost_right_to_left",
+      "heartbeat", "hit_heavy", "hit_light", "jetpack_loop", "kill_confirm", "landing",
+      "launcherExp", "launcherShot", "maze_loop", "notify_stereo", "reload_click",
+      "shot_recoil", "shotgun", "slash"
+    ]
+  },
+  "hapbeat-demos/hand-demo": {
+    "from": "hapbeat-demos/unity/handdemo/Assets/HandDemo/Haptics/stream-clips",
+    "clips": [
+      "grab_heavy", "grab_light", "hold_heavy", "hold_light", "hold_middle",
+      "push", "scratch", "snap_fit", "ui_click_heavy", "ui_click_light"
+    ]
+  },
+  "hapbeat-demos/safety-mill": {
+    "from": "hapbeat-demos/unreal/safety-mill-vr/Content/Hapbeat/Kit/safety-mill-kit/stream-clips",
+    "clips": [
+      "brush_loop_t98_d", "engage_t104_d", "entangle_t100_a", "feed_loop", "finish_t105_b",
+      "grab", "machine_button_t90_b", "neck_impact", "release", "step_done_t102_a", "ui_button_t106_d"
+    ]
+  },
+  "hapbeat-demos/trex-encounter": {
+    "from": "hapbeat-demos/unreal/trex-encounter/Content/Hapbeat/Kit/trex-kit/stream-clips",
+    "clips": [
+      "bite_t48_a", "bite_t51_a",
+      "breath_t56_a", "breath_t56_b", "breath_t56_c",
+      "grab_handdemo",
+      "rub_t57_a", "rub_t57_b", "rub_t57_d", "rub_t57_e"
+    ]
+  },
+  "hapbeat-demos/volley": {
+    "from": "hapbeat-demos/unity/gloveball/Assets/GloveBallDemo/Kits/gloveball-kit/stream-clips",
+    "clips": ["arm_collide", "body_collide", "landing", "volleyball_impact"]
+  }
+}

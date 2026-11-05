@@ -737,18 +737,22 @@ function ClipsPanel() {
   // 別フォルダに移ったときに自動で祖先フォルダを開いて、選択カードが
   // 画面からも見えるようにするため、parent 管理にする。
   const [openFolders, setOpenFolders] = useState<Set<string>>(new Set())
-  // A fresh work folder holds only template/ — keep it (and its subfolders)
-  // open so the sample clips are listed right away, not one collapsed folder
-  // row. Clips arrive in steps while a folder loads, so this follows them
-  // until the user opens or closes a folder themselves.
+  // A fresh work folder holds only template/ — open it and its categories so
+  // the sample clips are in view right away, not one collapsed folder row. Each
+  // demo stays one closed row: together they hold too many clips to list. Clips
+  // arrive in steps while a folder loads, so this follows them until the user
+  // opens or closes a folder themselves.
   const userToggledFolderRef = useRef(false)
   useEffect(() => {
     if (userToggledFolderRef.current || clips.length === 0) return
     const tree = buildClipTree(clips)
     if (tree.clips.length > 0 || tree.children.size !== 1) return
     const paths: string[] = []
-    const walk = (node: ClipTreeNode) => node.children.forEach((child) => { paths.push(child.path); walk(child) })
-    walk(tree)
+    const walk = (node: ClipTreeNode, depth: number) => node.children.forEach((child) => {
+      paths.push(child.path)
+      if (depth < 1) walk(child, depth + 1)
+    })
+    walk(tree, 0)
     setOpenFolders((prev) => paths.every((p) => prev.has(p)) ? prev : new Set([...prev, ...paths]))
   }, [clips])
   const { playingId, toggle, stop: stopPreview } = useAudioPreview()
