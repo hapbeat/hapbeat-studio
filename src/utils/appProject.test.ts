@@ -274,12 +274,30 @@ describe('sceneStore with the app project', () => {
     write(lib.paths.cues, good)
     await useSceneStore.getState().checkDisk()
     expect(useSceneStore.getState().table).not.toBeNull()
+    // The open's error no longer shows.
+    expect(useSceneStore.getState().notice).toBeNull()
     // Detection goes on afterwards (a recording change is read).
     const file = viewerData()
     file.events[0].gain = 0.45
     write(VIEWER_DATA, JSON.stringify(file))
     await useSceneStore.getState().checkDisk()
     expect(useSceneStore.getState().recorded?.full.events[0].gain).toBe(0.45)
+  })
+
+  it('a check that started before a folder switch does not open the old folder again after it', async () => {
+    const { useSceneStore, root: first } = await openPage()
+    const app = await import('./appProject')
+    const second = await app.openAppProject('second', BASE)
+    // The lib changed on disk (as if the app now served another folder): the check that sees it runs into the switch.
+    write('Saved/HapticViewer/viewer-lib.json', disk.get('Saved/HapticViewer/viewer-lib.json')!.text)
+    const checking = useSceneStore.getState().checkDisk()
+    const switching = useSceneStore.getState().openAppProject(second)
+    expect(useSceneStore.getState().busy).toBe(true)
+    await Promise.all([checking, switching])
+    await vi.advanceTimersByTimeAsync(100)
+    await vi.waitFor(() => { expect(useSceneStore.getState().busy).toBe(false) })
+    expect(useSceneStore.getState().root).toBe(second)
+    expect(useSceneStore.getState().root).not.toBe(first)
   })
 
   it('a folder chosen while another opens is opened after it, not dropped', async () => {

@@ -448,6 +448,8 @@ export const useSceneStore = create<SceneState>((set, get) => {
       chapter: chapter !== null && chapter < data.chapters.length ? chapter : null })
     addLog(`${VIEWER_DIR}/viewer-data.json changed: the recording read again`)
   }
+  /** What guarded says when an open fails on the table (errorNotice); cleared once a check has read the table. */
+  const OPEN_ERRORS = new Set(['scene.open.failed', 'clipGain.staleKey', 'scene.open.oldFormat'])
   let appChecking: Promise<void> | null = null
   /** The last check's error, logged once (a file Studio is still writing reads as broken until the next check). */
   let appCheckError = ''
@@ -461,12 +463,22 @@ export const useSceneStore = create<SceneState>((set, get) => {
         const now = await readAppStamp(root, lib)
         if (get().root !== root || appStamp !== was) return
         if (now.lib !== was.lib) {
+          // Not while another open runs (the app may have switched folders: every app handle reads the folder the app
+          // serves now, so this stamp may be the new folder's). Never queued from here: the stamp stays, so the next
+          // check sees the change again if it is still one.
+          if (get().busy || get().root !== root || appStamp !== was) return
           addLog(`${VIEWER_DIR}: the lib or the video changed: the project is opened again`)
           await get().openAppProject(root)
           return
         }
         if (now.recording !== was.recording) { await reloadRecording(root); appStamp = { ...appStamp!, recording: now.recording } }
-        if (now.wavs !== was.wavs) { await loadTable(); appStamp = { ...appStamp!, wavs: now.wavs }; addLog(`WAVs in ${lib.paths.clips} / ${lib.paths.sounds} changed: read again`) }
+        if (now.wavs !== was.wavs) {
+          await loadTable()
+          appStamp = { ...appStamp!, wavs: now.wavs }
+          addLog(`WAVs in ${lib.paths.clips} / ${lib.paths.sounds} changed: read again`)
+          // The table that did not read at open reads now: its error no longer holds.
+          if (was.wavs === '' && OPEN_ERRORS.has(get().notice?.id ?? '')) set({ notice: null })
+        }
         appCheckError = ''
       } catch (error) {
         // Tried again on the next check; the stamps that were not read again stay, so nothing is skipped.
