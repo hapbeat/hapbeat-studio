@@ -1,4 +1,5 @@
-import type { SceneData, SceneEvent, SceneLayer, SceneLib } from './sceneData'
+import { deriveMoments, type SceneData, type SceneEvent, type SceneLayer, type SceneLib } from './sceneData'
+import { markOverriddenClips } from './sceneOverrides'
 import { isLoopCue, type CueEmit, type CueTable } from './sceneCueTable'
 import { mulberry32 } from './textureDsp'
 
@@ -82,12 +83,20 @@ export function emittedEvents(table: CueTable, lib: SceneLib, levels: number[][]
   return out.sort((a, b) => a.t - b.t)
 }
 
-/** The recording as the Scene tab plays it: the recorded firings of emitting cues replaced by the generated ones. */
+/**
+ * The recording as the Scene tab plays it: the recorded firings of emitting cues replaced by the generated ones. When
+ * recorded firings were replaced, the moments are made again from the recorded firings left (the list's rows: emitted
+ * firings are not listed, so no moment is left without a row; overridden first firings keep `from`).
+ */
 export function applyEmits(data: SceneData, table: CueTable, lib: SceneLib, seed: number): SceneData {
   const cues = new Set(emittingCues(table, lib).map(x => x.cue))
   if (!cues.size) return data
-  const events = [...data.full.events.filter(e => !cues.has(e.name)), ...emittedEvents(table, lib, data.full.levels, data.fps, seed)].sort((a, b) => a.t - b.t)
-  return { ...data, full: { ...data.full, events } }
+  const kept = data.full.events.filter(e => !cues.has(e.name))
+  const events = [...kept, ...emittedEvents(table, lib, data.full.levels, data.fps, seed)].sort((a, b) => a.t - b.t)
+  if (kept.length === data.full.events.length) return { ...data, full: { ...data.full, events } }
+  const { file, levels } = data.full
+  const clips = deriveMoments(kept, lib, levels.length / data.fps).map(m => ({ ...m, file, event: m.at, levels }))
+  return markOverriddenClips({ ...data, clips, full: { ...data.full, events } })
 }
 
 /** What the generated firings depend on in the table (the emits); an edit that leaves it unchanged needs no new firings. */

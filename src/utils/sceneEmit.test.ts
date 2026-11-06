@@ -121,6 +121,10 @@ describe('Scene tab playback of emitted cues', () => {
     expect(out.full.events.map(e => e.t)).toEqual([...out.full.events.map(e => e.t)].sort((x, y) => x - y))
     // Same seed (a seek, a replay): the same firings.
     expect(applyEmits(data, table, lib, 1)).toEqual(out)
+    // The moments are made from the recorded firings left: none starts at a replaced firing, each starts at a listed one.
+    expect(data.clips.some(c => c.names.includes('grab'))).toBe(true)
+    expect(out.clips.some(c => c.names.includes('grab'))).toBe(false)
+    expect(out.clips.every(c => out.full.events.some(e => !(e as { emitted?: boolean }).emitted && e.name === c.name && e.t === c.at))).toBe(true)
   })
 
   it('leaves the recording alone without a usable emit', () => {

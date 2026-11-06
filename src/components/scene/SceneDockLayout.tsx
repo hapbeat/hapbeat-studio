@@ -3,6 +3,7 @@ import { DockviewReact, themeDark, type DockviewApi, type DockviewReadyEvent, ty
 import 'dockview-react/dist/styles/dockview.css'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useSceneSettings } from '@/stores/sceneSettings'
+import { useSceneStrength } from '@/stores/sceneStrength'
 import { SceneVideoPanel } from './SceneVideoPanel'
 import { SceneTimelinePanel } from './SceneTimelinePanel'
 import { SceneMomentsPanel } from './SceneMomentsPanel'
@@ -129,15 +130,20 @@ export function SceneDockLayout({ onApi, onNotice }: { onApi: (api: DockviewApi 
       clearTimeout(timer)
       timer = setTimeout(() => { if (apiRef.current === api) useSceneSettings.getState().update({ dockLayout: savedLayout(api) }) }, 300)
     })
+    // A panel opened again from the View menu gets its title as the effect below sets it (「発生 (3)」).
+    api.onDidAddPanel(() => { if (!applying.current) setBuilt(n => n + 1) })
     callbacks.current.onApi(api)
   }
   useEffect(() => () => { apiRef.current = null; callbacks.current.onApi(null) }, [])
   useEffect(() => { if (layoutRevision && apiRef.current) apply(apiRef.current) }, [layoutRevision])
+  // 「発生」's tab names how many firings are selected (「発生 (3)」): a selection shows where its gain and time are edited
+  // while the tab sits behind 「強さ」.
+  const selectedCount = useSceneStrength(s => s.selected.size)
   useEffect(() => {
     const api = apiRef.current
     if (!api) return
-    for (const id of SCENE_PANELS) api.getPanel(id)?.api.setTitle(t(SCENE_PANEL_TITLES[id]))
-  }, [locale, t, built])
+    for (const id of SCENE_PANELS) api.getPanel(id)?.api.setTitle(id === 'firing' && selectedCount ? t('scene.panel.firingCount', { count: selectedCount }) : t(SCENE_PANEL_TITLES[id]))
+  }, [locale, t, built, selectedCount])
 
   return <div className="editor-dock-root scene-dock-root">
     <DockviewReact components={COMPONENTS} onReady={onReady} theme={themeDark} />

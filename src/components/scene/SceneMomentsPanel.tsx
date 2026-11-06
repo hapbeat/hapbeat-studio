@@ -59,7 +59,7 @@ export function SceneMomentsPanel() {
   const selected = useSceneStrength(s => s.selected)
   const inView = useSceneTimelineRange(s => s.rows)
   const repeat = useSceneTimelineRange(s => s.repeat)
-  const rows = useMemo(() => data ? firingRows(items, data.full.events) : [], [items, data])
+  const rows = useMemo(() => data && lib ? firingRows(items, data.full.events, lib.ticks) : [], [items, data, lib])
   /** Each shown firing's recorded index (viewer-data events[i]); emitted firings have none. */
   const recordedOf = useMemo(() => new Map(data && edited ? [...shownIndexOf(data.full.events, edited.full.events)].map(([i, k]) => [k, i]) : []), [data, edited])
   /** A shown firing's RECORDED time (viewer-data.json): an override and the Change request name a firing by it, also after its time was edited. */
@@ -122,7 +122,7 @@ export function SceneMomentsPanel() {
       {data && rows.map(row => {
         const k = row.index, ev = data.full.events[k] as OverriddenEvent, from = fromOf(ev), sentKey = `${from}@${atOf(k)}`
         const view = !!inView && row.num >= inView[0] && row.num <= inView[1]
-        const cls = ['scene-item', 'scene-firing', k === picked ? 'sel' : '', chosen.has(k) ? 'chosen' : '', inRepeat(ev.t) ? 'repeat' : '',
+        const cls = ['scene-item', k === picked ? 'sel' : '', chosen.has(k) ? 'chosen' : '', inRepeat(ev.t) ? 'repeat' : '',
           view ? 'in-view' : '', view && row.num === inView![0] ? 'in-view-first' : '', view && row.num === inView![1] ? 'in-view-last' : '',
           row.group ? 'grp' : '', row.group && row.group.first ? 'grp-first' : '', row.group && row.group.last ? 'grp-last' : ''].filter(Boolean).join(' ')
         const place = placeOf(table, [ev.name], ev.hand)

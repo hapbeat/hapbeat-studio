@@ -1,6 +1,6 @@
-import { clipEnd, MOMENT_S, momentStart, type SceneChapter, type SceneEvent, type SceneItem } from './sceneData'
+import { clipEnd, isTick, MOMENT_S, momentStart, type SceneChapter, type SceneEvent, type SceneItem } from './sceneData'
 import type { CueTable } from './sceneCueTable'
-import { occurrenceKeys } from './sceneFiringGain'
+import { firingStrength, occurrenceKeys } from './sceneFiringGain'
 import { recordedIndexMap, recordedName } from './sceneStrength'
 
 /**
@@ -34,8 +34,8 @@ export function firingNumbers(events: readonly SceneEvent[]): (number | null)[] 
 export interface FiringRow { index: number; num: number; moment: number | null; group: false | { first: boolean; last: boolean } }
 
 /** The moments list's rows: every recorded firing once, in number order (time order), grouped by moment (firingMoments). */
-export function firingRows(items: readonly SceneItem[], events: readonly SceneEvent[]): FiringRow[] {
-  const nums = firingNumbers(events), moments = firingMoments(items, events)
+export function firingRows(items: readonly SceneItem[], events: readonly SceneEvent[], ticks: readonly string[]): FiringRow[] {
+  const nums = firingNumbers(events), moments = firingMoments(items, events, ticks)
   const rows = events.flatMap((_, i) => nums[i] === null ? [] : [{ index: i, num: nums[i]!, moment: moments[i] }]).sort((a, b) => a.num - b.num)
   const size = new Map<number, number>()
   for (const r of rows) if (r.moment !== null) size.set(r.moment, (size.get(r.moment) ?? 0) + 1)
@@ -61,7 +61,7 @@ export function numberRangeText(range: readonly [number, number] | null): string
 }
 
 /**
- * What repeats now (replay seconds, SceneRuntime's play range): W's part or a playing loop cue span (`part`), else a
+ * What plays now (replay seconds, SceneRuntime's play range): W's part or a playing loop cue span (`part`), else a
  * moment from its lead-in to its end, else a chapter playing; null = the full replay.
  */
 export function repeatRange(item: SceneItem, part: readonly [number, number] | null, leadSec: number, chapter: SceneChapter | null): [number, number] | null {
@@ -70,27 +70,48 @@ export function repeatRange(item: SceneItem, part: readonly [number, number] | n
   return chapter ? [chapter.start, chapter.end] : null
 }
 
+/** Whether that range repeats (SceneRuntime.tick): W's part / a span always, else only with the loop setting on (off: it plays once and stops). */
+export const rangeRepeats = (part: boolean, loop: boolean) => part || loop
+
 /** A repeat range as 「3.3–8.3」 (seconds, one decimal); '' for the full replay. */
 export const repeatRangeText = (range: readonly [number, number] | null) => range ? `${range[0].toFixed(1)}–${range[1].toFixed(1)}` : ''
 
 /**
- * Each firing's moment (its row `k` in the moments list), aligned with `events`; null when it belongs to none (an emitted
- * firing far from any moment). A firing belongs to moment k when the moment
- * lists its name and it fires within MOMENT_S after the moment's first cue (deriveMoments' grouping).
+ * Each firing's moment (items index), aligned with `events`; null when it belongs to none (an emitted firing far from
+ * any moment). By time, as deriveMoments groups: a non-tick firing belongs to the last non-tick moment starting at or
+ * before it within MOMENT_S, a tick firing to the tick moment at its own time. Not by name: an override renames a
+ * firing without renaming every moment that lists it.
  */
-export function firingMoments(items: readonly SceneItem[], events: readonly SceneEvent[]): (number | null)[] {
+export function firingMoments(items: readonly SceneItem[], events: readonly SceneEvent[], ticks: readonly string[]): (number | null)[] {
   const clips = items.flatMap((it, k) => it.kind === 'clip' ? [k] : [])
+  const plain = clips.filter(k => !isTick(ticks, items[k].name)), tick = clips.filter(k => isTick(ticks, items[k].name))
+  /** The last of `ks` (sorted by `at`) starting at or before `t`; -1 for none. */
+  const lastAtOrBefore = (ks: number[], t: number) => {
+    let lo = 0, hi = ks.length
+    while (lo < hi) { const m = (lo + hi) >> 1; if (items[ks[m]].at <= t + 1e-9) lo = m + 1; else hi = m }
+    return lo - 1
+  }
   return events.map(ev => {
-    // The last moment starting at or before the firing, then back while still within MOMENT_S.
-    let lo = 0, hi = clips.length
-    while (lo < hi) { const m = (lo + hi) >> 1; if (items[clips[m]].at <= ev.t + 1e-9) lo = m + 1; else hi = m }
-    for (let j = lo - 1; j >= 0; j--) {
-      const it = items[clips[j]]
-      if (ev.t - it.at > MOMENT_S + 1e-9) break
-      if (it.names.includes(ev.name)) return clips[j]
+    if (isTick(ticks, ev.name)) {
+      const j = lastAtOrBefore(tick, ev.t)
+      return j >= 0 && Math.abs(items[tick[j]].at - ev.t) <= 1e-9 ? tick[j] : null
     }
-    return null
+    const j = lastAtOrBefore(plain, ev.t)
+    return j >= 0 && ev.t - items[plain[j]].at <= MOMENT_S + 1e-9 ? plain[j] : null
   })
+}
+
+/**
+ * The firing selection (recorded indices) for the firing `name` at shown time `t`, as a moments row click makes it: that
+ * firing when it is a haptic one-shot (not a tick, with a strength in `table`), else none. `shown`: data.full.events;
+ * `edited`: the recording with the edits (recorded order).
+ */
+export function firingSelectionAt(table: CueTable | null, ticks: readonly string[], shown: readonly SceneEvent[], edited: readonly SceneEvent[] | null, name: string, t: number): number[] {
+  if (!table || !edited) return []
+  const k = shown.findIndex(e => e.name === name && Math.abs(e.t - t) < 0.02), ev = shown[k]
+  if (!ev || isEmitted(ev) || isTick(ticks, ev.name) || !firingStrength(table, shown, ev)) return []
+  const i = [...shownIndexOf(shown, edited)].find(([, kk]) => kk === k)?.[0]
+  return i === undefined ? [] : [i]
 }
 
 /**

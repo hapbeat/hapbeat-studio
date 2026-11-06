@@ -87,7 +87,11 @@ describe('event moments (cue table v2)', () => {
     const scene = { project: 'mill', cues: ['button', 'button:soft'] }
     const state = resolveTrialScene({ lib: sampleLib(), data, scene })
     expect(state.kind === 'ready' && state.chosen?.key).toBe('@1.300')
-    expect(state.kind === 'ready' && state.options.map(o => o.label)).toEqual(['01 button:soft (1.3 s)', '02 button (17.4 s)'])
+    // No recorded firing at the moments: no firing number.
+    expect(state.kind === 'ready' && state.options.map(o => o.label)).toEqual(['button:soft (1.3 s)', 'button (17.4 s)'])
+    // Labelled with the first firing's number, as the Scene tab's list and timeline number it.
+    data.full.events = [{ t: 0.4, name: 'other', hand: '' }, { t: 1.3, name: 'button:soft', hand: '' }, { t: 17.4, name: 'button', hand: '' }]
+    expect(trialSceneOptions(data, null).map(o => o.label)).toEqual(['02 button:soft (1.3 s)', '03 button (17.4 s)'])
     const picked = resolveTrialScene({ lib: sampleLib(), data, scene, saved: { project: 'mill', at: 17.4 } })
     expect(picked.kind === 'ready' && picked.chosen?.key).toBe('@17.400')
   })

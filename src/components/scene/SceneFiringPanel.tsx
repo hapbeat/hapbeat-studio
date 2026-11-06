@@ -71,7 +71,7 @@ export function SceneFiringPanel() {
   }, [selected, data, recorded, shownIdx, numbers, table, kitGains, editsMatch])
 
   if (!data) return <div className="scene-panel-empty">{t('scene.noProject')}</div>
-  if (!picked.length) return <div className="scene-firing scene-firing-empty">{t('scene.card.none')}</div>
+  if (!picked.length) return <div className="scene-firing-panel scene-firing-empty">{t('scene.card.none')}</div>
   const st = () => useSceneStrength.getState()
   const one = picked.length === 1 ? picked[0] : null
   const base = one ? one.gain : median(picked.map(p => p.gain))
@@ -93,7 +93,7 @@ export function SceneFiringPanel() {
     if (base > 0) st().scaleSelected(v / base); else st().setSelected(v)
   }
 
-  return <div className="scene-firing" role="group" aria-label={t('scene.strength.selected')}>
+  return <div className="scene-firing-panel" role="group" aria-label={t('scene.strength.selected')}>
     <div className="scene-firing-title" title={title}>{title}</div>
     <div className="scene-firing-grid">
       <div className="scene-firing-row" title={lockGain ? t('scene.card.gainLocked') : undefined}>

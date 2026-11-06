@@ -16,6 +16,7 @@ import { SceneRuntime } from './sceneRuntime'
 import { useSceneRuntimeHelper } from './useSceneRuntimeHelper'
 import { useSceneStrength } from '@/stores/sceneStrength'
 import { strengthStep } from '@/utils/sceneStrength'
+import { firingSelectionAt } from '@/utils/sceneTimelineEdit'
 import { SceneContext, type SceneShared } from './sceneContext'
 import { SceneDockLayout } from './SceneDockLayout'
 import { SceneTopBar } from './SceneTopBar'
@@ -83,6 +84,13 @@ export function SceneView({ active }: { active: boolean }) {
       st.setDragRatio(null)
       st.scaleSelected(ratio)
     }
+    // A key that moves the picked cue (↑↓, E, , .) also moves the firing selection to it, as a moments row click does: the
+    // selected row, the chosen bar and the 「発生」 panel always name one firing.
+    const syncFiring = () => {
+      const s = useSceneStore.getState(), sel = s.sel
+      useSceneStrength.getState().select(sel && sel.t != null && s.data
+        ? firingSelectionAt(s.table, s.lib?.ticks ?? [], s.data.full.events, s.edited?.full.events ?? null, sel.name, sel.t) : [], 'replace')
+    }
     const keyup = (e: KeyboardEvent) => { if (burst.timer !== undefined && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) commit() }
     const keydown = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
@@ -132,6 +140,7 @@ export function SceneView({ active }: { active: boolean }) {
       else if (/^[1-9]$/.test(key) && Number(key) <= (s.data?.chapters.length ?? 0)) runtime.playChapter(Number(key) - 1)
       else return
       e.preventDefault()
+      if (key === 'ArrowDown' || key === 'ArrowUp' || key === 'e' || key === ',' || key === '.') syncFiring()
     }
     window.addEventListener('keydown', keydown)
     window.addEventListener('keyup', keyup)

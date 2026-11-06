@@ -1,6 +1,7 @@
 import { buildItems, itemEvents, type SceneData, type SceneLib } from './sceneData'
 import type { TrialScene } from './agentProtocol'
 import type { TrialSceneChoice } from './editorUiSettings'
+import { firingNumber, firingNumbers, isEmitted } from './sceneTimelineEdit'
 import { LEAD_SEC, sceneSegment, TAIL_SEC, type SceneMark, type SceneSegment } from './sceneSegments'
 
 /**
@@ -32,16 +33,19 @@ export interface SceneClipOption {
 
 /** The moments of the recording that contain one of `cues` (every moment when `cues` is null), as their stretches of the full replay, marked at the first matching cue. */
 export function trialSceneOptions(data: SceneData, cues: string[] | null): SceneClipOption[] {
-  const items = buildItems(data)
+  const items = buildItems(data), nums = firingNumbers(data.full.events)
+  /** The number of a moment's first firing: the Scene tab's list and timeline name a moment by it. */
+  const numberOf = (name: string, at: number) => { const k = data.full.events.findIndex(e => !isEmitted(e) && e.name === name && e.t === at); return k >= 0 ? nums[k] : null }
   const out: SceneClipOption[] = []
-  items.forEach((it, index) => {
+  items.forEach(it => {
     if (it.kind !== 'clip' || (cues && !it.names.some(n => cues.includes(n)))) return
     const own = itemEvents(it, data.full.events).find(e => e.own && (!cues || cues.includes(e.name)))
     const cue = cues ? cues.find(c => it.names.includes(c)) ?? null : null
-    // Event names and time only ("03 roar (7.9 s)"); the haptic route (both / right) is not part of the moment's name.
+    // The first firing's number (the Scene tab's), event names and time only ("03 roar (7.9 s)"); the haptic route (both / right) is not part of the moment's name.
+    const num = numberOf(it.name, it.at)
     const mark = own ? own.t : it.event
     const marks: SceneMark[] = [{ t: mark, name: cue ?? it.name, target: true }]
-    out.push({ key: momentKey(it.at), file: it.file, label: `${String(index).padStart(2, '0')} ${it.names.join(' + ')} (${it.at.toFixed(1)} s)`, at: it.at, mark, cue, marks, end: it.end,
+    out.push({ key: momentKey(it.at), file: it.file, label: `${num === null ? '' : `${firingNumber(num)} `}${it.names.join(' + ')} (${it.at.toFixed(1)} s)`, at: it.at, mark, cue, marks, end: it.end,
       segment: { names: [cue ?? it.name], start: it.start, end: it.end, marks, repeating: false, total: 1 } })
   })
   return out

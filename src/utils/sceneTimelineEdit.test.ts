@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dragAxes, firingMoments, firingNumber, firingNumbers, firingRows, numberRangeText, numbersInRange, repeatRange, repeatRangeText, shownIndexOf, snapDt, tableHasSfx, visibleLanes } from './sceneTimelineEdit'
+import { dragAxes, firingMoments, firingSelectionAt, rangeRepeats, firingNumber, firingNumbers, firingRows, numberRangeText, numbersInRange, repeatRange, repeatRangeText, shownIndexOf, snapDt, tableHasSfx, visibleLanes } from './sceneTimelineEdit'
 import { sampleTable } from './sceneTestFixtures'
 import type { SceneEvent, SceneItem } from './sceneData'
 
@@ -17,13 +17,31 @@ describe('sceneTimelineEdit', () => {
     const events = [ev('b', 2), ev('a', 1), { ...ev('pulse', 1.5), emitted: true } as SceneEvent, ev('c', 1), ev('a', 3)]
     expect(firingNumbers(events)).toEqual([3, 1, null, 2, 4])
   })
-  it('finds each firing’s moment by name within MOMENT_S of its first cue', () => {
-    const events = [ev('hit', 1), ev('step', 1.15), ev('step', 1.5), ev('hit', 5), ev('tick', 5.1), ev('other', 1.05)]
-    expect(firingMoments(items, events)).toEqual([1, 1, null, 2, 3, null])
+  it('finds each firing’s moment by time within MOMENT_S of its first cue (a tick: its own moment)', () => {
+    const events = [ev('hit', 1), ev('step', 1.15), ev('step', 1.5), ev('hit', 5), ev('tick', 5.1), ev('other', 1.05), ev('tick', 6)]
+    expect(firingMoments(items, events, ['tick'])).toEqual([1, 1, null, 2, 3, 1, null])
+  })
+  it('keeps a renamed firing in its moment (an override renames the firing, not every moment that lists it)', () => {
+    // hit_n 29.1 s + hit_table 29.2 s are one moment; hit_table is changed to smash (the moment keeps its names).
+    const moments = [item('full', [], 0), item('clip', ['hit_n', 'hit_table'], 29.1), item('clip', ['applause'], 37.567)]
+    const events = [ev('hit_n', 29.1), ev('smash', 29.2), ev('clap2', 37.567), ev('applause', 37.667), ev('applause', 37.733)]
+    expect(firingMoments(moments, events, [])).toEqual([1, 1, 2, 2, 2])
+    expect(firingRows(moments, events, []).map(r => r.group)).toEqual([
+      { first: true, last: false }, { first: false, last: true }, { first: true, last: false }, { first: false, last: false }, { first: false, last: true }])
+  })
+  it('selects a haptic one-shot firing as a row click does (not a tick, an emitted or an unknown firing)', () => {
+    const table = sampleTable(), cue = Object.keys(table.cues).find(c => table.cues[c].haptics?.length)!
+    const recorded = [ev('tick', 0.5), ev(cue, 2), ev(cue, 1)]
+    const shown = [recorded[0], recorded[2], recorded[1]] // time order: recorded 0, 2, 1
+    expect(firingSelectionAt(table, ['tick'], shown, recorded, cue, 2)).toEqual([1])
+    expect(firingSelectionAt(table, ['tick'], shown, recorded, cue, 1.01)).toEqual([2])
+    expect(firingSelectionAt(table, ['tick'], shown, recorded, 'tick', 0.5)).toEqual([])
+    expect(firingSelectionAt(table, ['tick'], shown, recorded, cue, 3)).toEqual([])
+    expect(firingSelectionAt(null, ['tick'], shown, recorded, cue, 2)).toEqual([])
   })
   it('lists every recorded firing once as a row, joining a moment\u2019s firings by a group mark', () => {
     const events = [ev('hit', 1), ev('step', 1.15), { ...ev('pulse', 2), emitted: true } as SceneEvent, ev('hit', 5), ev('tick', 5.1)]
-    expect(firingRows(items, events)).toEqual([
+    expect(firingRows(items, events, ['tick'])).toEqual([
       { index: 0, num: 1, moment: 1, group: { first: true, last: false } },
       { index: 1, num: 2, moment: 1, group: { first: false, last: true } },
       { index: 3, num: 3, moment: 2, group: false },
@@ -49,6 +67,10 @@ describe('sceneTimelineEdit', () => {
     expect(repeatRange(items[0], null, 1, null)).toBeNull()
     expect(repeatRangeText([3.3, 8.26])).toBe('3.3–8.3')
     expect(repeatRangeText(null)).toBe('')
+    // It repeats with W's part / a span or with the loop on; otherwise it plays once.
+    expect(rangeRepeats(true, false)).toBe(true)
+    expect(rangeRepeats(false, true)).toBe(true)
+    expect(rangeRepeats(false, false)).toBe(false)
   })
   it('moves only the unlocked axes, Shift keeping the larger one', () => {
     expect(dragAxes(30, 5, { time: true, gain: false }, false)).toEqual({ time: false, gain: true })

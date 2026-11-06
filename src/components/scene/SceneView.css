@@ -172,16 +172,16 @@
 .scene-seg.scene-tl-seg > button.sound.on { background: var(--sound-soft); color: var(--sound-strong); }
 .scene-seg.scene-tl-seg > button:disabled { opacity: .45; cursor: default; }
 /* 「発生」 panel: the selected firings' gain and time, compact (two columns where it fits). */
-.scene-firing { display: flex; flex-direction: column; gap: 4px; height: 100%; min-height: 0; overflow: auto; box-sizing: border-box; padding: 6px 8px;
+.scene-firing-panel { display: flex; flex-direction: column; gap: 4px; height: 100%; min-height: 0; overflow: auto; box-sizing: border-box; padding: 6px 8px;
   font-size: 12px; font-variant-numeric: tabular-nums; }
 .scene-firing-empty { color: var(--text-muted); }
 .scene-firing-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--text-primary); }
 .scene-firing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 4px 16px; align-items: center; }
 .scene-firing-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .scene-firing-actions { flex-wrap: wrap; row-gap: 4px; }
-.scene-firing-label { flex: none; width: 3.5em; color: var(--text-muted); }
+.scene-firing-label { flex: none; min-width: 3.5em; white-space: nowrap; color: var(--text-muted); }
 .scene-firing-row input[type="range"] { flex: 1; min-width: 40px; }
-.scene-firing .scene-number { width: 68px; }
+.scene-firing-panel .scene-number { width: 68px; }
 /* The breakdown: one line of fixed height (red when the sent value is clipped). */
 .scene-firing-line { min-height: 1.4em; color: var(--text-muted); }
 .scene-firing-line.clipped { color: #ff8a80; }
