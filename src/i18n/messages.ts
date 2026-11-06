@@ -1775,7 +1775,7 @@ export const messages = defineMessages({
   'player.project.recent': { ja: '開いたことのあるフォルダ', en: 'Folders opened before' },
   'player.project.other': { ja: '別のフォルダを選択…', en: 'Choose another folder…' },
   'player.project.missing': { ja: '見つかりません', en: 'Not found' },
-  'player.project.playing': { ja: '再生中', en: 'Playing' },
+  'player.project.playing': { ja: '開いています', en: 'Open' },
   'player.ui.button': { ja: 'UI: {mode}', en: 'UI: {mode}' },
   'player.ui.auto': { ja: '自動', en: 'Auto' },
   'player.ui.show': { ja: '常に表示', en: 'Always' },
