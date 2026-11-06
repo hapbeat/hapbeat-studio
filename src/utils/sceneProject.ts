@@ -64,15 +64,19 @@ export interface SceneTableFiles {
   clipFiles: string[]
   /** Cue sound candidates: every WAV in lib.paths.sounds. */
   soundFiles: string[]
+  /** The cue table file as it was read for `table` (what CueTableSync compares the disk with). */
+  text: string
+  mtime: number
 }
 /** The cue table and the WAVs; null when the project has no cue table yet (createSceneTable makes one). */
 export async function readSceneTable(root: FileSystemDirectoryHandle, lib: SceneLib): Promise<SceneTableFiles | null> {
-  let text: string
-  try { text = await (await readProjectFile(root, lib.paths.cues)).text() } catch (error) { if (isNotFound(error)) return null; throw error }
+  let file: File
+  try { file = await readProjectFile(root, lib.paths.cues) } catch (error) { if (isNotFound(error)) return null; throw error }
+  const text = await file.text()
   const table = parseCueTable(text)
   const clipFiles = await listWavs(root, lib.paths.clips)
   const soundFiles = await listWavs(root, lib.paths.sounds)
-  return { table, clipFiles, soundFiles }
+  return { table, clipFiles, soundFiles, text, mtime: file.lastModified }
 }
 
 /** Writes a new cue table (newCueTable) at lib.paths.cues; refuses when one is there already (never overwritten). */

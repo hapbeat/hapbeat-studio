@@ -23,6 +23,8 @@ function resetDisk() {
   write('.git/HEAD', 'ref')
 }
 
+/** Runs after the mock answered a file (not a listing): a save landing between two reads. */
+let afterServe: ((path: string) => void) | null = null
 /** The app's answers (app/src/server.js): `?list` = a folder's entries, else the file with x-mtime-ms. */
 const fetchMock = vi.fn(async (input: string) => {
   const url = new URL(String(input))
@@ -40,12 +42,14 @@ const fetchMock = vi.fn(async (input: string) => {
     return new Response(JSON.stringify({ entries: [...entries.values()].sort((a, b) => a.name.localeCompare(b.name)) }))
   }
   const file = disk.get(path)
-  return file ? new Response(file.text, { headers: { 'content-type': 'text/plain', 'x-mtime-ms': String(file.mtimeMs) } }) : new Response('', { status: 404 })
+  const response = file ? new Response(file.text, { headers: { 'content-type': 'text/plain', 'x-mtime-ms': String(file.mtimeMs) } }) : new Response('', { status: 404 })
+  afterServe?.(path)
+  return response
 })
 const open = () => openAppProject('haptic-sports', BASE)
 const mustReject = async (work: Promise<unknown>, name: string) => { await expect(work).rejects.toMatchObject({ name }) }
 
-beforeEach(() => { resetDisk(); fetchMock.mockClear(); vi.stubGlobal('fetch', fetchMock) })
+beforeEach(() => { resetDisk(); afterServe = null; fetchMock.mockClear(); vi.stubGlobal('fetch', fetchMock) })
 afterEach(() => { vi.unstubAllGlobals() })
 
 describe('app project handle', () => {
@@ -139,13 +143,31 @@ describe('app project handle', () => {
     await expect(open()).rejects.toThrow('HTTP 500')
   })
 
-  it('gives an absolute URL only for the app project', async () => {
+  it('gives an absolute URL, versioned by the file, only for the app project', async () => {
     const root = await open()
     expect(isAppProject(root)).toBe(true)
     expect(isAppProject(memoryFolder({ 'a.txt': 'x' }).handle)).toBe(false)
-    expect(appProjectFileUrl(root, 'Saved/HapticViewer/a b+c.mp4')).toBe(`${BASE}Saved/HapticViewer/a%20b%2Bc.mp4`)
-    expect(appProjectFileUrl(await root.getDirectoryHandle('Saved'), 'HapticViewer/x.mp4')).toBe(`${BASE}Saved/HapticViewer/x.mp4`)
-    expect(appProjectFileUrl(memoryFolder({ 'a.txt': 'x' }).handle, 'a.txt')).toBeNull()
+    const video = () => disk.get('Saved/HapticViewer/a b+c.mp4')!
+    const first = await appProjectFileUrl(root, 'Saved/HapticViewer/a b+c.mp4')
+    expect(first).toBe(`${BASE}Saved/HapticViewer/a%20b%2Bc.mp4?v=${video().mtimeMs}-5`)
+    expect(await appProjectFileUrl(root, 'Saved/HapticViewer/a b+c.mp4')).toBe(first)
+    expect(await appProjectFileUrl(await root.getDirectoryHandle('Saved'), 'HapticViewer/A B+C.MP4')).toBe(first)
+    write('Saved/HapticViewer/a b+c.mp4', 'video2')
+    expect(await appProjectFileUrl(root, 'Saved/HapticViewer/a b+c.mp4')).toBe(`${BASE}Saved/HapticViewer/a%20b%2Bc.mp4?v=${video().mtimeMs}-6`)
+    await mustReject(appProjectFileUrl(root, 'Saved/HapticViewer/none.mp4'), 'NotFoundError')
+    await mustReject(appProjectFileUrl(root, 'Saved/HapticViewer'), 'NotFoundError')
+    expect(await appProjectFileUrl(memoryFolder({ 'a.txt': 'x' }).handle, 'a.txt')).toBeNull()
+  })
+
+  it('finds a name whatever its case, as File System Access does on Windows, and keeps the name on disk', async () => {
+    const root = await open()
+    const viewer = await (await root.getDirectoryHandle('saved')).getDirectoryHandle('HAPTICVIEWER')
+    expect(viewer.name).toBe('HapticViewer')
+    const file = await viewer.getFileHandle('Viewer-Lib.JSON')
+    expect(file.name).toBe('viewer-lib.json')
+    expect(await root.resolve(file)).toEqual(['Saved', 'HapticViewer', 'viewer-lib.json'])
+    expect(JSON.parse(await (await file.getFile()).text())).toEqual(sampleViewerLibFile())
+    await mustReject(root.getFileHandle('SAVED'), 'TypeMismatchError')
   })
 
   it('a folder stamp changes with a written, added or removed file it picks, and with nothing else', async () => {
@@ -197,9 +219,84 @@ describe('sceneStore with the app project', () => {
     expect(s.recordingFrom).toBe('open')
     expect(saved).not.toHaveBeenCalled()
     expect(registered).not.toHaveBeenCalled()
-    const reads = fetchMock.mock.calls.length
-    expect(await sceneVideoUrl(root, 'a b+c.mp4')).toBe(`${BASE}Saved/HapticViewer/a%20b%2Bc.mp4`)
-    expect(fetchMock.mock.calls.length).toBe(reads)
+    // The URL names the file and its version; the video itself is never fetched here (the video element streams it).
+    const url = await sceneVideoUrl(root, 'a b+c.mp4')
+    expect(url).toBe(`${BASE}Saved/HapticViewer/a%20b%2Bc.mp4?v=${disk.get('Saved/HapticViewer/a b+c.mp4')!.mtimeMs}-5`)
+    expect(fetchMock.mock.calls.every(([u]) => !String(u).includes('.mp4') || String(u).endsWith('?list'))).toBe(true)
+  })
+
+  it('a video Studio replaced opens the project again with a new video URL; an unchanged one keeps its URL', async () => {
+    const { useSceneStore, sceneVideoUrl, root } = await openPage()
+    const first = await sceneVideoUrl(root, 'a b+c.mp4')
+    write('Saved/HapticViewer/viewer-lib.json', disk.get('Saved/HapticViewer/viewer-lib.json')!.text)
+    await useSceneStore.getState().checkDisk()
+    expect(useSceneStore.getState().root).toBe(root)
+    expect(await sceneVideoUrl(root, 'a b+c.mp4')).toBe(first)
+    write('Saved/HapticViewer/a b+c.mp4', 'video, new take')
+    await useSceneStore.getState().checkDisk()
+    const second = await sceneVideoUrl(root, 'a b+c.mp4')
+    expect(second).not.toBe(first)
+    expect(second).toContain('?v=')
+    expect(useSceneStore.getState().items[useSceneStore.getState().cur].kind).toBe('full')
+  })
+
+  it('a save landing while the project opens is read on the next check (stamped before it was read)', async () => {
+    const file = viewerData()
+    file.events[0].gain = 0.3
+    // viewer-data.json is rewritten just after the open read it.
+    afterServe = path => { if (path === VIEWER_DATA) { afterServe = null; write(VIEWER_DATA, JSON.stringify(file)) } }
+    const { useSceneStore } = await openPage()
+    expect(useSceneStore.getState().recorded?.full.events[0].gain).not.toBe(0.3)
+    await useSceneStore.getState().checkDisk()
+    expect(useSceneStore.getState().recorded?.full.events[0].gain).toBe(0.3)
+  })
+
+  it('a cue table saved just after it was read is read on the next check (one read for the table and its base)', async () => {
+    const table = sampleTable()
+    table.cues.button.haptics![0].gain = 0.35
+    let reads = 0
+    afterServe = path => { if (path === lib.paths.cues && ++reads === 1) write(lib.paths.cues, serializeCueTable(table)) }
+    const { useSceneStore } = await openPage()
+    afterServe = null
+    expect(useSceneStore.getState().table?.cues.button.haptics?.[0].gain).not.toBe(0.35)
+    await useSceneStore.getState().checkDisk()
+    expect(useSceneStore.getState().table?.cues.button.haptics?.[0].gain).toBe(0.35)
+  })
+
+  it('a project whose table did not read at open goes on being checked, and reads once Studio fixed it', async () => {
+    const good = disk.get(lib.paths.cues)!.text
+    write(lib.paths.cues, '{"broken": ')
+    const { useSceneStore } = await openPage()
+    expect(useSceneStore.getState().table).toBeNull()
+    expect(useSceneStore.getState().notice?.error).toBe(true)
+    await useSceneStore.getState().checkDisk()
+    expect(useSceneStore.getState().table).toBeNull()
+    write(lib.paths.cues, good)
+    await useSceneStore.getState().checkDisk()
+    expect(useSceneStore.getState().table).not.toBeNull()
+    // Detection goes on afterwards (a recording change is read).
+    const file = viewerData()
+    file.events[0].gain = 0.45
+    write(VIEWER_DATA, JSON.stringify(file))
+    await useSceneStore.getState().checkDisk()
+    expect(useSceneStore.getState().recorded?.full.events[0].gain).toBe(0.45)
+  })
+
+  it('a folder chosen while another opens is opened after it, not dropped', async () => {
+    vi.resetModules()
+    vi.stubGlobal('window', { addEventListener() {}, removeEventListener() {} })
+    vi.doMock('@/utils/localDirectory', async original => ({ ...await original<typeof import('@/utils/localDirectory')>(), saveDirectoryHandle: saved }))
+    vi.doMock('@/utils/sceneRegistry', async original => ({ ...await original<typeof import('@/utils/sceneRegistry')>(), registerSceneProject: registered }))
+    const { useSceneStore } = await import('@/stores/sceneStore')
+    const app = await import('./appProject')
+    const first = await app.openAppProject('first', BASE), second = await app.openAppProject('second', BASE)
+    const opening = useSceneStore.getState().openAppProject(first)
+    expect(useSceneStore.getState().busy).toBe(true)
+    await useSceneStore.getState().openAppProject(second)
+    await opening
+    await vi.waitFor(() => { expect(useSceneStore.getState().root).toBe(second) })
+    await vi.waitFor(() => { expect(useSceneStore.getState().busy).toBe(false) })
+    expect(useSceneStore.getState().table).not.toBeNull()
   })
 
   it('reads nothing again while nothing changed on disk', async () => {

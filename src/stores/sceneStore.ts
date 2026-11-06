@@ -163,7 +163,9 @@ function mono(b: AudioBuffer): Float32Array {
 
 /**
  * The mp4s are read from the project folder: one Blob URL per file while the project is open. The player app's project
- * streams its video from its own absolute URL instead (by Range, never read whole; SceneRuntime.loadItem compares it with video.src).
+ * streams its video from its own absolute URL instead (by Range, never read whole), versioned by the file's size and
+ * time: SceneRuntime.loadItem compares it with video.src, so a video replaced on disk (read again when the project is
+ * opened again) loads anew while an unchanged one keeps playing.
  */
 const videoUrls = new Map<string, Promise<string>>()
 function clearVideoUrls() {
@@ -173,8 +175,8 @@ function clearVideoUrls() {
 export function sceneVideoUrl(root: FileSystemDirectoryHandle, file: string): Promise<string> {
   let url = videoUrls.get(file)
   if (!url) {
-    const direct = appProjectFileUrl(root, `${VIEWER_DIR}/${file}`)
-    url = direct !== null ? Promise.resolve(direct) : readProjectFile(root, `${VIEWER_DIR}/${file}`).then(f => URL.createObjectURL(f))
+    const path = `${VIEWER_DIR}/${file}`
+    url = isAppProject(root) ? appProjectFileUrl(root, path).then(u => u!) : readProjectFile(root, path).then(f => URL.createObjectURL(f))
     url.catch(() => videoUrls.delete(file))
     videoUrls.set(file, url)
   }
@@ -208,8 +210,8 @@ export const useSceneStore = create<SceneState>((set, get) => {
       addLog(`${lib.paths.cues}: no cue table yet`)
       return
     }
-    const file = await readProjectFile(root, lib.paths.cues)
-    sync.reset(await file.text(), file.lastModified)
+    // The text the table was parsed from (one read: a save landing after it differs from it and is read again).
+    sync.reset(files.text, files.mtime)
     const loops = loopCuesOf(files.table)
     if (loops.join('\n') !== lib.loop_cues.join('\n')) set({ lib: { ...lib, loop_cues: loops } })
     const pcm: Record<string, Float32Array> = {}, sfx: Record<string, AudioBuffer> = {}
@@ -405,11 +407,15 @@ export const useSceneStore = create<SceneState>((set, get) => {
   /** What the open app project's files were when it was read (appFolderStamp); null for any other project. */
   let appStamp: { lib: string; recording: string; wavs: string } | null = null
   const VIDEO_FILE = /\.(mp4|m4v|mov|webm)$/i
-  const readAppStamp = async (root: FileSystemDirectoryHandle, lib: SceneLib) => ({
+  /** viewer-lib.json with the video (lib), viewer-data.json (recording). */
+  const readViewerStamp = async (root: FileSystemDirectoryHandle) => ({
     lib: await appFolderStamp(root, VIEWER_DIR, name => name === 'viewer-lib.json' || VIDEO_FILE.test(name)),
     recording: await appFolderStamp(root, VIEWER_DIR, name => name === 'viewer-data.json'),
-    wavs: (await Promise.all([lib.paths.clips, lib.paths.sounds].map(dir => appFolderStamp(root, dir, name => /\.wav$/i.test(name))))).join('#'),
   })
+  /** The clip and cue-sound WAVs ('#' at least, so never ''). */
+  const readWavStamp = async (root: FileSystemDirectoryHandle, lib: SceneLib) =>
+    (await Promise.all([lib.paths.clips, lib.paths.sounds].map(dir => appFolderStamp(root, dir, name => /\.wav$/i.test(name))))).join('#')
+  const readAppStamp = async (root: FileSystemDirectoryHandle, lib: SceneLib) => ({ ...await readViewerStamp(root), wavs: await readWavStamp(root, lib) })
   /** The recording apart from its firings' own gains (what Studio's per-firing strength edits change). */
   const withoutGains = (data: SceneData) => JSON.stringify({ ...data, full: { ...data.full, events: data.full.events.map(({ gain: _gain, ...ev }) => ev) } })
   /**
@@ -490,6 +496,9 @@ export const useSceneStore = create<SceneState>((set, get) => {
     restoredNotice = null
     // The open project's firing gains are written before another project's files are read.
     await flushFirings()
+    // The app project's viewer files are stamped before they are read: a save landing after this differs from the stamp
+    // and is read again by checkAppProject (stamped after the read, it would pass for read).
+    const viewerStamp = isAppProject(handle) ? await readViewerStamp(handle) : null
     const opened = await openSceneProject(handle)
     if (!opened.ok && opened.reason === 'noLib') {
       const notice = opened.oldFormat ? oldFormatNotice(handle.name) : { id: 'scene.open.noLib' as const, params: { folder: handle.name, dir: VIEWER_DIR }, error: true }
@@ -515,11 +524,17 @@ export const useSceneStore = create<SceneState>((set, get) => {
     rememberSceneProject(opened.lib.project_name)
     // The old project's firing gains that could still not be written (after the flush above) stop here, said once.
     const unsaved = firingRoot && firingRoot !== handle ? abandonFirings() : null
-    // The app project's files as they are now (what changes after this is read again by checkAppProject).
+    // The app project's files as they were read (what changes after this is read again by checkAppProject); the WAVs are
+    // stamped here, before loadTable reads them.
     appStamp = null
-    const stamp = isAppProject(handle) ? await readAppStamp(handle, opened.lib) : null
+    const stamp = viewerStamp ? { ...viewerStamp, wavs: await readWavStamp(handle, opened.lib) } : null
     set({ root: handle, lib: opened.lib, recorded: opened.data, recordingFrom: 'open', overrides: [], data: opened.data, items: buildItems(opened.data), sel: null, cur: 0, empty: null, table: null, noTable: false, projectKit: undefined, kitError: null })
-    await loadTable()
+    try { await loadTable() } catch (error) {
+      // The project stays open without its table; with its WAVs counted unread, every check reads the table again
+      // until it reads (a WAV or the table that Studio was still writing, say), instead of never checking again.
+      if (stamp) appStamp = { ...stamp, wavs: '' }
+      throw error
+    }
     appStamp = stamp
     restoreJournal()
     const dropped = opened.data.droppedChapters
@@ -541,13 +556,20 @@ export const useSceneStore = create<SceneState>((set, get) => {
     : error instanceof StaleClipGainKeyError ? { id: 'clipGain.staleKey', params: staleParams(error, get().lib?.paths.cues), error: true }
       : { id: 'scene.open.failed', params: { error: message(error) }, error: true }
   let restoring: Promise<void> | null = null
+  /** An app project to open once the store is free: the app switched folders while another open (or work) ran. */
+  let pendingApp: FileSystemDirectoryHandle | null = null
   const guarded = async (work: () => Promise<void>) => {
     if (get().busy) return
     set({ busy: true })
     try { await work() } catch (error) {
       note(errorNotice(error))
       addLog(message(error))
-    } finally { set({ busy: false }) }
+    } finally {
+      set({ busy: false })
+      const next = pendingApp
+      pendingApp = null
+      if (next) void get().openAppProject(next)
+    }
   }
 
   return {
@@ -571,11 +593,15 @@ export const useSceneStore = create<SceneState>((set, get) => {
       })
       return restoring
     },
-    openAppProject: handle => guarded(async () => {
-      if (!await openFolder(handle)) return
-      const full = get().items.findIndex(it => it.kind === 'full')
-      if (full >= 0) get().select(full)
-    }),
+    openAppProject: handle => {
+      // Not dropped while busy: the last folder asked for opens when the store is free (guarded runs it).
+      if (get().busy) { pendingApp = handle; return Promise.resolve() }
+      return guarded(async () => {
+        if (!await openFolder(handle)) return
+        const full = get().items.findIndex(it => it.kind === 'full')
+        if (full >= 0) get().select(full)
+      })
+    },
     checkDisk: async () => {
       const s = get()
       await Promise.all([checkOutside(), s.root && s.table?.kit && !s.busy ? loadKit().catch(() => {}) : undefined, checkAppProject()])

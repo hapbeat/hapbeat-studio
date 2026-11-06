@@ -28,6 +28,16 @@ async function list(base: string, path: string): Promise<ListEntry[]> {
   return body.entries as ListEntry[]
 }
 
+/**
+ * Entry `name` of folder `dir`, the name as it is on disk. The app runs on Windows, where Chromium's File System Access
+ * finds a file whatever the case of its name (a project Studio opened may name `Click.wav` for `click.wav`); so does this.
+ */
+async function findEntry(base: string, dir: string, name: string): Promise<ListEntry | undefined> {
+  const entries = await list(base, dir)
+  const lower = name.toLowerCase()
+  return entries.find(e => e.name === name) ?? entries.find(e => e.name.toLowerCase() === lower)
+}
+
 abstract class AppEntry {
   abstract readonly kind: 'file' | 'directory'
   constructor(readonly name: string, readonly path: string, readonly base: string) {}
@@ -54,18 +64,18 @@ class AppFile extends AppEntry {
 class AppDirectory extends AppEntry {
   readonly kind = 'directory' as const
   private async entry(name: string, create: boolean | undefined, kind: 'file' | 'directory'): Promise<ListEntry> {
-    const found = (await list(this.base, this.path)).find(e => e.name === name)
+    const found = await findEntry(this.base, this.path, name)
     if (!found) throw create ? readOnly(join(this.path, name)) : notFound(join(this.path, name))
     if (found.kind !== kind) throw mismatch(join(this.path, name))
     return found
   }
   async getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<AppDirectory> {
-    await this.entry(name, options?.create, 'directory')
-    return new AppDirectory(name, join(this.path, name), this.base)
+    const found = await this.entry(name, options?.create, 'directory')
+    return new AppDirectory(found.name, join(this.path, found.name), this.base)
   }
   async getFileHandle(name: string, options?: { create?: boolean }): Promise<AppFile> {
-    await this.entry(name, options?.create, 'file')
-    return new AppFile(name, join(this.path, name), this.base)
+    const found = await this.entry(name, options?.create, 'file')
+    return new AppFile(found.name, join(this.path, found.name), this.base)
   }
   async *entries(): AsyncGenerator<[string, AppFile | AppDirectory]> {
     for (const e of await list(this.base, this.path)) {
@@ -97,10 +107,19 @@ export async function openAppProject(name: string, base = '/__project/'): Promis
 
 export const isAppProject = (handle: unknown) => handle instanceof AppDirectory
 
-/** The absolute URL of `path` under the app's project folder; null for any other handle (a folder Studio opened itself). */
-export function appProjectFileUrl(handle: unknown, path: string): string | null {
+/**
+ * The absolute URL of file `path` under the app's project folder, with the file's modification time and size as `?v=`
+ * (the app serves the file whatever the query): a file replaced on disk gets another URL, so a video element given it
+ * loads the new file instead of keeping the old one. null for any other handle (a folder Studio opened itself);
+ * NotFoundError when the file is not there.
+ */
+export async function appProjectFileUrl(handle: unknown, path: string): Promise<string | null> {
   if (!(handle instanceof AppDirectory)) return null
-  return fileUrl(handle.base, join(handle.path, path))
+  const full = join(handle.path, path), cut = full.lastIndexOf('/')
+  const dir = cut < 0 ? '' : full.slice(0, cut)
+  const found = await findEntry(handle.base, dir, full.slice(cut + 1))
+  if (!found || found.kind !== 'file') throw notFound(full)
+  return `${fileUrl(handle.base, join(dir, found.name))}?v=${found.mtimeMs}-${found.size}`
 }
 
 /**
