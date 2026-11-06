@@ -24,7 +24,7 @@ import { barDragRatio, recordedIndexMap, recordedName, selectableFirings, streng
 import { dragAxes, firingNumber, firingNumbers, isEmitted, numbersInRange, repeatRange, repeatRangeText, snapDt, tableHasSfx, visibleLanes } from '@/utils/sceneTimelineEdit'
 import { useSceneTimelineRange } from '@/stores/sceneTimelineRange'
 import type { SceneEvent } from '@/utils/sceneData'
-import { SceneFiringCard, SceneLockToggles } from './SceneFiringCard'
+import { SceneLockToggles } from './SceneFiringPanel'
 
 /**
  * A drawn marker; `gain`: what its bar shows in its lane (sound: the gain it plays at; haptics: the app gain,
@@ -69,7 +69,7 @@ const REPEAT_FILL = 'rgba(61,214,208,.10)', REPEAT_EDGE = 'rgba(61,214,208,.75)'
  * over an empty part of the haptic lane selects every firing in that time range, and a drag on a selected bar changes
  * every selected firing (viewer-edits.json): vertical = strength, horizontal = time (frame-snapped), each unless locked
  * (studio-scene-ui.json lockTime / lockGain; Shift keeps only the larger axis). Alt + wheel: ±1 dB (Shift ±3 dB), one
- * undo step per burst (not while the strength is locked). The firing card (SceneFiringCard) floats over the panel while firings are selected.
+ * undo step per burst (not while the gain is locked). The selected firings' gain and time are also edited in the 「発生」 panel (SceneFiringPanel).
  * Every firing of the full replay is drawn at any zoom (a moment's own firings normal, the rest dimmed to DIMMED);
  * emitted firings (cue table `emit`) are drawn hollow, not numbered and not in the list. What repeats (repeatRange: a
  * moment from its lead-in to its end, W's part or a loop cue span, a chapter) is a band with edge lines, named in the
@@ -489,7 +489,7 @@ export function SceneTimelinePanel() {
       const delta = wheelPixels(event, r.width)
       event.preventDefault(); event.stopPropagation()
       if (event.altKey && useSceneStrength.getState().selected.size) {
-        // 「強さをロック」: the strength stays (the notch is used up, nothing pans).
+        // 「ゲインをロック」: the gain stays (the notch is used up, nothing pans).
         if (useSceneSettings.getState().lockGain) return
         // Shift + wheel may come as a horizontal delta.
         const d = event.deltaY || event.deltaX
@@ -521,7 +521,6 @@ export function SceneTimelinePanel() {
       <SceneOutputToggles />
     </div>
     <canvas className="scene-timeline-canvas" ref={canvas} tabIndex={0} title={t('scene.timeline.hint')} onMouseDown={onMouseDown} onMouseMove={onMouseMove} />
-    <SceneFiringCard />
     <div className="scene-help">{t('scene.keys')}{hasChapters ? t('scene.keys.chapters') : ''}</div>
   </div>
 }

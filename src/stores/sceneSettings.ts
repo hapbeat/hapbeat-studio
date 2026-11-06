@@ -12,8 +12,8 @@ function read(): SceneUiSettings {
   try { return parseStoredSceneUi(localStorage.getItem(SCENE_UI_STORAGE_KEY)) ?? { ...DEFAULT_SCENE_UI } } catch { return { ...DEFAULT_SCENE_UI } }
 }
 export function sceneUiSettings(state: SceneUiSettings): SceneUiSettings {
-  const { pcSound, loop, sendHaptics, leadSec, dockLayout, lanes, lockTime, lockGain, cardPos } = state
-  return { pcSound, loop, sendHaptics, leadSec, dockLayout, lanes, lockTime, lockGain, cardPos }
+  const { pcSound, loop, sendHaptics, leadSec, dockLayout, lanes, lockTime, lockGain } = state
+  return { pcSound, loop, sendHaptics, leadSec, dockLayout, lanes, lockTime, lockGain }
 }
 function store(settings: SceneUiSettings) {
   try { localStorage.setItem(SCENE_UI_STORAGE_KEY, JSON.stringify(settings)) } catch { /* UI preferences must not prevent work. */ }

@@ -16,7 +16,7 @@ import { parseEventKey } from '@/utils/cueEvents'
  * 「強さ」 panel = the master mixer (DEC-112): the overall fader (this PC's, scenePlayback, applied when sending, not in
  * the bars) and one vertical fader per haptic event with firings in the recording (or the chapter playing), editing its
  * route gain in the cue table (live, one undo step per drag), with M / S for this session. The faders wrap into rows so
- * all of them show at once. Single firings are edited on the timeline (SceneFiringCard). The header has the versions
+ * all of them show at once. Single firings are edited on the timeline and in the 「発生」 panel (SceneFiringPanel). The header has the versions
  * menu (「版」) and the entries of viewer-edits.json that match no recorded firing.
  */
 export function SceneStrengthPanel() {

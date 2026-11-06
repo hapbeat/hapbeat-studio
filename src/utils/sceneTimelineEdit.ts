@@ -5,7 +5,7 @@ import { recordedIndexMap, recordedName } from './sceneStrength'
 
 /**
  * The Scene timeline's editing (DEC-112), pure parts: firing numbers (the moments list's rows, shared by the bar
- * labels and the card), the list's rows and the rows in the timeline's view, the repeat range, the drag axes under the
+ * labels and the 「発生」 panel), the list's rows and the rows in the timeline's view, the repeat range, the drag axes under the
  * locks, frame snapping of a time drag, and which lanes are drawn.
  */
 
@@ -123,18 +123,4 @@ export const tableHasSfx = (table: CueTable | null) => !!table && Object.values(
 export function visibleLanes(lanes: { sound: boolean; haptics: boolean }, hasSfx: boolean): { sound: boolean; haptics: boolean } {
   const sound = lanes.sound && hasSfx
   return { sound, haptics: lanes.haptics || !sound }
-}
-
-/** A selected bar this close (CSS px) to the firing card (SceneFiringCard)'s side counts as under it. */
-const BAR_MARGIN = 6
-
-/**
- * Where the card is drawn in a `panel` × `card` sized box: `pos` (from the panel's right or left edge, and its top) kept
- * inside the panel, on the right unless a selected bar (`xs`, CSS px from the panel's left) would be under it there and
- * none would be on the left (then mirrored: the same distance from the left edge).
- */
-export function cardPlace(pos: { right: number; top: number }, panel: { w: number; h: number }, card: { w: number; h: number }, xs: readonly number[]): { side: 'right' | 'left'; x: number; top: number } {
-  const x = Math.max(0, Math.min(pos.right, panel.w - card.w)), top = Math.max(0, Math.min(pos.top, panel.h - card.h))
-  const covers = (a: number) => xs.some(bx => bx >= a - BAR_MARGIN && bx <= a + card.w + BAR_MARGIN)
-  return { side: covers(panel.w - x - card.w) && !covers(x) ? 'left' : 'right', x, top }
 }

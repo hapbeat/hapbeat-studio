@@ -171,22 +171,20 @@
 /* Timeline header: the lane chips and the locks, each one segmented shape (two labels side by side). */
 .scene-seg.scene-tl-seg > button.sound.on { background: var(--sound-soft); color: var(--sound-strong); }
 .scene-seg.scene-tl-seg > button:disabled { opacity: .45; cursor: default; }
-/* The selected firings' card: over the timeline panel's top-right (its place kept, inside the panel; mirrored to the left over selected bars). */
-.scene-card { position: absolute; z-index: 4; display: flex; flex-direction: column; gap: 6px; box-sizing: border-box; width: 300px; max-width: calc(100% - 16px);
-  padding: 6px 8px 8px; background: var(--bg-secondary); border: 1px solid var(--border-light); border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.45);
+/* 「発生」 panel: the selected firings' gain and time, compact (two columns where it fits). */
+.scene-firing { display: flex; flex-direction: column; gap: 4px; height: 100%; min-height: 0; overflow: auto; box-sizing: border-box; padding: 6px 8px;
   font-size: 12px; font-variant-numeric: tabular-nums; }
-.scene-card-head { display: flex; align-items: center; gap: 6px; }
-.scene-card-grip { flex: none; padding: 0 2px; color: var(--text-muted); cursor: move; user-select: none; touch-action: none; }
-.scene-card-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--text-primary); }
-.scene-card-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
-/* The locks and the reset / Undo / Redo share one row (the card stays short enough for the default timeline panel). */
-.scene-card-actions { flex-wrap: wrap; row-gap: 4px; }
-.scene-card-label { flex: none; width: 5em; color: var(--text-muted); }
-.scene-card-row input[type="range"] { flex: 1; min-width: 40px; }
-.scene-card .scene-number { width: 68px; }
+.scene-firing-empty { color: var(--text-muted); }
+.scene-firing-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--text-primary); }
+.scene-firing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 4px 16px; align-items: center; }
+.scene-firing-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.scene-firing-actions { flex-wrap: wrap; row-gap: 4px; }
+.scene-firing-label { flex: none; width: 3.5em; color: var(--text-muted); }
+.scene-firing-row input[type="range"] { flex: 1; min-width: 40px; }
+.scene-firing .scene-number { width: 68px; }
 /* The breakdown: one line of fixed height (red when the sent value is clipped). */
-.scene-card-line { min-height: 1.4em; color: var(--text-muted); }
-.scene-card-line.clipped { color: #ff8a80; }
+.scene-firing-line { min-height: 1.4em; color: var(--text-muted); }
+.scene-firing-line.clipped { color: #ff8a80; }
 
 /* Chapters (moments panel): label and range, the one playing marked like a selected row. */
 .scene-chapters { border-bottom: 1px solid var(--border); }

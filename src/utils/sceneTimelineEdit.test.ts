@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cardPlace, dragAxes, firingMoments, firingNumber, firingNumbers, firingRows, numberRangeText, numbersInRange, repeatRange, repeatRangeText, shownIndexOf, snapDt, tableHasSfx, visibleLanes } from './sceneTimelineEdit'
+import { dragAxes, firingMoments, firingNumber, firingNumbers, firingRows, numberRangeText, numbersInRange, repeatRange, repeatRangeText, shownIndexOf, snapDt, tableHasSfx, visibleLanes } from './sceneTimelineEdit'
 import { sampleTable } from './sceneTestFixtures'
 import type { SceneEvent, SceneItem } from './sceneData'
 
@@ -77,18 +77,5 @@ describe('sceneTimelineEdit', () => {
     expect(visibleLanes({ sound: true, haptics: false }, true)).toEqual({ sound: true, haptics: false })
     expect(visibleLanes({ sound: true, haptics: false }, false)).toEqual({ sound: false, haptics: true })
     expect(visibleLanes({ sound: false, haptics: false }, true)).toEqual({ sound: false, haptics: true })
-  })
-})
-
-describe('the firing card\u2019s place', () => {
-  const panel = { w: 600, h: 175 }, card = { w: 300, h: 140 }
-  it('stays inside the panel (a place kept for a bigger panel is pulled in)', () => {
-    expect(cardPlace({ right: 8, top: 430 }, panel, card, [])).toEqual({ side: 'right', x: 8, top: 35 })
-    expect(cardPlace({ right: 500, top: 10 }, panel, card, [])).toEqual({ side: 'right', x: 300, top: 10 })
-  })
-  it('goes to the left while a selected bar would be under it on the right, unless one is under the left too', () => {
-    expect(cardPlace({ right: 8, top: 40 }, panel, card, [100])).toMatchObject({ side: 'right' })
-    expect(cardPlace({ right: 8, top: 40 }, panel, card, [450])).toMatchObject({ side: 'left', x: 8 })
-    expect(cardPlace({ right: 8, top: 40 }, panel, card, [100, 450])).toMatchObject({ side: 'right' })
   })
 })
