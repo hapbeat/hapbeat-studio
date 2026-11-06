@@ -26,9 +26,6 @@ export function useSceneSettingsFolderSync(root: FileSystemDirectoryHandle | nul
       lastWritten = text
       void writeSceneUiSettings(root, text).catch(error => { lastWritten = ''; noticeRef.current({ kind: 'failed', error: message(error) }) })
     }
-    // Per-firing editing is the project's own (confirmed there): off for every newly opened project until its valid
-    // settings file says otherwise (also when that file cannot be read).
-    if (useSceneSettings.getState().editFirings) useSceneSettings.getState().update({ editFirings: false })
     void (async () => {
       try {
         const folderText = await readSceneUiSettings(root)

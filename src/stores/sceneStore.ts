@@ -3,8 +3,8 @@ import { documentMessage, type MessageId, type MessageParams } from '@/i18n/mess
 import { appFolderStamp, appProjectFileUrl, isAppProject } from '@/utils/appProject'
 import { loadDirectoryHandle, saveDirectoryHandle } from '@/utils/localDirectory'
 import { buildItems, VIEWER_DIR, type SceneData, type SceneItem, type SceneLib } from '@/utils/sceneData'
-import { alignClipGains, CLIP_GAIN_RENAME_SCRIPT, kitCopyDiffers, loopCuesOf, SceneFormatError, serializeCueTable, StaleClipGainKeyError, validateCueTable, type CueTable } from '@/utils/sceneCueTable'
-import { createSceneTable, listWavs, openSceneProject, readProjectFile, readSceneTable, writeProjectFile, writeSceneSave, type PendingWavs } from '@/utils/sceneProject'
+import { alignClipGains, CLIP_GAIN_RENAME_SCRIPT, kitCopyDiffers, loopCuesOf, parseCueTable, SceneFormatError, serializeCueTable, StaleClipGainKeyError, validateCueTable, type CueTable } from '@/utils/sceneCueTable'
+import { createSceneTable, isNotFound, listWavs, openSceneProject, readProjectFile, readSceneTable, writeProjectFile, writeSceneSave, type PendingWavs } from '@/utils/sceneProject'
 import { CueTableSync } from '@/utils/cueTableSync'
 import { clearJournal, journalKey, readJournal, restoreFromJournal, writeJournal } from '@/utils/sceneJournal'
 import { applyOverrides, type SceneOverride } from '@/utils/sceneOverrides'
@@ -12,7 +12,8 @@ import { applyEmits, emitSignature, newEmitSeed } from '@/utils/sceneEmit'
 import { pageVisible, perfTrack } from '@/utils/perfRegistry'
 import { RATE } from '@/utils/sceneHaptics'
 import { lastSceneProject, lookupSceneProject, registerSceneProject, rememberSceneProject, restoreSceneHandle } from '@/utils/sceneRegistry'
-import { rewriteViewerDataGains, type FiringGainChange } from '@/utils/viewerDataGains'
+import { applyEdits, emptyEdits, matchEdits, parseViewerEdits, retimed, serializeViewerEdits, setEditFor, VIEWER_EDITS_FILE, type FiringChange, type ViewerEdits } from '@/utils/sceneEdits'
+import { applyTableGains, archiveVersion, listVersions, readVersion, writeVersion, type SceneVersion, type VersionSnapshot } from '@/utils/sceneVersions'
 import { locateProjectKit, type ProjectKit } from '@/utils/sceneKit'
 import { onKitManifestWritten } from '@/utils/kitManifestWrites'
 
@@ -34,6 +35,8 @@ export interface SceneNotice { id: MessageId; params?: MessageParams; error?: bo
  */
 export type LinkResult = { ok: true } | { ok: false; reason: 'needsClick' | 'unregistered' | 'cancelled' | 'failed' | 'dirty' | 'otherOpen'; notice?: SceneNotice }
 export interface SceneSelection { name: string; /** Time in the current item's video; null when picked from the list. */ t: number | null }
+/** What restoreVersion did: `skipped` = the cue table's events it could not set (applyTableGains). */
+export type VersionRestore = { ok: true; skipped: string[]; table: { before: CueTable; after: CueTable } | null } | { ok: false; notice: SceneNotice }
 
 interface SceneState {
   root: FileSystemDirectoryHandle | null
@@ -58,12 +61,41 @@ interface SceneState {
   /** Replaces the overrides (data / items recomputed; the caller saves the file). */
   setOverrides: (overrides: SceneOverride[]) => void
   /**
-   * Sets recorded firings' own gains (viewer-data `events[i].gain` by index; the strength panel with per-firing editing
-   * on): `recorded` and `data` change at once (the runtime fires from them, the bars follow), and viewer-data.json is
-   * rewritten 300 ms after the last change, only those `gain` values (rewriteViewerDataGains). The recording is never
-   * read again from the file meanwhile (only the cue table is watched), so a pending change is not overwritten.
+   * The user's changes to single recorded firings (viewer-edits.json, contracts scene-recording §3.5; empty without the
+   * file). The recording is never written: these are laid over it (`edited`, then `data`).
    */
-  setFiringGains: (gains: ReadonlyMap<number, number>) => void
+  edits: ViewerEdits
+  /** `recorded` with `edits` laid over it (applyEdits): the recorded order, index i = recorded firing i. */
+  edited: SceneData | null
+  /** Which entry of `edits` each recorded firing has (recorded index → entry index; matchEdits). */
+  editsMatch: ReadonlyMap<number, number>
+  /** How many entries of `edits` match no recorded firing (a new recording); kept until removeOrphanEdits. */
+  editsOrphans: number
+  /**
+   * Changes recorded firings' gain / time (by recorded index; FiringChange: null = the recorded value again): `edited`
+   * and `data` change at once (the levels stay the same, so the video plays on) and viewer-edits.json is written 300 ms
+   * after the last change (the whole file). The first change of an opened project saves a `before-edit` version first.
+   */
+  setFiringEdits: (changes: ReadonlyMap<number, FiringChange>) => void
+  /** Removes the entries that match no recorded firing (editsOrphans), saved like any change. */
+  removeOrphanEdits: () => void
+  /**
+   * Called right before a strength edit (firing edits, the strength panel's event faders): the first one after a project
+   * opened saves a `before-edit` version (skipped when the newest version keeps the same files already).
+   */
+  versionBeforeEdit: () => void
+  /** Saves the current edits and cue table as a version named `label`; its id. */
+  saveVersion: (label: string) => Promise<string | null>
+  /** The project's versions, newest first. */
+  listVersions: () => Promise<SceneVersion[]>
+  /**
+   * Goes back to version `id`: the current state is saved as a `before-restore` version first, then the version's edits
+   * are written (an empty file when it had none) and its strength values are set in the current cue table
+   * (applyTableGains, one edit). `table`: the cue table before / after (the strength undo step), null when unchanged.
+   */
+  restoreVersion: (id: string) => Promise<VersionRestore>
+  /** Moves version `id` to `Saved/HapticViewer/_archive/versions/` (never deleted). */
+  deleteVersion: (id: string) => Promise<void>
   /** Seed of the emitted cues' firings (one per session, so a replay repeats them); `reseedEmit` draws a new one. */
   emitSeed: number
   reseedEmit: () => void
@@ -186,12 +218,41 @@ export function sceneVideoUrl(root: FileSystemDirectoryHandle, file: string): Pr
 export const useSceneStore = create<SceneState>((set, get) => {
   const note = (notice: SceneNotice) => set({ notice })
   const addLog = (text: string) => set(s => ({ log: [...s.log.slice(-199), `${new Date().toLocaleTimeString()}  ${text}`] }))
-  /** `data` for `table` (overrides applied, emitted cues' firings made); none while nothing is recorded. */
+  /**
+   * `data` for `table`: the edited recording (in time order, its moments made again when a firing moved: retimed), the
+   * overrides applied, emitted cues' firings made; none while nothing is recorded.
+   */
   const derivedData = (table: CueTable | null, overrides = get().overrides, emitSeed = get().emitSeed): { data: SceneData } | Record<string, never> => {
-    const { recorded, lib } = get()
+    const { recorded, edited, lib } = get()
     if (!recorded) return {}
-    const data = applyOverrides(recorded, overrides)
+    const data = applyOverrides(lib ? retimed(recorded, edited ?? recorded, lib) : edited ?? recorded, overrides)
     return { data: table && lib ? applyEmits(data, table, lib, emitSeed) : data }
+  }
+  /** `edits` laid over `recording`: the state fields edits / edited / editsMatch / editsOrphans. */
+  const overlay = (recording: SceneData, edits: ViewerEdits) => {
+    const m = matchEdits(recording.full.events, recording.fps, edits.firings)
+    return { edits, edited: applyEdits(recording, edits.firings, m.byEvent), editsMatch: m.byEvent, editsOrphans: m.orphans.length }
+  }
+  /** The moments as the list shows them (a time edit may move, add or drop one). */
+  const momentsKey = (data: SceneData | null) => data ? data.clips.map(c => `${c.name}@${c.at}`).join('|') : ''
+  /**
+   * Lays `edits` over the recording and recomputes `data` (the levels stay: the video plays on). When the moments
+   * changed (a firing moved), the list is made again and keeps the item shown (the same moment, else the same row).
+   */
+  const takeEdits = (edits: ViewerEdits) => {
+    const { recorded, data: before, items, cur } = get()
+    if (!recorded) { set({ edits }); return }
+    set(overlay(recorded, edits))
+    const derived = derivedData(get().table)
+    if (!derived.data) return
+    if (momentsKey(derived.data) === momentsKey(before)) { set({ data: derived.data }); return }
+    const next = buildItems(derived.data), was = items[cur]
+    let at = was?.kind === 'full' ? 0 : -1
+    if (was?.kind === 'clip') {
+      let best = Infinity
+      next.forEach((it, k) => { const d = Math.abs(it.at - was.at); if (it.kind === 'clip' && it.name === was.name && d < best) { best = d; at = k } })
+    }
+    set({ data: derived.data, items: next, cur: at >= 0 ? at : Math.min(cur, next.length - 1) })
   }
 
   /**
@@ -333,63 +394,137 @@ export const useSceneStore = create<SceneState>((set, get) => {
     })()
     try { await saving } finally { saving = null }
   }
-  // ── Firing gains → viewer-data.json (only `events[i].gain`; checked against the name and time read at that index) ──
-  const VIEWER_DATA = `${VIEWER_DIR}/viewer-data.json`
-  let firingPending = new Map<number, FiringGainChange>()
-  /** The project the pending firing gains belong to (a newly opened project still gets them written to the old one). */
-  let firingRoot: FileSystemDirectoryHandle | null = null
-  /** That project's name (the notices say which project's gains could not be written). */
-  let firingProject = ''
-  let firingTimer: ReturnType<typeof setTimeout> | null = null
-  let firingSaving: Promise<void> | null = null
+  // ── The user's firing edits → viewer-edits.json (the whole file; the recording is never written) ──
+  const EDITS_PATH = `${VIEWER_DIR}/${VIEWER_EDITS_FILE}`
+  /** The file as last read / written for the open project (null: there is none), with its modification time. */
+  let editsKnown: { text: string | null; mtime: number } = { text: null, mtime: 0 }
+  /** The text to write (null: nothing pending). */
+  let editsPending: string | null = null
+  /** The project the pending text belongs to (a newly opened project still gets it written to the old one). */
+  let editsRoot: FileSystemDirectoryHandle | null = null
+  /** That project's name (the notices say which project's edits could not be written). */
+  let editsProject = ''
+  let editsTimer: ReturnType<typeof setTimeout> | null = null
+  let editsSaving: Promise<void> | null = null
   /** After a failed write the next try waits longer (2 s, doubling up to 30 s); a write that works resets it. */
-  let firingRetryMs = 0
-  const scheduleFiringSave = (ms = 300) => { if (firingTimer) clearTimeout(firingTimer); firingTimer = setTimeout(() => { firingTimer = null; void saveFiringsNow() }, ms) }
-  const saveFiringsNow = async (): Promise<void> => {
-    if (firingSaving) { await firingSaving; if (firingPending.size) return saveFiringsNow(); return }
-    const root = firingRoot, changes = [...firingPending.values()]
-    if (!root || !changes.length) return
-    firingPending = new Map()
-    firingSaving = (async () => {
+  let editsRetryMs = 0
+  const readEditsText = async (root: FileSystemDirectoryHandle): Promise<{ text: string | null; mtime: number }> => {
+    try { const f = await readProjectFile(root, EDITS_PATH); return { text: await f.text(), mtime: f.lastModified } }
+    catch (error) { if (isNotFound(error)) return { text: null, mtime: 0 }; throw error }
+  }
+  const scheduleEditsSave = (ms = 300) => { if (editsTimer) clearTimeout(editsTimer); editsTimer = setTimeout(() => { editsTimer = null; void saveEditsNow() }, ms) }
+  /** Writes the pending text; a change made on disk meanwhile is overwritten (Studio's wins) and said so. */
+  const saveEditsNow = async (): Promise<void> => {
+    if (editsSaving) { await editsSaving; if (editsPending !== null) return saveEditsNow(); return }
+    const root = editsRoot, text = editsPending
+    if (!root || text === null) return
+    editsPending = null
+    editsSaving = (async () => {
       try {
-        const result = rewriteViewerDataGains(await (await readProjectFile(root, VIEWER_DATA)).text(), changes)
-        if (!result.ok) {
-          const notice = result.reason === 'mismatch' ? { id: 'scene.firings.mismatch' as const, params: { index: result.index, file: VIEWER_DATA }, error: true }
-            : { id: 'scene.firings.saveFailed' as const, params: { project: firingProject, error: result.error }, error: true }
-          note(notice); addLog(`${VIEWER_DATA}: firing gains not written (${result.reason === 'mismatch' ? `events[${result.index}] is not the firing Studio read` : result.error})`)
-          return
+        const disk = (await readEditsText(root)).text
+        const ours = root === get().root
+        if (ours && disk !== editsKnown.text && disk !== text) {
+          note({ id: 'scene.edits.overwritten', params: { file: EDITS_PATH } }); addLog(`${EDITS_PATH} changed outside Studio while an edit was unsaved: Studio's edits written over it`)
         }
-        await writeProjectFile(root, VIEWER_DATA, result.text)
-        firingRetryMs = 0
-        addLog(`firing gains (${changes.length}) → ${VIEWER_DATA}`)
+        await writeProjectFile(root, EDITS_PATH, text)
+        if (ours) editsKnown = { text, mtime: (await readProjectFile(root, EDITS_PATH)).lastModified }
+        editsRetryMs = 0
+        addLog(`firing edits → ${EDITS_PATH}`)
       } catch (error) {
-        // Kept and tried again later (a newer change of the same firing wins).
-        for (const c of changes) if (!firingPending.has(c.index)) firingPending.set(c.index, c)
-        firingRetryMs = Math.min(30000, firingRetryMs ? firingRetryMs * 2 : 2000)
-        if (!firingTimer) scheduleFiringSave(firingRetryMs)
-        note({ id: 'scene.firings.saveFailed', params: { project: firingProject, error: message(error) }, error: true }); addLog(message(error))
+        // Kept and tried again later (a newer change wins).
+        if (editsPending === null) editsPending = text
+        editsRetryMs = Math.min(30000, editsRetryMs ? editsRetryMs * 2 : 2000)
+        if (!editsTimer) scheduleEditsSave(editsRetryMs)
+        note({ id: 'scene.edits.saveFailed', params: { project: editsProject, error: message(error) }, error: true }); addLog(message(error))
       }
     })()
-    try { await firingSaving } finally { firingSaving = null }
+    try { await editsSaving } finally { editsSaving = null }
   }
   /** Writes whatever is pending now (after a write in flight, which it waits for). */
-  const flushFirings = async () => {
-    if (firingTimer) { clearTimeout(firingTimer); firingTimer = null }
-    if (firingSaving) await firingSaving
-    if (firingPending.size) await saveFiringsNow()
+  const flushEdits = async () => {
+    if (editsTimer) { clearTimeout(editsTimer); editsTimer = null }
+    if (editsSaving) await editsSaving
+    if (editsPending !== null) await saveEditsNow()
   }
   /**
-   * Another project replaces the open one while firing gains of the old one could not be written (flushFirings failed):
-   * its retries stop and one notice says which project and how many (they are not dropped silently).
+   * Another project replaces the open one while its edits could not be written (flushEdits failed): the retries stop
+   * and one notice says which project (they are not dropped silently).
    */
-  const abandonFirings = (): SceneNotice | null => {
-    if (firingTimer) { clearTimeout(firingTimer); firingTimer = null }
-    firingRetryMs = 0
-    const count = firingPending.size
-    firingPending = new Map(); firingRoot = null
-    if (!count) return null
-    addLog(`${firingProject}: ${count} firing gain(s) could not be written to ${VIEWER_DATA}`)
-    return { id: 'scene.firings.unsaved', params: { project: firingProject, count }, error: true }
+  const abandonEdits = (): SceneNotice | null => {
+    if (editsTimer) { clearTimeout(editsTimer); editsTimer = null }
+    editsRetryMs = 0
+    const lost = editsPending !== null
+    editsPending = null; editsRoot = null
+    if (!lost) return null
+    addLog(`${editsProject}: the firing edits could not be written to ${EDITS_PATH}`)
+    return { id: 'scene.edits.unsaved', params: { project: editsProject, file: EDITS_PATH }, error: true }
+  }
+  /**
+   * The edits of a file's text: missing = none; a file that cannot be read, or entries that do not fit (left out), are
+   * first kept under a new name (`viewer-edits.unreadable-<time>.json`, never deleted) since the next save rewrites it.
+   */
+  const editsFromText = async (root: FileSystemDirectoryHandle, text: string | null): Promise<{ edits: ViewerEdits; notice: SceneNotice | null }> => {
+    if (text === null) return { edits: emptyEdits(), notice: null }
+    let edits = emptyEdits(), problem: { error: string } | { count: number }
+    try {
+      const parsed = parseViewerEdits(text)
+      if (!parsed.dropped) return { edits: parsed.edits, notice: null }
+      edits = parsed.edits; problem = { count: parsed.dropped }
+    } catch (error) { problem = { error: message(error) } }
+    let keptAs = ''
+    if (!isAppProject(root)) {
+      keptAs = `viewer-edits.unreadable-${new Date().toISOString().replace(/[:.]/g, '-')}.json`
+      try { await writeProjectFile(root, `${VIEWER_DIR}/${keptAs}`, text) } catch (error) { addLog(`${VIEWER_DIR}/${keptAs}: ${message(error)}`); keptAs = '' }
+    }
+    addLog('error' in problem ? `${EDITS_PATH}: not read (${problem.error})` : `${EDITS_PATH}: ${problem.count} entr(ies) left out`)
+    const notice: SceneNotice = 'error' in problem
+      ? keptAs ? { id: 'scene.edits.unreadable', params: { file: EDITS_PATH, error: problem.error, keptAs }, error: true } : { id: 'scene.edits.unreadableNotKept', params: { file: EDITS_PATH, error: problem.error }, error: true }
+      : keptAs ? { id: 'scene.edits.dropped', params: { file: EDITS_PATH, count: problem.count, keptAs }, error: true } : { id: 'scene.edits.droppedNotKept', params: { file: EDITS_PATH, count: problem.count }, error: true }
+    return { edits, notice }
+  }
+  /**
+   * Reads viewer-edits.json again when it changed on disk and nothing is pending (every 2 s / on focus; the player app's
+   * project from checkAppProject, `force`).
+   */
+  const checkEditsOutside = async (force = false) => {
+    const { root, recorded, busy } = get()
+    if (!root || !recorded || (busy && !force) || editsPending !== null || editsSaving || editsTimer || (!force && (isAppProject(root) || !pageVisible()))) return
+    try {
+      const now = await readEditsText(root)
+      if (get().root !== root || editsPending !== null || editsSaving) return
+      const known = editsKnown
+      editsKnown = now
+      if (now.text === known.text) return
+      const { edits, notice } = await editsFromText(root, now.text)
+      if (get().root !== root || editsPending !== null || editsSaving) return
+      takeEdits(edits)
+      if (notice) note(notice)
+      addLog(`${EDITS_PATH} changed outside Studio: read again`)
+    } catch (error) { if (force) throw error /* else checked again later */ }
+  }
+
+  // ── Versions (Saved/HapticViewer/versions/; the player never reads them) ──
+  /** A before-edit version was saved (or tried) since the project opened. */
+  let versionedThisOpen = false
+  /** Version writes, one after another (a restore waits for an automatic one still being written). */
+  let versionWrites: Promise<unknown> = Promise.resolve()
+  const baseName = (path: string) => path.slice(path.lastIndexOf('/') + 1)
+  /** The edits (when there is a file or an entry) and the cue table as they are now in Studio. */
+  const snapshot = (): VersionSnapshot | null => {
+    const { lib, table, edits } = get()
+    if (!lib) return null
+    return { edits: edits.firings.length || editsKnown.text !== null ? serializeViewerEdits(edits) : null, table: table ? serializeCueTable(table) : null,
+      tableFile: baseName(lib.paths.cues), firings: edits.firings.length }
+  }
+  const queueVersion = <T,>(work: () => Promise<T>): Promise<T> => { const run = versionWrites.then(work, work); versionWrites = run.catch(() => {}); return run }
+  /** The edits as changed by Studio: laid over the recording, written 300 ms later to the open project. */
+  const changeEdits = (edits: ViewerEdits) => {
+    const { root, lib } = get()
+    if (!root || !lib) return
+    if (editsRoot !== root) { const unsaved = abandonEdits(); if (unsaved) note(unsaved); editsRoot = root; editsProject = lib.project_name }
+    takeEdits(edits)
+    editsPending = serializeViewerEdits(edits)
+    scheduleEditsSave()
   }
 
   /** Reads the file again when it changed outside Studio and nothing is unsaved (every 2 s and on focus). */
@@ -405,46 +540,49 @@ export const useSceneStore = create<SceneState>((set, get) => {
 
   // ── The player app's project: Studio saves into the folder the app reads (appProject); nothing is unsaved here ──
   /** What the open app project's files were when it was read (appFolderStamp); null for any other project. */
-  let appStamp: { lib: string; recording: string; wavs: string } | null = null
+  let appStamp: { lib: string; recording: string; edits: string; wavs: string } | null = null
   const VIDEO_FILE = /\.(mp4|m4v|mov|webm)$/i
-  /** viewer-lib.json with the video (lib), viewer-data.json (recording). */
+  /** viewer-lib.json with the video (lib), viewer-data.json (recording), viewer-edits.json (edits). */
   const readViewerStamp = async (root: FileSystemDirectoryHandle) => ({
     lib: await appFolderStamp(root, VIEWER_DIR, name => name === 'viewer-lib.json' || VIDEO_FILE.test(name)),
     recording: await appFolderStamp(root, VIEWER_DIR, name => name === 'viewer-data.json'),
+    edits: await appFolderStamp(root, VIEWER_DIR, name => name === VIEWER_EDITS_FILE),
   })
   /** The clip and cue-sound WAVs ('#' at least, so never ''). */
   const readWavStamp = async (root: FileSystemDirectoryHandle, lib: SceneLib) =>
     (await Promise.all([lib.paths.clips, lib.paths.sounds].map(dir => appFolderStamp(root, dir, name => /\.wav$/i.test(name))))).join('#')
   const readAppStamp = async (root: FileSystemDirectoryHandle, lib: SceneLib) => ({ ...await readViewerStamp(root), wavs: await readWavStamp(root, lib) })
-  /** The recording apart from its firings' own gains (what Studio's per-firing strength edits change). */
+  /** The recording apart from its firings' own gains (other tools may still write them into viewer-data.json). */
   const withoutGains = (data: SceneData) => JSON.stringify({ ...data, full: { ...data.full, events: data.full.events.map(({ gain: _gain, ...ev }) => ev) } })
   /**
-   * The app project's viewer-data.json changed. When only its firings' gains differ (Studio's per-firing strength), they
-   * replace the old ones and playback goes on untouched (the same levels: the runtime keeps its video). Anything else:
+   * The app project's viewer-data.json changed. When only its firings' gains differ, they replace the old ones and
+   * playback goes on untouched (the same levels: the runtime keeps its video); the edits are laid over it again. Anything else:
    * the new recording replaces the old one at the full replay, in one change, and the runtime keeps its position
    * (recordingFrom 'refresh').
    */
   const reloadRecording = async (root: FileSystemDirectoryHandle) => {
     const opened = await openSceneProject(root)
     if (!opened.ok) throw new Error(opened.error)
-    const { recorded, lib, table, overrides, emitSeed, chapter } = get()
+    const { recorded, lib, table, overrides, emitSeed, chapter, edits } = get()
     if (get().root !== root || !recorded || !lib) return
     const next = opened.data
     if (withoutGains(next) === withoutGains(recorded)) {
       let changed = 0
       const events = recorded.full.events.map((ev, i) => { const gain = next.full.events[i].gain; if (gain === ev.gain) return ev; changed++; return { ...ev, gain } })
       if (!changed) return
-      set({ recorded: { ...recorded, full: { ...recorded.full, events } } })
+      const recording = { ...recorded, full: { ...recorded.full, events } }
+      set({ recorded: recording, ...overlay(recording, edits) })
       const derived = derivedData(table)
       if (derived.data) set({ data: derived.data })
       addLog(`${VIEWER_DIR}/viewer-data.json changed: ${changed} firing gain(s) read again`)
       return
     }
     const nextLib = { ...opened.lib, loop_cues: lib.loop_cues }
-    const plain = applyOverrides(next, overrides)
+    const over = overlay(next, edits)
+    const plain = applyOverrides(retimed(next, over.edited, nextLib), overrides)
     const data = table ? applyEmits(plain, table, nextLib, emitSeed) : plain
     const items = buildItems(data)
-    set({ lib: nextLib, recorded: next, recordingFrom: 'refresh', data, items, cur: Math.max(0, items.findIndex(it => it.kind === 'full')), sel: null,
+    set({ lib: nextLib, recorded: next, ...over, recordingFrom: 'refresh', data, items, cur: Math.max(0, items.findIndex(it => it.kind === 'full')), sel: null,
       chapter: chapter !== null && chapter < data.chapters.length ? chapter : null })
     addLog(`${VIEWER_DIR}/viewer-data.json changed: the recording read again`)
   }
@@ -453,7 +591,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
   let appChecking: Promise<void> | null = null
   /** The last check's error, logged once (a file Studio is still writing reads as broken until the next check). */
   let appCheckError = ''
-  /** Reads again what changed in the app project since it was read: the lib or the video (the whole project), the recording, the WAVs. */
+  /** Reads again what changed in the app project since it was read: the lib or the video (the whole project), the recording, the edits, the WAVs. */
   const checkAppProject = (): Promise<void> => {
     if (appChecking) return appChecking
     appChecking = (async () => {
@@ -472,6 +610,8 @@ export const useSceneStore = create<SceneState>((set, get) => {
           return
         }
         if (now.recording !== was.recording) { await reloadRecording(root); appStamp = { ...appStamp!, recording: now.recording } }
+        // Laid over the recording again; playback goes on (the levels stay).
+        if (now.edits !== was.edits) { await checkEditsOutside(true); appStamp = { ...appStamp!, edits: now.edits } }
         if (now.wavs !== was.wavs) {
           await loadTable()
           appStamp = { ...appStamp!, wavs: now.wavs }
@@ -492,12 +632,12 @@ export const useSceneStore = create<SceneState>((set, get) => {
     // One watcher per page: a hot reload of this module replaces the previous one instead of adding another.
     const w = window as unknown as { __sceneWatch?: () => void }
     w.__sceneWatch?.()
-    const timer = setInterval(() => { void checkOutside(); refreshKit(); void checkAppProject() }, 2000)
-    const onFocus = () => { void checkOutside(); refreshKit(); void checkAppProject() }
+    const timer = setInterval(() => { void checkOutside(); void checkEditsOutside(); refreshKit(); void checkAppProject() }, 2000)
+    const onFocus = () => { void checkOutside(); void checkEditsOutside(); refreshKit(); void checkAppProject() }
     // The editor wrote a Kit manifest (Save Folder / Deploy): the open project's Kit, when it is that one, is read again at once.
     const offKitWrites = onKitManifestWritten(kitId => { if (get().table?.kit === kitId) void loadKit().catch(() => {}) })
     // Leaving the page starts writing what is pending; the write may not finish, so the journal (written at every edit) is what keeps it.
-    const onHide = () => { if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; void saveNow() } void flushFirings() }
+    const onHide = () => { if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; void saveNow() } void flushEdits() }
     window.addEventListener('focus', onFocus); window.addEventListener('pagehide', onHide); window.addEventListener('beforeunload', onHide)
     perfTrack('intervals', 1)
     w.__sceneWatch = () => { clearInterval(timer); offKitWrites(); window.removeEventListener('focus', onFocus); window.removeEventListener('pagehide', onHide); window.removeEventListener('beforeunload', onHide); perfTrack('intervals', -1) }
@@ -506,8 +646,8 @@ export const useSceneStore = create<SceneState>((set, get) => {
   /** Opens a project folder; a folder with a lib is remembered even when the recording is missing (one click after recording). */
   const openFolder = async (handle: FileSystemDirectoryHandle): Promise<boolean> => {
     restoredNotice = null
-    // The open project's firing gains are written before another project's files are read.
-    await flushFirings()
+    // The open project's firing edits are written before another project's files are read.
+    await flushEdits()
     // The app project's viewer files are stamped before they are read: a save landing after this differs from the stamp
     // and is read again by checkAppProject (stamped after the read, it would pass for read).
     const viewerStamp = isAppProject(handle) ? await readViewerStamp(handle) : null
@@ -534,13 +674,19 @@ export const useSceneStore = create<SceneState>((set, get) => {
     }
     clearVideoUrls()
     rememberSceneProject(opened.lib.project_name)
-    // The old project's firing gains that could still not be written (after the flush above) stop here, said once.
-    const unsaved = firingRoot && firingRoot !== handle ? abandonFirings() : null
+    // The old project's firing edits that could still not be written (after the flush above) stop here, said once.
+    const unsaved = editsRoot && editsRoot !== handle ? abandonEdits() : null
+    // The edits (read after the recording's stamp, like it); the same project's edits still unwritten stay Studio's.
+    const editsFile = await readEditsText(handle)
+    const loadedEdits = editsPending !== null && editsRoot === handle ? { edits: parseViewerEdits(editsPending).edits, notice: null } : await editsFromText(handle, editsFile.text)
+    editsKnown = editsFile
+    versionedThisOpen = false
     // The app project's files as they were read (what changes after this is read again by checkAppProject); the WAVs are
     // stamped here, before loadTable reads them.
     appStamp = null
     const stamp = viewerStamp ? { ...viewerStamp, wavs: await readWavStamp(handle, opened.lib) } : null
-    set({ root: handle, lib: opened.lib, recorded: opened.data, recordingFrom: 'open', overrides: [], data: opened.data, items: buildItems(opened.data), sel: null, cur: 0, empty: null, table: null, noTable: false, projectKit: undefined, kitError: null })
+    const over = overlay(opened.data, loadedEdits.edits), data = retimed(opened.data, over.edited, opened.lib)
+    set({ root: handle, lib: opened.lib, recorded: opened.data, ...over, recordingFrom: 'open', overrides: [], data, items: buildItems(data), sel: null, cur: 0, empty: null, table: null, noTable: false, projectKit: undefined, kitError: null })
     try { await loadTable() } catch (error) {
       // The project stays open without its table; with its WAVs counted unread, every check reads the table again
       // until it reads (a WAV or the table that Studio was still writing, say), instead of never checking again.
@@ -554,6 +700,8 @@ export const useSceneStore = create<SceneState>((set, get) => {
       addLog(`viewer-data.json: ${dropped} chapter(s) left out (start >= 0, start < end <= the video's length, a label)`)
       if (!restoredNotice) { restoredNotice = { id: 'scene.chapters.dropped', params: { count: dropped }, error: true }; note(restoredNotice) }
     }
+    if (loadedEdits.notice) { restoredNotice = loadedEdits.notice; note(loadedEdits.notice) }
+    if (over.editsOrphans) addLog(`${EDITS_PATH}: ${over.editsOrphans} entr(ies) match no recorded firing (kept)`)
     if (unsaved) { restoredNotice = unsaved; note(unsaved) }
     let start = 1
     try { start = Number(localStorage.getItem(clipKey(opened.lib.project_name))) || 1 } catch { /* preference only */ }
@@ -586,7 +734,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
 
   return {
     root: null, remembered: null, restored: false, busy: false,
-    lib: null, data: null, recorded: null, recordingFrom: 'open', overrides: [], items: [], table: null, noTable: false, loaded: null, clipFiles: [], soundFiles: [],
+    lib: null, data: null, recorded: null, recordingFrom: 'open', overrides: [], edits: emptyEdits(), edited: null, editsMatch: new Map(), editsOrphans: 0, items: [], table: null, noTable: false, loaded: null, clipFiles: [], soundFiles: [],
     pending: { clips: {}, sounds: {} }, pcm: {}, sfx: {}, dirty: false, saveError: null, projectKit: null, kitError: null, cur: 0, sel: null, span: null, chapter: null, emitSeed: newEmitSeed(),
     notice: null, empty: null, log: [],
     note, addLog,
@@ -678,21 +826,83 @@ export const useSceneStore = create<SceneState>((set, get) => {
       if (!derived.data) { set({ overrides }); return }
       set({ overrides, data: derived.data, items: buildItems(derived.data) })
     },
-    setFiringGains: gains => {
+    setFiringEdits: changes => {
       const { recorded, root } = get()
-      if (!recorded || !root || !gains.size) return
-      if (firingRoot !== root) { const unsaved = abandonFirings(); if (unsaved) note(unsaved); firingRoot = root; firingProject = get().lib?.project_name ?? '' }
-      const events = recorded.full.events.map((ev, i) => {
-        const gain = gains.get(i)
-        // Absent and still 1 stays absent (in the file too).
-        return gain === undefined || gain === (ev.gain ?? 1) ? ev : { ...ev, gain }
-      })
-      for (const [i, gain] of gains) { const ev = recorded.full.events[i]; if (ev) firingPending.set(i, { index: i, name: ev.name, t: ev.t, gain }) }
-      // Same levels and clips: the runtime and the moments list see the same recording, only its firings' gains moved.
-      set({ recorded: { ...recorded, full: { ...recorded.full, events } } })
-      const derived = derivedData(get().table)
-      if (derived.data) set({ data: derived.data })
-      scheduleFiringSave()
+      if (!recorded || !root || !changes.size) return
+      let edits = get().edits, match = get().editsMatch
+      for (const [i, change] of changes) {
+        const ev = recorded.full.events[i]
+        if (!ev) continue
+        edits = setEditFor(edits, ev, change, match.get(i))
+        // An entry removed moves the later ones: matched again before the next change.
+        match = matchEdits(recorded.full.events, recorded.fps, edits.firings).byEvent
+      }
+      if (serializeViewerEdits(edits) === serializeViewerEdits(get().edits)) return
+      get().versionBeforeEdit()
+      changeEdits(edits)
+    },
+    removeOrphanEdits: () => {
+      const { recorded, edits } = get()
+      if (!recorded) return
+      const orphans = new Set(matchEdits(recorded.full.events, recorded.fps, edits.firings).orphans)
+      if (!orphans.size) return
+      get().versionBeforeEdit()
+      changeEdits({ schema_version: 1, firings: edits.firings.filter((_, k) => !orphans.has(k)) })
+      addLog(`${EDITS_PATH}: ${orphans.size} entr(ies) that match no recorded firing removed`)
+    },
+    versionBeforeEdit: () => {
+      const root = get().root, snap = snapshot()
+      if (versionedThisOpen || !root || !snap || isAppProject(root)) return
+      versionedThisOpen = true
+      void queueVersion(() => writeVersion(root, snap, 'before-edit', documentMessage('scene.versions.beforeEdit'), new Date(), true)).then(
+        id => { if (id) addLog(`version ${id} (before editing) saved`) },
+        error => { note({ id: 'scene.versions.saveFailed', params: { error: message(error) }, error: true }); addLog(message(error)) })
+    },
+    saveVersion: async label => {
+      const root = get().root, snap = snapshot()
+      if (!root || !snap) return null
+      try {
+        const id = await queueVersion(() => writeVersion(root, snap, 'manual', label, new Date()))
+        addLog(`version ${id} saved`)
+        return id
+      } catch (error) { note({ id: 'scene.versions.saveFailed', params: { error: message(error) }, error: true }); addLog(message(error)); return null }
+    },
+    listVersions: async () => {
+      const root = get().root
+      return root ? listVersions(root) : []
+    },
+    restoreVersion: async id => {
+      const { root, lib } = get()
+      if (!root || !lib || isAppProject(root)) return { ok: false, notice: { id: 'scene.save.noProject', error: true } }
+      try {
+        const version = await readVersion(root, id, baseName(lib.paths.cues))
+        const edits = version.edits === null ? emptyEdits() : parseViewerEdits(version.edits).edits
+        const source = version.table === null ? null : parseCueTable(version.table)
+        const snap = snapshot()
+        if (snap) await queueVersion(() => writeVersion(root, snap, 'before-restore', documentMessage('scene.versions.beforeRestore'), new Date()))
+        if (get().root !== root) return { ok: false, notice: { id: 'scene.save.noProject', error: true } }
+        // The version's edits, written now (an empty file when it had none).
+        changeEdits(edits)
+        await flushEdits()
+        const before = get().table
+        let table: { before: CueTable; after: CueTable } | null = null, skipped: string[] = []
+        if (before && source) {
+          const applied = applyTableGains(before, source)
+          skipped = applied.skipped
+          if (applied.table !== before && get().edit(() => applied.table)) table = { before, after: applied.table }
+        } else if (source) skipped = Object.keys(source.cues)
+        addLog(`version ${id} restored${skipped.length ? ` (not set: ${skipped.join(', ')})` : ''}`)
+        return { ok: true, skipped, table }
+      } catch (error) {
+        addLog(message(error))
+        return { ok: false, notice: { id: 'scene.versions.restoreFailed', params: { error: message(error) }, error: true } }
+      }
+    },
+    deleteVersion: async id => {
+      const root = get().root
+      if (!root) return
+      const moved = await queueVersion(() => archiveVersion(root, id))
+      addLog(`version ${id} → ${moved}`)
     },
     reseedEmit: () => {
       const emitSeed = newEmitSeed()

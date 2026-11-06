@@ -11,13 +11,6 @@ describe('scene UI settings', () => {
     expect(sanitizeSceneUi({}).sendHaptics).toBe(true)
   })
 
-  it('per-firing editing is off by default and kept only as a boolean', () => {
-    expect(DEFAULT_SCENE_UI.editFirings).toBe(false)
-    expect(sanitizeSceneUi({ editFirings: true }).editFirings).toBe(true)
-    expect(sanitizeSceneUi({ editFirings: 'yes' }).editFirings).toBe(false)
-    expect(parseSceneUiFile(serializeSceneUi({ ...DEFAULT_SCENE_UI, editFirings: true }))).toMatchObject({ ok: true, settings: { editFirings: true } })
-  })
-
   it('round-trips the file format and rejects untagged files', () => {
     const settings = { ...DEFAULT_SCENE_UI, loop: false, dockLayout: layout }
     expect(parseSceneUiFile(serializeSceneUi(settings))).toEqual({ ok: true, settings })

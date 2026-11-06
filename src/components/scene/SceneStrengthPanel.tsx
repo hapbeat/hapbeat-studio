@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
-import { useConfirm } from '@/components/common/useConfirm'
 import { useSceneStore } from '@/stores/sceneStore'
-import { useSceneSettings } from '@/stores/sceneSettings'
 import { clampOverallGain, effectiveOutput, OVERALL_GAIN_MAX, useScenePlayback } from '@/stores/scenePlayback'
 import { kitGainsFor } from '@/utils/sceneCueTable'
 import { routesOf, useSceneStrength } from '@/stores/sceneStrength'
@@ -26,7 +24,7 @@ const signedDb = (ratio: number) => { const db = ratioDb(ratio); return `${db >=
  * 「強さ」 panel (DEC-102 r3): a mixer of the app gain's parts. The overall fader is this PC's (scenePlayback, applied
  * when sending, not in the bars); one vertical fader per haptic event with firings in the recording (or the chapter
  * playing) edits its route gain in the cue table (live, one undo step per drag), with M / S for this session; 「選んだ
- * 発生」 scales the selected firings' own gains (viewer-data, with per-firing editing on); 「内訳」 splits the selection's
+ * 発生」 scales the selected firings' own gains (viewer-edits.json, sceneStore.setFiringEdits); 「内訳」 splits the selection's
  * (or the hovered firing's) strength into material / app / sent. The clip gain (material) is never edited here.
  */
 export function SceneStrengthPanel() {
@@ -36,30 +34,29 @@ export function SceneStrengthPanel() {
   const output = useScenePlayback(s => effectiveOutput(s))
   const kitGains = useSceneStore(s => kitGainsFor(s.projectKit?.clipGains, output))
   const data = useSceneStore(s => s.data)
-  const recorded = useSceneStore(s => s.recorded)
+  const edited = useSceneStore(s => s.edited)
   const chapter = useSceneStore(s => s.chapter)
   const overall = useScenePlayback(s => s.overallGain)
-  const editFirings = useSceneSettings(s => s.editFirings)
   const selected = useSceneStrength(s => s.selected)
   const hover = useSceneStrength(s => s.hover)
   const dragRatio = useSceneStrength(s => s.dragRatio)
   const canUndo = useSceneStrength(s => s.undo.length > 0)
   const canRedo = useSceneStrength(s => s.redo.length > 0)
-  const { ask, dialog } = useConfirm()
 
   // Each firing the runtime plays, by its recorded index (emitted firings have none) — and the strength of every one.
   const strengths = useMemo(() => table && data ? recordingFiringStrength(table, data.full.events, kitGains) : new Map<string, FiringStrength | null>(), [table, data, kitGains])
   const byIndex = useMemo(() => {
     const out = new Map<number, Firing & { t: number }>()
-    if (!data || !recorded) return out
-    const indexOf = recordedIndexMap(recorded.full.events), events = data.full.events
+    if (!data || !edited) return out
+    // The recorded firings at their edited times (the order of `recorded`): the shown firings' keys find their index.
+    const indexOf = recordedIndexMap(edited.full.events), events = data.full.events
     const shownKeys = occurrenceKeys(events), recordedKeys = occurrenceKeys(events, recordedName)
     events.forEach((ev, k) => {
       const strength = strengths.get(shownKeys[k]), i = indexOf.get(recordedKeys[k])
       if (strength && i !== undefined) out.set(i, { name: ev.name, strength, t: ev.t })
     })
     return out
-  }, [data, recorded, strengths])
+  }, [data, edited, strengths])
   // The haptic events of the scope (the chapter playing, else the recording) with their firings.
   const range = chapter !== null ? data?.chapters[chapter] : undefined
   const events = useMemo(() => {
@@ -77,7 +74,7 @@ export function SceneStrengthPanel() {
   const picked = [...selected].flatMap(i => { const f = byIndex.get(i); return f ? [f] : [] })
   const shown = picked.length ? picked : hover !== null && byIndex.has(hover) ? [byIndex.get(hover)!] : []
   const st = () => useSceneStrength.getState()
-  const scale = (ratio: number) => { if (editFirings && picked.length) st().scaleSelected(ratio) }
+  const scale = (ratio: number) => { if (picked.length) st().scaleSelected(ratio) }
   const onKeyDown = (e: React.KeyboardEvent) => {
     if ((e.key !== 'ArrowUp' && e.key !== 'ArrowDown') || isTypingTarget(e.target) || (e.target as HTMLElement).tagName === 'INPUT') return
     const step = strengthStep(e.shiftKey)
@@ -85,11 +82,7 @@ export function SceneStrengthPanel() {
     // The moments list's ↑ / ↓ (SceneView) stay for the rest of the tab.
     e.preventDefault(); e.stopPropagation()
   }
-  const toggleEditing = async (on: boolean) => {
-    if (on && !await ask({ message: t('scene.strength.editFiringsConfirm'), danger: true })) return
-    useSceneSettings.getState().update({ editFirings: on })
-  }
-  const disabledReason = !editFirings ? t('scene.strength.editOff') : !picked.length ? t('scene.strength.noneSelected') : ''
+  const disabledReason = !picked.length ? t('scene.strength.noneSelected') : ''
   const count = picked.length ? t('scene.strength.selectedCount', { count: picked.length, names: names(picked), range: span(picked.map(f => f.strength.firing)) }) : ''
 
   // Three rows so the default dock height shows everything: the selection line, the faders, the breakdown.
@@ -99,8 +92,6 @@ export function SceneStrengthPanel() {
       <span className="scene-strength-count" title={[count, disabledReason].filter(Boolean).join('\n')}>
         {count}{count && disabledReason ? '　' : ''}<span className="scene-dim">{disabledReason}</span>
       </span>
-      <label className="scene-check" title={t('scene.strength.editFiringsHint')}>
-        <input type="checkbox" checked={editFirings} onChange={ev => void toggleEditing(ev.target.checked)} />{t('scene.strength.editFirings')}</label>
     </div>
     <div className="scene-strength-body">
       <div className="scene-strength-mixer">
@@ -125,7 +116,6 @@ export function SceneStrengthPanel() {
       </div>
     </div>
     <Breakdown firings={shown} ratio={picked.length ? dragRatio : null} overall={overall} />
-    {dialog}
   </div>
 }
 
@@ -184,6 +174,8 @@ function EventFader({ name, gains, indices, chapter }: { name: string; gains: nu
   const onInput = (value: number) => {
     const now = routesOf(name)
     if (!now) return
+    // The first strength edit of the project saves a before-edit version (sceneStore.versionBeforeEdit).
+    if (!start.current) useSceneStore.getState().versionBeforeEdit()
     start.current ??= now
     const owner = parseEventKey(start.current.owner), next = gainsAtFader(start.current.gains, value)
     useSceneStore.getState().edit(tb => setRouteGains(tb, owner, next))

@@ -94,7 +94,7 @@ export class SceneRuntime {
     this.unsubscribes.push(useSceneStore.subscribe(state => {
       // A new moment, another file, or a newly opened recording (a re-opened project revokes the old video URLs, even for
       // the same file names; its levels are new); not a mere rename of the items (firing overrides) or a firing gain
-      // edit (setFiringGains keeps the levels), which keep the video playing.
+      // edit (setFiringEdits keeps the levels), which keep the video playing.
       const newRecording = state.recorded?.full.levels !== prev.recorded?.full.levels
       // The same project's recording read again (the player app, after Studio changed it) goes on from where it is.
       if (state.root !== prev.root || (newRecording && state.recordingFrom === 'open')) this.fullTime = 0

@@ -51,7 +51,7 @@ const DRAG_PX = 3
  * play that span in the full replay (SceneRuntime.playSpan; within the span already playing: seek). A firing is
  * reassigned from the moments list. Haptic one-shots are also the strength panel's selection (sceneStrength): a click
  * selects that firing (Shift / Ctrl: toggles it), a drag over an empty part of the haptic lane selects every firing in
- * that time range, and with per-firing editing on a vertical drag on a bar scales every selected firing's gain.
+ * that time range, and a vertical drag on a bar scales every selected firing's gain (viewer-edits.json).
  * While a loop cue's span plays, the timeline shows only that span with its lead-in / post-roll, and a moment shows its
  * stretch of the full replay (sceneTimelineView).
  * Ctrl + wheel zooms around the pointer, wheel / Shift + wheel pans (like the editor's waveform), also while playing.
@@ -160,7 +160,8 @@ export function SceneTimelinePanel() {
         gc.map = table ? recordingFiringGains(table, data.full.events, kit) : new Map()
         gc.strength = table ? recordingFiringStrength(table, data.full.events, kit) : new Map()
       }
-      const ix = indices.current, recorded = s.recorded?.full.events ?? null
+      // The recorded firings at their edited times (recorded order): the shown firings' keys find their recorded index.
+      const ix = indices.current, recorded = s.edited?.full.events ?? null
       if (ix.events !== recorded) { ix.events = recorded; ix.map = recorded ? recordedIndexMap(recorded) : new Map() }
       const st = useSceneStrength.getState()
       hapticLane.current = [mid + 3, base]
@@ -311,7 +312,7 @@ export function SceneTimelinePanel() {
   }
   /**
    * A press on a haptic one-shot bar: Shift / Ctrl (Cmd) toggles it in the selection, a plain press selects it (one
-   * already selected keeps the others until the release, so a drag moves them all). With per-firing editing on, a
+   * already selected keeps the others until the release, so a drag moves them all). A
    * vertical drag scales every selected firing's gain by the ratio the pressed bar's height follows (one undo step on
    * release). Returns whether the press is used up (Shift: selection only; Ctrl / a plain press go on as before).
    */
@@ -320,10 +321,8 @@ export function SceneTimelinePanel() {
     if (event.shiftKey || event.ctrlKey || event.metaKey) { st.select([hit.index], 'toggle'); return event.shiftKey }
     if (!was) st.select([hit.index], 'replace')
     const [laneTop, laneBottom] = hapticLane.current, H = laneBottom - laneTop, gain = hit.gain ?? 0
-    const editing = useSceneSettings.getState().editFirings
     let dragging = false, ratio = 1
     track(event, (_, dy) => {
-      if (!editing) return
       if (!dragging && Math.abs(dy) > DRAG_PX) dragging = true
       if (!dragging) return
       // The pressed bar's drawn top follows the pointer (barDragRatio: 1 at the press point, never 0).
@@ -352,8 +351,8 @@ export function SceneTimelinePanel() {
   /** Recorded indices of the haptic one-shot firings between two replay times that the lane draws (a moment: its stretch only). */
   const firingsBetween = (a: number, b: number): number[] => {
     const s = useSceneStore.getState(), it = s.items[s.cur]
-    if (!s.table || !s.data || !s.recorded) return []
-    return selectableFirings(s.table, s.data.full.events, s.recorded.full.events, s.lib?.ticks ?? [], a, b, it?.kind === 'clip' ? [it.start, it.end] : null)
+    if (!s.table || !s.data || !s.edited) return []
+    return selectableFirings(s.table, s.data.full.events, s.edited.full.events, s.lib?.ticks ?? [], a, b, it?.kind === 'clip' ? [it.start, it.end] : null)
   }
   const onMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
     if (!useSceneStore.getState().items.length || event.button !== 0) return

@@ -124,6 +124,12 @@ export function memoryFolder(files: Record<string, string | Uint8Array>, name = 
     entries: async function* () {
       for (const [n, child] of node.children) yield [n, child.kind === 'file' ? fileHandle(n, child) : dirHandle(n, child)]
     },
+    removeEntry: async (n: string, o?: { recursive?: boolean }) => {
+      const child = node.children.get(n)
+      if (!child) throw notFound()
+      if (child.kind === 'directory' && child.children.size && !o?.recursive) throw new DOMException('not empty', 'InvalidModificationError')
+      node.children.delete(n)
+    },
   })
   const read = (path: string): string | null => {
     let node: Node | undefined = root

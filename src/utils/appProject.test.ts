@@ -360,6 +360,25 @@ describe('sceneStore with the app project', () => {
     expect(after.recordingFrom).toBe('open')
   })
 
+  it('viewer-edits.json Studio saved is laid over the recording without a new recording (playback goes on)', async () => {
+    const edits = 'Saved/HapticViewer/viewer-edits.json'
+    const file = viewerData()
+    const { useSceneStore } = await openPage()
+    const before = useSceneStore.getState()
+    expect(before.edits.firings).toEqual([])
+    write(edits, JSON.stringify({ schema_version: 1, firings: [{ of: { name: file.events[0].name, t: file.events[0].t, hand: 'right' }, gain: 0.35 }] }))
+    await useSceneStore.getState().checkDisk()
+    const after = useSceneStore.getState()
+    expect(after.edited?.full.events[0].gain).toBe(0.35)
+    expect(after.data?.full.events.find(e => e.t === file.events[0].t && e.name === file.events[0].name)?.gain).toBe(0.35)
+    // The recording as read, the same levels and items: the runtime keeps its video, position and selection.
+    expect(after.recorded).toBe(before.recorded)
+    expect(after.data?.full.levels).toBe(before.data?.full.levels)
+    expect(after.items).toBe(before.items)
+    expect(after.recordingFrom).toBe('open')
+    expect(disk.get(VIEWER_DATA)!.text).toBe(JSON.stringify(sampleViewerDataFile()))
+  })
+
   it('a recording changed otherwise replaces the old one at the full replay, keeping the position (refresh)', async () => {
     const { useSceneStore } = await openPage()
     const before = useSceneStore.getState()

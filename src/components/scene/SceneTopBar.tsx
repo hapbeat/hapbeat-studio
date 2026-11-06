@@ -43,8 +43,7 @@ export function SceneTopBar({ dockApi, notice }: { dockApi: DockviewApi | null; 
   const importSettings = async (file: File) => {
     const parsed = parseSceneUiFile(await file.text())
     if (!parsed.ok) { useSceneStore.getState().note({ id: 'editor.settings.importFailed', params: { error: parsed.error }, error: true }); return }
-    // Per-firing editing is never imported: it is turned on (with its confirmation) in each project.
-    useSceneSettings.getState().replace({ ...parsed.settings, editFirings: false })
+    useSceneSettings.getState().replace(parsed.settings)
     useSceneStore.getState().note({ id: 'editor.settings.imported', params: { file: file.name } })
   }
   const revert = async () => { if (dirty && !await confirmDiscard()) return; await useSceneStore.getState().revert() }

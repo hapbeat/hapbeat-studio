@@ -8,7 +8,7 @@ import { newCueTable, parseCueTable, SceneFormatError, serializeCueTable, type C
  * deletes anything. Also holds the Scene tab's own UI settings file.
  */
 
-/** The tab's UI settings, next to the recording (scene-recording section 3.5: a new recording keeps it). */
+/** The tab's UI settings, next to the recording (scene-recording section 3.6: a new recording keeps it). */
 export const SCENE_UI_SETTINGS_FILE = 'studio-scene-ui.json'
 
 const split = (path: string): [string, string] => { const i = path.lastIndexOf('/'); return [path.slice(0, i), path.slice(i + 1)] }
