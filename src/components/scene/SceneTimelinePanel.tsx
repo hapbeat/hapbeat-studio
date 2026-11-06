@@ -4,7 +4,7 @@ import { perfTrack } from '@/utils/perfRegistry'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
-import { familyColor, frameAt, isTick, itemEvents, type SceneItem, type VisibleEvent } from '@/utils/sceneData'
+import { drawnEvents, familyColor, frameAt, isTick, type SceneItem, type VisibleEvent } from '@/utils/sceneData'
 import { WHEEL_ZOOM_RATE, wheelPixels, zoomAtTime } from '@/utils/waveformView'
 import { effectiveEvent, resolveEventName } from '@/utils/cueEvents'
 import { useScene } from './sceneContext'
@@ -21,7 +21,7 @@ import { firingBar, occurrenceKeys, recordingFiringGains, recordingFiringStrengt
 import { kindColor } from '@/utils/kindColors'
 import { useSceneStrength } from '@/stores/sceneStrength'
 import { barDragRatio, recordedIndexMap, recordedName, selectableFirings, strengthStep } from '@/utils/sceneStrength'
-import { dragAxes, firingMoments, momentNumber, snapDt, tableHasSfx, visibleLanes } from '@/utils/sceneTimelineEdit'
+import { dragAxes, firingNumber, firingNumbers, isEmitted, numbersInRange, repeatRange, repeatRangeText, snapDt, tableHasSfx, visibleLanes } from '@/utils/sceneTimelineEdit'
 import { useSceneTimelineRange } from '@/stores/sceneTimelineRange'
 import type { SceneEvent } from '@/utils/sceneData'
 import { SceneFiringCard, SceneLockToggles } from './SceneFiringCard'
@@ -31,7 +31,7 @@ import { SceneFiringCard, SceneLockToggles } from './SceneFiringCard'
  * DEC-102 r3; null: a loop cue / tick, drawn as before). Haptic one-shots: `strength` and the recorded firing `index`
  * (viewer-data events[i]; null for an emitted firing, which cannot be selected).
  */
-type Hit = { x: number; half: number; y0: number; y1: number; name: string; t: number; lane: Lane; gain: number | null; strength: FiringStrength | null; index: number | null }
+type Hit = { x: number; half: number; y0: number; y1: number; name: string; t: number; lane: Lane; gain: number | null; strength: FiringStrength | null; index: number | null; emitted: boolean }
 /** A drawn band of the selected loop cue: its lane's height and x range (CSS px). */
 type Band = { x0: number; x1: number; y0: number; y1: number }
 const MAX_ZOOM = 2000
@@ -49,6 +49,10 @@ const BAR_W = 7, BAR_W_SELECTED = 9
 const EXACT_LINE = 'rgba(0,0,0,.6)'
 /** Alt + wheel notches this close (ms) are one strength change (one undo step). */
 const WHEEL_BURST_MS = 400
+/** Firings not of the shown moment (or not the selected cue) are dimmed to this, never less (they stay readable). */
+const DIMMED = 0.6
+/** The repeat range's band and edge lines (distinct from the view, the selection and the lanes). */
+const REPEAT_FILL = 'rgba(61,214,208,.10)', REPEAT_EDGE = 'rgba(61,214,208,.75)'
 
 /**
  * Timeline: two lanes, sound (upper) and haptics (lower), as in the editor (the header's chips show either alone; the
@@ -60,14 +64,18 @@ const WHEEL_BURST_MS = 400
  * The seconds grid shows full-replay times. A click seeks (timelineClick); Ctrl (Cmd) + click a marker to edit that cue
  * (the moments list marks it too), a band to play that span in the full replay (SceneRuntime.playSpan; within the span
  * already playing: seek). A firing is reassigned from the moments list. Haptic one-shots (wide bars with a line at the
- * exact time, labelled with their moment number) are the firing selection (sceneStrength): a click selects that firing
+ * exact time, labelled with their firing number — the moments list's rows) are the firing selection (sceneStrength): a click selects that firing
  * (Shift / Ctrl: toggles it; one firing clicked is also the picked cue, and a paused video seeks to its time), a drag
  * over an empty part of the haptic lane selects every firing in that time range, and a drag on a selected bar changes
  * every selected firing (viewer-edits.json): vertical = strength, horizontal = time (frame-snapped), each unless locked
  * (studio-scene-ui.json lockTime / lockGain; Shift keeps only the larger axis). Alt + wheel: ±1 dB (Shift ±3 dB), one
  * undo step per burst (not while the strength is locked). The firing card (SceneFiringCard) floats over the panel while firings are selected.
- * While a loop cue's span plays, the timeline shows only that span with its lead-in / post-roll, and a moment shows its
- * stretch of the full replay (sceneTimelineView).
+ * Every firing of the full replay is drawn at any zoom (a moment's own firings normal, the rest dimmed to DIMMED);
+ * emitted firings (cue table `emit`) are drawn hollow, not numbered and not in the list. What repeats (repeatRange: a
+ * moment from its lead-in to its end, W's part or a loop cue span, a chapter) is a band with edge lines, named in the
+ * header (「繰り返し 3.3–8.3 s」 / 「全編」). The drawn range and its first / last firing numbers go to
+ * sceneTimelineRange for the moments list's bracket. A selected moment or a playing loop cue span first fills the view
+ * (sceneTimelineView); zooming out shows the rest.
  * Ctrl + wheel zooms around the pointer, wheel / Shift + wheel pans (like the editor's waveform), also while playing.
  * Read-outs and output toggles above it.
  */
@@ -82,6 +90,7 @@ export function SceneTimelinePanel() {
   const note = useRef<HTMLSpanElement>(null)
   const levels = useRef<HTMLSpanElement>(null)
   const state = useRef<HTMLSpanElement>(null)
+  const repeat = useRef<HTMLSpanElement>(null)
   const tRef = useRef(t); tRef.current = t
   const placeOf = useMomentPlace()
   const placeRef = useRef(placeOf); placeRef.current = placeOf
@@ -100,11 +109,12 @@ export function SceneTimelinePanel() {
   const hapticLane = useRef<[number, number] | null>(null)
   /** Whether the cue table has sound (again only for another table). */
   const sfx = useRef<{ table: CueTable | null; has: boolean }>({ table: null, has: false })
-  /** Each firing's moment number by its occurrenceKeys key (again only when the moments or the firings change). */
-  const moments = useRef<{ items: unknown; events: unknown; map: Map<string, number> }>({ items: null, events: null, map: new Map() })
+  /** Each shown firing's number (firingNumbers, aligned with data.full.events; again only when the firings change). */
+  const numbers = useRef<{ events: unknown; nums: (number | null)[] }>({ events: null, nums: [] })
   /**
-   * The shown item's firings with their keys (strength / gains; recorded index) and bar labels (`<moment> <name>`) and
-   * label widths: again only when the item, the firings or the moment numbers change (not every frame).
+   * The drawn firings (drawnEvents: all of the full replay, aligned with data.full.events) with their keys (strength /
+   * gains; recorded index) and bar labels (`<number> <name>`) and label widths: again only when the item, the firings
+   * or the numbers change (not every frame).
    */
   const shown = useRef<{ item: SceneItem | null; all: unknown; nums: unknown; events: VisibleEvent[]; keys: string[]; recordedKeys: string[]; labels: string[]; widths: number[] }>(
     { item: null, all: null, nums: null, events: [], keys: [], recordedKeys: [], labels: [], widths: [] })
@@ -128,7 +138,7 @@ export function SceneTimelinePanel() {
       if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr) }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.clearRect(0, 0, w, h)
-      if (!it || !lib || !data) { hits.current = []; bands.current = []; useSceneTimelineRange.getState().setRange(null); return }
+      if (!it || !lib || !data) { hits.current = []; bands.current = []; useSceneTimelineRange.getState().setRange(null); useSceneTimelineRange.getState().setRepeat(null); return }
       const fps = data.fps, layers = lib.layers, ticks = lib.ticks, sel = s.sel, table = s.table
       const dur = v.duration || it.levels.length / fps || 1
       // The visible stretch: a moment's stretch, a playing loop cue span's window (in the full replay), else the whole replay until zoomed.
@@ -136,7 +146,14 @@ export function SceneTimelinePanel() {
       const vw = view.current, key = `${s.cur}:${it.file}${shownSpan ? `:${shownSpan[0]}-${shownSpan[1]}` : ''}`
       stepView(vw, key, shownSpan, w, dur, MAX_ZOOM, !v.paused, v.currentTime)
       const span = w / vw.zoom
-      useSceneTimelineRange.getState().setRange(vw.start, vw.start + span)
+      // The drawn range and its firings' first / last numbers (the moments list's bracket and 「タイムライン: 04–08」).
+      const nb = numbers.current
+      if (nb.events !== data.full.events) { nb.events = data.full.events; nb.nums = firingNumbers(data.full.events) }
+      useSceneTimelineRange.getState().setRange(vw.start, vw.start + span, numbersInRange(data.full.events, nb.nums, vw.start, vw.start + span))
+      // What repeats: the band below and the header's 「繰り返し a–b s」.
+      const chapter = s.chapter === null ? null : data.chapters[s.chapter] ?? null
+      const rr = repeatRange(it, runtime.part ? runtime.partAB : null, useSceneSettings.getState().leadSec, chapter)
+      useSceneTimelineRange.getState().setRepeat(rr)
       // The lanes shown (header chips; sound only when the table has any): both split the height, one takes it all.
       if (sfx.current.table !== table) sfx.current = { table, has: tableHasSfx(table) }
       const shownLanes = visibleLanes(useSceneSettings.getState().lanes, sfx.current.has)
@@ -149,7 +166,11 @@ export function SceneTimelinePanel() {
       if (soundBox) { ctx.fillStyle = kindColor('sound', 'soft'); ctx.fillRect(0, soundBox[0], w, soundBox[1] - soundBox[0]) }
       if (hapticBox) { ctx.fillStyle = kindColor('haptic', 'soft'); ctx.fillRect(0, hapticBox[0], w, hapticBox[1] - hapticBox[0]) }
       ctx.globalAlpha = 1
-      if (runtime.part && runtime.partAB) { ctx.fillStyle = 'rgba(255,255,255,.07)'; ctx.fillRect(X(runtime.partAB[0]), 0, X(runtime.partAB[1]) - X(runtime.partAB[0]), h) }
+      if (rr) {
+        const x0 = X(rr[0]), x1 = X(rr[1])
+        ctx.fillStyle = REPEAT_FILL; ctx.fillRect(x0, 0, x1 - x0, base)
+        ctx.fillStyle = REPEAT_EDGE; ctx.fillRect(Math.round(x0) - 0.5, 0, 1, base); ctx.fillRect(Math.round(x1) - 0.5, 0, 1, base)
+      }
       if (both) { ctx.fillStyle = '#1a1d21'; ctx.fillRect(0, mid, w, 1) }
       ctx.font = '10px Segoe UI, sans-serif'
       // Seconds grid: full-replay times (a moment too).
@@ -194,20 +215,13 @@ export function SceneTimelinePanel() {
       if (ix.events !== recorded) { ix.events = recorded; ix.map = recorded ? recordedIndexMap(recorded) : new Map() }
       const st = useSceneStrength.getState()
       hapticLane.current = hapticBox && [hapticBox[0] + 2, hapticBox[1]]
-      // Each firing's moment number (the moments list's), for the bar labels.
-      const mo = moments.current
-      if (mo.items !== s.items || mo.events !== data.full.events) {
-        mo.items = s.items; mo.events = data.full.events
-        const keys = occurrenceKeys(data.full.events), nums = firingMoments(s.items, data.full.events)
-        mo.map = new Map(keys.flatMap((key, i) => { const n = nums[i]; return n === null ? [] : [[key, n] as [string, number]] }))
-      }
-      // The item's firings: each one's key (strength / gains), its recorded firing's key (index), one per firing even at
-      // one time, and its label (the moments list's number and its name) with the label's width (the font is fixed).
+      // Every firing of the full replay: each one's key (strength / gains), its recorded firing's key (index), one per
+      // firing even at one time, and its label (the moments list's number and its name) with the label's width (the font is fixed).
       const sh = shown.current
-      if (sh.item !== it || sh.all !== data.full.events || sh.nums !== mo.map) {
-        sh.item = it; sh.all = data.full.events; sh.nums = mo.map
-        sh.events = itemEvents(it, data.full.events); sh.keys = occurrenceKeys(sh.events); sh.recordedKeys = occurrenceKeys(sh.events, recordedName)
-        sh.labels = sh.events.map((ev, k) => { const num = mo.map.get(sh.keys[k]); return num === undefined ? ev.name : `${momentNumber(num)} ${ev.name}` })
+      if (sh.item !== it || sh.all !== data.full.events || sh.nums !== nb.nums) {
+        sh.item = it; sh.all = data.full.events; sh.nums = nb.nums
+        sh.events = drawnEvents(it, data.full.events); sh.keys = occurrenceKeys(sh.events); sh.recordedKeys = occurrenceKeys(sh.events, recordedName)
+        sh.labels = sh.events.map((ev, k) => { const num = nb.nums[k]; return num == null ? ev.name : `${firingNumber(num)} ${ev.name}` })
         sh.widths = sh.labels.map(label => ctx.measureText(label).width)
       }
       // Cue markers per lane: the selected cue bright and framed, the clip's moment normal, the rest dimmed.
@@ -236,7 +250,7 @@ export function SceneTimelinePanel() {
           const ev = events[k]
           if (!has(ev.name)) continue
           const picked = !!sel && sel.name === ev.name && sel.t != null && Math.abs(ev.t - sel.t) < 0.02
-          const tick = isTick(ticks, ev.name) && !picked, key = shownKeys[k]
+          const tick = isTick(ticks, ev.name) && !picked, key = shownKeys[k], emitted = isEmitted(ev)
           // Haptics: the app gain (a drag on the selection shows its ratio / time shift live); sound: the gain it plays at.
           const strength = lane === 'haptics' && !tick ? gc.strength.get(key) ?? null : null
           const index = strength ? ix.map.get(recordedKeys[k]) ?? null : null
@@ -246,13 +260,17 @@ export function SceneTimelinePanel() {
           const gain = tick ? null : lane === 'haptics' ? strength && strength.app * (chosen && st.dragRatio !== null ? st.dragRatio : 1) : gc.map.get(key)?.sound ?? null
           // A haptic one-shot is a wide bar centred on its time; the rest stay thin.
           const wide = lane === 'haptics' && gain !== null, bw = wide ? (picked || chosen ? BAR_W_SELECTED : BAR_W) : picked || chosen ? 3 : 2, bx = wide ? x - bw / 2 : x - 1
-          found.push({ x, half: wide ? bw / 2 + 0.5 : 0, y0, y1, name: ev.name, t: ev.t, lane, gain, strength, index })
+          found.push({ x, half: wide ? bw / 2 + 0.5 : 0, y0, y1, name: ev.name, t: ev.t, lane, gain, strength, index, emitted })
           ctx.fillStyle = color(ev.name)
-          ctx.globalAlpha = picked || chosen ? 1 : sel && sel.t != null ? 0.35 : it.kind === 'clip' && !ev.own ? 0.5 : 1
+          ctx.globalAlpha = picked || chosen ? 1 : (sel && sel.t != null) || (it.kind === 'clip' && !ev.own) ? DIMMED : 1
           if (tick) { ctx.fillRect(x, y1 - 6, 1, 6); continue }
           // A one-shot firing's bar: its gain × the lane height (1 at the lane top; above: clamped, with a cap — red when
           // the sent value is clipped; 0: dotted); a haptic bar has a 1 px line at its exact time.
-          if (gain === null) ctx.fillRect(bx, y0 + 2, bw, y1 - y0 - 2)
+          // An emitted firing (cue table `emit`): hollow and dashed, the same height, never selected.
+          if (emitted) {
+            const top = gain === null ? y0 + 2 : firingBar(gain, y0 + 2, y1).top
+            ctx.strokeStyle = color(ev.name); ctx.lineWidth = 1; ctx.setLineDash([2, 2]); ctx.strokeRect(bx + 0.5, top + 0.5, Math.max(1, bw - 1), y1 - top - 1); ctx.setLineDash([])
+          } else if (gain === null) ctx.fillRect(bx, y0 + 2, bw, y1 - y0 - 2)
           else {
             const bar = firingBar(gain, y0 + 2, y1)
             if (bar.stub) for (let n = 1; n <= 7; n += 3) ctx.fillRect(bx, y1 - n, bw, 1)
@@ -334,6 +352,7 @@ export function SceneTimelinePanel() {
       if (note.current) note.current.textContent = it.kind === 'full' ? tr('scene.cueCount', { count: data.full.events.length }) : `${it.note}  ${tr('scene.replayAt', { seconds: it.at.toFixed(1) })}`
       if (levels.current) levels.current.textContent = f ? layers.filter(l => l.gain.some(i => f[i] > 0)).map(l => `${l.cue} L ${f[l.gain[0]].toFixed(2)} R ${f[l.gain[1]].toFixed(2)}`
         + (l.rate ? ` (rate ${f[l.rate[0]].toFixed(2)} / ${f[l.rate[1]].toFixed(2)})` : '')).join('　') : ''
+      if (repeat.current) { const text = rr ? tr('scene.repeat.range', { range: repeatRangeText(rr) }) : tr('scene.repeat.full'); if (repeat.current.textContent !== text) repeat.current.textContent = text }
       if (state.current) state.current.textContent = `${SPEEDS[runtime.speedIndex]}x　loop ${runtime.part ? '±0.5s' : useSceneSettings.getState().loop ? 'on' : 'off'}　${Math.floor(time * fps)}f`
     }
     frame = requestAnimationFrame(draw)
@@ -351,7 +370,8 @@ export function SceneTimelinePanel() {
    */
   const onMouseMove = (event: React.MouseEvent<HTMLCanvasElement>) => {
     const { hit } = hitAt(event)
-    const text = hit?.strength ? t('scene.strength.tip', { app: hit.strength.app.toFixed(2), material: hit.strength.material.toFixed(2), sent: hit.strength.sent.toFixed(2) })
+    const text = hit?.emitted ? t('scene.timeline.emittedTip', { name: hit.name })
+      : hit?.strength ? t('scene.strength.tip', { app: hit.strength.app.toFixed(2), material: hit.strength.material.toFixed(2), sent: hit.strength.sent.toFixed(2) })
       : hit && hit.gain !== null ? `${t(hit.lane === 'sound' ? 'scene.lane.sound' : 'scene.lane.haptics')} ${hit.gain.toFixed(2)}` : t('scene.timeline.hint')
     if (event.currentTarget.title !== text) event.currentTarget.title = text
   }
@@ -421,11 +441,11 @@ export function SceneTimelinePanel() {
       useSceneStrength.getState().select(firingsBetween(time, timeAt(dx)), add ? 'add' : 'replace')
     })
   }
-  /** Recorded indices of the haptic one-shot firings between two replay times that the lane draws (a moment: its stretch only). */
+  /** Recorded indices of the haptic one-shot firings between two replay times (the lane draws every firing). */
   const firingsBetween = (a: number, b: number): number[] => {
-    const s = useSceneStore.getState(), it = s.items[s.cur]
+    const s = useSceneStore.getState()
     if (!s.table || !s.data || !s.edited) return []
-    return selectableFirings(s.table, s.data.full.events, s.edited.full.events, s.lib?.ticks ?? [], a, b, it?.kind === 'clip' ? [it.start, it.end] : null)
+    return selectableFirings(s.table, s.data.full.events, s.edited.full.events, s.lib?.ticks ?? [], a, b, null)
   }
   const onMouseDown = (event: React.MouseEvent<HTMLCanvasElement>) => {
     if (!useSceneStore.getState().items.length || event.button !== 0) return
@@ -494,6 +514,7 @@ export function SceneTimelinePanel() {
       <span className="scene-info-title" ref={title} />
       <span className="scene-info-dim" ref={note} />
       <span className="scene-info-dim scene-info-levels" ref={levels} />
+      <span className="scene-info-repeat" ref={repeat} title={t('scene.repeat.hint')} />
       <span className="scene-info-state" ref={state} />
       <SceneLaneChips />
       <SceneLockToggles />

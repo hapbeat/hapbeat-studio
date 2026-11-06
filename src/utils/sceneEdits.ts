@@ -110,7 +110,7 @@ export function applyEdits(recording: SceneData, firings: readonly FiringEdit[],
  * stable sort, so firings at one time keep their order) and the moments made again from them (contract §3.5: a moved
  * firing is in the moments list at its new time). `edited` itself when no time moved.
  */
-export function retimed(recording: SceneData, edited: SceneData, lib: Pick<SceneLib, 'ticks' | 'moment_rules'>): SceneData {
+export function retimed(recording: SceneData, edited: SceneData, lib: Pick<SceneLib, 'ticks'>): SceneData {
   if (edited === recording || edited.full.events.every((ev, i) => ev.t === recording.full.events[i].t)) return edited
   const events = edited.full.events.map((ev, i) => [ev, i] as const).sort((a, b) => a[0].t - b[0].t || a[1] - b[1]).map(([ev]) => ev)
   const { file, levels } = edited.full

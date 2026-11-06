@@ -8,7 +8,7 @@ import { AT_VALUES, SceneFormatError } from './sceneCueTable'
  *   viewer-lib.json   the project's settings: title, paths of the cue table and the
  *                     clip / sound WAV folders (relative to the project root), and
  *                     optionally the `at` choices, continuous layers, cue families,
- *                     tick cues, moment rules, import / record commands
+ *                     tick cues, moment rules (not used), import / record commands
  *   viewer-data.json  the recording: fps, the full replay video, its cue events and
  *                     the loop cues' levels per frame (named columns)
  *
@@ -37,7 +37,7 @@ export interface SceneLayer {
   colors: string[]
 }
 export interface SceneFamily { label: string; color: string; cues: string[] }
-/** How many moments a cue gets (keys `<cue>` or `<cue>:<variant>`, see ruleKey). */
+/** The lib's `moment_rules` (keys `<cue>` or `<cue>:<variant>`): parsed, not used (scene-recording section 3.4). */
 export interface MomentRules { max: Record<string, number>; min_gap_s: Record<string, number>; default_max: number | null }
 export interface SceneLib {
   title: string
@@ -195,9 +195,9 @@ function isLevels(value: unknown, width: number): value is number[][] {
 
 /**
  * viewer-data.json → SceneData; throws naming the first field that does not fit, or SceneFormatError for another
- * `schema_version`. The moments (`clips`) are made from the events with the lib's ticks and moment rules (deriveMoments).
+ * `schema_version`. The moments (`clips`) are made from the events with the lib's ticks (deriveMoments).
  */
-export function parseViewerData(text: string, lib: Pick<SceneLib, 'ticks' | 'moment_rules'>): SceneData {
+export function parseViewerData(text: string, lib: Pick<SceneLib, 'ticks'>): SceneData {
   const v = parseJson(text, 'viewer-data.json')
   const fail = (field: string): never => { throw new Error(`viewer-data.json: ${field} is missing or invalid`) }
   if (!isRecord(v)) return fail('(root)')
@@ -236,13 +236,6 @@ export function parseChapters(raw: readonly unknown[], duration: number): SceneC
 }
 
 const cueOf = (name: string) => name.split(':')[0]
-/**
- * The key of `record` (moment_rules.max / min_gap_s) that applies to event `name`: `<cue>:<variant>` itself, else its
- * `<cue>` (which covers the cue and every variant); null when neither is there.
- */
-export function ruleKey(record: Readonly<Record<string, unknown>>, name: string): string | null {
-  return Object.prototype.hasOwnProperty.call(record, name) ? name : Object.prototype.hasOwnProperty.call(record, cueOf(name)) ? cueOf(name) : null
-}
 /** A tick cue (lib.ticks, `<cue>` covering its variants): it fires often and gets a moment of its own. */
 export const isTick = (ticks: readonly string[], name: string) => ticks.includes(name) || ticks.includes(cueOf(name))
 
@@ -250,14 +243,12 @@ export const isTick = (ticks: readonly string[], name: string) => ticks.includes
 export type SceneMoment = Pick<SceneClip, 'name' | 'names' | 'hand' | 'at' | 'note' | 'start' | 'end'>
 
 /**
- * The moments list (scene-recording section 3.4; the rules of the former build_viewer.py): a non-tick cue within
- * MOMENT_S of the previous moment's first cue joins that moment; a tick cue is a moment of its own. The moment rules
- * apply to a moment's first cue: `min_gap_s` skips a moment that comes too soon after the last one kept under the
- * same key, `max` (else `default_max`) keeps the first n moments per key (a `<cue>` key counts the cue and its
- * variants together; without a `max` key each name counts on its own). Each moment's stretch runs from MOMENT_BEFORE_S
- * before its first cue to MOMENT_AFTER_S after it, within [0, `duration`].
+ * The moments (scene-recording section 3.4): every recorded firing is in exactly one — a non-tick cue within MOMENT_S
+ * of the previous moment's first cue joins that moment; a tick cue is a moment of its own. `moment_rules` is not used
+ * (the list drops no firing; the lib still parses it). Each moment's stretch runs from MOMENT_BEFORE_S before its
+ * first cue to MOMENT_AFTER_S after it, within [0, `duration`].
  */
-export function deriveMoments(events: readonly SceneEvent[], lib: Pick<SceneLib, 'ticks' | 'moment_rules'>, duration: number): SceneMoment[] {
+export function deriveMoments(events: readonly SceneEvent[], lib: Pick<SceneLib, 'ticks'>, duration: number): SceneMoment[] {
   const sorted = [...events].sort((a, b) => a.t - b.t)
   const groups: SceneEvent[][] = []
   for (const e of sorted) {
@@ -267,23 +258,13 @@ export function deriveMoments(events: readonly SceneEvent[], lib: Pick<SceneLib,
   }
   for (const e of sorted) if (isTick(lib.ticks, e.name)) groups.push([e])
   groups.sort((a, b) => a[0].t - b[0].t)
-  const { max, min_gap_s: gaps, default_max: defaultMax } = lib.moment_rules
-  const count = new Map<string, number>(), lastAt = new Map<string, number>()
-  const out: SceneMoment[] = []
-  for (const group of groups) {
-    const first = group[0], gapKey = ruleKey(gaps, first.name) ?? first.name, maxKey = ruleKey(max, first.name)
-    const prev = lastAt.get(gapKey)
-    if (prev !== undefined && first.t - prev < (gaps[gapKey] ?? 0)) continue
-    const key = maxKey ?? first.name, n = (count.get(key) ?? 0) + 1
-    count.set(key, n)
-    if (n > (maxKey ? max[maxKey] : defaultMax ?? Infinity)) continue
-    lastAt.set(gapKey, first.t)
-    out.push({
+  return groups.map(group => {
+    const first = group[0]
+    return {
       name: first.name, names: [...new Set(group.map(e => e.name))], hand: first.hand, at: first.t, note: first.note ?? '',
       start: Math.max(0, first.t - MOMENT_BEFORE_S), end: Math.min(duration, first.t + MOMENT_AFTER_S),
-    })
-  }
-  return out
+    }
+  })
 }
 
 /** The moments list: the full replay, then one entry per moment. */
@@ -307,6 +288,15 @@ export function itemEvents(item: SceneItem, all: SceneEvent[]): VisibleEvent[] {
   if (item.kind === 'full') return all.map(e => ({ ...e, own: false }))
   return all.filter(e => e.t >= item.start && e.t <= item.end)
     .map(e => ({ ...e, own: item.names.includes(e.name) && Math.abs(e.t - item.event) <= MOMENT_S + 1e-9 }))
+}
+
+/**
+ * Every cue of the full replay as the timeline draws it, at any zoom (`own` = the moment's cues at its mark, as
+ * itemEvents marks them): what is drawn is the whole replay, what the moment owns only marks some of it.
+ */
+export function drawnEvents(item: SceneItem, all: SceneEvent[]): VisibleEvent[] {
+  if (item.kind === 'full') return all.map(e => ({ ...e, own: false }))
+  return all.map(e => ({ ...e, own: item.names.includes(e.name) && Math.abs(e.t - item.event) <= MOMENT_S + 1e-9 }))
 }
 
 /** The cue E / W act on: a moment's own cue, or in the full replay the last non-tick cue up to just after `t`. */

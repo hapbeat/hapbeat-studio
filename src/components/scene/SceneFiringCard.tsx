@@ -8,7 +8,7 @@ import { effectiveOutput, useScenePlayback } from '@/stores/scenePlayback'
 import { kitGainsFor } from '@/utils/sceneCueTable'
 import { firingStrength, type FiringStrength } from '@/utils/sceneFiringGain'
 import { median, strengthStep } from '@/utils/sceneStrength'
-import { cardPlace, firingMoments, momentNumber, momentRangeText, shownIndexOf } from '@/utils/sceneTimelineEdit'
+import { cardPlace, firingNumber, firingNumbers, numberRangeText, shownIndexOf } from '@/utils/sceneTimelineEdit'
 import { NumberField } from './SceneCuePanels'
 
 /** The card's place when none is kept (CSS px from the timeline panel's top-right corner: under its info row). */
@@ -30,13 +30,13 @@ export function SceneLockToggles() {
 }
 
 /** One selected firing as the card shows it: the shown event (edited time / gain), its strength and recorded values. */
-interface Picked { index: number; name: string; t: number; gain: number; moment: number | null; strength: FiringStrength | null; recorded: { gain: number; t: number }; edited: boolean }
+interface Picked { index: number; name: string; t: number; gain: number; num: number | null; strength: FiringStrength | null; recorded: { gain: number; t: number }; edited: boolean }
 
 /**
  * The selected firings' card (DEC-112), floating over the timeline panel's top-right while firings are selected
  * (non-modal; moved by its grip, the place kept in studio-scene-ui.json `cardPos`; always drawn inside the panel, and
- * on its left while it would cover the selected bars on the right: cardPlace). One firing: its moment number,
- * name and time; several: their count and moment range. Strength: a number box (one: its gain; several: the median,
+ * on its left while it would cover the selected bars on the right: cardPlace). One firing: its number (the moments list's row),
+ * name and time; several: their count and number range. Strength: a number box (one: its gain; several: the median,
  * typing sets all), a 0–2 slider (live via dragRatio, one undo step on release) and ▼▲ (±1 dB, Shift ±3 dB), off while
  * 「強さをロック」. Time: one firing's absolute time / several firings' shift (frame-snapped), off while 「時刻をロック」. The locks, 「記録の値に戻す」,
  * the breakdown (material × event × this firing → sent, red when clipped) and Undo / Redo.
@@ -51,7 +51,6 @@ export function SceneFiringCard() {
   const data = useSceneStore(s => s.data)
   const edited = useSceneStore(s => s.edited)
   const recorded = useSceneStore(s => s.recorded)
-  const items = useSceneStore(s => s.items)
   const editsMatch = useSceneStore(s => s.editsMatch)
   const output = useScenePlayback(s => effectiveOutput(s))
   const kitGains = useSceneStore(s => kitGainsFor(s.projectKit?.clipGains, output))
@@ -69,7 +68,7 @@ export function SceneFiringCard() {
   const [sizes, setSizes] = useState<{ panel: { w: number; h: number }; card: { w: number; h: number } } | null>(null)
 
   const shownIdx = useMemo(() => data && edited ? shownIndexOf(data.full.events, edited.full.events) : new Map<number, number>(), [data, edited])
-  const moments = useMemo(() => data ? firingMoments(items, data.full.events) : [], [items, data])
+  const numbers = useMemo(() => data ? firingNumbers(data.full.events) : [], [data])
   const picked = useMemo((): Picked[] => {
     if (!data || !recorded) return []
     const events = data.full.events
@@ -77,9 +76,9 @@ export function SceneFiringCard() {
       const k = shownIdx.get(i), ev = k === undefined ? undefined : events[k], rec = recorded.full.events[i]
       if (k === undefined || !ev || !rec) return []
       const strength = table ? firingStrength(table, events, ev, kitGains) : null
-      return [{ index: i, name: ev.name, t: ev.t, gain: ev.gain ?? 1, moment: moments[k], strength, recorded: { gain: rec.gain ?? 1, t: rec.t }, edited: editsMatch.has(i) }]
+      return [{ index: i, name: ev.name, t: ev.t, gain: ev.gain ?? 1, num: numbers[k], strength, recorded: { gain: rec.gain ?? 1, t: rec.t }, edited: editsMatch.has(i) }]
     }).sort((a, b) => a.t - b.t)
-  }, [selected, data, recorded, shownIdx, moments, table, kitGains, editsMatch])
+  }, [selected, data, recorded, shownIdx, numbers, table, kitGains, editsMatch])
 
   const showing = picked.length > 0 && !!data
   useLayoutEffect(() => {
@@ -105,8 +104,8 @@ export function SceneFiringCard() {
   // Inside the panel, mirrored to the left while it would cover the selected bars on the right.
   const xs = view && sizes ? picked.map(p => (p.t - view[0]) / Math.max(1e-9, view[1] - view[0]) * sizes.panel.w) : []
   const place = sizes ? cardPlace(pos, sizes.panel, sizes.card, xs) : { side: 'right' as const, x: pos.right, top: pos.top }
-  const numbers = picked.flatMap(p => p.moment === null ? [] : [p.moment]), range = momentRangeText(numbers)
-  const title = one ? t('scene.card.one', { num: one.moment === null ? '' : momentNumber(one.moment), name: one.name, t: one.t.toFixed(2) }).trim()
+  const nums = picked.flatMap(p => p.num === null ? [] : [p.num]), range = numberRangeText(nums.length ? [Math.min(...nums), Math.max(...nums)] : null)
+  const title = one ? t('scene.card.one', { num: one.num === null ? '' : firingNumber(one.num), name: one.name, t: one.t.toFixed(2) }).trim()
     : range ? t('scene.card.several', { count: picked.length, range }) : t('scene.card.severalNoRange', { count: picked.length })
   const clipped = picked.filter(p => p.strength && p.strength.sent > 1).length
   const red = one?.strength ? one.strength.sent * (dragRatio ?? 1) > 1 : clipped > 0

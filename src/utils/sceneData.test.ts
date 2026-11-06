@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildItems, clipEnd, clockText, deriveMoments, familyColor, focusEvent, itemEvents, layersFromColumns, levelAt, momentCues, momentStart, parseViewerData, parseViewerLib, withRecordingLayers, type MomentRules, type SceneEvent } from './sceneData'
+import { buildItems, clipEnd, clockText, deriveMoments, drawnEvents, familyColor, focusEvent, itemEvents, layersFromColumns, levelAt, momentCues, momentStart, parseViewerData, parseViewerLib, withRecordingLayers, type SceneEvent } from './sceneData'
 import { AT_VALUES, parseCueTable, SceneFormatError, validateCueTable } from './sceneCueTable'
 import { sampleData, sampleLib, sampleViewerDataFile, sampleViewerLibFile } from './sceneTestFixtures'
 import { CONTRACT_CUE_TABLE, CONTRACT_SCENE_RECORDING } from './sceneContractFixtures'
@@ -68,14 +68,13 @@ describe('scene data files (scene-recording v1)', () => {
 })
 
 describe('deriveMoments (scene-recording section 3.4)', () => {
-  const none: MomentRules = { max: {}, min_gap_s: {}, default_max: null }
   const ev = (t: number, name: string, extra: Partial<SceneEvent> = {}): SceneEvent => ({ t, name, hand: '', ...extra })
-  const names = (events: SceneEvent[], ticks: string[] = [], rules: MomentRules = none, duration = 100) =>
-    deriveMoments(events, { ticks, moment_rules: rules }, duration).map(m => `${m.at}:${m.names.join('+')}`)
+  const names = (events: SceneEvent[], ticks: string[] = [], duration = 100) =>
+    deriveMoments(events, { ticks }, duration).map(m => `${m.at}:${m.names.join('+')}`)
 
   it('joins cues within 0.2 s of the moment\'s first cue; the first one names it (hand, note)', () => {
     expect(names([ev(1, 'button'), ev(1.2, 'spindle_on'), ev(1.3, 'feed')])).toEqual(['1:button+spindle_on', '1.3:feed'])
-    expect(deriveMoments([ev(5, 'grab', { hand: 'right', note: 'take 1' }), ev(5.1, 'grab')], { ticks: [], moment_rules: none }, 100))
+    expect(deriveMoments([ev(5, 'grab', { hand: 'right', note: 'take 1' }), ev(5.1, 'grab')], { ticks: [] }, 100))
       .toEqual([{ name: 'grab', names: ['grab'], hand: 'right', at: 5, note: 'take 1', start: 3, end: 8 }])
   })
 
@@ -83,20 +82,15 @@ describe('deriveMoments (scene-recording section 3.4)', () => {
     expect(names([ev(1, 'button'), ev(1.05, 'detent'), ev(1.1, 'detent:fine'), ev(1.15, 'grab')], ['detent'])).toEqual(['1:button+grab', '1.05:detent', '1.1:detent:fine'])
   })
 
-  it('min_gap_s skips a moment too soon after the last kept one of the same key', () => {
-    const rules = { ...none, min_gap_s: { footstep: 2 } }
-    expect(names([ev(0, 'footstep'), ev(1, 'footstep:approach'), ev(3, 'footstep'), ev(4, 'roar')], [], rules)).toEqual(['0:footstep', '3:footstep', '4:roar'])
-  })
-
-  it('max counts a <cue> key over its variants, a <cue>:<variant> key on its own; default_max per name', () => {
-    const steps = [ev(0, 'footstep:approach'), ev(1, 'footstep:leave'), ev(2, 'footstep'), ev(3, 'footstep:leave')]
-    expect(names(steps, [], { ...none, max: { footstep: 2 } })).toEqual(['0:footstep:approach', '1:footstep:leave'])
-    expect(names(steps, [], { ...none, max: { footstep: 2, 'footstep:leave': 1 } })).toEqual(['0:footstep:approach', '1:footstep:leave', '2:footstep'])
-    expect(names(steps, [], { ...none, default_max: 1 })).toEqual(['0:footstep:approach', '1:footstep:leave', '2:footstep'])
+  it('drops no firing: moment_rules in the lib is parsed but not used (§3.4)', () => {
+    const steps = [0, 1, 2, 3, 4, 5, 6].map(t => ev(t * 2.5, 'stroke_weak'))
+    const lib = parseViewerLib(text({ ...sampleViewerLibFile(), moment_rules: { max: { stroke_weak: 1 }, min_gap_s: { stroke_weak: 10 }, default_max: 4 } }))
+    expect(lib.moment_rules.default_max).toBe(4)
+    expect(deriveMoments(steps, lib, 100).map(m => m.at)).toEqual([0, 2.5, 5, 7.5, 10, 12.5, 15])
   })
 
   it('cuts the stretch at 0 and at the recording\'s end', () => {
-    expect(deriveMoments([ev(0.5, 'a'), ev(9, 'b')], { ticks: [], moment_rules: none }, 10).map(m => [m.start, m.end])).toEqual([[0, 3.5], [7, 10]])
+    expect(deriveMoments([ev(0.5, 'a'), ev(9, 'b')], { ticks: [] }, 10).map(m => [m.start, m.end])).toEqual([[0, 3.5], [7, 10]])
   })
 })
 
@@ -153,6 +147,13 @@ describe('scene cue timing', () => {
       ['detent', 1, false], ['button', 3, true], ['grab', 3.1, true], ['detent', 3.15, false], ['feed_loop', 4.5, false],
     ])
     expect(itemEvents({ ...clip, start: 2, end: 4 }, all).map(e => e.name)).toEqual(['button', 'grab', 'detent'])
+  })
+
+  it('draws every cue of the full replay for a moment too, marking only its own', () => {
+    const drawn = drawnEvents({ ...clip, start: 2, end: 4 }, all)
+    expect(drawn.map(e => e.name)).toEqual(all.map(e => e.name))
+    expect(drawn.filter(e => e.own).map(e => e.name)).toEqual(['button', 'grab'])
+    expect(drawnEvents(items[0], all).every(e => !e.own)).toBe(true)
   })
 
   it('groups the cues of one moment and skips ticks', () => {

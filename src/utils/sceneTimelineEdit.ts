@@ -1,20 +1,81 @@
-import { MOMENT_S, type SceneEvent, type SceneItem } from './sceneData'
+import { clipEnd, MOMENT_S, momentStart, type SceneChapter, type SceneEvent, type SceneItem } from './sceneData'
 import type { CueTable } from './sceneCueTable'
 import { occurrenceKeys } from './sceneFiringGain'
 import { recordedIndexMap, recordedName } from './sceneStrength'
 
 /**
- * The Scene timeline's editing (DEC-112 stage B), pure parts: moment numbers of firings (the moments list's numbering,
- * shared by the bar labels, the card and the list's in-view / chosen rows), the drag axes under the locks, frame
- * snapping of a time drag, and which lanes are drawn.
+ * The Scene timeline's editing (DEC-112), pure parts: firing numbers (the moments list's rows, shared by the bar
+ * labels and the card), the list's rows and the rows in the timeline's view, the repeat range, the drag axes under the
+ * locks, frame snapping of a time drag, and which lanes are drawn.
  */
 
-/** A moment's number as the moments list shows it (zero-padded: 04). */
-export const momentNumber = (k: number) => String(k).padStart(2, '0')
+/** A firing's number as the moments list and the bar labels show it (zero-padded: 04). */
+export const firingNumber = (n: number) => String(n).padStart(2, '0')
+
+/** A shown firing made by a cue table `emit` (sceneEmit), not recorded: not numbered, not listed. */
+export const isEmitted = (ev: SceneEvent) => !!(ev as { emitted?: true }).emitted
 
 /**
- * Each firing's moment (its row `k` in the moments list), aligned with `events`; null when it belongs to none (a moment
- * left out by the moment rules, an emitted firing far from any moment). A firing belongs to moment k when the moment
+ * Each shown firing's number (1, 2, … over the recorded firings in time order, edits applied: `events` are the shown
+ * firings), aligned with `events`; null for an emitted firing. Firings at one time keep their order.
+ */
+export function firingNumbers(events: readonly SceneEvent[]): (number | null)[] {
+  const out: (number | null)[] = events.map(() => null)
+  let n = 0
+  for (const i of events.map((_, i) => i).sort((a, b) => events[a].t - events[b].t || a - b)) if (!isEmitted(events[i])) out[i] = ++n
+  return out
+}
+
+/**
+ * One row of the moments list: a recorded firing (`index` into the shown firings), its number, its moment (items
+ * index; null for none), and the group mark of a moment with several firings (`group`: its first / last row of a run
+ * of consecutive rows of that moment; false for a moment of one firing).
+ */
+export interface FiringRow { index: number; num: number; moment: number | null; group: false | { first: boolean; last: boolean } }
+
+/** The moments list's rows: every recorded firing once, in number order (time order), grouped by moment (firingMoments). */
+export function firingRows(items: readonly SceneItem[], events: readonly SceneEvent[]): FiringRow[] {
+  const nums = firingNumbers(events), moments = firingMoments(items, events)
+  const rows = events.flatMap((_, i) => nums[i] === null ? [] : [{ index: i, num: nums[i]!, moment: moments[i] }]).sort((a, b) => a.num - b.num)
+  const size = new Map<number, number>()
+  for (const r of rows) if (r.moment !== null) size.set(r.moment, (size.get(r.moment) ?? 0) + 1)
+  return rows.map((r, k) => ({ ...r, group: r.moment !== null && size.get(r.moment)! > 1
+    ? { first: rows[k - 1]?.moment !== r.moment, last: rows[k + 1]?.moment !== r.moment } : false }))
+}
+
+/**
+ * The first and last numbers of the recorded firings whose time is in [a, b] (the timeline's drawn range); null for
+ * none. Firings are numbered in time order, so every number between them is in the range too.
+ */
+export function numbersInRange(events: readonly SceneEvent[], numbers: readonly (number | null)[], a: number, b: number): [number, number] | null {
+  const lo = Math.min(a, b), hi = Math.max(a, b)
+  let first = Infinity, last = -Infinity
+  events.forEach((ev, i) => { const n = numbers[i]; if (n != null && ev.t >= lo && ev.t <= hi) { first = Math.min(first, n); last = Math.max(last, n) } })
+  return first <= last ? [first, last] : null
+}
+
+/** First–last numbers ("04–08", one: "04"); '' for none. */
+export function numberRangeText(range: readonly [number, number] | null): string {
+  if (!range) return ''
+  return range[0] === range[1] ? firingNumber(range[0]) : `${firingNumber(range[0])}–${firingNumber(range[1])}`
+}
+
+/**
+ * What repeats now (replay seconds, SceneRuntime's play range): W's part or a playing loop cue span (`part`), else a
+ * moment from its lead-in to its end, else a chapter playing; null = the full replay.
+ */
+export function repeatRange(item: SceneItem, part: readonly [number, number] | null, leadSec: number, chapter: SceneChapter | null): [number, number] | null {
+  if (part) return [part[0], part[1]]
+  if (item.kind === 'clip') return [momentStart(item, leadSec), clipEnd(item)]
+  return chapter ? [chapter.start, chapter.end] : null
+}
+
+/** A repeat range as 「3.3–8.3」 (seconds, one decimal); '' for the full replay. */
+export const repeatRangeText = (range: readonly [number, number] | null) => range ? `${range[0].toFixed(1)}–${range[1].toFixed(1)}` : ''
+
+/**
+ * Each firing's moment (its row `k` in the moments list), aligned with `events`; null when it belongs to none (an emitted
+ * firing far from any moment). A firing belongs to moment k when the moment
  * lists its name and it fires within MOMENT_S after the moment's first cue (deriveMoments' grouping).
  */
 export function firingMoments(items: readonly SceneItem[], events: readonly SceneEvent[]): (number | null)[] {
@@ -30,20 +91,6 @@ export function firingMoments(items: readonly SceneItem[], events: readonly Scen
     }
     return null
   })
-}
-
-/** The moment numbers (sorted, distinct) of the firings between replay times `a` and `b`. */
-export function momentsInRange(events: readonly SceneEvent[], moments: readonly (number | null)[], a: number, b: number): number[] {
-  const lo = Math.min(a, b), hi = Math.max(a, b), found = new Set<number>()
-  events.forEach((ev, i) => { const k = moments[i]; if (k != null && ev.t >= lo && ev.t <= hi) found.add(k) })
-  return [...found].sort((x, y) => x - y)
-}
-
-/** First–last moment numbers ("04–08", one: "04"); '' for none. */
-export function momentRangeText(numbers: readonly number[]): string {
-  if (!numbers.length) return ''
-  const first = Math.min(...numbers), last = Math.max(...numbers)
-  return first === last ? momentNumber(first) : `${momentNumber(first)}–${momentNumber(last)}`
 }
 
 /**

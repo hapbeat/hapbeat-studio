@@ -1,37 +1,40 @@
-import { Fragment, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { useAgentTrialStore } from '@/stores/agentTrialStore'
 import { useWaveformStore } from '@/stores/waveformStore'
-import { clockText, familyColor } from '@/utils/sceneData'
+import { clockText, familyColor, isTick } from '@/utils/sceneData'
 import { addVariant, allEventKeys, effectiveEvent, parseEventKey, resolveEventName } from '@/utils/cueEvents'
 import { VARIANT_NAME, type CueTable } from '@/utils/sceneCueTable'
 import { HapticIcon, SoundIcon } from '@/components/common/KindIcon'
 import { useMomentPlace } from './SceneCuePanels'
 import { useScene } from './sceneContext'
-import { removeOverride, setOverride as setSceneOverride, type OverriddenClip } from '@/utils/sceneOverrides'
+import { removeOverride, setOverride as setSceneOverride, type OverriddenEvent } from '@/utils/sceneOverrides'
 import { saveSceneOverrides } from '@/hooks/useSceneOverrides'
 import { localIsoString } from '@/utils/hapticKnowledge'
 import { MenuPopup } from '@/components/waveform/EditorMenu'
-import { loopCueRunAt, loopCueRuns, nearestFiring } from '@/utils/loopStretch'
+import { loopCueRunAt, loopCueRuns } from '@/utils/loopStretch'
 import { useSceneStrength } from '@/stores/sceneStrength'
 import { useSceneTimelineRange } from '@/stores/sceneTimelineRange'
-import { firingMoments, momentRangeText, momentsInRange, shownIndexOf } from '@/utils/sceneTimelineEdit'
+import { firingNumber, firingRows, numberRangeText, shownIndexOf, type FiringRow } from '@/utils/sceneTimelineEdit'
+import { firingStrength } from '@/utils/sceneFiringGain'
 
 /**
- * "Moments and events": the project's chapters first (when it has any: a click plays that stretch, SceneRuntime.playChapter;
- * keys 1–9), then the full replay, then one stretch of it per cue moment, with which outputs its cues use. A click on
- * a row jumps to that moment (from the lead-in setting before its mark) and plays it. "Change" opens a one-line
- * request over the rows (nothing moves): an existing event or a new `cue:variant`, a comment, "Request" — a new
- * variant is made in the cue table at once (multipliers only, 1 / 1) so it can be tuned here, and the agent gets a
- * hapbeat-agent-message@1 `reassign` (the game's routing changes; the table holds no per-moment values).
- * A moment of several cues lists each cue as its own row under it (one click selects that cue). A loop cue's row (the
- * moment's, or its cue row) plays its own span instead: the layer's active run its firing starts (loopCueRunAt), in the
- * full replay from the lead-in before it to the lead-in after it (SceneRuntime.playSpan); one-shot rows play the moment.
- * The list follows the timeline (DEC-112): rows with firings in its visible range are tinted (in-view) and a sticky line
- * names them (「タイムライン: 04–08」); rows holding selected firings are marked (chosen; the first is scrolled to when the
- * selection changes); the picked firing's moment (a bar clicked) is outlined and scrolled to.
+ * "Moments and events" (DEC-112, scene-recording §3.4): the project's chapters first (when it has any: a click plays
+ * that stretch, SceneRuntime.playChapter; keys 1–9), then the full replay, then one row per recorded firing — the
+ * timeline's bars one to one, with the same numbers (firingRows: time order, edits applied; emitted firings are not
+ * listed). The firings of one moment (within MOMENT_S) are consecutive rows joined by a group mark on the left. A click
+ * on a row plays its moment (from the lead-in setting before its mark; a loop cue: the layer's active run that firing
+ * starts, loopCueRunAt, from the lead-in before it to the lead-in after it, SceneRuntime.playSpan) and selects that
+ * firing (the picked cue; a haptic one-shot also as the firing selection). "Change" opens a one-line request over the
+ * rows (nothing moves): an existing event or a new `cue:variant`, a comment, "Request" — a new variant is made in the
+ * cue table at once (multipliers only, 1 / 1) so it can be tuned here, and the agent gets a hapbeat-agent-message@1
+ * `reassign` for that firing (the game's routing changes; the table holds no per-firing values).
+ * The list follows the timeline (sceneTimelineRange): the rows it draws are bracketed by a purple line on the left and
+ * named by a sticky line (「タイムライン: 04–08」, from the same numbers); the rows inside what repeats are tinted; rows of
+ * selected firings are marked (chosen; the first is scrolled to when the selection changes); the picked firing's row
+ * is the selected row (scrolled to).
  */
 export function SceneMomentsPanel() {
   const { t } = useI18n()
@@ -42,11 +45,11 @@ export function SceneMomentsPanel() {
   const table = useSceneStore(s => s.table)
   const cur = useSceneStore(s => s.cur)
   const list = useRef<HTMLDivElement>(null)
+  /** The row (its shown firing index) whose Change form is open; the rows whose request was sent (by recorded time and name). */
   const [open, setOpen] = useState<number | null>(null)
-  const [sent, setSent] = useState<Record<number, true>>({})
+  const [sent, setSent] = useState<Record<string, true>>({})
   /** The row whose right-click menu ("Undo" of a changed firing) is open, and where (the pointer). */
   const [menu, setMenu] = useState<{ k: number; x: number; y: number } | null>(null)
-  // The firing selected here or on the timeline (Event panel follows it too): its moment's row is marked and scrolled to.
   const sel = useSceneStore(s => s.sel)
   const data = useSceneStore(s => s.data)
   const span = useSceneStore(s => s.span)
@@ -54,63 +57,45 @@ export function SceneMomentsPanel() {
   const edited = useSceneStore(s => s.edited)
   const recorded = useSceneStore(s => s.recorded)
   const selected = useSceneStrength(s => s.selected)
-  const range = useSceneTimelineRange(s => s.range)
-  /** Each shown firing's moment (its row), for the in-view, chosen and picked rows. */
-  const momentOf = useMemo(() => data ? firingMoments(items, data.full.events) : [], [items, data])
-  const inView = useMemo(() => new Set(data && range ? momentsInRange(data.full.events, momentOf, range[0], range[1]) : []), [data, momentOf, range])
-  const chosen = useMemo(() => {
-    const out = new Set<number>()
-    if (!data || !edited) return out
-    const shown = shownIndexOf(data.full.events, edited.full.events)
-    for (const i of selected) { const k = shown.get(i), m = k === undefined ? null : momentOf[k]; if (m != null) out.add(m) }
-    return out
-  }, [selected, data, edited, momentOf])
-  /**
-   * Each moment's first firing at its RECORDED time (row → seconds; viewer-data.json `events`): an override and the
-   * Change request name a firing by it, also after its time was edited. A row without a recorded firing: none (its own time).
-   */
-  const recordedAt = useMemo(() => {
-    const out = new Map<number, number>()
-    if (!data || !edited || !recorded) return out
-    const recordedOf = new Map([...shownIndexOf(data.full.events, edited.full.events)].map(([i, k]) => [k, i]))
-    items.forEach((it, k) => {
-      if (it.kind !== 'clip') return
-      const e = data.full.events.findIndex(ev => ev.name === it.name && ev.t === it.at), i = e < 0 ? undefined : recordedOf.get(e)
-      if (i !== undefined && recorded.full.events[i]) out.set(k, recorded.full.events[i].t)
-    })
-    return out
-  }, [items, data, edited, recorded])
-  const atOf = (k: number) => recordedAt.get(k) ?? items[k]?.at ?? 0
+  const inView = useSceneTimelineRange(s => s.rows)
+  const repeat = useSceneTimelineRange(s => s.repeat)
+  const rows = useMemo(() => data ? firingRows(items, data.full.events) : [], [items, data])
+  /** Each shown firing's recorded index (viewer-data events[i]); emitted firings have none. */
+  const recordedOf = useMemo(() => new Map(data && edited ? [...shownIndexOf(data.full.events, edited.full.events)].map(([i, k]) => [k, i]) : []), [data, edited])
+  /** A shown firing's RECORDED time (viewer-data.json): an override and the Change request name a firing by it, also after its time was edited. */
+  const atOf = (k: number) => { const i = recordedOf.get(k), r = i === undefined ? undefined : recorded?.full.events[i]; return r?.t ?? data?.full.events[k]?.t ?? 0 }
+  const fromOf = (ev: OverriddenEvent) => ev.from ?? ev.name
   /** Each loop cue's active runs over the recording (once per recording). */
   const runsOf = useMemo(() => new Map(data && lib ? lib.loop_cues.map(c => [c, loopCueRuns(data.full.levels, data.fps, lib, c)]) : []), [data, lib])
-  /** The span the row of cue `name` in moment `k` plays: its loop cue's run started by that firing (null for one-shot cues). */
-  const rowSpan = (k: number, name: string) => { const it = items[k], runs = runsOf.get(name.split(':')[0]); return it?.kind === 'clip' && data && runs?.length ? loopCueRunAt(runs, data.full.events, name, it.at) : null }
-  /** Whether the row of `name` in moment `k` is the span playing. */
-  const spanPlaying = (k: number, name: string) => { const r = span && rowSpan(k, name); return !!r && r[0] === span![0] && r[1] === span![1] }
-  /** The row of cue `name` in moment `k`: a loop cue plays its own span (selected at its firing in the full replay), a one-shot cue the moment. */
-  const pickCue = (k: number, name: string) => {
-    const it = items[k], run = rowSpan(k, name), lead = useSceneSettings.getState().leadSec
-    runtime.audio()
-    if (run && it && data) {
-      runtime.playSpan(run, lead, lead)
-      useSceneStore.getState().selectCue(name, nearestFiring(data.full.events, name, it.at))
-      return
-    }
-    runtime.playMoment(k, lead)
-    if (it?.kind === 'clip') useSceneStore.getState().selectCue(name, it.event)
+  /** The span the row of firing `k` plays: its loop cue's run started by that firing (null for one-shot cues). */
+  const rowSpan = (k: number) => {
+    const ev = data?.full.events[k], runs = ev && runsOf.get(ev.name.split(':')[0])
+    return ev && data && runs?.length ? loopCueRunAt(runs, data.full.events, ev.name, ev.t) : null
   }
-  const picked = useMemo(() => {
-    if (!sel || sel.t == null || !items[cur]) return -1
-    // The moment holding that firing (any of its firings), else a moment starting at it.
-    const k = data ? data.full.events.findIndex(e => e.name === sel.name && Math.abs(e.t - sel.t!) < 0.02) : -1, m = k >= 0 ? momentOf[k] : null
-    return m ?? items.findIndex(x => x.kind === 'clip' && x.names.includes(sel.name) && Math.abs(x.at - sel.t!) < 0.05)
-  }, [sel, items, cur, data, momentOf])
-  // The picked firing's row (a bar clicked) before the current one (the full replay's row 0 would come first in the list).
-  useEffect(() => { const root = list.current; (root?.querySelector('.scene-item.picked') ?? root?.querySelector('.scene-item.sel'))?.scrollIntoView({ block: 'nearest' }) }, [cur, picked])
+  /** A row: a loop cue plays its own span, a one-shot cue its moment; that firing is the picked cue and (a haptic one-shot) the firing selection. */
+  const pickRow = (row: FiringRow) => {
+    const ev = data?.full.events[row.index]
+    if (!ev || !data) return
+    const run = rowSpan(row.index), lead = useSceneSettings.getState().leadSec
+    runtime.audio()
+    if (run) runtime.playSpan(run, lead, lead)
+    else if (row.moment !== null) runtime.playMoment(row.moment, lead)
+    else runtime.playFull(Math.max(0, ev.t - lead))
+    useSceneStore.getState().selectCue(ev.name, ev.t)
+    const i = recordedOf.get(row.index), oneShot = !!table && !isTick(lib?.ticks ?? [], ev.name) && !!firingStrength(table, data.full.events, ev)
+    useSceneStrength.getState().select(i !== undefined && oneShot ? [i] : [], 'replace')
+  }
+  /** The picked firing's row (shown index), else -1. */
+  const picked = useMemo(() => !sel || sel.t == null || !data ? -1 : data.full.events.findIndex(e => e.name === sel.name && Math.abs(e.t - sel.t!) < 0.02), [sel, data])
+  const chosen = useMemo(() => new Set([...recordedOf].flatMap(([k, i]) => selected.has(i) ? [k] : [])), [recordedOf, selected])
+  // The picked firing's row (a bar clicked, a row clicked), else the full replay's row when it is shown.
+  useEffect(() => { const root = list.current; root?.querySelector('.scene-item.sel')?.scrollIntoView({ block: 'nearest' }) }, [cur, picked])
   // Another firing selection (the timeline): its first row in view.
   useEffect(() => { list.current?.querySelector('.scene-item.chosen')?.scrollIntoView({ block: 'nearest' }) }, [selected])
   if (!lib) return <div className="scene-panel-empty">{t('scene.noProject')}</div>
   const chapters = data?.chapters ?? []
+  const full = items.findIndex(it => it.kind === 'full')
+  const inRepeat = (time: number) => !!repeat && time >= repeat[0] && time <= repeat[1]
   return <div className="scene-moments">
     {chapters.length > 0 && <div className="scene-chapters">
       <div className="scene-chapters-head">{t('scene.chapters.heading')}</div>
@@ -126,49 +111,45 @@ export function SceneMomentsPanel() {
       <span className="scene-legend-kind"><HapticIcon size={14} decorative /> {t('scene.legend.haptics')}</span>
       <span className="scene-legend-kind"><SoundIcon size={14} decorative /> {t('scene.legend.sound')}</span>
     </div>
-    <div className="scene-moments-inview" title={t('scene.moments.inViewHint')}>{t('scene.moments.inView', { range: momentRangeText([...inView]) || '—' })}</div>
+    <div className="scene-moments-inview" title={t('scene.moments.inViewHint')}>{t('scene.moments.inView', { range: numberRangeText(inView) || '—' })}</div>
     <div ref={list}>
-      {items.map((it, k) => {
-        const several = it.kind === 'clip' && it.names.length > 1
-        const rowSel = span ? it.kind === 'clip' && !several && spanPlaying(k, it.name) : k === cur
-        return <Fragment key={k}><div className={`scene-item ${rowSel ? 'sel' : ''} ${k === picked ? 'picked' : ''} ${inView.has(k) ? 'in-view' : ''} ${chosen.has(k) ? 'chosen' : ''}`}
-          title={it.kind === 'clip' && !several && rowSpan(k, it.name) ? t('scene.span.hint', { name: it.name }) : t('scene.moment.playHint')}
-          onContextMenu={e => { if (!(it as OverriddenClip).from) return; e.preventDefault(); const at = { k, x: e.clientX, y: e.clientY }; setMenu(m => m?.k === k ? null : at) }}
-          onClick={e => {
-            if ((e.target as HTMLElement).closest('.scene-occ-form, button')) return
-            // The timeline marks the moment's firing (video time of the clip) and the Event panel shows it (its first cue).
-            if (it.kind === 'clip') pickCue(k, it.name)
-            else { runtime.audio(); runtime.playMoment(k, useSceneSettings.getState().leadSec) }
-          }}>
-          <span className="scene-num">{k === 0 ? '▶' : String(k).padStart(2, '0')}</span>
-          <span className="scene-dot" style={{ background: familyColor(lib, it.name) }} />
-          <span className="scene-name">{it.kind === 'full' ? t('scene.full') : <>{(it as OverriddenClip).from
-            ? <span className="scene-overridden" title={t('scene.override.hint', { from: (it as OverriddenClip).from! })}><i aria-hidden="true">◌</i>{it.names.join(' + ')}</span>
-            : it.names.join(' + ')}{(() => { const p = placeOf(table, it.names, it.hand); return <small title={`${p.title}\n${t('scene.placeHint')}`}>{p.text}</small> })()}</>}</span>
-          {/* A moment of several cues: the marks are on each cue's own row below. */}
-          <CueKinds table={table} name={it.kind === 'clip' && !several ? it.name : null} />
-          <span className="scene-num">{it.kind === 'full' ? '' : `${it.at.toFixed(1)}s`}</span>
-          {it.kind === 'clip' && <span className="scene-item-actions">
-            <button type="button" className="scene-icon-btn scene-open-editor" aria-expanded={open === k} title={`${t('scene.occ.reassignHint')}${sent[k] ? `\n${t('scene.occ.sent')}` : ''}`}
-            onClick={e => { e.stopPropagation(); e.currentTarget.blur(); setOpen(open === k ? null : k) }}>{sent[k] ? `✓ ${t('scene.moment.change')}` : t('scene.moment.change')}</button>
-          </span>}
-          {menu?.k === k && (it as OverriddenClip).from && <MenuPopup anchor={list} at={menu} onClose={() => setMenu(null)} className="scene-occ-form scene-row-menu">
+      {full >= 0 && <div className={`scene-item ${cur === full && !span && picked < 0 ? 'sel' : ''}`} title={t('scene.moment.playHint')}
+        onClick={() => { runtime.audio(); runtime.playMoment(full, useSceneSettings.getState().leadSec) }}>
+        <span className="scene-num">▶</span>
+        <span className="scene-dot" />
+        <span className="scene-name">{t('scene.full')}</span>
+      </div>}
+      {data && rows.map(row => {
+        const k = row.index, ev = data.full.events[k] as OverriddenEvent, from = fromOf(ev), sentKey = `${from}@${atOf(k)}`
+        const view = !!inView && row.num >= inView[0] && row.num <= inView[1]
+        const cls = ['scene-item', 'scene-firing', k === picked ? 'sel' : '', chosen.has(k) ? 'chosen' : '', inRepeat(ev.t) ? 'repeat' : '',
+          view ? 'in-view' : '', view && row.num === inView![0] ? 'in-view-first' : '', view && row.num === inView![1] ? 'in-view-last' : '',
+          row.group ? 'grp' : '', row.group && row.group.first ? 'grp-first' : '', row.group && row.group.last ? 'grp-last' : ''].filter(Boolean).join(' ')
+        const place = placeOf(table, [ev.name], ev.hand)
+        return <div key={k} className={cls} title={rowSpan(k) ? t('scene.span.hint', { name: ev.name }) : t('scene.moment.playHint')}
+          onContextMenu={e => { if (!ev.from) return; e.preventDefault(); const at = { k, x: e.clientX, y: e.clientY }; setMenu(m => m?.k === k ? null : at) }}
+          onClick={e => { if ((e.target as HTMLElement).closest('.scene-occ-form, button')) return; pickRow(row) }}>
+          <span className="scene-num">{firingNumber(row.num)}</span>
+          <span className="scene-dot" style={{ background: familyColor(lib, ev.name) }} />
+          <span className="scene-name">{ev.from
+            ? <span className="scene-overridden" title={t('scene.override.hint', { from: ev.from })}><i aria-hidden="true">◌</i>{ev.name}</span>
+            : ev.name}<small title={`${place.title}\n${t('scene.placeHint')}`}>{place.text}</small></span>
+          <CueKinds table={table} name={ev.name} />
+          <span className="scene-num">{`${ev.t.toFixed(2)}s`}</span>
+          <span className="scene-item-actions">
+            <button type="button" className="scene-icon-btn scene-open-editor" aria-expanded={open === k} title={`${t('scene.occ.reassignHint')}${sent[sentKey] ? `\n${t('scene.occ.sent')}` : ''}`}
+              onClick={e => { e.stopPropagation(); e.currentTarget.blur(); setOpen(open === k ? null : k) }}>{sent[sentKey] ? `✓ ${t('scene.moment.change')}` : t('scene.moment.change')}</button>
+          </span>
+          {menu?.k === k && ev.from && <MenuPopup anchor={list} at={menu} onClose={() => setMenu(null)} className="scene-occ-form scene-row-menu">
             <button type="button" role="menuitem" className="scene-icon-btn" autoFocus title={t('scene.override.undoHint')}
-              onClick={e => { e.stopPropagation(); setMenu(null); const from = (it as OverriddenClip).from!
-                void saveSceneOverrides(removeOverride(useSceneStore.getState().overrides, from, atOf(k))).catch(error => changeFailed(error instanceof Error ? error.message : String(error))) }}>{t('scene.override.undoTo', { from: (it as OverriddenClip).from! })}</button>
+              onClick={e => { e.stopPropagation(); setMenu(null)
+                void saveSceneOverrides(removeOverride(useSceneStore.getState().overrides, from, atOf(k))).catch(error => changeFailed(error instanceof Error ? error.message : String(error))) }}>{t('scene.override.undoTo', { from })}</button>
           </MenuPopup>}
-          {open === k && it.kind === 'clip' && table && <ChangeEventForm from={(it as OverriddenClip).from ?? it.name} at={atOf(k)} table={table}
+          {open === k && table && <ChangeEventForm from={from} at={atOf(k)} table={table}
             onClose={() => setOpen(null)}
-            onSent={to => { setSent(s => ({ ...s, [k]: true })); setOpen(null); changedFiring((it as OverriddenClip).from ?? it.name, atOf(k), to) }}
+            onSent={to => { setSent(s => ({ ...s, [sentKey]: true })); setOpen(null); changedFiring(from, atOf(k), to) }}
             onError={changeFailed} />}
         </div>
-        {several && it.names.map(name => <div key={name} className={`scene-item scene-subitem ${(span ? spanPlaying(k, name) : k === cur && sel?.name === name) ? 'sel' : ''}`}
-          title={rowSpan(k, name) ? t('scene.span.hint', { name }) : t('scene.moment.cueHint', { name })} onClick={() => pickCue(k, name)}>
-          <span className="scene-dot" style={{ background: familyColor(lib, name) }} />
-          <span className="scene-name">{name}</span>
-          <CueKinds table={table} name={name} />
-        </div>)}
-        </Fragment>
       })}
     </div>
   </div>

@@ -31,6 +31,7 @@
 .scene-info-dim { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
 .scene-info-levels { flex: 1; min-width: 0; }
 .scene-info-state { color: var(--text-muted); }
+.scene-info-repeat { color: rgb(61,214,208); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .scene-timeline-canvas { flex: 1; min-height: 60px; width: 100%; display: block; background: #111316; cursor: pointer; }
 .scene-help { padding: 4px 12px; color: var(--text-muted); font-size: 11px; border-top: 1px solid var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .scene-toggles { display: inline-flex; gap: 6px; align-items: center; flex: 0 1 auto; min-width: 0; }
@@ -67,18 +68,24 @@
 /* A firing shown as another event until the scene is re-recorded. */
 /* The mark before the name: one fixed-width cell, so names stay aligned. */
 .scene-overridden i { display: inline-block; width: 1.1em; text-align: center; font-style: normal; color: var(--text-muted); }
-/* Rows with firings in the timeline's visible range (a tint only), rows holding selected firings (stronger). */
-.scene-item.in-view { background: rgba(255,255,255,.05); }
+/* The left gutter holds two marks: the timeline's drawn range (a purple line, one continuous line over its rows) and a
+   moment of several firings (a thin square bracket joining its rows). Square ends only. */
+.scene-moments .scene-item { padding-left: 18px; }
+.scene-item.in-view::before { content: ''; position: absolute; left: 4px; width: 3px; top: 0; bottom: -1px; background: var(--accent-light); }
+.scene-item.in-view-first::before { top: 3px; }
+.scene-item.in-view-last::before { bottom: 3px; }
+.scene-item.grp::after { content: ''; position: absolute; left: 10px; width: 4px; top: 0; bottom: -1px; border-left: 1px solid var(--text-muted); }
+.scene-item.grp-first::after { top: 50%; border-top: 1px solid var(--text-muted); }
+.scene-item.grp-last::after { bottom: 50%; border-bottom: 1px solid var(--text-muted); }
+.scene-item.grp-first.grp-last::after { top: 25%; bottom: 25%; }
+/* Rows inside what repeats now (the timeline's band colour), rows of selected firings (stronger). */
+.scene-item.repeat { background: rgba(61,214,208,.08); }
 .scene-item.chosen { background: rgba(124,196,255,.16); }
 /* Which moments the timeline shows: one fixed line over the rows, kept on top while the list scrolls. */
 .scene-moments-inview { position: sticky; top: 0; z-index: 2; height: 22px; line-height: 22px; padding: 0 12px; font-size: 12px; color: var(--text-muted);
   background: var(--bg-secondary); border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* The moment of the firing selected on the timeline / here. */
-.scene-item.picked { outline: 1px solid var(--accent-light); outline-offset: -1px; }
-.scene-item.sel { background: rgba(124,92,191,.22); box-shadow: inset 3px 0 0 var(--accent-light); }
-/* A cue of a moment of several cues: indented rows of one fixed height under their row. */
-.scene-subitem { grid-template-columns: 10px minmax(0, 1fr) 38px; height: 24px; padding-top: 0; padding-bottom: 0; padding-left: 34px; font-size: 12px; color: var(--text-secondary); }
-.scene-subitem.sel { color: var(--text-primary); }
+/* The selected row: the picked firing (a bar or a row clicked), the full replay, a chapter playing. */
+.scene-item.sel { background: rgba(124,92,191,.22); outline: 1px solid var(--accent-light); outline-offset: -1px; }
 /* "Change" on a moment: a one-line request over the following rows (nothing moves). */
 .scene-occ-form { position: absolute; left: 12px; right: 12px; top: 100%; z-index: 5; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 4px; padding: 4px; background: var(--bg-secondary); border: 1px solid var(--border-light); border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,.4); }
 /* A row's right-click menu at the pointer: a MenuPopup (portal on the body, fixed, kept in the window). */
