@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { documentMessage, type MessageId, type MessageParams } from '@/i18n/messages'
-import { bundledFileUrl, isBundledProject } from '@/utils/bundledProject'
+import { appFolderStamp, appProjectFileUrl, isAppProject } from '@/utils/appProject'
 import { loadDirectoryHandle, saveDirectoryHandle } from '@/utils/localDirectory'
 import { buildItems, VIEWER_DIR, type SceneData, type SceneItem, type SceneLib } from '@/utils/sceneData'
 import { alignClipGains, CLIP_GAIN_RENAME_SCRIPT, kitCopyDiffers, loopCuesOf, SceneFormatError, serializeCueTable, StaleClipGainKeyError, validateCueTable, type CueTable } from '@/utils/sceneCueTable'
@@ -48,6 +48,11 @@ interface SceneState {
   data: SceneData | null
   /** The recording as read from the project (viewer-data). */
   recorded: SceneData | null
+  /**
+   * How `recorded` last changed: 'open' = a project opened (the runtime starts the full replay from 0); 'refresh' = the
+   * player app read the same project's recording again after Studio changed it (the runtime keeps its position).
+   */
+  recordingFrom: 'open' | 'refresh'
   /** Firings changed in the Scene tab ("Change"), until the scene is re-recorded (editor folder scene-overrides/). */
   overrides: SceneOverride[]
   /** Replaces the overrides (data / items recomputed; the caller saves the file). */
@@ -105,8 +110,13 @@ interface SceneState {
   log: string[]
   /** Opens the last opened project (else the Scene tab's remembered folder) once per page; later calls wait for the same run. */
   restore: () => Promise<void>
-  /** Opens the project the player app bundles (read-only, bundledProject) at its full replay. */
-  openBundled: (handle: FileSystemDirectoryHandle) => Promise<void>
+  /** Opens the player app's project folder (read-only, appProject) at its full replay. */
+  openAppProject: (handle: FileSystemDirectoryHandle) => Promise<void>
+  /**
+   * Checks the open project on disk now, as the 2-second checks do (the player app calls it when its folder changed):
+   * the cue table, the Kit and, for the app's project, the recording, the WAVs and the lib / video.
+   */
+  checkDisk: () => Promise<void>
   /** Opens the folder picker (call from the click handler). */
   pick: () => Promise<void>
   reconnect: () => Promise<void>
@@ -152,8 +162,8 @@ function mono(b: AudioBuffer): Float32Array {
 }
 
 /**
- * The mp4s are read from the project folder: one Blob URL per file while the project is open. A bundled project's
- * video streams from its own absolute URL instead (by Range, never read whole; SceneRuntime.loadItem compares it with video.src).
+ * The mp4s are read from the project folder: one Blob URL per file while the project is open. The player app's project
+ * streams its video from its own absolute URL instead (by Range, never read whole; SceneRuntime.loadItem compares it with video.src).
  */
 const videoUrls = new Map<string, Promise<string>>()
 function clearVideoUrls() {
@@ -163,8 +173,8 @@ function clearVideoUrls() {
 export function sceneVideoUrl(root: FileSystemDirectoryHandle, file: string): Promise<string> {
   let url = videoUrls.get(file)
   if (!url) {
-    const bundled = bundledFileUrl(root, `${VIEWER_DIR}/${file}`)
-    url = bundled !== null ? Promise.resolve(bundled) : readProjectFile(root, `${VIEWER_DIR}/${file}`).then(f => URL.createObjectURL(f))
+    const direct = appProjectFileUrl(root, `${VIEWER_DIR}/${file}`)
+    url = direct !== null ? Promise.resolve(direct) : readProjectFile(root, `${VIEWER_DIR}/${file}`).then(f => URL.createObjectURL(f))
     url.catch(() => videoUrls.delete(file))
     videoUrls.set(file, url)
   }
@@ -390,12 +400,82 @@ export const useSceneStore = create<SceneState>((set, get) => {
       addLog(`${lib.paths.cues} changed outside Studio: reloaded`)
     } catch { /* checked again later */ }
   }
+
+  // ── The player app's project: Studio saves into the folder the app reads (appProject); nothing is unsaved here ──
+  /** What the open app project's files were when it was read (appFolderStamp); null for any other project. */
+  let appStamp: { lib: string; recording: string; wavs: string } | null = null
+  const VIDEO_FILE = /\.(mp4|m4v|mov|webm)$/i
+  const readAppStamp = async (root: FileSystemDirectoryHandle, lib: SceneLib) => ({
+    lib: await appFolderStamp(root, VIEWER_DIR, name => name === 'viewer-lib.json' || VIDEO_FILE.test(name)),
+    recording: await appFolderStamp(root, VIEWER_DIR, name => name === 'viewer-data.json'),
+    wavs: (await Promise.all([lib.paths.clips, lib.paths.sounds].map(dir => appFolderStamp(root, dir, name => /\.wav$/i.test(name))))).join('#'),
+  })
+  /** The recording apart from its firings' own gains (what Studio's per-firing strength edits change). */
+  const withoutGains = (data: SceneData) => JSON.stringify({ ...data, full: { ...data.full, events: data.full.events.map(({ gain: _gain, ...ev }) => ev) } })
+  /**
+   * The app project's viewer-data.json changed. When only its firings' gains differ (Studio's per-firing strength), they
+   * replace the old ones and playback goes on untouched (the same levels: the runtime keeps its video). Anything else:
+   * the new recording replaces the old one at the full replay, in one change, and the runtime keeps its position
+   * (recordingFrom 'refresh').
+   */
+  const reloadRecording = async (root: FileSystemDirectoryHandle) => {
+    const opened = await openSceneProject(root)
+    if (!opened.ok) throw new Error(opened.error)
+    const { recorded, lib, table, overrides, emitSeed, chapter } = get()
+    if (get().root !== root || !recorded || !lib) return
+    const next = opened.data
+    if (withoutGains(next) === withoutGains(recorded)) {
+      let changed = 0
+      const events = recorded.full.events.map((ev, i) => { const gain = next.full.events[i].gain; if (gain === ev.gain) return ev; changed++; return { ...ev, gain } })
+      if (!changed) return
+      set({ recorded: { ...recorded, full: { ...recorded.full, events } } })
+      const derived = derivedData(table)
+      if (derived.data) set({ data: derived.data })
+      addLog(`${VIEWER_DIR}/viewer-data.json changed: ${changed} firing gain(s) read again`)
+      return
+    }
+    const nextLib = { ...opened.lib, loop_cues: lib.loop_cues }
+    const plain = applyOverrides(next, overrides)
+    const data = table ? applyEmits(plain, table, nextLib, emitSeed) : plain
+    const items = buildItems(data)
+    set({ lib: nextLib, recorded: next, recordingFrom: 'refresh', data, items, cur: Math.max(0, items.findIndex(it => it.kind === 'full')), sel: null,
+      chapter: chapter !== null && chapter < data.chapters.length ? chapter : null })
+    addLog(`${VIEWER_DIR}/viewer-data.json changed: the recording read again`)
+  }
+  let appChecking: Promise<void> | null = null
+  /** The last check's error, logged once (a file Studio is still writing reads as broken until the next check). */
+  let appCheckError = ''
+  /** Reads again what changed in the app project since it was read: the lib or the video (the whole project), the recording, the WAVs. */
+  const checkAppProject = (): Promise<void> => {
+    if (appChecking) return appChecking
+    appChecking = (async () => {
+      const { root, lib, busy } = get(), was = appStamp
+      if (!root || !lib || busy || !was || !isAppProject(root)) return
+      try {
+        const now = await readAppStamp(root, lib)
+        if (get().root !== root || appStamp !== was) return
+        if (now.lib !== was.lib) {
+          addLog(`${VIEWER_DIR}: the lib or the video changed: the project is opened again`)
+          await get().openAppProject(root)
+          return
+        }
+        if (now.recording !== was.recording) { await reloadRecording(root); appStamp = { ...appStamp!, recording: now.recording } }
+        if (now.wavs !== was.wavs) { await loadTable(); appStamp = { ...appStamp!, wavs: now.wavs }; addLog(`WAVs in ${lib.paths.clips} / ${lib.paths.sounds} changed: read again`) }
+        appCheckError = ''
+      } catch (error) {
+        // Tried again on the next check; the stamps that were not read again stay, so nothing is skipped.
+        if (message(error) !== appCheckError) { appCheckError = message(error); addLog(`project check: ${appCheckError}`) }
+      }
+    })().finally(() => { appChecking = null })
+    return appChecking
+  }
+
   if (typeof window !== 'undefined') {
     // One watcher per page: a hot reload of this module replaces the previous one instead of adding another.
     const w = window as unknown as { __sceneWatch?: () => void }
     w.__sceneWatch?.()
-    const timer = setInterval(() => { void checkOutside(); refreshKit() }, 2000)
-    const onFocus = () => { void checkOutside(); refreshKit() }
+    const timer = setInterval(() => { void checkOutside(); refreshKit(); void checkAppProject() }, 2000)
+    const onFocus = () => { void checkOutside(); refreshKit(); void checkAppProject() }
     // The editor wrote a Kit manifest (Save Folder / Deploy): the open project's Kit, when it is that one, is read again at once.
     const offKitWrites = onKitManifestWritten(kitId => { if (get().table?.kit === kitId) void loadKit().catch(() => {}) })
     // Leaving the page starts writing what is pending; the write may not finish, so the journal (written at every edit) is what keeps it.
@@ -418,8 +498,8 @@ export const useSceneStore = create<SceneState>((set, get) => {
       return false
     }
     set({ remembered: handle })
-    // A bundled project cannot be cloned into IndexedDB (and is opened anew every launch).
-    if (!isBundledProject(handle)) {
+    // The player app's project cannot be cloned into IndexedDB (the app gives it anew every launch).
+    if (!isAppProject(handle)) {
       await saveDirectoryHandle(handle, 'scenedir').catch(() => {})
       await registerSceneProject(opened.lib.project_name, handle).catch(() => {})
     }
@@ -435,8 +515,12 @@ export const useSceneStore = create<SceneState>((set, get) => {
     rememberSceneProject(opened.lib.project_name)
     // The old project's firing gains that could still not be written (after the flush above) stop here, said once.
     const unsaved = firingRoot && firingRoot !== handle ? abandonFirings() : null
-    set({ root: handle, lib: opened.lib, recorded: opened.data, overrides: [], data: opened.data, items: buildItems(opened.data), sel: null, cur: 0, empty: null, table: null, noTable: false, projectKit: undefined, kitError: null })
+    // The app project's files as they are now (what changes after this is read again by checkAppProject).
+    appStamp = null
+    const stamp = isAppProject(handle) ? await readAppStamp(handle, opened.lib) : null
+    set({ root: handle, lib: opened.lib, recorded: opened.data, recordingFrom: 'open', overrides: [], data: opened.data, items: buildItems(opened.data), sel: null, cur: 0, empty: null, table: null, noTable: false, projectKit: undefined, kitError: null })
     await loadTable()
+    appStamp = stamp
     restoreJournal()
     const dropped = opened.data.droppedChapters
     if (dropped) {
@@ -468,7 +552,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
 
   return {
     root: null, remembered: null, restored: false, busy: false,
-    lib: null, data: null, recorded: null, overrides: [], items: [], table: null, noTable: false, loaded: null, clipFiles: [], soundFiles: [],
+    lib: null, data: null, recorded: null, recordingFrom: 'open', overrides: [], items: [], table: null, noTable: false, loaded: null, clipFiles: [], soundFiles: [],
     pending: { clips: {}, sounds: {} }, pcm: {}, sfx: {}, dirty: false, saveError: null, projectKit: null, kitError: null, cur: 0, sel: null, span: null, chapter: null, emitSeed: newEmitSeed(),
     notice: null, empty: null, log: [],
     note, addLog,
@@ -487,11 +571,15 @@ export const useSceneStore = create<SceneState>((set, get) => {
       })
       return restoring
     },
-    openBundled: handle => guarded(async () => {
+    openAppProject: handle => guarded(async () => {
       if (!await openFolder(handle)) return
       const full = get().items.findIndex(it => it.kind === 'full')
       if (full >= 0) get().select(full)
     }),
+    checkDisk: async () => {
+      const s = get()
+      await Promise.all([checkOutside(), s.root && s.table?.kit && !s.busy ? loadKit().catch(() => {}) : undefined, checkAppProject()])
+    },
     pick: async () => {
       if (!('showDirectoryPicker' in window)) { note({ id: 'scene.open.unsupported', error: true }); return }
       let handle: FileSystemDirectoryHandle

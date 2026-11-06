@@ -96,7 +96,8 @@ export class SceneRuntime {
       // the same file names; its levels are new); not a mere rename of the items (firing overrides) or a firing gain
       // edit (setFiringGains keeps the levels), which keep the video playing.
       const newRecording = state.recorded?.full.levels !== prev.recorded?.full.levels
-      if (state.root !== prev.root || newRecording) this.fullTime = 0
+      // The same project's recording read again (the player app, after Studio changed it) goes on from where it is.
+      if (state.root !== prev.root || (newRecording && state.recordingFrom === 'open')) this.fullTime = 0
       if (state.cur !== prev.cur || state.root !== prev.root || newRecording || state.items[state.cur]?.file !== prev.items[prev.cur]?.file
         || (state.items !== prev.items && !state.items.length)) this.loadItem()
       if (state.table !== prev.table || state.lib !== prev.lib || state.projectKit !== prev.projectKit) this.rebuildLoops()

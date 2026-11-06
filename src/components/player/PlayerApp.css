@@ -9,13 +9,21 @@
 .player-bigplay:hover { background: rgba(255, 255, 255, .22); }
 .player-loading { position: absolute; left: 0; right: 0; top: 50%; margin-top: -10px; text-align: center; opacity: .75; pointer-events: none; }
 
+/* No project folder yet: what to choose, and the button. */
+.player-empty { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100% - 32px)); display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; line-height: 1.6; }
+.player-empty p { margin: 0; opacity: .85; white-space: pre-line; }
+.player-choose { height: 34px; padding: 0 18px; font-size: 14px; }
+/* The folder playing, top left; it hides with the bar. */
+.player-top { position: absolute; left: 12px; top: 10px; transition: opacity .2s; }
+.player-folder { max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: rgba(0, 0, 0, .55); }
+
 .player-notices { position: absolute; left: 16px; right: 16px; bottom: 88px; display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; transition: opacity .2s; }
 .player-notice { display: flex; align-items: center; gap: 10px; max-width: 100%; padding: 6px 12px; border-radius: 6px; background: rgba(20, 20, 20, .88); pointer-events: auto; }
 .player-notice.error { background: rgba(140, 30, 30, .92); }
 
 .player-bar { position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; gap: 4px; padding: 20px 12px 10px;
   background: linear-gradient(transparent, rgba(0, 0, 0, .8) 35%); white-space: nowrap; transition: opacity .2s; }
-.player[data-idle] .player-bar, .player[data-idle] .player-notices, .player[data-idle] .player-notice { opacity: 0; pointer-events: none; }
+.player[data-idle] .player-bar, .player[data-idle] .player-notices, .player[data-idle] .player-notice, .player[data-idle] .player-top { opacity: 0; pointer-events: none; }
 
 .player-seek-row { display: flex; align-items: center; gap: 10px; }
 .player-seek { flex: 1; min-width: 40px; position: relative; height: 16px; display: flex; align-items: center; cursor: pointer; touch-action: none; }

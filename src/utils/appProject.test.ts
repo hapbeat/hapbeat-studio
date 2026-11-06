@@ -1,0 +1,283 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { appFolderStamp, appProjectFileUrl, isAppProject, openAppProject } from './appProject'
+import { isNotFound, listWavs, openSceneProject, readProjectFile } from './sceneProject'
+import { serializeCueTable } from './sceneCueTable'
+import { memoryFolder, sampleLib, sampleTable, sampleViewerDataFile, sampleViewerLibFile } from './sceneTestFixtures'
+
+const BASE = 'https://studio.hapbeat.com/__project/'
+const lib = sampleLib()
+const VIEWER_DATA = 'Saved/HapticViewer/viewer-data.json'
+
+/** The folder on disk the app serves: path → text and modification time. */
+let disk: Map<string, { text: string; mtimeMs: number }>
+let clock = 1793546366434
+const write = (path: string, text: string) => { clock += 1000; disk.set(path, { text, mtimeMs: clock }) }
+function resetDisk() {
+  disk = new Map()
+  write('Saved/HapticViewer/viewer-lib.json', JSON.stringify(sampleViewerLibFile()))
+  write(VIEWER_DATA, JSON.stringify(sampleViewerDataFile()))
+  write(lib.paths.cues, serializeCueTable(sampleTable()))
+  for (const name of ['click', 'thump', 'hum']) write(`${lib.paths.clips}/${name}.wav`, 'x')
+  for (const name of ['Click', 'Motor']) write(`${lib.paths.sounds}/${name}.wav`, 'x')
+  write('Saved/HapticViewer/a b+c.mp4', 'video')
+  write('.git/HEAD', 'ref')
+}
+
+/** The app's answers (app/src/server.js): `?list` = a folder's entries, else the file with x-mtime-ms. */
+const fetchMock = vi.fn(async (input: string) => {
+  const url = new URL(String(input))
+  const path = decodeURIComponent(url.pathname.slice('/__project/'.length)).replace(/\/$/, '')
+  if (url.search === '?list') {
+    const prefix = path ? `${path}/` : ''
+    const entries = new Map<string, { name: string; kind: string; size: number; mtimeMs: number }>()
+    for (const [p, f] of disk) {
+      if (!p.startsWith(prefix)) continue
+      const [name, ...rest] = p.slice(prefix.length).split('/')
+      if (name.startsWith('.')) continue
+      entries.set(name, rest.length ? { name, kind: 'directory', size: 0, mtimeMs: 0 } : { name, kind: 'file', size: f.text.length, mtimeMs: f.mtimeMs })
+    }
+    if (!entries.size && path) return new Response('', { status: 404 })
+    return new Response(JSON.stringify({ entries: [...entries.values()].sort((a, b) => a.name.localeCompare(b.name)) }))
+  }
+  const file = disk.get(path)
+  return file ? new Response(file.text, { headers: { 'content-type': 'text/plain', 'x-mtime-ms': String(file.mtimeMs) } }) : new Response('', { status: 404 })
+})
+const open = () => openAppProject('haptic-sports', BASE)
+const mustReject = async (work: Promise<unknown>, name: string) => { await expect(work).rejects.toMatchObject({ name }) }
+
+beforeEach(() => { resetDisk(); fetchMock.mockClear(); vi.stubGlobal('fetch', fetchMock) })
+afterEach(() => { vi.unstubAllGlobals() })
+
+describe('app project handle', () => {
+  it('walks the folder on disk like a folder', async () => {
+    const root = await open()
+    expect(root.kind).toBe('directory')
+    expect(root.name).toBe('haptic-sports')
+    const viewer = await (await root.getDirectoryHandle('Saved')).getDirectoryHandle('HapticViewer')
+    const names: string[] = []
+    for await (const [name] of viewer.entries()) names.push(name)
+    expect(names).toEqual(['a b+c.mp4', 'viewer-data.json', 'viewer-lib.json'])
+    const keys: string[] = []
+    for await (const name of viewer.keys()) keys.push(name)
+    expect(keys).toEqual(names)
+    const kinds: string[] = []
+    for await (const handle of viewer.values()) kinds.push(handle.kind)
+    expect(kinds).toEqual(['file', 'file', 'file'])
+    const iterated: string[] = []
+    for await (const [name] of viewer as unknown as AsyncIterable<[string, unknown]>) iterated.push(name)
+    expect(iterated).toEqual(names)
+  })
+
+  it('says what sceneProject and sceneKit test for on a missing or wrong entry', async () => {
+    const root = await open()
+    const missing = await root.getFileHandle('nope.json').catch(error => error)
+    expect(isNotFound(missing)).toBe(true)
+    await mustReject(root.getDirectoryHandle('nope'), 'NotFoundError')
+    await mustReject(root.getDirectoryHandle('.git'), 'NotFoundError')
+    await mustReject(root.getFileHandle('Saved'), 'TypeMismatchError')
+    const viewer = await (await root.getDirectoryHandle('Saved')).getDirectoryHandle('HapticViewer')
+    await mustReject(viewer.getDirectoryHandle('viewer-lib.json'), 'TypeMismatchError')
+  })
+
+  it('never writes', async () => {
+    const root = await open()
+    await mustReject(root.getFileHandle('new.json', { create: true }), 'NoModificationAllowedError')
+    await mustReject(root.getDirectoryHandle('new', { create: true }), 'NoModificationAllowedError')
+    await mustReject(root.removeEntry('Saved'), 'NoModificationAllowedError')
+    const viewer = await (await root.getDirectoryHandle('Saved')).getDirectoryHandle('HapticViewer')
+    expect((await viewer.getFileHandle('viewer-lib.json', { create: true })).kind).toBe('file')
+    await mustReject((await viewer.getFileHandle('viewer-lib.json')).createWritable(), 'NoModificationAllowedError')
+  })
+
+  it('grants permission, knows its entries', async () => {
+    const root = await open()
+    expect(await root.queryPermission({ mode: 'readwrite' })).toBe('granted')
+    expect(await root.requestPermission({ mode: 'readwrite' })).toBe('granted')
+    const saved = await root.getDirectoryHandle('Saved'), viewer = await saved.getDirectoryHandle('HapticViewer'), file = await viewer.getFileHandle('viewer-lib.json')
+    expect(await saved.isSameEntry(await root.getDirectoryHandle('Saved'))).toBe(true)
+    expect(await saved.isSameEntry(viewer)).toBe(false)
+    expect(await root.resolve(file)).toEqual(['Saved', 'HapticViewer', 'viewer-lib.json'])
+    expect(await saved.resolve(file)).toEqual(['HapticViewer', 'viewer-lib.json'])
+    expect(await viewer.resolve(viewer)).toEqual([])
+    expect(await viewer.resolve(saved)).toBeNull()
+  })
+
+  it('reads the file as it is on disk now, with its modification time', async () => {
+    const root = await open()
+    const first = await readProjectFile(root, lib.paths.cues)
+    expect(first.name).toBe('cues.json')
+    expect(await first.text()).toBe(disk.get(lib.paths.cues)!.text)
+    expect(first.lastModified).toBe(disk.get(lib.paths.cues)!.mtimeMs)
+    expect(first.type).toContain('text/plain')
+    write(lib.paths.cues, 'changed')
+    const second = await readProjectFile(root, lib.paths.cues)
+    expect(await second.text()).toBe('changed')
+    expect(second.lastModified).toBeGreaterThan(first.lastModified)
+  })
+
+  it('a file removed on disk is NotFoundError', async () => {
+    const root = await open()
+    const handle = await (await (await root.getDirectoryHandle('Saved')).getDirectoryHandle('HapticViewer')).getFileHandle('a b+c.mp4')
+    disk.delete('Saved/HapticViewer/a b+c.mp4')
+    await mustReject(handle.getFile(), 'NotFoundError')
+    await mustReject(readProjectFile(root, 'Saved/HapticViewer/a b+c.mp4'), 'NotFoundError')
+  })
+
+  it('opens as a scene project', async () => {
+    const root = await open()
+    expect((await openSceneProject(root)).ok).toBe(true)
+    expect(await listWavs(root, lib.paths.clips)).toEqual(['click', 'hum', 'thump'])
+    expect(await listWavs(root, 'no/such/folder')).toEqual([])
+  })
+
+  it('no project in the app: NotFoundError; a list it cannot use: an error', async () => {
+    fetchMock.mockImplementationOnce(async () => new Response('', { status: 404 }))
+    await mustReject(open(), 'NotFoundError')
+    fetchMock.mockImplementationOnce(async () => new Response('{}'))
+    await expect(open()).rejects.toThrow('no entry list')
+    fetchMock.mockImplementationOnce(async () => new Response('', { status: 500 }))
+    await expect(open()).rejects.toThrow('HTTP 500')
+  })
+
+  it('gives an absolute URL only for the app project', async () => {
+    const root = await open()
+    expect(isAppProject(root)).toBe(true)
+    expect(isAppProject(memoryFolder({ 'a.txt': 'x' }).handle)).toBe(false)
+    expect(appProjectFileUrl(root, 'Saved/HapticViewer/a b+c.mp4')).toBe(`${BASE}Saved/HapticViewer/a%20b%2Bc.mp4`)
+    expect(appProjectFileUrl(await root.getDirectoryHandle('Saved'), 'HapticViewer/x.mp4')).toBe(`${BASE}Saved/HapticViewer/x.mp4`)
+    expect(appProjectFileUrl(memoryFolder({ 'a.txt': 'x' }).handle, 'a.txt')).toBeNull()
+  })
+
+  it('a folder stamp changes with a written, added or removed file it picks, and with nothing else', async () => {
+    const root = await open()
+    const wavs = () => appFolderStamp(root, lib.paths.clips, name => name.endsWith('.wav'))
+    const before = await wavs()
+    expect(await wavs()).toBe(before)
+    write(`${lib.paths.clips}/notes.txt`, 'x')
+    expect(await wavs()).toBe(before)
+    write(`${lib.paths.clips}/hum.wav`, 'xy')
+    const written = await wavs()
+    expect(written).not.toBe(before)
+    write(`${lib.paths.clips}/new.wav`, 'x')
+    expect(await wavs()).not.toBe(written)
+    expect(await appFolderStamp(root, 'no/such/folder', () => true)).toBe('')
+  })
+})
+
+describe('sceneStore with the app project', () => {
+  const storage = new Map<string, string>()
+  const saved = vi.fn(async () => {}), registered = vi.fn(async () => {})
+  beforeEach(() => {
+    storage.clear()
+    vi.stubGlobal('localStorage', { getItem: (k: string) => storage.get(k) ?? null, setItem: (k: string, v: string) => { storage.set(k, v) }, removeItem: (k: string) => { storage.delete(k) } })
+    vi.stubGlobal('OfflineAudioContext', class { decodeAudioData() { return Promise.resolve({ length: 1, numberOfChannels: 1, getChannelData: () => new Float32Array(1) }) } })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
+  })
+  afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.doUnmock('@/utils/localDirectory'); vi.doUnmock('@/utils/sceneRegistry') })
+
+  async function openPage() {
+    vi.resetModules()
+    vi.stubGlobal('window', { addEventListener() {}, removeEventListener() {} })
+    vi.doMock('@/utils/localDirectory', async original => ({ ...await original<typeof import('@/utils/localDirectory')>(), saveDirectoryHandle: saved }))
+    vi.doMock('@/utils/sceneRegistry', async original => ({ ...await original<typeof import('@/utils/sceneRegistry')>(), registerSceneProject: registered }))
+    const store = await import('@/stores/sceneStore')
+    const app = await import('./appProject')
+    const root = await app.openAppProject('haptic-sports', BASE)
+    await store.useSceneStore.getState().openAppProject(root)
+    return { ...store, root }
+  }
+  const viewerData = () => JSON.parse(disk.get(VIEWER_DATA)!.text) as { events: { t: number; name: string; gain?: number }[] }
+
+  it('opens at the full replay, remembers nothing in IndexedDB, streams the video from its URL', async () => {
+    const { useSceneStore, sceneVideoUrl, root } = await openPage()
+    const s = useSceneStore.getState()
+    expect(s.notice?.error).toBeFalsy()
+    expect(s.items[s.cur].kind).toBe('full')
+    expect(s.table).not.toBeNull()
+    expect(s.recordingFrom).toBe('open')
+    expect(saved).not.toHaveBeenCalled()
+    expect(registered).not.toHaveBeenCalled()
+    const reads = fetchMock.mock.calls.length
+    expect(await sceneVideoUrl(root, 'a b+c.mp4')).toBe(`${BASE}Saved/HapticViewer/a%20b%2Bc.mp4`)
+    expect(fetchMock.mock.calls.length).toBe(reads)
+  })
+
+  it('reads nothing again while nothing changed on disk', async () => {
+    const { useSceneStore } = await openPage()
+    const { table, recorded, pcm, projectKit } = useSceneStore.getState()
+    await vi.advanceTimersByTimeAsync(6000)
+    await useSceneStore.getState().checkDisk()
+    const now = useSceneStore.getState()
+    expect(now.table).toBe(table)
+    expect(now.recorded).toBe(recorded)
+    expect(now.pcm).toBe(pcm)
+    expect(now.projectKit).toBe(projectKit)
+    expect(now.dirty).toBe(false)
+  })
+
+  it('a cue table Studio saved is read at once on checkDisk (and on the 2 s check)', async () => {
+    const { useSceneStore } = await openPage()
+    const table = sampleTable()
+    table.cues.button.haptics![0].gain = 0.25
+    write(lib.paths.cues, serializeCueTable(table))
+    await useSceneStore.getState().checkDisk()
+    expect(useSceneStore.getState().table?.cues.button.haptics?.[0].gain).toBe(0.25)
+    table.cues.button.haptics![0].gain = 0.75
+    write(lib.paths.cues, serializeCueTable(table))
+    await vi.advanceTimersByTimeAsync(2100)
+    expect(useSceneStore.getState().table?.cues.button.haptics?.[0].gain).toBe(0.75)
+    expect(useSceneStore.getState().dirty).toBe(false)
+  })
+
+  it('firing gains Studio saved replace the old ones without a new recording (playback goes on)', async () => {
+    const { useSceneStore } = await openPage()
+    const before = useSceneStore.getState()
+    const file = viewerData()
+    file.events[0].gain = 0.4
+    write(VIEWER_DATA, JSON.stringify(file))
+    await useSceneStore.getState().checkDisk()
+    const after = useSceneStore.getState()
+    expect(after.recorded?.full.events[0].gain).toBe(0.4)
+    expect(after.data?.full.events.find(e => e.t === file.events[0].t && e.name === file.events[0].name)?.gain).toBe(0.4)
+    // The same levels and items: the runtime keeps its video, position and selection.
+    expect(after.recorded?.full.levels).toBe(before.recorded?.full.levels)
+    expect(after.items).toBe(before.items)
+    expect(after.recordingFrom).toBe('open')
+  })
+
+  it('a recording changed otherwise replaces the old one at the full replay, keeping the position (refresh)', async () => {
+    const { useSceneStore } = await openPage()
+    const before = useSceneStore.getState()
+    const file = viewerData()
+    file.events[0].t += 0.25
+    write(VIEWER_DATA, JSON.stringify(file))
+    await useSceneStore.getState().checkDisk()
+    const after = useSceneStore.getState()
+    expect(after.recorded).not.toBe(before.recorded)
+    expect(after.recorded?.full.events[0].t).toBeCloseTo(file.events[0].t)
+    expect(after.recordingFrom).toBe('refresh')
+    expect(after.items[after.cur].kind).toBe('full')
+    expect(after.root).toBe(before.root)
+  })
+
+  it('a broken viewer-data.json (still being written) is read again on the next check', async () => {
+    const { useSceneStore } = await openPage()
+    const recorded = useSceneStore.getState().recorded
+    write(VIEWER_DATA, '{"schema_version": 1, "ev')
+    await useSceneStore.getState().checkDisk()
+    expect(useSceneStore.getState().recorded).toBe(recorded)
+    const file = JSON.parse(JSON.stringify(sampleViewerDataFile())) as { events: { gain?: number }[] }
+    file.events[0].gain = 0.6
+    write(VIEWER_DATA, JSON.stringify(file))
+    await useSceneStore.getState().checkDisk()
+    expect(useSceneStore.getState().recorded?.full.events[0].gain).toBe(0.6)
+  })
+
+  it('a clip WAV Studio rewrote is decoded again', async () => {
+    const { useSceneStore } = await openPage()
+    const pcm = useSceneStore.getState().pcm
+    write(`${lib.paths.clips}/click.wav`, 'xx')
+    await useSceneStore.getState().checkDisk()
+    expect(useSceneStore.getState().pcm).not.toBe(pcm)
+  })
+})

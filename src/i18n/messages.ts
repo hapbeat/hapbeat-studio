@@ -1767,6 +1767,12 @@ export const messages = defineMessages({
   'player.notice.noDevice': { ja: 'Hapbeat の電源を入れ、PC と同じ Wi-Fi に接続してください。Windows のファイアウォールの確認が出たら「アクセスを許可する」を選んでください', en: 'Turn on the Hapbeat and connect it to the same Wi-Fi as this PC. If Windows Firewall asks about hapbeat-helper, choose Allow access' },
   'player.notice.portBusy': { ja: '別のプログラムがポート {port} を使っていて、Helper につながりません。Hapbeat Studio や Helper を閉じて、このアプリを開き直してください', en: 'Another program is using port {port}, so the Helper cannot be reached. Close Hapbeat Studio or the Helper, then reopen this app' },
   'player.notice.oldHelper': { ja: '古い Helper（{version}）が動いています。Hapbeat Studio などを閉じて、このアプリを開き直してください', en: 'An old Helper ({version}) is running. Close Hapbeat Studio and other such apps, then open this app again' },
+  'player.project.empty': { ja: 'プロジェクトのフォルダを選んでください。\nHapbeat Studio の Scene で開いているフォルダ（Saved/HapticViewer があるフォルダ）です。Studio で保存した内容は、すぐにここへ反映されます。', en: 'Choose the project folder.\nIt is the folder Hapbeat Studio\'s Scene tab opens (the one with Saved/HapticViewer). What you save in Studio shows here at once.' },
+  'player.project.noApp': { ja: 'このページはプレイヤーのアプリの中で開いてください。', en: 'Open this page inside the player app.' },
+  'player.project.choose': { ja: 'フォルダを選択', en: 'Choose folder' },
+  'player.project.folder': { ja: '📁 {name}', en: '📁 {name}' },
+  'player.project.change': { ja: 'クリックでフォルダを変更（Ctrl+O）', en: 'Click to change the folder (Ctrl+O)' },
+  'player.project.invalid': { ja: 'このフォルダは開けません（{error}）', en: 'This folder cannot be opened ({error})' },
   'player.notice.helperFailed': { ja: 'Helper を起動できませんでした（{error}）', en: 'The Helper could not start ({error})' },
 })
 

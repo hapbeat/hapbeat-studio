@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
 import { usePageVisible } from '@/hooks/usePageVisible'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
-import { playerApi, PLAYER_HAPTICS_OFF, type PlayerHelperStatus } from '@/config/playerShell'
+import { playerApi, PLAYER_HAPTICS_OFF, type PlayerHelperStatus, type PlayerProject } from '@/config/playerShell'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { OVERALL_GAIN_MAX, useScenePlayback } from '@/stores/scenePlayback'
-import { openBundledProject } from '@/utils/bundledProject'
+import { openAppProject } from '@/utils/appProject'
 import { pageVisible, perfTrack } from '@/utils/perfRegistry'
 import { isTypingTarget } from '@/utils/playbackShortcut'
 import { clockText } from '@/utils/sceneData'
@@ -21,6 +21,8 @@ const NOTICE_DELAY_MS = 6000
 const ARROW_SEEK_SEC = 5
 
 const blurActive = () => { (document.activeElement as HTMLElement | null)?.blur?.() }
+/** An Electron IPC rejection says which call failed before the reason; the reason alone is shown. */
+const ipcReason = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 
 /** The bundled helper's state from the app (null in a browser), and its restart. */
 function usePlayerHelperStatus(): { status: PlayerHelperStatus | null; restart: () => void } {
@@ -86,9 +88,11 @@ function PlayerSeek({ runtime }: { runtime: SceneRuntime }) {
 }
 
 /**
- * The whole window of the player app (`?shell=player`): the project the app bundles, played by the Scene tab's engine
- * (SceneRuntime) with the same helper wiring (useSceneRuntimeHelper). No authoring: nothing here edits the project,
- * and every connected Hapbeat plays every route, whatever its position (allDevices). It stays paused until the user presses play.
+ * The whole window of the player app (`?shell=player`): the project folder chosen in the app (the one Studio's Scene tab
+ * opens), played by the Scene tab's engine (SceneRuntime) with the same helper wiring (useSceneRuntimeHelper). What
+ * Studio saves into that folder plays at once: the app says when the folder changed and the store reads it again
+ * (checkDisk), besides its own 2-second checks. No authoring: nothing here edits the project, and every connected
+ * Hapbeat plays every route, whatever its position (allDevices). It stays paused until the user presses play.
  */
 export function PlayerApp() {
   const { t } = useI18n()
@@ -96,15 +100,33 @@ export function PlayerApp() {
   const root = useRef<HTMLDivElement>(null)
   const stage = useRef<HTMLDivElement>(null)
 
-  const opening = useRef(false)
+  // The project folder: the one the app plays now, then whichever the user chooses (here or the app's menu).
+  const [project, setProject] = useState<PlayerProject | null>(null)
+  /** Whether the app has said which folder it plays (until then, no "choose a folder" screen flashes). */
+  const [projectKnown, setProjectKnown] = useState(false)
+  const [chooseError, setChooseError] = useState<string | null>(null)
+  const openProject = useCallback((next: PlayerProject) => {
+    setProject(next)
+    setChooseError(null)
+    void openAppProject(next.name).then(handle => useSceneStore.getState().openAppProject(handle)).catch(error => {
+      useSceneStore.getState().note({ id: 'scene.open.failed', params: { error: error instanceof Error ? error.message : String(error) }, error: true })
+    })
+  }, [])
   useEffect(() => {
     useSceneSettings.getState().update({ pcSound: true, loop: true, sendHaptics: !PLAYER_HAPTICS_OFF })
     useScenePlayback.getState().update({ output: 'clip', allDevices: true })
-    if (opening.current) return
-    opening.current = true
-    void openBundledProject().then(handle => useSceneStore.getState().openBundled(handle)).catch(error => {
-      useSceneStore.getState().note({ id: 'scene.open.failed', params: { error: error instanceof Error ? error.message : String(error) }, error: true })
-    })
+    const api = playerApi()
+    if (!api) { setProjectKnown(true); return }
+    const offSwitched = api.project.onSwitched(openProject)
+    // Studio saved into the folder: read again now what changed (the cue table, the Kit, the recording, WAVs).
+    const offChanged = api.project.onChanged(() => { void useSceneStore.getState().checkDisk() })
+    void api.project.current().then(current => { setProjectKnown(true); if (current) openProject(current) }, () => setProjectKnown(true))
+    return () => { offSwitched(); offChanged() }
+  }, [openProject])
+  const chooseProject = useCallback(() => {
+    setChooseError(null)
+    // The app opens the project on its "switched" message (onSwitched), the same as after a choice from its menu.
+    playerApi()?.project.choose().catch(error => setChooseError(ipcReason(error)))
   }, [])
 
   useEffect(() => () => runtime.dispose(), [runtime])
@@ -222,6 +244,14 @@ export function PlayerApp() {
     <div className="player-stage" ref={stage} onClick={togglePlay} />
     {!started && ready && <button type="button" className="player-bigplay" aria-label={t('player.play')} title={t('player.play')}
       onClick={e => { e.currentTarget.blur(); togglePlay() }}>▶</button>}
+    {projectKnown && !project && <div className="player-empty">
+      <p>{t(playerApi() ? 'player.project.empty' : 'player.project.noApp')}</p>
+      {!!playerApi() && <button type="button" className="player-btn player-choose" onClick={e => { e.currentTarget.blur(); chooseProject() }}>{t('player.project.choose')}</button>}
+    </div>}
+    {project && <div className="player-top" onClick={blurActive}>
+      <button type="button" className="player-btn player-folder" title={`${project.path}\n${t('player.project.change')}`}
+        onClick={e => { e.currentTarget.blur(); chooseProject() }}>{t('player.project.folder', { name: project.name })}</button>
+    </div>}
     {busy && <div className="player-loading">{t('player.loading')}</div>}
     <div className="player-notices" role="status">
       {settled && helperDown && <div className="player-notice error">
@@ -232,6 +262,7 @@ export function PlayerApp() {
       {settled && isConnected && oldHelper && <div className="player-notice error">{t('player.notice.oldHelper', { version: helperVersion })}</div>}
       {settled && isConnected && !!table && !targetDevices.length && <div className="player-notice">{t('player.notice.noDevice')}</div>}
       {notice?.error && <div className="player-notice error">{t(notice.id, notice.params)}</div>}
+      {chooseError && <div className="player-notice error">{t('player.project.invalid', { error: chooseError })}</div>}
     </div>
     <div className="player-bar" onClick={blurActive} onPointerUp={blurActive}>
       <PlayerSeek runtime={runtime} />
