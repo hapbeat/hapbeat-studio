@@ -15,8 +15,6 @@ export const round3 = (x: number) => Math.round(x * 1000) / 1000
 export const ROUTE_GAIN_MAX = 2
 /** One ▲ / ▼ / ↑ / ↓ step: ×1.12 ≈ +1 dB; with Shift ×1.41 ≈ +3 dB. */
 export const strengthStep = (shift: boolean) => shift ? Math.SQRT2 : 10 ** (1 / 20)
-/** The relative fader's range (×0.25..×4) in log2 units. */
-export const RELATIVE_RANGE = 2
 
 /** A gain made by Studio (scaled or set): 4 significant digits, so a ratio ≠ 1 always moves a small gain too. */
 export const roundGain = (x: number) => x > 0 ? Number(x.toPrecision(4)) : 0

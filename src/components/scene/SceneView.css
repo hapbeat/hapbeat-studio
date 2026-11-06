@@ -222,37 +222,38 @@
 .scene-event-jitter[open] > summary { grid-column: 1 / -1; }
 
 /*
- * Strength panel (DEC-102 r3), three rows so the default dock height shows everything: the selection line, the faders
- * (one fixed height; the mixer scrolls sideways, and the selection's fader moves under it when the panel is narrow),
- * the breakdown.
+ * Strength panel = the master mixer (DEC-112): a header line (title, edits that match nothing, Undo / Redo, 「版」) and
+ * the faders in a grid that wraps (auto-fill columns of at least 80 px; the rows share the height left, so every fader
+ * shows at once and the tracks get shorter as rows are added). Only when a row would fall under 64 px does the grid
+ * scroll (more events than the dock can hold).
  */
-.scene-strength { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: auto; font-size: 12px; font-variant-numeric: tabular-nums; outline: none; }
+.scene-strength { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; font-size: 12px; font-variant-numeric: tabular-nums; }
 .scene-strength h3 { margin: 0; font-size: 12px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
-.scene-strength-head { display: flex; align-items: center; gap: 10px; padding: 6px 8px 0; flex: none; }
-.scene-strength-count { flex: 1 1 auto; min-width: 0; min-height: 18px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.scene-strength-body { display: flex; flex-wrap: wrap; flex: none; }
-.scene-strength-mixer { display: flex; gap: 2px; flex: 1 1 260px; min-width: 0; overflow-x: auto; overflow-y: hidden; padding: 8px; align-items: flex-start; }
-.scene-strength-sel { display: flex; gap: 8px; flex: none; padding: 8px; border-left: 1px solid var(--border); }
-.scene-strength-strip { flex: 0 0 84px; width: 84px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.scene-strength-overall { border-right: 1px solid var(--border); margin-right: 4px; padding-right: 4px; }
-.scene-strength-track { position: relative; flex: none; height: 120px; display: flex; justify-content: center; }
+.scene-strength-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 8px 0; flex: none; }
+.scene-strength-head-end { display: inline-flex; gap: 4px; margin-left: auto; }
+.scene-strength-orphans { display: inline-flex; align-items: center; gap: 6px; color: #e0a030; white-space: nowrap; }
+.scene-strength-mixer { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); grid-auto-rows: minmax(64px, 1fr); gap: 4px 2px; padding: 6px 8px 8px; }
+.scene-strength-mixer > .scene-panel-empty { grid-column: 2 / -1; }
+.scene-strength-strip { min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.scene-strength-overall { border-right: 1px solid var(--border); }
+.scene-strength-track { position: relative; flex: 1 1 auto; min-height: 24px; display: flex; justify-content: center; }
 .scene-strength-fader { writing-mode: vertical-lr; direction: rtl; height: 100%; width: 20px; margin: 0; cursor: pointer; }
 .scene-strength-unity { position: absolute; left: 50%; width: 30px; margin-left: -15px; height: 1px; background: rgba(255,255,255,.35); pointer-events: none; }
-.scene-strength-value { display: inline-block; min-width: 46px; text-align: center; color: var(--text-primary); }
-.scene-strength-ratio { min-width: 104px; }
-.scene-strength-label, .scene-strength-range { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
-/* The overall label and a firing range may take two lines; two are kept so a range change never moves M / S. */
-.scene-strength-overall .scene-strength-label, .scene-strength-range { white-space: normal; line-height: 1.25; min-height: 2.5em; }
+.scene-strength-line { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.scene-strength-value { display: inline-block; min-width: 38px; text-align: center; color: var(--text-primary); }
+.scene-strength-label { flex: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
 .scene-strength-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: none; border: none; color: var(--accent-light); cursor: pointer; padding: 0; font: inherit; }
-.scene-strength-ms { display: inline-flex; gap: 3px; }
-.scene-strength-m, .scene-strength-s { width: 22px; height: 18px; padding: 0; font-size: 11px; line-height: 1; border: 1px solid #4a525c; border-radius: 3px; background: none; color: var(--text-muted); cursor: pointer; }
+.scene-strength-ms { display: inline-flex; gap: 2px; }
+.scene-strength-m, .scene-strength-s { width: 18px; height: 18px; padding: 0; font-size: 11px; line-height: 1; border: 1px solid #4a525c; border-radius: 3px; background: none; color: var(--text-muted); cursor: pointer; }
 .scene-strength-m.on { background: #c0392b; border-color: #c0392b; color: #fff; }
 .scene-strength-s.on { background: #d4a017; border-color: #d4a017; color: #111; }
-.scene-strength-relative { flex: 0 0 110px; width: 110px; }
-.scene-strength-buttons { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
-.scene-strength-buttons .scene-row { margin: 0; }
-.scene-strength-detail { display: flex; align-items: flex-start; gap: 10px; padding: 6px 8px; border-top: 1px solid var(--border); flex: none; }
-.scene-strength-detail-line { flex: 1 1 auto; min-width: 0; height: 2.6em; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.scene-strength-clipped { margin-left: 8px; color: #ff4d4d; }
+/* 「版」 menu: a MenuPopup (portal on the body, fixed, kept in the window). */
+.scene-versions-menu { position: fixed; z-index: 1000; width: min(440px, calc(100vw - 16px)); display: flex; flex-direction: column; gap: 6px; padding: 6px; overflow: auto; background: var(--bg-secondary); border: 1px solid var(--border-light); border-radius: 4px; box-shadow: 0 4px 12px rgba(0,0,0,.4); color: var(--text-primary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.scene-versions-save { display: flex; gap: 4px; }
+.scene-versions-name { flex: 1 1 auto; min-width: 0; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-light); border-radius: 4px; padding: 1px 4px; font-size: 12px; }
+.scene-versions-list { display: flex; flex-direction: column; gap: 2px; }
+.scene-versions-row { display: grid; grid-template-columns: 104px minmax(0, 1fr) auto auto auto; align-items: center; gap: 6px; padding: 2px 0; }
+.scene-versions-row + .scene-versions-row { border-top: 1px solid var(--border); }
+.scene-versions-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scene-event-jitter label:has(.scene-jitter-range) { grid-template-columns: minmax(0, 1fr) auto auto; }
 .scene-jitter-range { display: inline-block; min-width: 92px; font-variant-numeric: tabular-nums; }
