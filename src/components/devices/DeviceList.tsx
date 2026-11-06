@@ -11,6 +11,7 @@ import { roleBadge } from '@/utils/roleLabels'
 import { isHapbeatBoard, isKnownNonHapbeatBoard } from '@/utils/hapbeatBoard'
 import { useOtaStore, OTA_DEFAULT } from '@/stores/otaStore'
 import { UsbInfoModal } from './UsbInfoModal'
+import { wifiBulkItemText } from './wifiBulkText'
 import type { ManagerMessage } from '@/types/manager'
 import { useI18n } from '@/i18n/I18nProvider'
 
@@ -135,6 +136,7 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
   const openConfigFor = useSerialMaster((s) => s.openConfigFor)
   const closeConfig = useSerialMaster((s) => s.closeConfig)
   const forgetPort = useSerialMaster((s) => s.forgetPort)
+  const wifiItem = useSerialMaster((s) => s.wifiBulk?.items.find((i) => i.id === entry.id))
 
   const checked = selectedPortIds.includes(entry.id)
   const isActive = entry.id === activePortId && mode === 'config'
@@ -237,17 +239,16 @@ function UsbPortCard({ entry, orderedIds }: { entry: SerialPortEntry; orderedIds
           {f.state === 'error' && <span title={f.message}>{t('devices.usb.failed', { message: f.message?.slice(0, 40) })}</span>}
         </div>
       )}
-      {/* Bulk config apply state (bulkConfigCmd) — parallel to the flash line. */}
-      {entry.config && entry.config.state !== 'idle' && (
-        <div className="device-row-meta" style={{ marginTop: 2 }}>
-          {entry.config.state === 'connecting' && <span>{t('devices.usb.connecting')}</span>}
-          {entry.config.state === 'sending' && <span>{t('devices.usb.sending')}</span>}
-          {entry.config.state === 'done' && <span>{t('devices.usb.applied', { message: entry.config.message })}</span>}
-          {entry.config.state === 'error' && (
-            <span title={entry.config.message}>{t('devices.usb.applyFailed', { message: entry.config.message?.slice(0, 30) })}</span>
-          )}
-        </div>
-      )}
+      {/* Bulk Wi-Fi write state (serialMaster.bulkSetWifi) — parallel to the
+          flash line; the Wi-Fi tab lists the same results with hints. */}
+      {wifiItem && (() => {
+        const v = wifiBulkItemText(t, wifiItem)
+        return (
+          <div className="device-row-meta" style={{ marginTop: 2 }}>
+            <span className={`wifi-bulk-result-state ${v.tone}`} title={v.hint}>{v.text}</span>
+          </div>
+        )
+      })()}
       {f.state !== 'flashing' && f.state !== 'waiting' && (
         <div
           className="device-row-meta"

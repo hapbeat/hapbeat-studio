@@ -443,7 +443,9 @@ export async function openConfigConnection(
       const timer = setTimeout(() => {
         const idx = waiters.findIndex((w) => w.resolve === resolve)
         if (idx >= 0) waiters.splice(idx, 1)
-        reject(new Error(`serial timeout: ${JSON.stringify(cmd).slice(0, 60)}`))
+        // Name the command only: the full JSON can hold a Wi-Fi password
+        // (set_wifi), and this message ends up in the log.
+        reject(new Error(`serial timeout: ${String(cmd.cmd ?? '?')}`))
       }, timeoutMs)
       waiters.push({ resolve, reject, timer })
       const line = JSON.stringify(cmd) + '\n'

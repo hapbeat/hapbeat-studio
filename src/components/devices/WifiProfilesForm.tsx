@@ -3,8 +3,10 @@ import type { DeviceInfo, ManagerMessage } from '@/types/manager'
 import type { WifiProfile } from '@/stores/deviceStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useToast } from '@/components/common/Toast'
-import type { SerialWifiNetwork } from '@/stores/serialMaster'
+import { useSerialMaster, type SerialWifiNetwork } from '@/stores/serialMaster'
+import type { WifiBulkSummary, WifiCredentials } from '@/utils/wifiSerialWrite'
 import { useI18n } from '@/i18n/I18nProvider'
+import { wifiBulkItemDone, wifiBulkItemText } from './wifiBulkText'
 
 interface Props {
   device: DeviceInfo
@@ -21,12 +23,13 @@ interface Props {
   sendTo: (msg: ManagerMessage) => void
   onRefresh: () => void
   /** Number of USB-serial cards currently selected (serial path only). When
-   *  > 1, a "選択中の N 台に書き込む" button appears that applies the SAME
-   *  Wi-Fi to all of them (sequentially) via serialMaster.bulkConfigCmd.
+   *  > 1, a "選択中の N 台に書き込む" button appears that writes the SAME
+   *  Wi-Fi to all of them and confirms each (serialMaster.bulkSetWifi).
    *  0/undefined = the LAN path or a single device → no bulk button. */
   bulkCount?: number
-  /** Apply this message to all selected USB-serial devices, one at a time. */
-  onBulkApply?: (msg: ManagerMessage) => void
+  /** Write this Wi-Fi to all selected USB-serial devices. Resolves to the
+   *  counts, or null when a run was already in progress. */
+  onBulkApply?: (creds: WifiCredentials) => Promise<WifiBulkSummary | null>
   /** True when there's a live 設定-connected USB-serial device (the one
    *  this form is editing) whose port is NOT in the ✔ 書込対象 (bulk write
    *  target) set — the bulk button below would skip it. Surfaced as a
@@ -189,16 +192,19 @@ export function WifiProfilesForm({
     setTimeout(onRefresh, 800)
   }
 
-  // Bulk: apply the SAME Wi-Fi to every selected USB-serial device in
-  // parallel (serialMaster.bulkConfigCmd via the parent's onBulkApply).
-  const submitBulk = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (!ssid.trim() || !onBulkApply) return
+  // Bulk: write the SAME Wi-Fi to every checked USB-serial device and
+  // confirm each (serialMaster.bulkSetWifi via the parent's onBulkApply).
+  // The form stays open while it runs; it closes only when every device
+  // took it, so a retry needs no retyping.
+  const bulkRunning = useSerialMaster((s) => s.wifiBulk?.running ?? false)
+  const submitBulk = async (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (!ssid.trim() || !onBulkApply || bulkRunning) return
     setAnchor(e.currentTarget)
-    const targetSsid = ssid.trim()
-    const passFields = password.length > 0 ? { pass: password, password } : {}
-    onBulkApply({ type: 'set_wifi', payload: { ssid: targetSsid, ...passFields } })
-    exitEditMode()
-    setAddOpen(false)
+    const r = await onBulkApply({ ssid: ssid.trim(), pass: password })
+    if (r && r.failed === 0) {
+      exitEditMode()
+      setAddOpen(false)
+    }
   }
 
   const connectProfile = (e: React.MouseEvent<HTMLButtonElement>, idx: number) => {
@@ -486,14 +492,14 @@ export function WifiProfilesForm({
                 style={{ marginTop: 8, minHeight: 18 }}
               >
                 {configConnectedNotChecked
-                  ? '※ 設定中のデバイスは書込対象（✔）に含まれていません'
-                  : `選択中の USB Serial ${bulkCount} 台に適用します`}
+                  ? t('wifi.bulk.activeNotChecked')
+                  : t('wifi.bulk.targets', { count: bulkCount })}
               </div>
               <div className="form-action-row" style={{ marginTop: 4 }}>
                 <button
                   className="form-button"
-                  onClick={submitBulk}
-                  disabled={!ssid.trim()}
+                  onClick={(e) => void submitBulk(e)}
+                  disabled={!ssid.trim() || bulkRunning}
                   title={t('wifi.bulkTitle')}
                   style={{ width: '100%' }}
                 >
@@ -505,9 +511,56 @@ export function WifiProfilesForm({
         </div>
       )}
 
+      {onBulkApply && <WifiBulkResult />}
+
       <div className="form-status muted" style={{ marginTop: 8 }}>
         {t('wifi.restartNote')}
       </div>
+    </div>
+  )
+}
+
+/** The last bulk Wi-Fi write: progress while it runs, then each device's
+ *  result with what to check. Stays until dismissed or the next run. */
+function WifiBulkResult() {
+  const { t } = useI18n()
+  const run = useSerialMaster((s) => s.wifiBulk)
+  const clearWifiBulk = useSerialMaster((s) => s.clearWifiBulk)
+  if (!run) return null
+  const done = run.items.filter(wifiBulkItemDone).length
+  const connected = run.items.filter((i) => i.state === 'connected').length
+  const saved = connected + run.items.filter((i) => i.state === 'saved').length
+  const failed = run.items.filter((i) => i.state === 'failed').length
+  return (
+    <div className="wifi-bulk-result">
+      <div className="wifi-bulk-result-head">
+        <span className="wifi-bulk-result-title">{t('wifi.bulk.panelTitle', { ssid: run.ssid })}</span>
+        <button
+          type="button"
+          className="form-button-secondary wifi-profile-btn"
+          onClick={clearWifiBulk}
+          disabled={run.running}
+        >
+          {t('wifi.bulk.dismiss')}
+        </button>
+      </div>
+      <div className={`form-status ${run.running ? 'muted' : failed > 0 ? 'err' : saved > connected ? 'warn' : 'ok'}`}>
+        {run.running
+          ? t('wifi.bulk.progress', { done, total: run.items.length })
+          : t('wifi.bulk.summary', { saved, total: run.items.length, connected, failed })}
+      </div>
+      <ul className="wifi-bulk-result-list">
+        {run.items.map((item) => {
+          const v = wifiBulkItemText(t, item)
+          return (
+            <li key={item.id} className="wifi-bulk-result-item">
+              <span className="wifi-bulk-result-name">{item.label}</span>
+              <span className={`wifi-bulk-result-state ${v.tone}`}>{v.text}</span>
+              {v.hint && <span className="wifi-bulk-result-hint">{v.hint}</span>}
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }

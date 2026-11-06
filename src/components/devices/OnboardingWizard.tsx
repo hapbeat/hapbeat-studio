@@ -89,7 +89,7 @@ export function OnboardingWizard() {
   }, [flashLastResult, step])
 
   // Step 3 中に conn が落ちても auto で Step 1 に戻さない (旧挙動を撤廃)。
-  // ケーブル抜け / set_wifi 後 reboot / post-flash いずれも「Step 3 内で
+  // ケーブル抜け / 再起動 / post-flash いずれも「Step 3 内で
   // 再接続」させる方が動線が短い (= ユーザ要望)。
 
   const goProbe = () => setStep('probe')
@@ -236,7 +236,7 @@ function ConfigureStep({
   onDisconnect: () => void
 }) {
   const { t } = useI18n()
-  // 接続なし: post-flash / cable 抜け / set_wifi 後 reboot のいずれかで
+  // 接続なし: post-flash / cable 抜け / 再起動 のいずれかで
   // conn が外れた状態。Step 1 に戻さず、ここで電源 OFF→ON + 再接続を促す。
   // 再接続も左サイドバーの USB Serial カードの「接続」ボタンで。
   if (!hasConn) {

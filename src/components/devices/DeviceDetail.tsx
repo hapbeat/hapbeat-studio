@@ -36,6 +36,7 @@ import {
 } from './NodeConfigSections'
 import { useDeviceTransport } from '@/hooks/useDeviceTransport'
 import { useSerialMaster } from '@/stores/serialMaster'
+import type { WifiCredentials } from '@/utils/wifiSerialWrite'
 import { roleBadge } from '@/utils/roleLabels'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 
@@ -671,11 +672,10 @@ export function DeviceDetail() {
     if (selectedIp) send({ type: 'get_info', payload: { ip: selectedIp } })
   }, [transport.isSerial, send, selectedIp])
 
-  // ── Bulk config over USB serial ─────────────────────────────────────
-  // Apply a config command to ALL selected USB-serial cards ONE AT A TIME
-  // (serial path only). Unlike the parallel firmware flash, config is
-  // serialized because set_wifi self-reboots each device — see bulkConfigCmd.
-  const bulkConfigCmd = useSerialMaster((s) => s.bulkConfigCmd)
+  // ── Bulk Wi-Fi over USB serial ──────────────────────────────────────
+  // Write the same Wi-Fi to ALL checked USB-serial cards in one go and
+  // confirm each by reading it back — see serialMaster.bulkSetWifi.
+  const bulkSetWifi = useSerialMaster((s) => s.bulkSetWifi)
   const selectedPortIds = useSerialMaster((s) => s.selectedPortIds)
   const activePortId = useSerialMaster((s) => s.activePortId)
   const isSerialDevice = !!selectedIp && selectedIp.startsWith('serial:')
@@ -697,30 +697,25 @@ export function DeviceDetail() {
   // a live config connection and its port isn't in the checked set.
   const configConnectedNotChecked =
     masterMode === 'config' && !!activePortId && !bulkTargetIds.includes(activePortId)
-  const bulkApply = useCallback((msg: ManagerMessage) => {
-    // Same ManagerMessage → firmware serial-config JSON translation as
-    // useDeviceTransport's single-port serial path.
-    const cmd: Record<string, unknown> = {
-      cmd: msg.type,
-      ...(msg.payload as Record<string, unknown>),
-    }
-    delete cmd.ip
-    delete cmd.targets
-    void bulkConfigCmd(bulkTargetIds.map((id) => ({ id, cmd }))).then(({ ok, fail }) => {
-      // Summary toast (symmetric with the single-device write_result path).
+  const bulkApply = useCallback(async (creds: WifiCredentials) => {
+    const r = await bulkSetWifi(bulkTargetIds, creds)
+    if (r) {
+      // Summary toast (symmetric with the single-device write_result path);
+      // the per-device result is in the Wi-Fi tab and on the cards.
       injectMessage({
         type: 'write_result',
         payload: {
-          success: fail === 0,
+          success: r.failed === 0,
           device: selectedIp,
-          cmd: `${msg.type} (一括 ${ok + fail} 台)`,
-          message: fail === 0
-            ? `✓ ${ok} 台に一括適用しました`
-            : `一括設定: 成功 ${ok} / 失敗 ${fail}`,
+          cmd: 'set_wifi',
+          message: t('wifi.bulk.summary', {
+            saved: r.connected + r.savedOnly, total: r.total, connected: r.connected, failed: r.failed,
+          }),
         },
       })
-    })
-  }, [bulkConfigCmd, bulkTargetIds, injectMessage, selectedIp])
+    }
+    return r
+  }, [bulkSetWifi, bulkTargetIds, injectMessage, selectedIp, t])
 
   if (!device || !selectedIp) {
     return <OnboardingWizard />

@@ -1251,6 +1251,59 @@
   border-radius: var(--radius);
 }
 
+/* ---- Bulk Wi-Fi write result (serialMaster.wifiBulk) ---- */
+.wifi-bulk-result {
+  margin-top: 10px;
+  padding: 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.wifi-bulk-result-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wifi-bulk-result-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.wifi-bulk-result .form-status { margin-top: 4px; }
+.wifi-bulk-result-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.wifi-bulk-result-item {
+  display: grid;
+  grid-template-columns: minmax(0, 12em) minmax(0, 1fr);
+  column-gap: 8px;
+  font-size: 14px;
+}
+.wifi-bulk-result-name {
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wifi-bulk-result-state { overflow-wrap: anywhere; }
+.wifi-bulk-result-state.ok { color: var(--success); }
+.wifi-bulk-result-state.warn { color: var(--warning); }
+.wifi-bulk-result-state.err { color: var(--error); }
+.wifi-bulk-result-state.muted { color: var(--text-muted); }
+.wifi-bulk-result-hint {
+  grid-column: 2;
+  font-size: 13px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
 /* ---- Installed Kits ---- */
 .installed-kits-list {
   display: flex;

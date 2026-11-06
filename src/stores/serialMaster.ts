@@ -12,6 +12,17 @@ import {
   type SerialConfigConn,
 } from '@/utils/serialConfig'
 import { eraseFlash as eraseFlashImpl, flashRegions, type FlashProgress } from '@/utils/serialFlasher'
+import {
+  askInfoWithRetry,
+  confirmWifiSaved,
+  sendSetWifi,
+  summarizeWifiOutcomes,
+  type SerialSend,
+  type WifiBulkSummary,
+  type WifiCredentials,
+  type WifiWriteFailure,
+  type WifiWriteOutcome,
+} from '@/utils/wifiSerialWrite'
 
 /**
  * Clear the LAN (Wi-Fi) multi-select so the USB and Wi-Fi selections stay
@@ -77,12 +88,35 @@ export interface SerialPortEntry {
     progress: FlashProgress | null
     message?: string
   }
-  /** Per-port state for a bulk config apply (bulkConfigCmd) — parallel to
-   *  `flash`, shown on the card the same way. Absent until a bulk op runs. */
-  config?: {
-    state: 'idle' | 'connecting' | 'sending' | 'done' | 'error'
-    message?: string
-  }
+}
+
+/** One device's step in a bulk Wi-Fi write (bulkSetWifi). */
+export type WifiBulkState =
+  | 'queued' | 'connecting' | 'sending' | 'verifying'
+  /** Saved and connected. */
+  | 'connected'
+  /** Saved, not connected (wrong password / out of range). Still written. */
+  | 'saved'
+  | 'failed'
+
+export interface WifiBulkItem {
+  id: string
+  /** Card label when the run started (the entry can vanish while an S3
+   *  re-enumerates after its port is closed). */
+  label: string
+  state: WifiBulkState
+  ip?: string
+  failure?: WifiWriteFailure
+  detail?: string
+}
+
+/** The last bulk Wi-Fi write. Kept in the store, not on the port entries, so
+ *  a card that drops out of getPorts() while its S3 resets keeps its result.
+ *  Never holds the password. */
+export interface WifiBulkRun {
+  ssid: string
+  running: boolean
+  items: WifiBulkItem[]
 }
 
 const portIdByPort = new WeakMap<SerialPort, string>()
@@ -130,13 +164,13 @@ const AUTO_PROBE_SESSION_CAP = 30
 /** A probePort() call currently holding `id`'s SerialPort open, keyed by
  *  port id. openConfigFor awaits this before touching the same port. */
 const probeInFlight = new Map<string, Promise<void>>()
-/** Timestamp of the last probePort()-triggered close for a port id. The S3
- *  resets on CDC CLOSE (not open — known device behavior), so after a
- *  probe's close we pad a short settle delay before the next open to let
- *  USB re-enumeration finish. */
-const lastProbeCloseAt = new Map<string, number>()
-/** Settle time after a probe's close before the same port is opened again. */
-const PROBE_SETTLE_MS = 1200
+/** Timestamp of the last time Studio closed a port id (probe, 設定 OFF, a
+ *  bulk Wi-Fi write). The S3 resets on CDC CLOSE (not open — known device
+ *  behavior), so after a close we pad a short settle delay before the next
+ *  open to let USB re-enumeration finish. */
+const lastCloseAt = new Map<string, number>()
+/** Settle time after a close before the same port is opened again. */
+const CLOSE_SETTLE_MS = 1200
 /** Ports the user has an in-flight 設定-connect (openConfigFor) for.
  *  Auto-identify (and a stray manual ↻ 識別) must never probe — and
  *  reboot — a port while the user is actively trying to configure it. */
@@ -513,29 +547,27 @@ interface SerialMasterState {
     opts?: { eraseAll?: boolean; compress?: boolean },
   ) => Promise<void>
   /**
-   * Apply a config command to SEVERAL registry ports, ONE AT A TIME.
-   * Each target opens its own transient config conn (like probePort),
-   * sends its cmd, and closes; a short settle delay separates devices.
+   * Write the same Wi-Fi network to several registry ports in one go and
+   * confirm each by reading it back (utils/wifiSerialWrite.ts has the
+   * firmware facts). Per device: open the port (or reuse the held 設定
+   * conn), wait until get_info answers, send set_wifi, then poll
+   * list_wifi_profiles / get_wifi_status with the port still OPEN until the
+   * network is saved (and connected, or connectWaitMs passed); only then
+   * close it.
    *
-   * Deliberately SEQUENTIAL, not `Promise.all` (unlike flashSelected):
-   * set_wifi makes the firmware reboot the instant it applies, so running
-   * N ports at once clusters N EN-resets + N reboot-driven USB
-   * re-enumerations in the same window and the write is dropped on some
-   * ports (user 2026-07-05:「複数同時だと再起動がかかって書き込めない、
-   * 1 台ずつなら成功する」). Serializing makes each write equivalent to the
-   * proven-reliable single-device path. Flash keeps its fan-out because
-   * esptool-js owns the port through a robust reset+sync and never
-   * self-reboots mid-stream.
+   * Opening and set_wifi run one device at a time (a classic ESP32 resets
+   * when its port opens; keeping those apart is cheap). The read-back waits
+   * of different devices overlap, so N devices take about N × (open +
+   * handshake) + one wait instead of N waits.
    *
-   * Per-port outcome lands in each entry's `config` slot. `targets` is
-   * `{id, cmd}[]` so the SAME cmd can go to all (map ids → one cmd) OR a
-   * DIFFERENT cmd per device. `cmd` is the raw firmware serial-config
-   * JSON, e.g. `{cmd:'set_wifi', ssid, pass}`. Returns a `{ ok, fail }`
-   * count. Ports mid-flash are skipped.
+   * Progress and results land in `wifiBulk`. Resolves to the counts, or null
+   * when a run is already in progress.
    */
-  bulkConfigCmd: (
-    targets: Array<{ id: string; cmd: Record<string, unknown> }>,
-  ) => Promise<{ ok: number; fail: number }>
+  bulkSetWifi: (ids: string[], creds: WifiCredentials) => Promise<WifiBulkSummary | null>
+  /** The last bulk Wi-Fi write, shown on the cards and in the Wi-Fi tab. */
+  wifiBulk: WifiBulkRun | null
+  /** Dismiss the finished bulk Wi-Fi result. */
+  clearWifiBulk: () => void
 }
 
 export const useSerialMaster = create<SerialMasterState>((set, get) => {
@@ -554,13 +586,33 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       knownPorts: s.knownPorts.map((e) => (e.id === id ? { ...e, ...patch } : e)),
     }))
 
-  /** The S3 resets on CDC CLOSE, so if a probe just closed this port, pad
-   *  out to PROBE_SETTLE_MS before reopening it (USB re-enumeration). */
-  async function waitProbeSettle(id: string): Promise<void> {
-    const closedAt = lastProbeCloseAt.get(id)
+  /** The S3 resets on CDC CLOSE, so if Studio just closed this port, pad
+   *  out to CLOSE_SETTLE_MS before reopening it (USB re-enumeration). */
+  async function waitCloseSettle(id: string): Promise<void> {
+    const closedAt = lastCloseAt.get(id)
     if (closedAt === undefined) return
-    const remaining = PROBE_SETTLE_MS - (Date.now() - closedAt)
+    const remaining = CLOSE_SETTLE_MS - (Date.now() - closedAt)
     if (remaining > 0) await new Promise((r) => setTimeout(r, remaining))
+  }
+
+  /**
+   * Ask get_info until the firmware answers. A native-USB board (S3) can
+   * sit in the ROM bootloader, e.g. right after a flash whose reset did not
+   * take; reboot it into the app once and ask again (the firmware answers
+   * ~1.2 s after a reset). Resolves to the get_info reply or null.
+   */
+  async function handshake(
+    c: SerialConfigConn,
+    port: SerialPort,
+    onReset?: () => void,
+  ): Promise<Record<string, unknown> | null> {
+    let info = await askInfoWithRetry(c.send)
+    if (info === null && await resetNativeUsbIntoApp(port, log)) {
+      onReset?.()
+      await new Promise((r) => setTimeout(r, 1500))
+      info = await askInfoWithRetry(c.send)
+    }
+    return info
   }
 
   /**
@@ -577,7 +629,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       log(`${id}: waiting for the in-flight probe before opening the port`)
       await inFlight
     }
-    await waitProbeSettle(id)
+    await waitCloseSettle(id)
     await releaseSerialPort(port)
   }
 
@@ -638,26 +690,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       // needs ~1 s to reach its loop, so a single 1 s shot is too eager
       // and mislabels a flashed device as "未書込". 3 × 1.2 s (~3.6 s)
       // still fails fast enough for a genuinely blank chip → Step 2.
-      const askInfo = async (): Promise<Record<string, unknown> | null> => {
-        for (let attempt = 0; attempt < 3; attempt++) {
-          try {
-            return await c.send({ cmd: 'get_info' }, { timeoutMs: 1200 })
-          } catch {
-            if (attempt < 2) await new Promise((r) => setTimeout(r, 200))
-          }
-        }
-        return null
-      }
-      let info = await askInfo()
-      // A native-USB board (S3) can sit in the ROM bootloader, e.g. right
-      // after a flash whose reset did not take — it then shows as "未書込?"
-      // although the firmware is fine. Reboot it into the app once and ask
-      // again (the firmware answers ~1.2 s after a reset).
-      if (info === null && await resetNativeUsbIntoApp(port, log)) {
-        setProbe('connecting', 'デバイスを再起動して確認中…')
-        await new Promise((r) => setTimeout(r, 1500))
-        info = await askInfo()
-      }
+      const info = await handshake(c, port, () => setProbe('connecting', 'デバイスを再起動して確認中…'))
       if (info === null) throw new Error('get_info no response after retries')
       // get_info answered → publish conn + mode atomically.
       const parsed = parseSerialInfo(info)
@@ -719,6 +752,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
     activePortId: null,
     selectedPortIds: [],
     selectedPortId: null,
+    wifiBulk: null,
 
     openConfig: async ({ forcePicker = false } = {}) => {
       const cur = get()
@@ -863,9 +897,10 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
     },
 
     closeConfig: async () => {
-      const { conn } = get()
+      const { conn, activePortId } = get()
       if (!conn) return
       await conn.close().catch(() => { /* already closed */ })
+      if (activePortId) lastCloseAt.set(activePortId, Date.now())
       set({ conn: null, mode: 'idle', info: null, wifiStatus: null, wifiProfiles: [] })
     },
 
@@ -1126,7 +1161,6 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
           probe: old?.probe ?? 'idle',
           info: old?.info ?? null,
           flash: old?.flash ?? { state: 'idle', progress: null },
-          config: old?.config,
         }
       })
       // Hide ports the user closed with the card ✕ (non-Hapbeat COM ports).
@@ -1274,14 +1308,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
         c = await openConfigConnection(port, {
           onLog: (line) => useLogStore.getState().push('serial-cfg', `[probe:${id}] ${line}`),
         })
-        let r: Record<string, unknown> | null = null
-        for (let attempt = 0; attempt < 3 && r === null; attempt++) {
-          try {
-            r = await c.send({ cmd: 'get_info' }, { timeoutMs: 1200 })
-          } catch {
-            if (attempt < 2) await new Promise((res) => setTimeout(res, 200))
-          }
-        }
+        const r = await askInfoWithRetry(c.send)
         if (r === null) throw new Error('get_info no response')
         patchEntry(id, { probe: 'success', info: parseSerialInfo(r) })
       } catch (err) {
@@ -1293,7 +1320,7 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
         // any, has now been triggered) and only THEN release the
         // in-flight marker — openConfigFor awaits this promise, so it
         // never proceeds until this port is genuinely idle again.
-        lastProbeCloseAt.set(id, Date.now())
+        lastCloseAt.set(id, Date.now())
         probeInFlight.delete(id)
         markProbeDone()
       }
@@ -1372,11 +1399,11 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
           await inFlightProbe
         }
         // Settle delay: the S3 resets on CDC CLOSE (not open — known
-        // device behavior), so if a probe just closed this exact port,
+        // device behavior), so if Studio just closed this exact port,
         // pad out to ~1.2s since that close before opening again so the
         // USB-CDC re-enumeration has time to finish. Skipped entirely
-        // when no probe has ever touched this port (the common case).
-        await waitProbeSettle(id)
+        // when Studio has never closed this port (the common case).
+        await waitCloseSettle(id)
         const { conn } = get()
         if (conn) await get().closeConfig()
         // Same acknowledgement as probePort — connecting supersedes the
@@ -1519,89 +1546,125 @@ export const useSerialMaster = create<SerialMasterState>((set, get) => {
       }, 5000)
     },
 
-    bulkConfigCmd: async (targets) => {
+    bulkSetWifi: async (ids, creds) => {
+      if (get().wifiBulk?.running) {
+        log('bulkSetWifi refused: a bulk Wi-Fi write is already running')
+        return null
+      }
+      const targetIds = [...new Set(ids)]
+      if (targetIds.length === 0) return null
       await get().syncPorts()
-      // Skip ports that are mid-flash (USB contention) or gone. Each port's
-      // config runs on its OWN transient conn, independent of the others and
-      // of the single held config conn — same model as probePort/flashSelected.
-      const entries = get().knownPorts
-      const runnable = targets.filter((t) => {
-        const e = entries.find((x) => x.id === t.id)
-        return !!e && e.flash.state !== 'flashing' && e.flash.state !== 'waiting'
-      })
-      if (runnable.length === 0) {
-        return { ok: 0, fail: 0 }
-      }
-      // If the held config conn is one of the targets, close it first so its
-      // transient bulk conn can take the port (mirror flashSelected:1006-1013).
-      const runIds = new Set(runnable.map((t) => t.id))
-      const { conn, activePortId } = get()
-      if (conn && activePortId && runIds.has(activePortId)) {
-        await conn.close().catch(() => { /* already closed */ })
-        set({ conn: null, mode: 'idle', info: null, wifiStatus: null, wifiProfiles: [], activePortId: null, port: null })
-      }
       const pushLog = useLogStore.getState().push
-      for (const t of runnable) patchEntry(t.id, { config: { state: 'connecting' } })
+      const entries = get().knownPorts
+      const labelOf = (id: string) => {
+        const e = entries.find((x) => x.id === id)
+        const num = `#${id.replace('usb-', '')}`
+        return e ? `${num} ${serialEntryLabel(e)}` : num
+      }
+      set({
+        wifiBulk: {
+          ssid: creds.ssid,
+          running: true,
+          items: targetIds.map((id) => ({ id, label: labelOf(id), state: 'queued' as const })),
+        },
+      })
+      const update = (id: string, patch: Partial<WifiBulkItem>) =>
+        set((s) => (s.wifiBulk
+          ? { wifiBulk: { ...s.wifiBulk, items: s.wifiBulk.items.map((i) => (i.id === id ? { ...i, ...patch } : i)) } }
+          : {}))
+      // Neither auto-identify nor a manual ↻ 識別 may open (and reset) these
+      // ports while they are being written.
+      for (const id of targetIds) configIntentIds.add(id)
+      pushLog('serial', `Wi-Fi ${creds.ssid} → ${targetIds.length} 台 (書き込みは 1 台ずつ、保存の確認は並行)`)
 
-      const applyOne = async (t: { id: string; cmd: Record<string, unknown> }): Promise<boolean> => {
-        const e = get().knownPorts.find((x) => x.id === t.id)
-        const label = e ? serialEntryLabel(e) : t.id
-        const port = portById.get(t.id)
-        if (!port) {
-          patchEntry(t.id, { config: { state: 'error', message: 'ポートが見つかりません (抜かれた?)' } })
-          return false
-        }
-        let c: SerialConfigConn | null = null
+      // Opening a port and set_wifi happen one device at a time; the
+      // read-back waits that follow overlap.
+      let turn: Promise<unknown> = Promise.resolve()
+      function oneAtATime<T>(fn: () => Promise<T>): Promise<T> {
+        const p = turn.then(fn)
+        turn = p.catch(() => undefined)
+        return p
+      }
+      let heldWritten = false
+
+      const writeOne = async (id: string): Promise<WifiWriteOutcome> => {
+        // A holder, not a `let`: TypeScript does not see assignments made
+        // inside the oneAtATime callback when it narrows in `finally`.
+        const opened: { conn: SerialConfigConn | null } = { conn: null }
+        const onLog = (line: string) => useLogStore.getState().push('serial-cfg', `[wifi:${id}] ${line}`)
         try {
-          await takePortExclusive(t.id, port)
-          c = await openConfigConnection(port, {
-            onLog: (line) => useLogStore.getState().push('serial-cfg', `[bulk:${t.id}] ${line}`),
+          const started = await oneAtATime(async (): Promise<WifiWriteOutcome | { send: SerialSend; at: number }> => {
+            const e = get().knownPorts.find((x) => x.id === id)
+            const port = portById.get(id)
+            if (!e || !port) return { kind: 'failed', reason: 'lost', detail: 'ポートが見つかりません (抜かれた?)' }
+            if (e.flash.state === 'flashing' || e.flash.state === 'waiting') {
+              return { kind: 'failed', reason: 'open', detail: 'ファーム書き込み中' }
+            }
+            const s = get()
+            let send: SerialSend
+            if (s.conn && s.mode === 'config' && s.activePortId === id) {
+              // The 設定-connected device: use its live conn. Closing it and
+              // reopening the port would reset an S3 right before set_wifi.
+              heldWritten = true
+              send = s.conn.send
+            } else {
+              update(id, { state: 'connecting' })
+              await takePortExclusive(id, port)
+              try {
+                opened.conn = await openConfigConnection(port, { onLog })
+              } catch (err) {
+                // Usually the tail of a USB re-enumeration; try once more.
+                log(`bulkSetWifi(${id}): open failed, retrying: ${(err as Error).message}`)
+                await new Promise((r) => setTimeout(r, 1000))
+                await releaseSerialPort(port)
+                opened.conn = await openConfigConnection(port, { onLog })
+              }
+              const info = await handshake(opened.conn, port)
+              if (info === null) return { kind: 'failed', reason: 'no_reply' }
+              patchEntry(id, { probe: 'success', info: parseSerialInfo(info) })
+              send = opened.conn.send
+            }
+            update(id, { state: 'sending' })
+            const refused = await sendSetWifi(send, creds)
+            if (refused) return refused
+            return { send, at: Date.now() }
           })
-          patchEntry(t.id, { config: { state: 'sending' } })
-          // set_wifi (and other applied settings) reboot the device right
-          // after taking effect, so the reply may not arrive before the reset.
-          // Treat "status:ok" and "no reply (reboot)" both as SENT; only a
-          // thrown open/write error is a real failure.
-          const r = await c.send(t.cmd, { timeoutMs: 3000 }).catch(() => null)
-          const ok = !!r && (r as Record<string, unknown>).status === 'ok'
-          patchEntry(t.id, {
-            config: { state: 'done', message: ok ? 'OK' : '送信済 (応答なし/再起動)' },
-          })
-          pushLog('serial', `[${label}] bulk ${String(t.cmd.cmd ?? '')} → ${ok ? 'ok' : 'sent (no reply)'}`)
-          return true
+          if ('kind' in started) return started
+          update(id, { state: 'verifying' })
+          return await confirmWifiSaved(started.send, creds, started.at)
         } catch (err) {
-          const msg = (err as Error).message ?? String(err)
-          patchEntry(t.id, { config: { state: 'error', message: msg } })
-          pushLog('serial', `[${label}] bulk config FAILED: ${msg}`)
-          return false
+          return { kind: 'failed', reason: 'open', detail: (err as Error).message ?? String(err) }
         } finally {
-          if (c) await c.close().catch(() => { /* already closed */ })
-        }
-      }
-
-      pushLog('serial', `bulk config → ${runnable.length} 台 順次 (${String(runnable[0]?.cmd.cmd ?? '')})`)
-      // SEQUENTIAL — see the bulkConfigCmd JSDoc. A settle delay between
-      // devices lets the previous device's set_wifi reboot + USB
-      // re-enumeration finish before we open the next port, so their
-      // resets never overlap (the cause of the "複数同時だと書き込めない" bug).
-      const results: boolean[] = []
-      for (let i = 0; i < runnable.length; i++) {
-        if (i > 0) await new Promise((r) => setTimeout(r, 400))
-        results.push(await applyOne(runnable[i]))
-      }
-      const okCount = results.filter(Boolean).length
-      const failCount = results.length - okCount
-      // Clear per-card config state after a beat (mirror flash).
-      setTimeout(() => {
-        for (const t of runnable) {
-          const cur = get().knownPorts.find((x) => x.id === t.id)
-          if (cur?.config && (cur.config.state === 'done' || cur.config.state === 'error')) {
-            patchEntry(t.id, { config: { state: 'idle' } })
+          // Close only after the read-back: an S3 resets on close.
+          if (opened.conn) {
+            await opened.conn.close().catch(() => { /* already closed */ })
+            lastCloseAt.set(id, Date.now())
           }
         }
-      }, 6000)
-      return { ok: okCount, fail: failCount }
+      }
+
+      try {
+        const outcomes = await Promise.all(targetIds.map(async (id) => {
+          const o = await writeOne(id)
+          if (o.kind === 'failed') {
+            update(id, { state: 'failed', failure: o.reason, detail: o.detail })
+            pushLog('serial', `[${labelOf(id)}] Wi-Fi ${creds.ssid} FAILED: ${o.reason}${o.detail ? ` (${o.detail})` : ''}`)
+          } else {
+            update(id, { state: o.kind, ip: o.kind === 'connected' ? o.ip : undefined })
+            pushLog('serial', `[${labelOf(id)}] Wi-Fi ${creds.ssid} → ${o.kind === 'connected' ? `saved + connected ${o.ip ?? ''}` : 'saved (not connected)'}`)
+          }
+          return o
+        }))
+        return summarizeWifiOutcomes(outcomes)
+      } finally {
+        for (const id of targetIds) configIntentIds.delete(id)
+        set((s) => (s.wifiBulk ? { wifiBulk: { ...s.wifiBulk, running: false } } : {}))
+        // The Wi-Fi tab on screen shows the held device's profile list.
+        if (heldWritten) void get().refreshAll()
+      }
     },
+
+    clearWifiBulk: () => set((s) => (s.wifiBulk?.running ? {} : { wifiBulk: null })),
   }
 })
 
