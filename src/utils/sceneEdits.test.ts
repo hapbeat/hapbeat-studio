@@ -118,18 +118,33 @@ describe('laying the edits over the recording', () => {
 describe('changing the entry of one firing', () => {
   const button = ev(3, 'button', 'right')
   it('adds, replaces, takes a field back and removes the entry', () => {
-    let e = setEditFor({ schema_version: 1, firings: [] }, button, { gain: 0.123456 })
+    let e = setEditFor({ schema_version: 1, firings: [] }, button, { gain: 0.123456 }, undefined)
     expect(e.firings).toEqual([{ of: { name: 'button', t: 3, hand: 'right' }, gain: 0.1235 }])
-    e = setEditFor(e, button, { t: 3.5 })
+    e = setEditFor(e, button, { t: 3.5 }, 0)
     expect(e.firings).toEqual([{ of: { name: 'button', t: 3, hand: 'right' }, gain: 0.1235, t: 3.5 }])
-    e = setEditFor(e, button, { gain: null })
+    e = setEditFor(e, button, { gain: null }, 0)
     expect(e.firings).toEqual([{ of: { name: 'button', t: 3, hand: 'right' }, t: 3.5 }])
-    e = setEditFor(e, button, { t: null })
+    e = setEditFor(e, button, { t: null }, 0)
     expect(e.firings).toEqual([])
   })
   it('replaces the matched entry (its `of` written as recorded), others stay where they are', () => {
     const firings: FiringEdit[] = [{ of: { name: 'tap', t: 1 }, gain: 2 }, { of: { name: 'button', t: 3.01, hand: 'right' }, gain: 0.5 }]
     const e = setEditFor({ schema_version: 1, firings }, button, { gain: 0.7 }, 1)
     expect(e.firings).toEqual([firings[0], { of: { name: 'button', t: 3, hand: 'right' }, gain: 0.7 }])
+  })
+  it('gives a second firing of the same cue in one frame its own entry (never takes the first one’s)', () => {
+    const events = [ev(1, 'step'), ev(1, 'step')]
+    let e = setEditFor({ schema_version: 1, firings: [] }, events[0], { gain: 1.2 }, undefined)
+    let match = matchEdits(events, 30, e.firings).byEvent
+    e = setEditFor(e, events[1], { gain: 0.8 }, match.get(1))
+    match = matchEdits(events, 30, e.firings).byEvent
+    expect(e.firings).toHaveLength(2)
+    expect(e.firings[match.get(0)!].gain).toBe(1.2)
+    expect(e.firings[match.get(1)!].gain).toBe(0.8)
+    // Taking firing 1 back removes its entry only.
+    e = setEditFor(e, events[1], { gain: null }, match.get(1))
+    match = matchEdits(events, 30, e.firings).byEvent
+    expect(e.firings).toEqual([{ of: { name: 'step', t: 1 }, gain: 1.2 }])
+    expect(match.get(0)).toBe(0)
   })
 })

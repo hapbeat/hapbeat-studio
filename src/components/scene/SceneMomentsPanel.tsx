@@ -52,6 +52,7 @@ export function SceneMomentsPanel() {
   const span = useSceneStore(s => s.span)
   const chapter = useSceneStore(s => s.chapter)
   const edited = useSceneStore(s => s.edited)
+  const recorded = useSceneStore(s => s.recorded)
   const selected = useSceneStrength(s => s.selected)
   const range = useSceneTimelineRange(s => s.range)
   /** Each shown firing's moment (its row), for the in-view, chosen and picked rows. */
@@ -64,6 +65,22 @@ export function SceneMomentsPanel() {
     for (const i of selected) { const k = shown.get(i), m = k === undefined ? null : momentOf[k]; if (m != null) out.add(m) }
     return out
   }, [selected, data, edited, momentOf])
+  /**
+   * Each moment's first firing at its RECORDED time (row → seconds; viewer-data.json `events`): an override and the
+   * Change request name a firing by it, also after its time was edited. A row without a recorded firing: none (its own time).
+   */
+  const recordedAt = useMemo(() => {
+    const out = new Map<number, number>()
+    if (!data || !edited || !recorded) return out
+    const recordedOf = new Map([...shownIndexOf(data.full.events, edited.full.events)].map(([i, k]) => [k, i]))
+    items.forEach((it, k) => {
+      if (it.kind !== 'clip') return
+      const e = data.full.events.findIndex(ev => ev.name === it.name && ev.t === it.at), i = e < 0 ? undefined : recordedOf.get(e)
+      if (i !== undefined && recorded.full.events[i]) out.set(k, recorded.full.events[i].t)
+    })
+    return out
+  }, [items, data, edited, recorded])
+  const atOf = (k: number) => recordedAt.get(k) ?? items[k]?.at ?? 0
   /** Each loop cue's active runs over the recording (once per recording). */
   const runsOf = useMemo(() => new Map(data && lib ? lib.loop_cues.map(c => [c, loopCueRuns(data.full.levels, data.fps, lib, c)]) : []), [data, lib])
   /** The span the row of cue `name` in moment `k` plays: its loop cue's run started by that firing (null for one-shot cues). */
@@ -88,7 +105,8 @@ export function SceneMomentsPanel() {
     const k = data ? data.full.events.findIndex(e => e.name === sel.name && Math.abs(e.t - sel.t!) < 0.02) : -1, m = k >= 0 ? momentOf[k] : null
     return m ?? items.findIndex(x => x.kind === 'clip' && x.names.includes(sel.name) && Math.abs(x.at - sel.t!) < 0.05)
   }, [sel, items, cur, data, momentOf])
-  useEffect(() => { list.current?.querySelector('.scene-item.picked, .scene-item.sel')?.scrollIntoView({ block: 'nearest' }) }, [cur, picked])
+  // The picked firing's row (a bar clicked) before the current one (the full replay's row 0 would come first in the list).
+  useEffect(() => { const root = list.current; (root?.querySelector('.scene-item.picked') ?? root?.querySelector('.scene-item.sel'))?.scrollIntoView({ block: 'nearest' }) }, [cur, picked])
   // Another firing selection (the timeline): its first row in view.
   useEffect(() => { list.current?.querySelector('.scene-item.chosen')?.scrollIntoView({ block: 'nearest' }) }, [selected])
   if (!lib) return <div className="scene-panel-empty">{t('scene.noProject')}</div>
@@ -137,11 +155,11 @@ export function SceneMomentsPanel() {
           {menu?.k === k && (it as OverriddenClip).from && <MenuPopup anchor={list} at={menu} onClose={() => setMenu(null)} className="scene-occ-form scene-row-menu">
             <button type="button" role="menuitem" className="scene-icon-btn" autoFocus title={t('scene.override.undoHint')}
               onClick={e => { e.stopPropagation(); setMenu(null); const from = (it as OverriddenClip).from!
-                void saveSceneOverrides(removeOverride(useSceneStore.getState().overrides, from, it.at)).catch(error => changeFailed(error instanceof Error ? error.message : String(error))) }}>{t('scene.override.undoTo', { from: (it as OverriddenClip).from! })}</button>
+                void saveSceneOverrides(removeOverride(useSceneStore.getState().overrides, from, atOf(k))).catch(error => changeFailed(error instanceof Error ? error.message : String(error))) }}>{t('scene.override.undoTo', { from: (it as OverriddenClip).from! })}</button>
           </MenuPopup>}
-          {open === k && it.kind === 'clip' && table && <ChangeEventForm from={(it as OverriddenClip).from ?? it.name} at={it.at} table={table}
+          {open === k && it.kind === 'clip' && table && <ChangeEventForm from={(it as OverriddenClip).from ?? it.name} at={atOf(k)} table={table}
             onClose={() => setOpen(null)}
-            onSent={to => { setSent(s => ({ ...s, [k]: true })); setOpen(null); changedFiring((it as OverriddenClip).from ?? it.name, it.at, to) }}
+            onSent={to => { setSent(s => ({ ...s, [k]: true })); setOpen(null); changedFiring((it as OverriddenClip).from ?? it.name, atOf(k), to) }}
             onError={changeFailed} />}
         </div>
         {several && it.names.map(name => <div key={name} className={`scene-item scene-subitem ${(span ? spanPlaying(k, name) : k === cur && sel?.name === name) ? 'sel' : ''}`}

@@ -92,19 +92,26 @@ export async function writeVersion(root: FileSystemDirectoryHandle, snapshot: Ve
   return id
 }
 
+/** Copies every file and folder in `source` (sub-folders too, empty ones made) to `path` under `root`. */
+async function copyFolder(root: FileSystemDirectoryHandle, source: FileSystemDirectoryHandle, path: string): Promise<void> {
+  await dirAt(root, path, true)
+  for await (const [name, handle] of source.entries()) {
+    if (handle.kind === 'file') await writeProjectFile(root, `${path}/${name}`, await (handle as FileSystemFileHandle).getFile())
+    else await copyFolder(root, handle as FileSystemDirectoryHandle, `${path}/${name}`)
+  }
+}
+
 /**
- * Moves version `id` to `_archive/versions/<id>/` (a name already there gets `-2`, …): every file is copied, then the
- * original folder is removed — only as this move (Studio never deletes files in the user's folder). Returns the path.
+ * Moves version `id` to `_archive/versions/<id>/` (a name already there gets `-2`, …): everything in it is copied
+ * (sub-folders too), then the original folder is removed — only as this move, after the whole copy worked (Studio
+ * never deletes files in the user's folder). Returns the path.
  */
 export async function archiveVersion(root: FileSystemDirectoryHandle, id: string): Promise<string> {
   const versions = await dirAt(root, VERSIONS_DIR), source = await versions.getDirectoryHandle(id)
   const archive = await dirAt(root, ARCHIVED_VERSIONS_DIR, true)
   let name = id
   for (let n = 2; await archive.getDirectoryHandle(name).then(() => true, error => { if (isNotFound(error)) return false; throw error }); n++) name = `${id}-${n}`
-  for await (const [file, handle] of source.entries()) {
-    if (handle.kind !== 'file') continue
-    await writeProjectFile(root, `${ARCHIVED_VERSIONS_DIR}/${name}/${file}`, await (handle as FileSystemFileHandle).getFile())
-  }
+  await copyFolder(root, source, `${ARCHIVED_VERSIONS_DIR}/${name}`)
   await versions.removeEntry(id, { recursive: true })
   return `${ARCHIVED_VERSIONS_DIR}/${name}`
 }

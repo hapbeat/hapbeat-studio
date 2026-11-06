@@ -120,12 +120,13 @@ export function retimed(recording: SceneData, edited: SceneData, lib: Pick<Scene
 
 /**
  * The edits with the entry of recorded firing `ev` changed (FiringChange; rounded as the file writes them): added,
- * replaced or — with neither field left — removed. `entry`: the index of its matched entry (matchEdits), else the
- * entry naming exactly its name, hand and time is the one.
+ * replaced or — with neither field left — removed. `entry`: the index of its matched entry (matchEdits); undefined =
+ * it has none, so a new one is added (an entry with the same name, hand and time can only be another firing's: the
+ * same cue twice in one frame, which matchEdits gives the next free firing).
  */
-export function setEditFor(edits: ViewerEdits, ev: SceneEvent, change: FiringChange, entry?: number): ViewerEdits {
+export function setEditFor(edits: ViewerEdits, ev: SceneEvent, change: FiringChange, entry: number | undefined): ViewerEdits {
   const hand = ev.hand ? ev.hand as Hand : undefined
-  const at = entry ?? edits.firings.findIndex(e => e.of.name === ev.name && (e.of.hand ?? '') === (ev.hand || '') && Math.abs(e.of.t - ev.t) < 1e-4)
+  const at = entry ?? -1
   const old = at >= 0 ? edits.firings[at] : undefined
   const gain = change.gain === undefined ? old?.gain : change.gain === null ? undefined : roundEditGain(change.gain)
   const t = change.t === undefined ? old?.t : change.t === null ? undefined : roundTime(change.t)

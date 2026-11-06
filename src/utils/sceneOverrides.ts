@@ -38,15 +38,30 @@ export function setOverride(list: readonly SceneOverride[], o: SceneOverride): S
 }
 export const removeOverride = (list: readonly SceneOverride[], from: string, atSec: number) => list.filter(x => !at(x, from, atSec))
 
-/** The recording as Studio uses it: overridden firings (events and the clips cut for them) renamed, their recorded name kept in `from`. */
-export function applyOverrides(data: SceneData, list: readonly SceneOverride[]): SceneData {
+/**
+ * The recording as Studio uses it: overridden firings (events and the clips cut for them) renamed, their recorded name
+ * kept in `from`. An override names a firing at its RECORDED time (viewer-data.json): `times[i]` is event i's recorded
+ * time when the events carry edited times (sceneEdits.applyEdits, recorded order); the clips are matched by their own time.
+ */
+export function applyOverrides(data: SceneData, list: readonly SceneOverride[], times?: readonly number[]): SceneData {
   if (!list.length) return data
-  const events: OverriddenEvent[] = data.full.events.map(e => { const o = list.find(x => at(x, e.name, e.t)); return o ? { ...e, name: o.to, from: e.name } : e })
+  const events: OverriddenEvent[] = data.full.events.map((e, i) => { const o = list.find(x => at(x, e.name, times?.[i] ?? e.t)); return o ? { ...e, name: o.to, from: e.name } : e })
   const clips: OverriddenClip[] = data.clips.map(c => {
     const o = list.find(x => at(x, c.name, c.at))
     return o ? { ...c, name: o.to, names: c.names.map(n => n === c.name ? o.to : n), from: c.name } : c
   })
   return { ...data, clips, full: { ...data.full, events } }
+}
+
+/**
+ * Moments made again from overridden firings (sceneEdits.retimed, after a time edit): each whose first firing is
+ * overridden keeps that firing's recorded name in `from`, as applyOverrides marks the recorded moments.
+ */
+export function markOverriddenClips(data: SceneData): SceneData {
+  const events = data.full.events as readonly OverriddenEvent[]
+  if (!events.some(e => e.from)) return data
+  const clips: OverriddenClip[] = data.clips.map(c => { const from = events.find(e => e.name === c.name && e.t === c.at)?.from; return from ? { ...c, from } : c })
+  return { ...data, clips }
 }
 
 /** Overrides the new recording already plays as wished (the firing at that time now carries `to`): no longer needed. */

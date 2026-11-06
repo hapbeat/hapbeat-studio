@@ -223,7 +223,8 @@ function VersionsMenu() {
   const readOnly = !root || isAppProject(root)
   return <>
     <button ref={button} type="button" className="scene-icon-btn" aria-haspopup="menu" aria-expanded={open} disabled={readOnly} title={t('scene.versions.buttonHint')} onClick={toggle}>{t('scene.versions.button')} ▾</button>
-    {open && <MenuPopup anchor={button} returnFocus={button} onClose={() => setOpen(false)} className="scene-versions-menu">
+    {/* Placed again when the list arrives or changes (its height did; a longer list scrolls inside the room it has). */}
+    {open && <MenuPopup key={versions?.length ?? -1} anchor={button} returnFocus={button} onClose={() => setOpen(false)} className="scene-versions-menu">
       <div className="scene-versions-save">
         <input type="text" className="scene-versions-name" value={label} autoFocus placeholder={t('scene.versions.namePlaceholder')} aria-label={t('scene.versions.saveCurrent')}
           onChange={e => setLabel(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') void save() }} />

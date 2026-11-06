@@ -6,7 +6,8 @@ import { create } from 'zustand'
  */
 interface SceneTimelineRangeState {
   range: readonly [number, number] | null
-  setRange: (range: readonly [number, number] | null) => void
+  /** The range from `start` to `end` (a new pair only when it changed: called every frame); null for none. */
+  setRange: (start: number | null, end?: number) => void
 }
 
 /** Changes below this (s) are not a new range (a still view redrawn). */
@@ -14,9 +15,10 @@ const SAME_S = 1e-3
 
 export const useSceneTimelineRange = create<SceneTimelineRangeState>((set, get) => ({
   range: null,
-  setRange: range => {
+  setRange: (start, end = start ?? 0) => {
     const now = get().range
-    if (now === range || (now && range && Math.abs(now[0] - range[0]) < SAME_S && Math.abs(now[1] - range[1]) < SAME_S)) return
-    set({ range })
+    if (start === null) { if (now) set({ range: null }); return }
+    if (now && Math.abs(now[0] - start) < SAME_S && Math.abs(now[1] - end) < SAME_S) return
+    set({ range: [start, end] })
   },
 }))

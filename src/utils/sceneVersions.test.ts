@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { applyTableGains, archiveVersion, listVersions, localIso, readVersion, versionId, versionSlug, writeVersion, VERSIONS_DIR, ARCHIVED_VERSIONS_DIR } from './sceneVersions'
 import { memoryFolder, sampleTable } from './sceneTestFixtures'
+import { writeProjectFile } from './sceneProject'
 import type { CueTable } from './sceneCueTable'
 
 const date = new Date(2026, 10, 6, 23, 44, 5)
@@ -45,6 +46,16 @@ describe('versions in the project folder', () => {
     // The same name archived again: -2.
     const again = (await writeVersion(folder.handle, snap, 'manual', '', date))!
     expect(await archiveVersion(folder.handle, again)).toBe(`${ARCHIVED_VERSIONS_DIR}/${id}-2`)
+  })
+  it('moves a version’s sub-folders with it (nothing in it is left out of the archive)', async () => {
+    const folder = memoryFolder({})
+    const id = (await writeVersion(folder.handle, snap, 'manual', '', date))!
+    await writeProjectFile(folder.handle, `${VERSIONS_DIR}/${id}/notes/a.txt`, 'keep me')
+    await writeProjectFile(folder.handle, `${VERSIONS_DIR}/${id}/notes/deep/b.txt`, 'me too')
+    await archiveVersion(folder.handle, id)
+    expect(folder.read(`${ARCHIVED_VERSIONS_DIR}/${id}/notes/a.txt`)).toBe('keep me')
+    expect(folder.read(`${ARCHIVED_VERSIONS_DIR}/${id}/notes/deep/b.txt`)).toBe('me too')
+    expect(folder.read(`${VERSIONS_DIR}/${id}/notes/a.txt`)).toBeNull()
   })
 })
 

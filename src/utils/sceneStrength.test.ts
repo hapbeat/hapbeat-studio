@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { effectiveEvent, setDistanceFalloff, setVariantScale } from './cueEvents'
 import { firingGains, firingStrength, recordingFiringStrength, firingKey, occurrenceKeys } from './sceneFiringGain'
 import {
-  eventRoutes, faderValue, gainsAtFader, hapticAllowed, JITTER_PCT_MAX, jitterDbToPct, jitterPctToDb, jitterRange, median, ratioDb, recordedIndexMap, recordedName,
+  eventRoutes, faderValue, gainsAtFader, hapticAllowed, JITTER_PCT_MAX, jitterDbToPct, jitterPctToDb, jitterRange, median, recordedIndexMap, recordedName,
   scaleFiringGain, scaleRouteGain, setFiringGain, setRouteGains, strengthStep, barDragRatio, selectableFirings, MIN_FIRING_GAIN,
 } from './sceneStrength'
 import { sampleData, sampleTable } from './sceneTestFixtures'
@@ -66,6 +66,8 @@ describe('scaling a selection', () => {
   it('firing gains: same ratio, 4 significant digits, no upper limit, kept above 0 (0 stays 0)', () => {
     expect(scaleFiringGain(0.2, 1.5)).toBe(0.3)
     expect(scaleFiringGain(3, 2)).toBe(6)
+    // Ratio 1: exactly as it is (a recorded gain with more digits is not rounded into an edit).
+    expect(scaleFiringGain(0.82345678, 1)).toBe(0.82345678)
     expect(scaleFiringGain(0.123456, 1.001)).toBe(0.1236)
     expect(scaleFiringGain(0.2, -1)).toBe(0.001)
     expect(scaleFiringGain(0.2, 0)).toBe(0.001)
@@ -97,8 +99,8 @@ describe('scaling a selection', () => {
     expect(gainsAtFader([0, 0], 0.7)).toEqual([0.7, 0.7])
   })
   it('steps and ratios', () => {
-    expect(ratioDb(strengthStep(false))).toBeCloseTo(1)
-    expect(ratioDb(strengthStep(true))).toBeCloseTo(3.01, 2)
+    expect(20 * Math.log10(strengthStep(false))).toBeCloseTo(1)
+    expect(20 * Math.log10(strengthStep(true))).toBeCloseTo(3.01, 2)
     expect(median([0.3, 0.1, 0.2])).toBe(0.2)
     expect(median([0.1, 0.2, 0.3, 0.4])).toBeCloseTo(0.25)
     expect(median([])).toBe(1)

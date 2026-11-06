@@ -77,3 +77,17 @@ export function visibleLanes(lanes: { sound: boolean; haptics: boolean }, hasSfx
   const sound = lanes.sound && hasSfx
   return { sound, haptics: lanes.haptics || !sound }
 }
+
+/** A selected bar this close (CSS px) to the firing card (SceneFiringCard)'s side counts as under it. */
+const BAR_MARGIN = 6
+
+/**
+ * Where the card is drawn in a `panel` × `card` sized box: `pos` (from the panel's right or left edge, and its top) kept
+ * inside the panel, on the right unless a selected bar (`xs`, CSS px from the panel's left) would be under it there and
+ * none would be on the left (then mirrored: the same distance from the left edge).
+ */
+export function cardPlace(pos: { right: number; top: number }, panel: { w: number; h: number }, card: { w: number; h: number }, xs: readonly number[]): { side: 'right' | 'left'; x: number; top: number } {
+  const x = Math.max(0, Math.min(pos.right, panel.w - card.w)), top = Math.max(0, Math.min(pos.top, panel.h - card.h))
+  const covers = (a: number) => xs.some(bx => bx >= a - BAR_MARGIN && bx <= a + card.w + BAR_MARGIN)
+  return { side: covers(panel.w - x - card.w) && !covers(x) ? 'left' : 'right', x, top }
+}

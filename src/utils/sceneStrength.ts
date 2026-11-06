@@ -22,9 +22,10 @@ export const roundGain = (x: number) => x > 0 ? Number(x.toPrecision(4)) : 0
 export const MIN_FIRING_GAIN = 0.001
 /**
  * A firing's own gain × `ratio`, 4 significant digits: a gain above 0 never reaches 0 — it stops at MIN_FIRING_GAIN,
- * or where it already is when it is below that (a step down never raises it); 0 stays 0.
+ * or where it already is when it is below that (a step down never raises it); 0 stays 0. Ratio 1 leaves it exactly
+ * as it is (a recorded gain with more digits is not rounded into an edit).
  */
-export const scaleFiringGain = (gain: number, ratio: number) => gain > 0 ? Math.max(Math.min(gain, MIN_FIRING_GAIN), roundGain(gain * ratio)) : 0
+export const scaleFiringGain = (gain: number, ratio: number) => ratio === 1 ? gain : gain > 0 ? Math.max(Math.min(gain, MIN_FIRING_GAIN), roundGain(gain * ratio)) : 0
 /** A firing's own gain set to `gain`: 0, or at least MIN_FIRING_GAIN (4 significant digits). */
 export const setFiringGain = (gain: number) => gain > 0 ? Math.max(MIN_FIRING_GAIN, roundGain(gain)) : 0
 
@@ -40,8 +41,6 @@ export function barDragRatio(gain: number, dy: number, laneH: number): number {
 }
 /** A route gain × `ratio` (0..2, 3 decimals). */
 export const scaleRouteGain = (gain: number, ratio: number) => round3(Math.max(0, Math.min(ROUTE_GAIN_MAX, gain * ratio)))
-/** A ratio in dB (`+3 dB`). */
-export const ratioDb = (ratio: number) => 20 * Math.log10(ratio)
 
 /** The middle value (the mean of the two middle ones for an even count); 1 for none. */
 export function median(values: readonly number[]): number {

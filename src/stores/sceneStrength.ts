@@ -1,34 +1,34 @@
 import { create } from 'zustand'
 import { eventKey, parseEventKey } from '@/utils/cueEvents'
 import { eventRoutes, scaleFiringGain, setFiringGain, setRouteGains } from '@/utils/sceneStrength'
-import { editOf, snapTime, type FiringChange } from '@/utils/sceneEdits'
+import { editOf, serializeViewerEdits, snapTime, type FiringChange, type ViewerEdits } from '@/utils/sceneEdits'
 import { applyTableGains } from '@/utils/sceneVersions'
 import type { CueTable } from '@/utils/sceneCueTable'
 import { useSceneStore, type VersionRestore } from './sceneStore'
 
 /**
  * The Scene tab's strength editing session (DEC-102 r3; nothing here is saved): which recorded firings are selected
- * (viewer-data `events` indices, shared by the strength panel and the timeline), the hovered one, a drag's live ratio,
+ * (viewer-data `events` indices, shared by the strength panel and the timeline), a drag's live ratio,
  * the M / S toggles of the haptic events, and one undo stack (≤ 100) for the strength edits made in the panel and the
  * timeline: firing edits (viewer-edits.json, sceneStore.setFiringEdits), event route gains (the cue table,
- * sceneStore.edit) and a version's strength values set by restoreVersion.
+ * sceneStore.edit) and a version restored (its edits and strength values together, restoreVersion).
  */
 
 /** A recorded firing's edit entry fields (gain / time), or null for none (the recorded values). */
 export type FiringEntry = { gain?: number; t?: number } | null
 /**
  * One strength edit: the edit entries of recorded firings (by index) before / after, the route gains of the event key
- * that holds them, or the strength values of the whole cue table (a version restored; applyTableGains).
+ * that holds them, or a version restored: the whole edits and the strength values of the whole cue table
+ * (applyTableGains; null: unchanged) before / after, undone and redone together.
  */
 export type StrengthEdit =
   | { kind: 'edits'; before: [number, FiringEntry][]; after: [number, FiringEntry][] }
   | { kind: 'routes'; owner: string; before: number[]; after: number[] }
-  | { kind: 'table'; before: CueTable; after: CueTable }
+  | { kind: 'restore'; edits: { before: ViewerEdits; after: ViewerEdits }; table: { before: CueTable; after: CueTable } | null }
 export const UNDO_LIMIT = 100
 
 interface SceneStrengthState {
   selected: ReadonlySet<number>
-  hover: number | null
   /** A drag's ratio on the selected firings while it lasts (timeline bar / relative fader); applied on release. */
   dragRatio: number | null
   /** A drag's time shift (s) on the selected firings while it lasts (the timeline draws it); applied on release (moveSelected). */
@@ -40,7 +40,6 @@ interface SceneStrengthState {
   /** `replace`: these only; `toggle`: each in / out; `add`: these too. */
   select: (indices: readonly number[], mode: 'replace' | 'toggle' | 'add') => void
   clear: () => void
-  setHover: (index: number | null) => void
   setDragRatio: (ratio: number | null) => void
   setDragDt: (dt: number | null) => void
   toggleMute: (name: string) => void
@@ -55,8 +54,8 @@ interface SceneStrengthState {
   resetSelected: () => boolean
   /** Records a route-gain change already applied (a fader drag: live edits, one step on release). */
   pushRoutes: (owner: string, before: number[], after: number[]) => void
-  /** Records a cue table strength change already applied (a version restored). */
-  pushTable: (before: CueTable, after: CueTable) => void
+  /** Records a version restore already applied (its edits and cue table change, one step). */
+  pushRestore: (edits: { before: ViewerEdits; after: ViewerEdits }, table: { before: CueTable; after: CueTable } | null) => void
   undoLast: () => void
   redoLast: () => void
 }
@@ -79,11 +78,16 @@ function apply(edit: StrengthEdit, side: 'before' | 'after'): 'ok' | 'gone' {
     s.setFiringEdits(new Map(edit[side].map(([i, e]) => [i, { gain: e?.gain ?? null, t: e?.t ?? null }])))
     return 'ok'
   }
-  if (edit.kind === 'table') {
-    const table = s.table
-    if (!table) return 'gone'
-    const next = applyTableGains(table, edit[side]).table
-    return next === table || s.edit(() => next) ? 'ok' : 'gone'
+  if (edit.kind === 'restore') {
+    if (!s.root || !s.recorded) return 'gone'
+    if (edit.table) {
+      const table = s.table
+      if (!table) return 'gone'
+      const next = applyTableGains(table, edit.table[side]).table
+      if (next !== table && !s.edit(() => next)) return 'gone'
+    }
+    s.replaceEdits(edit.edits[side])
+    return 'ok'
   }
   const now = s.table && eventRoutes(s.table, edit.owner)
   if (!now || eventKey(now.owner) !== edit.owner || now.gains.length !== edit[side].length) return 'gone'
@@ -114,7 +118,7 @@ export const useSceneStrength = create<SceneStrengthState>((set, get) => {
     return true
   }
   return {
-    selected: new Set(), hover: null, dragRatio: null, dragDt: null, muted: new Set(), soloed: new Set(), undo: [], redo: [],
+    selected: new Set(), dragRatio: null, dragDt: null, muted: new Set(), soloed: new Set(), undo: [], redo: [],
     select: (indices, mode) => set(st => {
       if (mode === 'replace') return { selected: new Set(indices) }
       let next = new Set(st.selected)
@@ -122,7 +126,6 @@ export const useSceneStrength = create<SceneStrengthState>((set, get) => {
       return { selected: next }
     }),
     clear: () => { if (get().selected.size) set({ selected: new Set() }) },
-    setHover: hover => { if (get().hover !== hover) set({ hover }) },
     setDragRatio: dragRatio => set({ dragRatio }),
     setDragDt: dragDt => set({ dragDt }),
     toggleMute: name => set(st => ({ muted: toggled(st.muted, name) })),
@@ -137,7 +140,7 @@ export const useSceneStrength = create<SceneStrengthState>((set, get) => {
     },
     resetSelected: () => firings((_, i) => useSceneStore.getState().editsMatch.has(i) ? { gain: null, t: null } : null),
     pushRoutes: (owner, before, after) => { if (after.some((g, i) => g !== before[i])) push({ kind: 'routes', owner, before, after }) },
-    pushTable: (before, after) => { if (before !== after) push({ kind: 'table', before, after }) },
+    pushRestore: (edits, table) => { if (table || serializeViewerEdits(edits.before) !== serializeViewerEdits(edits.after)) push({ kind: 'restore', edits, table }) },
     undoLast: () => {
       const { undo } = get(), edit = undo[undo.length - 1]
       if (!edit) return
@@ -164,15 +167,15 @@ export function routesOf(name: string): { owner: string; gains: number[] } | nul
 // Another recording (a project opened, another folder): its indices mean other firings, so the session starts over.
 useSceneStore.subscribe((state, prev) => {
   if (state.recorded?.full.levels !== prev.recorded?.full.levels || state.root !== prev.root)
-    useSceneStrength.setState({ selected: new Set(), hover: null, dragRatio: null, dragDt: null, muted: new Set(), soloed: new Set(), undo: [], redo: [] })
+    useSceneStrength.setState({ selected: new Set(), dragRatio: null, dragDt: null, muted: new Set(), soloed: new Set(), undo: [], redo: [] })
 })
 
 /**
- * restoreVersion (sceneStore) with its cue table change as one undo step here (Ctrl+Z puts the strength values back;
- * the edits it wrote are kept in the before-restore version).
+ * restoreVersion (sceneStore) as one undo step here: Ctrl+Z puts the edits and the strength values back together (the
+ * state before the restore is also kept in the before-restore version).
  */
 export async function restoreVersion(id: string): Promise<VersionRestore> {
   const result = await useSceneStore.getState().restoreVersion(id)
-  if (result.ok && result.table) useSceneStrength.getState().pushTable(result.table.before, result.table.after)
+  if (result.ok) useSceneStrength.getState().pushRestore(result.edits, result.table)
   return result
 }

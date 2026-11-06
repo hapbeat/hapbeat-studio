@@ -7,7 +7,7 @@ import { alignClipGains, CLIP_GAIN_RENAME_SCRIPT, kitCopyDiffers, loopCuesOf, pa
 import { createSceneTable, isNotFound, listWavs, openSceneProject, readProjectFile, readSceneTable, writeProjectFile, writeSceneSave, type PendingWavs } from '@/utils/sceneProject'
 import { CueTableSync } from '@/utils/cueTableSync'
 import { clearJournal, journalKey, readJournal, restoreFromJournal, writeJournal } from '@/utils/sceneJournal'
-import { applyOverrides, type SceneOverride } from '@/utils/sceneOverrides'
+import { applyOverrides, markOverriddenClips, type SceneOverride } from '@/utils/sceneOverrides'
 import { applyEmits, emitSignature, newEmitSeed } from '@/utils/sceneEmit'
 import { pageVisible, perfTrack } from '@/utils/perfRegistry'
 import { RATE } from '@/utils/sceneHaptics'
@@ -35,8 +35,11 @@ export interface SceneNotice { id: MessageId; params?: MessageParams; error?: bo
  */
 export type LinkResult = { ok: true } | { ok: false; reason: 'needsClick' | 'unregistered' | 'cancelled' | 'failed' | 'dirty' | 'otherOpen'; notice?: SceneNotice }
 export interface SceneSelection { name: string; /** Time in the current item's video; null when picked from the list. */ t: number | null }
-/** What restoreVersion did: `skipped` = the cue table's events it could not set (applyTableGains). */
-export type VersionRestore = { ok: true; skipped: string[]; table: { before: CueTable; after: CueTable } | null } | { ok: false; notice: SceneNotice }
+/**
+ * What restoreVersion did: `skipped` = the cue table's events it could not set (applyTableGains); `edits` / `table` =
+ * the whole edits and the cue table before / after (the strength undo step; `table` null when unchanged).
+ */
+export type VersionRestore = { ok: true; skipped: string[]; edits: { before: ViewerEdits; after: ViewerEdits }; table: { before: CueTable; after: CueTable } | null } | { ok: false; notice: SceneNotice }
 
 interface SceneState {
   root: FileSystemDirectoryHandle | null
@@ -77,6 +80,8 @@ interface SceneState {
    * after the last change (the whole file). The first change of an opened project saves a `before-edit` version first.
    */
   setFiringEdits: (changes: ReadonlyMap<number, FiringChange>) => void
+  /** The whole edits replaced by `edits` (a version restored and its undo / redo), saved like any change. */
+  replaceEdits: (edits: ViewerEdits) => void
   /** Removes the entries that match no recorded firing (editsOrphans), saved like any change. */
   removeOrphanEdits: () => void
   /**
@@ -91,7 +96,7 @@ interface SceneState {
   /**
    * Goes back to version `id`: the current state is saved as a `before-restore` version first, then the version's edits
    * are written (an empty file when it had none) and its strength values are set in the current cue table
-   * (applyTableGains, one edit). `table`: the cue table before / after (the strength undo step), null when unchanged.
+   * (applyTableGains, one edit). `edits` / `table`: before / after (the strength undo step).
    */
   restoreVersion: (id: string) => Promise<VersionRestore>
   /** Moves version `id` to `Saved/HapticViewer/_archive/versions/` (never deleted). */
@@ -215,6 +220,17 @@ export function sceneVideoUrl(root: FileSystemDirectoryHandle, file: string): Pr
   return url
 }
 
+/**
+ * The recording as Studio plays it (before the emitted firings): the overrides laid over `edited` in the recorded order,
+ * each firing matched at its recorded time (an override names a firing as viewer-data.json has it), then the events in
+ * time order and the moments made again when a firing moved (retimed; their overridden first firings keep `from`).
+ */
+function playedRecording(recorded: SceneData, edited: SceneData, lib: SceneLib | null, overrides: readonly SceneOverride[]): SceneData {
+  const named = applyOverrides(edited, overrides, recorded.full.events.map(e => e.t))
+  const shown = lib ? retimed(recorded, named, lib) : named
+  return shown === named ? shown : markOverriddenClips(shown)
+}
+
 export const useSceneStore = create<SceneState>((set, get) => {
   const note = (notice: SceneNotice) => set({ notice })
   const addLog = (text: string) => set(s => ({ log: [...s.log.slice(-199), `${new Date().toLocaleTimeString()}  ${text}`] }))
@@ -225,7 +241,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
   const derivedData = (table: CueTable | null, overrides = get().overrides, emitSeed = get().emitSeed): { data: SceneData } | Record<string, never> => {
     const { recorded, edited, lib } = get()
     if (!recorded) return {}
-    const data = applyOverrides(lib ? retimed(recorded, edited ?? recorded, lib) : edited ?? recorded, overrides)
+    const data = playedRecording(recorded, edited ?? recorded, lib, overrides)
     return { data: table && lib ? applyEmits(data, table, lib, emitSeed) : data }
   }
   /** `edits` laid over `recording`: the state fields edits / edited / editsMatch / editsOrphans. */
@@ -233,8 +249,8 @@ export const useSceneStore = create<SceneState>((set, get) => {
     const m = matchEdits(recording.full.events, recording.fps, edits.firings)
     return { edits, edited: applyEdits(recording, edits.firings, m.byEvent), editsMatch: m.byEvent, editsOrphans: m.orphans.length }
   }
-  /** The moments as the list shows them (a time edit may move, add or drop one). */
-  const momentsKey = (data: SceneData | null) => data ? data.clips.map(c => `${c.name}@${c.at}`).join('|') : ''
+  /** The moments as the list shows them, every field buildItems takes (a time edit may move, add or drop one, or move a firing between two). */
+  const momentsKey = (data: SceneData | null) => data ? data.clips.map(c => `${c.name}@${c.at}:${c.names.join('+')}:${c.hand}:${c.start}-${c.end}:${(c as { from?: string }).from ?? ''}`).join('|') : ''
   /**
    * Lays `edits` over the recording and recomputes `data` (the levels stay: the video plays on). When the moments
    * changed (a firing moved), the list is made again and keeps the item shown (the same moment, else the same row).
@@ -579,7 +595,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
     }
     const nextLib = { ...opened.lib, loop_cues: lib.loop_cues }
     const over = overlay(next, edits)
-    const plain = applyOverrides(retimed(next, over.edited, nextLib), overrides)
+    const plain = playedRecording(next, over.edited, nextLib, overrides)
     const data = table ? applyEmits(plain, table, nextLib, emitSeed) : plain
     const items = buildItems(data)
     set({ lib: nextLib, recorded: next, ...over, recordingFrom: 'refresh', data, items, cur: Math.max(0, items.findIndex(it => it.kind === 'full')), sel: null,
@@ -841,6 +857,10 @@ export const useSceneStore = create<SceneState>((set, get) => {
       get().versionBeforeEdit()
       changeEdits(edits)
     },
+    replaceEdits: edits => {
+      if (!get().recorded || serializeViewerEdits(edits) === serializeViewerEdits(get().edits)) return
+      changeEdits(edits)
+    },
     removeOrphanEdits: () => {
       const { recorded, edits } = get()
       if (!recorded) return
@@ -882,6 +902,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
         if (snap) await queueVersion(() => writeVersion(root, snap, 'before-restore', documentMessage('scene.versions.beforeRestore'), new Date()))
         if (get().root !== root) return { ok: false, notice: { id: 'scene.save.noProject', error: true } }
         // The version's edits, written now (an empty file when it had none).
+        const editsBefore = get().edits
         changeEdits(edits)
         await flushEdits()
         const before = get().table
@@ -892,7 +913,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
           if (applied.table !== before && get().edit(() => applied.table)) table = { before, after: applied.table }
         } else if (source) skipped = Object.keys(source.cues)
         addLog(`version ${id} restored${skipped.length ? ` (not set: ${skipped.join(', ')})` : ''}`)
-        return { ok: true, skipped, table }
+        return { ok: true, skipped, edits: { before: editsBefore, after: edits }, table }
       } catch (error) {
         addLog(message(error))
         return { ok: false, notice: { id: 'scene.versions.restoreFailed', params: { error: message(error) }, error: true } }

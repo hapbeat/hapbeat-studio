@@ -51,14 +51,16 @@ export const formatGain = (x: number) => Number.isInteger(x * 10) ? x.toFixed(1)
 export function NumberField({ value, min, max, step, disabled, onCommit, label }: { value: number | ''; min: number; max: number; step: number; disabled?: boolean; onCommit: (value: number) => void; label: string }) {
   const input = useRef<HTMLInputElement>(null)
   const commit = useRef(onCommit); commit.current = onCommit
+  const shown = useRef(value); shown.current = value
   useEffect(() => { if (input.current && document.activeElement !== input.current) input.current.value = String(value) }, [value])
   useEffect(() => {
     const el = input.current
     if (!el) return
-    const change = () => { const x = parseFloat(el.value); commit.current(Number.isFinite(x) ? x : min) }
+    // A box left empty (or not a number) commits nothing: it shows the value again.
+    const change = () => { const x = parseFloat(el.value); if (Number.isFinite(x)) commit.current(x); else el.value = String(shown.current) }
     el.addEventListener('change', change)
     return () => el.removeEventListener('change', change)
-  }, [min])
+  }, [])
   return <input ref={input} type="number" className="scene-number" aria-label={label} defaultValue={value} min={min} max={max} step={step} disabled={disabled} />
 }
 

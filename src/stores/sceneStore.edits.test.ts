@@ -109,6 +109,27 @@ describe('firing edits → viewer-edits.json (the recording is never written)', 
     await vi.advanceTimersByTimeAsync(400)
     expect(JSON.parse(folder.read(EDITS)!).firings).toEqual([{ of: { name: 'button', t: 3, hand: 'right' }, t: 4 }])
   })
+
+  it('a firing moved into another moment: both moments\' cues follow (the list is made again)', async () => {
+    const folder = memoryFolder(files()), { store } = await openPage(folder)
+    const clip = (name: string) => store.getState().items.find(it => it.kind === 'clip' && it.name === name)!
+    expect(clip('button').names).toEqual(['button', 'grab'])
+    // grab (3.1) next to feed_loop (4.5): the first cues and times of the moments stay the same.
+    store.getState().setFiringEdits(new Map([[2, { t: 4.6 }]]))
+    expect(clip('button').names).toEqual(['button'])
+    expect(clip('feed_loop').names).toEqual(['feed_loop', 'grab'])
+  })
+
+  it('an override names a firing at its recorded time: it still applies after the firing\'s time was edited', async () => {
+    const folder = memoryFolder(files()), { store } = await openPage(folder)
+    store.getState().setOverrides([{ from: 'button', atSec: 3, to: 'grab', requestedAt: '' }])
+    const at = (t: number) => store.getState().data!.full.events.find(e => e.t === t) as { name: string; from?: string }
+    expect(at(3)).toMatchObject({ name: 'grab', from: 'button' })
+    store.getState().setFiringEdits(new Map([[1, { t: 4 }]]))
+    expect(at(4)).toMatchObject({ name: 'grab', from: 'button' })
+    // The moment made again at its new time keeps the mark (its recorded name).
+    expect(store.getState().items.find(it => it.kind === 'clip' && it.at === 4)).toMatchObject({ name: 'grab', from: 'button' })
+  })
 })
 
 describe('strength undo / redo of firing edits', () => {
@@ -188,9 +209,15 @@ describe('versions', () => {
     const reasons = (await store.getState().listVersions()).map(v => v.reason)
     expect(reasons[0]).toBe('before-restore')
     expect(reasons).toContain('manual')
-    // Ctrl+Z puts the strength values back as they were before the restore.
+    // Ctrl+Z puts the strength values and the edits back as they were before the restore (one step), Ctrl+Y again.
+    const entries = () => store.getState().edits.firings.map(e => [e.of.name, e.gain]).sort()
     strength.useSceneStrength.getState().undoLast()
     expect(store.getState().table!.cues.button.haptics![0].gain).toBe(0.4)
+    expect(entries()).toEqual([['button', 0.9], ['detent', 0.1]])
+    strength.useSceneStrength.getState().redoLast()
+    expect(store.getState().table!.cues.button.haptics![0].gain).toBe(1)
+    expect(entries()).toEqual([['button', 0.25]])
+    strength.useSceneStrength.getState().undoLast()
     // 「消す」 moves it to _archive.
     await store.getState().deleteVersion(id)
     expect((await store.getState().listVersions()).some(v => v.id === id)).toBe(false)
