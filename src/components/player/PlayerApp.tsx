@@ -3,10 +3,12 @@ import { useI18n } from '@/i18n/I18nProvider'
 import { usePageVisible } from '@/hooks/usePageVisible'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { isPlayerUiMode, playerApi, PLAYER_HAPTICS_OFF, PLAYER_UI_MODES, type PlayerHelperStatus, type PlayerProject, type PlayerRecentProject, type PlayerUiMode } from '@/config/playerShell'
+import { useDeviceStore } from '@/stores/deviceStore'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { OVERALL_GAIN_MAX, useScenePlayback } from '@/stores/scenePlayback'
 import { openAppProject } from '@/utils/appProject'
+import { playerChipDevices } from '@/utils/playbackDevices'
 import { pageVisible, perfTrack } from '@/utils/perfRegistry'
 import { isTypingTarget } from '@/utils/playbackShortcut'
 import { clockText } from '@/utils/sceneData'
@@ -203,7 +205,8 @@ export function PlayerApp() {
   }, [runtime])
 
   const { isConnected, targetDevices } = useSceneRuntimeHelper(runtime)
-  const { helperVersion } = useHelperConnection()
+  const { helperVersion, devices } = useHelperConnection()
+  const kitSelectedIps = useDeviceStore(s => s.kitSelectedIps)
   const { status: helperStatus, restart: restartHelper } = usePlayerHelperStatus()
 
   const ready = useSceneStore(s => s.items.length > 0 && !s.busy)
@@ -343,9 +346,11 @@ export function PlayerApp() {
   const helperDown = helperStatus?.state === 'crashed' || helperStatus?.state === 'missing'
   // The app found something on the helper's port and left it alone (another helper), yet the page cannot reach it.
   const portBusy = settled && !isConnected && helperStatus?.state === 'external'
+  // Before the cue table is read (no project yet, or still reading it), the Hapbeats the helper found.
+  const chipDevices = playerChipDevices(!!table, targetDevices, devices, kitSelectedIps)
   const chip = !isConnected ? t(helperDown ? 'player.status.helperStopped' : portBusy ? 'player.status.helperUnreachable' : 'player.status.helperStarting')
-    : targetDevices.length ? t('player.status.devices', { count: targetDevices.length }) : t('player.status.noDevice')
-  const chipTitle = targetDevices.map(d => d.name || d.ipAddress).join(', ') || undefined
+    : chipDevices.length ? t('player.status.devices', { count: chipDevices.length }) : t('player.status.noDevice')
+  const chipTitle = chipDevices.map(d => d.name || d.ipAddress).join(', ') || undefined
   const oldHelper = !!helperVersion && Number.parseInt(helperVersion, 10) < 1
   const hapticsOn = sendHaptics && !PLAYER_HAPTICS_OFF
 

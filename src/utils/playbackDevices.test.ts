@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DeviceInfo } from '@/types/manager'
-import { atPositions, devicePosition, onlinePlaybackDevices, resolvePlaybackTargets, routePlaybackTargets } from './playbackDevices'
+import { atPositions, devicePosition, onlinePlaybackDevices, playerChipDevices, resolvePlaybackTargets, routePlaybackTargets } from './playbackDevices'
 
 const device = (ipAddress: string, patch: Partial<DeviceInfo> = {}): DeviceInfo => ({
   name: ipAddress, ipAddress, address: '', firmwareVersion: '', online: true, serialConnected: false,
@@ -15,6 +15,15 @@ describe('playback devices', () => {
   it('restricts to the selection when there is one, never to offline devices', () => {
     expect(resolvePlaybackTargets(devices, []).map(d => d.ipAddress)).toEqual(['a', 'd'])
     expect(resolvePlaybackTargets(devices, ['b', 'd']).map(d => d.ipAddress)).toEqual(['d'])
+  })
+  it("the player's chip counts the found Hapbeats before a project is read, the runtime's targets after", () => {
+    // No cue table yet: the runtime has no targets, but the helper sees two playback devices.
+    expect(playerChipDevices(false, [], devices, []).map(d => d.ipAddress)).toEqual(['a', 'd'])
+    expect(playerChipDevices(false, [], devices, ['d']).map(d => d.ipAddress)).toEqual(['d'])
+    expect(playerChipDevices(false, [], [], [])).toEqual([])
+    // With the table: exactly the runtime's targets.
+    expect(playerChipDevices(true, [{ ipAddress: 'a', name: 'a', address: '' }], devices, []).map(d => d.ipAddress)).toEqual(['a'])
+    expect(playerChipDevices(true, [], devices, [])).toEqual([])
   })
 
   it('routes an audition by the cue positions: neck to the DuoWL, hand / both to both wrists; no address = position unknown', () => {

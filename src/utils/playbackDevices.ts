@@ -10,6 +10,16 @@ export const isPlaybackDevice = (device: DeviceInfo) => !device.role || device.r
 /** Connected playback devices, in Helper's order. Offline entries are never targets. */
 export const onlinePlaybackDevices = (devices: DeviceInfo[]) => devices.filter(device => device.online && isPlaybackDevice(device))
 
+/**
+ * The Hapbeats the player app's status chip counts. Once the project's cue table is read, the runtime's targets; before
+ * that (no project yet, or still reading it) the runtime has none, so the chip counts the connected playback devices the
+ * selection allows, the ones the player then plays on (it plays every route on every Hapbeat): it never says that no
+ * Hapbeat was found while the helper sees them.
+ */
+export function playerChipDevices<T extends { ipAddress: string; name?: string }>(hasTable: boolean, targets: T[], devices: DeviceInfo[], selectedIps: string[]): Array<T | DeviceInfo> {
+  return hasTable ? targets : resolvePlaybackTargets(devices, selectedIps)
+}
+
 /** `selectedIps` empty → every connected playback device; otherwise only the selected connected ones. */
 export function resolvePlaybackTargets(devices: DeviceInfo[], selectedIps: string[]): DeviceInfo[] {
   const playback = onlinePlaybackDevices(devices)
