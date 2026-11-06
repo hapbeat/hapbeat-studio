@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
 import { usePageVisible } from '@/hooks/usePageVisible'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
-import { playerApi, PLAYER_HAPTICS_OFF, type PlayerHelperStatus, type PlayerProject } from '@/config/playerShell'
+import { isPlayerUiMode, playerApi, PLAYER_HAPTICS_OFF, PLAYER_UI_MODES, type PlayerHelperStatus, type PlayerProject, type PlayerRecentProject, type PlayerUiMode } from '@/config/playerShell'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { OVERALL_GAIN_MAX, useScenePlayback } from '@/stores/scenePlayback'
@@ -14,15 +14,35 @@ import { SceneRuntime } from '@/components/scene/sceneRuntime'
 import { useSceneRuntimeHelper } from '@/components/scene/useSceneRuntimeHelper'
 import './PlayerApp.css'
 
-/** While playing, the bar and the cursor hide this long after the pointer last moved. */
+/** The controls and the cursor hide this long after the pointer last moved (the UI mode says when they may). */
 const HIDE_AFTER_MS = 2500
 /** Notices about the connection wait this long after launch, so they do not flash during a normal start-up. */
 const NOTICE_DELAY_MS = 6000
 const ARROW_SEEK_SEC = 5
+/** The hint naming a new UI mode stays this long. */
+const HINT_MS = 3000
+/** This page's UI mode, kept per PC (the app's data); a viewer setting, not the project's. */
+const UI_MODE_KEY = 'hapbeat.player.uiMode'
+const UI_MODE_LABEL = { auto: 'player.ui.auto', show: 'player.ui.show', hide: 'player.ui.hide' } as const
+const UI_MODE_HINT = { auto: 'player.ui.hint.auto', show: 'player.ui.hint.show', hide: 'player.ui.hint.hide' } as const
 
 const blurActive = () => { (document.activeElement as HTMLElement | null)?.blur?.() }
 /** An Electron IPC rejection says which call failed before the reason; the reason alone is shown. */
 const ipcReason = (error: unknown) => (error instanceof Error ? error.message : String(error)).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+/** Windows paths: the same folder whatever the letter case. */
+const samePath = (a: string | undefined, b: string | undefined) => !!a && !!b && a.toLowerCase() === b.toLowerCase()
+
+function readUiMode(): PlayerUiMode {
+  try {
+    const value = localStorage.getItem(UI_MODE_KEY)
+    return isPlayerUiMode(value) ? value : 'auto'
+  } catch {
+    return 'auto'
+  }
+}
+function storeUiMode(mode: PlayerUiMode) {
+  try { localStorage.setItem(UI_MODE_KEY, mode) } catch { /* not kept: the next start is auto */ }
+}
 
 /** The bundled helper's state from the app (null in a browser), and its restart. */
 function usePlayerHelperStatus(): { status: PlayerHelperStatus | null; restart: () => void } {
@@ -93,6 +113,8 @@ function PlayerSeek({ runtime }: { runtime: SceneRuntime }) {
  * Studio saves into that folder plays at once: the app says when the folder changed and the store reads it again
  * (checkDisk), besides its own 2-second checks. No authoring: nothing here edits the project, and every connected
  * Hapbeat plays every route, whatever its position (allDevices). It stays paused until the user presses play.
+ * The controls show as the UI mode says (top right, U key, the app's menu; PlayerUiMode), and the folder button
+ * switches between the folders opened before (the app's list).
  */
 export function PlayerApp() {
   const { t } = useI18n()
@@ -123,11 +145,47 @@ export function PlayerApp() {
     void api.project.current().then(current => { setProjectKnown(true); if (current) openProject(current) }, () => setProjectKnown(true))
     return () => { offSwitched(); offChanged() }
   }, [openProject])
+  // The folders opened before: the folder button's menu (null = closed) and the "choose a folder" screen.
+  const [folderMenu, setFolderMenu] = useState<PlayerRecentProject[] | null>(null)
+  const [recent, setRecent] = useState<PlayerRecentProject[]>([])
   const chooseProject = useCallback(() => {
     setChooseError(null)
+    setFolderMenu(null)
     // The app opens the project on its "switched" message (onSwitched), the same as after a choice from its menu.
     playerApi()?.project.choose().catch(error => setChooseError(ipcReason(error)))
   }, [])
+
+  const readRecent = useCallback(async () => {
+    const list = playerApi()?.project.recent
+    return list ? await list().catch(() => []) : []
+  }, [])
+  const toggleFolderMenu = useCallback(() => {
+    if (folderMenu) { setFolderMenu(null); return }
+    // An app without the list (apiVersion 2) goes straight to the folder dialog.
+    if (!playerApi()?.project.recent) { chooseProject(); return }
+    void readRecent().then(setFolderMenu)
+  }, [folderMenu, chooseProject, readRecent])
+  const openRecent = useCallback((entry: PlayerRecentProject) => {
+    setFolderMenu(null)
+    setChooseError(null)
+    const open = playerApi()?.project.open
+    if (!open) return
+    // Played already: nothing to switch.
+    if (samePath(entry.path, projectRef.current?.path)) return
+    open(entry.path).catch(error => setChooseError(ipcReason(error)))
+  }, [])
+  const projectRef = useRef(project)
+  projectRef.current = project
+  useEffect(() => {
+    if (projectKnown && !project) void readRecent().then(setRecent)
+  }, [projectKnown, project, readRecent])
+  // The menu closes on a press outside it (or Escape, in the keys below).
+  useEffect(() => {
+    if (!folderMenu) return
+    const close = (e: PointerEvent) => { if (!(e.target as Element | null)?.closest?.('.player-top')) setFolderMenu(null) }
+    document.addEventListener('pointerdown', close, true)
+    return () => document.removeEventListener('pointerdown', close, true)
+  }, [folderMenu])
 
   useEffect(() => () => runtime.dispose(), [runtime])
   // The runtime (10 ms tick, video) runs only while the page is visible. The app keeps its page visible (so the timing
@@ -154,6 +212,8 @@ export function PlayerApp() {
   const chapters = useSceneStore(s => s.data?.chapters)
   const chapter = useSceneStore(s => s.chapter)
   const notice = useSceneStore(s => s.notice)
+  /** The title of the project open (viewer-lib.json): the folder button names the demo by it. */
+  const projectTitle = useSceneStore(s => s.lib?.title.trim() || null)
   const loop = useSceneSettings(s => s.loop)
   const pcSound = useSceneSettings(s => s.pcSound)
   const sendHaptics = useSceneSettings(s => s.sendHaptics)
@@ -179,36 +239,85 @@ export function PlayerApp() {
   const toggleHaptics = useCallback(() => { if (!PLAYER_HAPTICS_OFF) useSceneSettings.getState().update({ sendHaptics: !useSceneSettings.getState().sendHaptics }) }, [])
   const playChapter = useCallback((index: number) => { runtime.audio(); runtime.playChapter(index) }, [runtime])
 
+  // Fullscreen: in the app, its window's (the app's menu and F11 change it too); in a browser, the page's.
   const [fullscreen, setFullscreen] = useState(false)
+  const fullscreenRef = useRef(false)
+  fullscreenRef.current = fullscreen
   useEffect(() => {
+    const win = playerApi()?.window
+    if (win) {
+      void win.isFullscreen().then(setFullscreen, () => {})
+      return win.onFullscreen(setFullscreen)
+    }
     const sync = () => setFullscreen(!!document.fullscreenElement)
     document.addEventListener('fullscreenchange', sync)
     return () => document.removeEventListener('fullscreenchange', sync)
   }, [])
   const toggleFullscreen = useCallback(() => {
+    const win = playerApi()?.window
+    if (win) { void win.setFullscreen(!fullscreenRef.current).then(setFullscreen, () => {}); return }
     if (document.fullscreenElement) void document.exitFullscreen().catch(() => {})
     else void root.current?.requestFullscreen().catch(() => {})
   }, [])
 
-  // The bar and the cursor hide while playing, after a while without the pointer moving (or a key); while paused the bar stays.
+  // The UI mode (button, U key, the app's menu) and the hint naming a new one.
+  const [uiMode, setUiModeState] = useState<PlayerUiMode>(readUiMode)
+  const uiModeRef = useRef(uiMode)
+  uiModeRef.current = uiMode
+  const [hint, setHint] = useState<PlayerUiMode | null>(null)
+  const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const setUiMode = useCallback((mode: PlayerUiMode) => {
+    setUiModeState(mode)
+    storeUiMode(mode)
+    playerApi()?.ui?.modeChanged(mode)
+    setHint(mode)
+    if (hintTimer.current) clearTimeout(hintTimer.current)
+    hintTimer.current = setTimeout(() => setHint(null), HINT_MS)
+  }, [])
+  const cycleUiMode = useCallback(() => {
+    setUiMode(PLAYER_UI_MODES[(PLAYER_UI_MODES.indexOf(uiModeRef.current) + 1) % PLAYER_UI_MODES.length])
+  }, [setUiMode])
+  useEffect(() => {
+    const ui = playerApi()?.ui
+    if (!ui) return
+    // The app's menu marks the mode this page starts with.
+    ui.modeChanged(uiModeRef.current)
+    return ui.onMode(mode => { if (isPlayerUiMode(mode)) setUiMode(mode) })
+  }, [setUiMode])
+  useEffect(() => () => { if (hintTimer.current) clearTimeout(hintTimer.current) }, [])
+
+  // After a while without the pointer moving (or a key) the cursor hides, and the controls too where the mode lets
+  // them: auto while playing or in fullscreen (paused too: a display showing a demo), hide always, show never.
   const [idle, setIdle] = useState(false)
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const wake = useCallback(() => {
     setIdle(false)
     if (idleTimer.current) clearTimeout(idleTimer.current)
-    idleTimer.current = runtime.video.paused ? null : setTimeout(() => setIdle(true), HIDE_AFTER_MS)
+    const mode = uiModeRef.current
+    const hides = mode === 'hide' || (mode === 'auto' && (!runtime.video.paused || fullscreenRef.current))
+    idleTimer.current = hides ? setTimeout(() => setIdle(true), HIDE_AFTER_MS) : null
   }, [runtime])
   useEffect(() => {
     wake()
     return () => { if (idleTimer.current) clearTimeout(idleTimer.current) }
-  }, [playing, wake])
+  }, [playing, fullscreen, uiMode, wake])
+  // An open folder menu keeps everything shown.
+  const uiHidden = !folderMenu && (uiMode === 'hide' || (uiMode === 'auto' && idle))
+  const cursorHidden = !folderMenu && idle && uiMode !== 'show'
 
   // Keys. No App here to forward Space. Capture: before a focused control can take the key.
   useEffect(() => {
     const keydown = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing || isTypingTarget(e.target)) return
       const key = e.key.length === 1 ? e.key.toLowerCase() : e.key, video = runtime.video
-      if (key === 'ArrowLeft' || key === 'ArrowRight') runtime.seek(video.currentTime + (key === 'ArrowRight' ? ARROW_SEEK_SEC : -ARROW_SEEK_SEC))
+      if (key === 'Escape') {
+        // The folder menu first, then the app window's fullscreen (a browser leaves its own fullscreen by itself).
+        if (folderMenuOpen.current) setFolderMenu(null)
+        else if (fullscreenRef.current && playerApi()?.window) toggleFullscreen()
+        else return
+      }
+      else if (key === 'ArrowLeft' || key === 'ArrowRight') runtime.seek(video.currentTime + (key === 'ArrowRight' ? ARROW_SEEK_SEC : -ARROW_SEEK_SEC))
+      else if (key === 'u') { if (!e.repeat) cycleUiMode() }
       else if (key === ' ') { if (!e.repeat) togglePlay() }
       else if (key === 'f') { if (!e.repeat) toggleFullscreen() }
       else if (key === 'm') { if (!e.repeat) useSceneSettings.getState().update({ pcSound: !useSceneSettings.getState().pcSound }) }
@@ -221,7 +330,9 @@ export function PlayerApp() {
     }
     window.addEventListener('keydown', keydown, true)
     return () => window.removeEventListener('keydown', keydown, true)
-  }, [runtime, togglePlay, toggleFullscreen, toggleHaptics, toggleLoop, playChapter, wake])
+  }, [runtime, togglePlay, toggleFullscreen, toggleHaptics, toggleLoop, playChapter, wake, cycleUiMode])
+  const folderMenuOpen = useRef(false)
+  folderMenuOpen.current = !!folderMenu
 
   const [settled, setSettled] = useState(false)
   useEffect(() => {
@@ -238,7 +349,16 @@ export function PlayerApp() {
   const oldHelper = !!helperVersion && Number.parseInt(helperVersion, 10) < 1
   const hapticsOn = sendHaptics && !PLAYER_HAPTICS_OFF
 
-  return <div className="player" ref={root} data-idle={idle || undefined}
+  const recentItem = (entry: PlayerRecentProject) => {
+    const current = samePath(entry.path, project?.path)
+    return <button key={entry.path} type="button" role="menuitem" className="player-menu-item" disabled={!entry.ok} aria-current={current || undefined}
+      title={entry.path} onClick={e => { e.currentTarget.blur(); openRecent(entry) }}>
+      <span className="player-menu-title">{entry.title ?? entry.name}{current && <span className="player-menu-mark">{t('player.project.playing')}</span>}</span>
+      <span className="player-menu-path">{entry.ok ? entry.path : `${t('player.project.missing')}: ${entry.path}`}</span>
+    </button>
+  }
+
+  return <div className="player" ref={root} data-ui-hidden={uiHidden || undefined} data-cursor-hidden={cursorHidden || undefined}
     onPointerDown={() => { if (useSceneStore.getState().items.length) runtime.audio() }}
     onPointerMove={e => { if (e.movementX || e.movementY) wake() }}>
     <div className="player-stage" ref={stage} onClick={togglePlay} />
@@ -246,12 +366,26 @@ export function PlayerApp() {
       onClick={e => { e.currentTarget.blur(); togglePlay() }}>▶</button>}
     {projectKnown && !project && <div className="player-empty">
       <p>{t(playerApi() ? 'player.project.empty' : 'player.project.noApp')}</p>
+      {recent.some(r => r.ok) && <div className="player-menu player-empty-list" role="menu" aria-label={t('player.project.recent')}>
+        <div className="player-menu-head">{t('player.project.recent')}</div>
+        {recent.filter(r => r.ok).map(recentItem)}
+      </div>}
       {!!playerApi() && <button type="button" className="player-btn player-choose" onClick={e => { e.currentTarget.blur(); chooseProject() }}>{t('player.project.choose')}</button>}
     </div>}
     {project && <div className="player-top" onClick={blurActive}>
-      <button type="button" className="player-btn player-folder" title={`${project.path}\n${t('player.project.change')}`}
-        onClick={e => { e.currentTarget.blur(); chooseProject() }}>{t('player.project.folder', { name: project.name })}</button>
+      <div className="player-folder-wrap">
+        <button type="button" className="player-btn player-folder" aria-haspopup="menu" aria-expanded={!!folderMenu} title={`${project.path}\n${t('player.project.change')}`}
+          onClick={e => { e.currentTarget.blur(); toggleFolderMenu() }}>{t('player.project.folder', { name: (!busy && projectTitle) || project.name })}</button>
+        {folderMenu && <div className="player-menu player-folder-menu" role="menu">
+          {folderMenu.length > 0 && <div className="player-menu-head">{t('player.project.recent')}</div>}
+          {folderMenu.map(recentItem)}
+          <button type="button" role="menuitem" className="player-menu-item player-menu-other" onClick={e => { e.currentTarget.blur(); chooseProject() }}>{t('player.project.other')}</button>
+        </div>}
+      </div>
+      <button type="button" className="player-btn player-ui-mode" title={t('player.ui.title')} onClick={e => { e.currentTarget.blur(); cycleUiMode() }}>
+        {t('player.ui.button', { mode: t(UI_MODE_LABEL[uiMode]) })}</button>
     </div>}
+    {hint && <div className="player-hint" role="status">{t(UI_MODE_HINT[hint])}</div>}
     {busy && <div className="player-loading">{t('player.loading')}</div>}
     <div className="player-notices" role="status">
       {settled && helperDown && <div className="player-notice error">

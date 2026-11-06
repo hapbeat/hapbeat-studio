@@ -30,6 +30,22 @@ export interface PlayerProject {
   path: string
 }
 
+/** A folder opened before (newest first), as the app lists it to switch to. */
+export interface PlayerRecentProject extends PlayerProject {
+  /** The project's title (viewer-lib.json `title`); null when it cannot be read. */
+  title: string | null
+  /** Still a project folder (false: moved, deleted, or no longer holds Saved/HapticViewer/viewer-lib.json). */
+  ok: boolean
+}
+
+/**
+ * How the player's controls show. auto: they hide when the pointer rests, while playing and in fullscreen (also
+ * paused there: a display showing a demo); show: never hidden; hide: hidden whatever the pointer does.
+ */
+export type PlayerUiMode = 'auto' | 'show' | 'hide'
+export const PLAYER_UI_MODES: readonly PlayerUiMode[] = ['auto', 'show', 'hide']
+export const isPlayerUiMode = (value: unknown): value is PlayerUiMode => PLAYER_UI_MODES.includes(value as PlayerUiMode)
+
 export interface HapbeatPlayerApi {
   /** Raised by the app when this API changes. */
   apiVersion: number
@@ -54,6 +70,23 @@ export interface HapbeatPlayerApi {
     onSwitched(callback: (project: PlayerProject) => void): () => void
     /** Files of the folder changed on disk (Studio saved), shortly after (paths relative, possibly none). */
     onChanged(callback: (change: { paths: string[] }) => void): () => void
+    /** (apiVersion 3) The folders opened before, newest first (the one playing among them). */
+    recent?(): Promise<PlayerRecentProject[]>
+    /** (apiVersion 3) Plays one of `recent()`; rejects (with the reason) when it is no longer a project. Then onSwitched. */
+    open?(path: string): Promise<PlayerProject>
+  }
+  /** (apiVersion 3) The app window's fullscreen (the app's menu and F11 change it too). */
+  window?: {
+    isFullscreen(): Promise<boolean>
+    setFullscreen(on: boolean): Promise<boolean>
+    onFullscreen(callback: (on: boolean) => void): () => void
+  }
+  /** (apiVersion 3) The controls' display mode: the page owns it, the app's menu shows and sets it. */
+  ui?: {
+    /** Tells the app the page's mode (its menu marks it). */
+    modeChanged(mode: PlayerUiMode): void
+    /** The app's menu chose a mode. */
+    onMode(callback: (mode: string) => void): () => void
   }
 }
 

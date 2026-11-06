@@ -1,11 +1,12 @@
 /* The player app's whole window: the video contained on black, the bar and the notices over it (they take no layout space). */
 .player { position: fixed; inset: 0; background: #000; color: #fff; font-size: 13px; overflow: hidden; user-select: none; }
-.player[data-idle], .player[data-idle] * { cursor: none !important; }
+.player[data-cursor-hidden], .player[data-cursor-hidden] * { cursor: none !important; }
 .player-stage { position: absolute; inset: 0; }
 .player-stage video { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; }
 
 .player-bigplay { position: absolute; left: 50%; top: 50%; width: 96px; height: 96px; margin: -48px 0 0 -48px; padding: 0 0 0 8px; border: none; border-radius: 50%;
   background: rgba(0, 0, 0, .6); color: #fff; font-size: 44px; line-height: 1; cursor: pointer; }
+.player-bigplay { transition: opacity .2s; }
 .player-bigplay:hover { background: rgba(255, 255, 255, .22); }
 .player-loading { position: absolute; left: 0; right: 0; top: 50%; margin-top: -10px; text-align: center; opacity: .75; pointer-events: none; }
 
@@ -13,9 +14,31 @@
 .player-empty { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100% - 32px)); display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; line-height: 1.6; }
 .player-empty p { margin: 0; opacity: .85; white-space: pre-line; }
 .player-choose { height: 34px; padding: 0 18px; font-size: 14px; }
-/* The folder playing, top left; it hides with the bar. */
-.player-top { position: absolute; left: 12px; top: 10px; transition: opacity .2s; }
+/* The top row, hidden with the bar: the folder playing on the left (its menu lists the folders opened before),
+   the UI mode on the right. The row itself lets clicks through to the video. */
+.player-top { position: absolute; left: 12px; right: 12px; top: 10px; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+  pointer-events: none; transition: opacity .2s; }
+.player-top > * { pointer-events: auto; }
+.player-folder-wrap { position: relative; min-width: 0; }
 .player-folder { max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: rgba(0, 0, 0, .55); }
+.player-folder-menu { position: absolute; left: 0; top: 36px; }
+.player-menu { display: flex; flex-direction: column; width: min(520px, calc(100vw - 32px)); max-height: 60vh; overflow-y: auto; padding: 6px;
+  border: 1px solid rgba(255, 255, 255, .15); border-radius: 6px; background: rgba(20, 20, 28, .96); }
+.player-menu-head { padding: 4px 8px 6px; font-size: 12px; opacity: .6; }
+.player-menu-item { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: 7px 8px; border: none; border-radius: 0;
+  background: none; color: #fff; font: inherit; text-align: left; cursor: pointer; }
+.player-menu-item:hover:not(:disabled) { background: rgba(255, 255, 255, .1); }
+.player-menu-item:disabled { opacity: .45; cursor: default; }
+.player-menu-item[aria-current] { background: rgba(185, 168, 255, .16); }
+.player-menu-title { font-size: 14px; }
+.player-menu-mark { margin-left: 10px; font-size: 11px; color: var(--accent-light, #b9a8ff); }
+.player-menu-path { max-width: 100%; font-size: 11px; opacity: .6; overflow-wrap: anywhere; }
+.player-menu-other { margin-top: 4px; border-top: 1px solid rgba(255, 255, 255, .12); }
+.player-empty-list { width: 100%; text-align: left; }
+
+/* The new UI mode, for a moment (outside the layout; shown in every mode). */
+.player-hint { position: absolute; left: 50%; top: 18%; transform: translateX(-50%); max-width: calc(100% - 32px); padding: 7px 14px; border-radius: 6px;
+  background: rgba(20, 20, 20, .88); text-align: center; pointer-events: none; }
 
 .player-notices { position: absolute; left: 16px; right: 16px; bottom: 88px; display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; transition: opacity .2s; }
 .player-notice { display: flex; align-items: center; gap: 10px; max-width: 100%; padding: 6px 12px; border-radius: 6px; background: rgba(20, 20, 20, .88); pointer-events: auto; }
@@ -23,7 +46,8 @@
 
 .player-bar { position: absolute; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; gap: 4px; padding: 20px 12px 10px;
   background: linear-gradient(transparent, rgba(0, 0, 0, .8) 35%); white-space: nowrap; transition: opacity .2s; }
-.player[data-idle] .player-bar, .player[data-idle] .player-notices, .player[data-idle] .player-notice, .player[data-idle] .player-top { opacity: 0; pointer-events: none; }
+.player[data-ui-hidden] .player-bar, .player[data-ui-hidden] .player-notices, .player[data-ui-hidden] .player-notice, .player[data-ui-hidden] .player-top,
+.player[data-ui-hidden] .player-top > *, .player[data-ui-hidden] .player-bigplay, .player[data-ui-hidden] .player-loading { opacity: 0; pointer-events: none; }
 
 .player-seek-row { display: flex; align-items: center; gap: 10px; }
 .player-seek { flex: 1; min-width: 40px; position: relative; height: 16px; display: flex; align-items: center; cursor: pointer; touch-action: none; }
@@ -48,6 +72,8 @@
 .player-percent { width: 4ch; text-align: right; font-variant-numeric: tabular-nums; }
 /* Fixed width: the text changes with the connection, nothing else moves. */
 .player-chip { flex: none; width: 112px; overflow: hidden; text-overflow: ellipsis; text-align: center; opacity: .85; }
+/* Fixed width: the longest mode (UI: 常に表示) fits, switching moves nothing. */
+.player-ui-mode { width: 8.6em; background: rgba(0, 0, 0, .55); }
 
 /* Narrow windows (the app's minimum is 960px): a tighter bar, so every chapter stays visible in one row, in ja and en. */
 @media (max-width: 1180px) {
