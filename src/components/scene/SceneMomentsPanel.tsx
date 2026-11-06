@@ -15,6 +15,9 @@ import { saveSceneOverrides } from '@/hooks/useSceneOverrides'
 import { localIsoString } from '@/utils/hapticKnowledge'
 import { MenuPopup } from '@/components/waveform/EditorMenu'
 import { loopCueRunAt, loopCueRuns, nearestFiring } from '@/utils/loopStretch'
+import { useSceneStrength } from '@/stores/sceneStrength'
+import { useSceneTimelineRange } from '@/stores/sceneTimelineRange'
+import { firingMoments, momentRangeText, momentsInRange, shownIndexOf } from '@/utils/sceneTimelineEdit'
 
 /**
  * "Moments and events": the project's chapters first (when it has any: a click plays that stretch, SceneRuntime.playChapter;
@@ -26,6 +29,9 @@ import { loopCueRunAt, loopCueRuns, nearestFiring } from '@/utils/loopStretch'
  * A moment of several cues lists each cue as its own row under it (one click selects that cue). A loop cue's row (the
  * moment's, or its cue row) plays its own span instead: the layer's active run its firing starts (loopCueRunAt), in the
  * full replay from the lead-in before it to the lead-in after it (SceneRuntime.playSpan); one-shot rows play the moment.
+ * The list follows the timeline (DEC-112): rows with firings in its visible range are tinted (in-view) and a sticky line
+ * names them (「タイムライン: 04–08」); rows holding selected firings are marked (chosen; the first is scrolled to when the
+ * selection changes); the picked firing's moment (a bar clicked) is outlined and scrolled to.
  */
 export function SceneMomentsPanel() {
   const { t } = useI18n()
@@ -45,6 +51,19 @@ export function SceneMomentsPanel() {
   const data = useSceneStore(s => s.data)
   const span = useSceneStore(s => s.span)
   const chapter = useSceneStore(s => s.chapter)
+  const edited = useSceneStore(s => s.edited)
+  const selected = useSceneStrength(s => s.selected)
+  const range = useSceneTimelineRange(s => s.range)
+  /** Each shown firing's moment (its row), for the in-view, chosen and picked rows. */
+  const momentOf = useMemo(() => data ? firingMoments(items, data.full.events) : [], [items, data])
+  const inView = useMemo(() => new Set(data && range ? momentsInRange(data.full.events, momentOf, range[0], range[1]) : []), [data, momentOf, range])
+  const chosen = useMemo(() => {
+    const out = new Set<number>()
+    if (!data || !edited) return out
+    const shown = shownIndexOf(data.full.events, edited.full.events)
+    for (const i of selected) { const k = shown.get(i), m = k === undefined ? null : momentOf[k]; if (m != null) out.add(m) }
+    return out
+  }, [selected, data, edited, momentOf])
   /** Each loop cue's active runs over the recording (once per recording). */
   const runsOf = useMemo(() => new Map(data && lib ? lib.loop_cues.map(c => [c, loopCueRuns(data.full.levels, data.fps, lib, c)]) : []), [data, lib])
   /** The span the row of cue `name` in moment `k` plays: its loop cue's run started by that firing (null for one-shot cues). */
@@ -65,9 +84,13 @@ export function SceneMomentsPanel() {
   }
   const picked = useMemo(() => {
     if (!sel || sel.t == null || !items[cur]) return -1
-    return items.findIndex(x => x.kind === 'clip' && x.names.includes(sel.name) && Math.abs(x.at - sel.t!) < 0.05)
-  }, [sel, items, cur])
+    // The moment holding that firing (any of its firings), else a moment starting at it.
+    const k = data ? data.full.events.findIndex(e => e.name === sel.name && Math.abs(e.t - sel.t!) < 0.02) : -1, m = k >= 0 ? momentOf[k] : null
+    return m ?? items.findIndex(x => x.kind === 'clip' && x.names.includes(sel.name) && Math.abs(x.at - sel.t!) < 0.05)
+  }, [sel, items, cur, data, momentOf])
   useEffect(() => { list.current?.querySelector('.scene-item.picked, .scene-item.sel')?.scrollIntoView({ block: 'nearest' }) }, [cur, picked])
+  // Another firing selection (the timeline): its first row in view.
+  useEffect(() => { list.current?.querySelector('.scene-item.chosen')?.scrollIntoView({ block: 'nearest' }) }, [selected])
   if (!lib) return <div className="scene-panel-empty">{t('scene.noProject')}</div>
   const chapters = data?.chapters ?? []
   return <div className="scene-moments">
@@ -85,11 +108,12 @@ export function SceneMomentsPanel() {
       <span className="scene-legend-kind"><HapticIcon size={14} decorative /> {t('scene.legend.haptics')}</span>
       <span className="scene-legend-kind"><SoundIcon size={14} decorative /> {t('scene.legend.sound')}</span>
     </div>
+    <div className="scene-moments-inview" title={t('scene.moments.inViewHint')}>{t('scene.moments.inView', { range: momentRangeText([...inView]) || '—' })}</div>
     <div ref={list}>
       {items.map((it, k) => {
         const several = it.kind === 'clip' && it.names.length > 1
         const rowSel = span ? it.kind === 'clip' && !several && spanPlaying(k, it.name) : k === cur
-        return <Fragment key={k}><div className={`scene-item ${rowSel ? 'sel' : ''} ${k === picked ? 'picked' : ''}`}
+        return <Fragment key={k}><div className={`scene-item ${rowSel ? 'sel' : ''} ${k === picked ? 'picked' : ''} ${inView.has(k) ? 'in-view' : ''} ${chosen.has(k) ? 'chosen' : ''}`}
           title={it.kind === 'clip' && !several && rowSpan(k, it.name) ? t('scene.span.hint', { name: it.name }) : t('scene.moment.playHint')}
           onContextMenu={e => { if (!(it as OverriddenClip).from) return; e.preventDefault(); const at = { k, x: e.clientX, y: e.clientY }; setMenu(m => m?.k === k ? null : at) }}
           onClick={e => {

@@ -20,15 +20,18 @@ import { spanWindow, stepView, timelineClick, type TimelineView } from '@/utils/
 import { firingBar, occurrenceKeys, recordingFiringGains, recordingFiringStrength, type FiringGains, type FiringStrength } from '@/utils/sceneFiringGain'
 import { kindColor } from '@/utils/kindColors'
 import { useSceneStrength } from '@/stores/sceneStrength'
-import { barDragRatio, recordedIndexMap, recordedName, selectableFirings } from '@/utils/sceneStrength'
+import { barDragRatio, recordedIndexMap, recordedName, selectableFirings, strengthStep } from '@/utils/sceneStrength'
+import { dragAxes, firingMoments, momentNumber, snapDt, tableHasSfx, visibleLanes } from '@/utils/sceneTimelineEdit'
+import { useSceneTimelineRange } from '@/stores/sceneTimelineRange'
 import type { SceneEvent } from '@/utils/sceneData'
+import { SceneFiringCard, SceneLockToggles } from './SceneFiringCard'
 
 /**
  * A drawn marker; `gain`: what its bar shows in its lane (sound: the gain it plays at; haptics: the app gain,
  * DEC-102 r3; null: a loop cue / tick, drawn as before). Haptic one-shots: `strength` and the recorded firing `index`
  * (viewer-data events[i]; null for an emitted firing, which cannot be selected).
  */
-type Hit = { x: number; y0: number; y1: number; name: string; t: number; lane: Lane; gain: number | null; strength: FiringStrength | null; index: number | null }
+type Hit = { x: number; half: number; y0: number; y1: number; name: string; t: number; lane: Lane; gain: number | null; strength: FiringStrength | null; index: number | null }
 /** A drawn band of the selected loop cue: its lane's height and x range (CSS px). */
 type Band = { x0: number; x1: number; y0: number; y1: number }
 const MAX_ZOOM = 2000
@@ -40,18 +43,29 @@ const CLIPPED_CAP = '#ff4d4d'
 const SELECTED = '#7cc4ff'
 /** A press moves this far (CSS px) before it is a drag (a bar's strength, a range of firings). */
 const DRAG_PX = 3
+/** A haptic one-shot bar's width (CSS px; selected or picked: wider), centred on its time. */
+const BAR_W = 7, BAR_W_SELECTED = 9
+/** The 1 px line at a haptic bar's exact time (darker than the bar). */
+const EXACT_LINE = 'rgba(0,0,0,.6)'
+/** Alt + wheel notches this close (ms) are one strength change (one undo step). */
+const WHEEL_BURST_MS = 400
 
 /**
- * Timeline: two lanes, sound (upper) and haptics (lower), as in the editor, each with its continuous-layer levels
+ * Timeline: two lanes, sound (upper) and haptics (lower), as in the editor (the header's chips show either alone; the
+ * sound lane only when the cue table has sound; one lane takes the whole height), each with its continuous-layer levels
  * scaled inside it (a selected loop cue: also its output, levelMap applied); a cue shows in each lane it uses (a selected loop cue: its whole active
  * span, as long as its layer's recorded level is above 0, as bands in those lanes); a one-shot firing's marker is as tall
  * as the gain it plays at in that lane (sound) or its app gain (haptics: lane top = ×1, the material as
  * authored; the tooltip splits app / material / sent; a cap marks above ×1, red when the sent value is clipped).
- * A click seeks (timelineClick); Ctrl (Cmd) + click a marker to edit that cue (the moments list marks it too), a band to
- * play that span in the full replay (SceneRuntime.playSpan; within the span already playing: seek). A firing is
- * reassigned from the moments list. Haptic one-shots are also the strength panel's selection (sceneStrength): a click
- * selects that firing (Shift / Ctrl: toggles it), a drag over an empty part of the haptic lane selects every firing in
- * that time range, and a vertical drag on a bar scales every selected firing's gain (viewer-edits.json).
+ * The seconds grid shows full-replay times. A click seeks (timelineClick); Ctrl (Cmd) + click a marker to edit that cue
+ * (the moments list marks it too), a band to play that span in the full replay (SceneRuntime.playSpan; within the span
+ * already playing: seek). A firing is reassigned from the moments list. Haptic one-shots (wide bars with a line at the
+ * exact time, labelled with their moment number) are the firing selection (sceneStrength): a click selects that firing
+ * (Shift / Ctrl: toggles it; one firing clicked is also the picked cue, and a paused video seeks to its time), a drag
+ * over an empty part of the haptic lane selects every firing in that time range, and a drag on a selected bar changes
+ * every selected firing (viewer-edits.json): vertical = strength, horizontal = time (frame-snapped), each unless locked
+ * (studio-scene-ui.json lockTime / lockGain; Shift keeps only the larger axis). Alt + wheel: ±1 dB (Shift ±3 dB), one
+ * undo step per burst. The firing card (SceneFiringCard) floats over the panel while firings are selected.
  * While a loop cue's span plays, the timeline shows only that span with its lead-in / post-roll, and a moment shows its
  * stretch of the full replay (sceneTimelineView).
  * Ctrl + wheel zooms around the pointer, wheel / Shift + wheel pans (like the editor's waveform), also while playing.
@@ -82,8 +96,12 @@ export function SceneTimelinePanel() {
   const gains = useRef<{ table: CueTable | null; kit: KitClipGains | null; events: unknown; map: Map<string, FiringGains>; strength: Map<string, FiringStrength | null> }>({ table: null, kit: null, events: null, map: new Map(), strength: new Map() })
   /** Recorded firing index by firingKey (again only for another recording or a gain edit). */
   const indices = useRef<{ events: readonly SceneEvent[] | null; map: Map<string, number> }>({ events: null, map: new Map() })
-  /** The haptic lane's bar range as drawn (CSS px): top = ×1, bottom = 0. */
-  const hapticLane = useRef<[number, number]>([0, 0])
+  /** The haptic lane's bar range as drawn (CSS px): top = ×1, bottom = 0; null while the lane is hidden. */
+  const hapticLane = useRef<[number, number] | null>(null)
+  /** Whether the cue table has sound (again only for another table). */
+  const sfx = useRef<{ table: CueTable | null; has: boolean }>({ table: null, has: false })
+  /** Each firing's moment number by its occurrenceKeys key (again only when the moments or the firings change). */
+  const moments = useRef<{ items: unknown; events: unknown; map: Map<string, number> }>({ items: null, events: null, map: new Map() })
   /** A range being dragged over the haptic lane (replay seconds), drawn as a box. */
   const rubber = useRef<{ t0: number; t1: number } | null>(null)
 
@@ -104,7 +122,7 @@ export function SceneTimelinePanel() {
       if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr) }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.clearRect(0, 0, w, h)
-      if (!it || !lib || !data) { hits.current = []; bands.current = []; return }
+      if (!it || !lib || !data) { hits.current = []; bands.current = []; useSceneTimelineRange.getState().setRange(null); return }
       const fps = data.fps, layers = lib.layers, ticks = lib.ticks, sel = s.sel, table = s.table
       const dur = v.duration || it.levels.length / fps || 1
       // The visible stretch: a moment's stretch, a playing loop cue span's window (in the full replay), else the whole replay until zoomed.
@@ -112,18 +130,26 @@ export function SceneTimelinePanel() {
       const vw = view.current, key = `${s.cur}:${it.file}${shownSpan ? `:${shownSpan[0]}-${shownSpan[1]}` : ''}`
       stepView(vw, key, shownSpan, w, dur, MAX_ZOOM, !v.paused, v.currentTime)
       const span = w / vw.zoom
-      const X = (time: number) => (time - vw.start) * vw.zoom, top = 6, base = h - 16, mid = Math.round((top + base) / 2)
+      useSceneTimelineRange.getState().setRange([vw.start, vw.start + span])
+      // The lanes shown (header chips; sound only when the table has any): both split the height, one takes it all.
+      if (sfx.current.table !== table) sfx.current = { table, has: tableHasSfx(table) }
+      const shownLanes = visibleLanes(useSceneSettings.getState().lanes, sfx.current.has)
+      const X = (time: number) => (time - vw.start) * vw.zoom, top = 6, base = h - 16, mid = Math.round((top + base) / 2), both = shownLanes.sound && shownLanes.haptics
+      const soundBox: [number, number] | null = shownLanes.sound ? [top, both ? mid : base] : null
+      const hapticBox: [number, number] | null = shownLanes.haptics ? [both ? mid + 1 : top, base] : null
       // Lane tints (sound blue above, haptics orange below); the part playing: a neutral wash (not a lane colour).
       const soundColor = kindColor('sound'), hapticColor = kindColor('haptic')
-      ctx.fillStyle = kindColor('sound', 'soft'); ctx.globalAlpha = 0.5; ctx.fillRect(0, top, w, mid - top)
-      ctx.fillStyle = kindColor('haptic', 'soft'); ctx.fillRect(0, mid + 1, w, base - mid - 1); ctx.globalAlpha = 1
+      ctx.globalAlpha = 0.5
+      if (soundBox) { ctx.fillStyle = kindColor('sound', 'soft'); ctx.fillRect(0, soundBox[0], w, soundBox[1] - soundBox[0]) }
+      if (hapticBox) { ctx.fillStyle = kindColor('haptic', 'soft'); ctx.fillRect(0, hapticBox[0], w, hapticBox[1] - hapticBox[0]) }
+      ctx.globalAlpha = 1
       if (runtime.part && runtime.partAB) { ctx.fillStyle = 'rgba(255,255,255,.07)'; ctx.fillRect(X(runtime.partAB[0]), 0, X(runtime.partAB[1]) - X(runtime.partAB[0]), h) }
-      ctx.fillStyle = '#1a1d21'; ctx.fillRect(0, mid, w, 1)
+      if (both) { ctx.fillStyle = '#1a1d21'; ctx.fillRect(0, mid, w, 1) }
       ctx.font = '10px Segoe UI, sans-serif'
-      // Seconds grid (a clip counts from its cue).
+      // Seconds grid: full-replay times (a moment too).
       ctx.fillStyle = '#5c636c'
       const step = span > 60 ? 10 : span > 20 ? 5 : span > 4 ? 1 : 0.5
-      for (let sec = Math.ceil(vw.start / step) * step; sec <= vw.start + span; sec += step) { ctx.fillRect(X(sec), base, 1, 4); ctx.fillText(it.kind === 'clip' ? (sec - it.event).toFixed(step < 1 ? 1 : 0) + 's' : sec.toFixed(step < 1 ? 1 : 0) + 's', X(sec) + 2, h - 3) }
+      for (let sec = Math.ceil(vw.start / step) * step; sec <= vw.start + span; sec += step) { ctx.fillRect(X(sec), base, 1, 4); ctx.fillText(sec.toFixed(step < 1 ? 1 : 0) + 's', X(sec) + 2, h - 3) }
       // Continuous layer levels, each in its own lane (0 at the lane bottom, the layer's scale top at the lane top):
       // haptics for a loop cue with haptics routes, sound for one with a sound. The selected loop cue: its output
       // (levelMap applied) and its recorded level on one scale. Drawn after the bands and markers (below).
@@ -137,7 +163,7 @@ export function SceneTimelinePanel() {
         oc.curves = selLayer ? outputCurves(table, selLayer.cue) : []
         oc.max = selLayer ? outputScaleMax(full, selLayer, oc.curves) : 1
       }
-      const laneBox = (lane: Lane): [number, number] => lane === 'sound' ? [top + 3, mid - 1] : [mid + 4, base - 1]
+      const laneBox = (lane: Lane): [number, number] | null => { const b = lane === 'sound' ? soundBox : hapticBox; return b && [b[0] + 3, b[1] - 1] }
       const path = (value: (n: number) => number, max: number, y0: number, y1: number) => {
         ctx.beginPath()
         for (let n = 0; n < L.length; n++) { const px = X(n / fps), py = laneY(value(n), max, y0, y1); if (n) ctx.lineTo(px, py); else ctx.moveTo(px, py) }
@@ -148,10 +174,9 @@ export function SceneTimelinePanel() {
       // `cue:variant` names resolve like the game (variant fields, else the cue's).
       const effective = (name: string) => { const r = table ? resolveEventName(table, name) : null; return r && table ? effectiveEvent(table, r.ref) : null }
       // Sound above, haptics below (as in the editor).
-      const lanes: [number, number, (name: string) => boolean, (name: string) => string, Lane][] = [
-        [top, mid, name => !!effective(name)?.sfx, () => soundColor, 'sound'],
-        [mid + 1, base, name => { const e = effective(name); return !!e && (e.haptics.length > 0 || lib.loop_cues.includes(e.ref.cue)) }, name => familyColor(lib, name), 'haptics'],
-      ]
+      const lanes: [number, number, (name: string) => boolean, (name: string) => string, Lane][] = []
+      if (soundBox) lanes.push([soundBox[0], soundBox[1], name => !!effective(name)?.sfx, () => soundColor, 'sound'])
+      if (hapticBox) lanes.push([hapticBox[0], hapticBox[1], name => { const e = effective(name); return !!e && (e.haptics.length > 0 || lib.loop_cues.includes(e.ref.cue)) }, name => familyColor(lib, name), 'haptics'])
       const gc = gains.current
       // The Kit's clip gains of the output playing now (contracts cue-table §9.1).
       const kit = kitGainsFor(s.projectKit?.clipGains, effectiveOutput(useScenePlayback.getState()))
@@ -164,7 +189,14 @@ export function SceneTimelinePanel() {
       const ix = indices.current, recorded = s.edited?.full.events ?? null
       if (ix.events !== recorded) { ix.events = recorded; ix.map = recorded ? recordedIndexMap(recorded) : new Map() }
       const st = useSceneStrength.getState()
-      hapticLane.current = [mid + 3, base]
+      hapticLane.current = hapticBox && [hapticBox[0] + 2, hapticBox[1]]
+      // Each firing's moment number (the moments list's), for the bar labels.
+      const mo = moments.current
+      if (mo.items !== s.items || mo.events !== data.full.events) {
+        mo.items = s.items; mo.events = data.full.events
+        const keys = occurrenceKeys(data.full.events), nums = firingMoments(s.items, data.full.events)
+        mo.map = new Map(keys.flatMap((key, i) => { const n = nums[i]; return n === null ? [] : [[key, n] as [string, number]] }))
+      }
       // Each shown firing's key (strength / gains) and its recorded firing's key (index), one per firing even at one time.
       const shownKeys = occurrenceKeys(events), recordedKeys = occurrenceKeys(events, recordedName)
       // A selected loop cue: bands over its layer's active runs (the recorded firings are only the layer's starts).
@@ -186,36 +218,41 @@ export function SceneTimelinePanel() {
       ctx.globalAlpha = 1
       const found: Hit[] = []
       for (const [y0, y1, has, color, lane] of lanes) {
-        let labelX = -1e9
+        let labelEnd = -1e9
         for (let k = 0; k < events.length; k++) {
           const ev = events[k]
           if (!has(ev.name)) continue
-          const x = X(ev.t), picked = !!sel && sel.name === ev.name && sel.t != null && Math.abs(ev.t - sel.t) < 0.02
-          if (x < -10 || x > w + 10) continue
+          const picked = !!sel && sel.name === ev.name && sel.t != null && Math.abs(ev.t - sel.t) < 0.02
           const tick = isTick(ticks, ev.name) && !picked, key = shownKeys[k]
-          // Haptics: the app gain (a drag on the selection shows its ratio live); sound: the gain it plays at.
+          // Haptics: the app gain (a drag on the selection shows its ratio / time shift live); sound: the gain it plays at.
           const strength = lane === 'haptics' && !tick ? gc.strength.get(key) ?? null : null
           const index = strength ? ix.map.get(recordedKeys[k]) ?? null : null
           const chosen = index !== null && st.selected.has(index)
+          const x = X(ev.t + (chosen && st.dragDt !== null ? st.dragDt : 0))
+          if (x < -10 || x > w + 10) continue
           const gain = tick ? null : lane === 'haptics' ? strength && strength.app * (chosen && st.dragRatio !== null ? st.dragRatio : 1) : gc.map.get(key)?.sound ?? null
-          found.push({ x, y0, y1, name: ev.name, t: ev.t, lane, gain, strength, index })
+          // A haptic one-shot is a wide bar centred on its time; the rest stay thin.
+          const wide = lane === 'haptics' && gain !== null, bw = wide ? (picked || chosen ? BAR_W_SELECTED : BAR_W) : picked || chosen ? 3 : 2, bx = wide ? x - bw / 2 : x - 1
+          found.push({ x, half: wide ? bw / 2 + 0.5 : 0, y0, y1, name: ev.name, t: ev.t, lane, gain, strength, index })
           ctx.fillStyle = color(ev.name)
           ctx.globalAlpha = picked || chosen ? 1 : sel && sel.t != null ? 0.35 : it.kind === 'clip' && !ev.own ? 0.5 : 1
           if (tick) { ctx.fillRect(x, y1 - 6, 1, 6); continue }
           // A one-shot firing's bar: its gain × the lane height (1 at the lane top; above: clamped, with a cap — red when
-          // the sent value is clipped; 0: dotted).
-          const bw = picked || chosen ? 3 : 2
-          if (gain === null) ctx.fillRect(x - 1, y0 + 2, bw, y1 - y0 - 2)
+          // the sent value is clipped; 0: dotted); a haptic bar has a 1 px line at its exact time.
+          if (gain === null) ctx.fillRect(bx, y0 + 2, bw, y1 - y0 - 2)
           else {
             const bar = firingBar(gain, y0 + 2, y1)
-            if (bar.stub) for (let k = 1; k <= 7; k += 3) ctx.fillRect(x - 1, y1 - k, bw, 1)
-            else ctx.fillRect(x - 1, bar.top, bw, y1 - bar.top)
-            if (bar.over) { if (strength && strength.material * gain > 1) ctx.fillStyle = CLIPPED_CAP; ctx.fillRect(x - 3, bar.top, bw + 4, 2) }
-            if (chosen) { ctx.strokeStyle = SELECTED; ctx.lineWidth = 1; ctx.strokeRect(x - 3.5, bar.top - 1.5, bw + 5, y1 - bar.top + 1.5) }
+            if (bar.stub) for (let n = 1; n <= 7; n += 3) ctx.fillRect(bx, y1 - n, bw, 1)
+            else ctx.fillRect(bx, bar.top, bw, y1 - bar.top)
+            if (bar.over) { if (strength && strength.material * gain > 1) ctx.fillStyle = CLIPPED_CAP; ctx.fillRect(bx - 2, bar.top, bw + 4, 2) }
+            if (wide && !bar.stub) { ctx.fillStyle = EXACT_LINE; ctx.fillRect(x - 0.5, bar.top, 1, y1 - bar.top) }
+            if (chosen) { ctx.strokeStyle = SELECTED; ctx.lineWidth = 1; ctx.strokeRect(bx - 1.5, bar.top - 1.5, bw + 3, y1 - bar.top + 1.5) }
             ctx.fillStyle = color(ev.name)
           }
-          if (picked) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.strokeRect(x - 3.5, y0 + 0.5, 7, y1 - y0) }
-          if (x - labelX > 40 || picked) { ctx.fillText(ev.name, x + 5, y0 + 12); labelX = x }
+          if (picked) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.strokeRect(bx - 2.5, y0 + 0.5, bw + 5, y1 - y0) }
+          // Its moment number and name (the moments list's numbering), unless it would overlap the last label.
+          const num = mo.map.get(key), label = num === undefined ? ev.name : `${momentNumber(num)} ${ev.name}`
+          if (x + 5 > labelEnd + 4 || picked) { ctx.fillText(label, x + 5, y0 + 12); labelEnd = x + 5 + ctx.measureText(label).width }
         }
       }
       hits.current = found
@@ -225,7 +262,9 @@ export function SceneTimelinePanel() {
       layers.forEach((l, li) => {
         const mine = l === selLayer, max = mine ? oc.max : sc.max[li]
         for (const lane of layerLanes(table, l.cue)) {
-          const [y0, y1] = laneBox(lane)
+          const box = laneBox(lane)
+          if (!box) continue
+          const [y0, y1] = box
           l.gain.forEach((col, k) => {
             if (!L.some(r => r[col] > 0)) return
             ctx.globalAlpha = selLayer ? (mine ? 0.85 : 0.3) : 0.7
@@ -261,15 +300,17 @@ export function SceneTimelinePanel() {
           lx -= 16; swatch(lx, l.colors[k], 2, mine ? INPUT_DASH : []); lx -= 12
         }
       }
-      ctx.fillStyle = soundColor; ctx.fillText(tr('scene.lane.sound'), 3, top + 24)
-      ctx.fillStyle = hapticColor; ctx.fillText(tr('scene.lane.haptics'), 3, mid + 24)
-      // The haptic lane's top is ×1 (the material as authored): a faint line and its label.
-      ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fillRect(0, mid + 3, w, 1)
-      ctx.fillStyle = '#8b929b'; ctx.fillText('×1', 3, mid + 13)
+      if (soundBox) { ctx.fillStyle = soundColor; ctx.fillText(tr('scene.lane.sound'), 3, soundBox[0] + 24) }
+      if (hapticBox) {
+        ctx.fillStyle = hapticColor; ctx.fillText(tr('scene.lane.haptics'), 3, hapticBox[0] + 23)
+        // The haptic lane's top is ×1 (the material as authored): a faint line and its label.
+        ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fillRect(0, hapticBox[0] + 2, w, 1)
+        ctx.fillStyle = '#8b929b'; ctx.fillText('×1', 3, hapticBox[0] + 12)
+      }
       // A range being selected over the haptic lane.
       const rb = rubber.current
-      if (rb) {
-        const rx = Math.min(X(rb.t0), X(rb.t1)), rw = Math.abs(X(rb.t1) - X(rb.t0)), ry = mid + 1
+      if (rb && hapticBox) {
+        const rx = Math.min(X(rb.t0), X(rb.t1)), rw = Math.abs(X(rb.t1) - X(rb.t0)), ry = hapticBox[0]
         ctx.fillStyle = 'rgba(124,196,255,.12)'; ctx.fillRect(rx, ry, rw, base - ry)
         ctx.strokeStyle = SELECTED; ctx.lineWidth = 1; ctx.strokeRect(rx + 0.5, ry + 0.5, rw, base - ry - 1)
       }
@@ -290,7 +331,7 @@ export function SceneTimelinePanel() {
 
   const hitAt = (event: React.MouseEvent<HTMLCanvasElement>) => {
     const r = event.currentTarget.getBoundingClientRect(), x = event.clientX - r.left, y = event.clientY - r.top
-    return { x, hit: hits.current.filter(m => y >= m.y0 && y <= m.y1 && Math.abs(m.x - x) <= 5).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0] }
+    return { x, hit: hits.current.filter(m => y >= m.y0 && y <= m.y1 && Math.abs(m.x - x) <= Math.max(5, m.half)).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0] }
   }
   /**
    * Over a one-shot marker the tooltip is its gain: sound 「音声 0.50」, haptics its groups (「ソフトの倍率 ×0.20｜素材の基準
@@ -304,36 +345,51 @@ export function SceneTimelinePanel() {
     useSceneStrength.getState().setHover(hit?.index ?? null)
   }
   /** Follows a press on the window until it is released (the callbacks get the distance from the press, CSS px). */
-  const track = (event: React.MouseEvent, move: (dx: number, dy: number) => void, up: (dx: number, dy: number) => void) => {
+  const track = (event: React.MouseEvent, move: (dx: number, dy: number, e: MouseEvent) => void, up: (dx: number, dy: number) => void) => {
     const x0 = event.clientX, y0 = event.clientY
-    const onMove = (e: MouseEvent) => move(e.clientX - x0, e.clientY - y0)
+    const onMove = (e: MouseEvent) => move(e.clientX - x0, e.clientY - y0, e)
     const onUp = (e: MouseEvent) => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); up(e.clientX - x0, e.clientY - y0) }
     window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', onUp)
   }
   /**
    * A press on a haptic one-shot bar: Shift / Ctrl (Cmd) toggles it in the selection, a plain press selects it (one
-   * already selected keeps the others until the release, so a drag moves them all). A
-   * vertical drag scales every selected firing's gain by the ratio the pressed bar's height follows (one undo step on
-   * release). Returns whether the press is used up (Shift: selection only; Ctrl / a plain press go on as before).
+   * already selected keeps the others until the release, so a drag moves them all). A drag changes every selected
+   * firing, live, one undo step per axis on release: vertical = strength (the ratio the pressed bar's height follows),
+   * horizontal = time (the same shift for all, frame-snapped), each unless locked (Shift during the drag: the larger
+   * axis only). A click without a drag leaves this firing alone selected, marks it as the picked cue (the moments list
+   * shows its row; the timeline's window stays) and, while the video is paused, seeks to its exact time.
+   * Returns whether the press is used up (Ctrl goes on as before: that cue in the Event panel).
    */
   const pressBar = (event: React.MouseEvent<HTMLCanvasElement>, hit: Hit & { index: number }): boolean => {
     const st = useSceneStrength.getState(), was = st.selected.has(hit.index)
     if (event.shiftKey || event.ctrlKey || event.metaKey) { st.select([hit.index], 'toggle'); return event.shiftKey }
     if (!was) st.select([hit.index], 'replace')
-    const [laneTop, laneBottom] = hapticLane.current, H = laneBottom - laneTop, gain = hit.gain ?? 0
-    let dragging = false, ratio = 1
-    track(event, (_, dy) => {
-      if (!dragging && Math.abs(dy) > DRAG_PX) dragging = true
+    const lane = hapticLane.current, H = lane ? lane[1] - lane[0] : 1, gain = hit.gain ?? 0
+    // The pixel → time scale of the press, kept for the whole drag.
+    const zoom = view.current.zoom, fps = useSceneStore.getState().data?.fps ?? 30
+    let dragging = false, ratio: number | null = null, dt: number | null = null
+    track(event, (dx, dy, e) => {
+      if (!dragging && Math.max(Math.abs(dx), Math.abs(dy)) > DRAG_PX) dragging = true
       if (!dragging) return
+      const ui = useSceneSettings.getState(), axes = dragAxes(dx, dy, { time: ui.lockTime, gain: ui.lockGain }, e.shiftKey)
       // The pressed bar's drawn top follows the pointer (barDragRatio: 1 at the press point, never 0).
-      ratio = barDragRatio(gain, dy, H)
-      useSceneStrength.getState().setDragRatio(ratio)
+      ratio = axes.gain ? barDragRatio(gain, dy, H) : null
+      dt = axes.time ? snapDt(dx / zoom, fps) : null
+      const now = useSceneStrength.getState()
+      now.setDragRatio(ratio); now.setDragDt(dt)
     }, () => {
       const after = useSceneStrength.getState()
-      if (dragging) { after.setDragRatio(null); after.scaleSelected(ratio) }
-      else if (was) after.select([hit.index], 'replace')
+      if (dragging) {
+        after.setDragRatio(null); after.setDragDt(null)
+        if (ratio !== null) after.scaleSelected(ratio)
+        if (dt) after.moveSelected(dt)
+        return
+      }
+      if (was) after.select([hit.index], 'replace')
+      useSceneStore.getState().selectCue(hit.name, hit.t)
+      if (runtime.video.paused) runtime.seek(hit.t)
     })
-    return false
+    return true
   }
   /** A press on an empty part of the haptic lane: a drag selects the firings in its time range (Shift / Ctrl: adds them), a click seeks as before. */
   const pressLane = (event: React.MouseEvent<HTMLCanvasElement>, time: number) => {
@@ -358,8 +414,9 @@ export function SceneTimelinePanel() {
     if (!useSceneStore.getState().items.length || event.button !== 0) return
     const { x, hit } = hitAt(event), time = view.current.start + x / view.current.zoom
     const y = event.clientY - event.currentTarget.getBoundingClientRect().top, mod = event.ctrlKey || event.metaKey
+    const lane = hapticLane.current
     if (hit?.lane === 'haptics' && hit.index !== null) { if (pressBar(event, hit as Hit & { index: number })) return }
-    else if (!hit && y >= hapticLane.current[0] - 2 && y <= hapticLane.current[1] && !(mod && bandRunAt(event, time))) { pressLane(event, time); return }
+    else if (!hit && lane && y >= lane[0] - 2 && y <= lane[1] && !(mod && bandRunAt(event, time))) { pressLane(event, time); return }
     const click = timelineClick(mod, hit ?? null, bandRunAt(event, time), time)
     if (click.kind === 'select') { useSceneStore.getState().selectCue(click.name, click.t); runtime.video.pause(); runtime.seek(click.t - useSceneSettings.getState().leadSec); return }
     if (click.kind === 'span') { runtime.audio(); const lead = useSceneSettings.getState().leadSec; runtime.playSpan(click.run, lead, lead); return }
@@ -377,14 +434,32 @@ export function SceneTimelinePanel() {
     const run = loopCueRuns(s.data.full.levels, s.data.fps, s.lib, s.sel.name).find(([a, b]) => time >= a && time <= b)
     return run && !(s.span && s.span[0] === run[0] && s.span[1] === run[1]) ? run : null
   }
-  // Ctrl + wheel zooms around the pointer; wheel / Shift + wheel pans (the editor waveform's handling).
+  // Ctrl + wheel zooms around the pointer; wheel / Shift + wheel pans (the editor waveform's handling). Alt + wheel with
+  // firings selected: their strength ±1 dB per notch (Shift ±3 dB), live through dragRatio, one undo step per burst.
   useEffect(() => {
     const cv = canvas.current
     if (!cv) return
+    const burst = { ratio: 1, timer: undefined as ReturnType<typeof setTimeout> | undefined }
+    const commit = () => {
+      clearTimeout(burst.timer); burst.timer = undefined
+      const ratio = burst.ratio, st = useSceneStrength.getState()
+      burst.ratio = 1
+      st.setDragRatio(null)
+      if (ratio !== 1) st.scaleSelected(ratio)
+    }
     const wheel = (event: WheelEvent) => {
       const r = cv.getBoundingClientRect(), vw = view.current, dur = runtime.video.duration || 1, fit = r.width / dur
       const delta = wheelPixels(event, r.width)
       event.preventDefault(); event.stopPropagation()
+      if (event.altKey && useSceneStrength.getState().selected.size) {
+        // Shift + wheel may come as a horizontal delta.
+        const d = event.deltaY || event.deltaX
+        if (!d) return
+        burst.ratio *= strengthStep(event.shiftKey) ** (d < 0 ? 1 : -1)
+        useSceneStrength.getState().setDragRatio(burst.ratio)
+        clearTimeout(burst.timer); burst.timer = setTimeout(commit, WHEEL_BURST_MS)
+        return
+      }
       if (event.ctrlKey) {
         const x = Math.max(0, Math.min(r.width, event.clientX - r.left)), time = vw.start + x / vw.zoom
         const next = Math.min(MAX_ZOOM, Math.max(fit, vw.zoom * Math.exp(-delta * WHEEL_ZOOM_RATE)))
@@ -392,7 +467,7 @@ export function SceneTimelinePanel() {
       } else { vw.start = Math.max(0, Math.min(Math.max(0, dur - r.width / vw.zoom), vw.start + delta / vw.zoom)); vw.span = false }
     }
     cv.addEventListener('wheel', wheel, { passive: false })
-    return () => cv.removeEventListener('wheel', wheel)
+    return () => { cv.removeEventListener('wheel', wheel); if (burst.timer !== undefined) commit() }
   }, [runtime])
 
   return <div className="scene-timeline">
@@ -401,11 +476,29 @@ export function SceneTimelinePanel() {
       <span className="scene-info-dim" ref={note} />
       <span className="scene-info-dim scene-info-levels" ref={levels} />
       <span className="scene-info-state" ref={state} />
+      <SceneLaneChips />
+      <SceneLockToggles />
       <SceneOutputToggles />
     </div>
     <canvas className="scene-timeline-canvas" ref={canvas} tabIndex={0} title={t('scene.timeline.hint')} onMouseDown={onMouseDown} onMouseMove={onMouseMove}
       onMouseLeave={() => useSceneStrength.getState().setHover(null)} />
+    <SceneFiringCard />
     <div className="scene-help">{t('scene.keys')}{hasChapters ? t('scene.keys.chapters') : ''}</div>
   </div>
 }
 
+
+/** 「音声」「触覚」 chips: which timeline lanes show (studio-scene-ui.json `lanes`; at least one; sound only when the cue table has sound). */
+function SceneLaneChips() {
+  const { t } = useI18n()
+  const lanes = useSceneSettings(s => s.lanes)
+  const hasSfx = useSceneStore(s => tableHasSfx(s.table))
+  const shown = visibleLanes(lanes, hasSfx)
+  const chip = (lane: 'sound' | 'haptics', label: string, title: string, disabled: boolean) =>
+    <button type="button" className={`${lane} ${shown[lane] ? 'on' : ''}`} aria-pressed={shown[lane]} title={title} disabled={disabled}
+      onClick={e => { e.currentTarget.blur(); useSceneSettings.getState().update({ lanes: { ...shown, [lane]: !shown[lane] } }) }}>{label}</button>
+  return <span className="scene-seg scene-tl-seg" role="group" aria-label={t('scene.lanes.label')}>
+    {chip('sound', t('scene.lane.sound'), hasSfx ? t('scene.lanes.soundHint') : t('scene.lanes.noSfx'), !hasSfx || (shown.sound && !shown.haptics))}
+    {chip('haptics', t('scene.lane.haptics'), t('scene.lanes.hapticsHint'), shown.haptics && !shown.sound)}
+  </span>
+}

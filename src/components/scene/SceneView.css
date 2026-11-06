@@ -67,6 +67,12 @@
 /* A firing shown as another event until the scene is re-recorded. */
 /* The mark before the name: one fixed-width cell, so names stay aligned. */
 .scene-overridden i { display: inline-block; width: 1.1em; text-align: center; font-style: normal; color: var(--text-muted); }
+/* Rows with firings in the timeline's visible range (a tint only), rows holding selected firings (stronger). */
+.scene-item.in-view { background: rgba(255,255,255,.05); }
+.scene-item.chosen { background: rgba(124,196,255,.16); }
+/* Which moments the timeline shows: one fixed line over the rows, kept on top while the list scrolls. */
+.scene-moments-inview { position: sticky; top: 0; z-index: 2; height: 22px; line-height: 22px; padding: 0 12px; font-size: 12px; color: var(--text-muted);
+  background: var(--bg-secondary); border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The moment of the firing selected on the timeline / here. */
 .scene-item.picked { outline: 1px solid var(--accent-light); outline-offset: -1px; }
 .scene-item.sel { background: rgba(124,92,191,.22); box-shadow: inset 3px 0 0 var(--accent-light); }
@@ -155,6 +161,23 @@
 /* Timeline: "Change" opened from a marker, over the canvas (nothing moves). */
 .scene-timeline { position: relative; }
 .scene-timeline-canvas:focus { outline: 1px solid var(--accent-light); outline-offset: -1px; }
+/* Timeline header: the lane chips and the locks, each one segmented shape (two labels side by side). */
+.scene-seg.scene-tl-seg > button.sound.on { background: var(--sound-soft); color: var(--sound-strong); }
+.scene-seg.scene-tl-seg > button:disabled { opacity: .45; cursor: default; }
+/* The selected firings' card: over the timeline panel's top-right (its place kept), never wider than the panel. */
+.scene-card { position: absolute; z-index: 4; display: flex; flex-direction: column; gap: 6px; box-sizing: border-box; width: 300px; max-width: calc(100% - 16px);
+  padding: 6px 8px 8px; background: var(--bg-secondary); border: 1px solid var(--border-light); border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.45);
+  font-size: 12px; font-variant-numeric: tabular-nums; }
+.scene-card-head { display: flex; align-items: center; gap: 6px; }
+.scene-card-grip { flex: none; padding: 0 2px; color: var(--text-muted); cursor: move; user-select: none; touch-action: none; }
+.scene-card-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--text-primary); }
+.scene-card-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.scene-card-label { flex: none; width: 5em; color: var(--text-muted); }
+.scene-card-row input[type="range"] { flex: 1; min-width: 40px; }
+.scene-card .scene-number { width: 68px; }
+/* The breakdown: one line of fixed height (red when the sent value is clipped). */
+.scene-card-line { min-height: 1.4em; color: var(--text-muted); }
+.scene-card-line.clipped { color: #ff8a80; }
 
 /* Chapters (moments panel): label and range, the one playing marked like a selected row. */
 .scene-chapters { border-bottom: 1px solid var(--border); }

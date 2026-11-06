@@ -15,6 +15,7 @@ import { openSceneSelectionInEditor } from '@/stores/eventStore'
 import { SceneRuntime } from './sceneRuntime'
 import { useSceneRuntimeHelper } from './useSceneRuntimeHelper'
 import { useSceneStrength } from '@/stores/sceneStrength'
+import { strengthStep } from '@/utils/sceneStrength'
 import { SceneContext, type SceneShared } from './sceneContext'
 import { SceneDockLayout } from './SceneDockLayout'
 import { SceneTopBar } from './SceneTopBar'
@@ -64,7 +65,8 @@ export function SceneView({ active }: { active: boolean }) {
   // Keys (viewer's): ↑↓ item, Space play (App forwards it as studio:scene-playback), ←→ frame / Shift 1 s,
   // E before the cue, W ±0.5 s loop, R restart, F back to the full replay (where the moment / span is now), S speed, L loop, , . previous / next cue, M sound, H haptics,
   // O the selected event in the editor, 1–9 the project's chapters 1–9 (only with chapters: digits stay free otherwise).
-  // Strength edits (the strength panel / timeline): Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo, Esc clears the firing selection.
+  // Strength edits (the strength panel / timeline): Ctrl+Z undo, Ctrl+Shift+Z / Ctrl+Y redo, Esc clears the firing selection,
+  // ↑↓ on the focused timeline with a firing selection: ±1 dB (Shift ±3 dB).
   useEffect(() => {
     if (!active) return
     const playback = () => { if (useSceneStore.getState().items.length) { runtime.audio(); runtime.togglePlay() } }
@@ -77,6 +79,10 @@ export function SceneView({ active }: { active: boolean }) {
         if (mod && k === 'z' && !e.shiftKey) { if (st.undo.length) { st.undoLast(); done = true } }
         else if (mod && ((k === 'z' && e.shiftKey) || k === 'y')) { if (st.redo.length) { st.redoLast(); done = true } }
         else if (!mod && e.key === 'Escape' && st.selected.size) { st.clear(); done = true }
+        // ↑↓ on the focused timeline with firings selected: their strength ±1 dB (Shift ±3 dB) instead of the moment.
+        else if (!mod && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && st.selected.size && el.classList?.contains('scene-timeline-canvas')) {
+          st.scaleSelected(strengthStep(e.shiftKey) ** (e.key === 'ArrowUp' ? 1 : -1)); done = true
+        }
         if (done) { e.preventDefault(); return }
       }
       if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(el) || (el.closest && el.closest('input'))) return

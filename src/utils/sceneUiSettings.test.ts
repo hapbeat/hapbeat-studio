@@ -11,6 +11,13 @@ describe('scene UI settings', () => {
     expect(sanitizeSceneUi({}).sendHaptics).toBe(true)
   })
 
+  it('keeps the timeline lanes (at least one on), the locks (time locked by default) and the card place', () => {
+    expect(DEFAULT_SCENE_UI).toMatchObject({ lanes: { sound: true, haptics: true }, lockTime: true, lockGain: false, cardPos: null })
+    expect(sanitizeSceneUi({ lanes: { sound: false, haptics: true }, lockTime: false, lockGain: true, cardPos: { right: 12, top: 40 } }))
+      .toMatchObject({ lanes: { sound: false, haptics: true }, lockTime: false, lockGain: true, cardPos: { right: 12, top: 40 } })
+    expect(sanitizeSceneUi({ lanes: { sound: false, haptics: false }, cardPos: { right: -1, top: 2 } })).toMatchObject({ lanes: { sound: true, haptics: true }, cardPos: null })
+  })
+
   it('round-trips the file format and rejects untagged files', () => {
     const settings = { ...DEFAULT_SCENE_UI, loop: false, dockLayout: layout }
     expect(parseSceneUiFile(serializeSceneUi(settings))).toEqual({ ok: true, settings })
