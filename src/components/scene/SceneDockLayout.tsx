@@ -144,6 +144,22 @@ export function SceneDockLayout({ onApi, onNotice }: { onApi: (api: DockviewApi 
     if (!api) return
     for (const id of SCENE_PANELS) api.getPanel(id)?.api.setTitle(id === 'firing' && selectedCount ? t('scene.panel.firingCount', { count: selectedCount }) : t(SCENE_PANEL_TITLES[id]))
   }, [locale, t, built, selectedCount])
+  // A first selection brings 「発生」 to the front of its group when it sits behind another tab (the user edits the
+  // picked firings there); later changes of the selection leave the tabs as the user set them.
+  const hadSelection = useRef(false)
+  useEffect(() => {
+    const has = selectedCount > 0
+    if (has && !hadSelection.current) {
+      const panel = apiRef.current?.getPanel('firing')
+      if (panel && !panel.api.isVisible) {
+        const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null
+        panel.api.setActive()
+        // The timeline keeps the keyboard (↑ / ↓ steps, Esc).
+        focused?.focus({ preventScroll: true })
+      }
+    }
+    hadSelection.current = has
+  }, [selectedCount])
 
   return <div className="editor-dock-root scene-dock-root">
     <DockviewReact components={COMPONENTS} onReady={onReady} theme={themeDark} />
