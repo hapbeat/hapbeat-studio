@@ -4,6 +4,7 @@ import type { WifiProfile } from '@/stores/deviceStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useToast } from '@/components/common/Toast'
 import { useSerialMaster, type SerialWifiNetwork } from '@/stores/serialMaster'
+import { confirmsPresetConnection, useWifiPresets, type WifiPresetPending } from '@/stores/wifiPresets'
 import type { WifiBulkSummary, WifiCredentials } from '@/utils/wifiSerialWrite'
 import { useI18n } from '@/i18n/I18nProvider'
 import { wifiBulkItemDone, wifiBulkItemText } from './wifiBulkText'
@@ -35,7 +36,25 @@ interface Props {
    *  target) set — the bulk button below would skip it. Surfaced as a
    *  warning next to the bulk button instead of silently diverging. */
   configConnectedNotChecked?: boolean
+  /** Re-read the device's Wi-Fi status (get_wifi_status). Polled after a
+   *  single-device write to see it connect before saving the network on
+   *  this PC. */
+  onRefreshStatus?: () => void
 }
+
+/** After a single-device write, how often to re-read the Wi-Fi status and
+ *  how long to wait for it to connect before giving up on saving it here.
+ *  The firmware retries a network every 5 s (wifi_manager.cpp). */
+const REMEMBER_POLL_MS = 2000
+const REMEMBER_WAIT_MS = 20000
+
+type RememberNote = { kind: 'checking' | 'saved' | 'notSaved' | 'unavailable'; ssid: string }
+const REMEMBER_NOTE_ID = {
+  checking: 'wifi.presets.note.checking',
+  saved: 'wifi.presets.note.saved',
+  notSaved: 'wifi.presets.note.notSaved',
+  unavailable: 'wifi.presets.note.unavailable',
+} as const
 
 /**
  * Multi-profile Wi-Fi management — mirrors the 5-slot list in
@@ -54,8 +73,21 @@ export function WifiProfilesForm({
   bulkCount = 0,
   onBulkApply,
   configConnectedNotChecked = false,
+  onRefreshStatus,
 }: Props) {
   const { t } = useI18n()
+  // Networks saved on this PC (localStorage, stores/wifiPresets.ts).
+  const presets = useWifiPresets((s) => s.presets)
+  const rememberPreset = useWifiPresets((s) => s.remember)
+  const removePreset = useWifiPresets((s) => s.remove)
+  const clearPresets = useWifiPresets((s) => s.clear)
+  const [remember, setRemember] = useState(true)
+  const [rememberNote, setRememberNote] = useState<RememberNote | null>(null)
+  // The single-device write waiting to be seen connected. A ref, so the
+  // password is not kept in render state longer than the form needs it.
+  const pendingRef = useRef<(WifiPresetPending & { pass: string }) | null>(null)
+  const refreshStatusRef = useRef(onRefreshStatus)
+  refreshStatusRef.current = onRefreshStatus
   const [addOpen, setAddOpen] = useState(false)
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [ssid, setSsid] = useState('')
@@ -131,12 +163,26 @@ export function WifiProfilesForm({
     return () => document.removeEventListener('mousedown', onDown)
   }, [menuOpen])
 
-  // Dropdown shows Helper-side OS scan results (netsh / airport / nmcli).
-  // Displayed in signal-strength order (strongest first).
-  const dropdownOptions = scanResults.map((n) => ({
-    ssid: n.ssid,
-    meta: `${n.rssi}dBm${n.channel ? ` ch${n.channel}` : ''}${n.auth ? ` ${n.auth}` : ''}`,
-  }))
+  // Dropdown: networks saved on this PC first (picking one fills the
+  // password too), then the Helper-side OS scan results (netsh / airport /
+  // nmcli) in signal-strength order. A scanned network that is also saved
+  // shows once, as the saved row with its signal.
+  const scanMeta = (n: SerialWifiNetwork) =>
+    `${n.rssi}dBm${n.channel ? ` ch${n.channel}` : ''}${n.auth ? ` ${n.auth}` : ''}`
+  const dropdownOptions: Array<{ kind: 'preset' | 'scan'; ssid: string; meta: string; password?: string }> = [
+    ...presets.map((p) => {
+      const seen = scanResults.find((n) => n.ssid === p.ssid)
+      return {
+        kind: 'preset' as const,
+        ssid: p.ssid,
+        password: p.password,
+        meta: seen ? `${t('wifi.presets.optionMeta')} · ${scanMeta(seen)}` : t('wifi.presets.optionMeta'),
+      }
+    }),
+    ...scanResults
+      .filter((n) => !presets.some((p) => p.ssid === n.ssid))
+      .map((n) => ({ kind: 'scan' as const, ssid: n.ssid, meta: scanMeta(n) })),
+  ]
 
   // Reset form state when the user picks a different device.
   useEffect(() => {
@@ -147,15 +193,45 @@ export function WifiProfilesForm({
     setShowPass(false)
     setScanResults([])
     setScanState('idle')
+    pendingRef.current = null
+    setRememberNote(null)
   }, [device.ipAddress])
 
-  // Auto-scan when the user opens the add form (Serial only — LAN
-  // scan isn't wired through firmware yet).
+  // Auto-scan when the user opens the add form, unless networks are saved
+  // on this PC: then they pick one and scan only with the button (so the
+  // form works without the helper).
+  const hasPresets = presets.length > 0
   useEffect(() => {
-    if (addOpen && editingIndex === null && scanState === 'idle') {
+    if (addOpen && editingIndex === null && scanState === 'idle' && !hasPresets) {
       void runScan()
     }
-  }, [addOpen, editingIndex, scanState, runScan])
+  }, [addOpen, editingIndex, scanState, runScan, hasPresets])
+
+  // A single-device write is saved on this PC only once a fresh status shows
+  // the device connected to that network (a typo is never saved).
+  useEffect(() => {
+    const p = pendingRef.current
+    if (p && confirmsPresetConnection(p, wifiStatus, Date.now())) {
+      pendingRef.current = null
+      const ok = rememberPreset({ ssid: p.ssid, pass: p.pass })
+      setRememberNote({ kind: ok ? 'saved' : 'unavailable', ssid: p.ssid })
+    }
+  }, [wifiStatus, rememberPreset])
+
+  // While waiting, re-read the status; give up after REMEMBER_WAIT_MS.
+  const checking = rememberNote?.kind === 'checking'
+  useEffect(() => {
+    if (!checking) return
+    const poll = setInterval(() => refreshStatusRef.current?.(), REMEMBER_POLL_MS)
+    const giveUp = setTimeout(() => {
+      pendingRef.current = null
+      setRememberNote((n) => (n?.kind === 'checking' ? { kind: 'notSaved', ssid: n.ssid } : n))
+    }, REMEMBER_WAIT_MS)
+    return () => {
+      clearInterval(poll)
+      clearTimeout(giveUp)
+    }
+  }, [checking])
 
   const enterEditMode = (p: WifiProfile) => {
     setEditingIndex(p.index)
@@ -185,6 +261,12 @@ export function WifiProfilesForm({
       type: 'set_wifi',
       payload: { ssid: targetSsid, ...passFields },
     })
+    // Save it on this PC once the device is seen connected. Editing with an
+    // empty password keeps the device's password, which this PC never knew.
+    if (remember && (editingIndex === null || password.length > 0)) {
+      pendingRef.current = { ssid: targetSsid, pass: password, at: Date.now(), baseline: wifiStatus }
+      setRememberNote({ kind: 'checking', ssid: targetSsid })
+    }
     exitEditMode()
     setAddOpen(false)
     // 成功/失敗は HelperFailureToastListener が write_result ベースで出す（結果ベース）。
@@ -200,7 +282,13 @@ export function WifiProfilesForm({
   const submitBulk = async (e: React.MouseEvent<HTMLButtonElement>) => {
     if (!ssid.trim() || !onBulkApply || bulkRunning) return
     setAnchor(e.currentTarget)
-    const r = await onBulkApply({ ssid: ssid.trim(), pass: password })
+    const creds = { ssid: ssid.trim(), pass: password }
+    const r = await onBulkApply(creds)
+    // Saved on this PC when at least one device connected with it.
+    if (r && remember) {
+      const ok = r.connected > 0 && rememberPreset(creds)
+      setRememberNote({ kind: r.connected === 0 ? 'notSaved' : ok ? 'saved' : 'unavailable', ssid: creds.ssid })
+    }
     if (r && r.failed === 0) {
       exitEditMode()
       setAddOpen(false)
@@ -392,19 +480,26 @@ export function WifiProfilesForm({
                   >
                     {dropdownOptions.map((opt) => (
                       <li
-                        key={`scan-${opt.ssid}`}
+                        key={`${opt.kind}-${opt.ssid}`}
                         role="option"
                         aria-selected={opt.ssid === ssid}
-                        className={`ssid-combobox-item scan${opt.ssid === ssid ? ' selected' : ''}`}
+                        className={`ssid-combobox-item ${opt.kind}${opt.ssid === ssid ? ' selected' : ''}`}
                         onMouseDown={(e) => {
                           // mousedown so the input doesn't blur away
                           // the menu before the click registers.
                           e.preventDefault()
                           setSsid(opt.ssid)
+                          if (opt.kind === 'preset') {
+                            setPassword(opt.password ?? '')
+                            setShowPass(false)
+                          }
                           setMenuOpen(false)
                         }}
                       >
-                        <span className="ssid-combobox-name">{opt.ssid}</span>
+                        <span className="ssid-combobox-name">
+                          {opt.kind === 'preset' && <span className="ssid-combobox-mark" aria-hidden="true">★</span>}
+                          {opt.ssid}
+                        </span>
                         <span className="ssid-combobox-meta">{opt.meta}</span>
                       </li>
                     ))}
@@ -419,21 +514,18 @@ export function WifiProfilesForm({
                 title={t('wifi.scanTitle')}
                 style={{ flexShrink: 0, whiteSpace: 'nowrap' }}
               >
-                {scanState === 'scanning' ? 'スキャン中…' : '⟳ スキャン'}
+                {scanState === 'scanning' ? t('wifi.scanning') : t('wifi.scan')}
               </button>
             </div>
             <span />
           </div>
           {editingIndex === null && (
-            <div className="form-status muted" style={{ padding: '0 4px' }}>
-              {scanState === 'scanning' && 'PC 側で SSID をスキャン中…'}
-              {scanState === 'done' && scanResults.length === 0 && (
-                'スキャン結果なし — SSID を手動で入力してください'
-              )}
-              {scanState === 'done' && scanResults.length > 0 && (
-                `候補 ${scanResults.length} 件 (信号強度順)`
-              )}
-              {scanState === 'error' && 'スキャン失敗 — SSID を手動で入力してください'}
+            <div className="form-status muted" style={{ padding: '0 4px', minHeight: 18 }}>
+              {scanState === 'idle' && hasPresets && t('wifi.presets.pickOrScan')}
+              {scanState === 'scanning' && t('wifi.scanStatus.scanning')}
+              {scanState === 'done' && scanResults.length === 0 && t('wifi.scanStatus.none')}
+              {scanState === 'done' && scanResults.length > 0 && t('wifi.scanStatus.found', { count: scanResults.length })}
+              {scanState === 'error' && t('wifi.scanStatus.error')}
             </div>
           )}
           <div className="form-row">
@@ -478,6 +570,14 @@ export function WifiProfilesForm({
               {editingIndex !== null ? '更新・接続' : '追加・接続'}
             </button>
           </div>
+          <label className="wifi-remember" title={t('wifi.presets.rememberTitle')}>
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+            />
+            <span>{t('wifi.presets.remember')}</span>
+          </label>
           {/* Bulk apply: same Wi-Fi to all selected (✔ 書込対象) USB-serial
               devices, one at a time. Only in add mode (edit targets one
               profile) and when >1 device is selected. A fixed-height status
@@ -512,6 +612,53 @@ export function WifiProfilesForm({
       )}
 
       {onBulkApply && <WifiBulkResult />}
+
+      {/* ---- Networks saved on this PC (SSID only; never the password) ---- */}
+      {(presets.length > 0 || rememberNote) && (
+        <div className="wifi-presets">
+          <div className="wifi-presets-head">
+            <span className="wifi-presets-title">{t('wifi.presets.title')}</span>
+            {presets.length > 0 && (
+              <button
+                type="button"
+                className="form-button-secondary wifi-profile-btn"
+                onClick={() => {
+                  if (confirm(t('wifi.presets.clearConfirm'))) clearPresets()
+                }}
+              >
+                {t('wifi.presets.clearAll')}
+              </button>
+            )}
+          </div>
+          {rememberNote && (
+            <div
+              className={`form-status ${
+                rememberNote.kind === 'saved' ? 'ok' : rememberNote.kind === 'checking' ? 'muted' : 'warn'
+              }`}
+            >
+              {t(REMEMBER_NOTE_ID[rememberNote.kind], { ssid: rememberNote.ssid })}
+            </div>
+          )}
+          {presets.length > 0 && (
+            <ul className="wifi-presets-list">
+              {presets.map((p) => (
+                <li key={p.ssid} className="wifi-presets-item">
+                  <span className="wifi-presets-ssid">{p.ssid}</span>
+                  <button
+                    type="button"
+                    className="form-button-danger wifi-profile-btn"
+                    onClick={() => removePreset(p.ssid)}
+                    title={t('wifi.presets.removeTitle', { ssid: p.ssid })}
+                    aria-label={t('wifi.presets.removeTitle', { ssid: p.ssid })}
+                  >
+                    🗑
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       <div className="form-status muted" style={{ marginTop: 8 }}>
         {t('wifi.restartNote')}

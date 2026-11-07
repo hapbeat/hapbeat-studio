@@ -742,6 +742,14 @@ export function DeviceDetail() {
     }
   }
 
+  const refreshWifiStatus = () => {
+    if (transport.isSerial) {
+      void useSerialMaster.getState().refreshAll()
+      return
+    }
+    send({ type: 'get_wifi_status', payload: { ip: selectedIp } })
+  }
+
   const refreshWifiProfiles = () => {
     if (transport.isSerial) {
       void useSerialMaster.getState().refreshAll()
@@ -932,6 +940,7 @@ export function DeviceDetail() {
               wifiStatus={wifiStatus}
               sendTo={sendTo}
               onRefresh={refreshWifiProfiles}
+              onRefreshStatus={refreshWifiStatus}
               bulkCount={isSerialDevice ? bulkTargetIds.length : 0}
               onBulkApply={isSerialDevice ? bulkApply : undefined}
               configConnectedNotChecked={isSerialDevice && configConnectedNotChecked}
