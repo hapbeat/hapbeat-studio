@@ -302,10 +302,22 @@ export function PlayerApp() {
     const hides = idleHidesControls(uiModeRef.current, { playing: !runtime.video.paused, fullscreen: fullscreenRef.current, hovered: hovered.current })
     idleTimer.current = hides ? setTimeout(() => setIdle(true), HIDE_AFTER_MS) : null
   }, [runtime])
-  const hover = useCallback((e: React.PointerEvent, over: boolean) => {
-    if (e.pointerType !== 'mouse' || hovered.current === over) return
-    hovered.current = over
-    wake()
+  /**
+   * Hover is read from each pointer move's target, not from enter / leave on the bar: React's leave comes from pointerout,
+   * which Chromium does not send when the pointer leaves the time text it redraws each frame (the controls then never hid).
+   */
+  const onPointerMove = useCallback((e: React.PointerEvent) => {
+    const over = e.pointerType === 'mouse' && !!(e.target as Element | null)?.closest?.('.player-bar, .player-top')
+    if (over !== hovered.current) { hovered.current = over; wake() }
+    else if (e.movementX || e.movementY) wake()
+  }, [wake])
+  // The mouse leaving the window leaves the controls too (no move inside it says so).
+  useEffect(() => {
+    const el = root.current
+    if (!el) return
+    const leave = (e: PointerEvent) => { if (e.pointerType === 'mouse' && hovered.current) { hovered.current = false; wake() } }
+    el.addEventListener('pointerleave', leave)
+    return () => el.removeEventListener('pointerleave', leave)
   }, [wake])
   /** The press now going on only shows the controls: its click must not play or pause (wake renders before the click). */
   const pressWakesOnly = useRef(false)
@@ -380,7 +392,7 @@ export function PlayerApp() {
       wake()
     }}
     onClickCapture={e => { if (pressWakesOnly.current) { pressWakesOnly.current = false; e.stopPropagation() } }}
-    onPointerMove={e => { if (e.movementX || e.movementY) wake() }}>
+    onPointerMove={onPointerMove}>
     <div className="player-stage" ref={stage} onClick={togglePlay} />
     {!started && ready && <button type="button" className="player-bigplay" aria-label={t('player.play')} title={t('player.play')}
       onClick={e => { e.currentTarget.blur(); togglePlay() }}>▶</button>}
@@ -392,7 +404,7 @@ export function PlayerApp() {
       </div>}
       {!!playerApi() && <button type="button" className="player-btn player-choose" onClick={e => { e.currentTarget.blur(); chooseProject() }}>{t('player.project.choose')}</button>}
     </div>}
-    {project && <div className="player-top" onClick={blurActive} onPointerEnter={e => hover(e, true)} onPointerLeave={e => hover(e, false)}>
+    {project && <div className="player-top" onClick={blurActive}>
       <div className="player-folder-wrap">
         <button type="button" className="player-btn player-folder" aria-haspopup="menu" aria-expanded={!!folderMenu} title={`${project.path}\n${t('player.project.change')}`}
           onClick={e => { e.currentTarget.blur(); toggleFolderMenu() }}>{t('player.project.folder', { name: (!busy && projectTitle) || project.name })}</button>
@@ -418,7 +430,7 @@ export function PlayerApp() {
       {notice?.error && <div className="player-notice error">{t(notice.id, notice.params)}</div>}
       {chooseError && <div className="player-notice error">{t('player.project.invalid', { error: chooseError })}</div>}
     </div>
-    <div className="player-bar" onClick={blurActive} onPointerUp={blurActive} onPointerEnter={e => hover(e, true)} onPointerLeave={e => hover(e, false)}>
+    <div className="player-bar" onClick={blurActive} onPointerUp={blurActive}>
       <PlayerSeek runtime={runtime} />
       <div className="player-controls">
         <button type="button" className="player-btn player-play" onClick={togglePlay}>{t(playing ? 'player.pause' : 'player.play')}</button>
