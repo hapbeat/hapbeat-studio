@@ -10,6 +10,7 @@ import { OVERALL_GAIN_MAX, useScenePlayback } from '@/stores/scenePlayback'
 import { openAppProject } from '@/utils/appProject'
 import { playerChipDevices } from '@/utils/playbackDevices'
 import { pageVisible, perfTrack } from '@/utils/perfRegistry'
+import { idleHidesControls, pressOnlyShowsControls } from '@/utils/playerUi'
 import { isTypingTarget } from '@/utils/playbackShortcut'
 import { clockText } from '@/utils/sceneData'
 import { SceneRuntime } from '@/components/scene/sceneRuntime'
@@ -289,17 +290,25 @@ export function PlayerApp() {
   }, [setUiMode])
   useEffect(() => () => { if (hintTimer.current) clearTimeout(hintTimer.current) }, [])
 
-  // After a while without the pointer moving (or a key) the cursor hides, and the controls too where the mode lets
-  // them: auto while playing or in fullscreen (paused too: a display showing a demo), hide always, show never.
+  // After a while without the pointer moving or pressing (or a key) the cursor hides, and the controls too where the
+  // mode lets them (idleHidesControls): not while a mouse rests over the controls.
   const [idle, setIdle] = useState(false)
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** A mouse is over the bar or the top row (touch pointers have no hover and never set it). */
+  const hovered = useRef(false)
   const wake = useCallback(() => {
     setIdle(false)
     if (idleTimer.current) clearTimeout(idleTimer.current)
-    const mode = uiModeRef.current
-    const hides = mode === 'hide' || (mode === 'auto' && (!runtime.video.paused || fullscreenRef.current))
+    const hides = idleHidesControls(uiModeRef.current, { playing: !runtime.video.paused, fullscreen: fullscreenRef.current, hovered: hovered.current })
     idleTimer.current = hides ? setTimeout(() => setIdle(true), HIDE_AFTER_MS) : null
   }, [runtime])
+  const hover = useCallback((e: React.PointerEvent, over: boolean) => {
+    if (e.pointerType !== 'mouse' || hovered.current === over) return
+    hovered.current = over
+    wake()
+  }, [wake])
+  /** The press now going on only shows the controls: its click must not play or pause (wake renders before the click). */
+  const pressWakesOnly = useRef(false)
   useEffect(() => {
     wake()
     return () => { if (idleTimer.current) clearTimeout(idleTimer.current) }
@@ -364,7 +373,13 @@ export function PlayerApp() {
   }
 
   return <div className="player" ref={root} data-ui-hidden={uiHidden || undefined} data-cursor-hidden={cursorHidden || undefined}
-    onPointerDown={() => { if (useSceneStore.getState().items.length) runtime.audio() }}
+    onPointerDown={() => {
+      if (useSceneStore.getState().items.length) runtime.audio()
+      // Every press is activity; one while auto has hidden the controls only brings them back.
+      pressWakesOnly.current = pressOnlyShowsControls(uiMode, uiHidden)
+      wake()
+    }}
+    onClickCapture={e => { if (pressWakesOnly.current) { pressWakesOnly.current = false; e.stopPropagation() } }}
     onPointerMove={e => { if (e.movementX || e.movementY) wake() }}>
     <div className="player-stage" ref={stage} onClick={togglePlay} />
     {!started && ready && <button type="button" className="player-bigplay" aria-label={t('player.play')} title={t('player.play')}
@@ -377,7 +392,7 @@ export function PlayerApp() {
       </div>}
       {!!playerApi() && <button type="button" className="player-btn player-choose" onClick={e => { e.currentTarget.blur(); chooseProject() }}>{t('player.project.choose')}</button>}
     </div>}
-    {project && <div className="player-top" onClick={blurActive}>
+    {project && <div className="player-top" onClick={blurActive} onPointerEnter={e => hover(e, true)} onPointerLeave={e => hover(e, false)}>
       <div className="player-folder-wrap">
         <button type="button" className="player-btn player-folder" aria-haspopup="menu" aria-expanded={!!folderMenu} title={`${project.path}\n${t('player.project.change')}`}
           onClick={e => { e.currentTarget.blur(); toggleFolderMenu() }}>{t('player.project.folder', { name: (!busy && projectTitle) || project.name })}</button>
@@ -403,7 +418,7 @@ export function PlayerApp() {
       {notice?.error && <div className="player-notice error">{t(notice.id, notice.params)}</div>}
       {chooseError && <div className="player-notice error">{t('player.project.invalid', { error: chooseError })}</div>}
     </div>
-    <div className="player-bar" onClick={blurActive} onPointerUp={blurActive}>
+    <div className="player-bar" onClick={blurActive} onPointerUp={blurActive} onPointerEnter={e => hover(e, true)} onPointerLeave={e => hover(e, false)}>
       <PlayerSeek runtime={runtime} />
       <div className="player-controls">
         <button type="button" className="player-btn player-play" onClick={togglePlay}>{t(playing ? 'player.pause' : 'player.play')}</button>
