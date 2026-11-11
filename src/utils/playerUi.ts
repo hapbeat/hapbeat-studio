@@ -1,4 +1,6 @@
 import type { PlayerUiMode } from '@/config/playerShell'
+import type { CueTable } from './sceneCueTable'
+import { matchesAddress, tableTargets } from './sceneHaptics'
 
 /**
  * Whether the player's idle timer hides the controls (and the cursor): always in `hide`, never in `show`; in `auto`
@@ -17,3 +19,14 @@ export function idleHidesControls(mode: PlayerUiMode, state: { playing: boolean;
  * In `hide` the controls never show, so a press acts at once.
  */
 export const pressOnlyShowsControls = (mode: PlayerUiMode, controlsHidden: boolean) => mode === 'auto' && controlsHidden
+
+/**
+ * Whether the player sends every route to every Hapbeat (the Scene's allDevices): only when no playing Hapbeat's address
+ * is at a position the cue table routes to (one Hapbeat at a position the table does not use, none, no table), so a demo
+ * never goes silent. Once one is, every route plays by position, as in the game (a neck and a wrist each get their own).
+ */
+export function playerPlaysAllDevices(table: CueTable | null, addresses: string[]): boolean {
+  if (!table) return true
+  const targets = tableTargets(table)
+  return !addresses.some(address => address && targets.some(target => matchesAddress(target, address)))
+}

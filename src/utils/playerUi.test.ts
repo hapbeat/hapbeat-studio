@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { idleHidesControls, pressOnlyShowsControls } from './playerUi'
+import { idleHidesControls, playerPlaysAllDevices, pressOnlyShowsControls } from './playerUi'
+import type { CueTable } from './sceneCueTable'
 
 describe('player UI', () => {
   const still = { playing: false, fullscreen: false, hovered: false }
@@ -21,5 +22,22 @@ describe('player UI', () => {
     // hide: the controls never show, so a press on the stage plays or pauses.
     expect(pressOnlyShowsControls('hide', true)).toBe(false)
     expect(pressOnlyShowsControls('show', false)).toBe(false)
+  })
+})
+
+describe('player device routing', () => {
+  const table: CueTable = { clips: {}, cues: {
+    detent: { haptics: [{ clip: 'tick', at: 'hand', gain: 1 }] },
+    rumble: { haptics: [{ clip: 'hum', at: 'pos_neck', gain: 1 }] },
+  } }
+  it('plays by position once a Hapbeat is at a position the table routes to (neck + wrist)', () => {
+    expect(playerPlaysAllDevices(table, ['player_1/pos_neck', 'player_1/pos_r_wrist'])).toBe(false)
+    expect(playerPlaysAllDevices(table, ['player_1/pos_r_wrist', ''])).toBe(false)
+  })
+  it('sends every route to every Hapbeat when none is at a position the table uses', () => {
+    expect(playerPlaysAllDevices(table, ['player_1/pos_chest'])).toBe(true)
+    expect(playerPlaysAllDevices(table, [''])).toBe(true)
+    expect(playerPlaysAllDevices(table, [])).toBe(true)
+    expect(playerPlaysAllDevices(null, ['player_1/pos_neck'])).toBe(true)
   })
 })

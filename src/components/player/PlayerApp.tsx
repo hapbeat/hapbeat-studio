@@ -8,9 +8,9 @@ import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { OVERALL_GAIN_MAX, useScenePlayback } from '@/stores/scenePlayback'
 import { openAppProject } from '@/utils/appProject'
-import { playerChipDevices } from '@/utils/playbackDevices'
+import { playerChipDevices, resolvePlaybackTargets } from '@/utils/playbackDevices'
 import { pageVisible, perfTrack } from '@/utils/perfRegistry'
-import { idleHidesControls, pressOnlyShowsControls } from '@/utils/playerUi'
+import { idleHidesControls, playerPlaysAllDevices, pressOnlyShowsControls } from '@/utils/playerUi'
 import { isTypingTarget } from '@/utils/playbackShortcut'
 import { clockText } from '@/utils/sceneData'
 import { SceneRuntime } from '@/components/scene/sceneRuntime'
@@ -114,8 +114,9 @@ function PlayerSeek({ runtime }: { runtime: SceneRuntime }) {
  * The whole window of the player app (`?shell=player`): the project folder chosen in the app (the one Studio's Scene tab
  * opens), played by the Scene tab's engine (SceneRuntime) with the same helper wiring (useSceneRuntimeHelper). What
  * Studio saves into that folder plays at once: the app says when the folder changed and the store reads it again
- * (checkDisk), besides its own 2-second checks. No authoring: nothing here edits the project, and every connected
- * Hapbeat plays every route, whatever its position (allDevices). It stays paused until the user presses play.
+ * (checkDisk), besides its own 2-second checks. No authoring: nothing here edits the project. Each route plays on the
+ * Hapbeats at its position (a neck and a wrist each get their own, as in the game); only when no Hapbeat is at a position
+ * the table uses does every one play every route (allDevices, playerPlaysAllDevices). It stays paused until the user presses play.
  * The controls show as the UI mode says (top right, U key, the app's menu; PlayerUiMode), and the folder button
  * switches between the folders opened before (the app's list).
  */
@@ -139,7 +140,7 @@ export function PlayerApp() {
   }, [])
   useEffect(() => {
     useSceneSettings.getState().update({ pcSound: true, loop: true, sendHaptics: !PLAYER_HAPTICS_OFF })
-    useScenePlayback.getState().update({ output: 'clip', allDevices: true })
+    useScenePlayback.getState().update({ output: 'clip' })
     const api = playerApi()
     if (!api) { setProjectKnown(true); return }
     const offSwitched = api.project.onSwitched(openProject)
@@ -208,11 +209,16 @@ export function PlayerApp() {
   const { isConnected, targetDevices } = useSceneRuntimeHelper(runtime)
   const { helperVersion, devices } = useHelperConnection()
   const kitSelectedIps = useDeviceStore(s => s.kitSelectedIps)
+  const table = useSceneStore(s => s.table)
+  // By position when a Hapbeat is at one the table uses, else every Hapbeat plays every route (playerPlaysAllDevices).
+  useEffect(() => {
+    const all = playerPlaysAllDevices(table, resolvePlaybackTargets(devices, kitSelectedIps).map(d => d.address))
+    if (useScenePlayback.getState().allDevices !== all) useScenePlayback.getState().update({ allDevices: all })
+  }, [table, devices, kitSelectedIps])
   const { status: helperStatus, restart: restartHelper } = usePlayerHelperStatus()
 
   const ready = useSceneStore(s => s.items.length > 0 && !s.busy)
   const busy = useSceneStore(s => s.busy)
-  const table = useSceneStore(s => s.table)
   const chapters = useSceneStore(s => s.data?.chapters)
   const chapter = useSceneStore(s => s.chapter)
   const notice = useSceneStore(s => s.notice)
