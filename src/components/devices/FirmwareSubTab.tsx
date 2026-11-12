@@ -39,6 +39,7 @@ import {
   entryBoard,
   FAMILY_LABEL,
   hapticOutputFlashWarning,
+  hwLabel,
   isSelectionAvailable,
   listAvailability,
   pickDefaultEntry,
@@ -1162,9 +1163,9 @@ export function FirmwareSubTab({
                       aria-selected={isSelected}
                       className={`firmware-version-chip firmware-hw-chip${isSelected ? ' selected' : ''}`}
                       onClick={() => selectHierarchy({ family: selection.family, hw })}
-                      title={`${selection.family === 'peripheral' ? t('firmware.peripheral') : FAMILY_LABEL[selection.family]} ${hw}`}
+                      title={`${selection.family === 'peripheral' ? t('firmware.peripheral') : FAMILY_LABEL[selection.family]} ${hwLabel(selection.family, hw)}`}
                     >
-                      {hw}
+                      {hwLabel(selection.family, hw)}
                     </button>
                   )
                 })}
