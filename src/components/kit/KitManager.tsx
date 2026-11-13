@@ -2071,7 +2071,6 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
   const { subscribe } = useHelperConnection()
   const selectedIps = useDeviceStore((s) => s.kitSelectedIps)
   const infoCache = useDeviceStore((s) => s.infoCache)
-  const workDirHandle = useLibraryStore((s) => s.workDirHandle)
 
   // Kits only go to PLAYBACK devices (receivers / no-role legacy). A
   // sensor / broker / transmitter must never receive a kit — that's how a
@@ -2159,7 +2158,7 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
   // Kit フォルダが設定されていればその直下、無ければ作業フォルダの kits/ の直下に `<kitId>/` を作る
   // (kits/ が無く Kit が作業フォルダ直下にある古いフォルダは直下のまま。resolveWorkKitRoot)。
   const workKitRoot = useLibraryStore((s) => s.workKitRoot)
-  const outRoot = kitDirHandle ?? workKitRoot ?? workDirHandle
+  const outRoot = kitDirHandle ?? workKitRoot
 
   // Authoring state updates immediately; metadata persistence is debounced.
   // Pack output (generated WAVs + manifest) is committed only by Save Folder /

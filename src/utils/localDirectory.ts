@@ -870,6 +870,14 @@ export async function resolveWorkKitRoot(work: FileSystemDirectoryHandle): Promi
 }
 
 /**
+ * Where the Kits of a chosen Kit folder are: its kits/ when it has one (the user chose a work folder, or the folder
+ * that holds kits/), else the folder itself (e.g. Unity Assets/HapbeatKits, each Kit directly in it).
+ */
+export async function resolveChosenKitRoot(chosen: FileSystemDirectoryHandle): Promise<FileSystemDirectoryHandle> {
+  try { return await chosen.getDirectoryHandle(WORK_KITS_DIR) } catch { return chosen }
+}
+
+/**
  * Scan `root` for immediate subfolders that look like an exported Hapbeat Kit
  * (= contain a `<name>-manifest.json` or any `*manifest*.json` fallback). For
  * each one, parse the manifest and load every wav under `install-clips/` and

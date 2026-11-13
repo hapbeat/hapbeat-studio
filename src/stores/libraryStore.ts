@@ -33,6 +33,7 @@ import {
   ARCHIVE_KIT_DIR,
   findKitManifestHandle,
   resolveWorkKitRoot,
+  resolveChosenKitRoot,
   type DiscoveredKit,
   type KitDiskCache,
   type DirectoryHandleKey,
@@ -500,10 +501,10 @@ function savePersistedSort(filter: LibraryFilter): void {
 
 /**
  * The folder whose subfolders are the Kits: the chosen Kit folder, else the work folder's kits/ (workKitRoot).
- * The work folder itself is the last resort (before workKitRoot is resolved).
+ * Never the work folder itself before workKitRoot is resolved (its own subfolders are not Kits when it has kits/).
  */
-function kitRootOf(s: { kitDirHandle: FileSystemDirectoryHandle | null; workKitRoot: FileSystemDirectoryHandle | null; workDirHandle: FileSystemDirectoryHandle | null }): FileSystemDirectoryHandle | null {
-  return s.kitDirHandle ?? s.workKitRoot ?? s.workDirHandle
+function kitRootOf(s: { kitDirHandle: FileSystemDirectoryHandle | null; workKitRoot: FileSystemDirectoryHandle | null }): FileSystemDirectoryHandle | null {
+  return s.kitDirHandle ?? s.workKitRoot
 }
 
 /** Save clips metadata to the local work directory */
@@ -1863,7 +1864,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // Without a dedicated kitDir, the work folder is also the Kit source of
     // truth. Drop the previous folder's Kit state and pending writes before
     // adopting the new handle. A dedicated kitDir intentionally stays active.
-    const connected = { workDirHandle: handle, workDirName: handle.name, workDirStatus: 'connected' as const, workDirPendingName: null }
+    // workKitRoot of the previous folder must not be used for this one: it is resolved below, before any scan.
+    const connected = { workDirHandle: handle, workDirName: handle.name, workKitRoot: null, workDirStatus: 'connected' as const, workDirPendingName: null }
     if (get().kitDirHandle) {
       outRootEpoch++
       set({ clips: [], ...connected })
@@ -1911,7 +1913,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       set({ workDirStatus: 'needs-permission', workDirPendingName: handle.name })
       return false
     }
-    set({ workDirHandle: handle, workDirName: handle.name, workDirStatus: 'connected', workDirPendingName: null })
+    set({ workDirHandle: handle, workDirName: handle.name, workKitRoot: null, workDirStatus: 'connected', workDirPendingName: null })
     // Run the legacy → tilde-suffixed rename before syncClipsFromDir
     // / importKitsFromOutputDir kick in; they read the new folder
     // names directly and would otherwise expose stale legacy state.
@@ -1966,7 +1968,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     //      the new folder and copies a previous-folder kit into it.
     // Disk on either side is untouched: we just re-orient Studio.
     resetKitMemory()
-    set({ kits: [], activeKitId: null, kitDirHandle: handle, kitDirName: handle.name })
+    set({ kits: [], activeKitId: null, kitDirHandle: await resolveChosenKitRoot(handle), kitDirName: handle.name })
     // Discover kits already living under the newly chosen folder.
     await get().importKitsFromOutputDir().catch((err) => console.error('Auto-import after pickKitDir failed:', err))
     return true
@@ -1981,7 +1983,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // Adopting a dedicated kitDir moves outRoot off workDirHandle, so any scan
     // already running against the workdir is now for the wrong folder.
     outRootEpoch++
-    set({ kitDirHandle: handle, kitDirName: handle.name })
+    set({ kitDirHandle: await resolveChosenKitRoot(handle), kitDirName: handle.name })
     // 起動時の復元でも同様に自動取り込み (ローカル ≥ IDB)
     await get().importKitsFromOutputDir().catch((err) => console.error('Auto-import after restoreKitDir failed:', err))
     return true

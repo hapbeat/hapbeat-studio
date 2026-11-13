@@ -161,7 +161,7 @@ describe('flushKitFolderNow — missing source audio', () => {
     })
     useLibraryStore.setState({
       kits: [kit],
-      workDirHandle: { name: 'kits' } as FileSystemDirectoryHandle,
+      workDirHandle: { name: 'kits' } as FileSystemDirectoryHandle, workKitRoot: { name: 'kits' } as FileSystemDirectoryHandle,
     })
 
     const result = await useLibraryStore.getState().flushKitFolderNow(kit.id)
@@ -264,7 +264,7 @@ describe('flushKitFolderNow — non-destructive Save Folder', () => {
     })
     mocks.loadKitDiskCache.mockResolvedValue(null)
     mocks.saveKitDiskCache.mockResolvedValue(undefined)
-    useLibraryStore.setState({ kits: [kit], workDirHandle: root })
+    useLibraryStore.setState({ kits: [kit], workDirHandle: root, workKitRoot: root })
 
     const result = await useLibraryStore.getState().flushKitFolderNow(kit.id)
 
@@ -279,7 +279,7 @@ describe('Kit continuous parameter editing', () => {
   it('updates volume synchronously and coalesces kits-meta.json writes', async () => {
     vi.useFakeTimers()
     const root = { name: 'library' } as FileSystemDirectoryHandle
-    useLibraryStore.setState({ kits: [kit], workDirHandle: root })
+    useLibraryStore.setState({ kits: [kit], workDirHandle: root, workKitRoot: root })
 
     const pending: Promise<void>[] = []
     for (let volume = 1; volume <= 40; volume++) {
@@ -319,7 +319,7 @@ describe('Kit continuous parameter editing', () => {
     })
     mocks.loadKitDiskCache.mockResolvedValue(null)
     mocks.saveKitDiskCache.mockResolvedValue(undefined)
-    useLibraryStore.setState({ kits: [kit], workDirHandle: root })
+    useLibraryStore.setState({ kits: [kit], workDirHandle: root, workKitRoot: root })
 
     await useLibraryStore.getState().updateKit(kit.id, {
       targetDevice: { volume_level: 77 },
@@ -432,7 +432,7 @@ describe('sample-kit repair', () => {
       ok: true,
       blob: async () => new Blob(['canonical WAV']),
     }))
-    useLibraryStore.setState({ workDirHandle: root })
+    useLibraryStore.setState({ workDirHandle: root, workKitRoot: root })
 
     await useLibraryStore.getState().importKitsFromOutputDir()
 
@@ -490,7 +490,7 @@ describe('kits-meta.json with the strength key before DEC-103', () => {
         return { getFile: async () => ({ text: async () => JSON.stringify(meta) }) }
       }),
     } as unknown as FileSystemDirectoryHandle
-    useLibraryStore.setState({ workDirHandle: work })
+    useLibraryStore.setState({ workDirHandle: work, workKitRoot: work })
     mocks.scanKitOutputFolder.mockResolvedValue([{ folderName: 'k', manifestJson: { name: 'k', events: { 'k.hit': { clip: 'hit.wav', parameters: { clip_gain: 0.3 } } } }, clipFiles: new Map() }])
 
     await useLibraryStore.getState().importKitsFromOutputDir()
@@ -514,7 +514,7 @@ describe('kits-meta.json with the strength key before DEC-103', () => {
         return { getFile: async () => ({ text: async () => JSON.stringify(meta) }) }
       }),
     } as unknown as FileSystemDirectoryHandle
-    useLibraryStore.setState({ workDirHandle: work })
+    useLibraryStore.setState({ workDirHandle: work, workKitRoot: work })
     mocks.scanKitOutputFolder.mockResolvedValue([{ folderName: 'k', manifestJson: { name: 'k', events: { 'k.hit': { clip: 'hit.wav', parameters: { clip_gain: 0.3 } } } }, clipFiles: new Map() }])
     const metaWrites = () => mocks.writeMetadataJson.mock.calls.filter(([, file]) => file === 'kits-meta.json').length
 
