@@ -24,8 +24,8 @@ export function isFileSystemAccessSupported(): boolean {
 const HANDLE_DB = 'hapbeat-studio-fs'
 const HANDLE_STORE = 'handles'
 
-/** IDB key for each persisted handle. `workdir` = clip library root,
- *  `kitdir` = optional separate kit output root (e.g. Unity Assets),
+/** IDB key for each persisted handle. `workdir` = work folder (clips/ and kits/),
+ *  `kitdir` = the separate Kit folder of older Studio versions (only read to name it in a notice, then cleared),
  *  `streamdir` = streaming-test source folder (browseable WAV/MP3 root),
  *  `editordir` = waveform editor folder, `scenedir` = Scene tab game project. */
 export type DirectoryHandleKey = 'workdir' | 'kitdir' | 'streamdir' | 'editordir' | 'scenedir'
@@ -150,9 +150,7 @@ export async function pickWorkDirectory(key: DirectoryHandleKey = 'workdir'): Pr
   // pickerId は key ごとに分けておくとブラウザが「最後に選んだフォルダ」を
   // それぞれ独立して記憶してくれる (library / kit-out / streaming で別フォルダに誘導できる)。
   const pickerId =
-    key === 'kitdir'
-      ? 'hapbeat-kitdir'
-      : key === 'streamdir'
+    key === 'streamdir'
         ? 'hapbeat-streamdir'
         : 'hapbeat-workdir'
   try {
@@ -856,25 +854,26 @@ export async function findKitManifestHandle(
 /** The folder under the work folder that holds the Kits (beside `clips/`). */
 export const WORK_KITS_DIR = 'kits'
 
+/** The marker the Unity SDK puts in its Kits folder (HapbeatKitsReadme): Unity reads each folder directly in it. */
+const UNITY_KITS_MARKER = 'HapbeatKitsReadme.asset'
+
 /**
- * Where the Kits of a work folder are: `<work>/kits/` (made when missing). A work folder from before kits/
- * (Kit folders directly in it, and no kits/) keeps its Kits where they are, so nothing has to be moved.
+ * Where the Kits of a work folder are: `<work>/kits/` (made when missing). Kept where they are, so nothing has to be
+ * moved: a work folder from before kits/ (Kit folders directly in it, and no kits/), and the Unity SDK's Kits folder
+ * (its readme says to choose that folder in Studio; Unity reads the Kits directly in it).
  */
 export async function resolveWorkKitRoot(work: FileSystemDirectoryHandle): Promise<FileSystemDirectoryHandle> {
-  try { return await work.getDirectoryHandle(WORK_KITS_DIR) } catch { /* no kits/ yet */ }
+  try { await work.getFileHandle(UNITY_KITS_MARKER); return work } catch { /* not the Unity Kits folder */ }
+  // Matched without case: a Unity project's Assets/HapbeatSDK has Kits/ (the SDK's default), and a case-sensitive
+  // file system must not get a second kits/ beside it.
+  for await (const entry of work.values()) {
+    if (entry.kind === 'directory' && entry.name.toLowerCase() === WORK_KITS_DIR) return entry as FileSystemDirectoryHandle
+  }
   for await (const entry of work.values()) {
     if (entry.kind !== 'directory' || entry.name === 'clips' || isHiddenStudioDir(entry.name)) continue
     if (await findKitManifestHandle(entry as FileSystemDirectoryHandle)) return work
   }
   return work.getDirectoryHandle(WORK_KITS_DIR, { create: true })
-}
-
-/**
- * Where the Kits of a chosen Kit folder are: its kits/ when it has one (the user chose a work folder, or the folder
- * that holds kits/), else the folder itself (e.g. Unity Assets/HapbeatKits, each Kit directly in it).
- */
-export async function resolveChosenKitRoot(chosen: FileSystemDirectoryHandle): Promise<FileSystemDirectoryHandle> {
-  try { return await chosen.getDirectoryHandle(WORK_KITS_DIR) } catch { return chosen }
 }
 
 /**

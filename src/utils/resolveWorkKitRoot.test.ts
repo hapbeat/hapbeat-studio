@@ -43,4 +43,18 @@ describe('resolveWorkKitRoot', () => {
     expect(root.name).toBe('kits')
     expect('kits' in tree).toBe(true)
   })
+
+  it('uses Kits/ (a Unity Assets/HapbeatSDK, the SDK default) without making a second kits/', async () => {
+    const tree: Node = { Kits: { a: { 'a-manifest.json': 'file' } } }
+    const root = await resolveWorkKitRoot(dir('HapbeatSDK', tree))
+    expect(root.name).toBe('Kits')
+    expect(Object.keys(tree)).toEqual(['Kits'])
+  })
+
+  it('keeps the Unity SDK Kits folder (with its readme marker) as the Kit root, even when empty', async () => {
+    const tree: Node = { 'HapbeatKitsReadme.asset': 'file' }
+    const root = await resolveWorkKitRoot(dir('Kits', tree))
+    expect(root.name).toBe('Kits')
+    expect('kits' in tree).toBe(false)
+  })
 })

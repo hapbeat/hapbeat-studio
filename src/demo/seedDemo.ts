@@ -64,7 +64,7 @@ function seedLibraryStore(): void {
     clips: DEMO_CLIPS,
     kits: DEMO_KITS,
     activeKitId: DEMO_KIT_ID,
-    // No workDirHandle/kitDirHandle is ever created — every disk-write
+    // No workDirHandle/workKitRoot is ever created — every disk-write
     // call site in libraryStore.ts is already conditional on a truthy
     // handle, so leaving these `null` makes writes no-ops (see module
     // comment above) instead of needing a stub to satisfy the real

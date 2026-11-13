@@ -33,10 +33,8 @@ import {
   ARCHIVE_KIT_DIR,
   findKitManifestHandle,
   resolveWorkKitRoot,
-  resolveChosenKitRoot,
   type DiscoveredKit,
   type KitDiskCache,
-  type DirectoryHandleKey,
 } from '@/utils/localDirectory'
 import {
   exportKitAsPack,
@@ -219,10 +217,13 @@ interface LibraryState {
    */
   workDirStatus: WorkDirStatus
   workDirPendingName: string | null
-  /** Optional: separate output folder for exported Kits (e.g. Unity's
-   *  Assets/HapbeatKits). When null, kits are saved under workDir/kits/. */
-  kitDirHandle: FileSystemDirectoryHandle | null
-  kitDirName: string | null
+  /**
+   * The name of the separate Kit folder chosen before Studio read every Kit from the work folder's kits/ (a handle
+   * still stored under `kitdir`): no longer read, only named in a notice until dismissed.
+   */
+  retiredKitDirName: string | null
+  /** Forgets the retired Kit folder (the notice goes away; the folder on disk is untouched). */
+  dismissRetiredKitDir: () => Promise<void>
 
   /**
    * Demo/screenshot mode (`?demo=1`, see `src/demo/seedDemo.ts`). When
@@ -387,16 +388,12 @@ interface LibraryState {
   reconnectWorkDir: () => Promise<boolean>
   disconnectWorkDir: () => Promise<void>
   // Kit output directory (separate folder for kit exports)
-  pickKitDir: () => Promise<boolean>
-  restoreKitDir: () => Promise<boolean>
-  disconnectKitDir: () => Promise<void>
-  /** Scan kitDirHandle for kit subfolders (manifest.json + clips/ + stream-clips/)
-   *  and merge them into the in-memory kits[] + clips[]. Called automatically
-   *  when the kit output folder is chosen or restored on startup. */
+  /** Scan the work folder's kits/ (workKitRoot) for kit subfolders (manifest.json + install-clips/ +
+   *  stream-clips/) and rebuild the in-memory kits[] from them. Called when the work folder is chosen or restored. */
   importKitsFromOutputDir: () => Promise<number>
   /**
-   * Where the work folder's Kits are when no Kit folder is chosen: `<work>/kits/`, or the work folder itself for one
-   * from before kits/ (see resolveWorkKitRoot). Set with the work folder.
+   * Where the work folder's Kits are: `<work>/kits/`, or the work folder itself for one from before kits/ (see
+   * resolveWorkKitRoot). Set with the work folder; null without one.
    */
   workKitRoot: FileSystemDirectoryHandle | null
   /** Files the last Kit scan refused for the strength key before DEC-103 (Kit manifests, kits-meta.json); 0 = none. */
@@ -500,11 +497,11 @@ function savePersistedSort(filter: LibraryFilter): void {
 
 
 /**
- * The folder whose subfolders are the Kits: the chosen Kit folder, else the work folder's kits/ (workKitRoot).
- * Never the work folder itself before workKitRoot is resolved (its own subfolders are not Kits when it has kits/).
+ * The folder whose subfolders are the Kits: the work folder's kits/ (workKitRoot). Never the work folder itself
+ * before workKitRoot is resolved (its own subfolders are not Kits when it has kits/).
  */
-function kitRootOf(s: { kitDirHandle: FileSystemDirectoryHandle | null; workKitRoot: FileSystemDirectoryHandle | null }): FileSystemDirectoryHandle | null {
-  return s.kitDirHandle ?? s.workKitRoot
+function kitRootOf(s: { workKitRoot: FileSystemDirectoryHandle | null }): FileSystemDirectoryHandle | null {
+  return s.workKitRoot
 }
 
 /** Save clips metadata to the local work directory */
@@ -853,7 +850,7 @@ async function isPermissionLost(root: FileSystemDirectoryHandle): Promise<boolea
  * into the store.
  *
  * A `stale-handle` retry is otherwise guaranteed to fail: `flushKitFolderNow`
- * reads `kitDirHandle ?? workDirHandle` fresh each call, so retrying without
+ * reads `workKitRoot` fresh each call, so retrying without
  * replacing the handle just re-runs the same dead object. Handles go stale
  * when another process recreates the directory underneath us — which is
  * exactly what an editor that watches its own asset tree (Unity) does on
@@ -867,10 +864,8 @@ async function isPermissionLost(root: FileSystemDirectoryHandle): Promise<boolea
  * surfaces the "pick the folder again" hint.
  */
 async function reacquireOutRoot(): Promise<FileSystemDirectoryHandle | null> {
-  const { kitDirHandle } = useLibraryStore.getState()
-  const key: DirectoryHandleKey = kitDirHandle ? 'kitdir' : 'workdir'
   try {
-    const fresh = await loadDirectoryHandle(key)
+    const fresh = await loadDirectoryHandle('workdir')
     if (!fresh) return null
     // readwrite, not read: the retry this unblocks is a WRITE. Checking only
     // read would pass a handle whose write grant is gone, so the retry fails
@@ -878,12 +873,9 @@ async function reacquireOutRoot(): Promise<FileSystemDirectoryHandle | null> {
     // (no prompt) — requestPermission needs a user gesture we don't have here,
     // and the permission-lost case is already handled by its own branch.
     if ((await fresh.queryPermission({ mode: 'readwrite' })) !== 'granted') return null
-    if (key === 'kitdir') {
-      useLibraryStore.setState({ kitDirHandle: fresh, kitDirName: fresh.name })
-    } else {
-      useLibraryStore.setState({ workDirHandle: fresh, workDirName: fresh.name })
-    }
-    return fresh
+    const kitRoot = await resolveWorkKitRoot(fresh)
+    useLibraryStore.setState({ workDirHandle: fresh, workDirName: fresh.name, workKitRoot: kitRoot })
+    return kitRoot
   } catch {
     return null
   }
@@ -926,7 +918,7 @@ let importRunSeq = 0
 
 /**
  * Bumped ONLY when the user re-targets Studio at a different folder
- * (pickKitDir / disconnectKitDir / pickWorkDir). A long folder scan compares
+ * (pickWorkDir / disconnectWorkDir). A long folder scan compares
  * this at commit time to decide whether it is still relevant.
  *
  * Deliberately not an identity check on the handle itself: `reacquireOutRoot`
@@ -1037,8 +1029,11 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   workDirSupported: isFileSystemAccessSupported(),
   workDirStatus: isFileSystemAccessSupported() ? 'checking' : 'unsupported',
   workDirPendingName: null,
-  kitDirHandle: null,
-  kitDirName: null,
+  retiredKitDirName: null,
+  dismissRetiredKitDir: async () => {
+    await clearDirectoryHandle('kitdir')
+    set({ retiredKitDirName: null })
+  },
   demoMode: false,
   setDemoMode: (v) => set({ demoMode: v }),
   kits: [],
@@ -1471,7 +1466,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         maxAttempts = LOCKED_MAX_ATTEMPTS
       } else if (kind === 'stale-handle') {
         // Swap in a freshly deserialised handle BEFORE retrying. The retry
-        // re-reads `kitDirHandle ?? workDirHandle`, so without this it would
+        // re-reads `workKitRoot`, so without this it would
         // reuse the same dead handle and fail identically every time — the
         // "kit deploy into a Unity project fails forever" symptom. If the
         // handle can't be restored there is nothing a retry could fix, so go
@@ -1623,8 +1618,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     try {
       // Try to restore work directory first
       const restored = await get().restoreWorkDir()
-      // Kit output dir is optional and independent — restore silently
-      await get().restoreKitDir().catch(() => { /* ignore permission loss */ })
+      // A separate Kit folder chosen before every Kit moved to the work folder's kits/: named in a notice, not read.
+      const retired = await loadDirectoryHandle('kitdir').catch(() => null)
+      set({ retiredKitDirName: retired?.name ?? null })
 
       if (restored) {
         // Load from local directory
@@ -1861,23 +1857,20 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     if (!isFileSystemAccessSupported()) return false
     const handle = await pickWorkDirectory()
     if (!handle) return false
-    // Without a dedicated kitDir, the work folder is also the Kit source of
-    // truth. Drop the previous folder's Kit state and pending writes before
-    // adopting the new handle. A dedicated kitDir intentionally stays active.
-    // workKitRoot of the previous folder must not be used for this one: it is resolved below, before any scan.
-    const connected = { workDirHandle: handle, workDirName: handle.name, workKitRoot: null, workDirStatus: 'connected' as const, workDirPendingName: null }
-    if (get().kitDirHandle) {
-      outRootEpoch++
-      set({ clips: [], ...connected })
-    } else {
-      resetKitMemory()
-      set({
-        clips: [],
-        kits: [],
-        activeKitId: null,
-        ...connected,
-      })
-    }
+    // The work folder is the Kit source of truth (its kits/). Drop the previous folder's Kit state and pending writes
+    // before adopting the new handle. workKitRoot of the previous folder must not be used for this one: it is resolved
+    // below, before any scan.
+    resetKitMemory()
+    set({
+      clips: [],
+      kits: [],
+      activeKitId: null,
+      workDirHandle: handle,
+      workDirName: handle.name,
+      workKitRoot: null,
+      workDirStatus: 'connected',
+      workDirPendingName: null,
+    })
 
     // One-shot rename of the pre-tilde archive folders before any
     // scan/listing runs — keeps the workdir tidy and avoids two
@@ -1939,75 +1932,22 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   disconnectWorkDir: async () => {
     await clearDirectoryHandle()
     set({ workDirStatus: 'none', workDirPendingName: null })
-    if (get().kitDirHandle) {
-      set({ clips: [], workDirHandle: null, workDirName: null, workKitRoot: null, ampPresets: [] })
-    } else {
-      resetKitMemory()
-      set({
-        clips: [],
-        kits: [],
-        activeKitId: null,
-        workDirHandle: null,
-        workDirName: null,
-        workKitRoot: null,
-        ampPresets: [],
-      })
-    }
-  },
-
-  pickKitDir: async () => {
-    if (!isFileSystemAccessSupported()) return false
-    const handle = await pickWorkDirectory('kitdir')
-    if (!handle) return false
-    // Switching the kit folder = changing the source of truth for
-    // kits. Drop the in-memory kit list and all per-kit bookkeeping
-    // BEFORE pointing outRoot at the new folder, so:
-    //   1) The new folder's contents are loaded as-is (no merge with
-    //      the previous folder's kits).
-    //   2) No leftover scheduleKitFlush / retry timer fires against
-    //      the new folder and copies a previous-folder kit into it.
-    // Disk on either side is untouched: we just re-orient Studio.
     resetKitMemory()
-    set({ kits: [], activeKitId: null, kitDirHandle: await resolveChosenKitRoot(handle), kitDirName: handle.name })
-    // Discover kits already living under the newly chosen folder.
-    await get().importKitsFromOutputDir().catch((err) => console.error('Auto-import after pickKitDir failed:', err))
-    return true
-  },
-
-  restoreKitDir: async () => {
-    if (!isFileSystemAccessSupported()) return false
-    const handle = await loadDirectoryHandle('kitdir')
-    if (!handle) return false
-    const granted = await verifyPermission(handle, true)
-    if (!granted) return false
-    // Adopting a dedicated kitDir moves outRoot off workDirHandle, so any scan
-    // already running against the workdir is now for the wrong folder.
-    outRootEpoch++
-    set({ kitDirHandle: await resolveChosenKitRoot(handle), kitDirName: handle.name })
-    // 起動時の復元でも同様に自動取り込み (ローカル ≥ IDB)
-    await get().importKitsFromOutputDir().catch((err) => console.error('Auto-import after restoreKitDir failed:', err))
-    return true
-  },
-
-  disconnectKitDir: async () => {
-    await clearDirectoryHandle('kitdir')
-    // Same reasoning as pickKitDir — drop kits keyed to the folder
-    // we just disconnected. Then fall back to scanning the library
-    // workdir if one is configured (kits live there by default when
-    // no dedicated kitDir is set).
-    resetKitMemory()
-    set({ kits: [], activeKitId: null, kitDirHandle: null, kitDirName: null })
-    if (get().workDirHandle) {
-      await get().importKitsFromOutputDir().catch((err) => console.error('Re-scan after disconnectKitDir failed:', err))
-    }
+    set({
+      clips: [],
+      kits: [],
+      activeKitId: null,
+      workDirHandle: null,
+      workDirName: null,
+      workKitRoot: null,
+      ampPresets: [],
+    })
   },
 
   importKitsFromOutputDir: async () => {
-    // Kits live under either a dedicated kit folder (kitDirHandle —
-    // e.g. Unity's Assets/HapbeatKits) or, if that's unset, directly
-    // under the library workdir. Match the same outRoot that
-    // KitExportSection uses when writing kits, so what gets read back
-    // matches what was written.
+    // Kits live in the work folder's kits/ (workKitRoot). Match the same
+    // outRoot that KitExportSection uses when writing kits, so what gets
+    // read back matches what was written.
     const { workDirHandle } = get()
     const outRoot = kitRootOf(get())
     if (!outRoot) return 0
@@ -2635,10 +2575,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // scan so that kits added/edited/removed via OS Explorer (or by
     // another tool) are picked up on next load.
     //
-    // `importKitsFromOutputDir` falls back to `workDirHandle` when no
-    // dedicated `kitDirHandle` is set, so it covers both layouts:
-    //   - workdir/<kitId>/<kitId>-manifest.json   (default — kits inside library)
-    //   - kitDir/<kitId>/<kitId>-manifest.json    (dedicated kit-out folder)
+    // `importKitsFromOutputDir` reads workKitRoot, which covers both layouts:
+    //   - workdir/kits/<kitId>/<kitId>-manifest.json   (default)
+    //   - workdir/<kitId>/<kitId>-manifest.json        (a work folder from before kits/)
     // Discovery falls back to any `*manifest*.json` so kits authored
     // under the legacy `manifest.json` name still load.
     //

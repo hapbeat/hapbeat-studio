@@ -60,7 +60,7 @@ afterEach(() => {
     kits: [],
     activeKitId: null,
     workDirHandle: null,
-    kitDirHandle: null,
+    workKitRoot: null,
     localFsStatus: 'idle',
     localFsLastMsg: '',
   })
@@ -78,7 +78,7 @@ describe('addEventToKit — disk source ownership', () => {
         size: sourceBytes.byteLength,
         arrayBuffer: async () => sourceBytes.buffer,
       })
-    useLibraryStore.setState({ kits: [kit], kitDirHandle: root })
+    useLibraryStore.setState({ kits: [kit], workKitRoot: root })
 
     const event: Omit<KitDefinition['events'][number], 'id'> = {
       eventId: '',
@@ -119,7 +119,7 @@ describe('addEventToKit — disk source ownership', () => {
     const root = { name: 'kits' } as FileSystemDirectoryHandle
     const blob = new Blob([new Uint8Array([1, 2, 3, 4])], { type: 'audio/wav' })
     mocks.readKitClipFile.mockResolvedValue(null)
-    useLibraryStore.setState({ kits: [kit], kitDirHandle: root })
+    useLibraryStore.setState({ kits: [kit], workKitRoot: root })
 
     const event: Omit<KitDefinition['events'][number], 'id'> = {
       eventId: '',
@@ -215,7 +215,7 @@ describe('flushKitFolderNow — source audio resolution', () => {
     })
     mocks.loadKitDiskCache.mockResolvedValue(null)
     mocks.saveKitDiskCache.mockResolvedValue(undefined)
-    useLibraryStore.setState({ kits: [kitWithAudio], kitDirHandle: root })
+    useLibraryStore.setState({ kits: [kitWithAudio], workKitRoot: root })
 
     const result = await useLibraryStore.getState().flushKitFolderNow(kit.id)
 
@@ -382,7 +382,7 @@ describe('Kit operation ordering', () => {
         }],
       }
     })
-    useLibraryStore.setState({ kits: [kitWithEvents], kitDirHandle: root })
+    useLibraryStore.setState({ kits: [kitWithEvents], workKitRoot: root })
 
     // Deliberately do not await the remove before requesting Save. Registering
     // both operations in the same turn reproduces the user's × → Save sequence.
@@ -459,7 +459,7 @@ describe('Kit folders with the strength key before DEC-103', () => {
   it('a manifest with parameters.intensity and no clip_gain is not taken in (not read as 1.0), and the status says to convert it', async () => {
     vi.stubGlobal('AudioContext', class { decodeAudioData() { return Promise.resolve({ duration: 0, numberOfChannels: 1, sampleRate: 16000 }) } })
     const root = { name: 'kits', getDirectoryHandle: vi.fn().mockRejectedValue(new DOMException('missing', 'NotFoundError')) } as unknown as FileSystemDirectoryHandle
-    useLibraryStore.setState({ kitDirHandle: root })
+    useLibraryStore.setState({ workKitRoot: root })
     scan(['stale-kit', { intensity: 0.3 }], ['new-kit', { clip_gain: 0.3 }], ['plain-kit', {}])
 
     const found = await useLibraryStore.getState().importKitsFromOutputDir()

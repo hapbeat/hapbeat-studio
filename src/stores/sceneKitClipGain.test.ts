@@ -141,7 +141,7 @@ describe('Scene clip gains from the project Kit (DEC-103)', () => {
     const { useSceneStore, useLibraryStore } = await openPage(folder)
     expect(sent(useSceneStore.getState()).fire).toBeCloseTo(0.25)
     const kitsDir = await folder.handle.getDirectoryHandle('kits')
-    useLibraryStore.setState({ kits: [kitDefinition(0.5)], kitDirHandle: kitsDir, workDirHandle: null })
+    useLibraryStore.setState({ kits: [kitDefinition(0.5)], workKitRoot: kitsDir, workDirHandle: null })
     await useLibraryStore.getState().updateKitEvent('kit-sports', 'ev-thump', { clipGain: 0.2 })
     expect(await useLibraryStore.getState().flushKitFolderNow('kit-sports')).not.toBeNull()
     const written = JSON.parse(folder.read('kits/sports-kit/sports-kit-manifest.json')!) as { events: Record<string, { parameters: { clip_gain: number } }> }

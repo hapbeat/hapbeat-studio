@@ -91,6 +91,22 @@
 }
 .workdir-chip:hover { border-color: rgba(124,92,191,0.4); }
 
+/* Kit panel header: where the Kits are (read-only; the work folder chip picks the folder). */
+.kit-folder-note {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+/* One-time notice: the separate Kit folder of older versions is no longer read. */
+.kit-folder-retired {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  background: rgba(251, 191, 36, 0.12);
+  border-bottom: 1px solid var(--border);
+}
+.kit-folder-retired > span { flex: 1; min-width: 0; }
+
 /* Icon-only buttons inside the chip. Text-style `+ Library` still fits
    because the padding is tight. */
 .workdir-icon-btn {

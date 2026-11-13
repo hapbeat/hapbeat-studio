@@ -353,9 +353,8 @@ function ShortcutHelp() {
 // ============================================================
 
 /**
- * Reusable folder chip — icon + path + action buttons in one compact pill.
- * Used in both the Clips panel header (library folder) and the Kit panel
- * header (kit-out folder). Keeps each folder UI next to the panel it scopes.
+ * Folder chip — icon + path + action buttons in one compact pill, in the Clips
+ * panel header (the work folder: clips/ and kits/ inside it).
  */
 interface FolderChipProps {
   icon: string
@@ -1231,9 +1230,8 @@ function KitEditor() {
   const getKitEventAudio = useLibraryStore((s) => s.getKitEventAudio)
   const showClipDetails = useLibraryStore((s) => s.showClipDetails)
   const workDirSupported = useLibraryStore((s) => s.workDirSupported)
-  const kitDirName = useLibraryStore((s) => s.kitDirName)
-  const pickKitDir = useLibraryStore((s) => s.pickKitDir)
-  const disconnectKitDir = useLibraryStore((s) => s.disconnectKitDir)
+  const retiredKitDirName = useLibraryStore((s) => s.retiredKitDirName)
+  const dismissRetiredKitDir = useLibraryStore((s) => s.dismissRetiredKitDir)
   const { isConnected: managerConnected, devices, send } = useHelperConnection()
   const { toast } = useToast()
   const getClipAudio = useLibraryStore((s) => s.getClipAudio)
@@ -1578,21 +1576,7 @@ function KitEditor() {
         <h3>Kits</h3>
         <span className="library-count">{kits.length}</span>
         {workDirSupported && (
-          <FolderChip
-            icon="&#x1F4E6;"
-            name={kitDirName}
-            onPick={pickKitDir}
-            onClear={disconnectKitDir}
-            label="Kit"
-            setTitle={kitDirName ? t('kitFolder.chip.title', { name: kitDirName }) : undefined}
-            emptyTitle={t('kitFolder.chip.empty')}
-            setLabel="+ Kit"
-            changeTitle={t('kitFolder.chip.change')}
-            clearTitle={t('kitFolder.chip.clear')}
-            setToast={t('kitFolder.chip.set')}
-            changedToast={t('kitFolder.chip.changed')}
-            clearedToast={t('kitFolder.chip.cleared')}
-          />
+          <span className="kit-folder-note" title={t('kitFolder.whereTitle')}>{t('kitFolder.where')}</span>
         )}
         <input type="text" className="kit-create-input" placeholder={placeholderName.current}
           onKeyDown={(e) => {
@@ -1608,6 +1592,12 @@ function KitEditor() {
           input.value = ''
         }}>Create</button>
       </div>
+      {retiredKitDirName && (
+        <div className="kit-folder-retired" role="note">
+          <span>{t('kitFolder.retired', { name: retiredKitDirName })}</span>
+          <button className="library-btn small" onClick={() => { void dismissRetiredKitDir() }}>{t('kitFolder.retiredDismiss')}</button>
+        </div>
+      )}
 
       {/* Kit list with inline details */}
       <div className="kit-list-container"
@@ -2154,11 +2144,9 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
     }, 500)
     return () => window.clearInterval(id)
   }, [])
-  const kitDirHandle = useLibraryStore((s) => s.kitDirHandle)
-  // Kit フォルダが設定されていればその直下、無ければ作業フォルダの kits/ の直下に `<kitId>/` を作る
+  // 作業フォルダの kits/ の直下に `<kitId>/` を作る
   // (kits/ が無く Kit が作業フォルダ直下にある古いフォルダは直下のまま。resolveWorkKitRoot)。
-  const workKitRoot = useLibraryStore((s) => s.workKitRoot)
-  const outRoot = kitDirHandle ?? workKitRoot
+  const outRoot = useLibraryStore((s) => s.workKitRoot)
 
   // Authoring state updates immediately; metadata persistence is debounced.
   // Pack output (generated WAVs + manifest) is committed only by Save Folder /
