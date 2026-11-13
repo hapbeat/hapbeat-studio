@@ -853,6 +853,22 @@ export async function findKitManifestHandle(
   return null
 }
 
+/** The folder under the work folder that holds the Kits (beside `clips/`). */
+export const WORK_KITS_DIR = 'kits'
+
+/**
+ * Where the Kits of a work folder are: `<work>/kits/` (made when missing). A work folder from before kits/
+ * (Kit folders directly in it, and no kits/) keeps its Kits where they are, so nothing has to be moved.
+ */
+export async function resolveWorkKitRoot(work: FileSystemDirectoryHandle): Promise<FileSystemDirectoryHandle> {
+  try { return await work.getDirectoryHandle(WORK_KITS_DIR) } catch { /* no kits/ yet */ }
+  for await (const entry of work.values()) {
+    if (entry.kind !== 'directory' || entry.name === 'clips' || isHiddenStudioDir(entry.name)) continue
+    if (await findKitManifestHandle(entry as FileSystemDirectoryHandle)) return work
+  }
+  return work.getDirectoryHandle(WORK_KITS_DIR, { create: true })
+}
+
 /**
  * Scan `root` for immediate subfolders that look like an exported Hapbeat Kit
  * (= contain a `<name>-manifest.json` or any `*manifest*.json` fallback). For

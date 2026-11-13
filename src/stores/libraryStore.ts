@@ -32,6 +32,7 @@ import {
   isHiddenStudioDir,
   ARCHIVE_KIT_DIR,
   findKitManifestHandle,
+  resolveWorkKitRoot,
   type DiscoveredKit,
   type KitDiskCache,
   type DirectoryHandleKey,
@@ -392,6 +393,11 @@ interface LibraryState {
    *  and merge them into the in-memory kits[] + clips[]. Called automatically
    *  when the kit output folder is chosen or restored on startup. */
   importKitsFromOutputDir: () => Promise<number>
+  /**
+   * Where the work folder's Kits are when no Kit folder is chosen: `<work>/kits/`, or the work folder itself for one
+   * from before kits/ (see resolveWorkKitRoot). Set with the work folder.
+   */
+  workKitRoot: FileSystemDirectoryHandle | null
   /** Files the last Kit scan refused for the strength key before DEC-103 (Kit manifests, kits-meta.json); 0 = none. */
   oldClipGainFiles: number
   /**
@@ -491,6 +497,14 @@ function savePersistedSort(filter: LibraryFilter): void {
   } catch { /* ignore — quota or disabled storage */ }
 }
 
+
+/**
+ * The folder whose subfolders are the Kits: the chosen Kit folder, else the work folder's kits/ (workKitRoot).
+ * The work folder itself is the last resort (before workKitRoot is resolved).
+ */
+function kitRootOf(s: { kitDirHandle: FileSystemDirectoryHandle | null; workKitRoot: FileSystemDirectoryHandle | null; workDirHandle: FileSystemDirectoryHandle | null }): FileSystemDirectoryHandle | null {
+  return s.kitDirHandle ?? s.workKitRoot ?? s.workDirHandle
+}
 
 /** Save clips metadata to the local work directory */
 async function saveClipsMetaToDir(handle: FileSystemDirectoryHandle, clips: LibraryClip[]) {
@@ -1084,7 +1098,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       state.setLocalFsStatus('idle')
       return null
     }
-    const outRoot = state.kitDirHandle ?? state.workDirHandle
+    const outRoot = kitRootOf(state)
     if (!outRoot) {
       // No folder selected — clear 'saving' status so the pill doesn't
       // stay stuck (the caller sets 'saving' before scheduleKitFlush,
@@ -1868,6 +1882,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // co-existing archive directories.
     try { await migrateLegacyArchiveFolders(handle) }
     catch (err) { console.warn('[pickWorkDir] archive migration failed:', err) }
+    set({ workKitRoot: await resolveWorkKitRoot(handle) })
 
     const existingFiles = await listClipFiles(handle)
     if (existingFiles.length > 0) {
@@ -1902,6 +1917,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // names directly and would otherwise expose stale legacy state.
     try { await migrateLegacyArchiveFolders(handle) }
     catch (err) { console.warn('[restoreWorkDir] archive migration failed:', err) }
+    set({ workKitRoot: await resolveWorkKitRoot(handle) })
     await get().loadAmpPresets()
     return true
   },
@@ -1922,7 +1938,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     await clearDirectoryHandle()
     set({ workDirStatus: 'none', workDirPendingName: null })
     if (get().kitDirHandle) {
-      set({ clips: [], workDirHandle: null, workDirName: null, ampPresets: [] })
+      set({ clips: [], workDirHandle: null, workDirName: null, workKitRoot: null, ampPresets: [] })
     } else {
       resetKitMemory()
       set({
@@ -1931,6 +1947,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         activeKitId: null,
         workDirHandle: null,
         workDirName: null,
+        workKitRoot: null,
         ampPresets: [],
       })
     }
@@ -1989,8 +2006,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // under the library workdir. Match the same outRoot that
     // KitExportSection uses when writing kits, so what gets read back
     // matches what was written.
-    const { kitDirHandle, workDirHandle } = get()
-    const outRoot = kitDirHandle ?? workDirHandle
+    const { workDirHandle } = get()
+    const outRoot = kitRootOf(get())
     if (!outRoot) return 0
 
     // Which folder generation this scan is FOR. A scan can run for many
@@ -2461,10 +2478,11 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   },
 
   oldClipGainFiles: 0,
+  workKitRoot: null,
 
   convertOldClipGainKeys: async () => {
-    const { kitDirHandle, workDirHandle } = get()
-    const outRoot = kitDirHandle ?? workDirHandle
+    const { workDirHandle } = get()
+    const outRoot = kitRootOf(get())
     if (!outRoot) return
     get().setLocalFsStatus('saving', storeMessage('clipGain.converting'))
     const converted: string[] = []
@@ -2963,8 +2981,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // Disk is the only source of truth. Prefer the original authoring audio in
     // `<kit>/source/`; install/stream outputs are a migration fallback for kits
     // created before `source/` was introduced. Never consult browser audio.
-    const { kits, kitDirHandle, workDirHandle } = get()
-    const outRoot = kitDirHandle ?? workDirHandle
+    const { kits } = get()
+    const outRoot = kitRootOf(get())
     if (!outRoot) return undefined
     let kitName = '', ev: KitEvent | undefined
     for (const k of kits) {
@@ -3048,8 +3066,8 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
     // Move the on-disk folder first. Studio must never hide a Kit from its
     // list if `_archive` could not be created and populated successfully.
-    const { workDirHandle, kitDirHandle } = get()
-    const outRoot = kitDirHandle ?? workDirHandle
+    const { workDirHandle } = get()
+    const outRoot = kitRootOf(get())
     if (!outRoot) {
       get().setLocalFsStatus(
         'error',
@@ -3116,8 +3134,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // Independence: copy the original bytes into `<kit>/source/` before the
     // event becomes visible. The selected folder is the durable source of
     // truth; browser storage is deliberately not involved.
-    const { kitDirHandle, workDirHandle: sourceWorkDirHandle } = get()
-    const outRoot = kitDirHandle ?? sourceWorkDirHandle
+    const outRoot = kitRootOf(get())
     if (!outRoot || !audioBlob) {
       get().setLocalFsStatus(
         'error',

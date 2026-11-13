@@ -6,6 +6,16 @@ Hapbeat Studio の変更履歴。形式は [Keep a Changelog](https://keepachang
 - **最新版** `https://studio.hapbeat.com/` は master の package.json バージョンを表示。
 - **凍結版** `https://studio.hapbeat.com/vX.Y/` は `vX.Y.Z` タグ push 時に作成（マイナー単位）。
 
+## [Unreleased]
+
+### Changed（変更）
+- 作業フォルダの Kit は、クリップの clips/ と並べて kits/ に置くようにした（Kit フォルダを別に選んだときは、そのフォルダの直下のまま）。kits/ が無く、作業フォルダの直下に Kit がある前からのフォルダは、今までどおり直下を読む
+- 組み込みのサンプルのクリップは、作業フォルダへ 1 回だけコピーする（記録は .studio-builtins.json）。消したり移したりしたサンプルを、次の起動で戻さない
+- フォルダを開くときのクリップの読み込みの表示は、新しいファイルがあるときだけ出す。clips-meta.json は一覧が変わったときだけ書く
+
+### Fixed（修正）
+- 強さを古いキー intensity で持つ Kit（0.8 以前の Studio で作ったもの）が一覧に 1 つも出ず「保存失敗」と出ていた。「古い形式の Kit」と表示し、「変換して開く」で clip_gain に書き換えて開けるようにした
+
 ## [1.0.0] - 2026-11-06
 
 ### Added（追加）

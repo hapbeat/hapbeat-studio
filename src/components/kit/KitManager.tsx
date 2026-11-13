@@ -2156,9 +2156,10 @@ function KitExportSection({ kit, isExporting, setIsExporting, managerConnected, 
     return () => window.clearInterval(id)
   }, [])
   const kitDirHandle = useLibraryStore((s) => s.kitDirHandle)
-  // kit-out dir が設定されていればそちらを、無ければ library workDir を root にする。
-  // どちらの場合も root 直下に `<kitId>/` フォルダを作る (kits/ 階層は挟まない)。
-  const outRoot = kitDirHandle ?? workDirHandle
+  // Kit フォルダが設定されていればその直下、無ければ作業フォルダの kits/ の直下に `<kitId>/` を作る
+  // (kits/ が無く Kit が作業フォルダ直下にある古いフォルダは直下のまま。resolveWorkKitRoot)。
+  const workKitRoot = useLibraryStore((s) => s.workKitRoot)
+  const outRoot = kitDirHandle ?? workKitRoot ?? workDirHandle
 
   // Authoring state updates immediately; metadata persistence is debounced.
   // Pack output (generated WAVs + manifest) is committed only by Save Folder /
