@@ -1742,8 +1742,6 @@ export const messages = defineMessages({
   'workFolder.chip.set': { ja: '作業フォルダを設定しました', en: 'Work folder set' },
   'workFolder.chip.changed': { ja: '作業フォルダを変更しました', en: 'Work folder changed' },
   'workFolder.chip.cleared': { ja: '作業フォルダの接続を解除しました', en: 'Work folder disconnected' },
-  'kitFolder.where': { ja: '作業フォルダ / kits', en: 'work folder / kits' },
-  'kitFolder.whereTitle': { ja: 'Kit は作業フォルダの kits/ の中に、Kit ごとのフォルダとして置かれます。Unity の SDK の Kits フォルダ（HapbeatKitsReadme があるフォルダ）を作業フォルダに選んだときは、その直下に置きます', en: 'Kits are folders in kits/ inside the work folder. When the work folder is the Unity SDK Kits folder (the one with HapbeatKitsReadme), they go directly in it.' },
   'kitFolder.retired': { ja: 'Kit フォルダを別に選ぶ機能はなくなり、Kit は作業フォルダの kits/ から読むようになりました。前に選んでいた Kit フォルダ「{name}」の Kit を使うには、それを kits/ として含むフォルダを作業フォルダに選んでください（Unity の SDK の Kits フォルダなら、そのフォルダを選べば直下を読みます）。フォルダの中身は変えていません', en: 'A separate Kit folder can no longer be chosen: Kits are read from kits/ in the work folder. To use the Kits of your previous Kit folder "{name}", choose a work folder that holds it as kits/ (a Unity SDK Kits folder can be chosen itself; its Kits are read directly). Nothing in the folder was changed.' },
   'kitFolder.retiredDismiss': { ja: '閉じる', en: 'Dismiss' },
   'kit.progress.samples': { ja: 'サンプルのクリップをコピー中です。しばらくお待ちください…', en: 'Copying sample clips, please wait…' },

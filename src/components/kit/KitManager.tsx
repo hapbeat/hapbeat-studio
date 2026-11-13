@@ -353,8 +353,8 @@ function ShortcutHelp() {
 // ============================================================
 
 /**
- * Folder chip — icon + path + action buttons in one compact pill, in the Clips
- * panel header (the work folder: clips/ and kits/ inside it).
+ * Folder chip — icon + path + action buttons in one compact pill, in the Kit
+ * tab's top bar (the work folder: clips/ and kits/ inside it, for both panels).
  */
 interface FolderChipProps {
   icon: string
@@ -362,6 +362,8 @@ interface FolderChipProps {
   onPick: () => Promise<boolean>
   onClear: () => Promise<void>
   label: string          // e.g. "Library" / "Kit"
+  /** Show `label` before the folder name (the top bar, where the chip is not next to a panel title). */
+  showLabel?: boolean
   setTitle?: string
   emptyTitle?: string
   setLabel?: string      // "+ Library" / "+ Kit"
@@ -373,7 +375,7 @@ interface FolderChipProps {
   clearedToast: string
 }
 function FolderChip({
-  icon, name, onPick, onClear, label,
+  icon, name, onPick, onClear, label, showLabel = false,
   setTitle, emptyTitle,
   setLabel, changeTitle, clearTitle, clearLabel = '×',
   setToast, changedToast, clearedToast,
@@ -382,6 +384,7 @@ function FolderChip({
   return (
     <span className="workdir-chip" title={name ? (setTitle ?? `${label}: ${name}`) : (emptyTitle ?? `Choose ${label} folder`)}>
       <span className="workdir-icon">{icon}</span>
+      {showLabel && name && <span className="workdir-label">{label}</span>}
       {name ? (
         <>
           <span className="workdir-path" title={name}>{name}</span>
@@ -404,6 +407,10 @@ function WorkDirBar() {
   const setViewMode = useLibraryStore((s) => s.setViewMode)
   const showClipDetails = useLibraryStore((s) => s.showClipDetails)
   const setShowClipDetails = useLibraryStore((s) => s.setShowClipDetails)
+  const workDirName = useLibraryStore((s) => s.workDirName)
+  const workDirSupported = useLibraryStore((s) => s.workDirSupported)
+  const pickWorkDir = useLibraryStore((s) => s.pickWorkDir)
+  const disconnectWorkDir = useLibraryStore((s) => s.disconnectWorkDir)
   const { devices } = useHelperConnection()
   const dev0 = devices[0]
   const volumeWiper = dev0?.volumeWiper ?? null
@@ -427,6 +434,27 @@ function WorkDirBar() {
         title={showClipDetails ? 'Hide clip details (duration, sample rate, tags…)' : 'Show clip details'}
       >i</button>
       <ShortcutHelp />
+      {workDirSupported && (
+        <>
+          <span className="workdir-divider" />
+          <FolderChip
+            icon="&#x1F4C2;"
+            name={workDirName}
+            onPick={pickWorkDir}
+            onClear={disconnectWorkDir}
+            label={t('workFolder.chip.label')}
+            showLabel
+            setTitle={workDirName ? t('workFolder.chip.title', { name: workDirName }) : undefined}
+            emptyTitle={t('workFolder.choose')}
+            setLabel={`+ ${t('workFolder.chip.label')}`}
+            changeTitle={t('workFolder.chip.change')}
+            clearTitle={t('workFolder.chip.clear')}
+            setToast={t('workFolder.chip.set')}
+            changedToast={t('workFolder.chip.changed')}
+            clearedToast={t('workFolder.chip.cleared')}
+          />
+        </>
+      )}
       {/* Pin the device pill to the right side of the bar — original
           layout used margin-left:auto on the pill itself; the shared
           DevicePill stays layout-neutral so this divider takes the
@@ -710,11 +738,7 @@ function ClipsPanel() {
   const updateClip = useLibraryStore((s) => s.updateClip)
   const commitClipRename = useLibraryStore((s) => s.commitClipRename)
   const workDirHandle = useLibraryStore((s) => s.workDirHandle)
-  const workDirName = useLibraryStore((s) => s.workDirName)
-  const workDirSupported = useLibraryStore((s) => s.workDirSupported)
   const demoMode = useLibraryStore((s) => s.demoMode)
-  const pickWorkDir = useLibraryStore((s) => s.pickWorkDir)
-  const disconnectWorkDir = useLibraryStore((s) => s.disconnectWorkDir)
   const refreshClipsFromDir = useLibraryStore((s) => s.refreshClipsFromDir)
   const getClipAudio = useLibraryStore((s) => s.getClipAudio)
   const addEventToKit = useLibraryStore((s) => s.addEventToKit)
@@ -1049,40 +1073,11 @@ function ClipsPanel() {
       onDrop={(e) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files.length > 0) handleImport(e.dataTransfer.files) }}
       onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
       onDragLeave={() => setDragOver(false)}>
-      <div className="panel-header">
+      {/* One-row header like the Kit panel: title + count + search / sort / import / refresh + list mode.
+          The work folder is chosen in the top bar (WorkDirBar): it holds both clips/ and kits/. */}
+      <div className="panel-header clips-panel-header">
         <h3>Clips</h3>
         <span className="library-count">{clips.length}</span>
-        {workDirSupported && (
-          <FolderChip
-            icon="&#x1F4C2;"
-            name={workDirName}
-            onPick={pickWorkDir}
-            onClear={disconnectWorkDir}
-            label={t('workFolder.chip.label')}
-            setTitle={workDirName ? t('workFolder.chip.title', { name: workDirName }) : undefined}
-            emptyTitle={t('workFolder.choose')}
-            setLabel={`+ ${t('workFolder.chip.label')}`}
-            changeTitle={t('workFolder.chip.change')}
-            clearTitle={t('workFolder.chip.clear')}
-            setToast={t('workFolder.chip.set')}
-            changedToast={t('workFolder.chip.changed')}
-            clearedToast={t('workFolder.chip.cleared')}
-          />
-        )}
-        <div className="panel-header-actions">
-          <button
-            className={`panel-mode-btn ${listMode === 'flat' ? 'active' : ''}`}
-            onClick={() => setListMode('flat')}
-            title="Flat list (all clips, no folders)"
-          >=</button>
-          <button
-            className={`panel-mode-btn ${listMode === 'tree' ? 'active' : ''}`}
-            onClick={() => setListMode('tree')}
-            title="Tree view (grouped by folder)"
-          >&#x25B8;</button>
-        </div>
-      </div>
-      <div className="library-toolbar">
         <input type="text" className="library-search" placeholder="Search..." value={filter.searchQuery}
           onChange={(e) => setFilter({ searchQuery: e.target.value })} />
         <select
@@ -1103,8 +1098,20 @@ function ClipsPanel() {
         </select>
         <input ref={fileInputRef} type="file" accept=".wav,.mp3,.ogg,.flac,.aac,.m4a,audio/*" multiple
           onChange={(e) => e.target.files && handleImport(e.target.files)} style={{ display: 'none' }} />
-        <button className="library-btn" onClick={() => fileInputRef.current?.click()}>+ Import</button>
-        <button className="library-btn" onClick={refreshClipsFromDir}>Refresh</button>
+        <button className="library-btn small" onClick={() => fileInputRef.current?.click()}>+ Import</button>
+        <button className="library-btn small" onClick={refreshClipsFromDir}>Refresh</button>
+        <div className="panel-header-actions">
+          <button
+            className={`panel-mode-btn ${listMode === 'flat' ? 'active' : ''}`}
+            onClick={() => setListMode('flat')}
+            title="Flat list (all clips, no folders)"
+          >=</button>
+          <button
+            className={`panel-mode-btn ${listMode === 'tree' ? 'active' : ''}`}
+            onClick={() => setListMode('tree')}
+            title="Tree view (grouped by folder)"
+          >&#x25B8;</button>
+        </div>
       </div>
       <AmpPresetBar />
       <div className="library-list">
@@ -1229,7 +1236,6 @@ function KitEditor() {
   const addEventToKit = useLibraryStore((s) => s.addEventToKit)
   const getKitEventAudio = useLibraryStore((s) => s.getKitEventAudio)
   const showClipDetails = useLibraryStore((s) => s.showClipDetails)
-  const workDirSupported = useLibraryStore((s) => s.workDirSupported)
   const retiredKitDirName = useLibraryStore((s) => s.retiredKitDirName)
   const dismissRetiredKitDir = useLibraryStore((s) => s.dismissRetiredKitDir)
   const { isConnected: managerConnected, devices, send } = useHelperConnection()
@@ -1575,9 +1581,6 @@ function KitEditor() {
       <div className="panel-header kit-panel-header">
         <h3>Kits</h3>
         <span className="library-count">{kits.length}</span>
-        {workDirSupported && (
-          <span className="kit-folder-note" title={t('kitFolder.whereTitle')}>{t('kitFolder.where')}</span>
-        )}
         <input type="text" className="kit-create-input" placeholder={placeholderName.current}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {

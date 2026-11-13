@@ -78,6 +78,8 @@
   max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .workdir-divider { width: 1px; height: 14px; background: var(--border); margin: 0 2px; }
+.workdir-label { font-size: 14px; color: var(--text-secondary); white-space: nowrap; }
+.workdir-bar .workdir-path { max-width: 40ch; }
 
 /* Compact chip: groups icon + path + icon-buttons into one pill so the
    two folder UIs shrink predictably on narrow widths. */
@@ -91,12 +93,6 @@
 }
 .workdir-chip:hover { border-color: rgba(124,92,191,0.4); }
 
-/* Kit panel header: where the Kits are (read-only; the work folder chip picks the folder). */
-.kit-folder-note {
-  font-size: 12px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-}
 /* One-time notice: the separate Kit folder of older versions is no longer read. */
 .kit-folder-retired {
   display: flex; align-items: center; gap: 8px;
@@ -377,7 +373,6 @@
 .list-section-header { padding: 3px 10px; font-size: 14px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; background: rgba(255,255,255,0.02); border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 1; }
 
 /* ---- Toolbar ---- */
-.library-toolbar { display: flex; gap: 4px; padding: 4px 6px; border-bottom: 1px solid var(--border); }
 .library-search { flex: 1; min-width: 50px; padding: 3px 7px; font-size: 16px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border); border-radius: var(--radius); font-family: var(--font-ui); }
 .library-search:focus { outline: none; border-color: var(--accent); }
 .library-sort {
@@ -567,6 +562,14 @@
 .kit-panel-header { gap: 6px; }
 .kit-panel-header .kit-create-input { flex: 1 1 auto; }
 .kit-panel-header .library-btn.small { flex: 0 0 auto; }
+/* Clips panel 1-row layout (same as the Kit panel): search shrinks first. */
+.clips-panel-header .library-search { flex: 1 1 auto; min-width: 48px; }
+/* The sort names are long; the select shrinks (down to its arrow + a few characters) before the buttons do. */
+.clips-panel-header .library-sort { flex: 0 1 auto; min-width: 80px; max-width: 150px; }
+.clips-panel-header .library-btn.small { flex: 0 0 auto; }
+.clips-panel-header .panel-header-actions { margin-left: 0; }
+/* The two panel headers line up side by side. */
+.clips-panel-header, .kit-panel-header { box-sizing: border-box; min-height: 41px; }
 
 /* ---- Kit List (inline expandable) ---- */
 .kit-list-container { flex: 1; overflow-y: auto; }
