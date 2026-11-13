@@ -1,7 +1,7 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { basename, resolve, join } from 'path'
-import { promises as fs, readFileSync } from 'fs'
+import { promises as fs, existsSync, readFileSync } from 'fs'
 import { execFile, execSync } from 'child_process'
 import { promisify } from 'util'
 import {
@@ -662,17 +662,28 @@ const FIRMWARE_REPO_DIRS: Array<{ repo: string; dir: string }> = [
 // If an env ever shows a stale version, rebuild that env → merge_firmware.py
 // refreshes dist/<env>/variant.json. (Removing dist/ entirely was tried but it
 // broke persistence: building one env then made the others vanish.)
-// A Studio git worktree (repos-tools/.claude/worktrees/<name>) sits two
-// levels deeper, so its workspace root is ../../../../ — without this
-// base a dev server started from a worktree listed no local builds at all.
-const FIRMWARE_BASES = ['../../repos-firmware', '../../../../repos-firmware', '..']
+// The workspace's repos-firmware/ is found by walking up from this folder, so a
+// dev server started from a Studio git worktree (repos-tools/hapbeat-studio/
+// .claude/worktrees/<name>, or any other depth) lists the local builds too —
+// fixed relative bases missed the worktree depth and listed none.
+function findReposFirmware(): string[] {
+  let dir = __dirname
+  for (;;) {
+    const candidate = join(dir, 'repos-firmware')
+    if (existsSync(candidate)) return [candidate]
+    const parent = resolve(dir, '..')
+    if (parent === dir) return []
+    dir = parent
+  }
+}
+const FIRMWARE_BASES = [...findReposFirmware(), resolve(__dirname, '..')]
 
 const FIRMWARE_BUILD_REPOS = FIRMWARE_REPO_DIRS.flatMap(({ repo, dir }) =>
   FIRMWARE_BASES.flatMap((base) => {
-    const srcDir = resolve(__dirname, `${base}/${dir}/src`)
+    const srcDir = resolve(base, dir, 'src')
     return [
-      { repo, root: resolve(__dirname, `${base}/${dir}/dist`), srcDir },
-      { repo, root: resolve(__dirname, `${base}/${dir}/.pio/build`), srcDir },
+      { repo, root: resolve(base, dir, 'dist'), srcDir },
+      { repo, root: resolve(base, dir, '.pio', 'build'), srcDir },
     ]
   }),
 )
@@ -681,7 +692,7 @@ const FIRMWARE_BUILD_REPOS = FIRMWARE_REPO_DIRS.flatMap(({ repo, dir }) =>
 // for the snapshot-cache pruning pass (see readValidEnvNames).
 const FIRMWARE_REPO_ROOTS: FirmwareRepoRoot[] = FIRMWARE_REPO_DIRS.map(({ repo, dir }) => ({
   repo,
-  dirs: FIRMWARE_BASES.map((base) => resolve(__dirname, `${base}/${dir}`)),
+  dirs: FIRMWARE_BASES.map((base) => resolve(base, dir)),
 }))
 
 /**
