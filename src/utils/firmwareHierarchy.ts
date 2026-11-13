@@ -52,14 +52,15 @@ export function isHapbeatEntry(e: FirmwareLibraryEntry): boolean {
 
 /**
  * `duo_wl_v4` → `{ family: 'duo', hw: 'v4' }`,
- * `band_wl_twin_v1` → `{ family: 'band', hw: 'twin_v1' }` (the two-motor Band).
+ * `band_wl_single_v5` → `{ family: 'band', hw: 'single_v5' }` (one motor),
+ * `band_wl_twin_v1` → `{ family: 'band', hw: 'twin_v1' }` (two motors).
  * Non-Hapbeat boards (`atom_s3`), unparsable ids and undefined → null.
  */
 export function parseHapbeatBoard(
   board?: string | null,
 ): { family: 'duo' | 'band'; hw: string } | null {
   if (!board) return null
-  const m = /^(duo|band)_wl_((?:twin_)?v\d+)$/.exec(board)
+  const m = /^(duo|band)_wl_((?:single_|twin_)?v\d+)$/.exec(board)
   if (!m) return null
   return { family: m[1] as 'duo' | 'band', hw: m[2] }
 }
@@ -68,23 +69,19 @@ export function parseHapbeatBoard(
  * Board revisions that run another revision's firmware (same GPIO map) and
  * report its board id: shown on that revision's chip so they can be found.
  */
-const SHARED_REVISIONS: Record<string, string[]> = { 'band:v5': ['v5.1'] }
-
-/** First Band revision sold as Single / Twin (one motor / two motors). */
-const BAND_SINGLE_FROM = 5
+const SHARED_REVISIONS: Record<string, string[]> = { 'band:single_v5': ['v5.1'] }
 
 /**
- * Chip text for a hardware revision: from Band v5 the line is split into
- * "Single v5 / v5.1" and "Twin v1"; older revisions and Duo stay "v4".
+ * Chip text for a hardware revision: from Band v5 the boards are Single (one
+ * motor, `single_v5` → "Single v5 / v5.1") and Twin (two motors, `twin_v1` →
+ * "Twin v1"); older revisions and Duo stay "v4".
  */
 export function hwLabel(family: FirmwareFamily, hw: string): string {
+  const m = /^(?:(single|twin)_)?(v\d+)$/.exec(hw)
+  const line = m?.[1] === 'single' ? 'Single ' : m?.[1] === 'twin' ? 'Twin ' : ''
+  const rev = m ? m[2] : hw
   const shared = SHARED_REVISIONS[`${family}:${hw}`] ?? []
-  const name = [hw, ...shared].join(' / ')
-  if (family !== 'band') return name
-  const twin = /^twin_(v\d+)$/.exec(hw)
-  if (twin) return `Twin ${twin[1]}`
-  const n = /^v(\d+)$/.exec(hw)
-  return n && Number(n[1]) >= BAND_SINGLE_FROM ? `Single ${name}` : name
+  return line + [rev, ...shared].join(' / ')
 }
 
 /** Level-1 bucket for a library entry. */
@@ -99,11 +96,11 @@ export function hwOfEntry(e: FirmwareLibraryEntry): string | null {
   return parseHapbeatBoard(entryBoard(e))?.hw ?? null
 }
 
-/** Natural order for `vN` revisions: v2 < v3 < v10, then the Twin ones (twin_v1 < twin_v2). */
+/** Natural order for `vN` revisions: v2 < v3 < v10, then Single (single_v5 < single_v6), then Twin (twin_v1 < twin_v2). */
 function compareHw(a: string, b: string): number {
   const key = (s: string): [number, number] | null => {
-    const m = /^(twin_)?v(\d+)$/.exec(s)
-    return m ? [m[1] ? 1 : 0, parseInt(m[2], 10)] : null
+    const m = /^(?:(single|twin)_)?v(\d+)$/.exec(s)
+    return m ? [m[1] === 'single' ? 1 : m[1] === 'twin' ? 2 : 0, parseInt(m[2], 10)] : null
   }
   const ka = key(a)
   const kb = key(b)

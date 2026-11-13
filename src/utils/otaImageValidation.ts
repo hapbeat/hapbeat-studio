@@ -39,6 +39,8 @@ export function chipIdForBoard(board: string | null | undefined): number | null 
     case 'band_wl_v2':
     case 'band_wl_v3':
     case 'band_wl_v4':
+    case 'band_wl_single_v5':
+    case 'band_wl_twin_v1':
       return ESP_CHIP_ID_ESP32_S3
     default:
       return null

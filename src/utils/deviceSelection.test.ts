@@ -29,8 +29,8 @@ describe('connectedHapbeats', () => {
   it('counts a device on both USB and Wi-Fi once', () => {
     const out = connectedHapbeats(
       [lan('192.168.0.10')],
-      { '192.168.0.10': { board: 'band_wl_v5' } },
-      [{ id: 'usb-1', info: { wifi_ip: '192.168.0.10', board: 'band_wl_v5' } }],
+      { '192.168.0.10': { board: 'band_wl_single_v5' } },
+      [{ id: 'usb-1', info: { wifi_ip: '192.168.0.10', board: 'band_wl_single_v5' } }],
     )
     expect(out).toEqual([{ lanIp: '192.168.0.10', usbPortId: 'usb-1' }])
   })
@@ -40,7 +40,7 @@ describe('connectedHapbeats', () => {
       [lan('192.168.0.10', false), lan('192.168.0.20', true, 'sensor'), lan('192.168.0.30')],
       { '192.168.0.30': { board: 'atom_s3' } },
       [
-        { id: 'usb-1', info: { board: 'band_wl_v5', wifi_ip: '0.0.0.0' } },
+        { id: 'usb-1', info: { board: 'band_wl_single_v5', wifi_ip: '0.0.0.0' } },
         { id: 'usb-2', info: null },
       ],
     )
@@ -58,9 +58,9 @@ describe('usbUiTarget', () => {
   }
 
   it('targets the USB config device when no selected Wi-Fi device is online', () => {
-    const t = usbUiTarget({ ...base, serialInfo: { name: 'band5', mac: 'AA:01', wifi_ip: '0.0.0.0', board: 'band_wl_v5', serial_ui_config: 1 } })
+    const t = usbUiTarget({ ...base, serialInfo: { name: 'band5', mac: 'AA:01', wifi_ip: '0.0.0.0', board: 'band_wl_single_v5', serial_ui_config: 1 } })
     expect(t).toEqual({ serialId: 'serial:AA:01', name: 'band5', lanIp: null, serialWrite: true })
-    const old = usbUiTarget({ ...base, serialInfo: { name: 'band5', mac: 'AA:01', board: 'band_wl_v5' } })
+    const old = usbUiTarget({ ...base, serialInfo: { name: 'band5', mac: 'AA:01', board: 'band_wl_single_v5' } })
     expect(old?.serialWrite).toBe(false)
   })
 

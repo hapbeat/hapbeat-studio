@@ -36,8 +36,8 @@ const BOARD_LABELS: Record<string, string> = {
   band_wl_v3: 'BandWL v3',
   band_wl_v4: 'BandWL v4',
   // From v5 the Band comes as Single (one motor) and Twin (two motors).
-  // v5.1 runs the v5 firmware (same GPIO map) and reports band_wl_v5.
-  band_wl_v5: 'BandWL Single v5 / v5.1',
+  // Single v5.1 runs the Single v5 firmware (same GPIO map) and reports band_wl_single_v5.
+  band_wl_single_v5: 'BandWL Single v5 / v5.1',
   band_wl_twin_v1: 'BandWL Twin v1',
   atom_s3: 'M5 ATOM S3',
   atom_lite: 'M5 ATOM Lite',
@@ -260,12 +260,12 @@ export function inferVariantFromEnv(env: string): {
     transport = 'mqtt'
   }
   // Board inference for the receiver necklace/band naming scheme
-  // (band_twin_v1 → band_wl_twin_v1: the two-motor Band).
+  // (band_single_v5 → band_wl_single_v5, band_twin_v1 → band_wl_twin_v1).
   let board: string | undefined
-  const m = e.match(/(necklace|duo|band)[_-]?(twin[_-]?)?(v\d+)/)
+  const m = e.match(/(necklace|duo|band)[_-]?(?:(single|twin)[_-]?)?(v\d+)/)
   if (m) {
     const family = m[1] === 'necklace' || m[1] === 'duo' ? 'duo' : 'band'
-    board = `${family}_wl_${m[2] ? 'twin_' : ''}${m[3]}`
+    board = `${family}_wl_${m[2] ? `${m[2]}_` : ''}${m[3]}`
   }
   // `<env>_pwm` = MCU-direct PWM output build (band_v4_pwm).
   if (/_pwm/.test(e)) return { role, transport, board, hapticOutput: 'pwm' }

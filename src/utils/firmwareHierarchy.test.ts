@@ -34,6 +34,7 @@ describe('parseHapbeatBoard', () => {
   it('Hapbeat board を family + hw に分解する', () => {
     expect(parseHapbeatBoard('duo_wl_v4')).toEqual({ family: 'duo', hw: 'v4' })
     expect(parseHapbeatBoard('band_wl_v2')).toEqual({ family: 'band', hw: 'v2' })
+    expect(parseHapbeatBoard('band_wl_single_v5')).toEqual({ family: 'band', hw: 'single_v5' })
     expect(parseHapbeatBoard('band_wl_twin_v1')).toEqual({ family: 'band', hw: 'twin_v1' })
   })
   it('非 Hapbeat / 未定義 / 解釈不能は null', () => {
@@ -84,25 +85,27 @@ describe('listFamilies / listHw', () => {
     ]
     expect(listHw(many, 'band')).toEqual(['v2', 'v3', 'v10'])
   })
-  it('Band Twin は BandWL に入り、Single の後に並ぶ', () => {
+  it('Band Single / Twin は BandWL に入り、v4 → Single → Twin の順に並ぶ', () => {
     const lib = [
       entry('band_twin_v1', { board: 'band_wl_twin_v1', hapbeat: true }),
-      entry('band_v5', { board: 'band_wl_v5', hapbeat: true }),
+      entry('band_single_v5', { board: 'band_wl_single_v5', hapbeat: true }),
       entry('band_v4', { board: 'band_wl_v4', hapbeat: true }),
     ]
     expect(familyOfEntry(lib[0])).toBe('band')
     expect(hwOfEntry(lib[0])).toBe('twin_v1')
-    expect(listHw(lib, 'band')).toEqual(['v4', 'v5', 'twin_v1'])
+    expect(hwOfEntry(lib[1])).toBe('single_v5')
+    expect(listHw(lib, 'band')).toEqual(['v4', 'single_v5', 'twin_v1'])
     // board が無くても env 名から推定する
     expect(hwOfEntry(entry('band_twin_v1', { hapbeat: true }))).toBe('twin_v1')
+    expect(hwOfEntry(entry('band_single_v5', { hapbeat: true }))).toBe('single_v5')
   })
 })
 
 describe('hwLabel', () => {
-  it('Band は v5 から Single / Twin と書く（v5.1 は v5 のファーム）', () => {
+  it('Band は v5 から Single / Twin と書く（Single v5.1 は Single v5 のファーム）', () => {
     expect(hwLabel('band', 'v4')).toBe('v4')
-    expect(hwLabel('band', 'v5')).toBe('Single v5 / v5.1')
-    expect(hwLabel('band', 'v6')).toBe('Single v6')
+    expect(hwLabel('band', 'single_v5')).toBe('Single v5 / v5.1')
+    expect(hwLabel('band', 'single_v6')).toBe('Single v6')
     expect(hwLabel('band', 'twin_v1')).toBe('Twin v1')
     expect(hwLabel('duo', 'v4')).toBe('v4')
   })

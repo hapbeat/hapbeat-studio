@@ -85,7 +85,7 @@ describe('carrySelection (tab switch)', () => {
 
   it('carries a Manage USB card as the Wi-Fi IP of the same device', () => {
     useSerialMaster.setState({
-      knownPorts: [usbPort('usb-1', { mac: 'AA:BB:CC:DD:EE:01', wifi_ip: '192.168.0.10', board: 'band_wl_v5' })],
+      knownPorts: [usbPort('usb-1', { mac: 'AA:BB:CC:DD:EE:01', wifi_ip: '192.168.0.10', board: 'band_wl_single_v5' })],
       selectedPortIds: ['usb-1'],
       selectedPortId: 'usb-1',
     })

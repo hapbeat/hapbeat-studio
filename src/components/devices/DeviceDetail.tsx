@@ -112,14 +112,15 @@ function FirmwareUpdateChip({
  * tab — DSP (aic3204-full-dsp-registers.md) is DRC/3D/Beep/AGC, split from
  * EQ (biquad bands + 1st-order IIR + profile selector) purely for tab width.
  */
-/** BandWL v5 drives its DRV8850 from MCU PWM on every unit (no experiment
- *  flag), so the board id alone enables the bench tab. */
-const BAND_WL_V5_BOARD = 'band_wl_v5'
+/** BandWL Single v5 / v5.1 and Twin v1 drive DRV8850 bridges from MCU PWM on
+ *  every unit (no experiment flag), so the board id alone enables the bench
+ *  tab (the helper does not relay get_info's `haptic_driver` over Wi-Fi). */
+const DRV8850_BOARDS: ReadonlySet<string> = new Set(['band_wl_single_v5', 'band_wl_twin_v1'])
 
 /** Whether the node gets the PWM bench sub-tab: the band_v4_pwm build
- *  (get_info `haptic_pwm`) or any BandWL v5. */
+ *  (get_info `haptic_pwm`) or any DRV8850 Band (Single v5 / Twin v1). */
 function hasPwmBench(info: { board?: string; haptic_pwm?: unknown } | undefined): boolean {
-  return !!info?.haptic_pwm || info?.board === BAND_WL_V5_BOARD
+  return !!info?.haptic_pwm || DRV8850_BOARDS.has(info?.board ?? '')
 }
 
 function computeSubTabs(
@@ -1104,7 +1105,7 @@ export function DeviceDetail() {
           <BandWlV4PwmSection
             device={device}
             cachedInfo={cachedInfo}
-            driver={cachedInfo?.board === BAND_WL_V5_BOARD ? 'drv8850' : undefined}
+            driver={DRV8850_BOARDS.has(cachedInfo?.board ?? '') ? 'drv8850' : undefined}
             sendTo={sendTo}
             status={pwmStatus}
             probeTick={pwmProbeTick}

@@ -142,7 +142,7 @@ describe('exportKitAsPack — source audio safety', () => {
     }
     expect(await targetDevice(kit())).toEqual({ firmware_version_min: '0.1.0' })
     expect(await targetDevice(kit({ firmware_version_min: '0.5.3' }))).toEqual({ firmware_version_min: '0.1.0' })
-    expect(await targetDevice(kit({ firmware_version_min: '1.2.0', board: 'band_wl_v5' }))).toEqual({ firmware_version_min: '1.0.0', board: 'band_wl_v5' })
+    expect(await targetDevice(kit({ firmware_version_min: '1.2.0', board: 'band_wl_single_v5' }))).toEqual({ firmware_version_min: '1.0.0', board: 'band_wl_single_v5' })
     const legacy = kit({ firmware_version_min: '0.1.0' })
     ;(legacy.targetDevice as Record<string, unknown>).firmware_version_max = '0.9.0'
     expect(await targetDevice(legacy)).not.toHaveProperty('firmware_version_max')
