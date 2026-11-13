@@ -30,6 +30,8 @@ import {
   STUDIO_KIT_METADATA_FILENAME,
   migrateLegacyArchiveFolders,
   isHiddenStudioDir,
+  ARCHIVE_KIT_DIR,
+  findKitManifestHandle,
   type DiscoveredKit,
   type KitDiskCache,
   type DirectoryHandleKey,
@@ -45,8 +47,9 @@ import { getActiveHelperChannel } from '@/utils/helperRequest'
 import { notifyKitManifestWritten } from '@/utils/kitManifestWrites'
 import { KIT_CREDITS_FILENAME, writeKitCredits } from '@/utils/materials'
 import { documentMessage } from '@/i18n/messages'
-import { CLIP_GAIN_RENAME_SCRIPT, staleKeyEntries } from '@/utils/sceneCueTable'
+import { staleKeyEntries } from '@/utils/sceneCueTable'
 import { staleManifestEntries } from '@/utils/sceneKit'
+import { convertClipGainText, type ClipGainFileKind } from '@/utils/clipGainConvert'
 
 /** Store-side copy for the log drawer; follows the locale the I18nProvider set on <html lang>. */
 const storeMessage = documentMessage
@@ -389,6 +392,14 @@ interface LibraryState {
    *  and merge them into the in-memory kits[] + clips[]. Called automatically
    *  when the kit output folder is chosen or restored on startup. */
   importKitsFromOutputDir: () => Promise<number>
+  /** Files the last Kit scan refused for the strength key before DEC-103 (Kit manifests, kits-meta.json); 0 = none. */
+  oldClipGainFiles: number
+  /**
+   * Renames the strength key before DEC-103 (intensity → clip_gain / clipGain, libraryIntensity → libraryClipGain)
+   * in the Kit folders and the work folder's metadata, then scans the Kits again. The same rename as
+   * scripts/rename-intensity-to-clip-gain.py, so old Kits open without running the script.
+   */
+  convertOldClipGainKeys: () => Promise<void>
   syncClipsFromDir: () => Promise<void>
   /** Re-scan work dir clips/ folder and update clips list (adds new, removes deleted) */
   refreshClipsFromDir: () => Promise<void>
@@ -487,6 +498,27 @@ async function saveClipsMetaToDir(handle: FileSystemDirectoryHandle, clips: Libr
 }
 
 /**
+ * The built-in clips already copied into a work folder once (ids), in the folder itself: a built-in is copied only
+ * once, so one the user deleted or moved out of clips/template is not copied back on the next start. A built-in added
+ * by a later Studio release is not listed yet and is copied once.
+ */
+const BUILTINS_SEEDED_FILE = '.studio-builtins.json'
+
+async function readSeededBuiltins(handle: FileSystemDirectoryHandle): Promise<Set<string> | null> {
+  const data = await readMetadataJson<{ seeded?: unknown }>(handle, BUILTINS_SEEDED_FILE)
+  if (!data || !Array.isArray(data.seeded)) return null
+  return new Set(data.seeded.filter((x): x is string => typeof x === 'string'))
+}
+
+async function addSeededBuiltins(handle: FileSystemDirectoryHandle, ids: Iterable<string>): Promise<void> {
+  const seeded = (await readSeededBuiltins(handle)) ?? new Set<string>()
+  const before = seeded.size
+  for (const id of ids) seeded.add(id)
+  if (seeded.size === before && before > 0) return
+  await writeMetadataJson(handle, BUILTINS_SEEDED_FILE, { seeded: [...seeded].sort() })
+}
+
+/**
  * The events of kits-meta.json that still carry `intensity` and no `clipGain` (DEC-103),
  * as `<kit>/<event>`: such a list is not used, as migrateKit would read their strength as 1.0.
  */
@@ -500,7 +532,7 @@ function staleMetaEvents(kits: KitDefinition[]): string[] {
 
 /** Says (in the folder status, until the next successful write) that `file` was not read: it still has the key before DEC-103. */
 function reportStaleClipGain(file: string, entries: string[]): void {
-  const msg = storeMessage('clipGain.staleKey', { file, entries: entries.join(', '), script: CLIP_GAIN_RENAME_SCRIPT })
+  const msg = storeMessage('clipGain.staleKitKey', { file, entries: entries.join(', ') })
   console.warn('[libraryStore]', msg)
   useLibraryStore.getState().setLocalFsStatus('error', msg)
   staleMetaMsg = msg
@@ -1611,10 +1643,16 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // Fill any missing built-ins (first run after upgrade, or user removed
       // template/ but wants the default library back). Without a folder there
       // is nowhere to copy them: pickWorkDir seeds the chosen folder instead.
-      const { builtinIndex, clips } = get()
-      if (restored && builtinIndex && builtinIndex.length > 0) {
+      const { builtinIndex, clips, workDirHandle } = get()
+      if (restored && workDirHandle && builtinIndex && builtinIndex.length > 0) {
         const have = new Set(clips.map((c) => c.builtinId).filter((x): x is string => !!x))
-        const missing = builtinIndex.some((b) => !have.has(b.id))
+        let seeded = await readSeededBuiltins(workDirHandle)
+        if (!seeded && have.size > 0) {
+          // A folder seeded before the record existed: everything in this index counts as copied once.
+          await addSeededBuiltins(workDirHandle, builtinIndex.map((b) => b.id)).catch((err) => console.warn('[loadLibrary] built-in record write failed:', err))
+          seeded = new Set(builtinIndex.map((b) => b.id))
+        }
+        const missing = builtinIndex.some((b) => !have.has(b.id) && !seeded?.has(b.id))
         if (missing) await get().importAllBuiltinClips()
       }
       set({ isLoading: false })
@@ -1725,6 +1763,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const existingBuiltinIds = new Set(
       get().clips.map((c) => c.builtinId).filter((x): x is string => !!x)
     )
+    // Copied once already (see BUILTINS_SEEDED_FILE): not copied again, even when no longer in clips/.
+    const seededBefore = workDirHandle ? await readSeededBuiltins(workDirHandle) : null
+    for (const id of seededBefore ?? []) existingBuiltinIds.add(id)
 
     // Only the not-yet-imported built-ins count toward the progress total,
     // so the bar reflects the real work (skipped ones don't inflate it).
@@ -1776,6 +1817,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         toAdd.push(clip)
       }
 
+      if (workDirHandle) {
+        await addSeededBuiltins(workDirHandle, [...existingBuiltinIds, ...toAdd.map((c) => c.builtinId!)])
+          .catch((err) => console.warn('[importAllBuiltinClips] built-in record write failed:', err))
+      }
       if (toAdd.length === 0) {
         // Nothing imported — could be "all already present" or "all failed".
         if (failed > 0) get().setLocalFsStatus('error', `built-in import 失敗: ${failed} 件取得不可`)
@@ -2037,7 +2082,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
     const ctx = new AudioContext()
     const now = new Date().toISOString()
-    const updatedClips = [...get().clips]
+    const updatedClips = get().clips
     // We need the existing kits for ev.id / audio preservation matching
     // below. At init time, restoreKitDir runs us BEFORE loadLibrary has
     // populated zustand state, so `get().kits` may be empty even though
@@ -2401,19 +2446,72 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     // metadata of the folder the user actually has open now.
     if (!isStillCurrent()) return 0
 
-    set({ clips: updatedClips, kits: updatedKits })
-    if (workDirHandle) {
-      await saveClipsMetaToDir(workDirHandle, updatedClips)
-      await saveKitsMetaToDir(workDirHandle, updatedKits)
-    }
+    // The scan does not change the library (kits and clips are independent), so clips-meta.json is not written here.
+    set({ kits: updatedKits })
+    if (workDirHandle) await saveKitsMetaToDir(workDirHandle, updatedKits)
     // One report for every refused file (the status holds one message).
     const refused = [...(staleMeta.length ? [{ folder: `${workDirHandle?.name ?? ''}/${KITS_META_FILE}`, entries: staleMeta }] : []), ...staleKits]
+    set({ oldClipGainFiles: refused.length })
     if (refused.length) {
       reportStaleClipGain(refused.map((r) => r.folder).join(', '),
         refused.length === 1 ? refused[0].entries : refused.flatMap((r) => r.entries.map((e) => `${r.folder}: ${e}`)))
     }
     // A refused Kit folder counts as found: syncClipsFromDir must not show kits-meta.json's copy of it instead.
     return importedCount + staleKits.length
+  },
+
+  oldClipGainFiles: 0,
+
+  convertOldClipGainKeys: async () => {
+    const { kitDirHandle, workDirHandle } = get()
+    const outRoot = kitDirHandle ?? workDirHandle
+    if (!outRoot) return
+    get().setLocalFsStatus('saving', storeMessage('clipGain.converting'))
+    const converted: string[] = []
+    const skipped: string[] = []
+    const convertFile = async (file: FileSystemFileHandle, kind: ClipGainFileKind, label: string) => {
+      const res = convertClipGainText(kind, await (await file.getFile()).text())
+      if (!res) return
+      if ('skip' in res) { skipped.push(`${label} (${res.skip})`); return }
+      const writable = await file.createWritable()
+      await writable.write(res.text)
+      await writable.close()
+      converted.push(label)
+    }
+    const optionalFile = async (dir: FileSystemDirectoryHandle, name: string) => {
+      try { return await dir.getFileHandle(name) } catch { return null }
+    }
+    try {
+      for await (const entry of outRoot.values()) {
+        if (entry.kind !== 'directory' || entry.name === ARCHIVE_KIT_DIR || entry.name === '_archive~' || entry.name === 'clips') continue
+        const dir = entry as FileSystemDirectoryHandle
+        const manifest = await findKitManifestHandle(dir)
+        if (!manifest) continue
+        await convertFile(manifest, 'manifest', `${outRoot.name}/${dir.name}/${manifest.name}`)
+        const authoring = await optionalFile(dir, STUDIO_KIT_METADATA_FILENAME)
+        if (authoring) await convertFile(authoring, 'kit-authoring', `${outRoot.name}/${dir.name}/${STUDIO_KIT_METADATA_FILENAME}`)
+      }
+      if (workDirHandle) {
+        const kitsMeta = await optionalFile(workDirHandle, KITS_META_FILE)
+        if (kitsMeta) await convertFile(kitsMeta, 'kits-meta', `${workDirHandle.name}/${KITS_META_FILE}`)
+        const clipsMeta = await optionalFile(workDirHandle, CLIPS_META_FILE)
+        if (clipsMeta) await convertFile(clipsMeta, 'clips-meta', `${workDirHandle.name}/${CLIPS_META_FILE}`)
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      get().setLocalFsStatus('error', storeMessage('clipGain.convertFailed', { message: msg, files: converted.join(', ') || '-' }))
+      return
+    }
+    console.info('[libraryStore] converted the strength key before DEC-103 in', converted)
+    // The scan below decides again whether kits-meta.json is still refused.
+    staleMetaDir = null
+    staleMetaMsg = ''
+    await get().importKitsFromOutputDir()
+    if (skipped.length) {
+      get().setLocalFsStatus('error', storeMessage('clipGain.convertSkipped', { files: skipped.join(', ') }))
+    } else if (get().oldClipGainFiles === 0) {
+      get().setLocalFsStatus('saved', storeMessage('clipGain.converted', { count: converted.length }))
+    }
   },
 
   syncClipsFromDir: async () => {
@@ -2438,15 +2536,20 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     const clips: LibraryClip[] = []
     const ctx = new AudioContext()
 
-    // Surface a count-based progress banner while the folder's WAVs are
-    // read/decoded — this is the path that takes ~10 s for a big folder.
+    // Surface a count-based progress banner while the folder's new WAVs are
+    // decoded — this is the path that takes ~10 s for a big folder. Files
+    // already in clips-meta.json are not decoded, so they do not count, and a
+    // folder with no new file shows no banner at all.
     // Token-guard the ticks + the finally-clear so a thrown decode/read can't
     // leave the banner stuck and an overlapping scan can't fight over it.
+    const toDecode = fileList.filter((f) => !metaMap.has(f.name)).length
+    // clips-meta.json is written back only when the list changed (new / removed files, renamed legacy names).
+    let metaChanged = toDecode > 0 || (savedClips?.length ?? 0) !== fileList.length - toDecode
     let scanned = 0
     const myRun = ++importRunSeq
     const tick = (current: number) => {
-      if (importRunSeq === myRun) {
-        get().setImportProgress({ current, total: fileList.length, kind: 'folder' })
+      if (toDecode > 0 && importRunSeq === myRun) {
+        get().setImportProgress({ current, total: toDecode, kind: 'folder' })
       }
     }
     tick(0)
@@ -2458,8 +2561,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       if (existing) {
         // 旧実装の自動生成名だったら新実装で上書き（ユーザが編集した名前は保持）
         if (existing.name === legacyFilenameToDisplayName(existing.sourceFilename)) {
-          existing.name = filenameToDisplayName(existing.sourceFilename)
+          const name = filenameToDisplayName(existing.sourceFilename)
+          if (name !== existing.name) { existing.name = name; metaChanged = true }
         }
+        if (existing.libraryClipGain === undefined && savedClips?.some((c) => c.sourceFilename === filename && c.libraryClipGain !== undefined)) metaChanged = true
         clips.push(existing)
         // Disk-as-truth: no IDB write here. getClipAudio reads from disk via
         // readClipFile(workDirHandle, clip.sourceFilename).
@@ -2492,9 +2597,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         } catch (err) {
           console.error(`Failed to import ${filename} from work dir:`, err)
         }
+        scanned += 1
+        tick(scanned)
       }
-      scanned += 1
-      tick(scanned)
     }
     } finally {
       // Always clear — only the latest run owns the banner (overlap guard).
@@ -2503,7 +2608,7 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
 
     // Files in clips/ are the source of truth — clips deleted from folder are removed
     set({ clips })
-    await saveClipsMetaToDir(workDirHandle, clips)
+    if (metaChanged) await saveClipsMetaToDir(workDirHandle, clips)
 
     // Kits: the real master is each `<kitId>/<kitId>-manifest.json`
     // file on disk, NOT the cached kitsMeta.json. We do a live folder

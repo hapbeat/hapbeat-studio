@@ -473,7 +473,8 @@ describe('Kit folders with the strength key before DEC-103', () => {
     expect(useLibraryStore.getState().localFsStatus).toBe('error')
     expect(useLibraryStore.getState().localFsLastMsg).toMatch(/kits\/stale-kit/)
     expect(useLibraryStore.getState().localFsLastMsg).toMatch(/events\.k\.hit/)
-    expect(useLibraryStore.getState().localFsLastMsg).toMatch(/dec103_rename_local_data\.py/)
+    expect(useLibraryStore.getState().localFsLastMsg).toMatch(/変換して開く|Convert and open/)
+    expect(useLibraryStore.getState().oldClipGainFiles).toBe(1)
   })
 })
 

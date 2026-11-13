@@ -17,6 +17,10 @@ export function LocalFsStatus() {
   const status = useLibraryStore((s) => s.localFsStatus)
   const msg = useLibraryStore((s) => s.localFsLastMsg)
   const ts = useLibraryStore((s) => s.localFsLastTs)
+  const oldClipGainFiles = useLibraryStore((s) => s.oldClipGainFiles)
+  const convertOldClipGainKeys = useLibraryStore((s) => s.convertOldClipGainKeys)
+  const [converting, setConverting] = useState(false)
+  const showConvert = status === 'error' && oldClipGainFiles > 0
 
   // Auto-fade saved-state after a few seconds of inactivity.
   const [faded, setFaded] = useState(false)
@@ -38,8 +42,18 @@ export function LocalFsStatus() {
         {status === 'saving' && t('localFs.saving')}
         {status === 'saved' && t('localFs.saved')}
         {status === 'retrying' && t('localFs.retrying')}
-        {status === 'error' && t('localFs.failed')}
+        {status === 'error' && t(showConvert ? 'localFs.oldClipGain' : 'localFs.failed')}
       </span>
+      {showConvert && (
+        <button type="button" className="localfs-status-action" disabled={converting}
+          title={t('localFs.convertOldClipGainHint')}
+          onClick={() => {
+            setConverting(true)
+            void convertOldClipGainKeys().finally(() => setConverting(false))
+          }}>
+          {t('localFs.convertOldClipGain')}
+        </button>
+      )}
       {msg && <span className="localfs-status-msg">{msg}</span>}
     </div>
   )
