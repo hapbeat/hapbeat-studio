@@ -14,3 +14,6 @@ dev-notes/
 public/firmware/
 CLAUDE.md
 instructions/
+
+# TypeScript incremental build cache (tsc -b)
+*.tsbuildinfo
