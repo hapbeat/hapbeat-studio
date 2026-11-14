@@ -8,6 +8,9 @@ Hapbeat Studio の変更履歴。形式は [Keep a Changelog](https://keepachang
 
 ## [Unreleased]
 
+### Added（追加）
+- ストリーミングテストの簡易テスト（100 Hz・1 秒）に「L」「R」のボタンを足した。反対側を無音にしたステレオを流し、Duo Wireless や Band Twin の左右のモーターを 1 つずつ確かめられる。ボタンは機種によらず 3 つ並び、モーターが 1 つの機種では L・R とも半分の強さで鳴る
+
 ### Changed（変更）
 - 選ぶフォルダを作業フォルダ 1 つにした。クリップはその下の clips/、Kit は kits/ に置く。Kit フォルダを別に選ぶ機能はなくし、前に選んでいた人には一度だけ、そのフォルダの名前と選び直し方を知らせる（フォルダの中身は変えない）
 - kits/ が無く作業フォルダの直下に Kit がある前からのフォルダと、Unity の SDK の Kits フォルダ（HapbeatKitsReadme があるフォルダ）は、今までどおり直下の Kit を読む。kits/ は大文字・小文字を区別せずに探す（Unity の Kits/）

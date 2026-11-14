@@ -10,9 +10,10 @@ import {
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useI18n } from '@/i18n/I18nProvider'
+import type { MessageId } from '@/i18n/messages'
 import type { DeviceInfo } from '@/types/manager'
 import { streamClip } from '@/utils/audioStreamer'
-import { QUICK_TEST_TONE, createQuickTestToneBlob } from '@/utils/testTone'
+import { QUICK_TEST_FILE_NAMES, createQuickTestToneBlob, type QuickTestSide } from '@/utils/testTone'
 import {
   isFileSystemAccessSupported,
   loadDirectoryHandle,
@@ -39,6 +40,13 @@ const AUDIO_EXTS = new Set([
   '.wav', '.mp3', '.aac', '.m4a', '.ogg', '.flac',
   '.mp4', '.mkv', '.avi', '.mov', '.webm',
 ])
+
+/** Quick test buttons: both motors (mono source), or one channel of a stereo source. */
+const QUICK_TEST_SIDES: { side: QuickTestSide; label: MessageId; title: MessageId }[] = [
+  { side: 'both', label: 'manage.stream.quickTestBoth', title: 'manage.stream.quickTestBothTitle' },
+  { side: 'left', label: 'manage.stream.quickTestLeft', title: 'manage.stream.quickTestLeftTitle' },
+  { side: 'right', label: 'manage.stream.quickTestRight', title: 'manage.stream.quickTestRightTitle' },
+]
 
 /** Min visual column width in px. Mirrors Manager's _MIN_COL_W. */
 const MIN_COL_W = 170
@@ -425,8 +433,8 @@ export function StreamingTestSection({
     [startStream, t],
   )
 
-  const startQuickTest = useCallback(() => {
-    void startStream(createQuickTestToneBlob(), QUICK_TEST_TONE.fileName)
+  const startQuickTest = useCallback((side: QuickTestSide) => {
+    void startStream(createQuickTestToneBlob(side), QUICK_TEST_FILE_NAMES[side])
   }, [startStream])
 
   const activateEntry = useCallback(
@@ -661,14 +669,19 @@ export function StreamingTestSection({
 
       <div className="form-action-row" style={{ marginTop: 0 }}>
         <span className="form-action-label">{t('manage.stream.quickTest')}</span>
-        <button
-          className="form-button-secondary"
-          onClick={startQuickTest}
-          disabled={!device.online}
-          title={t('manage.stream.quickTestTitle')}
-        >
-          {t('manage.stream.quickTestButton')}
-        </button>
+        {/* Always all three, for every model (no layout change by device): on a
+            one-motor model L / R each play at half strength (the firmware mixes (L+R)/2). */}
+        {QUICK_TEST_SIDES.map(({ side, label, title }) => (
+          <button
+            key={side}
+            className="form-button-secondary"
+            onClick={() => startQuickTest(side)}
+            disabled={!device.online}
+            title={t(title)}
+          >
+            {t(label)}
+          </button>
+        ))}
       </div>
 
       <div className="form-row">
