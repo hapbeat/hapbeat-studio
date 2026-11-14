@@ -6,10 +6,14 @@ Hapbeat Studio の変更履歴。形式は [Keep a Changelog](https://keepachang
 - **最新版** `https://studio.hapbeat.com/` は master の package.json バージョンを表示。
 - **凍結版** `https://studio.hapbeat.com/vX.Y/` は `vX.Y.Z` タグ push 時に作成（マイナー単位）。
 
-## [Unreleased]
+## [1.1.0] - 2026-11-14
 
 ### Added（追加）
 - ストリーミングテストの簡易テスト（100 Hz・1 秒）に「L」「R」のボタンを足した。反対側を無音にしたステレオを流し、Duo Wireless や Band Twin の左右のモーターを 1 つずつ確かめられる。ボタンは機種によらず 3 つ並び、モーターが 1 つの機種では L・R とも半分の強さで鳴る
+- ファームウェアの一覧に Band Twin（board band_wl_twin_v1）を足した。BandWL の下に、v5 からは「Single v5 / v5.1」「Twin v1」として並ぶ（Twin は Single の後）。ローカルのビルドの env band_twin_v1 は Twin の board と見なす
+
+### Changed（変更）
+- BandWL v5 / v5.1（モーター 1 つ）の新しいファームが報告する board band_wl_single_v5 を「Single v5 / v5.1」として扱う（env band_single_v5 も同じ）。PWM のベンチと DRV8850 の状態の表示、OTA の前のチップの確認は、Single と Twin の両方の board に対応した
 
 ## [1.0.0] - 2026-11-06
 
