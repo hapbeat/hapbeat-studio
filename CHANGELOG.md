@@ -6,6 +6,11 @@ Hapbeat Studio の変更履歴。形式は [Keep a Changelog](https://keepachang
 - **最新版** `https://studio.hapbeat.com/` は master の package.json バージョンを表示。
 - **凍結版** `https://studio.hapbeat.com/vX.Y/` は `vX.Y.Z` タグ push 時に作成（マイナー単位）。
 
+## [Unreleased]
+
+### Added（追加）
+- ストリーミングテストの簡易テスト（100 Hz・1 秒）に「L」「R」のボタンを足した。反対側を無音にしたステレオを流し、Duo Wireless や Band Twin の左右のモーターを 1 つずつ確かめられる。ボタンは機種によらず 3 つ並び、モーターが 1 つの機種では L・R とも半分の強さで鳴る
+
 ## [1.0.0] - 2026-11-06
 
 ### Added（追加）
