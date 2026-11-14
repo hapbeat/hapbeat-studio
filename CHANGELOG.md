@@ -9,7 +9,7 @@ Hapbeat Studio の変更履歴。形式は [Keep a Changelog](https://keepachang
 ## [1.1.0] - 2026-11-14
 
 ### Added（追加）
-- ストリーミングテストの簡易テスト（100 Hz・1 秒）に「L」「R」のボタンを足した。反対側を無音にしたステレオを流し、Duo Wireless や Band Twin の左右のモーターを 1 つずつ確かめられる。ボタンは機種によらず 3 つ並び、モーターが 1 つの機種では L・R とも半分の強さで鳴る
+- ストリーミングテストの簡易テスト（100 Hz・1 秒）に「L」「R」のボタンを足した。反対側を無音にしたステレオを流し、Duo Wireless や Band Twin の左右のモーターを 1 つずつ確かめられる。モーターが 1 つの機種（機体が報告する haptic_channels が 1）では L・R を出さず「両方」だけにする（左右の平均で鳴り、半分の強さになるため）。報告しない古いファームの機種では 3 つとも出す
 - ファームウェアの一覧に Band Twin（board band_wl_twin_v1）を足した。BandWL の下に、v5 からは「Single v5 / v5.1」「Twin v1」として並ぶ（Twin は Single の後）。ローカルのビルドの env band_twin_v1 は Twin の board と見なす
 
 ### Changed（変更）

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { QUICK_TEST_TONE, createSineWav } from './testTone'
+import { QUICK_TEST_TONE, createSineWav, quickTestShowsSides } from './testTone'
 
 function ascii(bytes: Uint8Array, offset: number, length: number): string {
   return String.fromCharCode(...bytes.slice(offset, offset + length))
@@ -23,6 +23,21 @@ function stereoTone(only: 'left' | 'right') {
   }
   return { wav, view, left, right }
 }
+
+describe('quickTestShowsSides', () => {
+  it('hides L / R only when every target is known to drive one motor', () => {
+    expect(quickTestShowsSides([1])).toBe(false)
+    expect(quickTestShowsSides([1, 1])).toBe(false)
+    expect(quickTestShowsSides([2])).toBe(true)
+    expect(quickTestShowsSides([1, 2])).toBe(true)
+  })
+
+  it('keeps L / R for a target that does not report haptic_channels', () => {
+    expect(quickTestShowsSides([undefined])).toBe(true)
+    expect(quickTestShowsSides([1, undefined])).toBe(true)
+    expect(quickTestShowsSides([])).toBe(true)
+  })
+})
 
 describe('createSineWav', () => {
   it('creates the built-in 100 Hz, one-second PCM16 WAV source', () => {
