@@ -13,6 +13,16 @@ export const QUICK_TEST_TONE = {
  */
 export type QuickTestSide = 'both' | 'left' | 'right'
 
+/**
+ * Whether the quick test offers L / R: not when every target is known to drive
+ * one motor (`caps.haptic_channels` 1), where the firmware plays (L+R)/2 and a
+ * one-side tone is only half as strong as "both". A target that does not report
+ * it (0.x firmware) keeps L / R.
+ */
+export function quickTestShowsSides(hapticChannels: readonly (number | undefined)[]): boolean {
+  return !(hapticChannels.length > 0 && hapticChannels.every((c) => c === 1))
+}
+
 export const QUICK_TEST_FILE_NAMES: Record<QuickTestSide, string> = {
   both: QUICK_TEST_TONE.fileName,
   left: 'test-100Hz-1s-L.wav',

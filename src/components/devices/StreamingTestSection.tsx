@@ -13,7 +13,12 @@ import { useI18n } from '@/i18n/I18nProvider'
 import type { MessageId } from '@/i18n/messages'
 import type { DeviceInfo } from '@/types/manager'
 import { streamClip } from '@/utils/audioStreamer'
-import { QUICK_TEST_FILE_NAMES, createQuickTestToneBlob, type QuickTestSide } from '@/utils/testTone'
+import {
+  QUICK_TEST_FILE_NAMES,
+  createQuickTestToneBlob,
+  quickTestShowsSides,
+  type QuickTestSide,
+} from '@/utils/testTone'
 import {
   isFileSystemAccessSupported,
   loadDirectoryHandle,
@@ -433,6 +438,13 @@ export function StreamingTestSection({
     [startStream, t],
   )
 
+  // L / R are hidden when every stream target (the same set startStream uses)
+  // is known to drive one motor: there a one-side tone is half as strong as "both".
+  const showQuickTestSides = useDeviceStore((s) => {
+    const ips = s.selectedIps.length > 0 ? s.selectedIps : [device.ipAddress]
+    return quickTestShowsSides(ips.map((ip) => s.infoCache[ip]?.caps?.haptic_channels))
+  })
+
   const startQuickTest = useCallback((side: QuickTestSide) => {
     void startStream(createQuickTestToneBlob(side), QUICK_TEST_FILE_NAMES[side])
   }, [startStream])
@@ -669,19 +681,25 @@ export function StreamingTestSection({
 
       <div className="form-action-row" style={{ marginTop: 0 }}>
         <span className="form-action-label">{t('manage.stream.quickTest')}</span>
-        {/* Always all three, for every model (no layout change by device): on a
-            one-motor model L / R each play at half strength (the firmware mixes (L+R)/2). */}
-        {QUICK_TEST_SIDES.map(({ side, label, title }) => (
-          <button
-            key={side}
-            className="form-button-secondary"
-            onClick={() => startQuickTest(side)}
-            disabled={!device.online}
-            title={t(title)}
-          >
-            {t(label)}
-          </button>
-        ))}
+        {/* On a one-motor device L / R are hidden but keep their place, so the row
+            does not change when the device info arrives (the firmware mixes (L+R)/2). */}
+        {QUICK_TEST_SIDES.map(({ side, label, title }) => {
+          const hidden = side !== 'both' && !showQuickTestSides
+          return (
+            <button
+              key={side}
+              className="form-button-secondary"
+              onClick={() => startQuickTest(side)}
+              disabled={!device.online || hidden}
+              title={hidden ? undefined : t(title)}
+              aria-hidden={hidden || undefined}
+              tabIndex={hidden ? -1 : undefined}
+              style={hidden ? { visibility: 'hidden' } : undefined}
+            >
+              {t(label)}
+            </button>
+          )
+        })}
       </div>
 
       <div className="form-row">
