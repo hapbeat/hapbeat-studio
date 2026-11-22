@@ -244,10 +244,11 @@ export interface DuoWlV4Draft {
 
 const DEFAULT_DRAFT: DuoWlV4Draft = {
   // Firmware gain-staging defaults (duowl_v4_audio.cpp DEF_PAM_DB /
-  // DEF_LINEOUT_DB / DEF_BOOST_DB, restaged 2026-10 against the motor hiss).
-  pamDb: { value: 12, dirty: false },
-  lineoutDb: { value: 0, dirty: false },
-  boostDb: { value: 17, dirty: false },
+  // DEF_LINEOUT_DB / DEF_BOOST_DB): 18 / −3 / 21 = DuoWL v3 at full wheel
+  // (2026-11). Shown only until the device's get_info arrives.
+  pamDb: { value: 18, dirty: false },
+  lineoutDb: { value: -3, dirty: false },
+  boostDb: { value: 21, dirty: false },
   hpDb: { value: -10, dirty: false },
   bufferMs: { value: 0, dirty: false },
   avDelayMs: { value: 0, dirty: false },

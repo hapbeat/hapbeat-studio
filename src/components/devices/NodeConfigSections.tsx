@@ -2136,6 +2136,11 @@ const PAM_GAIN_STEPS = [6, 12, 18, 24] as const
 // The top step is labelled "max, noisy": every PAM dB also amplifies the DAC /
 // line-driver noise floor (DuoWL v4 motor hiss, 2026-10).
 const PAM_MAX_STEP = PAM_GAIN_STEPS[PAM_GAIN_STEPS.length - 1]
+// DuoWL v3 at full wheel on v4's scale: small-signal gain boost + line out +
+// PAM = 36 dB (v3: PCM5100A 2.1 Vrms vs AIC3204 0.5 Vrms = +12.5 dB, then
+// PAM8003 +24 dB), with 15 dB of analog gain so 0 dBFS reaches the amp's
+// ceiling. Also the firmware default from 2026-11 (duowl_v4_audio.cpp).
+const V3_EQUIVALENT = { boostDb: 21, lineoutDb: -3, pamDb: 18 } as const
 
 function clampPamDb(v: number): number {
   if (!Number.isFinite(v)) return 24
@@ -2546,21 +2551,31 @@ export function DuoWlV4AudioSection({
     if (persist) scheduleReconcile()
   }, syncTick)
 
+  // One apply for the whole haptic chain (boost + line out + PAM): the three
+  // set the motor strength together, so they are saved together.
   const applyHapticGain = (e: React.MouseEvent<HTMLElement>) => {
     setAnchor(e.currentTarget)
-    // Single combined send (not pam.commit() + lineout.commit(), which would
-    // each independently ship the full pam_db+lineout_db pair — correct but
-    // sends set_haptic_gain to the device twice for one click). Clear both
-    // fields' dirty flags directly since this one send covers both.
+    // Single combined set_haptic_gain (not pam.commit() + lineout.commit(),
+    // which would each ship the full pam_db+lineout_db pair — correct but two
+    // sends for one click), then set_dac_boost. Clear every dirty flag here.
     sendTo({ type: 'set_haptic_gain', payload: { pam_db: pam.value, lineout_db: lineout.value, persist: true } })
-    useDuoWlV4AudioStore.getState().setNumeric(ip, 'pamDb', pam.value, false)
-    useDuoWlV4AudioStore.getState().setNumeric(ip, 'lineoutDb', lineout.value, false)
+    sendTo({ type: 'set_dac_boost', payload: { boost_db: boost.value, persist: true } })
+    const store = useDuoWlV4AudioStore.getState()
+    store.setNumeric(ip, 'pamDb', pam.value, false)
+    store.setNumeric(ip, 'lineoutDb', lineout.value, false)
+    store.setNumeric(ip, 'boostDb', boost.value, false)
     scheduleReconcile()
   }
-  const applyBoost = (e: React.MouseEvent<HTMLElement>) => {
-    setAnchor(e.currentTarget)
-    boost.commit()
+  // Fill the v3-equivalent staging as an unsaved draft (● marks); the user
+  // saves it with the apply button next to it.
+  const fillV3Equivalent = () => {
+    const store = useDuoWlV4AudioStore.getState()
+    store.setNumeric(ip, 'boostDb', V3_EQUIVALENT.boostDb, V3_EQUIVALENT.boostDb !== audio?.boost_db)
+    store.setNumeric(ip, 'lineoutDb', V3_EQUIVALENT.lineoutDb, V3_EQUIVALENT.lineoutDb !== audio?.lineout_db)
+    store.setNumeric(ip, 'pamDb', V3_EQUIVALENT.pamDb, V3_EQUIVALENT.pamDb !== audio?.pam_db)
   }
+  const totalDb = boost.value + lineout.value + pam.value
+  const analogDb = lineout.value + pam.value
   const applyHpVolume = (e: React.MouseEvent<HTMLElement>) => {
     setAnchor(e.currentTarget)
     hp.commit()
@@ -2572,16 +2587,128 @@ export function DuoWlV4AudioSection({
 
   return (
     <>
+    {/* Haptic chain, in signal order: wheel (DAC digital volume, on the
+        device) → ① DAC boost (digital) → ② line out (analog, in the haptic
+        codec U1) → ③ PAM8404 (analog) → motors. None of these reach the
+        headphones (separate codec + TPA6130A2, next section). */}
     <div className="form-section duo-v4-config">
       <div className="form-section-title">
-        {t('node.audio.title')}
-        <span className="form-section-sub-inline"> {t('node.audio.subtitle')}</span>
+        {t('node.audio.hapticTitle')}
+        <span className="form-section-sub-inline"> {t('node.audio.hapticSubtitle')}</span>
       </div>
       <div className="form-status muted" style={{ marginBottom: 6, fontSize: 12 }}>
-        {t('node.audio.signalPath')}
+        {t('node.audio.hapticFlow')}
       </div>
 
-      {/* 0. Input/output routing — output=通常のヘッドホン出力, line_in=ジャックから
+      {/* ① AIC3204 (U1) DAC digital make-up boost — the wheel's top. */}
+      <div className="form-row">
+        <label>{t('node.audio.dacBoost')}<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('node.audio.digital')}</span></label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={0}
+            max={24}
+            step={1}
+            value={boost.value}
+            onChange={(e) => boost.onInput(clampBoostDb(Number(e.target.value)))}
+            onPointerUp={() => boost.commit()}
+            onBlur={() => boost.commit()}
+            disabled={offline}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 56, textAlign: 'right' }}>
+            {boost.value} dB
+          </span>
+        </div>
+        <DirtyMark dirty={boost.dirty} deviceValue={audio?.boost_db} format={(v) => `${v} dB`} />
+      </div>
+      <div className="form-status muted" style={{ fontSize: 12 }}>{t('node.audio.dacBoostHint')}</div>
+
+      {/* ② AIC3204 (U1) line-out driver — analog, before the PAM.
+          slider: ドラッグ中は persist:false でライブプレビュー、離した瞬間
+          (pointer-up/blur) に persist:true でコミット。 */}
+      <div className="form-row" style={{ marginTop: 10 }}>
+        <label>{t('node.audio.hapticLineout')}<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('node.audio.analog')}</span></label>
+        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
+          <input
+            type="range"
+            min={-6}
+            max={29}
+            step={1}
+            value={lineout.value}
+            onChange={(e) => lineout.onInput(clampLineoutDb(Number(e.target.value)))}
+            onPointerUp={() => lineout.commit()}
+            onBlur={() => lineout.commit()}
+            disabled={offline}
+            style={{ flex: 1 }}
+          />
+          <span className="mono" style={{ width: 56, textAlign: 'right' }}>
+            {lineout.value} dB
+          </span>
+        </div>
+        <DirtyMark dirty={lineout.dirty} deviceValue={audio?.lineout_db} format={(v) => `${v} dB`} />
+      </div>
+      <div className="form-status muted" style={{ fontSize: 12 }}>{t('node.audio.lineoutHint')}</div>
+
+      {/* ③ PAM8404 power amp (4 steps, drives the motors). discrete: クリックで
+          即座に persist:true 送信。 */}
+      <div className="form-row" style={{ marginTop: 10 }}>
+        <label>{t('node.audio.hapticAmp')}<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('node.audio.analog')}</span></label>
+        <div className="device-toggle" role="group" aria-label="PAM8404 gain">
+          {PAM_GAIN_STEPS.map((v) => (
+            <button
+              key={v}
+              type="button"
+              className={`btn btn-sm device-toggle-btn ${pam.value === v ? 'active' : ''}`}
+              onClick={() => pam.commit(v)}
+              disabled={offline}
+            >
+              {v} dB
+              {v === PAM_MAX_STEP && (
+                <span style={{ fontSize: 11, marginLeft: 4 }}>({t('node.audio.pamMaxNoisy')})</span>
+              )}
+            </button>
+          ))}
+        </div>
+        <DirtyMark dirty={pam.dirty} deviceValue={audio?.pam_db} format={(v) => `${v} dB`} />
+      </div>
+      <div className="form-status muted" style={{ fontSize: 12 }}>{t('node.audio.hapticAmpHint')}</div>
+
+      {/* Sums — what the three set together. Fixed-height rows, so a change
+          of value never shifts the buttons below (layout-shift rule). */}
+      <div className="form-status" style={{ marginTop: 10, fontSize: 12, minHeight: 18 }}>
+        <b>{t('node.audio.totalGain', { value: totalDb })}</b>
+      </div>
+      <div className="form-status" style={{ fontSize: 12, minHeight: 18 }}>
+        <b>{t('node.audio.analogGain', { value: analogDb })}</b>
+      </div>
+      <div className="form-status warn" style={{ minHeight: 18, fontSize: 12 }}>
+        {analogDb > V3_EQUIVALENT.pamDb + V3_EQUIVALENT.lineoutDb ? t('node.audio.analogWarn') : ''}
+      </div>
+
+      <div className="form-action-row" style={{ marginTop: 8, gap: 8 }}>
+        <button className="form-button" onClick={applyHapticGain} disabled={offline}>
+          {t('node.audio.applyHaptic')}
+        </button>
+        <button className="form-button-secondary" onClick={fillV3Equivalent} disabled={offline}>
+          {t('node.audio.fillV3')}
+        </button>
+      </div>
+    </div>
+
+    {/* Headphone jack: input/output routing and the headphone amp. Separate
+        codec (U2) + TPA6130A2; nothing here reaches the motors except the
+        line-in routing, which feeds the jack's audio to the haptic chain. */}
+    <div className="form-section duo-v4-config">
+      <div className="form-section-title">
+        {t('node.audio.jackTitle')}
+        <span className="form-section-sub-inline"> {t('node.audio.jackSubtitle')}</span>
+      </div>
+      <div className="form-status muted" style={{ marginBottom: 6, fontSize: 12 }}>
+        {t('node.audio.jackFlow')}
+      </div>
+
+      {/* Input/output routing — output=通常のヘッドホン出力, line_in=ジャックから
           有線音声を入力して触覚に出す（DuoWL v4 専用）。discrete: クリックで
           即座に persist:true 送信（適用ボタンを待たない）。 */}
       <div className="form-row">
@@ -2614,110 +2741,11 @@ export function DuoWlV4AudioSection({
           : t('node.audio.outputHint')}
       </div>
 
-      {/* 1. PAM8404 power amp (coarse, drives the motors). discrete: クリックで
-          即座に persist:true 送信（下の適用ボタンはライン出力との一括再送用）。 */}
-      <div className="form-row">
-        <label>{t('node.audio.hapticAmp')}<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>PAM8404</span></label>
-        <div className="device-toggle" role="group" aria-label="PAM8404 gain">
-          {PAM_GAIN_STEPS.map((v) => (
-            <button
-              key={v}
-              type="button"
-              className={`btn btn-sm device-toggle-btn ${pam.value === v ? 'active' : ''}`}
-              onClick={() => pam.commit(v)}
-              disabled={offline}
-            >
-              {v} dB
-              {v === PAM_MAX_STEP && (
-                <span style={{ fontSize: 11, marginLeft: 4 }}>({t('node.audio.pamMaxNoisy')})</span>
-              )}
-            </button>
-          ))}
-        </div>
-        <DirtyMark dirty={pam.dirty} deviceValue={audio?.pam_db} format={(v) => `${v} dB`} />
-      </div>
-      <div className="form-status muted" style={{ fontSize: 12 }}>{t('node.audio.hapticAmpHint')}</div>
-
-      {/* 2. AIC3204 (U1) line-out driver — analog pre-amp before the PAM.
-          slider: ドラッグ中は persist:false でライブプレビュー、離した瞬間
-          (pointer-up/blur) に persist:true でコミット。 */}
-      <div className="form-row">
-        <label>{t('node.audio.hapticLineout')}<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>AIC3204 U1</span></label>
-        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
-          <input
-            type="range"
-            min={-6}
-            max={29}
-            step={1}
-            value={lineout.value}
-            onChange={(e) => lineout.onInput(clampLineoutDb(Number(e.target.value)))}
-            onPointerUp={() => lineout.commit()}
-            onBlur={() => lineout.commit()}
-            disabled={offline}
-            style={{ flex: 1 }}
-          />
-          <span className="mono" style={{ width: 56, textAlign: 'right' }}>
-            {lineout.value} dB
-          </span>
-        </div>
-        <DirtyMark dirty={lineout.dirty} deviceValue={audio?.lineout_db} format={(v) => `${v} dB`} />
-      </div>
-      <div className="form-status muted" style={{ fontSize: 12 }}>
-        {t('node.audio.lineoutHint')}
-      </div>
-      {/* Line out above 0 dB amplifies the DAC / driver noise (motor hiss).
-          min-height reserved so the warning never shifts the rows below when
-          it appears (layout-shift rule). */}
-      <div className="form-status warn" style={{ minHeight: 18, fontSize: 12 }}>
-        {lineout.value > 0 ? t('node.audio.lineoutWarn') : ''}
-      </div>
-
-      <div className="form-action-row" style={{ marginTop: 8 }}>
-        <button className="form-button" onClick={applyHapticGain} disabled={offline}>
-          {t('node.audio.applyHaptic')}
-        </button>
-      </div>
-
-      {/* 3. AIC3204 DAC digital make-up boost — haptic codec (U1) only; the HP
-          codec's DAC volume is pinned to 0 dB in firmware. */}
-      <div className="form-row" style={{ marginTop: 12 }}>
-        <label>{t('node.audio.dacBoost')}<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>AIC3204 DAC</span></label>
-        <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
-          <input
-            type="range"
-            min={0}
-            max={24}
-            step={1}
-            value={boost.value}
-            onChange={(e) => boost.onInput(clampBoostDb(Number(e.target.value)))}
-            onPointerUp={() => boost.commit()}
-            onBlur={() => boost.commit()}
-            disabled={offline}
-            style={{ flex: 1 }}
-          />
-          <span className="mono" style={{ width: 56, textAlign: 'right' }}>
-            {boost.value} dB
-          </span>
-        </div>
-        <DirtyMark dirty={boost.dirty} deviceValue={audio?.boost_db} format={(v) => `${v} dB`} />
-      </div>
-      {/* min-height reserved so this hint is always present — never shifts
-          the action row below when boostDb changes (layout-shift rule). */}
-      <div className="form-status muted" style={{ minHeight: 18, fontSize: 12 }}>
-        {t('node.audio.dacBoostHint')}
-      </div>
-      <div className="form-action-row" style={{ marginTop: 8 }}>
-        <button className="form-button" onClick={applyBoost} disabled={offline}>
-          {t('node.audio.applyBoost')}
-        </button>
-      </div>
-
-      {/* 4. TPA6130A2 headphone amp (independent of the haptic path). Also
-          followed live by SW4/SW5 button presses — DeviceDetail.tsx merges
-          the pushed volume_changed.hp_db into cachedInfo.audio.hp_db, and
-          the adopt-when-not-dirty rule above (useDeviceBackedValue) picks
-          it up automatically. */}
-      <div className="form-row" style={{ marginTop: 12 }}>
+      {/* TPA6130A2 headphone amp. Also followed live by SW4/SW5 button
+          presses — DeviceDetail.tsx merges the pushed volume_changed.hp_db
+          into cachedInfo.audio.hp_db, and the adopt-when-not-dirty rule above
+          (useDeviceBackedValue) picks it up automatically. */}
+      <div className="form-row" style={{ marginTop: 10 }}>
         <label>{t('node.audio.headphoneVolume')}<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>TPA6130A2</span></label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
