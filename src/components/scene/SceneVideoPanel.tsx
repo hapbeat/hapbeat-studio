@@ -17,6 +17,8 @@ export function SceneVideoPanel() {
   const badge = useRef<HTMLDivElement>(null)
   const hasItems = useSceneStore(s => s.items.length > 0)
   const empty = useSceneStore(s => s.empty)
+  /** No project open: the empty stage asks for one in the yellow attention box (App.css). */
+  const noProject = useSceneStore(s => !s.root)
   const { open, reopen, rememberedName, busy } = useSceneProjectActions()
   // Overlay: ⏸/▶ follows the runtime's video; the bar's mark is the clip's cue (the full recording has none).
   const [playing, setPlaying] = useState(false)
@@ -79,10 +81,12 @@ export function SceneVideoPanel() {
     {hasItems && <VideoOverlay video={runtime.video} mark={mark} marks={marks} playing={playing} info={t('scene.keys')}
       onToggle={() => { runtime.audio(); runtime.togglePlay() }} onSeek={time => runtime.seek(time)} />}
     {!hasItems && <div className="scene-empty" onClick={e => e.stopPropagation()}>
-      <div className="scene-empty-message">{empty ? t(empty.id, empty.params) : t('scene.empty.intro')}</div>
-      <div className="scene-empty-actions">
-        <button type="button" className="toolbar-btn primary" disabled={busy} onClick={() => void open()}>{t('scene.open')}</button>
-        {rememberedName && <button type="button" className="toolbar-btn" disabled={busy} onClick={() => void reopen()}>{t('scene.reopenNamed', { name: rememberedName })}</button>}
+      <div className={`scene-empty-body${noProject ? ' attention-box' : ''}`}>
+        <div className="scene-empty-message">{empty ? t(empty.id, empty.params) : t('scene.empty.intro')}</div>
+        <div className="scene-empty-actions">
+          <button type="button" className={`toolbar-btn primary${noProject ? ' attention-btn' : ''}`} disabled={busy} onClick={() => void open()}>{t('scene.open')}</button>
+          {rememberedName && <button type="button" className="toolbar-btn" disabled={busy} onClick={() => void reopen()}>{t('scene.reopenNamed', { name: rememberedName })}</button>}
+        </div>
       </div>
     </div>}
   </div>

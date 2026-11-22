@@ -5,19 +5,16 @@ import { useToast } from '@/components/common/Toast'
 import './WorkFolderPrompt.css'
 
 /**
- * First-run guide for the work folder. Nothing in Studio shows clips until a
- * folder is chosen, and a small English hint inside the Kit tab was easy to
- * miss, so the app shows this on every tab (`banner`, under the header) and
- * again where the clips will appear (`panel`, in the Clips list).
+ * First-run guide for the Kit work folder, shown where the clips will appear
+ * (the Clips list of the Kit tab). Only the Kit tab needs this folder: the
+ * editor and the scene have folders of their own, and the UI / Manage tabs
+ * need none, so it is not shown app-wide. It uses the yellow "attention"
+ * colours (App.css) so it is not missed on a dark page.
  *
  * Renders nothing once a folder is connected, while the startup lookup is
  * still running, and in demo mode.
  */
-export function WorkFolderPrompt({ variant, onConnected }: {
-  variant: 'banner' | 'panel'
-  /** Called after a folder is connected from this prompt (e.g. open the Kit tab). */
-  onConnected?: () => void
-}) {
+export function WorkFolderPrompt() {
   const { t } = useI18n()
   const { toast } = useToast()
   const status = useLibraryStore((s) => s.workDirStatus)
@@ -33,8 +30,7 @@ export function WorkFolderPrompt({ variant, onConnected }: {
     if (busy) return
     setBusy(true)
     try {
-      if (await action()) onConnected?.()
-      else {
+      if (!(await action())) {
         const message = failure()
         if (message) toast(message, 'error')
       }
@@ -60,7 +56,7 @@ export function WorkFolderPrompt({ variant, onConnected }: {
     body = t('workFolder.reconnect.body', { name: pendingName })
     actions = (
       <>
-        <button type="button" className="work-folder-btn primary" onClick={reconnect} disabled={busy}>
+        <button type="button" className="work-folder-btn attention-btn" onClick={reconnect} disabled={busy}>
           {t('workFolder.reconnect.button', { name: pendingName })}
         </button>
         <button type="button" className="work-folder-btn secondary" onClick={choose} disabled={busy}>
@@ -70,20 +66,16 @@ export function WorkFolderPrompt({ variant, onConnected }: {
     )
   } else {
     title = t('workFolder.none.title')
-    body = t(variant === 'panel' ? 'workFolder.panelHint' : 'workFolder.none.body')
+    body = t('workFolder.panelHint')
     actions = (
-      <button type="button" className="work-folder-btn primary" onClick={choose} disabled={busy}>
+      <button type="button" className="work-folder-btn attention-btn" onClick={choose} disabled={busy}>
         {t('workFolder.choose')}
       </button>
     )
   }
 
   return (
-    <section
-      className={`work-folder-prompt work-folder-prompt--${variant}${status === 'unsupported' ? ' work-folder-prompt--unsupported' : ''}`}
-      role={variant === 'banner' ? 'region' : undefined}
-      aria-label={variant === 'banner' ? title : undefined}
-    >
+    <section className={`work-folder-prompt ${status === 'unsupported' ? 'work-folder-prompt--unsupported' : 'attention-box'}`}>
       <span className="work-folder-icon" aria-hidden="true">{status === 'unsupported' ? '⚠' : '📂'}</span>
       <div className="work-folder-text">
         <strong className="work-folder-title">{title}</strong>

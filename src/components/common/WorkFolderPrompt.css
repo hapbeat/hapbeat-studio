@@ -1,42 +1,33 @@
-/* First-run work folder guide (WorkFolderPrompt.tsx).
-   The banner sits in the normal flow under the header on every tab; App
-   mounts the tabs only after the startup folder lookup, so it never pops in
-   above content that is already on screen. */
+/* Kit work folder guide (WorkFolderPrompt.tsx), in the Clips list of the Kit
+   tab. Colours come from the shared "attention" classes in App.css. */
 
 .work-folder-prompt {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
+  margin: 10px;
+  padding: 22px 16px;
+  text-align: center;
   color: var(--text-primary);
 }
 
-.work-folder-prompt--banner {
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  row-gap: 10px;
-  padding: 14px 20px;
-  background: rgba(124, 92, 191, 0.22);
-  border-bottom: 2px solid var(--accent);
-}
-
-.work-folder-prompt--banner.work-folder-prompt--unsupported {
+.work-folder-prompt--unsupported {
   background: rgba(244, 67, 54, 0.15);
-  border-bottom-color: var(--error);
+  border: 2px solid var(--error);
+  border-radius: var(--radius-lg);
 }
 
 .work-folder-icon {
-  flex-shrink: 0;
-  font-size: 32px;
+  font-size: 40px;
   line-height: 1;
 }
 
 .work-folder-text {
-  flex: 1 1 auto;
-  min-width: 0;
-  max-width: 980px;
+  max-width: 340px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .work-folder-title {
@@ -51,12 +42,10 @@
 }
 
 .work-folder-actions {
-  flex-shrink: 0;
   max-width: 100%;
-  margin-left: auto;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
 }
 
@@ -68,23 +57,10 @@
   font-weight: 600;
   border-radius: var(--radius);
   cursor: pointer;
-  white-space: nowrap;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-/* Text keeps a readable width; the buttons drop below it when both don't fit. */
-.work-folder-prompt--banner .work-folder-text { flex-basis: 360px; }
-
-.work-folder-btn.primary {
-  background: var(--accent);
-  border: 1px solid var(--accent-light);
-  color: #fff;
-  box-shadow: 0 2px 10px rgba(124, 92, 191, 0.45);
-}
-
-.work-folder-btn.primary:hover:not(:disabled) { background: var(--accent-light); color: #111; }
 
 .work-folder-btn.secondary {
   background: transparent;
@@ -95,35 +71,3 @@
 .work-folder-btn.secondary:hover:not(:disabled) { background: var(--bg-hover); }
 
 .work-folder-btn:disabled { opacity: 0.6; cursor: progress; }
-
-.work-folder-btn:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
-
-/* In the Clips list: centred where the clips will appear. */
-.work-folder-prompt--panel {
-  flex-direction: column;
-  justify-content: center;
-  gap: 12px;
-  height: 100%;
-  min-height: 220px;
-  padding: 24px 16px;
-  text-align: center;
-}
-
-.work-folder-prompt--panel .work-folder-icon { font-size: 40px; opacity: 0.85; }
-.work-folder-prompt--panel .work-folder-text { flex: 0 0 auto; max-width: 340px; }
-.work-folder-prompt--panel .work-folder-body { font-size: 15px; }
-.work-folder-prompt--panel .work-folder-actions { justify-content: center; flex-direction: column; margin-left: 0; }
-
-@media (max-width: 760px) {
-  .work-folder-prompt--banner {
-    flex-wrap: wrap;
-    gap: 10px 12px;
-    padding: 12px 16px;
-  }
-  .work-folder-prompt--banner .work-folder-icon { font-size: 26px; }
-  .work-folder-prompt--banner .work-folder-text { flex-basis: calc(100% - 40px); }
-  .work-folder-prompt--banner .work-folder-actions { flex-basis: 100%; margin-left: 0; }
-  .work-folder-prompt--banner .work-folder-btn { flex: 1 1 auto; white-space: normal; }
-  .work-folder-title { font-size: 16px; }
-  .work-folder-body { font-size: 13px; }
-}

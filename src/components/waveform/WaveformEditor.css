@@ -853,6 +853,9 @@
 fieldset.editor-panel { display: block; min-width: 0; margin: 0; padding: 0; border: 0; }
 .editor-panel-empty { display: flex; align-items: center; justify-content: center; color: var(--text-muted); padding: 16px; }
 .editor-muted { margin: 8px; color: var(--text-muted); font-size: 12px; }
+/* No editor folder yet: the Clips panel asks for one (yellow attention box, App.css). */
+.editor-folder-needed { margin: 8px; padding: 14px 12px; display: flex; flex-direction: column; align-items: stretch; gap: 10px; text-align: center; font-size: 13px; }
+.editor-folder-needed .toolbar-btn { padding: 8px 12px; white-space: normal; }
 .editor-checkbox { display: inline-flex; align-items: center; gap: 6px; }
 :is(.waveform-editor, .dv-popout-window) .effects-panel { min-height: 0; height: 100%; }
 

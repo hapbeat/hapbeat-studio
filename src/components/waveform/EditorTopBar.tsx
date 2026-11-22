@@ -51,8 +51,8 @@ export function EditorTopBar({ dockApi, notice, onNotice }: { dockApi: DockviewA
     onNotice(t('editor.settings.imported', { file: file.name }))
   }
   return <div className="editor-folder-bar">
-    <button className="toolbar-btn" onClick={() => void s.openFolder()} disabled={s.isProcessing || !('showDirectoryPicker' in window)}>▱ {t('editor.folder')}</button>
-    <div className="editor-folder-name" title={t('editor.pathHint')}><strong>{folderName ? `${folderName}/` : t('editor.chooseFirst')}</strong></div>
+    <button className={`toolbar-btn${s.folder ? '' : ' attention-btn'}`} onClick={() => void s.openFolder()} disabled={s.isProcessing || !('showDirectoryPicker' in window)}>▱ {t('editor.folder')}</button>
+    <div className="editor-folder-name" title={t('editor.pathHint')}><strong className={s.folder ? undefined : 'attention-text'}>{folderName ? `${folderName}/` : t('editor.chooseFirst')}</strong></div>
     {!s.folder && s.rememberedFolder && <button className="toolbar-btn" disabled={s.isProcessing} onClick={() => void s.reconnectFolder()}>{t('editor.reconnect')}</button>}
     <input ref={audioInput} type="file" multiple accept="audio/*,.wav,.mp3,.ogg,.flac,.aac,.m4a" hidden onChange={e => { void s.loadFiles(Array.from(e.target.files ?? [])); e.target.value = '' }} />
     <input ref={settingsInput} type="file" accept="application/json,.json" hidden onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void importSettings(file) }} />

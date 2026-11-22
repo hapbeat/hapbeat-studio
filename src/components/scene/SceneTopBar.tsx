@@ -48,12 +48,12 @@ export function SceneTopBar({ dockApi, notice }: { dockApi: DockviewApi | null; 
   }
   const revert = async () => { if (dirty && !await confirmDiscard()) return; await useSceneStore.getState().revert() }
   return <div className="editor-folder-bar scene-bar">
-    <EditorMenu label={`${t('scene.projectMenu')} ▾`} disabled={busy}>
+    <EditorMenu label={`${t('scene.projectMenu')} ▾`} disabled={busy} className={root ? '' : 'attention-menu'}>
       <EditorMenuItem disabled={!('showDirectoryPicker' in window)} onSelect={() => void open()}>{t('scene.open')}</EditorMenuItem>
       <EditorMenuItem disabled={!rememberedName} onSelect={() => void reopen()}>{rememberedName ? t('scene.reopenNamed', { name: rememberedName }) : t('scene.reopen')}</EditorMenuItem>
     </EditorMenu>
     <div className="editor-folder-name" title={root ? t('scene.projectTitle', { title: lib?.title ?? '', folder: root.name }) : undefined}>
-      <strong>{root ? `${lib?.title ?? root.name} · ${root.name}/` : t('scene.noProject')}</strong>
+      <strong className={root ? undefined : 'attention-text'}>{root ? `${lib?.title ?? root.name} · ${root.name}/` : t('scene.noProject')}</strong>
     </div>
     <span className="scene-stack scene-dirty" role="status"><span aria-hidden="true" className="scene-sizer">{t('scene.saving')}</span><span>{dirty ? t('scene.saving') : ''}</span></span>
     <span className={`editor-bar-notice ${notice?.error ? 'error' : ''}`} role="status" title={notice?.text}>{notice?.text ?? ''}</span>

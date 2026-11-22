@@ -13,7 +13,6 @@ import { ExternalLinkIcon } from '@/components/common/ExternalLinkIcon'
 import { useToast } from '@/components/common/Toast'
 import { HelperFailureToastListener } from '@/components/common/HelperFailureToastListener'
 import { VersionSwitcher } from '@/components/common/VersionSwitcher'
-import { WorkFolderPrompt } from '@/components/common/WorkFolderPrompt'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useHelperUpdate, useStudioFrozenNotice } from '@/hooks/useReleaseNotices'
@@ -300,7 +299,6 @@ export function App() {
           >×</button>
         </div>
       )}
-      <WorkFolderPrompt variant="banner" onConnected={() => setActiveTab('kit')} />
       <HelperOnboardingModal
         open={helperModalOpen}
         onClose={() => setHelperModalOpen(false)}

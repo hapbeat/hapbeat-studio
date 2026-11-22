@@ -1040,7 +1040,7 @@ function ClipsPanel() {
           <h3>Clips</h3>
         </div>
         <div className="library-list">
-          <WorkFolderPrompt variant="panel" />
+          <WorkFolderPrompt />
         </div>
       </div>
     )

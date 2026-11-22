@@ -118,7 +118,11 @@ export function ClipsPanel() {
       </EditorMenu>
     </div>
     <div className="editor-clip-groups" aria-label={t('editor.clips')}>
-      {!s.folder && <p className="editor-muted">{t('editor.chooseFirst')}</p>}
+      {!s.folder && <div className="editor-folder-needed attention-box">
+        <strong>{t('editor.chooseFirst')}</strong>
+        <button type="button" className="toolbar-btn attention-btn" onClick={() => void s.openFolder()} disabled={s.isProcessing || !('showDirectoryPicker' in window)}>▱ {t('editor.folder')}</button>
+        {s.rememberedFolder && <button type="button" className="toolbar-btn" onClick={() => void s.reconnectFolder()} disabled={s.isProcessing}>{t('editor.reconnect')}</button>}
+      </div>}
       {s.folder && !s.documents.length && <p className="editor-muted">{t('editor.emptyHint')}</p>}
       {s.folder && s.documents.length > 0 && !groups.length && <p className="editor-muted">{t('editor.noMatches')}</p>}
       {groups.map(group => <section key={group.key} className="editor-clip-group">

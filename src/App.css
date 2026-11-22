@@ -43,6 +43,11 @@ body.is-dragging .char-cell.empty:hover {
   --success: #4caf50;
   --warning: #ff9800;
   --error: #f44336;
+  /* Attention (yellow): an action the page needs before it works, e.g. choosing a folder.
+     Kept apart from --warning / --haptic (orange), which mean haptics in this app. */
+  --attention: #ffd23f;
+  --attention-soft: rgba(255, 210, 63, .14);
+  --attention-ink: #1a1a1a;
   /* Sound vs haptic (every list mark, badge, lane and toggle): blue / orange, a colour-blind-safe pair.
      Plain = marks / borders / canvas, -strong = text on the dark bg (AA), -soft = fills. */
   --sound: #4ea8ff;
@@ -64,6 +69,18 @@ body.is-dragging .char-cell.empty:hover {
 .kind-icon { display: inline-block; flex: none; vertical-align: -3px; }
 .kind-icon.sound { color: var(--sound); }
 .kind-icon.haptic { color: var(--haptic); }
+
+/* Attention: a box, button or text asking for an action the page needs first (choose a folder / project).
+   The box has the line on all four sides (never one side of a rounded box). The button keeps the font
+   weight of the plain button, so switching it off never changes its width. */
+.attention-box { background: var(--attention-soft); border: 2px solid var(--attention); border-radius: var(--radius-lg); color: var(--text-primary); }
+.attention-btn,
+.attention-menu > .editor-menu-trigger { background: var(--attention) !important; border-color: var(--attention) !important; color: var(--attention-ink) !important; }
+.attention-btn:hover:not(:disabled),
+.attention-menu > .editor-menu-trigger:hover:not(:disabled) { filter: brightness(1.1); }
+.attention-btn:focus-visible,
+.attention-menu > .editor-menu-trigger:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+.attention-text { color: var(--attention) !important; }
 
 * {
   margin: 0;
