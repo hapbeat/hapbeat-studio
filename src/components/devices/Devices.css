@@ -959,13 +959,23 @@
 }
 
 /* DuoWL v4 gain/stream config: wider label column so the JP labels (e.g.
-   "触覚ライン出力") + the IC sub-line don't wrap. Scoped so other sections keep
+   "② ライン出力") + the sub-line don't wrap. Scoped so other sections keep
    the compact 90px column. */
 .duo-v4-config .form-row {
   grid-template-columns: 128px 1fr auto;
 }
 .duo-v4-config .form-row > label {
   line-height: 1.3;
+}
+/* Which chip a gain stage is in (codec ① ② / class-D amp ③): a small heading
+   with a straight full-width line under it. */
+.duo-v4-config .gain-group-title {
+  margin: 8px 0 6px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
 }
 
 .form-row-multi {
