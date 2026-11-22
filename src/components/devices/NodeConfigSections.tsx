@@ -2600,9 +2600,11 @@ export function DuoWlV4AudioSection({
         {t('node.audio.hapticFlow')}
       </div>
 
-      {/* ① AIC3204 (U1) DAC digital make-up boost — the wheel's top. */}
+      {/* ① AIC3204 (U1) DAC digital make-up boost — an offset added to the
+          wheel's −63.5..0 dB; the DAC volume register holds their sum
+          (aic3204SetVolumeWiper, capped at +24 dB). */}
       <div className="form-row">
-        <label>{t('node.audio.dacBoost')}<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('node.audio.digital')}</span></label>
+        <label>{t('node.audio.dacBoost')}<br /><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{t('node.audio.offset')}</span></label>
         <div className="form-row-multi" style={{ alignItems: 'center', gap: 8 }}>
           <input
             type="range"
