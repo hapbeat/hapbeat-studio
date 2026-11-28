@@ -56,7 +56,16 @@ export interface SceneLib {
   /** "Apply to the game" command ('' = none, not shown). */
   import_command: string
   record_command?: string
+  /**
+   * The project's kind (contracts scene-recording §3.1, DEC-114; absent in the file = 'game'). 'game': the Scene's
+   * strength edits go into the cue table (event / variant multipliers: they reach the game) and viewer-edits.json is
+   * neither read nor written; 'video': haptics for a video, single firings edited in viewer-edits.json (DEC-112).
+   */
+  kind: SceneKind
 }
+export type SceneKind = 'game' | 'video'
+/** Whether `lib` is a video project (single-firing edits in viewer-edits.json); a game project otherwise. */
+export const isVideoProject = (lib: Pick<SceneLib, 'kind'> | null | undefined) => lib?.kind === 'video'
 /** `dist`: the distance to the player when it fired (cm), when the game logged it (distanceFalloff). `hand` '' = not given. */
 export interface SceneEvent { t: number; name: string; hand: string; gain?: number; dist?: number; note?: string }
 /** One moment of the recording: a stretch of the full replay around its first cue. */
@@ -133,6 +142,7 @@ export function parseViewerLib(text: string): SceneLib {
   if (rules !== undefined && !(isRecord(rules) && isNumberMap(rules.max, x => Number.isInteger(x) && (x as number) >= 1)
     && isNumberMap(rules.min_gap_s, x => isNumber(x) && x >= 0) && (rules.default_max === undefined || rules.default_max === null || (Number.isInteger(rules.default_max) && (rules.default_max as number) >= 1)))) fail('moment_rules')
   for (const key of ['import_command', 'record_command'] as const) if (v[key] !== undefined && !isString(v[key])) fail(key)
+  if (v.kind !== undefined && v.kind !== 'game' && v.kind !== 'video') fail('kind')
   const at = (v.at as string[] | undefined) ?? [...AT_VALUES]
   const layers = ((v.layers ?? []) as { cue: string; level: number[]; rate?: number[] | null; colors: string[] }[]).map((l, i) => ({
     cue: l.cue, gain: l.level, rate: l.rate ?? null, colors: layerColors(l.colors, i),
@@ -148,6 +158,7 @@ export function parseViewerLib(text: string): SceneLib {
     moment_rules: { max: r.max ?? {}, min_gap_s: r.min_gap_s ?? {}, default_max: r.default_max ?? null },
     import_command: (v.import_command as string | undefined) ?? '',
     ...(isString(v.record_command) ? { record_command: v.record_command } : {}),
+    kind: v.kind === 'video' ? 'video' : 'game',
   }
 }
 

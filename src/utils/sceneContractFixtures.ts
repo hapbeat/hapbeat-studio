@@ -1,6 +1,6 @@
 /**
  * Test-only: hapbeat-contracts `fixtures/sample-cue-table.json` and `fixtures/sample-scene-recording.json`
- * (contracts branch feat/scene-pan-rate as of b8822b2, DEC-095 / DEC-113; the cue table with pan / rate / panMap / rateMap), copied as they are so the Scene tab is checked against the specification's samples.
+ * (contracts branch feat/scene-game-edits as of 9c67bfc, DEC-095 / DEC-113 / DEC-114; the cue table with pan / rate / panMap / rateMap, the viewer-libs with `kind`), copied as they are so the Scene tab is checked against the specification's samples.
  * Copy them again when the contracts change.
  */
 
@@ -361,7 +361,19 @@ export const CONTRACT_SCENE_RECORDING = {
           "#aaaaaa"
         ]
       }
-    ]
+    ],
+    "kind": "game"
+  },
+  "viewer_lib_video": {
+    "schema_version": 1,
+    "title": "Video",
+    "project_name": "video",
+    "paths": {
+      "cues": "cues.json",
+      "clips": "clips",
+      "sounds": "sounds"
+    },
+    "kind": "video"
   },
   "viewer_data": {
     "schema_version": 1,
@@ -403,5 +415,26 @@ export const CONTRACT_SCENE_RECORDING = {
         ]
       ]
     }
+  },
+  "viewer_edits": {
+    "schema_version": 1,
+    "firings": [
+      {
+        "of": {
+          "name": "roar",
+          "t": 4.0
+        },
+        "gain": 0.6
+      },
+      {
+        "of": {
+          "name": "grab",
+          "t": 6.0,
+          "hand": "right"
+        },
+        "gain": 1.2,
+        "t": 6.05
+      }
+    ]
   }
 }

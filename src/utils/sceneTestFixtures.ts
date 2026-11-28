@@ -1,8 +1,9 @@
 /** Test-only fixtures for the Scene tab: a project lib / recording / cue table and an in-memory folder. */
-import type { SceneData, SceneLib } from './sceneData'
+import type { SceneData, SceneKind, SceneLib } from './sceneData'
 import type { CueTable } from './sceneCueTable'
 
-export function sampleLib(): SceneLib {
+/** `kind`: 'video' by default (the single-firing edits of DEC-112 the older tests exercise); 'game' for DEC-114. */
+export function sampleLib(kind: SceneKind = 'video'): SceneLib {
   return {
     title: 'Mill', project_name: 'mill',
     paths: { cues: 'Content/Hapbeat/cues.json', clips: 'Content/Kit/stream-clips', sounds: 'Content/Audio' },
@@ -13,7 +14,7 @@ export function sampleLib(): SceneLib {
     families: [{ label: 'hand', color: '#4ea1ff', cues: ['button', 'grab'] }],
     ticks: ['detent'],
     moment_rules: { max: {}, min_gap_s: {}, default_max: null },
-    import_command: 'import.ps1', record_command: 'record.ps1',
+    import_command: 'import.ps1', record_command: 'record.ps1', kind,
   }
 }
 
@@ -38,12 +39,13 @@ export function sampleData(): SceneData {
 }
 
 /** sampleLib as its viewer-lib.json (scene-recording v1): parseViewerLib gives sampleLib(). */
-export function sampleViewerLibFile(): Record<string, unknown> {
-  const lib = sampleLib()
+export function sampleViewerLibFile(kind: SceneKind = 'video'): Record<string, unknown> {
+  const lib = sampleLib(kind)
   return {
     schema_version: 1, title: lib.title, project_name: lib.project_name, paths: lib.paths, at: lib.at,
     layers: lib.layers.map(l => ({ cue: l.cue, level: l.gain, rate: l.rate, colors: l.colors })),
     families: lib.families, ticks: lib.ticks, import_command: lib.import_command, record_command: lib.record_command,
+    ...(kind === 'video' ? { kind } : {}),
   }
 }
 

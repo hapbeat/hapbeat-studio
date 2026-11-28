@@ -10,6 +10,7 @@ import { occurrenceKeys, recordingFiringStrength } from '@/utils/sceneFiringGain
 import { faderValue, gainsAtFader, recordedIndexMap, recordedName, ROUTE_GAIN_MAX, setRouteGains } from '@/utils/sceneStrength'
 import type { SceneVersion } from '@/utils/sceneVersions'
 import { isAppProject } from '@/utils/appProject'
+import { isVideoProject } from '@/utils/sceneData'
 import { parseEventKey } from '@/utils/cueEvents'
 
 /**
@@ -28,6 +29,7 @@ export function SceneStrengthPanel() {
   const data = useSceneStore(s => s.data)
   const edited = useSceneStore(s => s.edited)
   const chapter = useSceneStore(s => s.chapter)
+  const game = useSceneStore(s => !!s.lib && !isVideoProject(s.lib))
   const overall = useScenePlayback(s => s.overallGain)
   const canUndo = useSceneStrength(s => s.undo.length > 0)
   const canRedo = useSceneStrength(s => s.redo.length > 0)
@@ -62,7 +64,7 @@ export function SceneStrengthPanel() {
   const st = () => useSceneStrength.getState()
   return <div className="scene-strength">
     <div className="scene-strength-head">
-      <h3 title={t('scene.strength.mixerHint')}>{t('scene.strength.mixer')}</h3>
+      <h3 title={t(game ? 'scene.strength.mixerHintGame' : 'scene.strength.mixerHint')}>{t('scene.strength.mixer')}</h3>
       <OrphanEdits />
       <span className="scene-strength-head-end">
         <button type="button" className="scene-icon-btn" disabled={!canUndo} title={t('scene.strength.undoHint')} onClick={() => st().undoLast()}>{t('scene.strength.undo')}</button>

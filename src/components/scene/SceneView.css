@@ -195,6 +195,10 @@
 /* The breakdown: one line of fixed height (red when the sent value is clipped). */
 .scene-firing-line { min-height: 1.4em; color: var(--text-muted); }
 .scene-firing-line.clipped { color: #ff8a80; }
+/* A game project (DEC-114): the time row's one line, the split form under its buttons, the unused viewer-edits.json count. */
+.scene-firing-dim { color: var(--text-muted); white-space: normal; }
+.scene-firing-split { position: relative; }
+.scene-firing-note { color: var(--text-muted); font-size: 11px; }
 
 /* Chapters (moments panel): label and range, the one playing marked like a selected row. */
 .scene-chapters { border-bottom: 1px solid var(--border); }

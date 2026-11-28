@@ -42,6 +42,15 @@ export function parseViewerEdits(text: string): { edits: ViewerEdits; dropped: n
   return { edits: { schema_version: 1, firings }, dropped: (v.firings as unknown[]).length - firings.length }
 }
 
+/**
+ * How many entries a viewer-edits.json text has (a game project shows the count and never uses them, DEC-114): the
+ * length of its `firings` array; 0 for no file or a text that is not such a file.
+ */
+export function countViewerEdits(text: string | null): number {
+  if (text === null) return 0
+  try { const v: unknown = JSON.parse(text); return isRecord(v) && Array.isArray(v.firings) ? v.firings.length : 0 } catch { return 0 }
+}
+
 /** Times as the recorder writes them (4 decimals). */
 export const roundTime = (t: number) => Math.round(t * 1e4) / 1e4
 /** Time `t` on the nearest frame of `fps`, kept within 0..`end` (the video), as the file writes it. */

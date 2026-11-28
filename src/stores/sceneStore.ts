@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { documentMessage, type MessageId, type MessageParams } from '@/i18n/messages'
 import { appFolderStamp, appProjectFileUrl, isAppProject } from '@/utils/appProject'
 import { loadDirectoryHandle, saveDirectoryHandle } from '@/utils/localDirectory'
-import { buildItems, VIEWER_DIR, type SceneData, type SceneItem, type SceneLib } from '@/utils/sceneData'
+import { buildItems, isVideoProject, VIEWER_DIR, type SceneData, type SceneItem, type SceneLib } from '@/utils/sceneData'
 import { alignClipGains, CLIP_GAIN_RENAME_SCRIPT, kitCopyDiffers, loopCuesOf, parseCueTable, SceneFormatError, serializeCueTable, StaleClipGainKeyError, validateCueTable, type CueTable } from '@/utils/sceneCueTable'
 import { createSceneTable, isNotFound, listWavs, openSceneProject, readProjectFile, readSceneTable, writeProjectFile, writeSceneSave, type PendingWavs } from '@/utils/sceneProject'
 import { CueTableSync } from '@/utils/cueTableSync'
@@ -12,7 +12,7 @@ import { applyEmits, emitSignature, newEmitSeed } from '@/utils/sceneEmit'
 import { pageVisible, perfTrack } from '@/utils/perfRegistry'
 import { RATE } from '@/utils/sceneHaptics'
 import { lastSceneProject, lookupSceneProject, registerSceneProject, rememberSceneProject, restoreSceneHandle } from '@/utils/sceneRegistry'
-import { applyEdits, emptyEdits, matchEdits, parseViewerEdits, retimed, serializeViewerEdits, setEditFor, VIEWER_EDITS_FILE, type FiringChange, type ViewerEdits } from '@/utils/sceneEdits'
+import { applyEdits, countViewerEdits, emptyEdits, matchEdits, parseViewerEdits, retimed, serializeViewerEdits, setEditFor, VIEWER_EDITS_FILE, type FiringChange, type ViewerEdits } from '@/utils/sceneEdits'
 import { applyTableGains, archiveVersion, listVersions, readVersion, writeVersion, type SceneVersion, type VersionSnapshot } from '@/utils/sceneVersions'
 import { locateProjectKit, type ProjectKit } from '@/utils/sceneKit'
 import { onKitManifestWritten } from '@/utils/kitManifestWrites'
@@ -74,6 +74,12 @@ interface SceneState {
   editsMatch: ReadonlyMap<number, number>
   /** How many entries of `edits` match no recorded firing (a new recording); kept until removeOrphanEdits. */
   editsOrphans: number
+  /**
+   * A game project (lib.kind 'game', DEC-114): how many entries its viewer-edits.json has. They are not used (`edits`
+   * stays empty, nothing is laid over the recording) and the file is never written or removed; the Scene says so. 0 in
+   * a video project.
+   */
+  ignoredEdits: number
   /**
    * Changes recorded firings' gain / time (by recorded index; FiringChange: null = the recorded value again): `edited`
    * and `data` change at once (the levels stay the same, so the video plays on) and viewer-edits.json is written 300 ms
@@ -511,6 +517,8 @@ export const useSceneStore = create<SceneState>((set, get) => {
       const known = editsKnown
       editsKnown = now
       if (now.text === known.text) return
+      // A game project: only the count it shows (the entries are not used).
+      if (!isVideoProject(get().lib)) { set({ ignoredEdits: countViewerEdits(now.text) }); return }
       const { edits, notice } = await editsFromText(root, now.text)
       if (get().root !== root || editsPending !== null || editsSaving) return
       takeEdits(edits)
@@ -529,6 +537,8 @@ export const useSceneStore = create<SceneState>((set, get) => {
   const snapshot = (): VersionSnapshot | null => {
     const { lib, table, edits } = get()
     if (!lib) return null
+    // A game project never uses its viewer-edits.json: a version keeps the file as it is on disk (when there is one).
+    if (!isVideoProject(lib)) return { edits: editsKnown.text, table: table ? serializeCueTable(table) : null, tableFile: baseName(lib.paths.cues), firings: countViewerEdits(editsKnown.text) }
     return { edits: edits.firings.length || editsKnown.text !== null ? serializeViewerEdits(edits) : null, table: table ? serializeCueTable(table) : null,
       tableFile: baseName(lib.paths.cues), firings: edits.firings.length }
   }
@@ -536,7 +546,8 @@ export const useSceneStore = create<SceneState>((set, get) => {
   /** The edits as changed by Studio: laid over the recording, written 300 ms later to the open project. */
   const changeEdits = (edits: ViewerEdits) => {
     const { root, lib } = get()
-    if (!root || !lib) return
+    // A game project never writes viewer-edits.json (DEC-114: its strength edits are the cue table's multipliers).
+    if (!root || !lib || !isVideoProject(lib)) return
     if (editsRoot !== root) { const unsaved = abandonEdits(); if (unsaved) note(unsaved); editsRoot = root; editsProject = lib.project_name }
     takeEdits(edits)
     editsPending = serializeViewerEdits(edits)
@@ -694,7 +705,10 @@ export const useSceneStore = create<SceneState>((set, get) => {
     const unsaved = editsRoot && editsRoot !== handle ? abandonEdits() : null
     // The edits (read after the recording's stamp, like it); the same project's edits still unwritten stay Studio's.
     const editsFile = await readEditsText(handle)
-    const loadedEdits = editsPending !== null && editsRoot === handle ? { edits: parseViewerEdits(editsPending).edits, notice: null } : await editsFromText(handle, editsFile.text)
+    // A game project does not read its entries (DEC-114): none laid over the recording, the file left as it is, its count shown.
+    const video = isVideoProject(opened.lib), ignoredEdits = video ? 0 : countViewerEdits(editsFile.text)
+    const loadedEdits = !video ? { edits: emptyEdits(), notice: null }
+      : editsPending !== null && editsRoot === handle ? { edits: parseViewerEdits(editsPending).edits, notice: null } : await editsFromText(handle, editsFile.text)
     editsKnown = editsFile
     versionedThisOpen = false
     // The app project's files as they were read (what changes after this is read again by checkAppProject); the WAVs are
@@ -702,7 +716,8 @@ export const useSceneStore = create<SceneState>((set, get) => {
     appStamp = null
     const stamp = viewerStamp ? { ...viewerStamp, wavs: await readWavStamp(handle, opened.lib) } : null
     const over = overlay(opened.data, loadedEdits.edits), data = retimed(opened.data, over.edited, opened.lib)
-    set({ root: handle, lib: opened.lib, recorded: opened.data, ...over, recordingFrom: 'open', overrides: [], data, items: buildItems(data), sel: null, cur: 0, empty: null, table: null, noTable: false, projectKit: undefined, kitError: null })
+    if (ignoredEdits) addLog(`${EDITS_PATH}: ${ignoredEdits} entr(ies) not used (a game project; kind "video" uses them)`)
+    set({ root: handle, lib: opened.lib, recorded: opened.data, ...over, ignoredEdits, recordingFrom: 'open', overrides: [], data, items: buildItems(data), sel: null, cur: 0, empty: null, table: null, noTable: false, projectKit: undefined, kitError: null })
     try { await loadTable() } catch (error) {
       // The project stays open without its table; with its WAVs counted unread, every check reads the table again
       // until it reads (a WAV or the table that Studio was still writing, say), instead of never checking again.
@@ -750,7 +765,7 @@ export const useSceneStore = create<SceneState>((set, get) => {
 
   return {
     root: null, remembered: null, restored: false, busy: false,
-    lib: null, data: null, recorded: null, recordingFrom: 'open', overrides: [], edits: emptyEdits(), edited: null, editsMatch: new Map(), editsOrphans: 0, items: [], table: null, noTable: false, loaded: null, clipFiles: [], soundFiles: [],
+    lib: null, data: null, recorded: null, recordingFrom: 'open', overrides: [], edits: emptyEdits(), edited: null, editsMatch: new Map(), editsOrphans: 0, ignoredEdits: 0, items: [], table: null, noTable: false, loaded: null, clipFiles: [], soundFiles: [],
     pending: { clips: {}, sounds: {} }, pcm: {}, sfx: {}, dirty: false, saveError: null, projectKit: null, kitError: null, cur: 0, sel: null, span: null, chapter: null, emitSeed: newEmitSeed(),
     notice: null, empty: null, log: [],
     note, addLog,
@@ -896,7 +911,8 @@ export const useSceneStore = create<SceneState>((set, get) => {
       if (!root || !lib || isAppProject(root)) return { ok: false, notice: { id: 'scene.save.noProject', error: true } }
       try {
         const version = await readVersion(root, id, baseName(lib.paths.cues))
-        const edits = version.edits === null ? emptyEdits() : parseViewerEdits(version.edits).edits
+        // A game project's edits are none (its viewer-edits.json is left as it is): only the strength values come back.
+        const edits = version.edits === null || !isVideoProject(lib) ? emptyEdits() : parseViewerEdits(version.edits).edits
         const source = version.table === null ? null : parseCueTable(version.table)
         const snap = snapshot()
         if (snap) await queueVersion(() => writeVersion(root, snap, 'before-restore', documentMessage('scene.versions.beforeRestore'), new Date()))

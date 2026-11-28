@@ -4,6 +4,9 @@ import { eventRoutes, scaleFiringGain, setFiringGain, setRouteGains } from '@/ut
 import { editOf, serializeViewerEdits, snapTime, type FiringChange, type ViewerEdits } from '@/utils/sceneEdits'
 import { applyTableGains } from '@/utils/sceneVersions'
 import type { CueTable } from '@/utils/sceneCueTable'
+import { isVideoProject } from '@/utils/sceneData'
+import { shownIndexOf } from '@/utils/sceneTimelineEdit'
+import { boundedRatio, changeTargets, parseTargetKey, scaledValues, setTargetValues, targetKey, targetsOf, targetValues, valuesAt, type GainTarget, type Lane, type TargetChange } from '@/utils/sceneGameEdits'
 import { useSceneStore, type VersionRestore } from './sceneStore'
 
 /**
@@ -12,6 +15,9 @@ import { useSceneStore, type VersionRestore } from './sceneStore'
  * the M / S toggles of the haptic events, and one undo stack (≤ 100) for the strength edits made in the panel and the
  * timeline: firing edits (viewer-edits.json, sceneStore.setFiringEdits), event route gains (the cue table,
  * sceneStore.edit) and a version restored (its edits and strength values together, restoreVersion).
+ * In a game project (lib.kind 'game', DEC-114) the firing edits are none: a strength change on selected firings changes
+ * the cue table's multiplier of each one's name once (sceneGameEdits: route gain / hapticsGain, sfx volume / sfxVolume),
+ * every bar of that name moving with it, and their times never move.
  */
 
 /** A recorded firing's edit entry fields (gain / time), or null for none (the recorded values). */
@@ -25,12 +31,19 @@ export type StrengthEdit =
   | { kind: 'edits'; before: [number, FiringEntry][]; after: [number, FiringEntry][] }
   | { kind: 'routes'; owner: string; before: number[]; after: number[] }
   | { kind: 'restore'; edits: { before: ViewerEdits; after: ViewerEdits }; table: { before: CueTable; after: CueTable } | null }
+  /** A game project's multipliers (sceneGameEdits targets, by targetKey) before / after. */
+  | { kind: 'gains'; changes: TargetChange[] }
 export const UNDO_LIMIT = 100
 
 interface SceneStrengthState {
   selected: ReadonlySet<number>
   /** A drag's ratio on the selected firings while it lasts (timeline bar / relative fader); applied on release. */
   dragRatio: number | null
+  /**
+   * A game project while dragRatio is set: the multipliers the drag changes (targetKey -> the ratio each gets, bounded
+   * at its top), so every bar of those names shows it live; null otherwise.
+   */
+  dragTargets: ReadonlyMap<string, number> | null
   /** A drag's time shift (s) on the selected firings while it lasts (the timeline draws it); applied on release (moveSelected). */
   dragDt: number | null
   muted: ReadonlySet<string>
@@ -52,6 +65,8 @@ interface SceneStrengthState {
   moveSelected: (dt: number) => boolean
   /** The selected firings back to their recorded values (their edit entries removed; one undo step). */
   resetSelected: () => boolean
+  /** A game project: the multipliers of `names` in `lane` x `ratio`, each once (one undo step); false when nothing changed. */
+  scaleNames: (names: readonly string[], lane: Lane, ratio: number) => boolean
   /** Records a route-gain change already applied (a fader drag: live edits, one step on release). */
   pushRoutes: (owner: string, before: number[], after: number[]) => void
   /** Records a version restore already applied (its edits and cue table change, one step). */
@@ -78,6 +93,13 @@ function apply(edit: StrengthEdit, side: 'before' | 'after'): 'ok' | 'gone' {
     s.setFiringEdits(new Map(edit[side].map(([i, e]) => [i, { gain: e?.gain ?? null, t: e?.t ?? null }])))
     return 'ok'
   }
+  if (edit.kind === 'gains') {
+    const table = s.table
+    if (!table) return 'gone'
+    const targets = edit.changes.map(c => [parseTargetKey(c.key), c[side]] as [GainTarget, number[]])
+    if (targets.some(([t, values]) => targetValues(table, t)?.length !== values.length)) return 'gone'
+    return s.edit(tb => targets.reduce((next, [t, values]) => setTargetValues(next, t, values), tb)) ? 'ok' : 'gone'
+  }
   if (edit.kind === 'restore') {
     if (!s.root || !s.recorded) return 'gone'
     if (edit.table) {
@@ -99,6 +121,16 @@ function selectedEntries(selected: ReadonlySet<number>): [number, FiringEntry][]
   return [...selected].flatMap(i => events[i] ? [[i, editOf(s.edits, s.editsMatch.get(i))] as [number, FiringEntry]] : [])
 }
 const sameEntry = (a: FiringEntry, b: FiringEntry) => a?.gain === b?.gain && a?.t === b?.t
+/** Whether the open project is a game project (DEC-114: strength edits go into the cue table). */
+export const isGameProject = () => { const lib = useSceneStore.getState().lib; return !!lib && !isVideoProject(lib) }
+/** The names the selected firings play under (an overridden firing: its new name, sceneOverrides), each once. */
+export function selectedNames(selected: ReadonlySet<number>): string[] {
+  const s = useSceneStore.getState()
+  if (!s.data || !s.edited) return []
+  const shown = shownIndexOf(s.data.full.events, s.edited.full.events), names = new Set<string>()
+  for (const i of selected) { const k = shown.get(i), ev = k === undefined ? undefined : s.data.full.events[k]; if (ev) names.add(ev.name) }
+  return [...names]
+}
 
 export const useSceneStrength = create<SceneStrengthState>((set, get) => {
   const push = (edit: StrengthEdit) => set(st => ({ undo: [...st.undo.slice(-(UNDO_LIMIT - 1)), edit], redo: [] }))
@@ -117,8 +149,20 @@ export const useSceneStrength = create<SceneStrengthState>((set, get) => {
     push({ kind: 'edits', before, after })
     return true
   }
+  /** A game project: `change` on each multiplier of `names` in `lane` once, as one undo step in the cue table. */
+  const targets = (names: readonly string[], lane: Lane, change: (values: number[]) => number[]) => {
+    const s = useSceneStore.getState(), table = s.table
+    if (!table) return false
+    const result = changeTargets(table, targetsOf(table, names, lane), change)
+    if (!result.changes.length) return false
+    // The first strength edit of the project saves a before-edit version (as the faders do).
+    s.versionBeforeEdit()
+    if (!s.edit(() => result.table)) return false
+    push({ kind: 'gains', changes: result.changes })
+    return true
+  }
   return {
-    selected: new Set(), dragRatio: null, dragDt: null, muted: new Set(), soloed: new Set(), undo: [], redo: [],
+    selected: new Set(), dragRatio: null, dragTargets: null, dragDt: null, muted: new Set(), soloed: new Set(), undo: [], redo: [],
     select: (indices, mode) => set(st => {
       if (mode === 'replace') return { selected: new Set(indices) }
       let next = new Set(st.selected)
@@ -126,19 +170,29 @@ export const useSceneStrength = create<SceneStrengthState>((set, get) => {
       return { selected: next }
     }),
     clear: () => { if (get().selected.size) set({ selected: new Set() }) },
-    setDragRatio: dragRatio => set({ dragRatio }),
+    setDragRatio: dragRatio => {
+      const table = useSceneStore.getState().table
+      if (dragRatio === null || !table || !isGameProject()) { set({ dragRatio, dragTargets: null }); return }
+      const ratios = new Map<string, number>()
+      for (const t of targetsOf(table, selectedNames(get().selected), 'haptics')) ratios.set(targetKey(t), boundedRatio(targetValues(table, t) ?? [], dragRatio))
+      set({ dragRatio, dragTargets: ratios })
+    },
     setDragDt: dragDt => set({ dragDt }),
     toggleMute: name => set(st => ({ muted: toggled(st.muted, name) })),
     toggleSolo: name => set(st => ({ soloed: toggled(st.soloed, name) })),
-    scaleSelected: ratio => firings(ev => { const g = ev.gain ?? 1, next = scaleFiringGain(g, ratio); return next === g ? null : { gain: next } }),
-    setSelected: gain => firings(ev => { const next = setFiringGain(gain); return next === (ev.gain ?? 1) ? null : { gain: next } }),
+    scaleSelected: ratio => isGameProject() ? targets(selectedNames(get().selected), 'haptics', values => scaledValues(values, ratio))
+      : firings(ev => { const g = ev.gain ?? 1, next = scaleFiringGain(g, ratio); return next === g ? null : { gain: next } }),
+    setSelected: gain => isGameProject() ? targets(selectedNames(get().selected), 'haptics', values => valuesAt(values, gain))
+      : firings(ev => { const next = setFiringGain(gain); return next === (ev.gain ?? 1) ? null : { gain: next } }),
+    scaleNames: (names, lane, ratio) => isGameProject() && targets(names, lane, values => scaledValues(values, ratio)),
     moveSelected: dt => {
+      // A game project: the game decides when a firing happens (DEC-114).
       const r = useSceneStore.getState().recorded
-      if (!r) return false
+      if (!r || isGameProject()) return false
       const end = r.full.levels.length / r.fps
       return firings(ev => { const t = snapTime(ev.t + dt, r.fps, end); return t === ev.t ? null : { t } })
     },
-    resetSelected: () => firings((_, i) => useSceneStore.getState().editsMatch.has(i) ? { gain: null, t: null } : null),
+    resetSelected: () => !isGameProject() && firings((_, i) => useSceneStore.getState().editsMatch.has(i) ? { gain: null, t: null } : null),
     pushRoutes: (owner, before, after) => { if (after.some((g, i) => g !== before[i])) push({ kind: 'routes', owner, before, after }) },
     pushRestore: (edits, table) => { if (table || serializeViewerEdits(edits.before) !== serializeViewerEdits(edits.after)) push({ kind: 'restore', edits, table }) },
     undoLast: () => {
@@ -167,7 +221,7 @@ export function routesOf(name: string): { owner: string; gains: number[] } | nul
 // Another recording (a project opened, another folder): its indices mean other firings, so the session starts over.
 useSceneStore.subscribe((state, prev) => {
   if (state.recorded?.full.levels !== prev.recorded?.full.levels || state.root !== prev.root)
-    useSceneStrength.setState({ selected: new Set(), dragRatio: null, dragDt: null, muted: new Set(), soloed: new Set(), undo: [], redo: [] })
+    useSceneStrength.setState({ selected: new Set(), dragRatio: null, dragTargets: null, dragDt: null, muted: new Set(), soloed: new Set(), undo: [], redo: [] })
 })
 
 /**

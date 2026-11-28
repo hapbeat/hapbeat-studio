@@ -161,9 +161,18 @@ If the user says a trial you submitted does not appear: check with \`list_trials
 - Route \`gain\` / \`sfx.volume\` (default 1) = part of the app gain, edited in the Scene tab only. Final output = WAV × clip_gain × app gain × device volume.
 - Studio writes adopted candidates normalized, with their own size × the rated \`intensity\` as the clip_gain. Do not bake loudness into WAVs.
 
+## Scene projects: game or video (DEC-114)
+
+- \`kind\` in \`Saved/HapticViewer/viewer-lib.json\` (absent = \`"game"\`). \`"game"\`: the recording checks a game, and the cue table is imported into it. \`"video"\`: haptics for a video (sports footage, a demo's screen capture); \`viewer-data.json\` is the source and the video is what plays.
+- In a game project the Scene has no per-firing values: moving a timeline bar up or down changes the cue table's multiplier for that firing's name (the route \`gain\` of a cue or of a variant with its own haptics, a sharing variant's \`hapticsGain\`; \`sfx.volume\` / \`sfxVolume\` for sound), so every firing of that name changes, in the game too. Firing times cannot move (the game decides them; align a material's timing with its sync point in the Editor). \`viewer-edits.json\` is neither read nor written there (a file left from before is kept and counted, never used).
+- To change only some firings in a game project, give them their own situation: a variant (\`cue:variant\`, multipliers only or its own material) that the game fires in that situation. The user asks for it with "Split situation…" (a \`reassign\` message): change the game's code so it fires that variant there, then re-record.
+- In a video project single firings keep their own gain and time in \`viewer-edits.json\` (Studio writes it; players lay it over the recording).
+- Three ways to use the Scene: (1) a video project — haptics for a fixed video; (2) a short experience with a fixed route — record one pass through it; (3) a free-roaming game — record a sampler: each event's actions one after another (as the Boxing recording does). Limits: a situation that never appears in a recording cannot be checked there, and the game decides when each firing happens.
+- Splitting events: a different haptic quality is another event (cue); fixed steps of one action (soft / hard, near / far) are variants with multipliers (\`hapticsGain\` / \`sfxVolume\`); something that changes continuously is a game value given as the loop cue's input, shaped by \`levelMap\`.
+
 ## Messages from Studio \`hapbeat-agent-message@1\` (Studio writes, you read)
 
-From the user's clicks: "Change event…" on a firing (Scene tab, \`reassign\`), "Remake…" on a material (\`revise\`), "Request a sound…" (\`sound\`) and "Go to haptics" (\`haptic\`) on an event, all in the Events panel. Files in \`hapbeat-agent/outbox/\`:
+From the user's clicks: "Change event…" on a firing in the moments list or "Split situation…" in the Firing panel (Scene tab, \`reassign\`), "Remake…" on a material (\`revise\`), "Request a sound…" (\`sound\`) and "Go to haptics" (\`haptic\`) on an event, all in the Events panel. Files in \`hapbeat-agent/outbox/\`:
 
 \`\`\`json
 { "format": "hapbeat-agent-message@1", "createdAt": "2026-10-05T15:42:00+09:00", "text": "イベントを変える依頼: footstep の 17.37 s の発生を footstep:feeding にしてください", "project": "trex-encounter", "reassign": { "cue": "footstep", "atSec": 17.367, "to": "footstep:feeding" } }
