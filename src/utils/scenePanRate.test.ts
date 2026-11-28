@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { isOutputMap, mapOutput, mapValue, withLevelIntercept, withOutputAt, type LevelMap } from './levelMap'
 import { clampRate, routePan, routeRate, validateCueTable, type CueTable, type CueTableContext } from './sceneCueTable'
 import { effectiveEvent, fireShot, MaterialPicker, setRouteMap, updateOwnRoute } from './cueEvents'
-import { buildLoopVoices, CHUNK, loopedAt, panFactors, renderChunk, resampleClip, shotVoices, type LoopVoice } from './sceneHaptics'
+import { buildLoopVoices, CHUNK, loopedAt, panFactors, renderChunk, resampleClip, SceneHapticMixer, shotVoices, type LoopVoice } from './sceneHaptics'
+import { CAPS_RETRY_MS, MAX_TRIES, SceneCapsProbe } from './sceneCapsProbe'
 import { SceneKitFire } from './sceneKitFire'
 import { sampleLib, sampleTable } from './sceneTestFixtures'
 import { CONTRACT_CUE_TABLE } from './sceneContractFixtures'
@@ -212,5 +213,49 @@ describe('FIRE (the Kit on the device): pan goes in PLAY, the rate is not applie
     fire.shot({ table: sampleTable(), shot: fireShot(effectiveEvent(sampleTable(), DETENT)!, false, new MaterialPicker()), hand: 'right', cueGain: 1, delayMs: 0, offsetMs: 0, devices: [{ ipAddress: '10.0.0.2', address: 'p/pos_chest' }], all: false })
     timer!()
     expect(sent[0].payload).not.toHaveProperty('pan')
+  })
+})
+
+describe('the Scene asks its target devices for their motors (get_info; sdk-multi-stream §6.15)', () => {
+  it('SceneCapsProbe: each device without caps once, again CAPS_RETRY_MS later, at most MAX_TRIES times', () => {
+    const p = new SceneCapsProbe(), none = () => false
+    expect(p.due(['a', 'b', 'a', ''], 0, none)).toEqual(['a', 'b'])
+    expect(p.due(['a', 'b'], CAPS_RETRY_MS - 1, none)).toEqual([])
+    expect(p.due(['a'], CAPS_RETRY_MS, none)).toEqual(['a'])
+    expect(p.due(['a'], 2 * CAPS_RETRY_MS, none)).toEqual(['a'])
+    expect(p.due(['a'], 10 * CAPS_RETRY_MS, none)).toEqual([]) // MAX_TRIES (3) reached
+    expect(MAX_TRIES).toBe(3)
+    expect(p.due(['c'], 0, ip => ip === 'c')).toEqual([]) // caps known
+  })
+
+  it('a device that answered without caps (0.x) is not asked again; one with caps is asked again only if they leave the cache', () => {
+    const p = new SceneCapsProbe(), none = () => false
+    p.due(['old', 'new'], 0, none)
+    p.answered('old', false)
+    p.answered('new', true)
+    expect(p.due(['old', 'new'], 1, none)).toEqual(['new'])
+    p.reset()
+    expect(p.due(['old'], 2, none)).toEqual(['old']) // a new helper connection asks again
+  })
+
+  it('the mixer: a device declaring one motor gets no pan, one declaring two (or not telling) gets it', () => {
+    const sent: { type: string; payload: Record<string, unknown> }[] = []
+    const mixer = new SceneHapticMixer((type, payload) => sent.push({ type, payload }))
+    const pcm16Of = (ip: string) => {
+      const data = sent.find(x => x.type === 'stream_data' && (x.payload.targets as string[])[0] === ip)!.payload.data as string
+      const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0))
+      return new Int16Array(bytes.buffer)
+    }
+    mixer.voices = [{ pcm: new Float32Array(16000).fill(0.5), targets: [''], gain: 1, start: 0, pan: 1 }]
+    const devices = [
+      { ipAddress: '10.0.0.1', address: 'p/pos_l_wrist', hapticChannels: 1 },
+      { ipAddress: '10.0.0.2', address: 'p/pos_neck', hapticChannels: 2 },
+      { ipAddress: '10.0.0.3', address: 'p/pos_chest' },
+    ]
+    mixer.pump(0, { enabled: true, playing: true, devices, leadMs: 0, pcm: {}, level: () => [0, 1] })
+    const band = pcm16Of('10.0.0.1'), duo = pcm16Of('10.0.0.2'), unknown = pcm16Of('10.0.0.3')
+    expect([band[0], band[1]]).toEqual([16384, 16384]) // one motor: L = R, the strength kept
+    expect([duo[0], duo[1]]).toEqual([0, 16384]) // pan +1: right only
+    expect([unknown[0], unknown[1]]).toEqual([0, 16384]) // no caps (0.x): the pan as before
   })
 })

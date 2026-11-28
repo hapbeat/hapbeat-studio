@@ -1,10 +1,12 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useI18n } from '@/i18n/I18nProvider'
 import { useHelperConnection } from '@/hooks/useHelperConnection'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useScenePlayback } from '@/stores/scenePlayback'
 import { resolvePlaybackTargets } from '@/utils/playbackDevices'
+import { parseCapsFields } from '@/utils/deviceCaps'
+import { CAPS_RETRY_MS, SceneCapsProbe } from '@/utils/sceneCapsProbe'
 import { matchesAddress, RETRY_MS, tableTargets, type HapticDevice, type StreamAck, type StreamDisplaced, type StreamLost } from '@/utils/sceneHaptics'
 import type { SceneRuntime } from './sceneRuntime'
 
@@ -18,16 +20,41 @@ export function useSceneRuntimeHelper(runtime: SceneRuntime): { isConnected: boo
   const kitSelectedIps = useDeviceStore(s => s.kitSelectedIps)
   const allDevices = useScenePlayback(s => s.allDevices)
   // The motors each device declared (caps `haptic_channels`, DEC-113): a one-motor Hapbeat gets no pan (sdk-multi-stream §6.15).
-  const infoCache = useDeviceStore(s => s.infoCache)
+  // Read as one string (`ip=n,...`) so other get_info fields changing re-make nothing.
+  const channelsKey = useDeviceStore(s => Object.entries(s.infoCache).flatMap(([ip, i]) => i?.caps?.haptic_channels !== undefined ? [`${ip}=${i.caps.haptic_channels}`] : []).join(','))
   const targetDevices = useMemo<HapticDevice[]>(() => {
     if (!isConnected || !table) return []
     const targets = tableTargets(table)
+    const channels = new Map(channelsKey ? channelsKey.split(',').map(x => { const [ip, n] = x.split('='); return [ip, Number(n)] as const }) : [])
     return resolvePlaybackTargets(devices, kitSelectedIps).filter(d => allDevices || (d.address && targets.some(tg => matchesAddress(tg, d.address))))
       .map(d => {
-        const channels = infoCache[d.ipAddress]?.caps?.haptic_channels
-        return { ipAddress: d.ipAddress, address: d.address, name: d.name, ...(channels !== undefined ? { hapticChannels: channels } : {}) }
+        const n = channels.get(d.ipAddress)
+        return { ipAddress: d.ipAddress, address: d.address, name: d.name, ...(n !== undefined ? { hapticChannels: n } : {}) }
       })
-  }, [isConnected, table, devices, kitSelectedIps, allDevices, infoCache])
+  }, [isConnected, table, devices, kitSelectedIps, allDevices, channelsKey])
+  // Studio reads get_info only for the device open in the Devices tab: ask each target device without caps here, so a
+  // one-motor Hapbeat is known before (or soon after) the Scene plays to it (SceneCapsProbe; its answer is stored below).
+  const probe = useRef(new SceneCapsProbe())
+  const targetIps = targetDevices.map(d => d.ipAddress).join(',')
+  useEffect(() => {
+    if (!isConnected) { probe.current.reset(); return }
+    const ask = () => {
+      const info = useDeviceStore.getState().infoCache
+      for (const ip of probe.current.due(targetIps ? targetIps.split(',') : [], performance.now(), x => info[x]?.caps !== undefined))
+        send({ type: 'get_info', payload: { ip } } as Parameters<typeof send>[0])
+    }
+    ask()
+    const timer = setInterval(ask, CAPS_RETRY_MS)
+    return () => clearInterval(timer)
+  }, [isConnected, targetIps, send])
+  useEffect(() => subscribe(message => {
+    const p = message.payload as Record<string, unknown> | undefined
+    if (message.type !== 'get_info_result' || !p || typeof p.device !== 'string') return
+    // Only the capability fields (the Devices tab stores the whole answer when it asked): merged, other fields kept.
+    const fields = parseCapsFields(p)
+    probe.current.answered(p.device, fields.caps !== undefined)
+    useDeviceStore.getState().setInfo(p.device, fields)
+  }), [subscribe])
   useEffect(() => {
     runtime.setHelper({ send: (type, payload) => send({ type, payload } as Parameters<typeof send>[0]), connected: isConnected, devices: targetDevices })
   }, [runtime, send, isConnected, targetDevices])
