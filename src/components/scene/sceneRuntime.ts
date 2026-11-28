@@ -348,7 +348,7 @@ export class SceneRuntime {
     if (shot.sound && !loop) this.playSfx(shot.sound, shot.soundGain, delay, false, 2 ** (shot.pitchSt / 12))
     if (this.firedListeners.size) {
       const materials = [...(shot.sound && !loop ? [shot.sound] : []), ...shot.routes.map(r => r.clip)]
-      const durSec = Math.max(shot.sound && !loop ? s.sfx[shot.sound]?.duration ?? 0 : 0, ...shot.routes.map(r => (s.pcm[r.clip]?.length ?? 0) / RATE))
+      const durSec = Math.max(shot.sound && !loop ? s.sfx[shot.sound]?.duration ?? 0 : 0, ...shot.routes.map(r => (s.pcm[r.clip]?.length ?? 0) / RATE / (r.rate ?? shot.rate)))
       const fired: FiredShot = { at: this.video.currentTime + delay * this.video.playbackRate, name: e.ref.variant ?? e.ref.cue, materials, durSec }
       if (materials.length) for (const l of this.firedListeners) l(fired)
     }

@@ -549,7 +549,8 @@ export function updateOwnRoute(table: CueTable, ref: EventRef, index: number, pa
     if (patch.gain !== undefined) route.gain = clampNumber(patch.gain, 0, 2)
     for (const kind of ['pan', 'rate'] as const) {
       const x = patch[kind]
-      if (x === undefined || route[MAP_KEYS[kind]] !== undefined) continue
+      // Not a number (NaN, ±Infinity) changes nothing (clampNumber would make it the range's low end).
+      if (x === undefined || !Number.isFinite(x) || route[MAP_KEYS[kind]] !== undefined) continue
       const v = Math.round(clampNumber(x, MAP_RANGES[kind][0], MAP_RANGES[kind][1]) * 1000) / 1000
       if (v === MAP_DEFAULTS[kind]) delete route[kind]; else route[kind] = v
     }

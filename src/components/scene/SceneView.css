@@ -172,8 +172,8 @@
 .scene-route-balance .scene-number { width: 64px; }
 .scene-route-more { margin-top: 4px; }
 .scene-route-pannote { font-size: 11px; flex-basis: 100%; }
-/* Two lines for every output's note, so switching the output does not move the graphs below. */
-.scene-levelmap-kindnote { min-height: 2.8em; }
+/* Room for the longest output note (pitch, up to 4 lines in the side panel), so switching the output does not move the graphs below. */
+.scene-levelmap-kindnote { min-height: 5.6em; }
 .scene-route-more.on { color: var(--haptic-strong); }
 /* Timeline: "Change" opened from a marker, over the canvas (nothing moves). */
 .scene-timeline { position: relative; }

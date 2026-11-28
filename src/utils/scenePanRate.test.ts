@@ -79,6 +79,7 @@ describe('the cue table (types, read / write, checks)', () => {
   it('updateOwnRoute: the fixed value kept in range, the default leaves the key out, a mapped one is left alone', () => {
     const t1 = updateOwnRoute(sampleTable(), DETENT, 0, { pan: -7, rate: 9 })
     expect(t1.cues.detent.haptics![0]).toMatchObject({ pan: -1, rate: 4 })
+    expect(updateOwnRoute(t1, DETENT, 0, { pan: NaN, rate: Infinity }).cues.detent.haptics![0]).toMatchObject({ pan: -1, rate: 4 }) // not a number: unchanged
     const t2 = updateOwnRoute(t1, DETENT, 0, { pan: 0, rate: 1 })
     expect(t2.cues.detent.haptics![0]).not.toHaveProperty('pan')
     expect(t2.cues.detent.haptics![0]).not.toHaveProperty('rate')
