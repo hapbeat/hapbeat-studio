@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useI18n, type MessageId } from '@/i18n/I18nProvider'
 import { useSceneStore } from '@/stores/sceneStore'
 import { useSceneSettings } from '@/stores/sceneSettings'
-import { isLoopCue, loopCuesOf, pairedProblem, PICK_MODES, routeAlternates, routeClips, sfxAlternates, sfxSounds, VARIANT_NAME, clipsForCue, type CueTable, type CueVariation, type VariationNumberKey, type DistanceFalloff } from '@/utils/sceneCueTable'
+import { isLoopCue, loopCuesOf, pairedProblem, PICK_MODES, routeAlternates, routeClips, sfxAlternates, sfxSounds, VARIANT_NAME, clipsForCue, PAN_RANGE, RATE_RANGE, routePan, routeRate, type CueRoute, type CueTable, type CueVariation, type VariationNumberKey, type DistanceFalloff } from '@/utils/sceneCueTable'
 import { curveAt, RAMP_CURVES, type RampCurve } from '@/utils/rampCurve'
 import { EMIT_INTERVAL_RANGE, EMIT_JITTER_RANGE } from '@/utils/sceneEmit'
 import {
@@ -309,6 +309,8 @@ function Clips({ table, e, edit }: { table: CueTable; e: EffectiveEvent; edit: E
   const { runtime } = useScene()
   const atLabel = useAtLabel()
   const own = holdsField(table, e.ref, 'haptics')
+  // Advanced (DEC-113): each route's fixed balance and pitch, shown on request (always for a route that has one).
+  const [more, setMore] = useState(false)
   if (!own) return <div className="scene-sec">
     <h3 className="scene-kind-head held-elsewhere"><HapticIcon decorative />{t('events.repeat.clips')}
       {e.ref.variant === null && <GroupSwitch table={table} cue={e.ref.cue} field="haptics" edit={edit} buttonClass="scene-icon-btn" />}<HeldBy e={e} /></h3>
@@ -324,22 +326,43 @@ function Clips({ table, e, edit }: { table: CueTable; e: EffectiveEvent; edit: E
         <label className="scene-row" title={t('scene.event.gainHint')}><span className="scene-dim scene-grow">{atLabel(r.at)} · {t('scene.route.gain')}</span>
           {own ? <NumberField value={r.gain} min={0} max={2} step={0.05} label={t('scene.route.gain')} onCommit={x => edit(tb => updateOwnRoute(tb, e.ref, i, { gain: x }))} />
             : <span className="scene-dim">{r.gain}</span>}</label>
+        {(more || r.pan !== undefined || r.rate !== undefined || r.panMap !== undefined || r.rateMap !== undefined) && <RouteBalancePitch r={r} own={own}
+          onCommit={patch => edit(tb => updateOwnRoute(tb, e.ref, i, patch))} />}
         {e.variation?.paired === true && i === 0
           ? <PairedList e={e} edit={edit} onPlay={(_, sound, clip) => {
             runtime.audio()
             if (sound) runtime.testSound({ sound, volume: e.sfx?.volume ?? 1 })
-            if (clip) runtime.testRoute({ clip, at: r.at, gain: r.gain })
+            if (clip) runtime.testRoute({ clip, at: r.at, gain: r.gain, pan: r.pan, rate: r.rate })
           }} />
           : <MaterialList kind="haptic" items={clips} alternates={alternates} label={atLabel(r.at)} minItems={1}
             onStar={own ? (c, on) => edit(tb => setStarred(tb, e.ref, 'haptic', i, c, on)) : null} onRemove={own ? c => edit(tb => removeMaterial(tb, e.ref, 'haptic', i, c)) : null}
-            onPlay={c => runtime.testRoute({ clip: c, at: r.at, gain: r.gain })} />}
+            onPlay={c => runtime.testRoute({ clip: c, at: r.at, gain: r.gain, pan: r.pan, rate: r.rate })} />}
         {own && <select value="" aria-label={t('events.addClipMulti')} onChange={ev => { const x = ev.target.value; ev.target.blur(); if (x) edit(tb => addMaterial(tb, e.ref, 'haptic', i, x)) }}>
           <option value="">{t('events.addClipMulti')}</option>
           {clipsForCue(table, e.ref.cue).filter(c => !clips.includes(c) && !alternates.includes(c)).map(c => <option key={c} value={c}>{c}</option>)}
         </select>}
       </div>
     })}
+    {e.haptics.length > 0 && <button type="button" className={`scene-icon-btn scene-route-more ${more ? 'on' : ''}`} aria-pressed={more} title={t('scene.route.moreHint')}
+      onClick={ev => { ev.currentTarget.blur(); setMore(!more) }}>{t('scene.route.more')}</button>}
   </div>
+}
+
+/**
+ * A route's fixed balance (pan −1..1) and pitch (rate 0.25..4) (DEC-113); a loop route whose panMap / rateMap sets it
+ * shows 「入力で決める」 instead (changed in the input → output section).
+ */
+function RouteBalancePitch({ r, own, onCommit }: { r: CueRoute; own: boolean; onCommit: (patch: { pan?: number; rate?: number }) => void }) {
+  const { t } = useI18n()
+  const field = (kind: 'pan' | 'rate') => {
+    const label = t(`scene.route.${kind}` as MessageId), byMap = r[kind === 'pan' ? 'panMap' : 'rateMap'] !== undefined
+    const value = kind === 'pan' ? routePan(r) : routeRate(r), [lo, hi] = kind === 'pan' ? PAN_RANGE : RATE_RANGE
+    return <label className="scene-row" title={t(`scene.route.${kind}Hint` as MessageId)}><span className="scene-dim">{label}</span>
+      {byMap ? <span className="scene-dim" title={t('scene.route.byInputHint')}>{t('scene.route.byInput')}</span>
+        : own ? <NumberField value={value} min={lo} max={hi} step={0.05} label={label} onCommit={x => onCommit({ [kind]: x })} />
+          : <span className="scene-dim">{value}</span>}</label>
+  }
+  return <div className="scene-row scene-route-balance">{field('pan')}{field('rate')}<span className="scene-dim scene-route-pannote">{t('scene.route.panNote')}</span></div>
 }
 
 /** `variation`: how one of several materials is picked, and the gain / pitch / rate jitter per firing (a loop cue: gain only). */

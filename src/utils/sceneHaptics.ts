@@ -1,7 +1,7 @@
-import { clipGainOf, routeClips, type CueTable, type KitClipGains } from './sceneCueTable'
+import { clampRate, clipGainOf, routeClips, routePan, routeRate, type CueTable, type KitClipGains } from './sceneCueTable'
 import { effectiveEvent, eventKey, MaterialPicker, resolveEventName, type Shot } from './cueEvents'
 import type { SceneLib } from './sceneData'
-import { mapLevel, type LevelMap } from './levelMap'
+import { mapLevel, mapValue, type LevelMap } from './levelMap'
 
 /**
  * Scene tab haptics: one stream per Hapbeat through hapbeat-helper, every
@@ -10,6 +10,9 @@ import { mapLevel, type LevelMap } from './levelMap'
  * STREAM_BEGIN `target`, exact unicast via `targets`). Gains follow the Unreal
  * SDK: WAV × clip_gain (clipGainOf: the Kit's in a project with a Kit, `kit`) × route gain × cue gain (one-shots) or × the
  * recorded layer level through the route's levelMap (loops, DEC-090). Ported from the standalone haptic clip viewer.
+ * DEC-113: each voice has the route's pan (the sdk-multi-stream §5 item 4 linear balance on the gain as sent; not on a
+ * one-motor Hapbeat, §6.15) and plays at the route's rate (a one-shot resampled once, a loop read at a fractional
+ * position with linear interpolation, §5 item 11; a loop's pan / rate may follow the input through panMap / rateMap).
  */
 
 export const RATE = 16000
@@ -55,9 +58,17 @@ export function tableTargets(table: CueTable): string[] {
   return [...out]
 }
 
-export interface OneShotVoice { pcm: Float32Array; targets: string[]; gain: number; start: number; cue?: boolean }
-/** `levelMap`: the route's level → multiplier (DEC-090; absent = the level). */
-export interface LoopVoice { clip: string; targets: string[]; gain: number; levelMap?: LevelMap; layer: number; side: number; phase: Record<string, number> }
+/** `pan`: −1..1 (absent = 0), applied after the send clamp; `pcm` is already at the voice's rate. */
+export interface OneShotVoice { pcm: Float32Array; targets: string[]; gain: number; start: number; cue?: boolean; pan?: number }
+/**
+ * `levelMap`: the route's level → multiplier (DEC-090; absent = the level). `pan` / `rate`: the route's fixed values,
+ * or `panMap` / `rateMap` from the same level (DEC-113); the recorded rate is multiplied in (cue-table §5.6).
+ * `phase`: the fractional read position per device ip (frames).
+ */
+export interface LoopVoice {
+  clip: string; targets: string[]; gain: number; levelMap?: LevelMap; layer: number; side: number; phase: Record<string, number>
+  pan?: number; rate?: number; panMap?: LevelMap; rateMap?: LevelMap
+}
 /** Replay time `t` was at wall time `wall` (ms), advancing at `rate`. */
 export interface PlayClock { t: number; rate: number; wall: number }
 export type LevelFn = (t: number, layer: number, side: number) => [number, number]
@@ -73,7 +84,8 @@ export function buildLoopVoices(table: CueTable, lib: SceneLib, all = false, kit
       // A loop does not re-pick while it plays: a multi-clip route loops its first clip.
       const clipName = routeClips(r)[0], clip = clipName === undefined ? undefined : table.clips[clipName]
       if (!clip || clipName === undefined) continue
-      const add = (targets: string[], side: number) => out.push({ clip: clipName, targets, gain: clipGainOf(table, clipName, kit) * r.gain, levelMap: r.levelMap, layer, side, phase: {} })
+      const add = (targets: string[], side: number) => out.push({ clip: clipName, targets, gain: clipGainOf(table, clipName, kit) * r.gain, levelMap: r.levelMap, layer, side, phase: {},
+        pan: routePan(r), rate: routeRate(r), ...(r.panMap ? { panMap: r.panMap } : {}), ...(r.rateMap ? { rateMap: r.rateMap } : {}) })
       if (all) add([''], -1)
       else if (r.at === 'hand') { add([WRIST.left], 0); add([WRIST.right], 1) } else add(targetsOf(r.at), -1)
     }
@@ -95,8 +107,17 @@ export function cueVoices(table: CueTable, pcm: Record<string, Float32Array>, ev
   e.haptics.forEach((r, i) => {
     const name = picker.pick(`${eventKey(e.ref)}#${i}`, routeClips(r), e.variation?.pick), clip = name === undefined ? undefined : table.clips[name]
     if (name === undefined || !pcm[name] || !clip || clip.loop) return
-    out.push({ pcm: pcm[name], targets: targetsOf(r.at, ev.hand), gain: sendGain(clipGainOf(table, name, opts.kit) * r.gain * (ev.gain ?? 1) * (opts.jitter ?? 1)), start, cue: true })
+    out.push({ pcm: resampleClip(pcm[name], routeRate(r)), targets: targetsOf(r.at, ev.hand), gain: sendGain(clipGainOf(table, name, opts.kit) * r.gain * (ev.gain ?? 1) * (opts.jitter ?? 1)), start, cue: true, pan: routePan(r) })
   })
+  return out
+}
+
+/** `length` frames of loop clip `data` played at `rate` from its start (linear interpolation, the last frame joined to the first). */
+export function loopedAt(data: Float32Array, rate: number, length: number): Float32Array {
+  const out = new Float32Array(length), n = data.length
+  if (!n) return out
+  let ph = 0
+  for (let i = 0; i < length; i++) { const j = Math.floor(ph), f = ph - j, a = data[j % n]; out[i] = f ? a + (data[(j + 1) % n] - a) * f : a; ph = (ph + rate) % n }
   return out
 }
 
@@ -108,13 +129,17 @@ export function resampleClip(data: Float32Array, rate: number): Float32Array {
   return out
 }
 
-/** Voices of one firing (fireShot): its picked one-shot clips at the shot's rate, clip_gain (clipGainOf with `kit`) × route gain (× jitter) × cue gain, kept to 0..1 (sendGain); `all`: see routeTargets. */
+/**
+ * Voices of one firing (fireShot): its picked one-shot clips at each route's rate (its own × the firing's jitter; the
+ * shot's for a route without one), with the route's pan, clip_gain (clipGainOf with `kit`) × route gain (× jitter) ×
+ * cue gain, kept to 0..1 (sendGain); `all`: see routeTargets.
+ */
 export function shotVoices(table: CueTable, pcm: Record<string, Float32Array>, shot: Shot, hand: string, cueGain: number, start: number, all = false,
   kit: KitClipGains | null = null): OneShotVoice[] {
   return shot.routes.flatMap(r => {
     const clip = table.clips[r.clip], data = pcm[r.clip]
     if (!clip || !data || clip.loop) return []
-    return [{ pcm: resampleClip(data, shot.rate), targets: routeTargets(r.at, hand, all), gain: sendGain(clipGainOf(table, r.clip, kit) * r.gain * cueGain), start, cue: true }]
+    return [{ pcm: resampleClip(data, clampRate(r.rate ?? shot.rate)), targets: routeTargets(r.at, hand, all), gain: sendGain(clipGainOf(table, r.clip, kit) * r.gain * cueGain), start, cue: true, pan: r.pan ?? 0 }]
   })
 }
 
@@ -139,28 +164,48 @@ export const sendGain = (gain: number) => Number.isFinite(gain) ? Math.min(1, Ma
 export const withOverallGain = (voices: LoopVoice[], overall: number): LoopVoice[] =>
   voices.map(v => { const gain = v.gain * overall; return { ...v, gain: Number.isFinite(gain) ? gain : 0 } })
 
-export function renderChunk(opts: { ip: string; address: string; wall: number; voices: OneShotVoice[]; loopVoices: LoopVoice[]; clock: PlayClock | null; pcm: Record<string, Float32Array>; level: LevelFn }): Int16Array {
-  const { ip, address, wall, voices, loopVoices, clock, pcm, level } = opts
-  const out = new Float32Array(CHUNK)
+/** The linear-balance channel factors of `pan` (sdk-multi-stream §5 item 4): [left, right]. */
+export const panFactors = (pan: number): [number, number] => {
+  const p = Number.isFinite(pan) ? Math.max(-1, Math.min(1, pan)) : 0
+  return [p <= 0 ? 1 : 1 - p, p >= 0 ? 1 : 1 + p]
+}
+
+/**
+ * `mono`: the device drives one motor (caps `haptic_channels` 1): pan is not applied (sdk-multi-stream §6.15); a device
+ * that does not tell (0.x, or caps not read yet) gets the pan. A loop's rate is its rate (or rateMap at the level) × the
+ * recorded rate, kept in 0.25..4, read with linear interpolation (wrapping from the last frame to the first); at rate 1
+ * from an integer position the samples are the clip's own. Its rate follows the level at the chunk start; the gain and
+ * pan move across the chunk to their values at its end.
+ */
+export function renderChunk(opts: { ip: string; address: string; wall: number; voices: OneShotVoice[]; loopVoices: LoopVoice[]; clock: PlayClock | null; pcm: Record<string, Float32Array>; level: LevelFn; mono?: boolean }): Int16Array {
+  const { ip, address, wall, voices, loopVoices, clock, pcm, level, mono = false } = opts
+  const outL = new Float32Array(CHUNK), outR = new Float32Array(CHUNK)
   // A voice gain above 1 is mixed at 1, one that is not a finite number (NaN, ±Infinity) adds nothing (sendGain).
   for (const x of voices) if (x.targets.some(tg => matchesAddress(tg, address))) {
-    const o = Math.round((wall - x.start) * RATE / 1000), gain = sendGain(x.gain)
-    for (let k = Math.max(0, -o); k < CHUNK && o + k < x.pcm.length; k++) out[k] += x.pcm[o + k] * gain
+    const o = Math.round((wall - x.start) * RATE / 1000), gain = sendGain(x.gain), [fl, fr] = panFactors(mono ? 0 : x.pan ?? 0)
+    for (let k = Math.max(0, -o); k < CHUNK && o + k < x.pcm.length; k++) { const s = x.pcm[o + k] * gain; outL[k] += s * fl; outR[k] += s * fr }
   }
   if (clock) {
     const t0 = clock.t + (wall - clock.wall) / 1000 * clock.rate, t1 = t0 + CHUNK / RATE * clock.rate
     for (const x of loopVoices) {
-      const p = pcm[x.clip]
-      if (!p || !p.length || !x.targets.some(tg => matchesAddress(tg, address))) continue
+      const p = pcm[x.clip], n = p?.length ?? 0
+      if (!p || !n || !x.targets.some(tg => matchesAddress(tg, address))) continue
       const [l0, r0] = level(t0, x.layer, x.side), [l1] = level(t1, x.layer, x.side), g0 = mapLevel(x.levelMap, l0), g1 = mapLevel(x.levelMap, l1)
+      const pan0 = mono ? 0 : mapValue('pan', x.panMap, l0, x.pan), pan1 = mono ? 0 : mapValue('pan', x.panMap, l1, x.pan)
+      const step = clampRate(mapValue('rate', x.rateMap, l0, x.rate) * r0)
       let ph = x.phase[ip] || 0
       // The level × the voice's gain is the whole app gain of a loop, kept to 0..1 per sample (sendGain), like FIRE's loopTick.
-      if (g0 > 0 || g1 > 0) for (let k = 0; k < CHUNK; k++) { out[k] += p[Math.floor(ph) % p.length] * sendGain((g0 + (g1 - g0) * k / CHUNK) * x.gain); ph += r0 }
-      x.phase[ip] = ph % p.length
+      if (g0 > 0 || g1 > 0) for (let k = 0; k < CHUNK; k++) {
+        const j = Math.floor(ph), f = ph - j, a = p[j % n], s = f ? a + (p[(j + 1) % n] - a) * f : a
+        const v = s * sendGain((g0 + (g1 - g0) * k / CHUNK) * x.gain), [fl, fr] = panFactors(pan0 + (pan1 - pan0) * k / CHUNK)
+        outL[k] += v * fl; outR[k] += v * fr
+        ph += step
+      }
+      x.phase[ip] = ph % n
     }
   }
-  const pcm16 = new Int16Array(CHUNK * 2)
-  for (let k = 0; k < CHUNK; k++) pcm16[2 * k] = pcm16[2 * k + 1] = Math.max(-32768, Math.min(32767, Math.round(out[k] * 32767)))
+  const pcm16 = new Int16Array(CHUNK * 2), q = (y: number) => Math.max(-32768, Math.min(32767, Math.round(y * 32767)))
+  for (let k = 0; k < CHUNK; k++) { pcm16[2 * k] = q(outL[k]); pcm16[2 * k + 1] = q(outR[k]) }
   return pcm16
 }
 
@@ -171,7 +216,8 @@ export function bytesToBase64(buffer: ArrayBuffer): string {
   return btoa(s)
 }
 
-export interface HapticDevice { ipAddress: string; address: string; name?: string }
+/** `hapticChannels`: the device's motors (caps `haptic_channels`; absent = not told, pan is applied). */
+export interface HapticDevice { ipAddress: string; address: string; name?: string; hapticChannels?: number }
 export type HelperSend = (type: string, payload: Record<string, unknown>) => void
 /** The helper's reply to stream_begin (hapbeat-helper `stream_ack`). */
 export interface StreamAck { stream_id?: string; status?: string; targets?: string[]; deferred?: string[]; message?: string }
@@ -312,7 +358,8 @@ export class SceneHapticMixer {
       if (!o.devices.some(d => d.ipAddress === ip)) { this.send('stream_end', { stream_id: s.id, targets: [ip] }); this.sessions.delete(ip); this.log(`stream_end ${s.id} → ${ip}`); continue }
       if (s.wall < now - 200) s.wall = now // throttled tab: skip ahead instead of bursting
       while (s.wall < now + LEAD_MS) {
-        const chunk = renderChunk({ ip, address: s.address, wall: s.wall + o.leadMs, voices: this.voices, loopVoices: o.loopOn ? this.loopVoices.filter(o.loopOn) : this.loopVoices, clock: this.clock, pcm: o.pcm, level: o.level })
+        const mono = o.devices.find(d => d.ipAddress === ip)?.hapticChannels === 1
+        const chunk = renderChunk({ ip, address: s.address, wall: s.wall + o.leadMs, voices: this.voices, loopVoices: o.loopOn ? this.loopVoices.filter(o.loopOn) : this.loopVoices, clock: this.clock, pcm: o.pcm, level: o.level, mono })
         this.send('stream_data', { stream_id: s.id, targets: [ip], offset: s.bytes, data: bytesToBase64(chunk.buffer as ArrayBuffer) })
         s.bytes += chunk.byteLength
         s.wall += CHUNK / RATE * 1000

@@ -17,12 +17,17 @@ export function useSceneRuntimeHelper(runtime: SceneRuntime): { isConnected: boo
   const { isConnected, devices, send, subscribe } = useHelperConnection()
   const kitSelectedIps = useDeviceStore(s => s.kitSelectedIps)
   const allDevices = useScenePlayback(s => s.allDevices)
+  // The motors each device declared (caps `haptic_channels`, DEC-113): a one-motor Hapbeat gets no pan (sdk-multi-stream §6.15).
+  const infoCache = useDeviceStore(s => s.infoCache)
   const targetDevices = useMemo<HapticDevice[]>(() => {
     if (!isConnected || !table) return []
     const targets = tableTargets(table)
     return resolvePlaybackTargets(devices, kitSelectedIps).filter(d => allDevices || (d.address && targets.some(tg => matchesAddress(tg, d.address))))
-      .map(d => ({ ipAddress: d.ipAddress, address: d.address, name: d.name }))
-  }, [isConnected, table, devices, kitSelectedIps, allDevices])
+      .map(d => {
+        const channels = infoCache[d.ipAddress]?.caps?.haptic_channels
+        return { ipAddress: d.ipAddress, address: d.address, name: d.name, ...(channels !== undefined ? { hapticChannels: channels } : {}) }
+      })
+  }, [isConnected, table, devices, kitSelectedIps, allDevices, infoCache])
   useEffect(() => {
     runtime.setHelper({ send: (type, payload) => send({ type, payload } as Parameters<typeof send>[0]), connected: isConnected, devices: targetDevices })
   }, [runtime, send, isConnected, targetDevices])

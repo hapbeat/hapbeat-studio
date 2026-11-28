@@ -2,10 +2,10 @@ import type { SceneLib } from './sceneData'
 import type { MaterialReserve } from './editorUiSettings'
 import {
   type CueReview, type ReviewState,
-  clampNumber, isLoopCue, soundClipGain, positionsForCue, routeAlternates, routeClips, sfxAlternates, sfxSounds, VARIANT_NAME,
+  clampNumber, clampRate, isLoopCue, routePan, routeRate, soundClipGain, positionsForCue, routeAlternates, routeClips, sfxAlternates, sfxSounds, VARIANT_NAME,
   type CueEntry, type CueRoute, type CueSfx, type CueTable, type CueVariant, type CueVariation, type PickMode, type DistanceFalloff, type CueEmit,
 } from './sceneCueTable'
-import type { LevelMap } from './levelMap'
+import { MAP_DEFAULTS, MAP_KEYS, MAP_RANGES, type LevelMap } from './levelMap'
 import { curveAt, type RampCurve } from './rampCurve'
 
 /**
@@ -537,12 +537,22 @@ export function setRouteClips(table: CueTable, ref: EventRef, index: number, cli
     if (route) entry.haptics![index] = routeWith(route, clips)
   })
 }
-export function updateOwnRoute(table: CueTable, ref: EventRef, index: number, patch: { at?: string; gain?: number }): CueTable {
+/**
+ * `pan` / `rate` (DEC-113): the route's fixed value, kept in −1..1 / 0.25..4; the default (0 / 1) leaves the key out.
+ * A route whose panMap / rateMap decides it is left as it is (the map is changed in the input → output section).
+ */
+export function updateOwnRoute(table: CueTable, ref: EventRef, index: number, patch: { at?: string; gain?: number; pan?: number; rate?: number }): CueTable {
   return edited(table, ref, entry => {
     const route = entry.haptics?.[index]
     if (!route) return
     if (patch.at !== undefined) route.at = patch.at
     if (patch.gain !== undefined) route.gain = clampNumber(patch.gain, 0, 2)
+    for (const kind of ['pan', 'rate'] as const) {
+      const x = patch[kind]
+      if (x === undefined || route[MAP_KEYS[kind]] !== undefined) continue
+      const v = Math.round(clampNumber(x, MAP_RANGES[kind][0], MAP_RANGES[kind][1]) * 1000) / 1000
+      if (v === MAP_DEFAULTS[kind]) delete route[kind]; else route[kind] = v
+    }
   })
 }
 export function removeOwnRoute(table: CueTable, ref: EventRef, index: number): CueTable {
@@ -560,6 +570,20 @@ export function setLevelMap(table: CueTable, cue: string, where: 'sfx' | number,
     const next = { ...target }
     if (map) next.levelMap = map; else delete next.levelMap
     if (where === 'sfx') entry.sfx = next as CueSfx; else entry.haptics![where] = next as CueRoute
+  })
+}
+/**
+ * A loop cue route's panMap / rateMap (DEC-113): set (the route's fixed `pan` / `rate` goes, the map replaces it) or
+ * removed (undefined: the route is back to its fixed value, absent = 0 / 1). Level maps: setLevelMap.
+ */
+export function setRouteMap(table: CueTable, cue: string, index: number, kind: 'pan' | 'rate', map: LevelMap | undefined): CueTable {
+  const key = MAP_KEYS[kind]
+  return edited(table, { cue, variant: null }, entry => {
+    const route = entry.haptics?.[index]
+    if (!route) return
+    const next: CueRoute = { ...route }
+    if (map) { next[key] = map; delete next[kind] } else delete next[key]
+    entry.haptics![index] = next
   })
 }
 /**
@@ -806,7 +830,13 @@ export interface Shot {
   jitterDb: number
   /** Haptic playback rate (frequency and length together). */
   rate: number
-  routes: { clip: string; at: string; /** route gain × gain jitter (× clip gain is applied by the player). */ gain: number }[]
+  routes: {
+    clip: string; at: string; /** route gain × gain jitter (× clip gain is applied by the player). */ gain: number
+    /** The route's pan (−1..1, DEC-113; absent = 0). */
+    pan?: number
+    /** The route's rate × this firing's rate jitter, kept in 0.25..4 (cue-table §5.4; absent = the shot's `rate`). */
+    rate?: number
+  }[]
 }
 const jitter = (amount: number | undefined, random: () => number) => amount ? (random() * 2 - 1) * amount : 0
 
@@ -864,7 +894,7 @@ export function fireShot(e: EffectiveEvent, loop: boolean, picker: MaterialPicke
   const routes = e.haptics.flatMap((r, i) => {
     const clips = routeClips(r)
     const clip = index >= 0 && clips.length === sounds.length ? clips[index] : picker.pick(`${key}#${i}`, clips, v.pick)
-    return clip ? [{ clip, at: r.at, gain: r.gain * hapticScale * gain }] : []
+    return clip ? [{ clip, at: r.at, gain: r.gain * hapticScale * gain, pan: routePan(r), rate: loop ? routeRate(r) : clampRate(routeRate(r) * rate) }] : []
   })
   return { sound, soundGain: (e.sfx?.volume ?? 0) * sfxScale * gain, pitchSt, jitterDb, rate, routes }
 }

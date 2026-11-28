@@ -1,5 +1,5 @@
 import type { SceneLib } from './sceneData'
-import { isLevelMap, LEVEL_MAP_RULE, type LevelMap } from './levelMap'
+import { isLevelMap, isOutputMap, LEVEL_MAP_RULE, MAP_RANGES, mapRule, type LevelMap } from './levelMap'
 import { RAMP_CURVES, type RampCurve } from './rampCurve'
 import { SYNC_MAX_MS } from './syncPoint'
 
@@ -25,13 +25,30 @@ import { SYNC_MAX_MS } from './syncPoint'
  * DEC-092: a sfx / route may have nothing starred (only `alternates`): it plays nothing (the last ★ taken off; unlike
  * "none", it is not a decision, and the Events list marks it).
  * DEC-090 adds `levelMap` on a loop cue's sfx / route: the input the game gives the loop (the recorded layer level) mapped to an output multiplier (see levelMap).
+ * DEC-113 adds a haptic route's `pan` (left/right balance) and `rate` (playback rate), and on a loop cue's route
+ * `panMap` / `rateMap` from the same input (not on the sfx).
  */
 
 /**
  * A route plays `clip`, or one of `clips` per firing (picked by `variation.pick`); `alternates`: unstarred clips (never played, DEC-089);
  * `levelMap`: a loop cue's input → output (DEC-090; absent = the input).
+ * `pan` −1..1 (absent = 0; −1 = left only, +1 = right only; unused on a one-motor Hapbeat) and `rate` 0.25..4 (absent =
+ * 1; the clip's frequency and length together), or on a loop cue `panMap` / `rateMap` from the loop input instead (DEC-113).
  */
-export interface CueRoute { clip?: string; clips?: string[]; alternates?: string[]; at: string; gain: number; levelMap?: LevelMap; [key: string]: unknown }
+export interface CueRoute {
+  clip?: string; clips?: string[]; alternates?: string[]; at: string; gain: number; levelMap?: LevelMap
+  pan?: number; rate?: number; panMap?: LevelMap; rateMap?: LevelMap
+  [key: string]: unknown
+}
+/** The ranges of a route's fixed pan and rate (contracts cue-table §4.4). */
+export const PAN_RANGE = MAP_RANGES.pan
+export const RATE_RANGE = MAP_RANGES.rate
+/** A route's pan as played: its `pan` in −1..1 (absent / not a number = 0). */
+export const routePan = (r: Pick<CueRoute, 'pan'>) => typeof r.pan === 'number' && Number.isFinite(r.pan) ? Math.max(-1, Math.min(1, r.pan)) : 0
+/** A route's rate as played: its `rate` in 0.25..4 (absent / not a number = 1). */
+export const routeRate = (r: Pick<CueRoute, 'rate'>) => typeof r.rate === 'number' && Number.isFinite(r.rate) ? Math.max(0.25, Math.min(4, r.rate)) : 1
+/** A rate product (a firing's jitter × the route's, a recorded rate × the route's) kept in 0.25..4 (cue-table §5.4 / §5.6). */
+export const clampRate = (rate: number) => Number.isFinite(rate) ? Math.max(0.25, Math.min(4, rate)) : 1
 /** A cue sound: `sound`, or one of `sounds` per firing; `alternates`: unstarred sounds (never played, DEC-089); `levelMap` as a route's. */
 export interface CueSfx { sound?: string; sounds?: string[]; alternates?: string[]; volume: number; levelMap?: LevelMap; [key: string]: unknown }
 export const PICK_MODES = ['random', 'roundRobin'] as const
@@ -387,6 +404,16 @@ function validateCueFields(err: string[], table: CueTable, ctx: CueTableContext,
     if (!AT_VALUES.includes(r.at)) err.push(`${label}: at must be one of ${AT_VALUES.join(', ')}`)
     if (!inRange(r.gain, 0, 2)) err.push(`${label}: gain must be 0..2`)
     levelMapProblems(err, loop, label, 'route', r.levelMap)
+    // DEC-113: pan / rate fixed, or from the loop input (panMap / rateMap), not both.
+    if (r.pan !== undefined && !inRange(r.pan, -1, 1)) err.push(`${label}: pan must be -1..1`)
+    if (r.rate !== undefined && !inRange(r.rate, 0.25, 4)) err.push(`${label}: rate must be 0.25..4`)
+    for (const [kind, key, fixed] of [['pan', 'panMap', 'pan'], ['rate', 'rateMap', 'rate']] as const) {
+      const map = r[key]
+      if (map === undefined) continue
+      if (!loop) err.push(`${label}: route ${key} is for loop cues`)
+      else if (!isOutputMap(map, kind)) err.push(`${label}: route ${key} must be ${mapRule(kind)}`)
+      if (r[fixed] !== undefined) err.push(`${label}: a route has ${fixed} or ${key}, not both`)
+    }
   }
   const df = entry.distanceFalloff
   if (df) {

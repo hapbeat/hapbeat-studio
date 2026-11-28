@@ -1,6 +1,6 @@
 /**
  * Test-only: hapbeat-contracts `fixtures/sample-cue-table.json` and `fixtures/sample-scene-recording.json`
- * (contracts branch tmp as of 522c39e, DEC-095), copied as they are so the Scene tab is checked against the specification's samples.
+ * (contracts branch feat/scene-pan-rate as of b8822b2, DEC-095 / DEC-113; the cue table with pan / rate / panMap / rateMap), copied as they are so the Scene tab is checked against the specification's samples.
  * Copy them again when the contracts change.
  */
 
@@ -132,6 +132,8 @@ export const CONTRACT_CUE_TABLE = {
           "clip": "grab",
           "at": "hand",
           "gain": 0.8,
+          "pan": -0.5,
+          "rate": 1.25,
           "alternates": [
             "purr"
           ]
@@ -170,6 +172,24 @@ export const CONTRACT_CUE_TABLE = {
               ]
             ],
             "intercept": 0.1
+          },
+          "panMap": {
+            "points": [
+              [
+                1,
+                0.5
+              ]
+            ]
+          },
+          "rateMap": {
+            "points": [
+              [
+                1,
+                1.5
+              ]
+            ],
+            "intercept": 0.8,
+            "curve": "easeOut"
           }
         }
       ]

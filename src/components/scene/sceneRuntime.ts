@@ -4,11 +4,11 @@ import { effectiveOutput, useScenePlayback, type SceneOutput } from '@/stores/sc
 import { perfTrack } from '@/utils/perfRegistry'
 import { useSceneSettings } from '@/stores/sceneSettings'
 import { clipEnd, focusEvent, itemEvents, levelAt, momentStart, type SceneItem, type VisibleEvent } from '@/utils/sceneData'
-import { clipGainOf, isLoopCue, kitGainsFor, routeClips, sfxSounds, type CueRoute, type CueSfx, soundClipGain } from '@/utils/sceneCueTable'
+import { clipGainOf, isLoopCue, kitGainsFor, routeClips, routePan, routeRate, sfxSounds, type CueRoute, type CueSfx, soundClipGain } from '@/utils/sceneCueTable'
 import { effectiveEvent, fireShot, MaterialPicker, resolveEventName } from '@/utils/cueEvents'
 import { runPosition } from '@/utils/sceneSegments'
 import { buildLoopSounds, LoopSoundPlayer, loopSoundLevel, type LoopSound } from '@/utils/sceneLoopSounds'
-import { buildLoopVoices, sendGain, shotVoices, withOverallGain, type LoopVoice, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, routeTargets, SceneHapticMixer, type HapticDevice, type HelperSend, type StreamAck, type StreamDisplaced, type StreamLost } from '@/utils/sceneHaptics'
+import { buildLoopVoices, loopedAt, resampleClip, sendGain, shotVoices, withOverallGain, type LoopVoice, LEAD_MS, LOOKAHEAD, matchesAddress, RATE, routeTargets, SceneHapticMixer, type HapticDevice, type HelperSend, type StreamAck, type StreamDisplaced, type StreamLost } from '@/utils/sceneHaptics'
 import { SceneKitFire } from '@/utils/sceneKitFire'
 import { isStreamOpen } from '@/utils/openStreams'
 import { useSceneStrength } from '@/stores/sceneStrength'
@@ -310,12 +310,15 @@ export class SceneRuntime {
     const s = useSceneStore.getState(), pb = useScenePlayback.getState(), name = routeClips(r)[0], clip = name === undefined ? undefined : s.table?.clips[name]
     if (!clip || name === undefined || !s.table) return 0
     // Each output plays its own bucket's clip_gain of the Kit (contracts cue-table §9.1: FIRE `events`, CLIP `stream_events`).
-    if (effectiveOutput(pb) === 'fire') return this.kitFire.test({ table: s.table, kit: kitGainsFor(s.projectKit?.clipGains, 'fire'), clip: name, at: r.at, gain: r.gain * pb.overallGain, devices: this.helper.devices, all: pb.allDevices })
+    // The route's fixed pan and rate (DEC-113; a route with panMap / rateMap: its fixed default, there is no input here).
+    if (effectiveOutput(pb) === 'fire') return this.kitFire.test({ table: s.table, kit: kitGainsFor(s.projectKit?.clipGains, 'fire'), clip: name, at: r.at, gain: r.gain * pb.overallGain, pan: routePan(r), devices: this.helper.devices, all: pb.allDevices })
     let p = s.pcm[name]
     if (!p) return 0
-    if (clip.loop) { const q = new Float32Array(RATE); for (let i = 0; i < RATE; i++) q[i] = p[i % p.length]; p = q }
+    const rate = routeRate(r)
+    if (clip.loop) p = loopedAt(p, rate, RATE)
+    else p = resampleClip(p, rate)
     const targets = routeTargets(r.at, undefined, pb.allDevices)
-    this.mixer.voices.push({ pcm: p, targets, gain: sendGain(clipGainOf(s.table, name, kitGainsFor(s.projectKit?.clipGains, 'clip')) * r.gain * pb.overallGain), start: performance.now() + LEAD_MS })
+    this.mixer.voices.push({ pcm: p, targets, gain: sendGain(clipGainOf(s.table, name, kitGainsFor(s.projectKit?.clipGains, 'clip')) * r.gain * pb.overallGain), start: performance.now() + LEAD_MS, pan: routePan(r) })
     return this.helper.devices.filter(d => targets.some(tg => matchesAddress(tg, d.address))).length
   }
 

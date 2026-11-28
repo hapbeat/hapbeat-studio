@@ -18,7 +18,21 @@ export const LEVEL_MAP_GAIN_RANGE = [0, 4] as const
 export const LEVEL_MAP_MAX_POINTS = 16
 const LEVEL_MAP_KEYS = ['points', 'intercept', 'curve']
 
-const clampOutput = (y: number) => Math.max(LEVEL_MAP_GAIN_RANGE[0], Math.min(LEVEL_MAP_GAIN_RANGE[1], y))
+/**
+ * What a loop route's input drives (DEC-113, contracts cue-table §5.6): its strength (`levelMap`), its left/right
+ * balance (`panMap`, −1 = left only .. +1 = right only) or its playback rate (`rateMap`, the clip's frequency and length
+ * together). The same shape and segments; the output range, the intercept's default and input 0 differ.
+ */
+export const MAP_KINDS = ['level', 'pan', 'rate'] as const
+export type MapKind = typeof MAP_KINDS[number]
+/** The route key of each kind's map (`level` is also the sfx's). */
+export const MAP_KEYS = { level: 'levelMap', pan: 'panMap', rate: 'rateMap' } as const
+/** Each kind's output (and intercept) range. */
+export const MAP_RANGES: Record<MapKind, readonly [number, number]> = { level: LEVEL_MAP_GAIN_RANGE, pan: [-1, 1], rate: [0.25, 4] }
+/** The output with no map (pan and rate: the route's fixed value, absent = these) and the intercept left out. */
+export const MAP_DEFAULTS: Record<MapKind, number> = { level: 0, pan: 0, rate: 1 }
+
+const clampTo = (kind: MapKind, y: number) => Math.max(MAP_RANGES[kind][0], Math.min(MAP_RANGES[kind][1], y))
 
 /**
  * The output at `input`: 0 at (or below) 0, the input itself without a map, else the segments from (0, intercept)
@@ -26,24 +40,43 @@ const clampOutput = (y: number) => Math.max(LEVEL_MAP_GAIN_RANGE[0], Math.min(LE
  */
 export function mapLevel(map: LevelMap | null | undefined, input: number): number {
   if (!(input > 0)) return 0
-  const p = map?.points
-  if (!p || !p.length) return input
-  const curve = map!.curve ?? 'linear', intercept = map!.intercept ?? 0
+  return map?.points?.length ? segmentsAt('level', map, input) : input
+}
+
+/**
+ * A pan / rate map's output at `input` (cue-table §5.6): the same segments as mapLevel, kept in the kind's range, but
+ * input 0 is not forced to 0 (the loop is silent then, so the value is unused): at or below 0 it is the intercept.
+ * Without a map, `fixed` (the route's `pan` / `rate`; absent = MAP_DEFAULTS), kept in the range too.
+ */
+export function mapValue(kind: 'pan' | 'rate', map: LevelMap | null | undefined, input: number, fixed?: number): number {
+  if (!map?.points?.length) return clampTo(kind, typeof fixed === 'number' && Number.isFinite(fixed) ? fixed : MAP_DEFAULTS[kind])
+  return input > 0 ? segmentsAt(kind, map, input) : clampTo(kind, map.intercept ?? MAP_DEFAULTS[kind])
+}
+
+/** Any kind's output at `input` (level: mapLevel, else mapValue with the route's fixed value). */
+export const mapOutput = (kind: MapKind, map: LevelMap | null | undefined, input: number, fixed?: number) =>
+  kind === 'level' ? mapLevel(map, input) : mapValue(kind, map, input, fixed)
+
+function segmentsAt(kind: MapKind, map: LevelMap, input: number): number {
+  const p = map.points, curve = map.curve ?? 'linear', intercept = map.intercept ?? MAP_DEFAULTS[kind]
   let x0 = 0, y0 = intercept
   for (const [x1, y1] of p) {
-    if (input <= x1) return clampOutput(y0 + (y1 - y0) * curveAt(curve, (input - x0) / (x1 - x0)))
+    if (input <= x1) return clampTo(kind, y0 + (y1 - y0) * curveAt(curve, (input - x0) / (x1 - x0)))
     x0 = x1; y0 = y1
   }
   const [xa, ya] = p.length > 1 ? p[p.length - 2] : [0, intercept]
-  return clampOutput(y0 + (y0 - ya) / (x0 - xa) * (input - x0))
+  return clampTo(kind, y0 + (y0 - ya) / (x0 - xa) * (input - x0))
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
-const inOutputRange = (x: number) => x >= LEVEL_MAP_GAIN_RANGE[0] && x <= LEVEL_MAP_GAIN_RANGE[1]
 
 /** Whether `value` is a valid levelMap: 1–16 points [input > 0, output 0..4] with increasing inputs, intercept 0..4, curve one of LEVEL_MAP_CURVES. */
-export function isLevelMap(value: unknown): value is LevelMap {
+export function isLevelMap(value: unknown): value is LevelMap { return isOutputMap(value, 'level') }
+
+/** Whether `value` is a valid map of `kind`: levelMap's shape with the output and intercept in MAP_RANGES[kind]. */
+export function isOutputMap(value: unknown, kind: MapKind): value is LevelMap {
+  const inOutputRange = (x: number) => x >= MAP_RANGES[kind][0] && x <= MAP_RANGES[kind][1]
   if (!isRecord(value) || Object.keys(value).some(k => !LEVEL_MAP_KEYS.includes(k))) return false
   const points = value.points
   if (!Array.isArray(points) || points.length < 1 || points.length > LEVEL_MAP_MAX_POINTS) return false
@@ -56,8 +89,12 @@ export function isLevelMap(value: unknown): value is LevelMap {
   if (value.intercept !== undefined && !(finite(value.intercept) && inOutputRange(value.intercept))) return false
   return value.curve === undefined || (LEVEL_MAP_CURVES as readonly unknown[]).includes(value.curve)
 }
-const RANGE = `${LEVEL_MAP_GAIN_RANGE[0]}..${LEVEL_MAP_GAIN_RANGE[1]}`
-export const LEVEL_MAP_RULE = `{points: [[input > 0, output ${RANGE}], ...] (1-${LEVEL_MAP_MAX_POINTS}, inputs increasing), intercept?: ${RANGE}, curve?: ${LEVEL_MAP_CURVES.join(' | ')}}`
+/** The shape a map of `kind` must have (for messages). */
+export const mapRule = (kind: MapKind) => {
+  const range = `${MAP_RANGES[kind][0]}..${MAP_RANGES[kind][1]}`
+  return `{points: [[input > 0, output ${range}], ...] (1-${LEVEL_MAP_MAX_POINTS}, inputs increasing), intercept?: ${range}, curve?: ${LEVEL_MAP_CURVES.join(' | ')}}`
+}
+export const LEVEL_MAP_RULE = mapRule('level')
 
 const round3 = (x: number) => Math.round(x * 1000) / 1000
 
@@ -65,8 +102,8 @@ const round3 = (x: number) => Math.round(x * 1000) / 1000
  * `map` with the point (`input`, `output`) (rounded to 0.001; output clamped to 0..4): replaces the point at that input,
  * else is inserted in order. Throws when the input rounds to 0 or less, or there are already 16 points and none at that input.
  */
-export function withLevelPoint(map: LevelMap | null | undefined, input: number, output: number): LevelMap {
-  const l = round3(input), g = round3(clampOutput(Number.isFinite(output) ? output : 0))
+export function withLevelPoint(map: LevelMap | null | undefined, input: number, output: number, kind: MapKind = 'level'): LevelMap {
+  const l = round3(input), g = round3(clampTo(kind, Number.isFinite(output) ? output : MAP_DEFAULTS[kind]))
   if (!(l > 0)) throw new Error('levelMap: a point needs an input > 0')
   const points = (map?.points ?? []).filter(p => p[0] !== l)
   if (points.length >= LEVEL_MAP_MAX_POINTS) throw new Error(`levelMap: up to ${LEVEL_MAP_MAX_POINTS} points`)
@@ -78,8 +115,8 @@ export function withLevelPoint(map: LevelMap | null | undefined, input: number, 
  * `map` with point `index` changed to (`input`, `output`) (rounded to 0.001; output clamped to 0..4), the points sorted
  * by input again. `'input'` when the input rounds to 0 or less, `'duplicate'` when another point has that input.
  */
-export function withPointEdited(map: LevelMap, index: number, input: number, output: number): LevelMap | 'input' | 'duplicate' {
-  const l = round3(input), g = round3(clampOutput(Number.isFinite(output) ? output : 0))
+export function withPointEdited(map: LevelMap, index: number, input: number, output: number, kind: MapKind = 'level'): LevelMap | 'input' | 'duplicate' {
+  const l = round3(input), g = round3(clampTo(kind, Number.isFinite(output) ? output : MAP_DEFAULTS[kind]))
   if (!(l > 0)) return 'input'
   if (map.points.some((p, i) => i !== index && p[0] === l)) return 'duplicate'
   const points = map.points.map((p, i): [number, number] => i === index ? [l, g] : p)
@@ -96,11 +133,11 @@ export function withLevelCurve(map: LevelMap, curve: LevelMapCurve): LevelMap {
   const { curve: _curve, ...rest } = map
   return curve === 'linear' ? rest as LevelMap : { ...rest, points: map.points, curve }
 }
-/** `map` with `intercept`, the output near input 0 (rounded to 0.001, clamped to 0..4; 0 = the key left out). */
-export function withLevelIntercept(map: LevelMap, intercept: number): LevelMap {
+/** `map` with `intercept`, the output near input 0 (rounded to 0.001, clamped to the kind's range; its default, 0 or 1 for rate, = the key left out). */
+export function withLevelIntercept(map: LevelMap, intercept: number, kind: MapKind = 'level'): LevelMap {
   const { intercept: _intercept, ...rest } = map
-  const v = round3(clampOutput(Number.isFinite(intercept) ? intercept : 0))
-  return v === 0 ? rest as LevelMap : { ...rest, points: map.points, intercept: v }
+  const v = round3(clampTo(kind, Number.isFinite(intercept) ? intercept : MAP_DEFAULTS[kind]))
+  return v === MAP_DEFAULTS[kind] ? rest as LevelMap : { ...rest, points: map.points, intercept: v }
 }
 
 /**
@@ -108,8 +145,8 @@ export function withLevelIntercept(map: LevelMap, intercept: number): LevelMap {
  * recorded level), so mapLevel(result, input) = output. Null when there is no input (rounds to ≤ 0) or the map is full
  * without a point there.
  */
-export function withOutputAt(map: LevelMap | null | undefined, input: number, output: number): LevelMap | null {
+export function withOutputAt(map: LevelMap | null | undefined, input: number, output: number, kind: MapKind = 'level'): LevelMap | null {
   if (!(round3(input) > 0)) return null
   if (map && map.points.length >= LEVEL_MAP_MAX_POINTS && !map.points.some(p => p[0] === round3(input))) return null
-  return withLevelPoint(map, input, output)
+  return withLevelPoint(map, input, output, kind)
 }
