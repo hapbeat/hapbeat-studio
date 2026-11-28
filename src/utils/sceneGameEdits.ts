@@ -40,8 +40,31 @@ export function gainTarget(table: CueTable, name: string, lane: Lane): GainTarge
   const r = resolveEventName(table, name), e = r && effectiveEvent(table, r.ref)
   if (!e || isLoopCue(table, e.ref.cue)) return null
   const variant = e.ref.variant !== null
-  if (lane === 'haptics') return e.haptics.length ? { kind: variant && !e.own.haptics ? 'hapticsGain' : 'routes', ref: e.ref } : null
-  return e.sfx ? { kind: variant && !e.own.sfx ? 'sfxVolume' : 'sfx', ref: e.ref } : null
+  if (lane === 'haptics') {
+    if (!e.haptics.length) return null
+    const shared = variant && !e.own.haptics
+    return shared && isRamped(table, e.ref) ? null : { kind: shared ? 'hapticsGain' : 'routes', ref: e.ref }
+  }
+  if (!e.sfx) return null
+  const shared = variant && !e.own.sfx
+  return shared && isRamped(table, e.ref) ? null : { kind: shared ? 'sfxVolume' : 'sfx', ref: e.ref }
+}
+
+/**
+ * Whether variant `ref` changes its multipliers over a run (`rampTo` / `rampSteps`): its firings play other values than
+ * its hapticsGain / sfxVolume (one ramp for sound and haptics), so a bar cannot scale it; the Event panel edits the ramp.
+ */
+export function isRamped(table: CueTable, ref: EventRef): boolean {
+  const v = ref.variant === null ? undefined : table.cues[ref.cue]?.variants?.[ref.variant]
+  return !!v && (v.rampTo !== undefined || !!v.rampSteps?.length)
+}
+
+/** Names among `names` whose `lane` multiplier is a ramped variant's (gainTarget gives none for them; the panel says why). */
+export function rampedNames(table: CueTable, names: Iterable<string>, lane: Lane): string[] {
+  return [...new Set(names)].filter(name => {
+    const r = resolveEventName(table, name), e = r && effectiveEvent(table, r.ref)
+    return !!e && e.ref.variant !== null && !(lane === 'haptics' ? e.own.haptics : e.own.sfx) && isRamped(table, e.ref)
+  })
 }
 
 /** The target's values now (routes: one gain per route; the others: one value, 1 when not written), or null when it no longer exists. */

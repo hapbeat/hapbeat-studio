@@ -11,7 +11,7 @@ import { median, strengthStep } from '@/utils/sceneStrength'
 import { firingNumber, firingNumbers, numberRangeText, shownIndexOf } from '@/utils/sceneTimelineEdit'
 import { NumberField } from './SceneCuePanels'
 import { changedFiring, changeFailed, ChangeEventForm } from './SceneMomentsPanel'
-import { targetKey, targetsOf, targetValue, targetValues, type GainTarget } from '@/utils/sceneGameEdits'
+import { rampedNames, targetKey, targetsOf, targetValue, targetValues, type GainTarget } from '@/utils/sceneGameEdits'
 import { eventKey } from '@/utils/cueEvents'
 import type { CueTable } from '@/utils/sceneCueTable'
 
@@ -190,6 +190,7 @@ function GameFiring({ picked, title, table }: { picked: { index: number; name: s
   const other = strength && Math.abs(strength.scale * scaleR - 1) > 1e-9 ? t('scene.strength.other', { value: (strength.scale * scaleR).toFixed(2) }) : ''
   const clipped = picked.filter(p => p.strength && p.strength.sent > 1).length
   const red = strength ? strength.sent * ratio > 1 : clipped > 0
+  const ramped = rampedNames(table, picked.map(p => p.name), 'haptics')
   const commitSlider = () => {
     const v = sliderValue.current
     if (v === null) return
@@ -209,7 +210,7 @@ function GameFiring({ picked, title, table }: { picked: { index: number; name: s
         <button type="button" className="scene-icon-btn" disabled={lockGain || !targets.length} title={t('scene.strength.downHint')} onClick={e => { e.currentTarget.blur(); st().scaleSelected(1 / strengthStep(e.shiftKey)) }}>▼</button>
         <button type="button" className="scene-icon-btn" disabled={lockGain || !targets.length} title={t('scene.strength.upHint')} onClick={e => { e.currentTarget.blur(); st().scaleSelected(strengthStep(e.shiftKey)) }}>▲</button>
       </div>
-      <div className="scene-firing-row scene-firing-dim">{t('scene.card.timeGame')}</div>
+      <div className="scene-firing-row scene-firing-dim">{ramped.length ? `${t('scene.card.rampGame', { names: ramped.join(', ') })} ` : ''}{t('scene.card.timeGame')}</div>
       <div className="scene-firing-row scene-firing-actions scene-firing-split">
         <SceneLockToggles />
         <button type="button" className="scene-icon-btn" disabled={!rec} aria-expanded={split} title={t('scene.card.splitHint')}

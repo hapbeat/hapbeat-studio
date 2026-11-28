@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { boundedRatio, changeTargets, gainTarget, parseTargetKey, scaledValues, targetKey, targetsOf, targetValues, valuesAt } from './sceneGameEdits'
+import { boundedRatio, changeTargets, gainTarget, parseTargetKey, rampedNames, scaledValues, targetKey, targetsOf, targetValues, valuesAt } from './sceneGameEdits'
 import { parseViewerLib } from './sceneData'
 import { sampleTable, sampleViewerLibFile } from './sceneTestFixtures'
 import { CONTRACT_SCENE_RECORDING } from './sceneContractFixtures'
@@ -47,6 +47,16 @@ describe('which multiplier a bar moves (gainTarget)', () => {
     expect(gainTarget(t, 'footstep:subtle', 'sound')).toEqual({ kind: 'sfxVolume', ref: { cue: 'footstep', variant: 'subtle' } })
     expect(gainTarget(t, 'footstep:heavy', 'sound')).toEqual({ kind: 'sfx', ref: { cue: 'footstep', variant: 'heavy' } })
     expect(gainTarget(t, 'grab', 'sound')).toBeNull()
+  })
+  it('a variant ramping its multipliers (rampTo / rampSteps) is not scaled from a bar', () => {
+    const t = table()
+    t.cues.footstep.variants!.subtle.rampTo = 1
+    t.cues.footstep.variants!.heavy.rampSteps = [0.5, 1]
+    expect(gainTarget(t, 'footstep:subtle', 'haptics')).toBeNull()
+    expect(gainTarget(t, 'footstep:subtle', 'sound')).toBeNull()
+    // heavy has its own haptics and sound: the ramp does not touch them.
+    expect(gainTarget(t, 'footstep:heavy', 'haptics')).toEqual({ kind: 'routes', ref: { cue: 'footstep', variant: 'heavy' } })
+    expect(rampedNames(t, ['footstep', 'footstep:subtle', 'footstep:heavy'], 'haptics')).toEqual(['footstep:subtle'])
   })
   it('keys go both ways; each multiplier once in a selection', () => {
     const t = table(), target = gainTarget(t, 'footstep:subtle', 'haptics')!

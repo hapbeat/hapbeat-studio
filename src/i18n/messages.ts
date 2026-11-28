@@ -1655,6 +1655,7 @@ export const messages = defineMessages({
   'scene.card.sliderGameHint': { ja: 'イベント（状況）の倍率（0〜2）。離すと確定します', en: 'The event (situation) multiplier (0–2). Applied when released.' },
   'scene.card.timeGame': { ja: '発生の時刻はゲームが決めます。素材のタイミングは Editor の同期点で合わせます', en: 'The game decides when a firing happens. Align the material’s timing with the sync point in the Editor.' },
   'scene.card.breakdownGame': { ja: '素材 {material} × イベント ×{route}{other} × ゲームが掛けた値（記録） {firing} → 送る値 {sent}', en: 'clip {material} × event ×{route}{other} × the game’s value (recorded) {firing} → sent {sent}' },
+  'scene.card.rampGame': { ja: '{names} は強さをだんだん変える状況なので、バーでは変えられません。イベントのパネルの「だんだん変える」で直してください。', en: '{names} change their strength over a run, so a bar cannot scale them. Change it with “Ramp” in the Event panel.' },
   'scene.card.split': { ja: '状況を分ける…', en: 'Split situation…' },
   'scene.card.splitHint': { ja: 'この発生だけ強さや素材を変えたい時に使います。新しい状況（cue:variant）にすると、cue 表に倍率だけの variant がすぐでき、ゲームでその状況の時に呼ぶようエージェントに頼みます。撮り直すまでは仮の表示です', en: 'For when only this firing should be stronger, weaker or use another material. A new situation (cue:variant) is added to the cue table at once (multipliers only), and the agent is asked to have the game fire it in that situation. Shown as tentative until re-recorded.' },
   'scene.edits.ignored': { ja: '映像のプロジェクトの上書きが {count} 件あります（このプロジェクトでは使いません）', en: '{count} video-project override(s) found (not used in this project)' },

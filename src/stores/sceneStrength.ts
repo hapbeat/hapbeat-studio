@@ -6,7 +6,7 @@ import { applyTableGains } from '@/utils/sceneVersions'
 import type { CueTable } from '@/utils/sceneCueTable'
 import { isVideoProject } from '@/utils/sceneData'
 import { shownIndexOf } from '@/utils/sceneTimelineEdit'
-import { boundedRatio, changeTargets, parseTargetKey, scaledValues, setTargetValues, targetKey, targetsOf, targetValues, valuesAt, type GainTarget, type Lane, type TargetChange } from '@/utils/sceneGameEdits'
+import { boundedRatio, changeTargets, parseTargetKey, rampedNames, scaledValues, setTargetValues, targetKey, targetsOf, targetValues, valuesAt, type GainTarget, type Lane, type TargetChange } from '@/utils/sceneGameEdits'
 import { useSceneStore, type VersionRestore } from './sceneStore'
 
 /**
@@ -154,7 +154,12 @@ export const useSceneStrength = create<SceneStrengthState>((set, get) => {
     const s = useSceneStore.getState(), table = s.table
     if (!table) return false
     const result = changeTargets(table, targetsOf(table, names, lane), change)
-    if (!result.changes.length) return false
+    if (!result.changes.length) {
+      // A ramped variant (rampTo / rampSteps) is not scaled from a bar: said once per try.
+      const ramped = rampedNames(table, names, lane)
+      if (ramped.length) s.note({ id: 'scene.card.rampGame', params: { names: ramped.join(', ') } })
+      return false
+    }
     // The first strength edit of the project saves a before-edit version (as the faders do).
     s.versionBeforeEdit()
     if (!s.edit(() => result.table)) return false
